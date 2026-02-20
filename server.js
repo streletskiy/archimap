@@ -24,6 +24,7 @@ const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-geofabrik-buildings.js');
+let sessionMiddleware = null;
 
 let syncInProgress = false;
 let currentSyncChild = null;
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS architectural_info (
   architect TEXT,
   address TEXT,
   description TEXT,
+  updated_by TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(osm_type, osm_id)
@@ -78,10 +80,20 @@ if (!archiColumnNames.has('name')) {
 if (!archiColumnNames.has('levels')) {
   db.exec(`ALTER TABLE architectural_info ADD COLUMN levels INTEGER;`);
 }
+if (!archiColumnNames.has('updated_by')) {
+  db.exec(`ALTER TABLE architectural_info ADD COLUMN updated_by TEXT;`);
+}
 
 app.use(express.json());
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.use((req, res, next) => {
+  if (!sessionMiddleware) {
+    return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
+  }
+  return sessionMiddleware(req, res, next);
+});
 
 function rowToFeature(row) {
   let ring = [];
@@ -131,7 +143,7 @@ function attachInfoToFeatures(features) {
       params.push(type, Number(id));
     }
     const rows = db.prepare(`
-      SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_at
+      SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at
       FROM architectural_info
       WHERE ${clauses}
     `).all(...params);
@@ -163,6 +175,105 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
   next();
+}
+
+function isAdminRequest(req) {
+  const username = String(req.session?.user?.username || '');
+  return Boolean(username) && username === ADMIN_USERNAME;
+}
+
+function requireAdmin(req, res, next) {
+  if (!isAdminRequest(req)) {
+    return res.status(403).json({ error: 'Требуются права администратора' });
+  }
+  next();
+}
+
+function normalizeTagValue(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text ? text : null;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function osmAddressFromTags(tags) {
+  if (!tags || typeof tags !== 'object') return null;
+  if (tags['addr:full']) return normalizeTagValue(tags['addr:full']);
+  const parts = [
+    tags['addr:postcode'] || tags.addr_postcode,
+    tags['addr:city'] || tags.addr_city,
+    tags['addr:street'] || tags.addr_street || tags.addr_stree,
+    tags['addr:housenumber'] || tags.addr_housenumber || tags.addr_hous
+  ]
+    .map(normalizeTagValue)
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join(', ') : null;
+}
+
+function parseIntegerMaybe(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed)) return null;
+  const intValue = Math.trunc(parsed);
+  return Number.isInteger(intValue) ? intValue : null;
+}
+
+function getOsmBaselineFromTags(tags) {
+  return {
+    name: normalizeTagValue(tags?.name || tags?.['name:ru'] || tags?.official_name || null),
+    style: normalizeTagValue(tags?.['building:architecture'] || tags?.architecture || tags?.style || null),
+    levels: parseIntegerMaybe(tags?.['building:levels'] || tags?.levels || null),
+    year_built: parseIntegerMaybe(tags?.['building:year'] || tags?.start_date || tags?.construction_date || tags?.year_built || null),
+    architect: normalizeTagValue(tags?.architect || tags?.architect_name || null),
+    address: osmAddressFromTags(tags),
+    description: null
+  };
+}
+
+function normalizeInfoForDiff(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function buildChangesFromRows(localRow, tags) {
+  const baseline = getOsmBaselineFromTags(tags || {});
+  const fields = [
+    { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
+    { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
+    { key: 'levels', label: 'Этажей', osmTag: 'building:levels | levels' },
+    { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
+    { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
+    { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
+    { key: 'description', label: 'Описание', osmTag: null }
+  ];
+
+  const changes = [];
+  for (const field of fields) {
+    const osmValue = normalizeInfoForDiff(baseline[field.key]);
+    const localValue = normalizeInfoForDiff(localRow[field.key]);
+    if (localValue == null) continue;
+    if (osmValue === localValue) continue;
+    changes.push({
+      field: field.key,
+      label: field.label,
+      osmTag: field.osmTag,
+      isLocalTag: !field.osmTag,
+      osmValue,
+      localValue
+    });
+  }
+  return changes;
 }
 
 function tileBbox(z, x, y) {
@@ -206,13 +317,20 @@ function getBuildingsFeatureCollectionByBbox(minLon, minLat, maxLon, maxLat, lim
 }
 
 app.get('/api/me', (req, res) => {
-  res.json({ authenticated: Boolean(req.session && req.session.user), user: req.session?.user || null });
+  const authenticated = Boolean(req.session && req.session.user);
+  const user = authenticated
+    ? {
+      ...req.session.user,
+      isAdmin: isAdminRequest(req)
+    }
+    : null;
+  res.json({ authenticated, user });
 });
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-    req.session.user = { username };
+    req.session.user = { username, isAdmin: true };
     return res.json({ ok: true, user: req.session.user });
   }
   return res.status(401).json({ error: 'Неверный логин или пароль' });
@@ -232,7 +350,7 @@ app.get('/api/building-info/:osmType/:osmId', (req, res) => {
   }
 
   const row = db.prepare(`
-    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_at
+    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at
     FROM architectural_info
     WHERE osm_type = ? AND osm_id = ?
   `).get(osmType, osmId);
@@ -281,8 +399,8 @@ app.post('/api/building-info', requireAuth, (req, res) => {
   }
 
   const upsert = db.prepare(`
-    INSERT INTO architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_at)
-    VALUES (@osm_type, @osm_id, @name, @style, @levels, @year_built, @architect, @address, @description, datetime('now'))
+    INSERT INTO architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at)
+    VALUES (@osm_type, @osm_id, @name, @style, @levels, @year_built, @architect, @address, @description, @updated_by, datetime('now'))
     ON CONFLICT(osm_type, osm_id) DO UPDATE SET
       name = excluded.name,
       style = excluded.style,
@@ -291,6 +409,7 @@ app.post('/api/building-info', requireAuth, (req, res) => {
       architect = excluded.architect,
       address = excluded.address,
       description = excluded.description,
+      updated_by = excluded.updated_by,
       updated_at = datetime('now');
   `);
 
@@ -303,7 +422,8 @@ app.post('/api/building-info', requireAuth, (req, res) => {
     year_built: yearBuilt,
     architect: cleanText(body.architect, 200),
     address: cleanText(body.address, 300),
-    description: cleanText(body.description, 1000)
+    description: cleanText(body.description, 1000),
+    updated_by: String(req.session?.user?.username || '')
   });
 
   return res.json({ ok: true });
@@ -347,6 +467,55 @@ app.get('/api/building/:osmType/:osmId', (req, res) => {
   const feature = rowToFeature(row);
   attachInfoToFeatures([feature]);
   return res.json(feature);
+});
+
+app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      ai.osm_type,
+      ai.osm_id,
+      ai.name,
+      ai.style,
+      ai.levels,
+      ai.year_built,
+      ai.architect,
+      ai.address,
+      ai.description,
+      ai.updated_by,
+      ai.updated_at,
+      bc.tags_json
+    FROM architectural_info ai
+    LEFT JOIN building_contours bc
+      ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
+    ORDER BY ai.updated_at DESC
+    LIMIT 2000
+  `).all();
+
+  const out = [];
+  for (const row of rows) {
+    let tags = {};
+    try {
+      tags = row.tags_json ? JSON.parse(row.tags_json) : {};
+    } catch {
+      tags = {};
+    }
+
+    const changes = buildChangesFromRows(row, tags);
+    if (changes.length === 0) continue;
+
+    out.push({
+      osmType: row.osm_type,
+      osmId: row.osm_id,
+      updatedBy: row.updated_by || null,
+      updatedAt: row.updated_at || null,
+      changes
+    });
+  }
+
+  return res.json({
+    total: out.length,
+    items: out
+  });
 });
 
 app.get('/api/contours-status', (req, res) => {
@@ -460,18 +629,17 @@ async function initSessionStore() {
       console.error(`[session] Redis error: ${String(error.message || error)}`);
     });
     await redisClient.connect();
-
-    app.use(session({
+    sessionMiddleware = session({
       ...sessionConfig,
       store: new RedisStore({
         client: redisClient,
         prefix: 'archimap:sess:'
       })
-    }));
+    });
     console.log(`[session] Redis store connected: ${REDIS_URL}`);
   } catch (error) {
     console.error(`[session] Redis unavailable, fallback to MemoryStore: ${String(error.message || error)}`);
-    app.use(session(sessionConfig));
+    sessionMiddleware = session(sessionConfig);
   }
 }
 

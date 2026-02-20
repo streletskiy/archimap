@@ -67,6 +67,7 @@ map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
 let selected = null;
 let isAuthenticated = false;
+let isAdmin = false;
 let loadTimer = null;
 let loadRequestSeq = 0;
 let currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
@@ -94,8 +95,15 @@ const modalEl = document.getElementById('building-modal');
 const modalContentEl = document.getElementById('modal-content');
 const modalCloseBtn = document.getElementById('modal-close');
 const authFabEl = document.getElementById('auth-fab');
+const authIconLoginEl = document.getElementById('auth-icon-login');
+const authIconUserEl = document.getElementById('auth-icon-user');
+const adminEditsFabEl = document.getElementById('admin-edits-fab');
 const authModalEl = document.getElementById('auth-modal');
 const authModalCloseEl = document.getElementById('auth-modal-close');
+const adminEditsModalEl = document.getElementById('admin-edits-modal');
+const adminEditsCloseEl = document.getElementById('admin-edits-close');
+const adminEditsListEl = document.getElementById('admin-edits-list');
+const adminEditsStatusEl = document.getElementById('admin-edits-status');
 const THEME_STORAGE_KEY = 'archimap-theme';
 
 function escapeHtml(value) {
@@ -547,6 +555,7 @@ async function loadAuthState() {
   const resp = await fetch('/api/me');
   const data = await resp.json();
   isAuthenticated = Boolean(data.authenticated);
+  isAdmin = Boolean(data?.user?.isAdmin);
   renderAuth();
 }
 
@@ -561,9 +570,84 @@ function renderAuth() {
     loginForm.classList.remove('hidden');
   }
 
+  if (adminEditsFabEl) {
+    if (isAuthenticated && isAdmin) {
+      adminEditsFabEl.classList.remove('hidden');
+    } else {
+      adminEditsFabEl.classList.add('hidden');
+      closeAdminEditsModal();
+    }
+  }
+
+  if (authFabEl && authIconLoginEl && authIconUserEl) {
+    if (isAuthenticated) {
+      authIconLoginEl.classList.add('hidden');
+      authIconUserEl.classList.remove('hidden');
+      authFabEl.setAttribute('aria-label', 'Профиль');
+    } else {
+      authIconUserEl.classList.add('hidden');
+      authIconLoginEl.classList.remove('hidden');
+      authFabEl.setAttribute('aria-label', 'Вход');
+    }
+  }
+
+  updateBuildingHighlightStyle();
+
   if (selected && !modalEl.classList.contains('hidden')) {
     openModal(selected.feature);
   }
+}
+
+function getBuildingFillColorExpression() {
+  return [
+    'case',
+    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    '#f59e0b',
+    ['boolean', ['get', 'isFiltered'], false],
+    '#12b4a6',
+    '#d3d3d3'
+  ];
+}
+
+function getBuildingFillOpacityExpression() {
+  return [
+    'case',
+    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    0.82,
+    ['boolean', ['get', 'isFiltered'], false],
+    0.82,
+    0.24
+  ];
+}
+
+function getBuildingLineColorExpression() {
+  return [
+    'case',
+    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    '#b45309',
+    ['boolean', ['get', 'isFiltered'], false],
+    '#0b6d67',
+    '#8c8c8c'
+  ];
+}
+
+function getBuildingLineWidthExpression() {
+  return [
+    'case',
+    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    1.8,
+    ['boolean', ['get', 'isFiltered'], false],
+    1.4,
+    1
+  ];
+}
+
+function updateBuildingHighlightStyle() {
+  if (!map.getLayer('local-buildings-fill') || !map.getLayer('local-buildings-line')) return;
+  map.setPaintProperty('local-buildings-fill', 'fill-color', getBuildingFillColorExpression());
+  map.setPaintProperty('local-buildings-fill', 'fill-opacity', getBuildingFillOpacityExpression());
+  map.setPaintProperty('local-buildings-line', 'line-color', getBuildingLineColorExpression());
+  map.setPaintProperty('local-buildings-line', 'line-width', getBuildingLineWidthExpression());
 }
 
 function buildEditField(label, id, type, value, placeholder) {
@@ -601,31 +685,44 @@ function buildModalHtml(feature) {
   const shownArchitect = info.architect || osmArchitect || '-';
   const shownStyleRaw = info.style || osmStyle || '-';
   const shownStyle = shownStyleRaw === '-' ? '-' : (toHumanArchitectureStyle(shownStyleRaw) || shownStyleRaw);
-  const editorBlock = isAuthenticated
+  const editableRows = isAuthenticated
     ? `
-      <form id="building-edit-form" class="mt-3 grid gap-2.5 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-        <h3 class="text-base font-extrabold text-slate-900">Редактирование доп. информации</h3>
-        ${buildEditField('Название', 'building-name', 'text', info.name || '', shownName !== '-' ? shownName : 'Название здания')}
-        ${buildEditField('Адрес', 'building-address', 'text', info.address || '', shownAddress !== '-' ? shownAddress : 'Адрес здания')}
-        ${buildEditField('Этажей', 'building-levels', 'number', info.levels ?? '', shownLevels !== '-' ? shownLevels : 'Например, 5')}
-        ${buildEditField('Год постройки', 'building-year', 'number', info.year_built || '', 'Например, 1898')}
-        ${buildEditField('Архитектор', 'building-architect', 'text', info.architect || '', shownArchitect !== '-' ? shownArchitect : 'Имя архитектора')}
-        ${buildEditField('Архитектурный стиль', 'building-style', 'text', info.style || '', shownStyle !== '-' ? shownStyle : 'Например, модерн')}
-        ${buildEditTextarea('Описание', 'building-description', info.description || '', 'Краткая архитектурная справка')}
-        <div class="flex items-center justify-between gap-2">
+      <form id="building-edit-form" class="grid gap-2.5">
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-name" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Название:</label>
+          <input id="building-name" name="building-name" type="text" value="${escapeHtml(info.name || (shownName !== '-' ? shownName : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-address" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Адрес:</label>
+          <input id="building-address" name="building-address" type="text" value="${escapeHtml(info.address || (shownAddress !== '-' ? shownAddress : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-levels" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Этажей:</label>
+          <input id="building-levels" name="building-levels" type="number" value="${escapeHtml(info.levels ?? (shownLevels !== '-' ? shownLevels : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-year" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Год постройки:</label>
+          <input id="building-year" name="building-year" type="number" value="${escapeHtml(info.year_built || (shownYear !== '-' ? shownYear : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-architect" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектор:</label>
+          <input id="building-architect" name="building-architect" type="text" value="${escapeHtml(info.architect || (shownArchitect !== '-' ? shownArchitect : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-style" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектурный стиль:</label>
+          <input id="building-style" name="building-style" type="text" value="${escapeHtml(info.style || (osmStyle || ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <label for="building-description" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Описание:</label>
+          <textarea id="building-description" name="building-description" rows="3" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">${escapeHtml(info.description || '')}</textarea>
+        </div>
+        <div class="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
           <p id="building-save-status" class="text-sm text-slate-600"></p>
           <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">Сохранить</button>
         </div>
       </form>
     `
     : `
-      <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-700">
-        Для редактирования войдите через кнопку в левом нижнем углу.
-      </div>
-    `;
-
-  return `
-    <div class="grid gap-2.5">
       <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Название:</b>${escapeHtml(shownName)}</div>
       <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Адрес:</b>${escapeHtml(shownAddress)}</div>
       <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Этажей:</b>${escapeHtml(shownLevels)}</div>
@@ -633,7 +730,14 @@ function buildModalHtml(feature) {
       <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектор:</b>${escapeHtml(shownArchitect)}</div>
       <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектурный стиль:</b>${escapeHtml(shownStyle)}</div>
       <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Описание:</b>${escapeHtml(info.description || '-')}</div>
-      ${editorBlock}
+      <div class="rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-700">
+        Для редактирования войдите через кнопку в левом нижнем углу.
+      </div>
+    `;
+
+  return `
+    <div class="grid gap-2.5">
+      ${editableRows}
       <details class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
         <summary class="relative cursor-pointer list-none bg-slate-50 px-3.5 py-3 pr-10 font-bold text-slate-900 transition hover:bg-slate-100 after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:content-['▾'] [&::-webkit-details-marker]:hidden [&[open]_summary]:after:rotate-180">OSM теги</summary>
         <pre class="m-0 border-t border-slate-200 bg-white px-3.5 py-3 text-xs leading-6 text-slate-700 whitespace-pre-wrap break-words">${escapeHtml(JSON.stringify({
@@ -732,6 +836,84 @@ function openAuthModal() {
 function closeAuthModal() {
   authModalEl.classList.add('hidden');
   authModalEl.setAttribute('aria-hidden', 'true');
+}
+
+function formatChangeValue(value) {
+  if (value == null || value === '') return '—';
+  return String(value);
+}
+
+function formatUpdatedAt(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('ru-RU');
+}
+
+function renderAdminEdits(items) {
+  if (!adminEditsListEl) return;
+  adminEditsListEl.innerHTML = items.map((item) => {
+    const changesHtml = item.changes.map((change) => `
+      <div class="rounded-lg border border-slate-200 bg-white p-2.5">
+        <div class="mb-1 flex items-center justify-between gap-2">
+          <div class="text-xs font-semibold text-slate-600">${escapeHtml(change.label)}</div>
+          <div class="text-[11px] font-semibold ${change.isLocalTag ? 'text-rose-600' : 'text-slate-500'}">
+            ${change.isLocalTag ? 'Локальный тег' : `OSM: ${escapeHtml(change.osmTag || '—')}`}
+          </div>
+        </div>
+        <div class="grid gap-1 md:grid-cols-2 md:gap-2">
+          <div class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700"><span class="font-semibold text-slate-500">OSM:</span> ${escapeHtml(formatChangeValue(change.osmValue))}</div>
+          <div class="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900"><span class="font-semibold text-amber-700">Стало:</span> ${escapeHtml(formatChangeValue(change.localValue))}</div>
+        </div>
+      </div>
+    `).join('');
+
+    return `
+      <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="mb-2 flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold text-slate-900">${escapeHtml(item.osmType)}/${escapeHtml(item.osmId)}</div>
+          <a class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100" href="?b=${encodeURIComponent(`${item.osmType}/${item.osmId}`)}${window.location.hash || ''}">Открыть</a>
+        </div>
+        <div class="mb-2 text-xs text-slate-600">Изменил: <b class="text-slate-900">${escapeHtml(item.updatedBy || '—')}</b> • ${escapeHtml(formatUpdatedAt(item.updatedAt))}</div>
+        <div class="space-y-2">${changesHtml}</div>
+      </article>
+    `;
+  }).join('');
+}
+
+async function loadAdminEdits() {
+  if (!adminEditsStatusEl || !adminEditsListEl) return;
+  adminEditsStatusEl.textContent = 'Загрузка...';
+  adminEditsListEl.innerHTML = '';
+
+  const resp = await fetch('/api/admin/building-edits');
+  if (!resp.ok) {
+    adminEditsStatusEl.textContent = 'Не удалось загрузить список правок.';
+    return;
+  }
+
+  const data = await resp.json().catch(() => ({ total: 0, items: [] }));
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (items.length === 0) {
+    adminEditsStatusEl.textContent = 'Локальные правки не найдены.';
+    return;
+  }
+
+  adminEditsStatusEl.textContent = `Найдено правок: ${items.length}`;
+  renderAdminEdits(items);
+}
+
+function openAdminEditsModal() {
+  if (!isAuthenticated || !isAdmin || !adminEditsModalEl) return;
+  adminEditsModalEl.classList.remove('hidden');
+  adminEditsModalEl.setAttribute('aria-hidden', 'false');
+  loadAdminEdits();
+}
+
+function closeAdminEditsModal() {
+  if (!adminEditsModalEl) return;
+  adminEditsModalEl.classList.add('hidden');
+  adminEditsModalEl.setAttribute('aria-hidden', 'true');
 }
 
 function setSelectedFeature(feature) {
@@ -833,7 +1015,9 @@ loginForm.addEventListener('submit', async (event) => {
     return;
   }
 
+  const data = await resp.json().catch(() => ({ user: null }));
   isAuthenticated = true;
+  isAdmin = Boolean(data?.user?.isAdmin);
   renderAuth();
   closeAuthModal();
 });
@@ -841,6 +1025,7 @@ loginForm.addEventListener('submit', async (event) => {
 logoutBtn.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   isAuthenticated = false;
+  isAdmin = false;
   renderAuth();
 });
 
@@ -920,8 +1105,7 @@ async function saveBuildingInfoFromModal(event) {
     return;
   }
 
-  selected.feature.properties = selected.feature.properties || {};
-  selected.feature.properties.archiInfo = {
+  const nextArchiInfo = {
     osm_type: selected.osmType,
     osm_id: selected.osmId,
     name: payload.name || null,
@@ -933,21 +1117,67 @@ async function saveBuildingInfoFromModal(event) {
     description: payload.description || null,
     updated_at: new Date().toISOString()
   };
-  selected.feature.properties.hasExtraInfo = true;
-
-  setSelectedFeature(selected.feature);
+  applySavedInfoToFeatureCaches(selected.osmType, selected.osmId, nextArchiInfo);
   openModal(selected.feature);
   const nextStatusEl = document.getElementById('building-save-status');
   if (nextStatusEl) nextStatusEl.textContent = 'Сохранено';
   scheduleLoadBuildings();
 }
 
+function applySavedInfoToFeature(feature, archiInfo) {
+  if (!feature) return;
+  feature.properties = feature.properties || {};
+  feature.properties.archiInfo = archiInfo;
+  feature.properties.hasExtraInfo = true;
+}
+
+function applySavedInfoToFeatureCaches(osmType, osmId, archiInfo) {
+  const key = `${osmType}/${osmId}`;
+
+  if (selected?.feature?.properties?.osm_key === key) {
+    applySavedInfoToFeature(selected.feature, archiInfo);
+    setSelectedFeature(selected.feature);
+  }
+
+  let touchedCurrent = false;
+  for (const feature of currentBuildingsGeojson.features || []) {
+    if (String(feature?.properties?.osm_key || feature?.id || '') !== key) continue;
+    applySavedInfoToFeature(feature, archiInfo);
+    touchedCurrent = true;
+  }
+
+  if (touchedCurrent) {
+    const source = map.getSource('local-buildings');
+    if (source) source.setData(currentBuildingsGeojson);
+  }
+
+  for (const entry of tileCache.values()) {
+    const features = entry?.geojson?.features;
+    if (!Array.isArray(features)) continue;
+    for (const feature of features) {
+      if (String(feature?.properties?.osm_key || feature?.id || '') !== key) continue;
+      applySavedInfoToFeature(feature, archiInfo);
+    }
+  }
+}
+
 modalCloseBtn.addEventListener('click', closeModal);
 authFabEl.addEventListener('click', openAuthModal);
+if (adminEditsFabEl) {
+  adminEditsFabEl.addEventListener('click', openAdminEditsModal);
+}
 authModalCloseEl.addEventListener('click', closeAuthModal);
 authModalEl.addEventListener('click', (event) => {
   if (event.target === authModalEl) closeAuthModal();
 });
+if (adminEditsCloseEl) {
+  adminEditsCloseEl.addEventListener('click', closeAdminEditsModal);
+}
+if (adminEditsModalEl) {
+  adminEditsModalEl.addEventListener('click', (event) => {
+    if (event.target === adminEditsModalEl) closeAdminEditsModal();
+  });
+}
 
 function ensureMapSourcesAndLayers() {
   if (!map.getSource('local-buildings')) {
@@ -973,18 +1203,8 @@ function ensureMapSourcesAndLayers() {
       type: 'fill',
       source: 'local-buildings',
       paint: {
-        'fill-color': [
-          'case',
-          ['boolean', ['get', 'isFiltered'], false],
-          '#12b4a6',
-          '#d3d3d3'
-        ],
-        'fill-opacity': [
-          'case',
-          ['boolean', ['get', 'isFiltered'], false],
-          0.82,
-          0.24
-        ],
+        'fill-color': getBuildingFillColorExpression(),
+        'fill-opacity': getBuildingFillOpacityExpression(),
         'fill-opacity-transition': {
           duration: 220
         }
@@ -998,18 +1218,8 @@ function ensureMapSourcesAndLayers() {
       type: 'line',
       source: 'local-buildings',
       paint: {
-        'line-color': [
-          'case',
-          ['boolean', ['get', 'isFiltered'], false],
-          '#0b6d67',
-          '#8c8c8c'
-        ],
-        'line-width': [
-          'case',
-          ['boolean', ['get', 'isFiltered'], false],
-          1.4,
-          1
-        ],
+        'line-color': getBuildingLineColorExpression(),
+        'line-width': getBuildingLineWidthExpression(),
         'line-opacity-transition': {
           duration: 220
         }
@@ -1078,6 +1288,7 @@ function bindBuildingsLayerEvents() {
 map.on('style.load', () => {
   ensureMapSourcesAndLayers();
   bindBuildingsLayerEvents();
+  updateBuildingHighlightStyle();
   if (labelsToggleEl) {
     setLabelsVisibility(Boolean(labelsToggleEl.checked));
   }
