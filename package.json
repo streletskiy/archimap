@@ -1,0 +1,23 @@
+{
+  "name": "archimap",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node server.js",
+    "start": "node server.js",
+    "sync:city": "node scripts/sync-geofabrik-buildings.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "connect-redis": "^9.0.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "redis": "^5.8.2"
+  }
+}

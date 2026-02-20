@@ -1,0 +1,20 @@
+services:
+  archimap:
+    image: streletskiy/archimap:latest
+    build:
+      context: .
+    container_name: archimap
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3252}:${PORT:-3252}"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: archimap-redis
+    restart: unless-stopped

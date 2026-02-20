@@ -1,0 +1,336 @@
+:root {
+  --bg-app: #eef2f7;
+  --bg-panel: rgba(255, 255, 255, 0.78);
+  --bg-input: #f6f8fb;
+  --bg-hover: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #667085;
+  --text-tertiary: #cbd5e1;
+  --accent-purple: #5b62f0;
+  --accent-purple-light: #e4e7ff;
+  --accent-orange: #ff6b7f;
+  --accent-orange-light: #ffe4e9;
+  --border-light: rgba(148, 163, 184, 0.22);
+  --radius-panel: 24px;
+  --radius-item: 16px;
+  --radius-pill: 999px;
+  --shadow-soft: 0 8px 20px rgba(15, 23, 42, 0.06);
+  --shadow-float: 0 20px 40px rgba(15, 23, 42, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: "Manrope", "Segoe UI", Roboto, Arial, sans-serif;
+  color: var(--text-primary);
+  background: radial-gradient(1000px 520px at 110% -10%, #dbeafe 0%, transparent 60%),
+    radial-gradient(860px 480px at -10% 110%, #ffe7ec 0%, transparent 62%),
+    var(--bg-app);
+}
+
+#map {
+  position: fixed;
+  inset: 0;
+}
+
+.brand-mark {
+  position: fixed;
+  top: 18px;
+  left: 20px;
+  z-index: 905;
+  font-size: 28px;
+  font-weight: 800;
+  color: #0b1220;
+  letter-spacing: 0.2px;
+  user-select: none;
+  text-shadow: 0 2px 8px rgba(255, 255, 255, 0.75);
+}
+
+.auth-fab {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent-purple), #7981ff);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: var(--shadow-float);
+  z-index: 910;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.auth-fab:hover {
+  transform: translateY(-1px);
+}
+
+.auth-fab svg {
+  fill: currentColor;
+}
+
+.auth-modal-card {
+  width: min(92vw, 420px);
+  height: auto;
+  max-height: min(88vh, 560px);
+}
+
+h2 {
+  margin: 20px 0 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.muted {
+  color: var(--text-secondary);
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+form {
+  display: grid;
+  gap: 10px;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius-item);
+  padding: 12px 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+input:focus,
+textarea:focus {
+  background: #ffffff;
+  border-color: var(--accent-purple-light);
+  box-shadow: 0 0 0 4px rgba(91, 98, 240, 0.12);
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+button {
+  border: none;
+  background: linear-gradient(135deg, var(--accent-orange), #ff8f83);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  padding: 12px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+button:hover {
+  opacity: 0.95;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button.secondary {
+  background: linear-gradient(135deg, var(--accent-purple), #7a80ff);
+}
+
+.hidden {
+  display: none;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.45), rgba(15, 23, 42, 0.3));
+  backdrop-filter: blur(4px);
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-card {
+  position: relative;
+  width: min(95vw, 1240px);
+  height: min(92vh, 940px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
+  overflow: auto;
+  padding: 24px 24px 26px;
+  backdrop-filter: blur(16px);
+}
+
+.modal-close {
+  position: sticky;
+  top: 0;
+  margin-left: auto;
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  font-size: 18px;
+  line-height: 1;
+  z-index: 3;
+}
+
+.modal-close:hover {
+  background: var(--bg-hover);
+}
+
+.building-modal-title {
+  margin: 6px 0 12px;
+  font-size: clamp(26px, 3vw, 36px);
+  line-height: 1.08;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.building-modal-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.osm-spoiler {
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-item);
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.osm-spoiler summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 44px 12px 14px;
+  font-weight: 700;
+  color: #0f172a;
+  background: #f8fafc;
+  position: relative;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.osm-spoiler summary:hover {
+  background: #f1f5f9;
+}
+
+.osm-spoiler summary::-webkit-details-marker {
+  display: none;
+}
+
+.osm-spoiler summary::after {
+  content: "▾";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-90deg);
+  color: #64748b;
+  font-size: 14px;
+  transition: transform 0.2s ease;
+}
+
+.osm-spoiler[open] summary::after {
+  transform: translateY(-50%) rotate(0deg);
+}
+
+.osm-spoiler pre {
+  margin: 0;
+  padding: 12px 14px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #334155;
+  background: #ffffff;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid #e2e8f0;
+}
+
+.building-row {
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-item);
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  box-shadow: var(--shadow-soft);
+  color: #334155;
+}
+
+.building-row b {
+  display: inline-block;
+  min-width: 220px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.maplibregl-ctrl-group {
+  border-radius: 14px;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.maplibregl-ctrl button {
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+@media (max-width: 720px) {
+  .brand-mark {
+    top: 10px;
+    left: 12px;
+    font-size: 22px;
+  }
+
+  .modal-card {
+    width: calc(100vw - 8px);
+    height: calc(100vh - 8px);
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .building-modal-title {
+    font-size: 24px;
+  }
+
+  .building-row b {
+    min-width: 0;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .auth-fab {
+    left: 12px;
+    bottom: 12px;
+  }
+}
