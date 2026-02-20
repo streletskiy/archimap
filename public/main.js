@@ -43,10 +43,17 @@ function clearBuildingFromUrl() {
 }
 
 const initialView = readViewFromUrl();
+const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
+const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
+let currentMapTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+
+function getMapStyleForTheme(theme) {
+  return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+}
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: '/styles/positron-custom.json',
+  style: getMapStyleForTheme(currentMapTheme),
   center: initialView ? initialView.center : [44.0059, 56.3269],
   zoom: initialView ? initialView.zoom : 15,
   attributionControl: true
@@ -81,6 +88,7 @@ const filterResetBtnEl = document.getElementById('filter-reset-btn');
 const filterStatusEl = document.getElementById('filter-status');
 const filterTagKeysEl = document.getElementById('filter-tag-keys');
 const labelsToggleEl = document.getElementById('labels-toggle');
+const themeToggleEl = document.getElementById('theme-toggle');
 
 const modalEl = document.getElementById('building-modal');
 const modalContentEl = document.getElementById('modal-content');
@@ -88,6 +96,7 @@ const modalCloseBtn = document.getElementById('modal-close');
 const authFabEl = document.getElementById('auth-fab');
 const authModalEl = document.getElementById('auth-modal');
 const authModalCloseEl = document.getElementById('auth-modal-close');
+const THEME_STORAGE_KEY = 'archimap-theme';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -96,6 +105,59 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function getSavedTheme() {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // ignore localStorage access failures
+  }
+  return null;
+}
+
+function getSystemTheme() {
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+function getCurrentTheme() {
+  const attr = document.documentElement.getAttribute('data-theme');
+  return attr === 'dark' ? 'dark' : 'light';
+}
+
+function applyTheme(theme, options = {}) {
+  const { persist = true } = options;
+  const normalized = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', normalized);
+  applyMapTheme(normalized);
+
+  if (themeToggleEl) {
+    themeToggleEl.checked = normalized === 'dark';
+    themeToggleEl.setAttribute(
+      'aria-label',
+      normalized === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'
+    );
+  }
+
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, normalized);
+    } catch {
+      // ignore localStorage access failures
+    }
+  }
+}
+
+function applyMapTheme(theme, options = {}) {
+  const { force = false } = options;
+  const normalized = theme === 'dark' ? 'dark' : 'light';
+  if (!force && currentMapTheme === normalized) return;
+  currentMapTheme = normalized;
+  map.setStyle(getMapStyleForTheme(normalized), { diff: false });
 }
 
 function parseKey(osmKey) {
@@ -812,6 +874,16 @@ if (labelsToggleEl) {
     setLabelsVisibility(Boolean(labelsToggleEl.checked));
   });
 }
+if (themeToggleEl) {
+  applyTheme(getCurrentTheme(), { persist: false });
+  themeToggleEl.addEventListener('change', () => {
+    const nextTheme = themeToggleEl.checked ? 'dark' : 'light';
+    applyTheme(nextTheme, { persist: true });
+  });
+} else {
+  const theme = getSavedTheme() || getCurrentTheme() || getSystemTheme();
+  applyTheme(theme, { persist: false });
+}
 
 async function saveBuildingInfoFromModal(event) {
   event.preventDefault();
@@ -877,106 +949,142 @@ authModalEl.addEventListener('click', (event) => {
   if (event.target === authModalEl) closeAuthModal();
 });
 
-map.on('load', async () => {
+function ensureMapSourcesAndLayers() {
+  if (!map.getSource('local-buildings')) {
+    map.addSource('local-buildings', {
+      type: 'geojson',
+      data: currentBuildingsGeojson
+    });
+  }
+
+  if (!map.getSource('selected-building')) {
+    map.addSource('selected-building', {
+      type: 'geojson',
+      data: {
+        type: 'FeatureCollection',
+        features: selected?.feature ? [selected.feature] : []
+      }
+    });
+  }
+
+  if (!map.getLayer('local-buildings-fill')) {
+    map.addLayer({
+      id: 'local-buildings-fill',
+      type: 'fill',
+      source: 'local-buildings',
+      paint: {
+        'fill-color': [
+          'case',
+          ['boolean', ['get', 'isFiltered'], false],
+          '#12b4a6',
+          '#d3d3d3'
+        ],
+        'fill-opacity': [
+          'case',
+          ['boolean', ['get', 'isFiltered'], false],
+          0.82,
+          0.24
+        ],
+        'fill-opacity-transition': {
+          duration: 220
+        }
+      }
+    });
+  }
+
+  if (!map.getLayer('local-buildings-line')) {
+    map.addLayer({
+      id: 'local-buildings-line',
+      type: 'line',
+      source: 'local-buildings',
+      paint: {
+        'line-color': [
+          'case',
+          ['boolean', ['get', 'isFiltered'], false],
+          '#0b6d67',
+          '#8c8c8c'
+        ],
+        'line-width': [
+          'case',
+          ['boolean', ['get', 'isFiltered'], false],
+          1.4,
+          1
+        ],
+        'line-opacity-transition': {
+          duration: 220
+        }
+      }
+    });
+  }
+
+  if (!map.getLayer('selected-building-fill')) {
+    map.addLayer({
+      id: 'selected-building-fill',
+      type: 'fill',
+      source: 'selected-building',
+      paint: {
+        'fill-color': '#4f7db9',
+        'fill-opacity': 0.55
+      }
+    });
+  }
+
+  if (!map.getLayer('selected-building-line')) {
+    map.addLayer({
+      id: 'selected-building-line',
+      type: 'line',
+      source: 'selected-building',
+      paint: {
+        'line-color': '#2b4f7b',
+        'line-width': 2
+      }
+    });
+  }
+
+  const buildingsSource = map.getSource('local-buildings');
+  if (buildingsSource) buildingsSource.setData(currentBuildingsGeojson);
+  setSelectedFeature(selected?.feature || null);
+}
+
+function onBuildingsLayerMouseEnter() {
+  map.getCanvas().style.cursor = 'pointer';
+}
+
+function onBuildingsLayerMouseLeave() {
+  map.getCanvas().style.cursor = '';
+}
+
+async function onBuildingsLayerClick(event) {
+  const feature = event.features && event.features[0];
+  if (!feature) return;
+  normalizeFeatureInfo(feature);
+
+  try {
+    await selectBuildingFeature(feature);
+  } catch {
+    // no-op
+  }
+}
+
+function bindBuildingsLayerEvents() {
+  map.off('mouseenter', 'local-buildings-fill', onBuildingsLayerMouseEnter);
+  map.off('mouseleave', 'local-buildings-fill', onBuildingsLayerMouseLeave);
+  map.off('click', 'local-buildings-fill', onBuildingsLayerClick);
+  map.on('mouseenter', 'local-buildings-fill', onBuildingsLayerMouseEnter);
+  map.on('mouseleave', 'local-buildings-fill', onBuildingsLayerMouseLeave);
+  map.on('click', 'local-buildings-fill', onBuildingsLayerClick);
+}
+
+map.on('style.load', () => {
+  ensureMapSourcesAndLayers();
+  bindBuildingsLayerEvents();
   if (labelsToggleEl) {
     setLabelsVisibility(Boolean(labelsToggleEl.checked));
   }
+});
+
+map.on('load', async () => {
   await loadAuthState();
-
-  map.addSource('local-buildings', {
-    type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] }
-  });
-
-  map.addSource('selected-building', {
-    type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] }
-  });
-
-  map.addLayer({
-    id: 'local-buildings-fill',
-    type: 'fill',
-    source: 'local-buildings',
-    paint: {
-      'fill-color': [
-        'case',
-        ['boolean', ['get', 'isFiltered'], false],
-        '#12b4a6',
-        '#d3d3d3'
-      ],
-      'fill-opacity': [
-        'case',
-        ['boolean', ['get', 'isFiltered'], false],
-        0.82,
-        0.24
-      ],
-      'fill-opacity-transition': {
-        duration: 220
-      }
-    }
-  });
-
-  map.addLayer({
-    id: 'local-buildings-line',
-    type: 'line',
-    source: 'local-buildings',
-    paint: {
-      'line-color': [
-        'case',
-        ['boolean', ['get', 'isFiltered'], false],
-        '#0b6d67',
-        '#8c8c8c'
-      ],
-      'line-width': [
-        'case',
-        ['boolean', ['get', 'isFiltered'], false],
-        1.4,
-        1
-      ],
-      'line-opacity-transition': {
-        duration: 220
-      }
-    }
-  });
-
-  map.addLayer({
-    id: 'selected-building-fill',
-    type: 'fill',
-    source: 'selected-building',
-    paint: {
-      'fill-color': '#4f7db9',
-      'fill-opacity': 0.55
-    }
-  });
-
-  map.addLayer({
-    id: 'selected-building-line',
-    type: 'line',
-    source: 'selected-building',
-    paint: {
-      'line-color': '#2b4f7b',
-      'line-width': 2
-    }
-  });
-
-  map.on('mouseenter', 'local-buildings-fill', () => {
-    map.getCanvas().style.cursor = 'pointer';
-  });
-  map.on('mouseleave', 'local-buildings-fill', () => {
-    map.getCanvas().style.cursor = '';
-  });
-
-  map.on('click', 'local-buildings-fill', async (event) => {
-    const feature = event.features && event.features[0];
-    if (!feature) return;
-    normalizeFeatureInfo(feature);
-
-    try {
-      await selectBuildingFeature(feature);
-    } catch {
-      // no-op
-    }
-  });
 
   scheduleLoadBuildings();
   if (filterRowsEl && filterRowsEl.children.length === 0) {

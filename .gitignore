@@ -29,3 +29,4 @@ coverage/
 __pycache__/
 *.pyc
 scripts/release-docker.ps1
+LOCAL_CONTEXT.md
