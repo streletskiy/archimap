@@ -19,6 +19,9 @@ const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED ?? 'true').toLowe
 const AUTO_SYNC_ON_START = String(process.env.AUTO_SYNC_ON_START ?? 'true').toLowerCase() === 'true';
 const AUTO_SYNC_INTERVAL_HOURS = Number(process.env.AUTO_SYNC_INTERVAL_HOURS || 168);
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
+const MAP_DEFAULT_LON = Number(process.env.MAP_DEFAULT_LON ?? 44.0059);
+const MAP_DEFAULT_LAT = Number(process.env.MAP_DEFAULT_LAT ?? 56.3269);
+const MAP_DEFAULT_ZOOM = Number(process.env.MAP_DEFAULT_ZOOM ?? 15);
 
 const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
@@ -34,6 +37,13 @@ let scheduledSkipLogged = false;
 let nextSyncTimer = null;
 
 const MAX_NODE_TIMER_MS = 2_147_483_647;
+
+function normalizeMapConfig() {
+  const lon = Number.isFinite(MAP_DEFAULT_LON) ? Math.min(180, Math.max(-180, MAP_DEFAULT_LON)) : 44.0059;
+  const lat = Number.isFinite(MAP_DEFAULT_LAT) ? Math.min(90, Math.max(-90, MAP_DEFAULT_LAT)) : 56.3269;
+  const zoom = Number.isFinite(MAP_DEFAULT_ZOOM) ? Math.min(22, Math.max(0, MAP_DEFAULT_ZOOM)) : 15;
+  return { lon, lat, zoom };
+}
 
 db.pragma('journal_mode = WAL');
 
@@ -85,6 +95,13 @@ if (!archiColumnNames.has('updated_by')) {
 }
 
 app.use(express.json());
+
+app.get('/app-config.js', (req, res) => {
+  const mapDefault = normalizeMapConfig();
+  res.type('application/javascript').send(
+    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault })};`
+  );
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -623,8 +640,15 @@ async function initSessionStore() {
     }
   };
 
+  let redisClient = null;
   try {
-    const redisClient = createClient({ url: REDIS_URL });
+    redisClient = createClient({
+      url: REDIS_URL,
+      socket: {
+        connectTimeout: 1500,
+        reconnectStrategy: () => false
+      }
+    });
     redisClient.on('error', (error) => {
       console.error(`[session] Redis error: ${String(error.message || error)}`);
     });
@@ -639,6 +663,11 @@ async function initSessionStore() {
     console.log(`[session] Redis store connected: ${REDIS_URL}`);
   } catch (error) {
     console.error(`[session] Redis unavailable, fallback to MemoryStore: ${String(error.message || error)}`);
+    try {
+      await redisClient?.quit?.();
+    } catch {
+      // ignore
+    }
     sessionMiddleware = session(sessionConfig);
   }
 }

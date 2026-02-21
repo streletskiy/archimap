@@ -83,6 +83,9 @@ What it does:
 - `PORT` - server port.
 - `SESSION_SECRET` - session secret.
 - `REDIS_URL` - Redis connection URL for sessions (default: `redis://redis:6379`).
+- `MAP_DEFAULT_LON` - default map center longitude (used when URL hash has no `#map=...`).
+- `MAP_DEFAULT_LAT` - default map center latitude (used when URL hash has no `#map=...`).
+- `MAP_DEFAULT_ZOOM` - default map zoom (used when URL hash has no `#map=...`).
 - `ADMIN_USERNAME` - admin login.
 - `ADMIN_PASSWORD` - admin password.
 - `GEOFABRIK_PBF_URL` - Geofabrik PBF URL.

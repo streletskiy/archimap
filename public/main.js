@@ -46,6 +46,31 @@ const initialView = readViewFromUrl();
 const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
 const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
 let currentMapTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+const FALLBACK_DEFAULT_MAP_VIEW = Object.freeze({
+  center: [44.0059, 56.3269],
+  zoom: 15
+});
+
+function getDefaultMapView() {
+  const cfg = window.__ARCHIMAP_CONFIG?.mapDefault;
+  const lon = Number(cfg?.lon);
+  const lat = Number(cfg?.lat);
+  const zoom = Number(cfg?.zoom);
+
+  if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(zoom)) {
+    return FALLBACK_DEFAULT_MAP_VIEW;
+  }
+  if (lon < -180 || lon > 180 || lat < -90 || lat > 90 || zoom < 0 || zoom > 22) {
+    return FALLBACK_DEFAULT_MAP_VIEW;
+  }
+
+  return {
+    center: [lon, lat],
+    zoom
+  };
+}
+
+const defaultMapView = getDefaultMapView();
 
 function getMapStyleForTheme(theme) {
   return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
@@ -54,8 +79,8 @@ function getMapStyleForTheme(theme) {
 const map = new maplibregl.Map({
   container: 'map',
   style: getMapStyleForTheme(currentMapTheme),
-  center: initialView ? initialView.center : [44.0059, 56.3269],
-  zoom: initialView ? initialView.zoom : 15,
+  center: initialView ? initialView.center : defaultMapView.center,
+  zoom: initialView ? initialView.zoom : defaultMapView.zoom,
   attributionControl: true
 });
 
@@ -80,8 +105,8 @@ const logoutBtn = document.getElementById('logout-btn');
 const loginForm = document.getElementById('login-form');
 const filterToggleBtnEl = document.getElementById('filter-toggle-btn');
 const filterShellEl = document.getElementById('filter-shell');
-const filterCompactEl = document.getElementById('filter-compact');
-const filterPanelEl = document.getElementById('filter-panel');
+const mobileControlsToggleBtnEl = document.getElementById('mobile-controls-toggle-btn');
+const mobileControlsShellEl = document.getElementById('mobile-controls-shell');
 const filterCloseBtnEl = document.getElementById('filter-close-btn');
 const filterRowsEl = document.getElementById('filter-rows');
 const filterAddRowBtnEl = document.getElementById('filter-add-row-btn');
@@ -105,6 +130,7 @@ const adminEditsCloseEl = document.getElementById('admin-edits-close');
 const adminEditsListEl = document.getElementById('admin-edits-list');
 const adminEditsStatusEl = document.getElementById('admin-edits-status');
 const THEME_STORAGE_KEY = 'archimap-theme';
+const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -137,6 +163,17 @@ function getCurrentTheme() {
   return attr === 'dark' ? 'dark' : 'light';
 }
 
+function getSavedLabelsHidden() {
+  try {
+    const stored = localStorage.getItem(LABELS_HIDDEN_STORAGE_KEY);
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+  } catch {
+    // ignore localStorage access failures
+  }
+  return null;
+}
+
 function applyTheme(theme, options = {}) {
   const { persist = true } = options;
   const normalized = theme === 'dark' ? 'dark' : 'light';
@@ -154,6 +191,29 @@ function applyTheme(theme, options = {}) {
   if (persist) {
     try {
       localStorage.setItem(THEME_STORAGE_KEY, normalized);
+    } catch {
+      // ignore localStorage access failures
+    }
+  }
+}
+
+function applyLabelsHidden(hidden, options = {}) {
+  const { persist = true } = options;
+  const normalized = Boolean(hidden);
+
+  if (labelsToggleEl) {
+    labelsToggleEl.checked = normalized;
+    labelsToggleEl.setAttribute(
+      'aria-label',
+      normalized ? 'Показывать обозначения карты' : 'Скрыть обозначения карты'
+    );
+  }
+
+  setLabelsVisibility(!normalized);
+
+  if (persist) {
+    try {
+      localStorage.setItem(LABELS_HIDDEN_STORAGE_KEY, String(normalized));
     } catch {
       // ignore localStorage access failures
     }
@@ -331,20 +391,120 @@ function resetFilterRows() {
   applyFiltersToCurrentData();
 }
 
+const FILTER_PANEL_OPEN_CLASSES = [
+  'max-h-[70vh]',
+  'translate-y-0',
+  'scale-100',
+  'opacity-100',
+  'pointer-events-auto',
+  'overflow-auto'
+];
+
+const FILTER_PANEL_CLOSED_CLASSES = [
+  'max-h-0',
+  '-translate-y-2',
+  'scale-95',
+  'opacity-0',
+  'pointer-events-none',
+  'overflow-hidden'
+];
+
+const MOBILE_CONTROLS_OPEN_CLASSES = [
+  'max-h-[76px]',
+  'translate-y-0',
+  'scale-100',
+  'opacity-100',
+  'pointer-events-auto',
+  'overflow-visible'
+];
+
+const MOBILE_CONTROLS_CLOSED_CLASSES = [
+  'max-h-0',
+  '-translate-y-2',
+  'scale-95',
+  'opacity-0',
+  'pointer-events-none',
+  'overflow-hidden'
+];
+
+function isFilterPanelOpen() {
+  return Boolean(filterShellEl && filterShellEl.classList.contains('pointer-events-auto'));
+}
+
+function setFilterToggleButtonState(isOpen) {
+  if (!filterToggleBtnEl) return;
+  filterToggleBtnEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  filterToggleBtnEl.setAttribute('aria-label', isOpen ? 'Скрыть фильтр' : 'Открыть фильтр');
+  filterToggleBtnEl.classList.toggle('bg-indigo-600', isOpen);
+  filterToggleBtnEl.classList.toggle('border-indigo-600', isOpen);
+  filterToggleBtnEl.classList.toggle('text-white', isOpen);
+  filterToggleBtnEl.classList.toggle('hover:bg-indigo-500', isOpen);
+  filterToggleBtnEl.classList.toggle('bg-white', !isOpen);
+  filterToggleBtnEl.classList.toggle('border-slate-300', !isOpen);
+  filterToggleBtnEl.classList.toggle('text-slate-800', !isOpen);
+  filterToggleBtnEl.classList.toggle('hover:bg-slate-50', !isOpen);
+}
+
 function openFilterPanel() {
-  if (!filterPanelEl || !filterShellEl || !filterCompactEl) return;
-  filterCompactEl.classList.add('hidden');
-  filterPanelEl.classList.remove('hidden');
-  filterShellEl.classList.remove('w-[240px]', 'p-2');
-  filterShellEl.classList.add('w-[360px]', 'max-h-[70vh]', 'overflow-auto', 'p-3');
+  if (!filterShellEl) return;
+  filterShellEl.classList.remove(...FILTER_PANEL_CLOSED_CLASSES);
+  filterShellEl.classList.add(...FILTER_PANEL_OPEN_CLASSES);
+  setFilterToggleButtonState(true);
 }
 
 function closeFilterPanel() {
-  if (!filterPanelEl || !filterShellEl || !filterCompactEl) return;
-  filterPanelEl.classList.add('hidden');
-  filterCompactEl.classList.remove('hidden');
-  filterShellEl.classList.remove('w-[360px]', 'max-h-[70vh]', 'overflow-auto', 'p-3');
-  filterShellEl.classList.add('w-[240px]', 'p-2');
+  if (!filterShellEl) return;
+  filterShellEl.classList.remove(...FILTER_PANEL_OPEN_CLASSES);
+  filterShellEl.classList.add(...FILTER_PANEL_CLOSED_CLASSES);
+  setFilterToggleButtonState(false);
+}
+
+function toggleFilterPanel() {
+  if (isFilterPanelOpen()) {
+    closeFilterPanel();
+    return;
+  }
+  openFilterPanel();
+}
+
+function isMobileControlsPanelOpen() {
+  return Boolean(mobileControlsShellEl && mobileControlsShellEl.classList.contains('pointer-events-auto'));
+}
+
+function setMobileControlsToggleButtonState(isOpen) {
+  if (!mobileControlsToggleBtnEl) return;
+  mobileControlsToggleBtnEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  mobileControlsToggleBtnEl.setAttribute('aria-label', isOpen ? 'Скрыть переключатели' : 'Открыть переключатели');
+  mobileControlsToggleBtnEl.classList.toggle('bg-indigo-600', isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('border-indigo-600', isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('text-white', isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('hover:bg-indigo-500', isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('bg-white', !isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('border-slate-300', !isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('text-slate-800', !isOpen);
+  mobileControlsToggleBtnEl.classList.toggle('hover:bg-slate-50', !isOpen);
+}
+
+function openMobileControlsPanel() {
+  if (!mobileControlsShellEl) return;
+  mobileControlsShellEl.classList.remove(...MOBILE_CONTROLS_CLOSED_CLASSES);
+  mobileControlsShellEl.classList.add(...MOBILE_CONTROLS_OPEN_CLASSES);
+  setMobileControlsToggleButtonState(true);
+}
+
+function closeMobileControlsPanel() {
+  if (!mobileControlsShellEl) return;
+  mobileControlsShellEl.classList.remove(...MOBILE_CONTROLS_OPEN_CLASSES);
+  mobileControlsShellEl.classList.add(...MOBILE_CONTROLS_CLOSED_CLASSES);
+  setMobileControlsToggleButtonState(false);
+}
+
+function toggleMobileControlsPanel() {
+  if (isMobileControlsPanelOpen()) {
+    closeMobileControlsPanel();
+    return;
+  }
+  openMobileControlsPanel();
 }
 
 function setLabelsVisibility(show) {
@@ -1030,7 +1190,12 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 if (filterToggleBtnEl) {
-  filterToggleBtnEl.addEventListener('click', openFilterPanel);
+  filterToggleBtnEl.addEventListener('click', toggleFilterPanel);
+  setFilterToggleButtonState(isFilterPanelOpen());
+}
+if (mobileControlsToggleBtnEl) {
+  mobileControlsToggleBtnEl.addEventListener('click', toggleMobileControlsPanel);
+  setMobileControlsToggleButtonState(isMobileControlsPanelOpen());
 }
 if (filterCloseBtnEl) {
   filterCloseBtnEl.addEventListener('click', closeFilterPanel);
@@ -1056,8 +1221,10 @@ if (filterRowsEl) {
 }
 if (labelsToggleEl) {
   labelsToggleEl.addEventListener('change', () => {
-    setLabelsVisibility(Boolean(labelsToggleEl.checked));
+    applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: true });
   });
+  const savedLabelsHidden = getSavedLabelsHidden();
+  applyLabelsHidden(savedLabelsHidden == null ? false : savedLabelsHidden, { persist: false });
 }
 if (themeToggleEl) {
   applyTheme(getCurrentTheme(), { persist: false });
@@ -1290,7 +1457,7 @@ map.on('style.load', () => {
   bindBuildingsLayerEvents();
   updateBuildingHighlightStyle();
   if (labelsToggleEl) {
-    setLabelsVisibility(Boolean(labelsToggleEl.checked));
+    applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: false });
   }
 });
 
