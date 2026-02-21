@@ -12,6 +12,7 @@ const app = express();
 
 const PORT = Number(process.env.PORT || 3252);
 const HOST = process.env.HOST || '0.0.0.0';
+const NODE_ENV = process.env.NODE_ENV || 'development';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -27,16 +28,24 @@ const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-geofabrik-buildings.js');
+const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
 let sessionMiddleware = null;
 
 let syncInProgress = false;
 let currentSyncChild = null;
+let currentSearchRebuildChild = null;
 let httpServer = null;
 let shuttingDown = false;
 let scheduledSkipLogged = false;
 let nextSyncTimer = null;
+let searchIndexRebuildInProgress = false;
+let queuedSearchIndexRebuildReason = null;
+const pendingSearchIndexRefreshes = new Set();
 
 const MAX_NODE_TIMER_MS = 2_147_483_647;
+const SEARCH_INDEX_BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
+const SEARCH_INDEX_SCHEMA_VERSION = 1;
+const SEARCH_INDEX_FINGERPRINT_KEY = 'search.index.fingerprint';
 
 function normalizeMapConfig() {
   const lon = Number.isFinite(MAP_DEFAULT_LON) ? Math.min(180, Math.max(-180, MAP_DEFAULT_LON)) : 44.0059;
@@ -44,6 +53,74 @@ function normalizeMapConfig() {
   const zoom = Number.isFinite(MAP_DEFAULT_ZOOM) ? Math.min(22, Math.max(0, MAP_DEFAULT_ZOOM)) : 15;
   return { lon, lat, zoom };
 }
+
+function validateSecurityConfig() {
+  const isProduction = NODE_ENV === 'production';
+  const weakSessionSecret = SESSION_SECRET === 'dev-secret-change-me';
+  const weakAdminPassword = ADMIN_PASSWORD === 'admin123';
+
+  if (!isProduction) {
+    if (weakSessionSecret) {
+      console.warn('[security] SESSION_SECRET uses default value (allowed in non-production, unsafe for production)');
+    }
+    if (weakAdminPassword) {
+      console.warn('[security] ADMIN_PASSWORD uses default value (allowed in non-production, unsafe for production)');
+    }
+    return;
+  }
+
+  if (weakSessionSecret || weakAdminPassword) {
+    const issues = [];
+    if (weakSessionSecret) issues.push('SESSION_SECRET is default');
+    if (weakAdminPassword) issues.push('ADMIN_PASSWORD is default');
+    throw new Error(`[security] Refusing to start in production: ${issues.join('; ')}`);
+  }
+}
+
+function createSimpleRateLimiter({ windowMs, maxRequests, message }) {
+  const buckets = new Map();
+
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of buckets.entries()) {
+      if (value.resetAt <= now) buckets.delete(key);
+    }
+  }, Math.max(1000, Math.floor(windowMs / 2)));
+  if (typeof cleanupTimer.unref === 'function') {
+    cleanupTimer.unref();
+  }
+
+  return (req, res, next) => {
+    const key = `${req.ip || 'unknown'}:${req.path}`;
+    const now = Date.now();
+    let bucket = buckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      buckets.set(key, bucket);
+    }
+
+    bucket.count += 1;
+    if (bucket.count > maxRequests) {
+      const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({ error: message || 'Слишком много запросов, попробуйте позже' });
+    }
+
+    return next();
+  };
+}
+
+const loginRateLimiter = createSimpleRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  maxRequests: 20,
+  message: 'Слишком много попыток входа, попробуйте позже'
+});
+
+const searchRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+  message: 'Слишком много поисковых запросов, попробуйте позже'
+});
 
 db.pragma('journal_mode = WAL');
 
@@ -80,6 +157,40 @@ CREATE TABLE IF NOT EXISTS building_contours (
 
 CREATE INDEX IF NOT EXISTS idx_building_contours_bbox
 ON building_contours (min_lon, max_lon, min_lat, max_lat);
+
+CREATE TABLE IF NOT EXISTS building_search_source (
+  osm_key TEXT PRIMARY KEY,
+  osm_type TEXT NOT NULL,
+  osm_id INTEGER NOT NULL,
+  name TEXT,
+  address TEXT,
+  style TEXT,
+  architect TEXT,
+  center_lon REAL NOT NULL,
+  center_lat REAL NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_building_search_source_osm
+ON building_search_source (osm_type, osm_id);
+
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
+db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS building_search_fts
+USING fts5(
+  osm_key UNINDEXED,
+  name,
+  address,
+  style,
+  architect,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
 `);
 
 const archiColumns = db.prepare(`PRAGMA table_info(architectural_info)`).all();
@@ -333,6 +444,322 @@ function getBuildingsFeatureCollectionByBbox(minLon, minLat, maxLon, maxLat, lim
   };
 }
 
+function normalizeSearchTokens(queryText) {
+  return [...new Set(
+    String(queryText || '')
+      .trim()
+      .split(/\s+/)
+      .map((t) => t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+      .filter(Boolean)
+  )].slice(0, 8);
+}
+
+function buildFtsMatchQuery(tokens) {
+  return tokens
+    .map((t) => {
+      const safe = t.replace(/"/g, '""');
+      return `"${safe}"*`;
+    })
+    .join(' AND ');
+}
+
+function getSearchFingerprintSnapshot() {
+  return db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM building_contours) AS contours_count,
+      (SELECT coalesce(MAX(updated_at), '') FROM building_contours) AS contours_max_updated_at,
+      (SELECT COUNT(*) FROM architectural_info) AS info_count,
+      (SELECT coalesce(MAX(updated_at), '') FROM architectural_info) AS info_max_updated_at
+  `).get();
+}
+
+function getSearchIndexCountsSnapshot() {
+  return db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM building_contours) AS contours_count,
+      (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
+      (SELECT COUNT(*) FROM building_search_fts) AS search_fts_count
+  `).get();
+}
+
+function buildSearchDataFingerprint(snapshot) {
+  return [
+    `schema:${SEARCH_INDEX_SCHEMA_VERSION}`,
+    `c:${Number(snapshot?.contours_count || 0)}`,
+    `cu:${String(snapshot?.contours_max_updated_at || '')}`,
+    `i:${Number(snapshot?.info_count || 0)}`,
+    `iu:${String(snapshot?.info_max_updated_at || '')}`
+  ].join('|');
+}
+
+function readMetaValue(key) {
+  const row = db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(String(key));
+  return row ? String(row.value || '') : null;
+}
+
+function writeMetaValue(key, value) {
+  db.prepare(`
+    INSERT INTO app_meta (key, value, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = datetime('now')
+  `).run(String(key), String(value ?? ''));
+}
+
+function getSearchRebuildDecision() {
+  const fingerprintSnapshot = getSearchFingerprintSnapshot();
+  const currentFingerprint = buildSearchDataFingerprint(fingerprintSnapshot);
+  const storedFingerprint = readMetaValue(SEARCH_INDEX_FINGERPRINT_KEY);
+  const countsSnapshot = getSearchIndexCountsSnapshot();
+  const expectedSourceRows = Number(countsSnapshot?.contours_count || 0);
+  const actualSourceRows = Number(countsSnapshot?.search_source_count || 0);
+  const actualFtsRows = Number(countsSnapshot?.search_fts_count || 0);
+
+  const sourceMismatch = actualSourceRows !== expectedSourceRows;
+  const ftsMismatch = actualFtsRows !== actualSourceRows;
+  const fingerprintChanged = storedFingerprint !== currentFingerprint;
+
+  if (sourceMismatch || ftsMismatch || fingerprintChanged) {
+    const reasons = [];
+    if (sourceMismatch) reasons.push(`source ${actualSourceRows}/${expectedSourceRows}`);
+    if (ftsMismatch) reasons.push(`fts ${actualFtsRows}/${actualSourceRows}`);
+    if (fingerprintChanged) reasons.push('data fingerprint changed');
+    return {
+      shouldRebuild: true,
+      currentFingerprint,
+      reason: reasons.join(', ')
+    };
+  }
+
+  return {
+    shouldRebuild: false,
+    currentFingerprint,
+    reason: 'fingerprint and row counts are unchanged'
+  };
+}
+
+function syncStoredSearchFingerprint() {
+  const snapshot = getSearchFingerprintSnapshot();
+  const fingerprint = buildSearchDataFingerprint(snapshot);
+  writeMetaValue(SEARCH_INDEX_FINGERPRINT_KEY, fingerprint);
+}
+
+function flushDeferredSearchRefreshes() {
+  if (pendingSearchIndexRefreshes.size === 0) return;
+  const pending = Array.from(pendingSearchIndexRefreshes);
+  pendingSearchIndexRefreshes.clear();
+  console.log(`[search] applying deferred building refreshes: ${pending.length}`);
+  for (const key of pending) {
+    const [osmType, osmIdRaw] = String(key).split('/');
+    const osmId = Number(osmIdRaw);
+    if (['way', 'relation'].includes(osmType) && Number.isInteger(osmId)) {
+      refreshSearchIndexForBuilding(osmType, osmId, { force: true });
+    }
+  }
+}
+
+function maybeRunQueuedSearchRebuild() {
+  if (!queuedSearchIndexRebuildReason) return;
+  const nextReason = queuedSearchIndexRebuildReason;
+  queuedSearchIndexRebuildReason = null;
+  rebuildSearchIndex(nextReason);
+}
+
+function rebuildSearchIndex(reason = 'manual', options = {}) {
+  const force = Boolean(options.force);
+  if (searchIndexRebuildInProgress) {
+    queuedSearchIndexRebuildReason = reason;
+    console.log(`[search] rebuild already running; queued next rebuild (${reason})`);
+    return;
+  }
+
+  if (!force) {
+    const decision = getSearchRebuildDecision();
+    if (!decision.shouldRebuild) {
+      console.log(`[search] rebuild skipped (${reason}): ${decision.reason}`);
+      return;
+    }
+    console.log(`[search] rebuild required (${reason}): ${decision.reason}`);
+  }
+
+  const startedAt = Date.now();
+  searchIndexRebuildInProgress = true;
+  console.log(`[search] rebuild worker started (${reason}), batch size: ${SEARCH_INDEX_BATCH_SIZE}`);
+
+  const child = spawn(process.execPath, [searchRebuildScriptPath], {
+    cwd: __dirname,
+    env: {
+      ...process.env,
+      SEARCH_REBUILD_REASON: reason,
+      SEARCH_INDEX_BATCH_SIZE: String(SEARCH_INDEX_BATCH_SIZE),
+      SEARCH_INDEX_SCHEMA_VERSION: String(SEARCH_INDEX_SCHEMA_VERSION),
+      SEARCH_INDEX_FINGERPRINT_KEY
+    },
+    stdio: 'inherit'
+  });
+  currentSearchRebuildChild = child;
+
+  child.on('error', (error) => {
+    currentSearchRebuildChild = null;
+    searchIndexRebuildInProgress = false;
+    console.error(`[search] rebuild worker failed to start: ${String(error.message || error)}`);
+    flushDeferredSearchRefreshes();
+    maybeRunQueuedSearchRebuild();
+  });
+
+  child.on('close', (code, signal) => {
+    currentSearchRebuildChild = null;
+    searchIndexRebuildInProgress = false;
+
+    if (shuttingDown && (signal === 'SIGTERM' || signal === 'SIGINT')) {
+      console.log('[search] rebuild worker stopped due to shutdown');
+      return;
+    }
+    if (code === 0) {
+      syncStoredSearchFingerprint();
+      console.log(`[search] index rebuilt in worker in ${Date.now() - startedAt}ms`);
+    } else {
+      console.error(`[search] rebuild worker failed with code ${code}`);
+    }
+
+    flushDeferredSearchRefreshes();
+    maybeRunQueuedSearchRebuild();
+  });
+}
+
+function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
+  const force = Boolean(options.force);
+  if (!force && searchIndexRebuildInProgress) {
+    pendingSearchIndexRefreshes.add(`${osmType}/${osmId}`);
+    return;
+  }
+  const row = db.prepare(`
+    SELECT
+      bc.osm_type || '/' || bc.osm_id AS osm_key,
+      bc.osm_type AS osm_type,
+      bc.osm_id AS osm_id,
+      NULLIF(trim(coalesce(ai.name,
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.name'),
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."name:ru"'),
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.official_name'),
+        ''
+      )), '') AS name,
+      NULLIF(trim(replace(replace(replace(coalesce(ai.address,
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:full"'),
+        trim(
+          coalesce(json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:postcode"') || ', ', '') ||
+          coalesce(json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:city"') || ', ', '') ||
+          coalesce(json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:place"') || ', ', '') ||
+          coalesce(json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:street"'), '') ||
+          CASE
+            WHEN json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:housenumber"') IS NOT NULL
+              AND trim(json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:housenumber"')) <> ''
+            THEN ', ' || json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."addr:housenumber"')
+            ELSE ''
+          END
+        )
+      ), ', ,', ','), ',,', ','), '  ', ' ')), '') AS address,
+      NULLIF(trim(coalesce(ai.style,
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$."building:architecture"'),
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.architecture'),
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.style'),
+        ''
+      )), '') AS style,
+      NULLIF(trim(coalesce(ai.architect,
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.architect'),
+        json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.architect_name'),
+        ''
+      )), '') AS architect,
+      (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
+      (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
+    FROM building_contours bc
+    LEFT JOIN architectural_info ai
+      ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+    WHERE bc.osm_type = ? AND bc.osm_id = ?
+  `).get(osmType, osmId);
+
+  const osmKey = `${osmType}/${osmId}`;
+  if (!row) {
+    db.prepare(`DELETE FROM building_search_source WHERE osm_key = ?`).run(osmKey);
+    db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(osmKey);
+    syncStoredSearchFingerprint();
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, center_lon, center_lat, updated_at)
+    VALUES (@osm_key, @osm_type, @osm_id, @name, @address, @style, @architect, @center_lon, @center_lat, datetime('now'))
+    ON CONFLICT(osm_key) DO UPDATE SET
+      name = excluded.name,
+      address = excluded.address,
+      style = excluded.style,
+      architect = excluded.architect,
+      center_lon = excluded.center_lon,
+      center_lat = excluded.center_lat,
+      updated_at = datetime('now')
+  `).run(row);
+
+  db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(row.osm_key);
+  db.prepare(`
+    INSERT INTO building_search_fts (osm_key, name, address, style, architect)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(row.osm_key, row.name || '', row.address || '', row.style || '', row.architect || '');
+  syncStoredSearchFingerprint();
+}
+
+function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
+  const tokens = normalizeSearchTokens(queryText);
+  if (tokens.length === 0) {
+    return { items: [], nextCursor: null, hasMore: false };
+  }
+
+  const matchQuery = buildFtsMatchQuery(tokens);
+  const cappedLimit = Math.max(1, Math.min(60, Number(limit) || 30));
+  const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
+  const lon = Number.isFinite(centerLon) ? centerLon : 44.0059;
+  const lat = Number.isFinite(centerLat) ? centerLat : 56.3269;
+
+  const rows = db.prepare(`
+    WITH matched AS (
+      SELECT osm_key, bm25(building_search_fts) AS rank
+      FROM building_search_fts
+      WHERE building_search_fts MATCH ?
+    )
+    SELECT
+      s.osm_type,
+      s.osm_id,
+      s.name,
+      s.address,
+      s.style,
+      s.architect,
+      m.rank,
+      ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
+    FROM matched m
+    JOIN building_search_source s ON s.osm_key = m.osm_key
+    ORDER BY m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
+    LIMIT ? OFFSET ?
+  `).all(matchQuery, lon, lon, lat, lat, cappedLimit + 1, offset);
+
+  const hasMore = rows.length > cappedLimit;
+  const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
+  const nextCursor = hasMore ? offset + cappedLimit : null;
+
+  return {
+    items: sliced.map((row) => ({
+      osmType: row.osm_type,
+      osmId: row.osm_id,
+      name: row.name || null,
+      address: row.address || null,
+      style: row.style || null,
+      architect: row.architect || null,
+      score: Number(row.rank || 0)
+    })),
+    nextCursor,
+    hasMore
+  };
+}
+
 app.get('/api/me', (req, res) => {
   const authenticated = Boolean(req.session && req.session.user);
   const user = authenticated
@@ -344,7 +771,7 @@ app.get('/api/me', (req, res) => {
   res.json({ authenticated, user });
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', loginRateLimiter, (req, res) => {
   const { username, password } = req.body || {};
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
     req.session.user = { username, isAdmin: true };
@@ -442,6 +869,7 @@ app.post('/api/building-info', requireAuth, (req, res) => {
     description: cleanText(body.description, 1000),
     updated_by: String(req.session?.user?.username || '')
   });
+  refreshSearchIndexForBuilding(osmType, osmId);
 
   return res.json({ ok: true });
 });
@@ -484,6 +912,31 @@ app.get('/api/building/:osmType/:osmId', (req, res) => {
   const feature = rowToFeature(row);
   attachInfoToFeatures([feature]);
   return res.json(feature);
+});
+
+app.get('/api/search-buildings', searchRateLimiter, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) {
+    return res.status(400).json({ error: 'Минимальная длина запроса: 2 символа' });
+  }
+  if (q.length > 120) {
+    return res.status(400).json({ error: 'Максимальная длина запроса: 120 символов' });
+  }
+
+  const lon = Number(req.query.lon);
+  const lat = Number(req.query.lat);
+  const limit = Number(req.query.limit || 30);
+  const cursor = Number(req.query.cursor || 0);
+  if (!Number.isFinite(cursor) || cursor < 0) {
+    return res.status(400).json({ error: 'Некорректный cursor' });
+  }
+
+  const result = getBuildingSearchResults(q, lon, lat, limit, cursor);
+  return res.json({
+    items: result.items,
+    hasMore: result.hasMore,
+    nextCursor: result.nextCursor
+  });
 });
 
 app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
@@ -584,6 +1037,7 @@ function runCitySync(reason = 'interval') {
     }
     if (code === 0) {
       console.log('[auto-sync] finished successfully');
+      rebuildSearchIndex('auto-sync');
     } else {
       console.error(`[auto-sync] failed with code ${code}`);
     }
@@ -684,6 +1138,13 @@ function shutdown(signal) {
       // ignore
     }
   }
+  if (currentSearchRebuildChild && !currentSearchRebuildChild.killed) {
+    try {
+      currentSearchRebuildChild.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+  }
 
   if (nextSyncTimer) {
     clearTimeout(nextSyncTimer);
@@ -710,10 +1171,12 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 initSessionStore()
   .then(() => {
+    validateSecurityConfig();
     httpServer = app.listen(PORT, HOST, () => {
       console.log('[server] ArchiMap started successfully');
       console.log(`[server] Local:   http://localhost:${PORT}`);
       console.log(`[server] Network: http://${HOST}:${PORT}`);
+      rebuildSearchIndex('startup');
       initAutoSync();
     });
   })

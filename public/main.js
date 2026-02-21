@@ -129,8 +129,29 @@ const adminEditsModalEl = document.getElementById('admin-edits-modal');
 const adminEditsCloseEl = document.getElementById('admin-edits-close');
 const adminEditsListEl = document.getElementById('admin-edits-list');
 const adminEditsStatusEl = document.getElementById('admin-edits-status');
+const searchFormEl = document.getElementById('search-form');
+const searchInputEl = document.getElementById('search-input');
+const searchMobileBtnEl = document.getElementById('search-mobile-btn');
+const searchModalEl = document.getElementById('search-modal');
+const searchModalCloseEl = document.getElementById('search-modal-close');
+const searchModalFormEl = document.getElementById('search-modal-form');
+const searchModalInputEl = document.getElementById('search-modal-input');
+const searchResultsStatusEl = document.getElementById('search-results-status');
+const searchResultsListEl = document.getElementById('search-results-list');
+const searchLoadMoreBtnEl = document.getElementById('search-load-more-btn');
 const THEME_STORAGE_KEY = 'archimap-theme';
 const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const SEARCH_RESULTS_LIMIT = 30;
+const buildingSearchCache = new Map();
+let activeSearchRequestToken = 0;
+let searchState = {
+  query: '',
+  center: null,
+  items: [],
+  hasMore: false,
+  nextCursor: null
+};
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -638,6 +659,7 @@ const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze({
   ottoman: 'Османская архитектура',
   baroque: 'Архитектура барокко',
   rococo: 'Рококо',
+  classicism: 'Классицизм',
   neoclassicism: 'Классицизм',
   empire: 'Ампир',
   moorish_revival: 'Неомавританский стиль',
@@ -679,6 +701,7 @@ const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze({
 
 const ARCHITECTURE_STYLE_ALIASES = Object.freeze({
   brutalism: 'brutalist',
+  classicism: 'neoclassicism',
   'stalinist neoclassicism': 'stalinist_neoclassicism'
 });
 
@@ -998,6 +1021,245 @@ function closeAuthModal() {
   authModalEl.setAttribute('aria-hidden', 'true');
 }
 
+function openSearchModal(prefill = '') {
+  if (!searchModalEl) return;
+  searchModalEl.classList.remove('hidden');
+  searchModalEl.setAttribute('aria-hidden', 'false');
+  if (searchModalInputEl) {
+    searchModalInputEl.value = String(prefill || '').trim();
+    setTimeout(() => searchModalInputEl.focus(), 0);
+  }
+}
+
+function closeSearchModal() {
+  if (!searchModalEl) return;
+  searchModalEl.classList.add('hidden');
+  searchModalEl.setAttribute('aria-hidden', 'true');
+}
+
+function buildSearchCacheKey(query, center, cursor = 0) {
+  const q = String(query || '').trim().toLowerCase();
+  const lon = Number(center?.lng || 0).toFixed(3);
+  const lat = Number(center?.lat || 0).toFixed(3);
+  return `${q}|${lon}|${lat}|${SEARCH_RESULTS_LIMIT}|${Number(cursor) || 0}`;
+}
+
+function getSearchCache(key) {
+  const entry = buildingSearchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > SEARCH_CACHE_TTL_MS) {
+    buildingSearchCache.delete(key);
+    return null;
+  }
+  return entry.items;
+}
+
+function setSearchCache(key, items) {
+  if (!key) return;
+  buildingSearchCache.set(key, {
+    ts: Date.now(),
+    items
+  });
+  if (buildingSearchCache.size > 120) {
+    const firstKey = buildingSearchCache.keys().next().value;
+    if (firstKey != null) buildingSearchCache.delete(firstKey);
+  }
+}
+
+function debounce(fn, delayMs) {
+  let timer = null;
+  return (...args) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delayMs);
+  };
+}
+
+function renderSearchSkeleton(count = 6) {
+  if (!searchResultsListEl) return;
+  const parts = [];
+  for (let i = 0; i < count; i += 1) {
+    parts.push(`
+      <div class="animate-pulse rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="mb-2 h-4 w-2/3 rounded bg-slate-200"></div>
+        <div class="mb-1 h-3 w-4/5 rounded bg-slate-200"></div>
+        <div class="h-3 w-3/5 rounded bg-slate-200"></div>
+      </div>
+    `);
+  }
+  searchResultsListEl.innerHTML = parts.join('');
+}
+
+function renderSearchResults(items, options = {}) {
+  const { hasMore = false, loadingMore = false } = options;
+  if (!searchResultsListEl || !searchResultsStatusEl) return;
+  const data = Array.isArray(items) ? items : [];
+  if (data.length === 0) {
+    searchResultsStatusEl.textContent = 'Ничего не найдено.';
+    searchResultsListEl.innerHTML = '';
+    if (searchLoadMoreBtnEl) {
+      searchLoadMoreBtnEl.classList.add('hidden');
+      searchLoadMoreBtnEl.disabled = false;
+      searchLoadMoreBtnEl.textContent = 'Показать ещё';
+    }
+    return;
+  }
+
+  searchResultsStatusEl.textContent = `Найдено: ${data.length}`;
+  searchResultsListEl.innerHTML = data.map((item) => {
+    const title = item.name || 'Без названия';
+    const shownStyle = toHumanArchitectureStyle(item.style) || item.style || null;
+    const line2 = [
+      item.address ? `Адрес: ${item.address}` : null,
+      shownStyle ? `Стиль: ${shownStyle}` : null
+    ].filter(Boolean).join(' • ');
+    const line3 = item.architect ? `Архитектор: ${item.architect}` : '';
+
+    return `
+      <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="mb-1 text-sm font-semibold text-slate-900">${escapeHtml(title)}</div>
+        ${line2 ? `<div class="mb-1 text-xs text-slate-700">${escapeHtml(line2)}</div>` : ''}
+        ${line3 ? `<div class="mb-2 text-xs text-slate-700">${escapeHtml(line3)}</div>` : '<div class="mb-2"></div>'}
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-[11px] text-slate-500">${escapeHtml(`${item.osmType}/${item.osmId}`)}</div>
+          <button data-action="go-to-building" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+            К зданию
+          </button>
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  if (searchLoadMoreBtnEl) {
+    if (hasMore) {
+      searchLoadMoreBtnEl.classList.remove('hidden');
+      searchLoadMoreBtnEl.disabled = loadingMore;
+      searchLoadMoreBtnEl.textContent = loadingMore ? 'Загрузка...' : 'Показать ещё';
+    } else {
+      searchLoadMoreBtnEl.classList.add('hidden');
+      searchLoadMoreBtnEl.disabled = false;
+      searchLoadMoreBtnEl.textContent = 'Показать ещё';
+    }
+  }
+}
+
+function resetSearchState() {
+  searchState = {
+    query: '',
+    center: null,
+    items: [],
+    hasMore: false,
+    nextCursor: null
+  };
+}
+
+async function runBuildingSearch(query, options = {}) {
+  const { append = false } = options;
+  const text = String(query || '').trim().slice(0, 120);
+  if (!searchResultsStatusEl || !searchResultsListEl) return;
+  if (text.length < 2) {
+    resetSearchState();
+    searchResultsStatusEl.textContent = 'Введите минимум 2 символа.';
+    searchResultsListEl.innerHTML = '';
+    if (searchLoadMoreBtnEl) searchLoadMoreBtnEl.classList.add('hidden');
+    return;
+  }
+
+  const center = append && searchState.center ? searchState.center : map.getCenter();
+  const cursor = append ? Number(searchState.nextCursor || 0) : 0;
+  if (append && !searchState.hasMore) return;
+  if (!append) {
+    searchState = {
+      query: text,
+      center,
+      items: [],
+      hasMore: false,
+      nextCursor: null
+    };
+  }
+
+  const cacheKey = buildSearchCacheKey(text, center, cursor);
+  const cached = getSearchCache(cacheKey);
+  if (cached) {
+    const cachedItems = Array.isArray(cached.items) ? cached.items : [];
+    if (append) {
+      searchState.items = searchState.items.concat(cachedItems);
+    } else {
+      searchState.items = cachedItems;
+    }
+    searchState.hasMore = Boolean(cached.hasMore);
+    searchState.nextCursor = Number.isFinite(cached.nextCursor) ? Number(cached.nextCursor) : null;
+    renderSearchResults(searchState.items, { hasMore: searchState.hasMore });
+    return;
+  }
+
+  const token = ++activeSearchRequestToken;
+  if (append) {
+    searchResultsStatusEl.textContent = `Найдено: ${searchState.items.length}`;
+    renderSearchResults(searchState.items, { hasMore: true, loadingMore: true });
+  } else {
+    searchResultsStatusEl.textContent = 'Ищем по базе...';
+    renderSearchSkeleton(6);
+  }
+
+  const params = new URLSearchParams({
+    q: text,
+    lon: String(center.lng ?? center.lon ?? 0),
+    lat: String(center.lat),
+    limit: String(SEARCH_RESULTS_LIMIT)
+  });
+  if (cursor > 0) params.set('cursor', String(cursor));
+
+  try {
+    const resp = await fetch(`/api/search-buildings?${params.toString()}`);
+    if (token !== activeSearchRequestToken) return;
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Ошибка поиска' }));
+      searchResultsStatusEl.textContent = err.error || 'Ошибка поиска';
+      if (append) {
+        renderSearchResults(searchState.items, { hasMore: searchState.hasMore });
+      } else {
+        searchResultsListEl.innerHTML = '';
+        if (searchLoadMoreBtnEl) searchLoadMoreBtnEl.classList.add('hidden');
+      }
+      return;
+    }
+
+    const data = await resp.json().catch(() => ({ items: [], hasMore: false, nextCursor: null }));
+    const items = Array.isArray(data.items) ? data.items : [];
+    const hasMore = Boolean(data.hasMore);
+    const nextCursor = Number.isFinite(data.nextCursor) ? Number(data.nextCursor) : null;
+    setSearchCache(cacheKey, { items, hasMore, nextCursor });
+
+    if (append) {
+      searchState.items = searchState.items.concat(items);
+    } else {
+      searchState.items = items;
+    }
+    searchState.query = text;
+    searchState.center = center;
+    searchState.hasMore = hasMore;
+    searchState.nextCursor = nextCursor;
+    renderSearchResults(searchState.items, { hasMore: searchState.hasMore });
+  } catch {
+    if (token !== activeSearchRequestToken) return;
+    searchResultsStatusEl.textContent = 'Не удалось выполнить поиск.';
+    if (append) {
+      if (searchLoadMoreBtnEl) {
+        searchLoadMoreBtnEl.classList.remove('hidden');
+        searchLoadMoreBtnEl.disabled = false;
+        searchLoadMoreBtnEl.textContent = 'Показать ещё';
+      }
+    } else {
+      searchResultsListEl.innerHTML = '';
+      if (searchLoadMoreBtnEl) searchLoadMoreBtnEl.classList.add('hidden');
+    }
+  }
+}
+
+const runBuildingSearchDebounced = debounce((text) => {
+  runBuildingSearch(text, { append: false });
+}, 320);
+
 function formatChangeValue(value) {
   if (value == null || value === '') return '—';
   return String(value);
@@ -1189,6 +1451,72 @@ logoutBtn.addEventListener('click', async () => {
   renderAuth();
 });
 
+if (searchFormEl) {
+  searchFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const text = String(searchInputEl?.value || '').trim().slice(0, 120);
+    openSearchModal(text);
+    if (searchModalInputEl) searchModalInputEl.value = text;
+    await runBuildingSearch(text, { append: false });
+  });
+}
+
+if (searchMobileBtnEl) {
+  searchMobileBtnEl.addEventListener('click', () => {
+    const text = String(searchInputEl?.value || searchModalInputEl?.value || '').trim().slice(0, 120);
+    openSearchModal(text);
+    if (text.length >= 2) {
+      runBuildingSearch(text);
+    }
+  });
+}
+
+if (searchModalFormEl) {
+  searchModalFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const text = String(searchModalInputEl?.value || '').trim().slice(0, 120);
+    if (searchInputEl) searchInputEl.value = text;
+    if (searchModalInputEl) searchModalInputEl.value = text;
+    await runBuildingSearch(text, { append: false });
+  });
+}
+
+if (searchModalInputEl) {
+  searchModalInputEl.addEventListener('input', () => {
+    const text = String(searchModalInputEl.value || '').slice(0, 120);
+    searchModalInputEl.value = text;
+    if (searchInputEl) searchInputEl.value = text;
+    runBuildingSearchDebounced(text);
+  });
+}
+
+if (searchLoadMoreBtnEl) {
+  searchLoadMoreBtnEl.addEventListener('click', async () => {
+    await runBuildingSearch(searchState.query || String(searchModalInputEl?.value || searchInputEl?.value || '').trim(), { append: true });
+  });
+}
+
+if (searchResultsListEl) {
+  searchResultsListEl.addEventListener('click', async (event) => {
+    const button = event.target?.closest?.('[data-action="go-to-building"]');
+    if (!button) return;
+    const osmType = String(button.getAttribute('data-osm-type') || '').trim();
+    const osmId = Number(button.getAttribute('data-osm-id'));
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) return;
+
+    button.disabled = true;
+    try {
+      const feature = await fetchBuildingById(osmType, osmId);
+      if (!feature) return;
+      normalizeFeatureInfo(feature);
+      await selectBuildingFeature(feature);
+      closeSearchModal();
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 if (filterToggleBtnEl) {
   filterToggleBtnEl.addEventListener('click', toggleFilterPanel);
   setFilterToggleButtonState(isFilterPanelOpen());
@@ -1337,6 +1665,14 @@ authModalCloseEl.addEventListener('click', closeAuthModal);
 authModalEl.addEventListener('click', (event) => {
   if (event.target === authModalEl) closeAuthModal();
 });
+if (searchModalCloseEl) {
+  searchModalCloseEl.addEventListener('click', closeSearchModal);
+}
+if (searchModalEl) {
+  searchModalEl.addEventListener('click', (event) => {
+    if (event.target === searchModalEl) closeSearchModal();
+  });
+}
 if (adminEditsCloseEl) {
   adminEditsCloseEl.addEventListener('click', closeAdminEditsModal);
 }
