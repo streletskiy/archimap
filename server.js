@@ -26,6 +26,7 @@ const MAP_DEFAULT_ZOOM = Number(process.env.MAP_DEFAULT_ZOOM ?? 15);
 
 const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
+const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-geofabrik-buildings.js');
 const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
@@ -44,8 +45,6 @@ const pendingSearchIndexRefreshes = new Set();
 
 const MAX_NODE_TIMER_MS = 2_147_483_647;
 const SEARCH_INDEX_BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
-const SEARCH_INDEX_SCHEMA_VERSION = 1;
-const SEARCH_INDEX_FINGERPRINT_KEY = 'search.index.fingerprint';
 
 function normalizeMapConfig() {
   const lon = Number.isFinite(MAP_DEFAULT_LON) ? Math.min(180, Math.max(-180, MAP_DEFAULT_LON)) : 44.0059;
@@ -123,6 +122,11 @@ const searchRateLimiter = createSimpleRateLimiter({
 });
 
 db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+
+db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
+db.exec(`PRAGMA local.journal_mode = WAL;`);
+db.exec(`PRAGMA local.synchronous = NORMAL;`);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS architectural_info (
@@ -166,6 +170,7 @@ CREATE TABLE IF NOT EXISTS building_search_source (
   address TEXT,
   style TEXT,
   architect TEXT,
+  local_priority INTEGER NOT NULL DEFAULT 0,
   center_lon REAL NOT NULL,
   center_lat REAL NOT NULL,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -173,13 +178,56 @@ CREATE TABLE IF NOT EXISTS building_search_source (
 
 CREATE INDEX IF NOT EXISTS idx_building_search_source_osm
 ON building_search_source (osm_type, osm_id);
-
-CREATE TABLE IF NOT EXISTS app_meta (
-  key TEXT PRIMARY KEY,
-  value TEXT,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 `);
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS local.architectural_info (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  osm_type TEXT NOT NULL,
+  osm_id INTEGER NOT NULL,
+  name TEXT,
+  style TEXT,
+  levels INTEGER,
+  year_built INTEGER,
+  architect TEXT,
+  address TEXT,
+  description TEXT,
+  updated_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(osm_type, osm_id)
+);
+
+CREATE INDEX IF NOT EXISTS local.idx_architectural_info_osm
+ON architectural_info (osm_type, osm_id);
+
+`);
+
+const legacyInfoStats = db.prepare(`
+  SELECT
+    (SELECT COUNT(*) FROM main.architectural_info) AS main_count,
+    (SELECT COUNT(*) FROM local.architectural_info) AS local_count
+`).get();
+if (Number(legacyInfoStats?.local_count || 0) === 0 && Number(legacyInfoStats?.main_count || 0) > 0) {
+  const inserted = db.prepare(`
+    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, created_at, updated_at)
+    SELECT
+      ai.osm_type,
+      ai.osm_id,
+      ai.name,
+      ai.style,
+      ai.levels,
+      ai.year_built,
+      ai.architect,
+      ai.address,
+      ai.description,
+      ai.updated_by,
+      coalesce(ai.created_at, datetime('now')),
+      coalesce(ai.updated_at, datetime('now'))
+    FROM main.architectural_info ai
+  `).run();
+  console.log(`[db] migrated ${Number(inserted?.changes || 0)} local edits to local-edits.db`);
+}
 
 db.exec(`
 CREATE VIRTUAL TABLE IF NOT EXISTS building_search_fts
@@ -193,16 +241,22 @@ USING fts5(
 );
 `);
 
-const archiColumns = db.prepare(`PRAGMA table_info(architectural_info)`).all();
+const archiColumns = db.prepare(`PRAGMA local.table_info(architectural_info)`).all();
 const archiColumnNames = new Set(archiColumns.map((c) => c.name));
 if (!archiColumnNames.has('name')) {
-  db.exec(`ALTER TABLE architectural_info ADD COLUMN name TEXT;`);
+  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN name TEXT;`);
 }
 if (!archiColumnNames.has('levels')) {
-  db.exec(`ALTER TABLE architectural_info ADD COLUMN levels INTEGER;`);
+  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN levels INTEGER;`);
 }
 if (!archiColumnNames.has('updated_by')) {
-  db.exec(`ALTER TABLE architectural_info ADD COLUMN updated_by TEXT;`);
+  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN updated_by TEXT;`);
+}
+
+const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
+const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
+if (!searchSourceColumnNames.has('local_priority')) {
+  db.exec(`ALTER TABLE building_search_source ADD COLUMN local_priority INTEGER NOT NULL DEFAULT 0;`);
 }
 
 app.use(express.json());
@@ -272,7 +326,7 @@ function attachInfoToFeatures(features) {
     }
     const rows = db.prepare(`
       SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at
-      FROM architectural_info
+      FROM local.architectural_info
       WHERE ${clauses}
     `).all(...params);
     for (const row of rows) {
@@ -463,16 +517,6 @@ function buildFtsMatchQuery(tokens) {
     .join(' AND ');
 }
 
-function getSearchFingerprintSnapshot() {
-  return db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM building_contours) AS contours_count,
-      (SELECT coalesce(MAX(updated_at), '') FROM building_contours) AS contours_max_updated_at,
-      (SELECT COUNT(*) FROM architectural_info) AS info_count,
-      (SELECT coalesce(MAX(updated_at), '') FROM architectural_info) AS info_max_updated_at
-  `).get();
-}
-
 function getSearchIndexCountsSnapshot() {
   return db.prepare(`
     SELECT
@@ -482,35 +526,7 @@ function getSearchIndexCountsSnapshot() {
   `).get();
 }
 
-function buildSearchDataFingerprint(snapshot) {
-  return [
-    `schema:${SEARCH_INDEX_SCHEMA_VERSION}`,
-    `c:${Number(snapshot?.contours_count || 0)}`,
-    `cu:${String(snapshot?.contours_max_updated_at || '')}`,
-    `i:${Number(snapshot?.info_count || 0)}`,
-    `iu:${String(snapshot?.info_max_updated_at || '')}`
-  ].join('|');
-}
-
-function readMetaValue(key) {
-  const row = db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(String(key));
-  return row ? String(row.value || '') : null;
-}
-
-function writeMetaValue(key, value) {
-  db.prepare(`
-    INSERT INTO app_meta (key, value, updated_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(key) DO UPDATE SET
-      value = excluded.value,
-      updated_at = datetime('now')
-  `).run(String(key), String(value ?? ''));
-}
-
 function getSearchRebuildDecision() {
-  const fingerprintSnapshot = getSearchFingerprintSnapshot();
-  const currentFingerprint = buildSearchDataFingerprint(fingerprintSnapshot);
-  const storedFingerprint = readMetaValue(SEARCH_INDEX_FINGERPRINT_KEY);
   const countsSnapshot = getSearchIndexCountsSnapshot();
   const expectedSourceRows = Number(countsSnapshot?.contours_count || 0);
   const actualSourceRows = Number(countsSnapshot?.search_source_count || 0);
@@ -518,31 +534,21 @@ function getSearchRebuildDecision() {
 
   const sourceMismatch = actualSourceRows !== expectedSourceRows;
   const ftsMismatch = actualFtsRows !== actualSourceRows;
-  const fingerprintChanged = storedFingerprint !== currentFingerprint;
 
-  if (sourceMismatch || ftsMismatch || fingerprintChanged) {
+  if (sourceMismatch || ftsMismatch) {
     const reasons = [];
     if (sourceMismatch) reasons.push(`source ${actualSourceRows}/${expectedSourceRows}`);
     if (ftsMismatch) reasons.push(`fts ${actualFtsRows}/${actualSourceRows}`);
-    if (fingerprintChanged) reasons.push('data fingerprint changed');
     return {
       shouldRebuild: true,
-      currentFingerprint,
       reason: reasons.join(', ')
     };
   }
 
   return {
     shouldRebuild: false,
-    currentFingerprint,
-    reason: 'fingerprint and row counts are unchanged'
+    reason: 'search index row counts are consistent'
   };
-}
-
-function syncStoredSearchFingerprint() {
-  const snapshot = getSearchFingerprintSnapshot();
-  const fingerprint = buildSearchDataFingerprint(snapshot);
-  writeMetaValue(SEARCH_INDEX_FINGERPRINT_KEY, fingerprint);
 }
 
 function flushDeferredSearchRefreshes() {
@@ -564,6 +570,16 @@ function maybeRunQueuedSearchRebuild() {
   const nextReason = queuedSearchIndexRebuildReason;
   queuedSearchIndexRebuildReason = null;
   rebuildSearchIndex(nextReason);
+}
+
+function enqueueSearchIndexRefresh(osmType, osmId) {
+  setImmediate(() => {
+    try {
+      refreshSearchIndexForBuilding(osmType, osmId);
+    } catch (error) {
+      console.error(`[search] incremental refresh failed for ${osmType}/${osmId}: ${String(error.message || error)}`);
+    }
+  });
 }
 
 function rebuildSearchIndex(reason = 'manual', options = {}) {
@@ -593,8 +609,7 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
       ...process.env,
       SEARCH_REBUILD_REASON: reason,
       SEARCH_INDEX_BATCH_SIZE: String(SEARCH_INDEX_BATCH_SIZE),
-      SEARCH_INDEX_SCHEMA_VERSION: String(SEARCH_INDEX_SCHEMA_VERSION),
-      SEARCH_INDEX_FINGERPRINT_KEY
+      LOCAL_EDITS_DB_PATH: localEditsDbPath
     },
     stdio: 'inherit'
   });
@@ -617,7 +632,6 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
       return;
     }
     if (code === 0) {
-      syncStoredSearchFingerprint();
       console.log(`[search] index rebuilt in worker in ${Date.now() - startedAt}ms`);
     } else {
       console.error(`[search] rebuild worker failed with code ${code}`);
@@ -671,10 +685,11 @@ function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
         json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.architect_name'),
         ''
       )), '') AS architect,
+      CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
       (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
       (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
     FROM building_contours bc
-    LEFT JOIN architectural_info ai
+    LEFT JOIN local.architectural_info ai
       ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
     WHERE bc.osm_type = ? AND bc.osm_id = ?
   `).get(osmType, osmId);
@@ -683,18 +698,18 @@ function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
   if (!row) {
     db.prepare(`DELETE FROM building_search_source WHERE osm_key = ?`).run(osmKey);
     db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(osmKey);
-    syncStoredSearchFingerprint();
     return;
   }
 
   db.prepare(`
-    INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, center_lon, center_lat, updated_at)
-    VALUES (@osm_key, @osm_type, @osm_id, @name, @address, @style, @architect, @center_lon, @center_lat, datetime('now'))
+    INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, local_priority, center_lon, center_lat, updated_at)
+    VALUES (@osm_key, @osm_type, @osm_id, @name, @address, @style, @architect, @local_priority, @center_lon, @center_lat, datetime('now'))
     ON CONFLICT(osm_key) DO UPDATE SET
       name = excluded.name,
       address = excluded.address,
       style = excluded.style,
       architect = excluded.architect,
+      local_priority = excluded.local_priority,
       center_lon = excluded.center_lon,
       center_lat = excluded.center_lat,
       updated_at = datetime('now')
@@ -705,13 +720,16 @@ function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
     INSERT INTO building_search_fts (osm_key, name, address, style, architect)
     VALUES (?, ?, ?, ?, ?)
   `).run(row.osm_key, row.name || '', row.address || '', row.style || '', row.architect || '');
-  syncStoredSearchFingerprint();
 }
 
 function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
   const tokens = normalizeSearchTokens(queryText);
   if (tokens.length === 0) {
     return { items: [], nextCursor: null, hasMore: false };
+  }
+
+  if (searchIndexRebuildInProgress) {
+    return getLocalEditsSearchResults(tokens, centerLon, centerLat, limit, cursor);
   }
 
   const matchQuery = buildFtsMatchQuery(tokens);
@@ -733,11 +751,12 @@ function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, c
       s.address,
       s.style,
       s.architect,
+      s.local_priority,
       m.rank,
       ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
     FROM matched m
     JOIN building_search_source s ON s.osm_key = m.osm_key
-    ORDER BY m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
+    ORDER BY s.local_priority DESC, m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
     LIMIT ? OFFSET ?
   `).all(matchQuery, lon, lon, lat, lat, cappedLimit + 1, offset);
 
@@ -754,6 +773,62 @@ function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, c
       style: row.style || null,
       architect: row.architect || null,
       score: Number(row.rank || 0)
+    })),
+    nextCursor,
+    hasMore
+  };
+}
+
+function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cursor = 0) {
+  const cappedLimit = Math.max(1, Math.min(60, Number(limit) || 30));
+  const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
+  const lon = Number.isFinite(centerLon) ? centerLon : 44.0059;
+  const lat = Number.isFinite(centerLat) ? centerLat : 56.3269;
+
+  const whereTokenClauses = [];
+  const whereParams = [];
+  for (const token of tokens) {
+    const pattern = `%${token}%`;
+    whereTokenClauses.push(`(
+      coalesce(ai.name, '') LIKE ? OR
+      coalesce(ai.address, '') LIKE ? OR
+      coalesce(ai.style, '') LIKE ? OR
+      coalesce(ai.architect, '') LIKE ?
+    )`);
+    whereParams.push(pattern, pattern, pattern, pattern);
+  }
+
+  const whereSql = whereTokenClauses.length > 0 ? whereTokenClauses.join(' AND ') : '1=1';
+  const rows = db.prepare(`
+    SELECT
+      ai.osm_type,
+      ai.osm_id,
+      ai.name,
+      ai.address,
+      ai.style,
+      ai.architect,
+      (((bc.min_lon + bc.max_lon) / 2.0 - ?) * (((bc.min_lon + bc.max_lon) / 2.0 - ?)) +
+       (((bc.min_lat + bc.max_lat) / 2.0 - ?) * (((bc.min_lat + bc.max_lat) / 2.0 - ?))) AS distance2
+    FROM local.architectural_info ai
+    LEFT JOIN building_contours bc
+      ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
+    WHERE ${whereSql}
+    ORDER BY distance2 ASC, ai.updated_at DESC
+    LIMIT ? OFFSET ?
+  `).all(lon, lon, lat, lat, ...whereParams, cappedLimit + 1, offset);
+
+  const hasMore = rows.length > cappedLimit;
+  const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
+  const nextCursor = hasMore ? offset + cappedLimit : null;
+  return {
+    items: sliced.map((row) => ({
+      osmType: row.osm_type,
+      osmId: row.osm_id,
+      name: row.name || null,
+      address: row.address || null,
+      style: row.style || null,
+      architect: row.architect || null,
+      score: 0
     })),
     nextCursor,
     hasMore
@@ -795,7 +870,7 @@ app.get('/api/building-info/:osmType/:osmId', (req, res) => {
 
   const row = db.prepare(`
     SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at
-    FROM architectural_info
+    FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
   `).get(osmType, osmId);
 
@@ -843,7 +918,7 @@ app.post('/api/building-info', requireAuth, (req, res) => {
   }
 
   const upsert = db.prepare(`
-    INSERT INTO architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at)
+    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at)
     VALUES (@osm_type, @osm_id, @name, @style, @levels, @year_built, @architect, @address, @description, @updated_by, datetime('now'))
     ON CONFLICT(osm_type, osm_id) DO UPDATE SET
       name = excluded.name,
@@ -869,7 +944,7 @@ app.post('/api/building-info', requireAuth, (req, res) => {
     description: cleanText(body.description, 1000),
     updated_by: String(req.session?.user?.username || '')
   });
-  refreshSearchIndexForBuilding(osmType, osmId);
+  enqueueSearchIndexRefresh(osmType, osmId);
 
   return res.json({ ok: true });
 });
@@ -954,7 +1029,7 @@ app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
       ai.updated_by,
       ai.updated_at,
       bc.tags_json
-    FROM architectural_info ai
+    FROM local.architectural_info ai
     LEFT JOIN building_contours bc
       ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
     ORDER BY ai.updated_at DESC

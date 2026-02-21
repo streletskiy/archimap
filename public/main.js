@@ -289,6 +289,41 @@ function getSourceTags(feature) {
   return props;
 }
 
+function getFilterTags(feature) {
+  const tags = { ...(getSourceTags(feature) || {}) };
+  const parsedInfo = safeParseJsonMaybe(feature?.properties?.archiInfo);
+  const info = (parsedInfo && typeof parsedInfo === 'object') ? parsedInfo : (feature?.properties?.archiInfo || null);
+  if (!info || typeof info !== 'object') return tags;
+
+  const assignIfPresent = (key, value) => {
+    if (value == null) return;
+    const text = String(value).trim();
+    if (!text) return;
+    tags[key] = text;
+  };
+
+  const levelsText = info.levels != null && String(info.levels).trim() !== '' ? String(info.levels).trim() : null;
+  const yearText = info.year_built != null && String(info.year_built).trim() !== '' ? String(info.year_built).trim() : null;
+
+  assignIfPresent('name', info.name);
+  assignIfPresent('address', info.address);
+  assignIfPresent('addr:full', info.address);
+  assignIfPresent('architect', info.architect);
+  assignIfPresent('style', info.style);
+  assignIfPresent('building:architecture', info.style);
+  assignIfPresent('description', info.description);
+  if (levelsText) {
+    tags.levels = levelsText;
+    tags['building:levels'] = levelsText;
+  }
+  if (yearText) {
+    tags.year_built = yearText;
+    tags['building:year'] = yearText;
+  }
+
+  return tags;
+}
+
 function normalizeTagValue(value) {
   if (value == null) return '';
   if (typeof value === 'string') return value.trim();
@@ -338,7 +373,7 @@ function applyFiltersToCurrentData() {
   let matched = 0;
 
   for (const feature of currentBuildingsGeojson.features) {
-    const tags = getSourceTags(feature);
+    const tags = getFilterTags(feature);
     const isFiltered = rules.length > 0 && rules.every((rule) => matchesRule(tags, rule));
     feature.properties = feature.properties || {};
     feature.properties.isFiltered = isFiltered;
@@ -360,7 +395,7 @@ function refreshTagKeysDatalist() {
   if (!filterTagKeysEl) return;
   const keys = new Set();
   for (const feature of currentBuildingsGeojson.features || []) {
-    const tags = getSourceTags(feature);
+    const tags = getFilterTags(feature);
     for (const key of Object.keys(tags || {})) {
       keys.add(key);
     }
@@ -634,6 +669,57 @@ function osmAddressFromTags(tags) {
   return parts.length > 0 ? parts.join(', ') : null;
 }
 
+function getAddressFormState(tags, infoAddress) {
+  const readTag = (...keys) => {
+    for (const key of keys) {
+      const value = tags?.[key];
+      if (value == null) continue;
+      const text = String(value).trim();
+      if (text) return text;
+    }
+    return '';
+  };
+
+  const state = {
+    full: readTag('addr:full'),
+    postcode: readTag('addr:postcode', 'addr_postcode'),
+    city: readTag('addr:city', 'addr_city'),
+    place: readTag('addr:place', 'addr_place'),
+    street: readTag('addr:street', 'addr_street', 'addr_stree'),
+    housenumber: readTag('addr:housenumber', 'addr_housenumber', 'addr_hous')
+  };
+
+  const hasAnyOsmAddressPart = Object.values(state).some((value) => value);
+  if (!hasAnyOsmAddressPart && infoAddress) {
+    state.full = String(infoAddress).trim();
+  }
+
+  return state;
+}
+
+function buildAddressFromForm(formData) {
+  const full = String(formData.get('building-addr-full') || '').trim();
+  if (full) return full;
+
+  const parts = [
+    String(formData.get('building-addr-postcode') || '').trim(),
+    String(formData.get('building-addr-city') || '').trim(),
+    String(formData.get('building-addr-place') || '').trim(),
+    String(formData.get('building-addr-street') || '').trim()
+  ].filter(Boolean);
+
+  const house = String(formData.get('building-addr-housenumber') || '').trim();
+  if (house) {
+    if (parts.length > 0) {
+      parts[parts.length - 1] = `${parts[parts.length - 1]}, ${house}`;
+    } else {
+      parts.push(house);
+    }
+  }
+
+  return parts.join(', ');
+}
+
 function osmYearFromTags(tags) {
   if (!tags) return null;
   return tags['building:year'] || tags.start_date || tags.construction_date || tags.year_built || null;
@@ -722,6 +808,51 @@ function toHumanArchitectureStyle(value) {
     return ARCHITECTURE_STYLE_LABELS_RU[key] || part;
   });
   return translated.join('; ');
+}
+
+function getArchitectureStyleOptions() {
+  return Object.entries(ARCHITECTURE_STYLE_LABELS_RU)
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'ru'))
+    .map(([key, label]) => ({ key, label }));
+}
+
+function getArchitectureStyleEditState(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return { selectedKey: '' };
+  }
+
+  const lowered = raw.toLowerCase();
+  if (ARCHITECTURE_STYLE_LABELS_RU[lowered]) {
+    return { selectedKey: lowered };
+  }
+  if (ARCHITECTURE_STYLE_ALIASES[lowered]) {
+    return { selectedKey: ARCHITECTURE_STYLE_ALIASES[lowered] };
+  }
+
+  for (const [key, label] of Object.entries(ARCHITECTURE_STYLE_LABELS_RU)) {
+    if (String(label).toLowerCase() === lowered) {
+      return { selectedKey: key };
+    }
+  }
+
+  return { selectedKey: '' };
+}
+
+function normalizeArchitectureStyleForSave(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  const keyByLabel = new Map();
+  for (const [key, label] of Object.entries(ARCHITECTURE_STYLE_LABELS_RU)) {
+    keyByLabel.set(String(label).toLowerCase(), key);
+  }
+
+  const lowered = text.toLowerCase();
+  if (ARCHITECTURE_STYLE_LABELS_RU[lowered]) return lowered;
+  if (ARCHITECTURE_STYLE_ALIASES[lowered]) return ARCHITECTURE_STYLE_ALIASES[lowered];
+  if (keyByLabel.has(lowered)) return keyByLabel.get(lowered) || text;
+  return text;
 }
 
 function osmNameFromTags(tags) {
@@ -854,6 +985,7 @@ function buildEditTextarea(label, id, value, placeholder) {
 function buildModalHtml(feature) {
   const info = feature.properties?.archiInfo || {};
   const osmTags = getSourceTags(feature);
+  const addressForm = getAddressFormState(osmTags, info.address);
   const osmAddress = osmAddressFromTags(osmTags);
   const osmYear = osmYearFromTags(osmTags);
   const osmArchitect = osmArchitectFromTags(osmTags);
@@ -868,16 +1000,17 @@ function buildModalHtml(feature) {
   const shownArchitect = info.architect || osmArchitect || '-';
   const shownStyleRaw = info.style || osmStyle || '-';
   const shownStyle = shownStyleRaw === '-' ? '-' : (toHumanArchitectureStyle(shownStyleRaw) || shownStyleRaw);
+  const styleOptions = getArchitectureStyleOptions();
+  const styleEditState = getArchitectureStyleEditState(info.style || osmStyle || '');
+  const styleOptionsHtml = styleOptions
+    .map((option) => `<option value="${escapeHtml(option.key)}" ${styleEditState.selectedKey === option.key ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
+    .join('');
   const editableRows = isAuthenticated
     ? `
       <form id="building-edit-form" class="grid gap-2.5">
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
           <label for="building-name" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Название:</label>
           <input id="building-name" name="building-name" type="text" value="${escapeHtml(info.name || (shownName !== '-' ? shownName : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-address" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Адрес:</label>
-          <input id="building-address" name="building-address" type="text" value="${escapeHtml(info.address || (shownAddress !== '-' ? shownAddress : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
           <label for="building-levels" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Этажей:</label>
@@ -892,12 +1025,44 @@ function buildModalHtml(feature) {
           <input id="building-architect" name="building-architect" type="text" value="${escapeHtml(info.architect || (shownArchitect !== '-' ? shownArchitect : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-style" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектурный стиль:</label>
-          <input id="building-style" name="building-style" type="text" value="${escapeHtml(info.style || (osmStyle || ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+          <label for="building-style-select" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектурный стиль:</label>
+          <select id="building-style-select" name="building-style-select" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
+            <option value="" ${styleEditState.selectedKey === '' ? 'selected' : ''}>Не указан</option>
+            ${styleOptionsHtml}
+          </select>
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
           <label for="building-description" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Описание:</label>
           <textarea id="building-description" name="building-description" rows="3" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">${escapeHtml(info.description || '')}</textarea>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
+          <div class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Адрес (OSM теги):</div>
+          <div class="mt-2 grid gap-2 md:grid-cols-2">
+            <label class="block md:col-span-2">
+              <span class="mb-1 block text-xs font-semibold text-slate-700">Полный адрес (addr:full)</span>
+              <input id="building-addr-full" name="building-addr-full" type="text" value="${escapeHtml(addressForm.full)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-semibold text-slate-700">Индекс (addr:postcode)</span>
+              <input id="building-addr-postcode" name="building-addr-postcode" type="text" value="${escapeHtml(addressForm.postcode)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-semibold text-slate-700">Город (addr:city)</span>
+              <input id="building-addr-city" name="building-addr-city" type="text" value="${escapeHtml(addressForm.city)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-semibold text-slate-700">Место/локация (addr:place)</span>
+              <input id="building-addr-place" name="building-addr-place" type="text" value="${escapeHtml(addressForm.place)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-semibold text-slate-700">Улица (addr:street)</span>
+              <input id="building-addr-street" name="building-addr-street" type="text" value="${escapeHtml(addressForm.street)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            </label>
+            <label class="block md:col-span-2">
+              <span class="mb-1 block text-xs font-semibold text-slate-700">Номер дома (addr:housenumber)</span>
+              <input id="building-addr-housenumber" name="building-addr-housenumber" type="text" value="${escapeHtml(addressForm.housenumber)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            </label>
+          </div>
         </div>
         <div class="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
           <p id="building-save-status" class="text-sm text-slate-600"></p>
@@ -1575,16 +1740,18 @@ async function saveBuildingInfoFromModal(event) {
   const formData = new FormData(form);
   const yearRaw = String(formData.get('building-year') || '').trim();
   const levelsRaw = String(formData.get('building-levels') || '').trim();
+  const styleSelectRaw = String(formData.get('building-style-select') || '').trim();
+  const styleRaw = styleSelectRaw;
 
   const payload = {
     osmType: selected.osmType,
     osmId: selected.osmId,
     name: String(formData.get('building-name') || '').trim(),
-    style: String(formData.get('building-style') || '').trim(),
+    style: normalizeArchitectureStyleForSave(styleRaw),
     levels: levelsRaw,
     yearBuilt: yearRaw,
     architect: String(formData.get('building-architect') || '').trim(),
-    address: String(formData.get('building-address') || '').trim(),
+    address: buildAddressFromForm(formData),
     description: String(formData.get('building-description') || '').trim()
   };
 

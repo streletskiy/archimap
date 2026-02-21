@@ -5,44 +5,40 @@ const Database = require('better-sqlite3');
 
 const dataDir = path.join(__dirname, '..', 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
+const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
 const db = new Database(dbPath);
 
 const REASON = String(process.env.SEARCH_REBUILD_REASON || 'manual');
 const BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
-const SCHEMA_VERSION = Number(process.env.SEARCH_INDEX_SCHEMA_VERSION || 1);
-const FINGERPRINT_KEY = String(process.env.SEARCH_INDEX_FINGERPRINT_KEY || 'search.index.fingerprint');
 
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
+db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
+db.exec(`PRAGMA local.journal_mode = WAL;`);
+db.exec(`PRAGMA local.synchronous = NORMAL;`);
+db.exec(`
+CREATE TABLE IF NOT EXISTS local.architectural_info (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  osm_type TEXT NOT NULL,
+  osm_id INTEGER NOT NULL,
+  name TEXT,
+  style TEXT,
+  levels INTEGER,
+  year_built INTEGER,
+  architect TEXT,
+  address TEXT,
+  description TEXT,
+  updated_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(osm_type, osm_id)
+);
+`);
 
-function buildSearchDataFingerprint(snapshot) {
-  return [
-    `schema:${SCHEMA_VERSION}`,
-    `c:${Number(snapshot?.contours_count || 0)}`,
-    `cu:${String(snapshot?.contours_max_updated_at || '')}`,
-    `i:${Number(snapshot?.info_count || 0)}`,
-    `iu:${String(snapshot?.info_max_updated_at || '')}`
-  ].join('|');
-}
-
-function getSearchFingerprintSnapshot() {
-  return db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM building_contours) AS contours_count,
-      (SELECT coalesce(MAX(updated_at), '') FROM building_contours) AS contours_max_updated_at,
-      (SELECT COUNT(*) FROM architectural_info) AS info_count,
-      (SELECT coalesce(MAX(updated_at), '') FROM architectural_info) AS info_max_updated_at
-  `).get();
-}
-
-function writeMetaValue(key, value) {
-  db.prepare(`
-    INSERT INTO app_meta (key, value, updated_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(key) DO UPDATE SET
-      value = excluded.value,
-      updated_at = datetime('now')
-  `).run(String(key), String(value ?? ''));
+const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
+const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
+if (!searchSourceColumnNames.has('local_priority')) {
+  db.exec(`ALTER TABLE building_search_source ADD COLUMN local_priority INTEGER NOT NULL DEFAULT 0;`);
 }
 
 function delayImmediate() {
@@ -66,14 +62,12 @@ async function run() {
   }
 
   if (totalContours === 0) {
-    const fingerprint = buildSearchDataFingerprint(getSearchFingerprintSnapshot());
-    writeMetaValue(FINGERPRINT_KEY, fingerprint);
     console.log('[search-worker] rebuild finished: source is empty');
     console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
     return;
   }
 
-  const selectSourceBatch = db.prepare(`
+const selectSourceBatch = db.prepare(`
     SELECT
       bc.rowid AS contour_rowid,
       bc.osm_type || '/' || bc.osm_id AS osm_key,
@@ -111,10 +105,11 @@ async function run() {
         json_extract(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END, '$.architect_name'),
         ''
       )), '') AS architect,
+      CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
       (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
       (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
     FROM building_contours bc
-    LEFT JOIN architectural_info ai
+    LEFT JOIN local.architectural_info ai
       ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
     WHERE bc.rowid > ?
     ORDER BY bc.rowid
@@ -122,8 +117,8 @@ async function run() {
   `);
 
   const insertSource = db.prepare(`
-    INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, center_lon, center_lat, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, local_priority, center_lon, center_lat, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
 
   let sourceProcessed = 0;
@@ -145,6 +140,7 @@ async function run() {
           row.address || null,
           row.style || null,
           row.architect || null,
+          row.local_priority,
           row.center_lon,
           row.center_lat
         );
@@ -210,8 +206,6 @@ async function run() {
     await delayImmediate();
   }
 
-  const fingerprint = buildSearchDataFingerprint(getSearchFingerprintSnapshot());
-  writeMetaValue(FINGERPRINT_KEY, fingerprint);
   console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
 }
 

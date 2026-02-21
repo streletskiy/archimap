@@ -6,7 +6,7 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 
 - MapLibre GL map with a customized Positron style.
 - Building contours imported from Geofabrik PBF and stored in local SQLite.
-- Additional building metadata stored in SQLite:
+- Additional building metadata stored in a separate SQLite file (`local-edits.db`):
   `name`, `style`, `levels`, `year`, `architect`, `address`, `description`.
 - Building info modal with in-place editing for authorized users.
 - OSM tags viewer in building modal.
@@ -83,19 +83,19 @@ What it does:
 ## Search Logic
 
 - API: `GET /api/search-buildings?q=...&lon=...&lat=...&limit=...&cursor=...`.
-- Search scope: full local `building_contours` (+ local overrides from `architectural_info`), not limited by viewport.
+- Search scope: full local `building_contours` (+ local overrides from `local-edits.db`), not limited by viewport.
 - Search index:
   - source table `building_search_source` stores normalized searchable fields + geometry center;
   - FTS table `building_search_fts` (SQLite FTS5, `unicode61`) indexes `name`, `address`, `style`, `architect`.
 - Fields used:
-  - `name` (`architectural_info.name`, OSM `name`, `name:ru`, `official_name`)
-  - `address` (`architectural_info.address`, OSM `addr:*` including `addr:place`)
-  - `style` (`architectural_info.style`, OSM `building:architecture` / `architecture` / `style`)
-  - `architect` (`architectural_info.architect`, OSM `architect` / `architect_name`)
+  - `name` (`local.architectural_info.name`, OSM `name`, `name:ru`, `official_name`)
+  - `address` (`local.architectural_info.address`, OSM `addr:*` including `addr:place`)
+  - `style` (`local.architectural_info.style`, OSM `building:architecture` / `architecture` / `style`)
+  - `architect` (`local.architectural_info.architect`, OSM `architect` / `architect_name`)
 - Matching and ranking:
   - query is tokenized;
   - all tokens are required (`AND` across token prefixes in FTS);
-  - ordering: `bm25` relevance, then distance to current map center.
+  - ordering: local-edited buildings first, then `bm25` relevance, then distance to current map center.
 - Pagination:
   - response returns `items`, `hasMore`, `nextCursor`;
   - frontend supports progressive loading via "Показать ещё".
@@ -130,3 +130,4 @@ What it does:
 - `AUTO_SYNC_ON_START` - run sync automatically on server startup (`true/false`).
 - `AUTO_SYNC_INTERVAL_HOURS` - periodic sync interval in hours (`<=0` disables periodic sync).
 - `SEARCH_INDEX_BATCH_SIZE` - FTS rebuild batch size for progress/indexing loop (`200..20000`, default `2500`).
+- `LOCAL_EDITS_DB_PATH` - path to SQLite with local edits metadata (default: `data/local-edits.db`).
