@@ -153,6 +153,69 @@ let searchState = {
   nextCursor: null
 };
 
+const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
+const UI_TEXT = Object.freeze(I18N_RU.ui || {});
+
+function t(key, params = null, fallback = '') {
+  const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
+  const base = String(template || fallback || '');
+  if (!params || typeof params !== 'object') return base;
+  return base.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? '' : String(params[name])));
+}
+
+const OSM_FILTER_TAG_LABELS_RU = Object.freeze(I18N_RU.filterTagLabels || {});
+
+const LOCAL_EDIT_PRIORITY_TAG_KEYS = Object.freeze([
+  'name',
+  'architect',
+  'style',
+  'building:architecture',
+  'levels',
+  'building:levels',
+  'year_built',
+  'building:year',
+  'address',
+  'addr:full',
+  'description'
+]);
+
+const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
+  'architect',
+  'building:architecture',
+  'style',
+  'year_built',
+  'year_of_construction',
+  'start_date',
+  'building:start_date',
+  'building:year',
+  'building:levels',
+  'levels'
+]);
+
+const APPEARANCE_FILTER_TAG_KEYS = Object.freeze([
+  'building:colour',
+  'building:material',
+  'building:height',
+  'roof:colour',
+  'roof:shape',
+  'roof:levels',
+  'roof:orientation',
+  'height',
+  'colour',
+  'material'
+]);
+
+const APPEARANCE_FILTER_TAG_PREFIXES = Object.freeze([
+  'roof:',
+  'facade:',
+  'building:facade',
+  'building:cladding',
+  'building:colour',
+  'building:material',
+  'building:height',
+  'building:shape'
+]);
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -205,7 +268,9 @@ function applyTheme(theme, options = {}) {
     themeToggleEl.checked = normalized === 'dark';
     themeToggleEl.setAttribute(
       'aria-label',
-      normalized === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'
+      normalized === 'dark'
+        ? t('themeEnableLight', null, 'Включить светлую тему')
+        : t('themeEnableDark', null, 'Включить тёмную тему')
     );
   }
 
@@ -226,7 +291,9 @@ function applyLabelsHidden(hidden, options = {}) {
     labelsToggleEl.checked = normalized;
     labelsToggleEl.setAttribute(
       'aria-label',
-      normalized ? 'Показывать обозначения карты' : 'Скрыть обозначения карты'
+      normalized
+        ? t('labelsShow', null, 'Показывать обозначения карты')
+        : t('labelsHide', null, 'Скрыть обозначения карты')
     );
   }
 
@@ -324,6 +391,38 @@ function getFilterTags(feature) {
   return tags;
 }
 
+function getLocalEditPriorityKeys(feature) {
+  const parsedInfo = safeParseJsonMaybe(feature?.properties?.archiInfo);
+  const info = (parsedInfo && typeof parsedInfo === 'object') ? parsedInfo : (feature?.properties?.archiInfo || null);
+  if (!info || typeof info !== 'object') return [];
+  const keys = [];
+  const hasText = (value) => value != null && String(value).trim() !== '';
+
+  if (hasText(info.name)) keys.push('name');
+  if (hasText(info.architect)) keys.push('architect');
+  if (hasText(info.style)) keys.push('style', 'building:architecture');
+  if (hasText(info.description)) keys.push('description');
+  if (hasText(info.address)) keys.push('address', 'addr:full');
+  if (hasText(info.levels)) keys.push('levels', 'building:levels');
+  if (hasText(info.year_built)) keys.push('year_built', 'building:year');
+  return keys;
+}
+
+function getFilterTagDisplayName(tagKey) {
+  const key = String(tagKey || '').trim();
+  if (!key) return '';
+  return OSM_FILTER_TAG_LABELS_RU[key] || key;
+}
+
+function getFilterTagGroupRank(tagKey) {
+  const key = String(tagKey || '').trim();
+  if (!key) return 2;
+  if (PRIORITY_FILTER_TAG_KEYS.includes(key)) return 0;
+  if (APPEARANCE_FILTER_TAG_KEYS.includes(key)) return 1;
+  if (APPEARANCE_FILTER_TAG_PREFIXES.some((prefix) => key.startsWith(prefix))) return 1;
+  return 2;
+}
+
 function normalizeTagValue(value) {
   if (value == null) return '';
   if (typeof value === 'string') return value.trim();
@@ -385,23 +484,50 @@ function applyFiltersToCurrentData() {
   if (!filterStatusEl) return;
   const total = currentBuildingsGeojson.features.length;
   if (rules.length === 0) {
-    filterStatusEl.textContent = 'Фильтр не активен.';
+    filterStatusEl.textContent = t('filterInactive', null, 'Фильтр не активен.');
   } else {
-    filterStatusEl.textContent = `Подсвечено ${matched} из ${total} зданий в текущем окне карты.`;
+    filterStatusEl.textContent = t(
+      'filterMatchedInViewport',
+      { matched, total },
+      `Подсвечено ${matched} из ${total} зданий в текущем окне карты.`
+    );
   }
 }
 
 function refreshTagKeysDatalist() {
   if (!filterTagKeysEl) return;
   const keys = new Set();
+  const localPriorityKeys = new Set();
   for (const feature of currentBuildingsGeojson.features || []) {
     const tags = getFilterTags(feature);
     for (const key of Object.keys(tags || {})) {
       keys.add(key);
     }
+    for (const key of getLocalEditPriorityKeys(feature)) {
+      localPriorityKeys.add(key);
+    }
   }
-  const sorted = [...keys].sort((a, b) => a.localeCompare(b, 'ru'));
-  filterTagKeysEl.innerHTML = sorted.map((k) => `<option value="${escapeHtml(k)}"></option>`).join('');
+  for (const key of LOCAL_EDIT_PRIORITY_TAG_KEYS) {
+    if (keys.has(key) && localPriorityKeys.has(key)) {
+      localPriorityKeys.add(key);
+    }
+  }
+
+  const sorted = [...keys].sort((a, b) => {
+    const aGroup = getFilterTagGroupRank(a);
+    const bGroup = getFilterTagGroupRank(b);
+    if (aGroup !== bGroup) return aGroup - bGroup;
+    const aLocal = localPriorityKeys.has(a) ? 0 : 1;
+    const bLocal = localPriorityKeys.has(b) ? 0 : 1;
+    if (aLocal !== bLocal) return aLocal - bLocal;
+    const aLabel = getFilterTagDisplayName(a);
+    const bLabel = getFilterTagDisplayName(b);
+    return aLabel.localeCompare(bLabel, 'ru');
+  });
+  filterTagKeysEl.innerHTML = sorted.map((k) => {
+    const display = getFilterTagDisplayName(k);
+    return `<option value="${escapeHtml(k)}" label="${escapeHtml(display)}">${escapeHtml(display)}</option>`;
+  }).join('');
 }
 
 function buildFilterRow() {
@@ -409,16 +535,16 @@ function buildFilterRow() {
   row.dataset.filterRow = String(++filterRowSeq);
   row.className = 'grid grid-cols-[1fr_auto_1fr_auto] items-center gap-1.5';
   row.innerHTML = `
-    <input data-field="key" list="filter-tag-keys" placeholder="Тег, например building:levels" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+    <input data-field="key" list="filter-tag-keys" placeholder="${escapeHtml(t('filterKeyPlaceholder', null, 'Тег, например building:levels'))}" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
     <select data-field="op" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
-      <option value="contains">содержит</option>
-      <option value="equals">равно</option>
-      <option value="not_equals">не равно</option>
-      <option value="starts_with">начинается с</option>
-      <option value="exists">существует</option>
-      <option value="not_exists">отсутствует</option>
+      <option value="contains">${escapeHtml(t('filterOpContains', null, 'содержит'))}</option>
+      <option value="equals">${escapeHtml(t('filterOpEquals', null, 'равно'))}</option>
+      <option value="not_equals">${escapeHtml(t('filterOpNotEquals', null, 'не равно'))}</option>
+      <option value="starts_with">${escapeHtml(t('filterOpStartsWith', null, 'начинается с'))}</option>
+      <option value="exists">${escapeHtml(t('filterOpExists', null, 'существует'))}</option>
+      <option value="not_exists">${escapeHtml(t('filterOpNotExists', null, 'отсутствует'))}</option>
     </select>
-    <input data-field="value" placeholder="Значение" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+    <input data-field="value" placeholder="${escapeHtml(t('filterValuePlaceholder', null, 'Значение'))}" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
     <button data-action="remove" type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-500 hover:bg-slate-100 hover:text-slate-900">×</button>
   `;
   return row;
@@ -490,7 +616,12 @@ function isFilterPanelOpen() {
 function setFilterToggleButtonState(isOpen) {
   if (!filterToggleBtnEl) return;
   filterToggleBtnEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-  filterToggleBtnEl.setAttribute('aria-label', isOpen ? 'Скрыть фильтр' : 'Открыть фильтр');
+  filterToggleBtnEl.setAttribute(
+    'aria-label',
+    isOpen
+      ? t('filterPanelClose', null, 'Скрыть фильтр')
+      : t('filterPanelOpen', null, 'Открыть фильтр')
+  );
   filterToggleBtnEl.classList.toggle('bg-indigo-600', isOpen);
   filterToggleBtnEl.classList.toggle('border-indigo-600', isOpen);
   filterToggleBtnEl.classList.toggle('text-white', isOpen);
@@ -530,7 +661,12 @@ function isMobileControlsPanelOpen() {
 function setMobileControlsToggleButtonState(isOpen) {
   if (!mobileControlsToggleBtnEl) return;
   mobileControlsToggleBtnEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-  mobileControlsToggleBtnEl.setAttribute('aria-label', isOpen ? 'Скрыть переключатели' : 'Открыть переключатели');
+  mobileControlsToggleBtnEl.setAttribute(
+    'aria-label',
+    isOpen
+      ? t('switchesPanelClose', null, 'Скрыть переключатели')
+      : t('switchesPanelOpen', null, 'Открыть переключатели')
+  );
   mobileControlsToggleBtnEl.classList.toggle('bg-indigo-600', isOpen);
   mobileControlsToggleBtnEl.classList.toggle('border-indigo-600', isOpen);
   mobileControlsToggleBtnEl.classList.toggle('text-white', isOpen);
@@ -735,61 +871,9 @@ function osmStyleFromTags(tags) {
   return tags['building:architecture'] || tags.architecture || tags.style || null;
 }
 
-const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze({
-  islamic: 'Исламская архитектура',
-  mamluk: 'Мамлюкская архитектура',
-  romanesque: 'Романская архитектура',
-  gothic: 'Готическая архитектура',
-  renaissance: 'Архитектура Возрождения',
-  mannerism: 'Маньеризм',
-  ottoman: 'Османская архитектура',
-  baroque: 'Архитектура барокко',
-  rococo: 'Рококо',
-  classicism: 'Классицизм',
-  neoclassicism: 'Классицизм',
-  empire: 'Ампир',
-  moorish_revival: 'Неомавританский стиль',
-  'pseudo-russian': 'Псевдорусский стиль',
-  eclectic: 'Эклектика',
-  georgian: 'Георгианская архитектура',
-  victorian: 'Викторианская архитектура',
-  historicism: 'Историцизм',
-  'neo-romanesque': 'Неороманский стиль',
-  'neo-gothic': 'Неоготика',
-  'pseudo-gothic': 'Русская псевдоготика',
-  russian_gothic: 'Русская псевдоготика',
-  'neo-byzantine': 'Неовизантийский стиль',
-  'neo-renaissance': 'Неоренессанс',
-  'neo-baroque': 'Необарокко',
-  art_nouveau: 'Архитектура модерна',
-  nothern_modern: 'Северный модерн',
-  functionalism: 'Функционализм',
-  cubism: 'Кубизм',
-  new_objectivity: 'Новая вещественность',
-  art_deco: 'Ар-деко',
-  modern: 'Архитектурный модернизм',
-  amsterdam_school: 'Амстердамская школа',
-  international_style: 'Интернациональный стиль',
-  constructivism: 'Конструктивизм',
-  postconstructivism: 'Постконструктивизм',
-  stalinist_neoclassicism: 'Сталинский ампир',
-  brutalist: 'Брутализм',
-  postmodern: 'Архитектура постмодернизма',
-  contemporary: 'Современная архитектура',
-  vernacular: 'Народная архитектура',
-  classic_swahili: 'Классический суахили',
-  omani: 'Оманская архитектура (Занзибар)',
-  indian: 'Индийское влияние (Занзибар)',
-  british_colonial: 'Британская колониальная архитектура',
-  modernism: 'Модернизм',
-  hypermodern: 'Гипермодернизм'
-});
+const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze(I18N_RU.architectureStyleLabels || {});
 
-const ARCHITECTURE_STYLE_ALIASES = Object.freeze({
-  brutalism: 'brutalist',
-  classicism: 'neoclassicism',
-  'stalinist neoclassicism': 'stalinist_neoclassicism'
-});
+const ARCHITECTURE_STYLE_ALIASES = Object.freeze(I18N_RU.architectureStyleAliases || {});
 
 function toHumanArchitectureStyle(value) {
   if (value == null) return null;
@@ -875,11 +959,11 @@ async function loadAuthState() {
 
 function renderAuth() {
   if (isAuthenticated) {
-    authStatusEl.textContent = 'Вы авторизованы';
+    authStatusEl.textContent = t('authLoggedIn', null, 'Вы авторизованы');
     logoutBtn.classList.remove('hidden');
     loginForm.classList.add('hidden');
   } else {
-    authStatusEl.textContent = 'Вход не выполнен';
+    authStatusEl.textContent = t('authLoggedOut', null, 'Вход не выполнен');
     logoutBtn.classList.add('hidden');
     loginForm.classList.remove('hidden');
   }
@@ -897,11 +981,11 @@ function renderAuth() {
     if (isAuthenticated) {
       authIconLoginEl.classList.add('hidden');
       authIconUserEl.classList.remove('hidden');
-      authFabEl.setAttribute('aria-label', 'Профиль');
+      authFabEl.setAttribute('aria-label', t('authFabProfile', null, 'Профиль'));
     } else {
       authIconUserEl.classList.add('hidden');
       authIconLoginEl.classList.remove('hidden');
-      authFabEl.setAttribute('aria-label', 'Вход');
+      authFabEl.setAttribute('aria-label', t('authFabLogin', null, 'Вход'));
     }
   }
 
@@ -1009,77 +1093,77 @@ function buildModalHtml(feature) {
     ? `
       <form id="building-edit-form" class="grid gap-2.5">
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-name" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Название:</label>
+          <label for="building-name" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelName', null, 'Название:'))}</label>
           <input id="building-name" name="building-name" type="text" value="${escapeHtml(info.name || (shownName !== '-' ? shownName : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-levels" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Этажей:</label>
+          <label for="building-levels" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelLevels', null, 'Этажей:'))}</label>
           <input id="building-levels" name="building-levels" type="number" value="${escapeHtml(info.levels ?? (shownLevels !== '-' ? shownLevels : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-year" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Год постройки:</label>
+          <label for="building-year" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelYearBuilt', null, 'Год постройки:'))}</label>
           <input id="building-year" name="building-year" type="number" value="${escapeHtml(info.year_built || (shownYear !== '-' ? shownYear : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-architect" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектор:</label>
+          <label for="building-architect" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelArchitect', null, 'Архитектор:'))}</label>
           <input id="building-architect" name="building-architect" type="text" value="${escapeHtml(info.architect || (shownArchitect !== '-' ? shownArchitect : ''))}" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-style-select" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектурный стиль:</label>
+          <label for="building-style-select" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelStyle', null, 'Архитектурный стиль:'))}</label>
           <select id="building-style-select" name="building-style-select" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
-            <option value="" ${styleEditState.selectedKey === '' ? 'selected' : ''}>Не указан</option>
+            <option value="" ${styleEditState.selectedKey === '' ? 'selected' : ''}>${escapeHtml(t('modalStyleNotSet', null, 'Не указан'))}</option>
             ${styleOptionsHtml}
           </select>
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <label for="building-description" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Описание:</label>
+          <label for="building-description" class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelDescription', null, 'Описание:'))}</label>
           <textarea id="building-description" name="building-description" rows="3" class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">${escapeHtml(info.description || '')}</textarea>
         </div>
         <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft">
-          <div class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Адрес (OSM теги):</div>
+          <div class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalAddressTagsTitle', null, 'Адрес (OSM теги):'))}</div>
           <div class="mt-2 grid gap-2 md:grid-cols-2">
             <label class="block md:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">Полный адрес (addr:full)</span>
+              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressFull', null, 'Полный адрес (addr:full)'))}</span>
               <input id="building-addr-full" name="building-addr-full" type="text" value="${escapeHtml(addressForm.full)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
             </label>
             <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">Индекс (addr:postcode)</span>
+              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressPostcode', null, 'Индекс (addr:postcode)'))}</span>
               <input id="building-addr-postcode" name="building-addr-postcode" type="text" value="${escapeHtml(addressForm.postcode)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
             </label>
             <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">Город (addr:city)</span>
+              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressCity', null, 'Город (addr:city)'))}</span>
               <input id="building-addr-city" name="building-addr-city" type="text" value="${escapeHtml(addressForm.city)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
             </label>
             <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">Место/локация (addr:place)</span>
+              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressPlace', null, 'Место/локация (addr:place)'))}</span>
               <input id="building-addr-place" name="building-addr-place" type="text" value="${escapeHtml(addressForm.place)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
             </label>
             <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">Улица (addr:street)</span>
+              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressStreet', null, 'Улица (addr:street)'))}</span>
               <input id="building-addr-street" name="building-addr-street" type="text" value="${escapeHtml(addressForm.street)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
             </label>
             <label class="block md:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">Номер дома (addr:housenumber)</span>
+              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressHouseNumber', null, 'Номер дома (addr:housenumber)'))}</span>
               <input id="building-addr-housenumber" name="building-addr-housenumber" type="text" value="${escapeHtml(addressForm.housenumber)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
             </label>
           </div>
         </div>
         <div class="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3">
           <p id="building-save-status" class="text-sm text-slate-600"></p>
-          <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">Сохранить</button>
+          <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">${escapeHtml(t('modalSave', null, 'Сохранить'))}</button>
         </div>
       </form>
     `
     : `
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Название:</b>${escapeHtml(shownName)}</div>
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Адрес:</b>${escapeHtml(shownAddress)}</div>
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Этажей:</b>${escapeHtml(shownLevels)}</div>
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Год постройки:</b>${escapeHtml(shownYear)}</div>
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектор:</b>${escapeHtml(shownArchitect)}</div>
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Архитектурный стиль:</b>${escapeHtml(shownStyle)}</div>
-      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">Описание:</b>${escapeHtml(info.description || '-')}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelName', null, 'Название:'))}</b>${escapeHtml(shownName)}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelAddress', null, 'Адрес:'))}</b>${escapeHtml(shownAddress)}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelLevels', null, 'Этажей:'))}</b>${escapeHtml(shownLevels)}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelYearBuilt', null, 'Год постройки:'))}</b>${escapeHtml(shownYear)}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelArchitect', null, 'Архитектор:'))}</b>${escapeHtml(shownArchitect)}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelStyle', null, 'Архитектурный стиль:'))}</b>${escapeHtml(shownStyle)}</div>
+      <div class="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-slate-700 shadow-soft"><b class="mr-2 inline-block min-w-[220px] font-bold text-slate-900">${escapeHtml(t('modalLabelDescription', null, 'Описание:'))}</b>${escapeHtml(info.description || '-')}</div>
       <div class="rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-700">
-        Для редактирования войдите через кнопку в левом нижнем углу.
+        ${escapeHtml(t('modalLoginHint', null, 'Для редактирования войдите через кнопку в левом нижнем углу.'))}
       </div>
     `;
 
@@ -1087,7 +1171,7 @@ function buildModalHtml(feature) {
     <div class="grid gap-2.5">
       ${editableRows}
       <details class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-        <summary class="relative cursor-pointer list-none bg-slate-50 px-3.5 py-3 pr-10 font-bold text-slate-900 transition hover:bg-slate-100 after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:content-['▾'] [&::-webkit-details-marker]:hidden [&[open]_summary]:after:rotate-180">OSM теги</summary>
+        <summary class="relative cursor-pointer list-none bg-slate-50 px-3.5 py-3 pr-10 font-bold text-slate-900 transition hover:bg-slate-100 after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:content-['▾'] [&::-webkit-details-marker]:hidden [&[open]_summary]:after:rotate-180">${escapeHtml(t('modalOsmTagsSummary', null, 'OSM теги'))}</summary>
         <pre class="m-0 border-t border-slate-200 bg-white px-3.5 py-3 text-xs leading-6 text-slate-700 whitespace-pre-wrap break-words">${escapeHtml(JSON.stringify({
           osm: feature.properties?.osm_key || '-',
           ...osmTags
@@ -1259,25 +1343,25 @@ function renderSearchResults(items, options = {}) {
   if (!searchResultsListEl || !searchResultsStatusEl) return;
   const data = Array.isArray(items) ? items : [];
   if (data.length === 0) {
-    searchResultsStatusEl.textContent = 'Ничего не найдено.';
+    searchResultsStatusEl.textContent = t('searchNoResults', null, 'Ничего не найдено.');
     searchResultsListEl.innerHTML = '';
     if (searchLoadMoreBtnEl) {
       searchLoadMoreBtnEl.classList.add('hidden');
       searchLoadMoreBtnEl.disabled = false;
-      searchLoadMoreBtnEl.textContent = 'Показать ещё';
+      searchLoadMoreBtnEl.textContent = t('searchShowMore', null, 'Показать ещё');
     }
     return;
   }
 
-  searchResultsStatusEl.textContent = `Найдено: ${data.length}`;
+  searchResultsStatusEl.textContent = t('searchFoundCount', { count: data.length }, `Найдено: ${data.length}`);
   searchResultsListEl.innerHTML = data.map((item) => {
-    const title = item.name || 'Без названия';
+    const title = item.name || t('searchUntitled', null, 'Без названия');
     const shownStyle = toHumanArchitectureStyle(item.style) || item.style || null;
     const line2 = [
-      item.address ? `Адрес: ${item.address}` : null,
-      shownStyle ? `Стиль: ${shownStyle}` : null
+      item.address ? t('searchLineAddress', { value: item.address }, `Адрес: ${item.address}`) : null,
+      shownStyle ? t('searchLineStyle', { value: shownStyle }, `Стиль: ${shownStyle}`) : null
     ].filter(Boolean).join(' • ');
-    const line3 = item.architect ? `Архитектор: ${item.architect}` : '';
+    const line3 = item.architect ? t('searchLineArchitect', { value: item.architect }, `Архитектор: ${item.architect}`) : '';
 
     return `
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1287,7 +1371,7 @@ function renderSearchResults(items, options = {}) {
         <div class="flex items-center justify-between gap-2">
           <div class="text-[11px] text-slate-500">${escapeHtml(`${item.osmType}/${item.osmId}`)}</div>
           <button data-action="go-to-building" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-            К зданию
+            ${escapeHtml(t('searchGoToBuilding', null, 'К зданию'))}
           </button>
         </div>
       </article>
@@ -1298,11 +1382,13 @@ function renderSearchResults(items, options = {}) {
     if (hasMore) {
       searchLoadMoreBtnEl.classList.remove('hidden');
       searchLoadMoreBtnEl.disabled = loadingMore;
-      searchLoadMoreBtnEl.textContent = loadingMore ? 'Загрузка...' : 'Показать ещё';
+      searchLoadMoreBtnEl.textContent = loadingMore
+        ? t('searchLoading', null, 'Загрузка...')
+        : t('searchShowMore', null, 'Показать ещё');
     } else {
       searchLoadMoreBtnEl.classList.add('hidden');
       searchLoadMoreBtnEl.disabled = false;
-      searchLoadMoreBtnEl.textContent = 'Показать ещё';
+      searchLoadMoreBtnEl.textContent = t('searchShowMore', null, 'Показать ещё');
     }
   }
 }
@@ -1323,7 +1409,7 @@ async function runBuildingSearch(query, options = {}) {
   if (!searchResultsStatusEl || !searchResultsListEl) return;
   if (text.length < 2) {
     resetSearchState();
-    searchResultsStatusEl.textContent = 'Введите минимум 2 символа.';
+    searchResultsStatusEl.textContent = t('searchMinChars', null, 'Введите минимум 2 символа.');
     searchResultsListEl.innerHTML = '';
     if (searchLoadMoreBtnEl) searchLoadMoreBtnEl.classList.add('hidden');
     return;
@@ -1359,10 +1445,14 @@ async function runBuildingSearch(query, options = {}) {
 
   const token = ++activeSearchRequestToken;
   if (append) {
-    searchResultsStatusEl.textContent = `Найдено: ${searchState.items.length}`;
+    searchResultsStatusEl.textContent = t(
+      'searchFoundCount',
+      { count: searchState.items.length },
+      `Найдено: ${searchState.items.length}`
+    );
     renderSearchResults(searchState.items, { hasMore: true, loadingMore: true });
   } else {
-    searchResultsStatusEl.textContent = 'Ищем по базе...';
+    searchResultsStatusEl.textContent = t('searchInProgress', null, 'Ищем по базе...');
     renderSearchSkeleton(6);
   }
 
@@ -1378,8 +1468,8 @@ async function runBuildingSearch(query, options = {}) {
     const resp = await fetch(`/api/search-buildings?${params.toString()}`);
     if (token !== activeSearchRequestToken) return;
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: 'Ошибка поиска' }));
-      searchResultsStatusEl.textContent = err.error || 'Ошибка поиска';
+      const err = await resp.json().catch(() => ({ error: t('searchError', null, 'Ошибка поиска') }));
+      searchResultsStatusEl.textContent = err.error || t('searchError', null, 'Ошибка поиска');
       if (append) {
         renderSearchResults(searchState.items, { hasMore: searchState.hasMore });
       } else {
@@ -1407,12 +1497,12 @@ async function runBuildingSearch(query, options = {}) {
     renderSearchResults(searchState.items, { hasMore: searchState.hasMore });
   } catch {
     if (token !== activeSearchRequestToken) return;
-    searchResultsStatusEl.textContent = 'Не удалось выполнить поиск.';
+    searchResultsStatusEl.textContent = t('searchFailed', null, 'Не удалось выполнить поиск.');
     if (append) {
       if (searchLoadMoreBtnEl) {
         searchLoadMoreBtnEl.classList.remove('hidden');
         searchLoadMoreBtnEl.disabled = false;
-        searchLoadMoreBtnEl.textContent = 'Показать ещё';
+        searchLoadMoreBtnEl.textContent = t('searchShowMore', null, 'Показать ещё');
       }
     } else {
       searchResultsListEl.innerHTML = '';
@@ -1445,12 +1535,12 @@ function renderAdminEdits(items) {
         <div class="mb-1 flex items-center justify-between gap-2">
           <div class="text-xs font-semibold text-slate-600">${escapeHtml(change.label)}</div>
           <div class="text-[11px] font-semibold ${change.isLocalTag ? 'text-rose-600' : 'text-slate-500'}">
-            ${change.isLocalTag ? 'Локальный тег' : `OSM: ${escapeHtml(change.osmTag || '—')}`}
+            ${change.isLocalTag ? escapeHtml(t('adminLocalTag', null, 'Локальный тег')) : `OSM: ${escapeHtml(change.osmTag || '—')}`}
           </div>
         </div>
         <div class="grid gap-1 md:grid-cols-2 md:gap-2">
           <div class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700"><span class="font-semibold text-slate-500">OSM:</span> ${escapeHtml(formatChangeValue(change.osmValue))}</div>
-          <div class="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900"><span class="font-semibold text-amber-700">Стало:</span> ${escapeHtml(formatChangeValue(change.localValue))}</div>
+          <div class="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900"><span class="font-semibold text-amber-700">${escapeHtml(t('adminChangedTo', null, 'Стало:'))}</span> ${escapeHtml(formatChangeValue(change.localValue))}</div>
         </div>
       </div>
     `).join('');
@@ -1459,9 +1549,9 @@ function renderAdminEdits(items) {
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
         <div class="mb-2 flex items-start justify-between gap-2">
           <div class="text-sm font-semibold text-slate-900">${escapeHtml(item.osmType)}/${escapeHtml(item.osmId)}</div>
-          <a class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100" href="?b=${encodeURIComponent(`${item.osmType}/${item.osmId}`)}${window.location.hash || ''}">Открыть</a>
+          <a class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100" href="?b=${encodeURIComponent(`${item.osmType}/${item.osmId}`)}${window.location.hash || ''}">${escapeHtml(t('adminOpen', null, 'Открыть'))}</a>
         </div>
-        <div class="mb-2 text-xs text-slate-600">Изменил: <b class="text-slate-900">${escapeHtml(item.updatedBy || '—')}</b> • ${escapeHtml(formatUpdatedAt(item.updatedAt))}</div>
+        <div class="mb-2 text-xs text-slate-600">${escapeHtml(t('adminChangedBy', null, 'Изменил:'))} <b class="text-slate-900">${escapeHtml(item.updatedBy || '—')}</b> • ${escapeHtml(formatUpdatedAt(item.updatedAt))}</div>
         <div class="space-y-2">${changesHtml}</div>
       </article>
     `;
@@ -1470,23 +1560,23 @@ function renderAdminEdits(items) {
 
 async function loadAdminEdits() {
   if (!adminEditsStatusEl || !adminEditsListEl) return;
-  adminEditsStatusEl.textContent = 'Загрузка...';
+  adminEditsStatusEl.textContent = t('adminLoading', null, 'Загрузка...');
   adminEditsListEl.innerHTML = '';
 
   const resp = await fetch('/api/admin/building-edits');
   if (!resp.ok) {
-    adminEditsStatusEl.textContent = 'Не удалось загрузить список правок.';
+    adminEditsStatusEl.textContent = t('adminLoadFailed', null, 'Не удалось загрузить список правок.');
     return;
   }
 
   const data = await resp.json().catch(() => ({ total: 0, items: [] }));
   const items = Array.isArray(data.items) ? data.items : [];
   if (items.length === 0) {
-    adminEditsStatusEl.textContent = 'Локальные правки не найдены.';
+    adminEditsStatusEl.textContent = t('adminNoEdits', null, 'Локальные правки не найдены.');
     return;
   }
 
-  adminEditsStatusEl.textContent = `Найдено правок: ${items.length}`;
+  adminEditsStatusEl.textContent = t('adminFoundEdits', { count: items.length }, `Найдено правок: ${items.length}`);
   renderAdminEdits(items);
 }
 
@@ -1598,7 +1688,7 @@ loginForm.addEventListener('submit', async (event) => {
   });
 
   if (!resp.ok) {
-    authStatusEl.textContent = 'Ошибка авторизации';
+    authStatusEl.textContent = t('authError', null, 'Ошибка авторизации');
     return;
   }
 
@@ -1735,7 +1825,7 @@ async function saveBuildingInfoFromModal(event) {
   if (!selected || !isAuthenticated) return;
   const form = event.currentTarget;
   const statusEl = document.getElementById('building-save-status');
-  if (statusEl) statusEl.textContent = 'Сохраняем...';
+  if (statusEl) statusEl.textContent = t('saveInProgress', null, 'Сохраняем...');
 
   const formData = new FormData(form);
   const yearRaw = String(formData.get('building-year') || '').trim();
@@ -1762,8 +1852,8 @@ async function saveBuildingInfoFromModal(event) {
   });
 
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: 'Не удалось сохранить' }));
-    if (statusEl) statusEl.textContent = err.error || 'Не удалось сохранить';
+    const err = await resp.json().catch(() => ({ error: t('saveFailed', null, 'Не удалось сохранить') }));
+    if (statusEl) statusEl.textContent = err.error || t('saveFailed', null, 'Не удалось сохранить');
     return;
   }
 
@@ -1782,7 +1872,7 @@ async function saveBuildingInfoFromModal(event) {
   applySavedInfoToFeatureCaches(selected.osmType, selected.osmId, nextArchiInfo);
   openModal(selected.feature);
   const nextStatusEl = document.getElementById('building-save-status');
-  if (nextStatusEl) nextStatusEl.textContent = 'Сохранено';
+  if (nextStatusEl) nextStatusEl.textContent = t('saveDone', null, 'Сохранено');
   scheduleLoadBuildings();
 }
 
