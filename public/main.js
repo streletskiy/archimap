@@ -153,6 +153,7 @@ let searchState = {
   hasMore: false,
   nextCursor: null
 };
+let adminReassignPickState = null;
 
 const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
 const UI_TEXT = Object.freeze(I18N_RU.ui || {});
@@ -1535,6 +1536,7 @@ function formatUpdatedAt(value) {
 function renderAdminEdits(items) {
   if (!adminEditsListEl) return;
   adminEditsListEl.innerHTML = items.map((item) => {
+    const sourceKey = `${item.osmType}/${item.osmId}`;
     const changesHtml = item.changes.map((change) => `
       <div class="rounded-lg border border-slate-200 bg-white p-2.5">
         <div class="mb-1 flex items-center justify-between gap-2">
@@ -1550,17 +1552,72 @@ function renderAdminEdits(items) {
       </div>
     `).join('');
 
+    const orphanControlsHtml = item.orphaned
+      ? `
+        <div class="mb-2 rounded-lg border border-rose-200 bg-rose-50 p-2.5">
+          <div class="mb-2 text-xs font-semibold text-rose-700">${escapeHtml(t('adminOrphanHint', null, 'Здание удалено из OSM. Можно удалить локальные правки или переназначить их на другое здание.'))}</div>
+          <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <input data-field="target-osm-key" data-source-key="${escapeHtml(sourceKey)}" type="text" placeholder="${escapeHtml(t('adminOrphanTargetPlaceholder', null, 'way/123456 или relation/123456'))}" class="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
+            <button data-action="admin-reassign-submit" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">${escapeHtml(t('adminReassign', null, 'Переназначить'))}</button>
+          </div>
+          <div class="mt-2 flex items-center gap-2">
+            <button data-action="admin-reassign-pick" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">${escapeHtml(t('adminReassignByMap', null, 'Выбрать на карте'))}</button>
+            <button data-action="admin-delete-orphan" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-rose-300 bg-white px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50">${escapeHtml(t('adminDeleteOrphan', null, 'Удалить правки'))}</button>
+          </div>
+        </div>
+      `
+      : '';
+
     return `
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
         <div class="mb-2 flex items-start justify-between gap-2">
-          <div class="text-sm font-semibold text-slate-900">${escapeHtml(item.osmType)}/${escapeHtml(item.osmId)}</div>
+          <div class="text-sm font-semibold text-slate-900">${escapeHtml(sourceKey)} ${item.orphaned ? `<span class="ml-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">${escapeHtml(t('adminOrphanBadge', null, 'удалено из OSM'))}</span>` : ''}</div>
           <a class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100" href="?b=${encodeURIComponent(`${item.osmType}/${item.osmId}`)}${window.location.hash || ''}">${escapeHtml(t('adminOpen', null, 'Открыть'))}</a>
         </div>
         <div class="mb-2 text-xs text-slate-600">${escapeHtml(t('adminChangedBy', null, 'Изменил:'))} <b class="text-slate-900">${escapeHtml(item.updatedBy || '—')}</b> • ${escapeHtml(formatUpdatedAt(item.updatedAt))}</div>
+        ${orphanControlsHtml}
         <div class="space-y-2">${changesHtml}</div>
       </article>
     `;
   }).join('');
+}
+
+async function deleteOrphanLocalEdit(osmType, osmId) {
+  const osmKey = `${osmType}/${osmId}`;
+  const confirmed = window.confirm(t('adminDeleteConfirm', { osmKey }, `Удалить локальные правки для ${osmKey}?`));
+  if (!confirmed) return;
+  const resp = await fetch('/api/admin/building-edits/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ osmType, osmId })
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: t('adminDeleteFailed', null, 'Не удалось удалить правки') }));
+    if (adminEditsStatusEl) adminEditsStatusEl.textContent = err.error || t('adminDeleteFailed', null, 'Не удалось удалить правки');
+    return;
+  }
+  if (adminEditsStatusEl) adminEditsStatusEl.textContent = t('adminDeleteDone', { osmKey }, `Локальные правки ${osmKey} удалены`);
+  await loadAdminEdits();
+}
+
+async function reassignLocalEdit(fromOsmType, fromOsmId, toOsmType, toOsmId) {
+  const resp = await fetch('/api/admin/building-edits/reassign', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fromOsmType, fromOsmId, toOsmType, toOsmId })
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: t('adminReassignFailed', null, 'Не удалось переназначить правки') }));
+    if (adminEditsStatusEl) adminEditsStatusEl.textContent = err.error || t('adminReassignFailed', null, 'Не удалось переназначить правки');
+    return false;
+  }
+  if (adminEditsStatusEl) adminEditsStatusEl.textContent = t(
+    'adminReassignDone',
+    { from: `${fromOsmType}/${fromOsmId}`, to: `${toOsmType}/${toOsmId}` },
+    `Правки переназначены: ${fromOsmType}/${fromOsmId} -> ${toOsmType}/${toOsmId}`
+  );
+  await loadAdminEdits();
+  return true;
 }
 
 async function loadAdminEdits() {
@@ -1773,6 +1830,52 @@ if (searchResultsListEl) {
       closeSearchModal();
     } finally {
       button.disabled = false;
+    }
+  });
+}
+
+if (adminEditsListEl) {
+  adminEditsListEl.addEventListener('click', async (event) => {
+    const button = event.target?.closest?.('button[data-action]');
+    if (!button) return;
+    const action = String(button.getAttribute('data-action') || '').trim();
+    const osmType = String(button.getAttribute('data-osm-type') || '').trim();
+    const osmId = Number(button.getAttribute('data-osm-id'));
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) return;
+
+    if (action === 'admin-delete-orphan') {
+      button.disabled = true;
+      try {
+        await deleteOrphanLocalEdit(osmType, osmId);
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (action === 'admin-reassign-submit') {
+      const sourceKey = `${osmType}/${osmId}`;
+      const input = adminEditsListEl.querySelector(`input[data-field="target-osm-key"][data-source-key="${sourceKey}"]`);
+      const raw = String(input?.value || '').trim();
+      const parsed = parseKey(raw);
+      if (!parsed) {
+        if (adminEditsStatusEl) adminEditsStatusEl.textContent = t('adminReassignInvalidTarget', null, 'Укажите корректный OSM ключ в формате way/123 или relation/123');
+        return;
+      }
+      button.disabled = true;
+      try {
+        await reassignLocalEdit(osmType, osmId, parsed.osmType, parsed.osmId);
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (action === 'admin-reassign-pick') {
+      adminReassignPickState = { fromOsmType: osmType, fromOsmId: osmId };
+      closeAdminEditsModal();
+      if (adminEditsStatusEl) adminEditsStatusEl.textContent = '';
+      window.alert(t('adminReassignPickHint', { osmKey: `${osmType}/${osmId}` }, `Выберите на карте целевое здание для переназначения правок ${osmType}/${osmId}.`));
     }
   });
 }
@@ -2033,6 +2136,16 @@ async function onBuildingsLayerClick(event) {
   const feature = event.features && event.features[0];
   if (!feature) return;
   normalizeFeatureInfo(feature);
+
+  if (adminReassignPickState && isAuthenticated && isAdmin) {
+    const parsed = parseKey(feature.properties?.osm_key);
+    if (!parsed) return;
+    const { fromOsmType, fromOsmId } = adminReassignPickState;
+    adminReassignPickState = null;
+    await reassignLocalEdit(fromOsmType, fromOsmId, parsed.osmType, parsed.osmId);
+    openAdminEditsModal();
+    return;
+  }
 
   try {
     await selectBuildingFeature(feature);

@@ -812,7 +812,7 @@ function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cu
     FROM local.architectural_info ai
     LEFT JOIN building_contours bc
       ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
-    WHERE ${whereSql}
+    WHERE bc.osm_id IS NOT NULL AND (${whereSql})
     ORDER BY distance2 ASC, ai.updated_at DESC
     LIMIT ? OFFSET ?
   `).all(lon, lon, lat, lat, ...whereParams, cappedLimit + 1, offset);
@@ -1051,6 +1051,7 @@ app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
     out.push({
       osmType: row.osm_type,
       osmId: row.osm_id,
+      orphaned: !row.tags_json,
       updatedBy: row.updated_by || null,
       updatedAt: row.updated_at || null,
       changes
@@ -1060,6 +1061,104 @@ app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
   return res.json({
     total: out.length,
     items: out
+  });
+});
+
+app.post('/api/admin/building-edits/delete', requireAuth, requireAdmin, (req, res) => {
+  const osmType = String(req.body?.osmType || '').trim();
+  const osmId = Number(req.body?.osmId);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
+    return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+  }
+
+  const deleted = db.prepare(`
+    DELETE FROM local.architectural_info
+    WHERE osm_type = ? AND osm_id = ?
+  `).run(osmType, osmId);
+
+  enqueueSearchIndexRefresh(osmType, osmId);
+  return res.json({
+    ok: true,
+    deleted: Number(deleted?.changes || 0)
+  });
+});
+
+app.post('/api/admin/building-edits/reassign', requireAuth, requireAdmin, (req, res) => {
+  const fromOsmType = String(req.body?.fromOsmType || '').trim();
+  const fromOsmId = Number(req.body?.fromOsmId);
+  const toOsmType = String(req.body?.toOsmType || '').trim();
+  const toOsmId = Number(req.body?.toOsmId);
+
+  if (!['way', 'relation'].includes(fromOsmType) || !Number.isInteger(fromOsmId)) {
+    return res.status(400).json({ error: 'Некорректный исходный идентификатор здания' });
+  }
+  if (!['way', 'relation'].includes(toOsmType) || !Number.isInteger(toOsmId)) {
+    return res.status(400).json({ error: 'Некорректный целевой идентификатор здания' });
+  }
+  if (fromOsmType === toOsmType && fromOsmId === toOsmId) {
+    return res.status(400).json({ error: 'Исходный и целевой идентификаторы совпадают' });
+  }
+
+  const fromRow = db.prepare(`
+    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by
+    FROM local.architectural_info
+    WHERE osm_type = ? AND osm_id = ?
+  `).get(fromOsmType, fromOsmId);
+  if (!fromRow) {
+    return res.status(404).json({ error: 'Исходная локальная правка не найдена' });
+  }
+
+  const targetContour = db.prepare(`
+    SELECT 1
+    FROM building_contours
+    WHERE osm_type = ? AND osm_id = ?
+    LIMIT 1
+  `).get(toOsmType, toOsmId);
+  if (!targetContour) {
+    return res.status(404).json({ error: 'Целевое здание не найдено в локальной базе контуров' });
+  }
+
+  const targetLocal = db.prepare(`
+    SELECT 1
+    FROM local.architectural_info
+    WHERE osm_type = ? AND osm_id = ?
+    LIMIT 1
+  `).get(toOsmType, toOsmId);
+  if (targetLocal) {
+    return res.status(409).json({ error: 'Для целевого здания уже есть локальные правки' });
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(
+      toOsmType,
+      toOsmId,
+      fromRow.name ?? null,
+      fromRow.style ?? null,
+      fromRow.levels ?? null,
+      fromRow.year_built ?? null,
+      fromRow.architect ?? null,
+      fromRow.address ?? null,
+      fromRow.description ?? null,
+      String(req.session?.user?.username || fromRow.updated_by || '')
+    );
+
+    db.prepare(`
+      DELETE FROM local.architectural_info
+      WHERE osm_type = ? AND osm_id = ?
+    `).run(fromOsmType, fromOsmId);
+  });
+
+  tx();
+  enqueueSearchIndexRefresh(fromOsmType, fromOsmId);
+  enqueueSearchIndexRefresh(toOsmType, toOsmId);
+
+  return res.json({
+    ok: true,
+    from: `${fromOsmType}/${fromOsmId}`,
+    to: `${toOsmType}/${toOsmId}`
   });
 });
 
