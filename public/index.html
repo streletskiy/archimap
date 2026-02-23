@@ -228,9 +228,9 @@
 
   <div id="navigation" class="fixed inset-x-0 top-0 z-[930] px-3 pt-3 sm:px-4 sm:pt-4">
     <div class="relative rounded-2xl border border-slate-300 bg-white/95 px-3 py-2 shadow-float backdrop-blur">
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center justify-between gap-1">
         <div class="flex min-w-0 items-center gap-2">
-          <div class="select-none text-2xl font-extrabold tracking-tight text-black sm:text-xl">/archimap</div>
+          <div class="select-none text-2xl font-extrabold tracking-tight text-black sm:text-xl px-2">/archimap</div>
           <button id="filter-toggle-btn" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 transition-colors hover:bg-slate-50" aria-label="Открыть фильтр" aria-expanded="false">
             <svg viewBox="0 0 512 512" width="15" height="15" aria-hidden="true" class="fill-current">
               <path d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"></path>
@@ -257,11 +257,11 @@
             </svg>
           </button>
           <button id="mobile-controls-toggle-btn" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 transition-colors hover:bg-slate-50" aria-label="Открыть переключатели" aria-expanded="false">
-            <svg viewBox="0 0 640 640" width="16" height="16" aria-hidden="true" class="fill-current">
-              <path d="M96 128C78.3 128 64 142.3 64 160C64 177.7 78.3 192 96 192L182.7 192C195 220.3 223.2 240 256 240C288.8 240 317 220.3 329.3 192L544 192C561.7 192 576 177.7 576 160C576 142.3 561.7 128 544 128L329.3 128C317 99.7 288.8 80 256 80C223.2 80 195 99.7 182.7 128L96 128zM96 288C78.3 288 64 302.3 64 320C64 337.7 78.3 352 96 352L342.7 352C355 380.3 383.2 400 416 400C448.8 400 477 380.3 489.3 352L544 352C561.7 352 576 337.7 576 320C576 302.3 561.7 288 544 288L489.3 288C477 259.7 448.8 240 416 240C383.2 240 355 259.7 342.7 288L96 288zM96 448C78.3 448 64 462.3 64 480C64 497.7 78.3 512 96 512L150.7 512C163 540.3 191.2 560 224 560C256.8 560 285 540.3 297.3 512L544 512C561.7 512 576 497.7 576 480C576 462.3 561.7 448 544 448L297.3 448C285 419.7 256.8 400 224 400C191.2 400 163 419.7 150.7 448L96 448z"></path>
-            </svg>
+            <svg viewBox="0 0 640 640" width="24" height="24" aria-hidden="true" class="fill-current">
+              <path d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"></path>            </svg>
           </button>
-          <div id="mobile-controls-shell" class="absolute right-0 top-[calc(100%+0.5rem)] z-[935] flex w-auto items-center gap-2 rounded-xl border border-slate-300 bg-white/95 p-2 shadow-soft transition-all duration-200 ease-out origin-top-right max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0 pointer-events-none">
+          <div id="mobile-controls-shell" class="absolute right-0 top-[calc(100%+0.5rem)] z-[935] flex w-[177px] flex-col gap-2 rounded-xl border border-slate-300 bg-white/95 p-2 shadow-soft transition-all duration-200 ease-out origin-top-right max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0 pointer-events-none">
+            <div class="flex items-center gap-2">
             <label for="labels-toggle" class="relative inline-flex h-10 w-[76px] cursor-pointer items-center rounded-full bg-white px-2 shadow-soft hover:bg-slate-50" aria-label="Скрыть обозначения карты">
               <input id="labels-toggle" type="checkbox" class="peer sr-only" />
               <span class="absolute inset-1 rounded-full bg-slate-300 transition peer-checked:bg-indigo-500"></span>
@@ -284,15 +284,17 @@
               </span>
               <span class="pointer-events-none absolute left-1.5 z-[2] inline-flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-sm transition peer-checked:translate-x-[36px]"></span>
             </label>
+            </div>
+            <button id="auth-fab" class="inline-flex h-10 w-full items-center justify-start gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 shadow-soft transition hover:bg-slate-50" type="button" aria-label="Вход">
+              <svg id="auth-icon-login" viewBox="0 0 512 512" width="18" height="18" aria-hidden="true" class="fill-current">
+                <path d="M217.9 105.9L340.7 228.7c7.2 7.2 11.3 17.1 11.3 27.3s-4.1 20.1-11.3 27.3L217.9 406.1c-6.4 6.4-15 9.9-24 9.9c-18.7 0-33.9-15.2-33.9-33.9l0-62.1L32 320c-17.7 0-32-14.3-32-32l0-64c0-17.7 14.3-32 32-32l128 0 0-62.1c0-18.7 15.2-33.9 33.9-33.9c9 0 17.6 3.6 24 9.9zM352 416l64 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32l64 0c53 0 96 43 96 96l0 256c0 53-43 96-96 96l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"></path>
+              </svg>
+              <svg id="auth-icon-user" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="14" height="14" aria-hidden="true" class="hidden fill-current">
+                <path d="M320 312C386.3 312 440 258.3 440 192C440 125.7 386.3 72 320 72C253.7 72 200 125.7 200 192C200 258.3 253.7 312 320 312zM290.3 368C191.8 368 112 447.8 112 546.3C112 562.7 125.3 576 141.7 576L498.3 576C514.7 576 528 562.7 528 546.3C528 447.8 448.2 368 349.7 368L290.3 368z"></path>
+              </svg>
+              <span id="auth-fab-label">Войти</span>
+            </button>
           </div>
-          <button id="auth-fab" class="grid h-10 w-10 place-items-center rounded-lg border border-white/40 bg-gradient-to-br from-brand-purple to-indigo-400 text-white shadow-soft transition hover:-translate-y-0.5" type="button" aria-label="Вход">
-            <svg id="auth-icon-login" viewBox="0 0 512 512" width="16" height="16" aria-hidden="true" class="fill-current">
-              <path d="M217.9 105.9L340.7 228.7c7.2 7.2 11.3 17.1 11.3 27.3s-4.1 20.1-11.3 27.3L217.9 406.1c-6.4 6.4-15 9.9-24 9.9c-18.7 0-33.9-15.2-33.9-33.9l0-62.1L32 320c-17.7 0-32-14.3-32-32l0-64c0-17.7 14.3-32 32-32l128 0 0-62.1c0-18.7 15.2-33.9 33.9-33.9c9 0 17.6 3.6 24 9.9zM352 416l64 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32l64 0c53 0 96 43 96 96l0 256c0 53-43 96-96 96l-64 0c-17.7 0-32-14.3-32-32s14.3-32 32-32z"></path>
-            </svg>
-            <svg id="auth-icon-user" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="16" height="16" aria-hidden="true" class="hidden fill-current">
-              <path d="M320 312C386.3 312 440 258.3 440 192C440 125.7 386.3 72 320 72C253.7 72 200 125.7 200 192C200 258.3 253.7 312 320 312zM290.3 368C191.8 368 112 447.8 112 546.3C112 562.7 125.3 576 141.7 576L498.3 576C514.7 576 528 562.7 528 546.3C528 447.8 448.2 368 349.7 368L290.3 368z"></path>
-            </svg>
-          </button>
         </div>
       </div>
       <div id="filter-shell" class="absolute left-0 top-[calc(100%+0.5rem)] w-[360px] max-w-[calc(100vw-1.5rem)] rounded-xl border border-slate-300 bg-white/95 p-3 shadow-soft transition-all duration-200 ease-out origin-top-left max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0 pointer-events-none">

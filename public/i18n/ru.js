@@ -21,7 +21,7 @@ window.__ARCHIMAP_I18N_RU = Object.freeze({
   authLoggedIn: 'Вы авторизованы',
   authLoggedOut: 'Вход не выполнен',
   authFabProfile: 'Профиль',
-  authFabLogin: 'Вход',
+  authFabLogin: 'Логин',
   modalLabelName: 'Название:',
   modalLabelAddress: 'Адрес:',
   modalLabelLevels: 'Этажей:',

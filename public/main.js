@@ -120,6 +120,7 @@ const modalEl = document.getElementById('building-modal');
 const modalContentEl = document.getElementById('modal-content');
 const modalCloseBtn = document.getElementById('modal-close');
 const authFabEl = document.getElementById('auth-fab');
+const authFabLabelEl = document.getElementById('auth-fab-label');
 const authIconLoginEl = document.getElementById('auth-icon-login');
 const authIconUserEl = document.getElementById('auth-icon-user');
 const adminEditsFabEl = document.getElementById('admin-edits-fab');
@@ -592,7 +593,7 @@ const FILTER_PANEL_CLOSED_CLASSES = [
 ];
 
 const MOBILE_CONTROLS_OPEN_CLASSES = [
-  'max-h-[76px]',
+  'max-h-[140px]',
   'translate-y-0',
   'scale-100',
   'opacity-100',
@@ -981,11 +982,15 @@ function renderAuth() {
     if (isAuthenticated) {
       authIconLoginEl.classList.add('hidden');
       authIconUserEl.classList.remove('hidden');
-      authFabEl.setAttribute('aria-label', t('authFabProfile', null, 'Профиль'));
+      const profileText = t('authFabProfile', null, 'Профиль');
+      authFabEl.setAttribute('aria-label', profileText);
+      if (authFabLabelEl) authFabLabelEl.textContent = profileText;
     } else {
       authIconUserEl.classList.add('hidden');
       authIconLoginEl.classList.remove('hidden');
-      authFabEl.setAttribute('aria-label', t('authFabLogin', null, 'Вход'));
+      const loginText = t('authFabLogin', null, 'Войти');
+      authFabEl.setAttribute('aria-label', loginText);
+      if (authFabLabelEl) authFabLabelEl.textContent = loginText;
     }
   }
 
