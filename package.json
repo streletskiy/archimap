@@ -6,7 +6,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "node server.js",
     "start": "node server.js",
-    "sync:city": "node scripts/sync-geofabrik-buildings.js"
+    "sync:city": "node scripts/sync-osm-buildings.js"
   },
   "keywords": [],
   "author": "",

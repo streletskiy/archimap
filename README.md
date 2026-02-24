@@ -5,7 +5,7 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 ## Features
 
 - MapLibre GL map with a customized Positron style.
-- Building contours imported from Geofabrik PBF and stored in local SQLite.
+- Building contours imported from OSM extracts (QuackOSM) or local `.osm.pbf` and stored in local SQLite.
 - Additional building metadata stored in a separate SQLite file (`local-edits.db`):
   `name`, `style`, `levels`, `year`, `architect`, `address`, `description`.
 - Building info modal with in-place editing for authorized users.
@@ -22,7 +22,7 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 
 - Backend: Node.js, Express, better-sqlite3
 - Frontend: Vanilla JS, MapLibre GL, Tailwind/Flowbite
-- Data import: Python + osmium
+- Data import: Python + QuackOSM + DuckDB
 - Sessions: Redis
 
 ## Local Run
@@ -74,11 +74,17 @@ npm run sync:city
 
 What it does:
 
-- downloads Geofabrik PBF only when changed (or always with `FORCE_DOWNLOAD=true`);
-- uses `aria2c` when available;
+- in `OSM_EXTRACT_QUERY` / `OSM_EXTRACT_QUERIES` mode: lets QuackOSM auto-find/download extract by text query;
+- in `OSM_PBF_PATH` mode: imports from a local `.osm.pbf` file;
 - imports building geometries + all available OSM tags into `building_contours`;
 - removes stale buildings no longer present in the latest import;
 - prints progress in terminal.
+
+Importer implementation details:
+
+- extracts building features from `.osm.pbf` via QuackOSM (`tags_filter={"building": true}`);
+- computes geometry/bbox in DuckDB (spatial extension);
+- writes into SQLite `building_contours` directly from DuckDB (`INSERT/UPSERT` style SQL, no per-row Python loop).
 
 ## Search Logic
 
@@ -119,13 +125,12 @@ What it does:
 - `MAP_DEFAULT_ZOOM` - default map zoom (used when URL hash has no `#map=...`).
 - `ADMIN_USERNAME` - admin login.
 - `ADMIN_PASSWORD` - admin password.
-- `GEOFABRIK_PBF_URL` - Geofabrik PBF URL.
-- `GEOFABRIK_DOWNLOAD_DIR` - local directory for downloaded PBF.
-- `CITY_FILTER_BBOXES` - optional city bbox list:
-  `minLon,minLat,maxLon,maxLat;minLon,minLat,maxLon,maxLat`.
-- `FORCE_DOWNLOAD` - force redownload even if local file is up to date.
+- `OSM_EXTRACT_QUERY` - optional single QuackOSM extract query (for example: `Gibraltar`).
+- `OSM_EXTRACT_QUERIES` - optional semicolon-separated list of extract queries
+  (for example: `Nizhny Novgorod;Moscow Oblast;Russia`).
+- `OSM_PBF_PATH` - optional path to a local `.osm.pbf` file.
 - `PBF_PROGRESS_EVERY` - importer progress print interval.
-- `PBF_PROGRESS_COUNT_PASS` - enable count pass for percentage/ETA.
+- `PBF_PROGRESS_COUNT_PASS` - optional fallback retry flag (`--no-count-pass` on retry).
 - `AUTO_SYNC_ENABLED` - enable/disable auto sync (`true/false`).
 - `AUTO_SYNC_ON_START` - run sync automatically on server startup (`true/false`).
 - `AUTO_SYNC_INTERVAL_HOURS` - periodic sync interval in hours (`<=0` disables periodic sync).

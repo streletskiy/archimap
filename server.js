@@ -28,7 +28,7 @@ const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
 const db = new Database(dbPath);
-const syncScriptPath = path.join(__dirname, 'scripts', 'sync-geofabrik-buildings.js');
+const syncScriptPath = path.join(__dirname, 'scripts', 'sync-osm-buildings.js');
 const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
 let sessionMiddleware = null;
 
@@ -800,22 +800,34 @@ function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cu
 
   const whereSql = whereTokenClauses.length > 0 ? whereTokenClauses.join(' AND ') : '1=1';
   const rows = db.prepare(`
+    WITH src AS (
+      SELECT
+        ai.osm_type,
+        ai.osm_id,
+        ai.name,
+        ai.address,
+        ai.style,
+        ai.architect,
+        ai.updated_at,
+        ((bc.min_lon + bc.max_lon) / 2.0) AS center_lon,
+        ((bc.min_lat + bc.max_lat) / 2.0) AS center_lat
+      FROM local.architectural_info ai
+      LEFT JOIN building_contours bc
+        ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
+      WHERE bc.osm_id IS NOT NULL AND (${whereSql})
+    )
     SELECT
-      ai.osm_type,
-      ai.osm_id,
-      ai.name,
-      ai.address,
-      ai.style,
-      ai.architect,
-      (((bc.min_lon + bc.max_lon) / 2.0 - ?) * (((bc.min_lon + bc.max_lon) / 2.0 - ?)) +
-       (((bc.min_lat + bc.max_lat) / 2.0 - ?) * (((bc.min_lat + bc.max_lat) / 2.0 - ?))) AS distance2
-    FROM local.architectural_info ai
-    LEFT JOIN building_contours bc
-      ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
-    WHERE bc.osm_id IS NOT NULL AND (${whereSql})
-    ORDER BY distance2 ASC, ai.updated_at DESC
+      osm_type,
+      osm_id,
+      name,
+      address,
+      style,
+      architect,
+      ((center_lon - ?) * (center_lon - ?) + (center_lat - ?) * (center_lat - ?)) AS distance2
+    FROM src
+    ORDER BY distance2 ASC, updated_at DESC
     LIMIT ? OFFSET ?
-  `).all(lon, lon, lat, lat, ...whereParams, cappedLimit + 1, offset);
+  `).all(...whereParams, lon, lon, lat, lat, cappedLimit + 1, offset);
 
   const hasMore = rows.length > cappedLimit;
   const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;

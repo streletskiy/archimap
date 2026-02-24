@@ -1,6 +1,6 @@
 services:
   archimap:
-    image: streletskiy/archimap:latest
+    image: streletskiy/archimap:dev
     build:
       context: .
     container_name: archimap
