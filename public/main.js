@@ -88,9 +88,76 @@ const PMTILES_CONFIG = Object.freeze({
   url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
   sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
 });
+const LOCAL_BUILDING_STYLE_FALLBACK = Object.freeze({
+  light: Object.freeze({
+    fill: Object.freeze({
+      normal: '#a3a3a3',
+      filtered: '#12b4a6',
+      admin: '#f59e0b',
+      hoverNormal: '#8f8f8f',
+      hoverFiltered: '#0f9e92',
+      hoverAdmin: '#dc8a08',
+      opacityNormal: 0.36,
+      opacityActive: 0.82,
+      opacityHover: 0.58
+    }),
+    line: Object.freeze({
+      normal: '#bcbcbc',
+      filtered: '#0b6d67',
+      admin: '#b45309',
+      hoverNormal: '#9a9a9a',
+      hoverFiltered: '#0a7770',
+      hoverAdmin: '#a46300',
+      widthNormal: 0.9,
+      widthFiltered: 1.4,
+      widthAdmin: 1.8,
+      widthHover: 1.8
+    }),
+    transition: Object.freeze({
+      durationMs: 180
+    })
+  }),
+  dark: Object.freeze({
+    fill: Object.freeze({
+      normal: '#a3a3a3',
+      filtered: '#12b4a6',
+      admin: '#f59e0b',
+      hoverNormal: '#b8b8b8',
+      hoverFiltered: '#2ac8ba',
+      hoverAdmin: '#f9b541',
+      opacityNormal: 0.36,
+      opacityActive: 0.82,
+      opacityHover: 0.58
+    }),
+    line: Object.freeze({
+      normal: '#8f8f8f',
+      filtered: '#0b6d67',
+      admin: '#b45309',
+      hoverNormal: '#a8a8a8',
+      hoverFiltered: '#79dfd6',
+      hoverAdmin: '#ffd27d',
+      widthNormal: 0.9,
+      widthFiltered: 1.4,
+      widthAdmin: 1.8,
+      widthHover: 1.8
+    }),
+    transition: Object.freeze({
+      durationMs: 180
+    })
+  })
+});
 
 function getMapStyleForTheme(theme) {
   return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+}
+
+function getLocalBuildingStyleForTheme(theme) {
+  const normalized = theme === 'dark' ? 'dark' : 'light';
+  const external = window.__ARCHIMAP_LOCAL_BUILDING_STYLE;
+  if (external && typeof external === 'object' && external[normalized]) {
+    return external[normalized];
+  }
+  return LOCAL_BUILDING_STYLE_FALLBACK[normalized];
 }
 
 const pmtilesProtocol = new pmtiles.Protocol();
@@ -120,6 +187,7 @@ let filterRowSeq = 0;
 const localEditStateOverrides = new Map();
 let currentVisibleBuildingKeys = new Set();
 let lastCartoBuildingsVisibility = null;
+let hoveredBuildingKey = null;
 
 const authStatusEl = document.getElementById('auth-status');
 const logoutBtn = document.getElementById('logout-btn');
@@ -1088,46 +1156,72 @@ function renderAuth() {
 }
 
 function getBuildingFillColorExpression() {
+  const style = getLocalBuildingStyleForTheme(currentMapTheme);
   return [
     'case',
+    ['boolean', ['feature-state', 'isHovered'], false],
+    [
+      'case',
+      ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+      style.fill.hoverAdmin,
+      ['boolean', ['feature-state', 'isFiltered'], false],
+      style.fill.hoverFiltered,
+      style.fill.hoverNormal
+    ],
     ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
-    '#f59e0b',
+    style.fill.admin,
     ['boolean', ['feature-state', 'isFiltered'], false],
-    '#12b4a6',
-    '#d3d3d3'
+    style.fill.filtered,
+    style.fill.normal
   ];
 }
 
 function getBuildingFillOpacityExpression() {
+  const style = getLocalBuildingStyleForTheme(currentMapTheme);
   return [
     'case',
+    ['boolean', ['feature-state', 'isHovered'], false],
+    style.fill.opacityHover,
     ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
-    0.82,
+    style.fill.opacityActive,
     ['boolean', ['feature-state', 'isFiltered'], false],
-    0.82,
-    0.24
+    style.fill.opacityActive,
+    style.fill.opacityNormal
   ];
 }
 
 function getBuildingLineColorExpression() {
+  const style = getLocalBuildingStyleForTheme(currentMapTheme);
   return [
     'case',
+    ['boolean', ['feature-state', 'isHovered'], false],
+    [
+      'case',
+      ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+      style.line.hoverAdmin,
+      ['boolean', ['feature-state', 'isFiltered'], false],
+      style.line.hoverFiltered,
+      style.line.hoverNormal
+    ],
     ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
-    '#b45309',
+    style.line.admin,
     ['boolean', ['feature-state', 'isFiltered'], false],
-    '#0b6d67',
-    '#8c8c8c'
+    style.line.filtered,
+    style.line.normal
   ];
 }
 
 function getBuildingLineWidthExpression() {
+  const style = getLocalBuildingStyleForTheme(currentMapTheme);
   return [
     'case',
+    ['boolean', ['feature-state', 'isHovered'], false],
+    style.line.widthHover,
     ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
-    1.8,
+    style.line.widthAdmin,
     ['boolean', ['feature-state', 'isFiltered'], false],
-    1.4,
-    1
+    style.line.widthFiltered,
+    style.line.widthNormal
   ];
 }
 
@@ -1808,9 +1902,13 @@ async function syncSelectedBuildingWithUrl() {
 
 async function loadBuildingsByViewport() {
   updateCartoBuildingsVisibility();
-  if (!map.getSource('local-buildings')) return;
+  if (!map.getSource('local-buildings')) {
+    setHoveredBuilding(null);
+    return;
+  }
 
   if (map.getZoom() < MIN_BUILDING_ZOOM) {
+    setHoveredBuilding(null);
     currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
     for (const key of currentVisibleBuildingKeys) {
       setLocalBuildingFeatureState(key, { isFiltered: false });
@@ -1822,6 +1920,7 @@ async function loadBuildingsByViewport() {
   }
 
   if (!shouldProcessVisibleBuildings()) {
+    setHoveredBuilding(null);
     currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
     for (const key of currentVisibleBuildingKeys) {
       setLocalBuildingFeatureState(key, { isFiltered: false, hasExtraInfo: false });
@@ -2178,6 +2277,7 @@ function ensureMapSourcesAndLayers() {
   }
 
   if (!map.getLayer('local-buildings-fill')) {
+    const style = getLocalBuildingStyleForTheme(currentMapTheme);
     map.addLayer({
       id: 'local-buildings-fill',
       type: 'fill',
@@ -2186,15 +2286,19 @@ function ensureMapSourcesAndLayers() {
       minzoom: MIN_BUILDING_ZOOM,
       paint: {
         'fill-color': getBuildingFillColorExpression(),
+        'fill-color-transition': {
+          duration: style.transition.durationMs
+        },
         'fill-opacity': getBuildingFillOpacityExpression(),
         'fill-opacity-transition': {
-          duration: 220
+          duration: style.transition.durationMs
         }
       }
     });
   }
 
   if (!map.getLayer('local-buildings-line')) {
+    const style = getLocalBuildingStyleForTheme(currentMapTheme);
     map.addLayer({
       id: 'local-buildings-line',
       type: 'line',
@@ -2203,9 +2307,15 @@ function ensureMapSourcesAndLayers() {
       minzoom: MIN_BUILDING_ZOOM,
       paint: {
         'line-color': getBuildingLineColorExpression(),
+        'line-color-transition': {
+          duration: style.transition.durationMs
+        },
         'line-width': getBuildingLineWidthExpression(),
+        'line-width-transition': {
+          duration: style.transition.durationMs
+        },
         'line-opacity-transition': {
-          duration: 220
+          duration: style.transition.durationMs
         }
       }
     });
@@ -2242,8 +2352,35 @@ function onBuildingsLayerMouseEnter() {
   map.getCanvas().style.cursor = 'pointer';
 }
 
+function setHoveredBuilding(osmKey) {
+  if (hoveredBuildingKey === osmKey) return;
+  if (hoveredBuildingKey) {
+    setLocalBuildingFeatureState(hoveredBuildingKey, { isHovered: false });
+  }
+  hoveredBuildingKey = osmKey || null;
+  if (hoveredBuildingKey) {
+    setLocalBuildingFeatureState(hoveredBuildingKey, { isHovered: true });
+  }
+}
+
+function onBuildingsLayerMouseMove(event) {
+  const feature = event.features && event.features[0];
+  if (!feature) {
+    setHoveredBuilding(null);
+    return;
+  }
+  normalizeFeatureInfo(feature);
+  const parsed = getFeatureIdentity(feature);
+  if (!parsed) {
+    setHoveredBuilding(null);
+    return;
+  }
+  setHoveredBuilding(`${parsed.osmType}/${parsed.osmId}`);
+}
+
 function onBuildingsLayerMouseLeave() {
   map.getCanvas().style.cursor = '';
+  setHoveredBuilding(null);
 }
 
 async function onBuildingsLayerClick(event) {
@@ -2271,15 +2408,18 @@ async function onBuildingsLayerClick(event) {
 
 function bindBuildingsLayerEvents() {
   map.off('mouseenter', 'local-buildings-fill', onBuildingsLayerMouseEnter);
+  map.off('mousemove', 'local-buildings-fill', onBuildingsLayerMouseMove);
   map.off('mouseleave', 'local-buildings-fill', onBuildingsLayerMouseLeave);
   map.off('click', 'local-buildings-fill', onBuildingsLayerClick);
   map.on('mouseenter', 'local-buildings-fill', onBuildingsLayerMouseEnter);
+  map.on('mousemove', 'local-buildings-fill', onBuildingsLayerMouseMove);
   map.on('mouseleave', 'local-buildings-fill', onBuildingsLayerMouseLeave);
   map.on('click', 'local-buildings-fill', onBuildingsLayerClick);
 }
 
 map.on('style.load', () => {
   lastCartoBuildingsVisibility = null;
+  hoveredBuildingKey = null;
   ensureMapSourcesAndLayers();
   bindBuildingsLayerEvents();
   updateBuildingHighlightStyle();
