@@ -47,6 +47,7 @@ let nextSyncTimer = null;
 let searchIndexRebuildInProgress = false;
 let queuedSearchIndexRebuildReason = null;
 const pendingSearchIndexRefreshes = new Set();
+let filterTagKeysCache = { keys: null, loadedAt: 0 };
 
 const MAX_NODE_TIMER_MS = 2_147_483_647;
 const SEARCH_INDEX_BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
@@ -295,6 +296,38 @@ app.get('/api/buildings.pmtiles', (req, res) => {
   });
 });
 
+const selectFilterTagKeys = db.prepare(`
+  SELECT DISTINCT trim(je.key) AS tag_key
+  FROM building_contours bc,
+       json_each(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END) AS je
+  WHERE je.key IS NOT NULL
+    AND trim(je.key) <> ''
+  ORDER BY tag_key COLLATE NOCASE
+`);
+
+function getFilterTagKeysCached() {
+  const now = Date.now();
+  const ttlMs = 5 * 60 * 1000;
+  if (Array.isArray(filterTagKeysCache.keys) && (now - filterTagKeysCache.loadedAt) < ttlMs) {
+    return filterTagKeysCache.keys;
+  }
+  const keys = selectFilterTagKeys
+    .all()
+    .map((row) => String(row?.tag_key || '').trim())
+    .filter(Boolean);
+  filterTagKeysCache = { keys, loadedAt: now };
+  return keys;
+}
+
+app.get('/api/filter-tag-keys', (req, res) => {
+  try {
+    const keys = getFilterTagKeysCached();
+    res.json({ keys });
+  } catch (error) {
+    res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
+  }
+});
+
 app.use((req, res, next) => {
   if (!sessionMiddleware) {
     return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
@@ -376,6 +409,138 @@ function attachInfoToFeatures(features) {
 
   return features;
 }
+
+function parseOsmKey(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(way|relation)\/(\d+)$/);
+  if (!match) return null;
+  const osmId = Number(match[2]);
+  if (!Number.isInteger(osmId)) return null;
+  return { osmType: match[1], osmId };
+}
+
+function mapFilterDataRow(row) {
+  const osmKey = `${row.osm_type}/${row.osm_id}`;
+  let sourceTags = {};
+  try {
+    sourceTags = row.tags_json ? JSON.parse(row.tags_json) : {};
+  } catch {
+    sourceTags = {};
+  }
+  const hasExtraInfo = row.info_osm_id != null;
+  return {
+    osmKey,
+    sourceTags,
+    archiInfo: hasExtraInfo
+      ? {
+        osm_type: row.osm_type,
+        osm_id: row.osm_id,
+        name: row.name,
+        style: row.style,
+        levels: row.levels,
+        year_built: row.year_built,
+        architect: row.architect,
+        address: row.address,
+        description: row.description,
+        updated_by: row.updated_by,
+        updated_at: row.updated_at
+      }
+      : null,
+    hasExtraInfo
+  };
+}
+
+const FILTER_DATA_SELECT_FIELDS_SQL = `
+  SELECT
+    bc.osm_type,
+    bc.osm_id,
+    bc.tags_json,
+    ai.osm_id AS info_osm_id,
+    ai.name,
+    ai.style,
+    ai.levels,
+    ai.year_built,
+    ai.architect,
+    ai.address,
+    ai.description,
+    ai.updated_by,
+    ai.updated_at
+  FROM building_contours bc
+  LEFT JOIN local.architectural_info ai
+    ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+`;
+
+app.post('/api/buildings/filter-data', (req, res) => {
+  const rawKeys = Array.isArray(req.body?.keys) ? req.body.keys : [];
+  if (!Array.isArray(rawKeys)) {
+    return res.status(400).json({ error: 'Ожидается массив keys' });
+  }
+
+  const unique = [];
+  const seen = new Set();
+  for (const raw of rawKeys) {
+    const parsed = parseOsmKey(raw);
+    if (!parsed) continue;
+    const key = `${parsed.osmType}/${parsed.osmId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(parsed);
+    if (unique.length >= 5000) break;
+  }
+
+  if (unique.length === 0) {
+    return res.json({ items: [] });
+  }
+
+  const outByKey = new Map();
+  const CHUNK_SIZE = 300;
+  for (let i = 0; i < unique.length; i += CHUNK_SIZE) {
+    const chunk = unique.slice(i, i + CHUNK_SIZE);
+    const clauses = chunk.map(() => '(bc.osm_type = ? AND bc.osm_id = ?)').join(' OR ');
+    const params = [];
+    for (const item of chunk) {
+      params.push(item.osmType, item.osmId);
+    }
+    const rows = db.prepare(`
+      ${FILTER_DATA_SELECT_FIELDS_SQL}
+      WHERE ${clauses}
+    `).all(...params);
+
+    for (const row of rows) {
+      const item = mapFilterDataRow(row);
+      outByKey.set(item.osmKey, item);
+    }
+  }
+
+  return res.json({ items: [...outByKey.values()] });
+});
+
+app.get('/api/buildings/filter-data-bbox', (req, res) => {
+  const minLon = Number(req.query.minLon);
+  const minLat = Number(req.query.minLat);
+  const maxLon = Number(req.query.maxLon);
+  const maxLat = Number(req.query.maxLat);
+  const limit = Math.max(1, Math.min(50000, Number(req.query.limit) || 12000));
+  if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
+    return res.status(400).json({ error: 'Некорректные координаты bbox' });
+  }
+  if (minLon > maxLon || minLat > maxLat) {
+    return res.status(400).json({ error: 'Некорректные границы bbox' });
+  }
+
+  const rows = db.prepare(`
+    ${FILTER_DATA_SELECT_FIELDS_SQL}
+    WHERE bc.max_lon >= ?
+      AND bc.min_lon <= ?
+      AND bc.max_lat >= ?
+      AND bc.min_lat <= ?
+    LIMIT ?
+  `).all(minLon, maxLon, minLat, maxLat, limit);
+
+  const items = rows.map(mapFilterDataRow);
+  res.setHeader('Cache-Control', 'public, max-age=60');
+  return res.json({ items, truncated: rows.length >= limit });
+});
 
 function requireAuth(req, res, next) {
   if (!req.session || !req.session.user) {

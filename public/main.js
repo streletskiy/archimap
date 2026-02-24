@@ -188,6 +188,17 @@ const localEditStateOverrides = new Map();
 let currentVisibleBuildingKeys = new Set();
 let lastCartoBuildingsVisibility = null;
 let hoveredBuildingKey = null;
+let dbFilterTagKeys = [];
+let dbFilterTagKeysLoaded = false;
+let dbFilterTagKeysLoadingPromise = null;
+let lastRenderedFilterTagKeysSignature = '';
+let visibleBuildingsLoadSeq = 0;
+const filterDataCache = new Map();
+const FILTER_DATA_CACHE_TTL_MS = 10 * 60 * 1000;
+const FILTER_DATA_CACHE_MAX_ITEMS = 60000;
+const FILTER_PREFETCH_PADDING_RATIO = 0.35;
+const FILTER_PREFETCH_LIMIT = 15000;
+const filterPrefetchInFlight = new Map();
 
 const authStatusEl = document.getElementById('auth-status');
 const logoutBtn = document.getElementById('logout-btn');
@@ -255,20 +266,6 @@ function t(key, params = null, fallback = '') {
 }
 
 const OSM_FILTER_TAG_LABELS_RU = Object.freeze(I18N_RU.filterTagLabels || {});
-
-const LOCAL_EDIT_PRIORITY_TAG_KEYS = Object.freeze([
-  'name',
-  'architect',
-  'style',
-  'building:architecture',
-  'levels',
-  'building:levels',
-  'year_built',
-  'building:year',
-  'address',
-  'addr:full',
-  'description'
-]);
 
 const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
   'architect',
@@ -512,23 +509,6 @@ function getFilterTags(feature) {
   return tags;
 }
 
-function getLocalEditPriorityKeys(feature) {
-  const parsedInfo = safeParseJsonMaybe(feature?.properties?.archiInfo);
-  const info = (parsedInfo && typeof parsedInfo === 'object') ? parsedInfo : (feature?.properties?.archiInfo || null);
-  if (!info || typeof info !== 'object') return [];
-  const keys = [];
-  const hasText = (value) => value != null && String(value).trim() !== '';
-
-  if (hasText(info.name)) keys.push('name');
-  if (hasText(info.architect)) keys.push('architect');
-  if (hasText(info.style)) keys.push('style', 'building:architecture');
-  if (hasText(info.description)) keys.push('description');
-  if (hasText(info.address)) keys.push('address', 'addr:full');
-  if (hasText(info.levels)) keys.push('levels', 'building:levels');
-  if (hasText(info.year_built)) keys.push('year_built', 'building:year');
-  return keys;
-}
-
 function getFilterTagDisplayName(tagKey) {
   const key = String(tagKey || '').trim();
   if (!key) return '';
@@ -600,6 +580,169 @@ function setLocalBuildingFeatureState(osmKey, state) {
   }
 }
 
+async function ensureDbFilterTagKeysLoaded() {
+  if (dbFilterTagKeysLoaded) return;
+  if (dbFilterTagKeysLoadingPromise) return dbFilterTagKeysLoadingPromise;
+  dbFilterTagKeysLoadingPromise = fetch('/api/filter-tag-keys')
+    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((payload) => {
+      const keys = Array.isArray(payload?.keys) ? payload.keys : [];
+      dbFilterTagKeys = keys.map((key) => String(key || '').trim()).filter(Boolean);
+      dbFilterTagKeysLoaded = true;
+      refreshTagKeysDatalist();
+    })
+    .catch(() => {
+      dbFilterTagKeys = [];
+      dbFilterTagKeysLoaded = false;
+    })
+    .finally(() => {
+      dbFilterTagKeysLoadingPromise = null;
+    });
+  return dbFilterTagKeysLoadingPromise;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function upsertFilterDataCacheItem(item) {
+  const key = String(item?.osmKey || '').trim();
+  if (!key) return;
+  const normalized = {
+    osmKey: key,
+    sourceTags: item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {},
+    archiInfo: item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : null,
+    hasExtraInfo: Boolean(item?.hasExtraInfo)
+  };
+  filterDataCache.delete(key);
+  filterDataCache.set(key, { cachedAt: Date.now(), item: normalized });
+  while (filterDataCache.size > FILTER_DATA_CACHE_MAX_ITEMS) {
+    const oldestKey = filterDataCache.keys().next().value;
+    if (!oldestKey) break;
+    filterDataCache.delete(oldestKey);
+  }
+}
+
+function getFilterDataFromCache(key) {
+  const entry = filterDataCache.get(key);
+  if (!entry) return null;
+  if ((Date.now() - entry.cachedAt) > FILTER_DATA_CACHE_TTL_MS) {
+    filterDataCache.delete(key);
+    return null;
+  }
+  filterDataCache.delete(key);
+  filterDataCache.set(key, entry);
+  return entry.item;
+}
+
+function getPaddedViewportBounds() {
+  const bounds = map.getBounds();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const spanLon = Math.max(0.0001, east - west);
+  const spanLat = Math.max(0.0001, north - south);
+  const padLon = spanLon * FILTER_PREFETCH_PADDING_RATIO;
+  const padLat = spanLat * FILTER_PREFETCH_PADDING_RATIO;
+  return {
+    minLon: clamp(west - padLon, -180, 180),
+    maxLon: clamp(east + padLon, -180, 180),
+    minLat: clamp(south - padLat, -85, 85),
+    maxLat: clamp(north + padLat, -85, 85)
+  };
+}
+
+async function prefetchFilterDataByViewportBounds() {
+  const b = getPaddedViewportBounds();
+  const params = new URLSearchParams({
+    minLon: b.minLon.toFixed(6),
+    minLat: b.minLat.toFixed(6),
+    maxLon: b.maxLon.toFixed(6),
+    maxLat: b.maxLat.toFixed(6),
+    limit: String(FILTER_PREFETCH_LIMIT)
+  });
+  const url = `/api/buildings/filter-data-bbox?${params.toString()}`;
+  if (filterPrefetchInFlight.has(url)) {
+    await filterPrefetchInFlight.get(url);
+    return;
+  }
+  const task = fetch(url, { cache: 'default' })
+    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((payload) => {
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      for (const item of items) upsertFilterDataCacheItem(item);
+    })
+    .catch(() => {
+      // ignore prefetch failures, fallback key-based fetch will handle misses
+    })
+    .finally(() => {
+      filterPrefetchInFlight.delete(url);
+    });
+  filterPrefetchInFlight.set(url, task);
+  await task;
+}
+
+async function fetchFilterDataByOsmKeys(keys) {
+  const normalized = [...new Set((keys || [])
+    .map((key) => String(key || '').trim())
+    .filter((key) => /^(way|relation)\/\d+$/.test(key))
+  )];
+  if (normalized.length === 0) return new Map();
+
+  const CHUNK_SIZE = 700;
+  const out = new Map();
+  const missing = [];
+  for (const key of normalized) {
+    const cached = getFilterDataFromCache(key);
+    if (cached) {
+      out.set(key, cached);
+    } else {
+      missing.push(key);
+    }
+  }
+
+  for (let i = 0; i < missing.length; i += CHUNK_SIZE) {
+    const chunk = missing.slice(i, i + CHUNK_SIZE);
+    const resp = await fetch('/api/buildings/filter-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: chunk })
+    });
+    if (!resp.ok) continue;
+    const payload = await resp.json().catch(() => ({ items: [] }));
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    for (const item of items) {
+      const key = String(item?.osmKey || '').trim();
+      if (!key) continue;
+      upsertFilterDataCacheItem(item);
+      const cached = getFilterDataFromCache(key);
+      if (cached) out.set(key, cached);
+    }
+  }
+  return out;
+}
+
+async function hydrateVisibleBuildingsForFiltering(features, loadSeq) {
+  if (!Array.isArray(features) || features.length === 0) return;
+  const keys = features
+    .map((feature) => String(feature?.properties?.osm_key || feature?.id || '').trim())
+    .filter(Boolean);
+  const byKey = await fetchFilterDataByOsmKeys(keys);
+  if (loadSeq !== visibleBuildingsLoadSeq) return;
+  for (const feature of features) {
+    const key = String(feature?.properties?.osm_key || feature?.id || '').trim();
+    if (!key) continue;
+    const item = byKey.get(key);
+    if (!item) continue;
+    feature.properties = feature.properties || {};
+    feature.properties.source_tags = item.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
+    feature.properties.archiInfo = item.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : null;
+    feature.properties.has_extra_info = item.hasExtraInfo ? 1 : 0;
+    feature.properties.hasExtraInfo = Boolean(item.hasExtraInfo);
+  }
+}
+
 function applyFiltersToCurrentData() {
   if (!currentBuildingsGeojson || !Array.isArray(currentBuildingsGeojson.features)) return;
   const rules = getFilterRules();
@@ -642,19 +785,14 @@ function applyFiltersToCurrentData() {
 function refreshTagKeysDatalist() {
   if (!filterTagKeysEl) return;
   const keys = new Set();
-  const localPriorityKeys = new Set();
-  for (const feature of currentBuildingsGeojson.features || []) {
-    const tags = getFilterTags(feature);
-    for (const key of Object.keys(tags || {})) {
-      keys.add(key);
-    }
-    for (const key of getLocalEditPriorityKeys(feature)) {
-      localPriorityKeys.add(key);
-    }
-  }
-  for (const key of LOCAL_EDIT_PRIORITY_TAG_KEYS) {
-    if (keys.has(key) && localPriorityKeys.has(key)) {
-      localPriorityKeys.add(key);
+  if (dbFilterTagKeysLoaded && Array.isArray(dbFilterTagKeys) && dbFilterTagKeys.length > 0) {
+    for (const key of dbFilterTagKeys) keys.add(key);
+  } else {
+    for (const feature of currentBuildingsGeojson.features || []) {
+      const tags = getFilterTags(feature);
+      for (const key of Object.keys(tags || {})) {
+        keys.add(key);
+      }
     }
   }
 
@@ -662,13 +800,13 @@ function refreshTagKeysDatalist() {
     const aGroup = getFilterTagGroupRank(a);
     const bGroup = getFilterTagGroupRank(b);
     if (aGroup !== bGroup) return aGroup - bGroup;
-    const aLocal = localPriorityKeys.has(a) ? 0 : 1;
-    const bLocal = localPriorityKeys.has(b) ? 0 : 1;
-    if (aLocal !== bLocal) return aLocal - bLocal;
     const aLabel = getFilterTagDisplayName(a);
     const bLabel = getFilterTagDisplayName(b);
     return aLabel.localeCompare(bLabel, 'ru');
   });
+  const signature = sorted.join('\n');
+  if (signature === lastRenderedFilterTagKeysSignature) return;
+  lastRenderedFilterTagKeysSignature = signature;
   filterTagKeysEl.innerHTML = sorted.map((k) => {
     const display = getFilterTagDisplayName(k);
     return `<option value="${escapeHtml(k)}" label="${escapeHtml(display)}">${escapeHtml(display)}</option>`;
@@ -789,6 +927,7 @@ function openFilterPanel() {
   filterShellEl.classList.remove(...FILTER_PANEL_CLOSED_CLASSES);
   filterShellEl.classList.add(...FILTER_PANEL_OPEN_CLASSES);
   setFilterToggleButtonState(true);
+  ensureDbFilterTagKeysLoaded();
   scheduleLoadBuildings();
 }
 
@@ -872,11 +1011,18 @@ function getVisibleBuildingsSnapshot() {
   const features = [];
   let sourceFeatures = [];
   try {
-    sourceFeatures = map.querySourceFeatures('local-buildings', {
-      sourceLayer: PMTILES_CONFIG.sourceLayer
-    }) || [];
+    sourceFeatures = map.queryRenderedFeatures({ layers: ['local-buildings-fill'] }) || [];
   } catch {
     sourceFeatures = [];
+  }
+  if (sourceFeatures.length === 0) {
+    try {
+      sourceFeatures = map.querySourceFeatures('local-buildings', {
+        sourceLayer: PMTILES_CONFIG.sourceLayer
+      }) || [];
+    } catch {
+      sourceFeatures = [];
+    }
   }
   for (const feature of sourceFeatures) {
     const identity = getFeatureIdentity(feature);
@@ -1901,6 +2047,7 @@ async function syncSelectedBuildingWithUrl() {
 }
 
 async function loadBuildingsByViewport() {
+  const loadSeq = ++visibleBuildingsLoadSeq;
   updateCartoBuildingsVisibility();
   if (!map.getSource('local-buildings')) {
     setHoveredBuilding(null);
@@ -1932,10 +2079,12 @@ async function loadBuildingsByViewport() {
     return;
   }
 
-  currentBuildingsGeojson = {
-    type: 'FeatureCollection',
-    features: getVisibleBuildingsSnapshot()
-  };
+  await prefetchFilterDataByViewportBounds();
+  if (loadSeq !== visibleBuildingsLoadSeq) return;
+  const features = getVisibleBuildingsSnapshot();
+  await hydrateVisibleBuildingsForFiltering(features, loadSeq);
+  if (loadSeq !== visibleBuildingsLoadSeq) return;
+  currentBuildingsGeojson = { type: 'FeatureCollection', features };
   refreshTagKeysDatalist();
   applyFiltersToCurrentData();
 }
@@ -2227,6 +2376,15 @@ function applySavedInfoToFeatureCaches(osmType, osmId, archiInfo) {
     setLocalBuildingFeatureState(key, { hasExtraInfo: true });
   }
   localEditStateOverrides.set(key, true);
+  const sourceTags = selected?.feature?.properties?.osm_key === key
+    ? (getSourceTags(selected.feature) || {})
+    : {};
+  upsertFilterDataCacheItem({
+    osmKey: key,
+    sourceTags,
+    archiInfo,
+    hasExtraInfo: true
+  });
 }
 
 modalCloseBtn.addEventListener('click', closeModal);
@@ -2431,6 +2589,7 @@ map.on('style.load', () => {
 
 map.on('load', async () => {
   await loadAuthState();
+  await ensureDbFilterTagKeysLoaded();
 
   scheduleLoadBuildings();
   if (filterRowsEl && filterRowsEl.children.length === 0) {
@@ -2446,6 +2605,7 @@ window.addEventListener('popstate', () => {
 
 map.on('moveend', scheduleLoadBuildings);
 map.on('zoomend', scheduleLoadBuildings);
+map.on('idle', scheduleLoadBuildings);
 map.on('sourcedata', (event) => {
   if (event.sourceId !== 'local-buildings') return;
   if (map.getZoom() < MIN_BUILDING_ZOOM) return;
