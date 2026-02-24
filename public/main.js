@@ -71,10 +71,17 @@ function getDefaultMapView() {
 }
 
 const defaultMapView = getDefaultMapView();
+const PMTILES_CONFIG = Object.freeze({
+  url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
+  sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
+});
 
 function getMapStyleForTheme(theme) {
   return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
 }
+
+const pmtilesProtocol = new pmtiles.Protocol();
+maplibregl.addProtocol('pmtiles', pmtilesProtocol.tile);
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -85,8 +92,6 @@ const map = new maplibregl.Map({
 });
 
 const MIN_BUILDING_ZOOM = 13;
-const TILE_FETCH_ZOOM_MAX = 16;
-const TILE_CACHE_LIMIT = 320;
 
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
@@ -94,11 +99,10 @@ let selected = null;
 let isAuthenticated = false;
 let isAdmin = false;
 let loadTimer = null;
-let loadRequestSeq = 0;
 let currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
 let filterRowSeq = 0;
-const tileCache = new Map();
-let visibleTileKeys = new Set();
+const localEditStateOverrides = new Map();
+let currentVisibleBuildingKeys = new Set();
 
 const authStatusEl = document.getElementById('auth-status');
 const logoutBtn = document.getElementById('logout-btn');
@@ -326,6 +330,33 @@ function parseKey(osmKey) {
   return { osmType, osmId };
 }
 
+function encodeOsmFeatureId(osmType, osmId) {
+  const typeBit = osmType === 'relation' ? 1 : 0;
+  return (Number(osmId) * 2) + typeBit;
+}
+
+function decodeOsmFeatureId(featureId) {
+  const n = Number(featureId);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
+  const osmType = (n % 2) === 1 ? 'relation' : 'way';
+  const osmId = Math.floor(n / 2);
+  if (!Number.isInteger(osmId) || osmId <= 0) return null;
+  return { osmType, osmId };
+}
+
+function getFeatureIdentity(feature) {
+  const fromKey = parseKey(feature?.properties?.osm_key);
+  if (fromKey) return fromKey;
+  const osmType = String(feature?.properties?.osm_type || '').trim();
+  const osmId = Number(feature?.properties?.osm_id);
+  if (['way', 'relation'].includes(osmType) && Number.isInteger(osmId)) {
+    return { osmType, osmId };
+  }
+  const fromEncoded = decodeOsmFeatureId(feature?.id);
+  if (fromEncoded) return fromEncoded;
+  return null;
+}
+
 function safeParseJsonMaybe(value) {
   if (value == null) return null;
   if (typeof value === 'object') return value;
@@ -352,8 +383,11 @@ function getSourceTags(feature) {
 
   const props = { ...(feature?.properties || {}) };
   delete props.osm_key;
+  delete props.osm_type;
+  delete props.osm_id;
   delete props.archiInfo;
   delete props.hasExtraInfo;
+  delete props.has_extra_info;
   delete props.source_tags;
   return props;
 }
@@ -467,21 +501,45 @@ function matchesRule(tags, rule) {
   return lhs.includes(rhs);
 }
 
+function setLocalBuildingFeatureState(osmKey, state) {
+  const parsed = parseKey(osmKey);
+  if (!parsed) return;
+  const id = encodeOsmFeatureId(parsed.osmType, parsed.osmId);
+  try {
+    map.setFeatureState(
+      { source: 'local-buildings', sourceLayer: PMTILES_CONFIG.sourceLayer, id },
+      state
+    );
+  } catch {
+    // source may be reloading while style/theme switches
+  }
+}
+
 function applyFiltersToCurrentData() {
   if (!currentBuildingsGeojson || !Array.isArray(currentBuildingsGeojson.features)) return;
   const rules = getFilterRules();
-  const source = map.getSource('local-buildings');
   let matched = 0;
+  const nextVisibleKeys = new Set();
 
   for (const feature of currentBuildingsGeojson.features) {
+    const key = String(feature?.properties?.osm_key || feature?.id || '');
+    if (!key) continue;
+    nextVisibleKeys.add(key);
     const tags = getFilterTags(feature);
     const isFiltered = rules.length > 0 && rules.every((rule) => matchesRule(tags, rule));
     feature.properties = feature.properties || {};
     feature.properties.isFiltered = isFiltered;
+    const hasExtraInfo = localEditStateOverrides.get(key) ?? Boolean(Number(feature.properties?.has_extra_info || 0));
+    feature.properties.hasExtraInfo = hasExtraInfo;
+    setLocalBuildingFeatureState(key, { isFiltered, hasExtraInfo });
     if (isFiltered) matched += 1;
   }
 
-  if (source) source.setData(currentBuildingsGeojson);
+  for (const prevKey of currentVisibleBuildingKeys) {
+    if (nextVisibleKeys.has(prevKey)) continue;
+    setLocalBuildingFeatureState(prevKey, { isFiltered: false });
+  }
+  currentVisibleBuildingKeys = nextVisibleKeys;
 
   if (!filterStatusEl) return;
   const total = currentBuildingsGeojson.features.length;
@@ -563,6 +621,13 @@ function onFilterRowsChange(event) {
   applyFiltersToCurrentData();
 }
 
+function shouldProcessVisibleBuildings() {
+  const hasActiveRules = getFilterRules().length > 0;
+  const needsAdminHighlight = Boolean(isAuthenticated && isAdmin);
+  const needsFilterPanelData = isFilterPanelOpen();
+  return hasActiveRules || needsAdminHighlight || needsFilterPanelData;
+}
+
 function addFilterRow() {
   if (!filterRowsEl) return;
   filterRowsEl.appendChild(buildFilterRow());
@@ -639,6 +704,7 @@ function openFilterPanel() {
   filterShellEl.classList.remove(...FILTER_PANEL_CLOSED_CLASSES);
   filterShellEl.classList.add(...FILTER_PANEL_OPEN_CLASSES);
   setFilterToggleButtonState(true);
+  scheduleLoadBuildings();
 }
 
 function closeFilterPanel() {
@@ -646,6 +712,7 @@ function closeFilterPanel() {
   filterShellEl.classList.remove(...FILTER_PANEL_OPEN_CLASSES);
   filterShellEl.classList.add(...FILTER_PANEL_CLOSED_CLASSES);
   setFilterToggleButtonState(false);
+  scheduleLoadBuildings();
 }
 
 function toggleFilterPanel() {
@@ -715,81 +782,30 @@ function setLabelsVisibility(show) {
   }
 }
 
-function clampTileX(x, z) {
-  const n = 2 ** z;
-  return ((x % n) + n) % n;
-}
-
-function clampTileY(y, z) {
-  const n = 2 ** z;
-  return Math.max(0, Math.min(n - 1, y));
-}
-
-function lonLatToTile(lon, lat, z) {
-  const n = 2 ** z;
-  const x = Math.floor(((lon + 180) / 360) * n);
-  const latRad = (Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180;
-  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-  return { x: clampTileX(x, z), y: clampTileY(y, z) };
-}
-
-function tileKey(z, x, y) {
-  return `${z}/${x}/${y}`;
-}
-
-function touchTileCacheEntry(key, value) {
-  if (tileCache.has(key)) tileCache.delete(key);
-  tileCache.set(key, value);
-}
-
-function pruneTileCache() {
-  while (tileCache.size > TILE_CACHE_LIMIT) {
-    const firstKey = tileCache.keys().next().value;
-    if (firstKey == null) break;
-    tileCache.delete(firstKey);
-  }
-}
-
-function getVisibleTileKeys() {
-  const bounds = map.getBounds();
-  const z = Math.min(TILE_FETCH_ZOOM_MAX, Math.max(MIN_BUILDING_ZOOM, Math.floor(map.getZoom())));
-
-  const nw = lonLatToTile(bounds.getWest(), bounds.getNorth(), z);
-  const se = lonLatToTile(bounds.getEast(), bounds.getSouth(), z);
-
-  const minX = Math.min(nw.x, se.x);
-  const maxX = Math.max(nw.x, se.x);
-  const minY = Math.min(nw.y, se.y);
-  const maxY = Math.max(nw.y, se.y);
-
-  const keys = [];
-  for (let x = minX; x <= maxX; x += 1) {
-    for (let y = minY; y <= maxY; y += 1) {
-      keys.push(tileKey(z, x, y));
-    }
-  }
-  return keys;
-}
-
-function rebuildCurrentBuildingsFromVisibleTiles() {
+function getVisibleBuildingsSnapshot() {
   const seen = new Set();
   const features = [];
-
-  for (const key of visibleTileKeys) {
-    const entry = tileCache.get(key);
-    const tileFeatures = entry?.geojson?.features || [];
-    for (const feature of tileFeatures) {
-      const id = String(feature?.id || feature?.properties?.osm_key || '');
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      features.push(feature);
-    }
+  let sourceFeatures = [];
+  try {
+    sourceFeatures = map.querySourceFeatures('local-buildings', {
+      sourceLayer: PMTILES_CONFIG.sourceLayer
+    }) || [];
+  } catch {
+    sourceFeatures = [];
   }
-
-  currentBuildingsGeojson = {
-    type: 'FeatureCollection',
-    features
-  };
+  for (const feature of sourceFeatures) {
+    const identity = getFeatureIdentity(feature);
+    if (!identity) continue;
+    const key = `${identity.osmType}/${identity.osmId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    feature.properties = feature.properties || {};
+    feature.properties.osm_key = key;
+    feature.properties.osm_type = identity.osmType;
+    feature.properties.osm_id = identity.osmId;
+    features.push(feature);
+  }
+  return features;
 }
 
 function osmAddressFromTags(tags) {
@@ -996,6 +1012,7 @@ function renderAuth() {
   }
 
   updateBuildingHighlightStyle();
+  scheduleLoadBuildings();
 
   if (selected && !modalEl.classList.contains('hidden')) {
     openModal(selected.feature);
@@ -1005,9 +1022,9 @@ function renderAuth() {
 function getBuildingFillColorExpression() {
   return [
     'case',
-    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
     '#f59e0b',
-    ['boolean', ['get', 'isFiltered'], false],
+    ['boolean', ['feature-state', 'isFiltered'], false],
     '#12b4a6',
     '#d3d3d3'
   ];
@@ -1016,9 +1033,9 @@ function getBuildingFillColorExpression() {
 function getBuildingFillOpacityExpression() {
   return [
     'case',
-    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
     0.82,
-    ['boolean', ['get', 'isFiltered'], false],
+    ['boolean', ['feature-state', 'isFiltered'], false],
     0.82,
     0.24
   ];
@@ -1027,9 +1044,9 @@ function getBuildingFillOpacityExpression() {
 function getBuildingLineColorExpression() {
   return [
     'case',
-    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
     '#b45309',
-    ['boolean', ['get', 'isFiltered'], false],
+    ['boolean', ['feature-state', 'isFiltered'], false],
     '#0b6d67',
     '#8c8c8c'
   ];
@@ -1038,9 +1055,9 @@ function getBuildingLineColorExpression() {
 function getBuildingLineWidthExpression() {
   return [
     'case',
-    ['all', ['boolean', ['get', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
+    ['all', ['boolean', ['feature-state', 'hasExtraInfo'], false], ['literal', Boolean(isAuthenticated && isAdmin)]],
     1.8,
-    ['boolean', ['get', 'isFiltered'], false],
+    ['boolean', ['feature-state', 'isFiltered'], false],
     1.4,
     1
   ];
@@ -1682,45 +1699,32 @@ async function loadBuildingsByViewport() {
   if (!map.getSource('local-buildings')) return;
 
   if (map.getZoom() < MIN_BUILDING_ZOOM) {
-    visibleTileKeys = new Set();
     currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
-    map.getSource('local-buildings').setData(currentBuildingsGeojson);
+    for (const key of currentVisibleBuildingKeys) {
+      setLocalBuildingFeatureState(key, { isFiltered: false });
+    }
+    currentVisibleBuildingKeys = new Set();
     refreshTagKeysDatalist();
     applyFiltersToCurrentData();
     return;
   }
 
-  const seq = ++loadRequestSeq;
-  const keys = getVisibleTileKeys();
-  visibleTileKeys = new Set(keys);
-
-  const missingKeys = keys.filter((key) => !tileCache.has(key));
-  const BATCH = 8;
-
-  for (let i = 0; i < missingKeys.length; i += BATCH) {
-    const chunk = missingKeys.slice(i, i + BATCH);
-    await Promise.all(chunk.map(async (key) => {
-      const [z, x, y] = key.split('/').map(Number);
-      try {
-        const resp = await fetch(`/api/buildings-tile/${z}/${x}/${y}`);
-        if (!resp.ok) return;
-        const geojson = await resp.json();
-        if (!geojson || !Array.isArray(geojson.features)) return;
-        touchTileCacheEntry(key, { geojson, ts: Date.now() });
-      } catch {
-        // keep map responsive if one tile fails
-      }
-    }));
-    if (seq !== loadRequestSeq) return;
+  if (!shouldProcessVisibleBuildings()) {
+    currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
+    for (const key of currentVisibleBuildingKeys) {
+      setLocalBuildingFeatureState(key, { isFiltered: false, hasExtraInfo: false });
+    }
+    currentVisibleBuildingKeys = new Set();
+    if (filterStatusEl) {
+      filterStatusEl.textContent = t('filterInactive', null, 'Фильтр не активен.');
+    }
+    return;
   }
 
-  for (const key of keys) {
-    const entry = tileCache.get(key);
-    if (entry) touchTileCacheEntry(key, entry);
-  }
-  pruneTileCache();
-
-  rebuildCurrentBuildingsFromVisibleTiles();
+  currentBuildingsGeojson = {
+    type: 'FeatureCollection',
+    features: getVisibleBuildingsSnapshot()
+  };
   refreshTagKeysDatalist();
   applyFiltersToCurrentData();
 }
@@ -2003,22 +2007,15 @@ function applySavedInfoToFeatureCaches(osmType, osmId, archiInfo) {
   for (const feature of currentBuildingsGeojson.features || []) {
     if (String(feature?.properties?.osm_key || feature?.id || '') !== key) continue;
     applySavedInfoToFeature(feature, archiInfo);
+    feature.properties.has_extra_info = 1;
+    feature.properties.hasExtraInfo = true;
     touchedCurrent = true;
   }
 
   if (touchedCurrent) {
-    const source = map.getSource('local-buildings');
-    if (source) source.setData(currentBuildingsGeojson);
+    setLocalBuildingFeatureState(key, { hasExtraInfo: true });
   }
-
-  for (const entry of tileCache.values()) {
-    const features = entry?.geojson?.features;
-    if (!Array.isArray(features)) continue;
-    for (const feature of features) {
-      if (String(feature?.properties?.osm_key || feature?.id || '') !== key) continue;
-      applySavedInfoToFeature(feature, archiInfo);
-    }
-  }
+  localEditStateOverrides.set(key, true);
 }
 
 modalCloseBtn.addEventListener('click', closeModal);
@@ -2049,9 +2046,12 @@ if (adminEditsModalEl) {
 
 function ensureMapSourcesAndLayers() {
   if (!map.getSource('local-buildings')) {
+    const pmtilesUrl = PMTILES_CONFIG.url.startsWith('http')
+      ? PMTILES_CONFIG.url
+      : `${window.location.origin}${PMTILES_CONFIG.url.startsWith('/') ? '' : '/'}${PMTILES_CONFIG.url}`;
     map.addSource('local-buildings', {
-      type: 'geojson',
-      data: currentBuildingsGeojson
+      type: 'vector',
+      url: `pmtiles://${pmtilesUrl}`
     });
   }
 
@@ -2070,6 +2070,8 @@ function ensureMapSourcesAndLayers() {
       id: 'local-buildings-fill',
       type: 'fill',
       source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: MIN_BUILDING_ZOOM,
       paint: {
         'fill-color': getBuildingFillColorExpression(),
         'fill-opacity': getBuildingFillOpacityExpression(),
@@ -2085,6 +2087,8 @@ function ensureMapSourcesAndLayers() {
       id: 'local-buildings-line',
       type: 'line',
       source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: MIN_BUILDING_ZOOM,
       paint: {
         'line-color': getBuildingLineColorExpression(),
         'line-width': getBuildingLineWidthExpression(),
@@ -2119,8 +2123,6 @@ function ensureMapSourcesAndLayers() {
     });
   }
 
-  const buildingsSource = map.getSource('local-buildings');
-  if (buildingsSource) buildingsSource.setData(currentBuildingsGeojson);
   setSelectedFeature(selected?.feature || null);
 }
 
@@ -2136,10 +2138,10 @@ async function onBuildingsLayerClick(event) {
   const feature = event.features && event.features[0];
   if (!feature) return;
   normalizeFeatureInfo(feature);
+  const parsed = getFeatureIdentity(feature);
+  if (!parsed) return;
 
   if (adminReassignPickState && isAuthenticated && isAdmin) {
-    const parsed = parseKey(feature.properties?.osm_key);
-    if (!parsed) return;
     const { fromOsmType, fromOsmId } = adminReassignPickState;
     adminReassignPickState = null;
     await reassignLocalEdit(fromOsmType, fromOsmId, parsed.osmType, parsed.osmId);
@@ -2148,7 +2150,8 @@ async function onBuildingsLayerClick(event) {
   }
 
   try {
-    await selectBuildingFeature(feature);
+    const fullFeature = await fetchBuildingById(parsed.osmType, parsed.osmId);
+    await selectBuildingFeature(fullFeature || feature);
   } catch {
     // no-op
   }
@@ -2192,5 +2195,10 @@ map.on('load', async () => {
 
 map.on('moveend', scheduleLoadBuildings);
 map.on('zoomend', scheduleLoadBuildings);
+map.on('sourcedata', (event) => {
+  if (event.sourceId !== 'local-buildings') return;
+  if (map.getZoom() < MIN_BUILDING_ZOOM) return;
+  scheduleLoadBuildings();
+});
 map.on('moveend', writeViewToUrl);
 map.on('zoomend', writeViewToUrl);

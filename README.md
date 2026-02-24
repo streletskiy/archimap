@@ -16,13 +16,13 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 - URL state for map view/building selection.
 - Redis-backed sessions.
 - Automatic contour sync (startup + scheduled, configurable via env).
-- Tile-based contour loading with client-side cache for better map performance.
+- PMTiles vector layer for building contours (generated locally via tippecanoe).
 
 ## Tech Stack
 
 - Backend: Node.js, Express, better-sqlite3
 - Frontend: Vanilla JS, MapLibre GL, Tailwind/Flowbite
-- Data import: Python + QuackOSM + DuckDB
+- Data import: Python + QuackOSM + DuckDB + tippecanoe (PMTiles)
 - Sessions: Redis
 
 ## Local Run
@@ -78,6 +78,8 @@ What it does:
 - in `OSM_PBF_PATH` mode: imports from a local `.osm.pbf` file;
 - imports building geometries + all available OSM tags into `building_contours`;
 - removes stale buildings no longer present in the latest import;
+- rebuilds `data/buildings.pmtiles` from local SQLite via `tippecanoe`;
+- writes minimal PMTiles attributes (`feature.id` + `osm_id`) to keep tiles compact;
 - prints progress in terminal.
 
 Importer implementation details:
@@ -133,6 +135,15 @@ Importer implementation details:
 - `PBF_PROGRESS_COUNT_PASS` - optional fallback retry flag (`--no-count-pass` on retry).
 - `AUTO_SYNC_ENABLED` - enable/disable auto sync (`true/false`).
 - `AUTO_SYNC_ON_START` - run sync automatically on server startup (`true/false`).
+  - startup sync is skipped automatically when both `building_contours` and PMTiles file already exist.
+  - when `AUTO_SYNC_ON_START=false`, app still builds missing PMTiles on startup from existing `building_contours` (without full OSM import).
 - `AUTO_SYNC_INTERVAL_HOURS` - periodic sync interval in hours (`<=0` disables periodic sync).
 - `SEARCH_INDEX_BATCH_SIZE` - FTS rebuild batch size for progress/indexing loop (`200..20000`, default `2500`).
 - `LOCAL_EDITS_DB_PATH` - path to SQLite with local edits metadata (default: `data/local-edits.db`).
+- `BUILDINGS_PMTILES_FILE` - output PMTiles filename in `data/` (default: `buildings.pmtiles`).
+- `BUILDINGS_PMTILES_SOURCE_LAYER` - vector layer name written by tippecanoe (default: `buildings`).
+- `BUILDINGS_PMTILES_MIN_ZOOM` - minimum PMTiles zoom for building layer (default: `13`).
+- `BUILDINGS_PMTILES_MAX_ZOOM` - maximum PMTiles zoom for building layer (default: `16`).
+- `TIPPECANOE_BIN` - optional absolute path to `tippecanoe` binary.
+- `TIPPECANOE_PROGRESS_JSON` - print tippecanoe progress as JSON lines (default: `true`, useful in Docker logs).
+- `TIPPECANOE_PROGRESS_INTERVAL_SEC` - tippecanoe progress update interval in seconds (default: `5`).

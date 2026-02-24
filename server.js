@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
@@ -23,9 +24,12 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 const MAP_DEFAULT_LON = Number(process.env.MAP_DEFAULT_LON ?? 44.0059);
 const MAP_DEFAULT_LAT = Number(process.env.MAP_DEFAULT_LAT ?? 56.3269);
 const MAP_DEFAULT_ZOOM = Number(process.env.MAP_DEFAULT_ZOOM ?? 15);
+const BUILDINGS_PMTILES_FILE = path.basename(String(process.env.BUILDINGS_PMTILES_FILE || 'buildings.pmtiles').trim() || 'buildings.pmtiles');
+const BUILDINGS_PMTILES_SOURCE_LAYER = String(process.env.BUILDINGS_PMTILES_SOURCE_LAYER || 'buildings').trim() || 'buildings';
 
 const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
+const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-osm-buildings.js');
@@ -34,6 +38,7 @@ let sessionMiddleware = null;
 
 let syncInProgress = false;
 let currentSyncChild = null;
+let currentPmtilesBuildChild = null;
 let currentSearchRebuildChild = null;
 let httpServer = null;
 let shuttingDown = false;
@@ -263,12 +268,32 @@ app.use(express.json());
 
 app.get('/app-config.js', (req, res) => {
   const mapDefault = normalizeMapConfig();
+  const buildingsPmtiles = {
+    url: '/api/buildings.pmtiles',
+    sourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER
+  };
   res.type('application/javascript').send(
-    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault })};`
+    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles })};`
   );
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/api/buildings.pmtiles', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  return res.sendFile(buildingsPmtilesPath, (error) => {
+    if (!error) return;
+    if (error.code === 'ENOENT') {
+      if (!res.headersSent) {
+        res.status(404).json({ error: 'Файл PMTiles не найден. Выполните sync для генерации tileset.' });
+      }
+      return;
+    }
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Не удалось отдать PMTiles файл' });
+    }
+  });
+});
 
 app.use((req, res, next) => {
   if (!sessionMiddleware) {
@@ -456,46 +481,6 @@ function buildChangesFromRows(localRow, tags) {
     });
   }
   return changes;
-}
-
-function tileBbox(z, x, y) {
-  const zi = Number(z);
-  const xi = Number(x);
-  const yi = Number(y);
-  if (!Number.isInteger(zi) || !Number.isInteger(xi) || !Number.isInteger(yi)) return null;
-  if (zi < 0 || zi > 22) return null;
-  const n = 2 ** zi;
-  if (xi < 0 || xi >= n || yi < 0 || yi >= n) return null;
-
-  const lon1 = (xi / n) * 360 - 180;
-  const lon2 = ((xi + 1) / n) * 360 - 180;
-  const lat1 = (Math.atan(Math.sinh(Math.PI * (1 - (2 * yi) / n))) * 180) / Math.PI;
-  const lat2 = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (yi + 1)) / n))) * 180) / Math.PI;
-
-  return {
-    minLon: Math.min(lon1, lon2),
-    minLat: Math.min(lat1, lat2),
-    maxLon: Math.max(lon1, lon2),
-    maxLat: Math.max(lat1, lat2)
-  };
-}
-
-function getBuildingsFeatureCollectionByBbox(minLon, minLat, maxLon, maxLat, limit = 12000) {
-  const rows = db.prepare(`
-    SELECT osm_type, osm_id, tags_json, geometry_json
-    FROM building_contours
-    WHERE max_lon >= ? AND min_lon <= ?
-      AND max_lat >= ? AND min_lat <= ?
-    LIMIT ?
-  `).all(minLon, maxLon, minLat, maxLat, limit);
-
-  const features = rows.map(rowToFeature);
-  attachInfoToFeatures(features);
-
-  return {
-    type: 'FeatureCollection',
-    features
-  };
 }
 
 function normalizeSearchTokens(queryText) {
@@ -961,24 +946,6 @@ app.post('/api/building-info', requireAuth, (req, res) => {
   return res.json({ ok: true });
 });
 
-app.get('/api/buildings-tile/:z/:x/:y', (req, res) => {
-  const bbox = tileBbox(req.params.z, req.params.x, req.params.y);
-  if (!bbox) {
-    return res.status(400).json({ error: 'Некорректный tile z/x/y' });
-  }
-
-  const out = getBuildingsFeatureCollectionByBbox(
-    bbox.minLon,
-    bbox.minLat,
-    bbox.maxLon,
-    bbox.maxLat,
-    12000
-  );
-
-  res.setHeader('Cache-Control', 'public, max-age=120');
-  return res.json(out);
-});
-
 app.get('/api/building/:osmType/:osmId', (req, res) => {
   const osmType = req.params.osmType;
   const osmId = Number(req.params.osmId);
@@ -1230,14 +1197,82 @@ function runCitySync(reason = 'interval') {
   });
 }
 
+function runPmtilesBuild(reason = 'startup-missing') {
+  if (currentPmtilesBuildChild) {
+    console.log(`[pmtiles] skipped (${reason}): generation already running`);
+    return;
+  }
+  if (syncInProgress) {
+    console.log(`[pmtiles] skipped (${reason}): full sync is running`);
+    return;
+  }
+
+  console.log(`[pmtiles] generation started (${reason})`);
+  const child = spawn(process.execPath, [syncScriptPath, '--pmtiles-only'], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: 'inherit'
+  });
+  currentPmtilesBuildChild = child;
+
+  child.on('error', (error) => {
+    currentPmtilesBuildChild = null;
+    console.error(`[pmtiles] failed to start: ${String(error.message || error)}`);
+  });
+
+  child.on('close', (code, signal) => {
+    currentPmtilesBuildChild = null;
+    if (shuttingDown && (signal === 'SIGTERM' || signal === 'SIGINT')) {
+      console.log('[pmtiles] generation stopped due to shutdown');
+      return;
+    }
+    if (code === 0) {
+      console.log('[pmtiles] generation finished successfully');
+    } else {
+      console.error(`[pmtiles] generation failed with code ${code}`);
+    }
+  });
+}
+
+function shouldRunStartupSync() {
+  const hasPmtiles = fs.existsSync(buildingsPmtilesPath);
+  const contoursTotal = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+  const hasContours = contoursTotal > 0;
+  if (hasContours && hasPmtiles) {
+    console.log('[auto-sync] startup skipped: contours and PMTiles already exist');
+    return false;
+  }
+  return true;
+}
+
+function maybeGeneratePmtilesOnStartup() {
+  if (AUTO_SYNC_ENABLED && AUTO_SYNC_ON_START) return;
+
+  const hasPmtiles = fs.existsSync(buildingsPmtilesPath);
+  if (hasPmtiles) return;
+
+  const contoursTotal = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+  if (contoursTotal <= 0) {
+    console.log('[pmtiles] startup generation skipped: building_contours is empty');
+    return;
+  }
+
+  runPmtilesBuild('startup-missing');
+}
+
 function initAutoSync() {
   if (!AUTO_SYNC_ENABLED) {
     console.log('[auto-sync] disabled by AUTO_SYNC_ENABLED=false');
+    maybeGeneratePmtilesOnStartup();
     return;
   }
 
   if (AUTO_SYNC_ON_START) {
-    runCitySync('startup');
+    if (shouldRunStartupSync()) {
+      runCitySync('startup');
+    }
+  } else {
+    maybeGeneratePmtilesOnStartup();
   }
 
   if (Number.isFinite(AUTO_SYNC_INTERVAL_HOURS) && AUTO_SYNC_INTERVAL_HOURS > 0) {
@@ -1320,6 +1355,13 @@ function shutdown(signal) {
   if (currentSyncChild && !currentSyncChild.killed) {
     try {
       currentSyncChild.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+  }
+  if (currentPmtilesBuildChild && !currentPmtilesBuildChild.killed) {
+    try {
+      currentPmtilesBuildChild.kill('SIGTERM');
     } catch {
       // ignore
     }
