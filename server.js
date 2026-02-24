@@ -34,12 +34,14 @@ const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, '
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-osm-buildings.js');
 const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
+const filterTagKeysRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-filter-tag-keys-cache.js');
 let sessionMiddleware = null;
 
 let syncInProgress = false;
 let currentSyncChild = null;
 let currentPmtilesBuildChild = null;
 let currentSearchRebuildChild = null;
+let currentFilterTagKeysRebuildChild = null;
 let httpServer = null;
 let shuttingDown = false;
 let scheduledSkipLogged = false;
@@ -48,6 +50,8 @@ let searchIndexRebuildInProgress = false;
 let queuedSearchIndexRebuildReason = null;
 const pendingSearchIndexRefreshes = new Set();
 let filterTagKeysCache = { keys: null, loadedAt: 0 };
+let filterTagKeysRebuildInProgress = false;
+let queuedFilterTagKeysRebuildReason = null;
 
 const MAX_NODE_TIMER_MS = 2_147_483_647;
 const SEARCH_INDEX_BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
@@ -184,7 +188,173 @@ CREATE TABLE IF NOT EXISTS building_search_source (
 
 CREATE INDEX IF NOT EXISTS idx_building_search_source_osm
 ON building_search_source (osm_type, osm_id);
+
+CREATE TABLE IF NOT EXISTS filter_tag_keys_cache (
+  tag_key TEXT PRIMARY KEY,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
+
+const rtreeState = {
+  supported: false,
+  ready: false,
+  rebuilding: false
+};
+const RTREE_REBUILD_BATCH_SIZE = Math.max(500, Math.min(20000, Number(process.env.RTREE_REBUILD_BATCH_SIZE || 4000)));
+const RTREE_REBUILD_PAUSE_MS = Math.max(0, Math.min(200, Number(process.env.RTREE_REBUILD_PAUSE_MS || 8)));
+
+function ensureBuildingContoursRtreeSchema() {
+  const compileOptions = db.prepare('PRAGMA compile_options').all();
+  const hasRtreeSupport = compileOptions.some((row) => String(row?.compile_options || '').includes('ENABLE_RTREE'));
+  if (!hasRtreeSupport) {
+    console.warn('[db] SQLite R*Tree is not available (ENABLE_RTREE missing), bbox endpoint will use fallback query');
+    rtreeState.supported = false;
+    rtreeState.ready = false;
+    return;
+  }
+
+  db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS building_contours_rtree
+USING rtree(
+  contour_rowid,
+  min_lon, max_lon,
+  min_lat, max_lat
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_building_contours_rtree_insert
+AFTER INSERT ON building_contours
+BEGIN
+  INSERT OR REPLACE INTO building_contours_rtree (contour_rowid, min_lon, max_lon, min_lat, max_lat)
+  VALUES (new.rowid, new.min_lon, new.max_lon, new.min_lat, new.max_lat);
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_building_contours_rtree_update
+AFTER UPDATE OF min_lon, max_lon, min_lat, max_lat ON building_contours
+BEGIN
+  DELETE FROM building_contours_rtree WHERE contour_rowid = old.rowid;
+  INSERT INTO building_contours_rtree (contour_rowid, min_lon, max_lon, min_lat, max_lat)
+  VALUES (new.rowid, new.min_lon, new.max_lon, new.min_lat, new.max_lat);
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_building_contours_rtree_delete
+AFTER DELETE ON building_contours
+BEGIN
+  DELETE FROM building_contours_rtree WHERE contour_rowid = old.rowid;
+END;
+`);
+  rtreeState.supported = true;
+}
+
+function needsBuildingContoursRtreeRebuild() {
+  if (!rtreeState.supported) return false;
+  const contourCount = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+  const rtreeCount = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours_rtree').get()?.total || 0);
+  return contourCount !== rtreeCount;
+}
+
+function scheduleBuildingContoursRtreeRebuild(reason = 'startup') {
+  if (!rtreeState.supported || rtreeState.ready || rtreeState.rebuilding) return;
+
+  const waitForIdle = () => {
+    if (syncInProgress) {
+      console.log('[db] R*Tree rebuild postponed: sync is running');
+      setTimeout(waitForIdle, 5000);
+      return;
+    }
+    rebuildBuildingContoursRtreeInBackground(reason).catch((error) => {
+      console.error(`[db] R*Tree rebuild failed: ${String(error.message || error)}`);
+    });
+  };
+
+  setTimeout(waitForIdle, 0);
+}
+
+async function rebuildBuildingContoursRtreeInBackground(reason = 'startup') {
+  if (!rtreeState.supported || rtreeState.rebuilding) return;
+  rtreeState.rebuilding = true;
+  rtreeState.ready = false;
+
+  const total = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+  console.log(`[db] R*Tree rebuild started (${reason}), total contours: ${total}`);
+
+  const batchSize = RTREE_REBUILD_BATCH_SIZE;
+  const readBatch = db.prepare(`
+    SELECT rowid, min_lon, max_lon, min_lat, max_lat
+    FROM building_contours
+    WHERE rowid > ?
+    ORDER BY rowid
+    LIMIT ?
+  `);
+  const insertRow = db.prepare(`
+    INSERT OR REPLACE INTO building_contours_rtree (contour_rowid, min_lon, max_lon, min_lat, max_lat)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const insertBatch = db.transaction((rows) => {
+    for (const row of rows) {
+      insertRow.run(row.rowid, row.min_lon, row.max_lon, row.min_lat, row.max_lat);
+    }
+  });
+
+  try {
+    db.exec('DELETE FROM building_contours_rtree;');
+    if (total === 0) {
+      rtreeState.ready = true;
+      console.log('[db] R*Tree rebuild finished: no contours to index');
+      return;
+    }
+
+    let cursor = 0;
+    let inserted = 0;
+    let lastLoggedAt = 0;
+    while (true) {
+      const rows = readBatch.all(cursor, batchSize);
+      if (rows.length === 0) break;
+      insertBatch(rows);
+      inserted += rows.length;
+      cursor = Number(rows[rows.length - 1].rowid);
+
+      const now = Date.now();
+      if (inserted === total || (now - lastLoggedAt) >= 1000) {
+        const percent = Math.min(100, (inserted / Math.max(1, total)) * 100);
+        console.log(`[db] R*Tree rebuild progress: ${inserted}/${total} (${percent.toFixed(1)}%)`);
+        lastLoggedAt = now;
+      }
+
+      if (RTREE_REBUILD_PAUSE_MS > 0) {
+        await new Promise((resolve) => setTimeout(resolve, RTREE_REBUILD_PAUSE_MS));
+      } else {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+
+    const contourCount = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+    const rtreeCount = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours_rtree').get()?.total || 0);
+    if (contourCount !== rtreeCount) {
+      console.warn('[db] R*Tree rebuild finished with drift, scheduling retry');
+      setTimeout(() => scheduleBuildingContoursRtreeRebuild('retry'), 1000);
+      return;
+    }
+
+    rtreeState.ready = true;
+    console.log(`[db] R*Tree rebuild completed: ${inserted} rows indexed`);
+  } catch (error) {
+    rtreeState.ready = false;
+    throw error;
+  } finally {
+    rtreeState.rebuilding = false;
+  }
+}
+
+ensureBuildingContoursRtreeSchema();
+rtreeState.ready = rtreeState.supported && !needsBuildingContoursRtreeRebuild();
+if (rtreeState.supported) {
+  const contourCount = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+  const rtreeCount = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours_rtree').get()?.total || 0);
+  console.log(`[db] R*Tree status at startup: ready=${rtreeState.ready}, contours=${contourCount}, rtree=${rtreeCount}`);
+  if (!rtreeState.ready) {
+    console.log('[db] R*Tree requires rebuild, bbox endpoint will use fallback query until ready');
+  }
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS local.architectural_info (
@@ -296,14 +466,62 @@ app.get('/api/buildings.pmtiles', (req, res) => {
   });
 });
 
-const selectFilterTagKeys = db.prepare(`
-  SELECT DISTINCT trim(je.key) AS tag_key
-  FROM building_contours bc,
-       json_each(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END) AS je
-  WHERE je.key IS NOT NULL
-    AND trim(je.key) <> ''
+const selectFilterTagKeysFromCache = db.prepare(`
+  SELECT tag_key
+  FROM filter_tag_keys_cache
   ORDER BY tag_key COLLATE NOCASE
 `);
+
+function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
+  if (filterTagKeysRebuildInProgress) {
+    queuedFilterTagKeysRebuildReason = reason;
+    return;
+  }
+
+  filterTagKeysRebuildInProgress = true;
+  console.log(`[filter-tags] cache rebuild worker started (${reason})`);
+  const child = spawn(process.execPath, [filterTagKeysRebuildScriptPath], {
+    cwd: __dirname,
+    env: {
+      ...process.env,
+      ARCHIMAP_DB_PATH: dbPath,
+      FILTER_TAG_KEYS_REBUILD_REASON: reason
+    },
+    stdio: 'inherit'
+  });
+  currentFilterTagKeysRebuildChild = child;
+
+  child.on('error', (error) => {
+    currentFilterTagKeysRebuildChild = null;
+    filterTagKeysRebuildInProgress = false;
+    console.error(`[filter-tags] rebuild worker failed to start: ${String(error.message || error)}`);
+    if (queuedFilterTagKeysRebuildReason) {
+      const nextReason = queuedFilterTagKeysRebuildReason;
+      queuedFilterTagKeysRebuildReason = null;
+      scheduleFilterTagKeysCacheRebuild(nextReason);
+    }
+  });
+
+  child.on('close', (code, signal) => {
+    currentFilterTagKeysRebuildChild = null;
+    filterTagKeysRebuildInProgress = false;
+    if (shuttingDown && (signal === 'SIGTERM' || signal === 'SIGINT')) {
+      console.log('[filter-tags] rebuild worker stopped due to shutdown');
+      return;
+    }
+    if (code === 0) {
+      filterTagKeysCache = { keys: null, loadedAt: 0 };
+      console.log('[filter-tags] cache rebuild worker finished successfully');
+    } else {
+      console.error(`[filter-tags] rebuild worker failed with code ${code}`);
+    }
+    if (queuedFilterTagKeysRebuildReason) {
+      const nextReason = queuedFilterTagKeysRebuildReason;
+      queuedFilterTagKeysRebuildReason = null;
+      scheduleFilterTagKeysCacheRebuild(nextReason);
+    }
+  });
+}
 
 function getFilterTagKeysCached() {
   const now = Date.now();
@@ -311,18 +529,30 @@ function getFilterTagKeysCached() {
   if (Array.isArray(filterTagKeysCache.keys) && (now - filterTagKeysCache.loadedAt) < ttlMs) {
     return filterTagKeysCache.keys;
   }
-  const keys = selectFilterTagKeys
+  const cachedKeys = selectFilterTagKeysFromCache
     .all()
     .map((row) => String(row?.tag_key || '').trim())
     .filter(Boolean);
-  filterTagKeysCache = { keys, loadedAt: now };
-  return keys;
+
+  if (cachedKeys.length > 0) {
+    filterTagKeysCache = { keys: cachedKeys, loadedAt: now };
+    return cachedKeys;
+  }
+
+  if (!filterTagKeysRebuildInProgress) {
+    scheduleFilterTagKeysCacheRebuild('cold-start');
+  }
+  filterTagKeysCache = { keys: [], loadedAt: now };
+  return [];
 }
 
 app.get('/api/filter-tag-keys', (req, res) => {
   try {
     const keys = getFilterTagKeysCached();
-    res.json({ keys });
+    res.json({
+      keys,
+      warmingUp: filterTagKeysRebuildInProgress || keys.length === 0
+    });
   } catch (error) {
     res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
   }
@@ -528,14 +758,41 @@ app.get('/api/buildings/filter-data-bbox', (req, res) => {
     return res.status(400).json({ error: 'Некорректные границы bbox' });
   }
 
-  const rows = db.prepare(`
-    ${FILTER_DATA_SELECT_FIELDS_SQL}
-    WHERE bc.max_lon >= ?
-      AND bc.min_lon <= ?
-      AND bc.max_lat >= ?
-      AND bc.min_lat <= ?
-    LIMIT ?
-  `).all(minLon, maxLon, minLat, maxLat, limit);
+  const rows = rtreeState.ready
+    ? db.prepare(`
+      SELECT
+        bc.osm_type,
+        bc.osm_id,
+        bc.tags_json,
+        ai.osm_id AS info_osm_id,
+        ai.name,
+        ai.style,
+        ai.levels,
+        ai.year_built,
+        ai.architect,
+        ai.address,
+        ai.description,
+        ai.updated_by,
+        ai.updated_at
+      FROM building_contours_rtree br
+      JOIN building_contours bc
+        ON bc.rowid = br.contour_rowid
+      LEFT JOIN local.architectural_info ai
+        ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+      WHERE br.max_lon >= ?
+        AND br.min_lon <= ?
+        AND br.max_lat >= ?
+        AND br.min_lat <= ?
+      LIMIT ?
+    `).all(minLon, maxLon, minLat, maxLat, limit)
+    : db.prepare(`
+      ${FILTER_DATA_SELECT_FIELDS_SQL}
+      WHERE bc.max_lon >= ?
+        AND bc.min_lon <= ?
+        AND bc.max_lat >= ?
+        AND bc.min_lat <= ?
+      LIMIT ?
+    `).all(minLon, maxLon, minLat, maxLat, limit);
 
   const items = rows.map(mapFilterDataRow);
   res.setHeader('Cache-Control', 'public, max-age=60');
@@ -1356,6 +1613,8 @@ function runCitySync(reason = 'interval') {
     if (code === 0) {
       console.log('[auto-sync] finished successfully');
       rebuildSearchIndex('auto-sync');
+      filterTagKeysCache = { keys: null, loadedAt: 0 };
+      scheduleFilterTagKeysCacheRebuild('auto-sync');
     } else {
       console.error(`[auto-sync] failed with code ${code}`);
     }
@@ -1538,6 +1797,13 @@ function shutdown(signal) {
       // ignore
     }
   }
+  if (currentFilterTagKeysRebuildChild && !currentFilterTagKeysRebuildChild.killed) {
+    try {
+      currentFilterTagKeysRebuildChild.kill('SIGTERM');
+    } catch {
+      // ignore
+    }
+  }
 
   if (nextSyncTimer) {
     clearTimeout(nextSyncTimer);
@@ -1570,7 +1836,11 @@ initSessionStore()
       console.log(`[server] Local:   http://localhost:${PORT}`);
       console.log(`[server] Network: http://${HOST}:${PORT}`);
       rebuildSearchIndex('startup');
+      scheduleFilterTagKeysCacheRebuild('startup');
       initAutoSync();
+      if (!rtreeState.ready) {
+        scheduleBuildingContoursRtreeRebuild('startup');
+      }
     });
   })
   .catch((error) => {

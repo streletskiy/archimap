@@ -24,6 +24,8 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 - Building modal with in-place editing (authorized users).
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
+- Viewport filter prefetch uses SQLite R*Tree bbox index with fallback to B-tree query when R*Tree is unavailable.
+- Filter-tag keys are served from persistent SQLite cache and rebuilt in a background worker.
 - Global building search (SQLite-wide, not viewport-limited) with FTS5 relevance + distance ranking.
 - Search modal with skeleton loading and quick "go to building" action.
 - URL state for map view and selected building.
@@ -42,7 +44,9 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 
 - Primary DB: `data/archimap.db`
   - `building_contours` (geometry + OSM tags)
+  - `building_contours_rtree` (SQLite R*Tree bbox index)
   - Search structures (`building_search_source`, `building_search_fts`)
+  - Filter tag key cache (`filter_tag_keys_cache`)
 - Local metadata DB: `data/local-edits.db`
   - `architectural_info` overrides and additions
 - Tiles artifact: `data/buildings.pmtiles`
@@ -50,6 +54,8 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 - Sync pipeline:
   - `scripts/sync-osm-buildings.js`
   - `scripts/sync-osm-buildings.py`
+  - `scripts/rebuild-search-index.js`
+  - `scripts/rebuild-filter-tag-keys-cache.js`
 
 ## Quick Start (Local)
 
@@ -164,6 +170,22 @@ Index lifecycle:
 - post-auto-sync rebuild is conditional with the same checks;
 - full rebuild runs in worker process: `scripts/rebuild-search-index.js`.
 
+## Viewport Filter Logic
+
+- Prefetch API: `GET /api/buildings/filter-data-bbox?minLon=...&minLat=...&maxLon=...&maxLat=...&limit=...`
+- Data API: `POST /api/buildings/filter-data` with `keys: string[]`.
+- BBox query path:
+  - primary: `building_contours_rtree` -> `building_contours` -> `local.architectural_info`,
+  - fallback: direct bbox scan on `building_contours` when R*Tree is unavailable/not ready.
+- R*Tree lifecycle:
+  - schema + triggers are ensured on startup and during sync,
+  - startup never blocks HTTP availability; rebuild runs in background batches,
+  - rebuild progress is logged in server console.
+- Tag keys for filter UI:
+  - served from `filter_tag_keys_cache`,
+  - rebuilt in worker process (`scripts/rebuild-filter-tag-keys-cache.js`) on startup/auto-sync,
+  - `/api/filter-tag-keys` returns `{ keys, warmingUp }` while cache is being warmed.
+
 ## API Overview
 
 - PMTiles:
@@ -172,6 +194,10 @@ Index lifecycle:
   - `GET /api/building/:osmType/:osmId`
   - `GET /api/building-info/:osmType/:osmId`
   - `POST /api/building-info`
+- Viewport filter:
+  - `GET /api/buildings/filter-data-bbox`
+  - `POST /api/buildings/filter-data`
+  - `GET /api/filter-tag-keys`
 - Search:
   - `GET /api/search-buildings`
 - Auth:
@@ -200,6 +226,8 @@ Index lifecycle:
 | `AUTO_SYNC_ON_START` | Run sync on startup (`true/false`). |
 | `AUTO_SYNC_INTERVAL_HOURS` | Periodic sync interval in hours (`<=0` disables periodic sync). |
 | `SEARCH_INDEX_BATCH_SIZE` | FTS rebuild batch size (`200..20000`, default `2500`). |
+| `RTREE_REBUILD_BATCH_SIZE` | Background R*Tree rebuild batch size (`500..20000`, default `4000`). |
+| `RTREE_REBUILD_PAUSE_MS` | Delay between R*Tree batches in ms (`0..200`, default `8`). |
 | `LOCAL_EDITS_DB_PATH` | Path to local edits DB (default: `data/local-edits.db`). |
 | `BUILDINGS_PMTILES_FILE` | PMTiles output filename inside `data/` (default: `buildings.pmtiles`). |
 | `BUILDINGS_PMTILES_SOURCE_LAYER` | Vector layer name written by tippecanoe (default: `buildings`). |

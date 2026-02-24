@@ -55,6 +55,83 @@ CREATE TABLE IF NOT EXISTS building_contours (
 CREATE INDEX IF NOT EXISTS idx_building_contours_bbox
 ON building_contours (min_lon, max_lon, min_lat, max_lat);
 ''')
+    ensure_sqlite_rtree_schema(conn)
+
+
+def ensure_sqlite_rtree_schema(conn: sqlite3.Connection) -> bool:
+    compile_options = [str(row[0]) for row in conn.execute('PRAGMA compile_options').fetchall()]
+    if not any('ENABLE_RTREE' in option for option in compile_options):
+        print('SQLite R*Tree support is not available (ENABLE_RTREE missing); bbox will use fallback index.', flush=True)
+        return False
+
+    conn.execute('''
+CREATE VIRTUAL TABLE IF NOT EXISTS building_contours_rtree
+USING rtree(
+  contour_rowid,
+  min_lon, max_lon,
+  min_lat, max_lat
+);
+''')
+    conn.execute('''
+CREATE TRIGGER IF NOT EXISTS trg_building_contours_rtree_insert
+AFTER INSERT ON building_contours
+BEGIN
+  INSERT OR REPLACE INTO building_contours_rtree (contour_rowid, min_lon, max_lon, min_lat, max_lat)
+  VALUES (new.rowid, new.min_lon, new.max_lon, new.min_lat, new.max_lat);
+END;
+''')
+    conn.execute('''
+CREATE TRIGGER IF NOT EXISTS trg_building_contours_rtree_update
+AFTER UPDATE OF min_lon, max_lon, min_lat, max_lat ON building_contours
+BEGIN
+  DELETE FROM building_contours_rtree WHERE contour_rowid = old.rowid;
+  INSERT INTO building_contours_rtree (contour_rowid, min_lon, max_lon, min_lat, max_lat)
+  VALUES (new.rowid, new.min_lon, new.max_lon, new.min_lat, new.max_lat);
+END;
+''')
+    conn.execute('''
+CREATE TRIGGER IF NOT EXISTS trg_building_contours_rtree_delete
+AFTER DELETE ON building_contours
+BEGIN
+  DELETE FROM building_contours_rtree WHERE contour_rowid = old.rowid;
+END;
+''')
+    return True
+
+
+def rebuild_sqlite_rtree_if_needed(conn: sqlite3.Connection) -> None:
+    if not ensure_sqlite_rtree_schema(conn):
+        return
+
+    contour_count = int(conn.execute('SELECT COUNT(*) FROM building_contours').fetchone()[0] or 0)
+    rtree_count = int(conn.execute('SELECT COUNT(*) FROM building_contours_rtree').fetchone()[0] or 0)
+    has_missing = conn.execute('''
+SELECT 1
+FROM building_contours bc
+LEFT JOIN building_contours_rtree br
+  ON br.contour_rowid = bc.rowid
+WHERE br.contour_rowid IS NULL
+LIMIT 1;
+''').fetchone() is not None
+    has_orphan = conn.execute('''
+SELECT 1
+FROM building_contours_rtree br
+LEFT JOIN building_contours bc
+  ON bc.rowid = br.contour_rowid
+WHERE bc.rowid IS NULL
+LIMIT 1;
+''').fetchone() is not None
+
+    if contour_count != rtree_count or has_missing or has_orphan:
+        with conn:
+            conn.execute('DELETE FROM building_contours_rtree;')
+            conn.execute('''
+INSERT INTO building_contours_rtree (contour_rowid, min_lon, max_lon, min_lat, max_lat)
+SELECT rowid, min_lon, max_lon, min_lat, max_lat
+FROM building_contours;
+''')
+        rebuilt = int(conn.execute('SELECT COUNT(*) FROM building_contours_rtree').fetchone()[0] or 0)
+        print(f'Rebuilt building_contours_rtree: {rebuilt} rows', flush=True)
 
 
 def migrate_sqlite_schema_for_duckdb(conn: sqlite3.Connection) -> None:
@@ -94,6 +171,7 @@ FROM building_contours;
 CREATE INDEX IF NOT EXISTS idx_building_contours_bbox
 ON building_contours (min_lon, max_lon, min_lat, max_lat);
 ''')
+        ensure_sqlite_rtree_schema(conn)
 
 
 def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
@@ -380,6 +458,7 @@ def main() -> None:
         )
 
     deleted = cleanup_stale(conn, import_limit, run_marker)
+    rebuild_sqlite_rtree_if_needed(conn)
     conn.commit()
 
     row = conn.execute('SELECT COUNT(*) AS total, MAX(updated_at) AS last_updated FROM building_contours').fetchone()

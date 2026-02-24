@@ -191,9 +191,11 @@ let hoveredBuildingKey = null;
 let dbFilterTagKeys = [];
 let dbFilterTagKeysLoaded = false;
 let dbFilterTagKeysLoadingPromise = null;
+let dbFilterTagKeysRetryTimer = null;
 let lastRenderedFilterTagKeysSignature = '';
 let visibleBuildingsLoadSeq = 0;
 const filterDataCache = new Map();
+const filterFeatureStateCache = new Map();
 const FILTER_DATA_CACHE_TTL_MS = 10 * 60 * 1000;
 const FILTER_DATA_CACHE_MAX_ITEMS = 60000;
 const FILTER_PREFETCH_PADDING_RATIO = 0.35;
@@ -580,6 +582,21 @@ function setLocalBuildingFeatureState(osmKey, state) {
   }
 }
 
+function setLocalBuildingFilterState(osmKey, isFiltered, hasExtraInfo) {
+  const key = String(osmKey || '').trim();
+  if (!key) return;
+  const normalized = {
+    isFiltered: Boolean(isFiltered),
+    hasExtraInfo: Boolean(hasExtraInfo)
+  };
+  const prev = filterFeatureStateCache.get(key);
+  if (prev && prev.isFiltered === normalized.isFiltered && prev.hasExtraInfo === normalized.hasExtraInfo) {
+    return;
+  }
+  filterFeatureStateCache.set(key, normalized);
+  setLocalBuildingFeatureState(key, normalized);
+}
+
 async function ensureDbFilterTagKeysLoaded() {
   if (dbFilterTagKeysLoaded) return;
   if (dbFilterTagKeysLoadingPromise) return dbFilterTagKeysLoadingPromise;
@@ -587,13 +604,26 @@ async function ensureDbFilterTagKeysLoaded() {
     .then((resp) => (resp.ok ? resp.json() : null))
     .then((payload) => {
       const keys = Array.isArray(payload?.keys) ? payload.keys : [];
+      const warmingUp = Boolean(payload?.warmingUp);
       dbFilterTagKeys = keys.map((key) => String(key || '').trim()).filter(Boolean);
-      dbFilterTagKeysLoaded = true;
+      dbFilterTagKeysLoaded = dbFilterTagKeys.length > 0 || !warmingUp;
       refreshTagKeysDatalist();
+      if (!dbFilterTagKeysLoaded) {
+        if (dbFilterTagKeysRetryTimer) clearTimeout(dbFilterTagKeysRetryTimer);
+        dbFilterTagKeysRetryTimer = setTimeout(() => {
+          dbFilterTagKeysRetryTimer = null;
+          ensureDbFilterTagKeysLoaded();
+        }, 1500);
+      }
     })
     .catch(() => {
       dbFilterTagKeys = [];
       dbFilterTagKeysLoaded = false;
+      if (dbFilterTagKeysRetryTimer) clearTimeout(dbFilterTagKeysRetryTimer);
+      dbFilterTagKeysRetryTimer = setTimeout(() => {
+        dbFilterTagKeysRetryTimer = null;
+        ensureDbFilterTagKeysLoaded();
+      }, 2500);
     })
     .finally(() => {
       dbFilterTagKeysLoadingPromise = null;
@@ -759,12 +789,13 @@ function applyFiltersToCurrentData() {
     feature.properties.isFiltered = isFiltered;
     const hasExtraInfo = localEditStateOverrides.get(key) ?? Boolean(Number(feature.properties?.has_extra_info || 0));
     feature.properties.hasExtraInfo = hasExtraInfo;
-    setLocalBuildingFeatureState(key, { isFiltered, hasExtraInfo });
+    setLocalBuildingFilterState(key, isFiltered, hasExtraInfo);
     if (isFiltered) matched += 1;
   }
 
   for (const prevKey of currentVisibleBuildingKeys) {
     if (nextVisibleKeys.has(prevKey)) continue;
+    filterFeatureStateCache.delete(prevKey);
     setLocalBuildingFeatureState(prevKey, { isFiltered: false });
   }
   currentVisibleBuildingKeys = nextVisibleKeys;
@@ -842,13 +873,17 @@ function onFilterRowsChange(event) {
     valueInput.disabled = (op === 'exists' || op === 'not_exists');
   }
   applyFiltersToCurrentData();
+  // If filters became active after being idle, ensure viewport data is loaded
+  // immediately instead of waiting for the next map move/zoom event.
+  if (getFilterRules().length > 0 && (currentBuildingsGeojson.features || []).length === 0) {
+    scheduleLoadBuildings();
+  }
 }
 
 function shouldProcessVisibleBuildings() {
   const hasActiveRules = getFilterRules().length > 0;
   const needsAdminHighlight = Boolean(isAuthenticated && isAdmin);
-  const needsFilterPanelData = isFilterPanelOpen();
-  return hasActiveRules || needsAdminHighlight || needsFilterPanelData;
+  return hasActiveRules || needsAdminHighlight;
 }
 
 function addFilterRow() {
@@ -2058,6 +2093,7 @@ async function loadBuildingsByViewport() {
     setHoveredBuilding(null);
     currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
     for (const key of currentVisibleBuildingKeys) {
+      filterFeatureStateCache.delete(key);
       setLocalBuildingFeatureState(key, { isFiltered: false });
     }
     currentVisibleBuildingKeys = new Set();
@@ -2070,6 +2106,7 @@ async function loadBuildingsByViewport() {
     setHoveredBuilding(null);
     currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
     for (const key of currentVisibleBuildingKeys) {
+      filterFeatureStateCache.delete(key);
       setLocalBuildingFeatureState(key, { isFiltered: false, hasExtraInfo: false });
     }
     currentVisibleBuildingKeys = new Set();
@@ -2605,7 +2642,6 @@ window.addEventListener('popstate', () => {
 
 map.on('moveend', scheduleLoadBuildings);
 map.on('zoomend', scheduleLoadBuildings);
-map.on('idle', scheduleLoadBuildings);
 map.on('sourcedata', (event) => {
   if (event.sourceId !== 'local-buildings') return;
   if (map.getZoom() < MIN_BUILDING_ZOOM) return;
