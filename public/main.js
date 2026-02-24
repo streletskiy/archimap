@@ -105,6 +105,8 @@ const map = new maplibregl.Map({
 });
 
 const MIN_BUILDING_ZOOM = 13;
+const CARTO_BUILDINGS_SOURCE_ID = 'carto';
+const CARTO_BUILDINGS_SOURCE_LAYER = 'building';
 
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
@@ -117,6 +119,7 @@ let currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
 let filterRowSeq = 0;
 const localEditStateOverrides = new Map();
 let currentVisibleBuildingKeys = new Set();
+let lastCartoBuildingsVisibility = null;
 
 const authStatusEl = document.getElementById('auth-status');
 const logoutBtn = document.getElementById('logout-btn');
@@ -820,6 +823,57 @@ function getVisibleBuildingsSnapshot() {
     features.push(feature);
   }
   return features;
+}
+
+function getCartoBuildingLayerIds() {
+  const style = map.getStyle();
+  if (!style || !Array.isArray(style.layers)) return [];
+  return style.layers
+    .filter((layer) => layer?.source === CARTO_BUILDINGS_SOURCE_ID && layer?.['source-layer'] === CARTO_BUILDINGS_SOURCE_LAYER)
+    .map((layer) => layer.id);
+}
+
+function setCartoBuildingsVisibility(isVisible) {
+  if (lastCartoBuildingsVisibility === isVisible) return;
+  const layerIds = getCartoBuildingLayerIds();
+  const visibility = isVisible ? 'visible' : 'none';
+  for (const layerId of layerIds) {
+    try {
+      map.setLayoutProperty(layerId, 'visibility', visibility);
+    } catch {
+      // ignore transient style updates
+    }
+  }
+  lastCartoBuildingsVisibility = isVisible;
+}
+
+function updateCartoBuildingsVisibility() {
+  if (!map.getLayer('local-buildings-fill')) {
+    setCartoBuildingsVisibility(true);
+    return;
+  }
+
+  if (map.getZoom() < MIN_BUILDING_ZOOM) {
+    setCartoBuildingsVisibility(true);
+    return;
+  }
+
+  let renderedFeatures = [];
+  try {
+    renderedFeatures = map.queryRenderedFeatures({ layers: ['local-buildings-fill'] }) || [];
+  } catch {
+    renderedFeatures = [];
+  }
+
+  const uniqueVisibleKeys = new Set();
+  for (const feature of renderedFeatures) {
+    const identity = getFeatureIdentity(feature);
+    if (!identity) continue;
+    uniqueVisibleKeys.add(`${identity.osmType}/${identity.osmId}`);
+    if (uniqueVisibleKeys.size > 0) break;
+  }
+
+  setCartoBuildingsVisibility(uniqueVisibleKeys.size === 0);
 }
 
 function osmAddressFromTags(tags) {
@@ -1753,6 +1807,7 @@ async function syncSelectedBuildingWithUrl() {
 }
 
 async function loadBuildingsByViewport() {
+  updateCartoBuildingsVisibility();
   if (!map.getSource('local-buildings')) return;
 
   if (map.getZoom() < MIN_BUILDING_ZOOM) {
@@ -2224,9 +2279,11 @@ function bindBuildingsLayerEvents() {
 }
 
 map.on('style.load', () => {
+  lastCartoBuildingsVisibility = null;
   ensureMapSourcesAndLayers();
   bindBuildingsLayerEvents();
   updateBuildingHighlightStyle();
+  updateCartoBuildingsVisibility();
   if (labelsToggleEl) {
     applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: false });
   }
