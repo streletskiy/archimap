@@ -30,16 +30,29 @@ function readBuildingFromUrl() {
   return parsed || null;
 }
 
-function writeBuildingToUrl(osmType, osmId) {
+function writeBuildingToUrl(osmType, osmId, options = {}) {
+  const mode = options.mode === 'replace' ? 'replace' : 'push';
+  const nextValue = `${osmType}/${osmId}`;
   const url = new URL(window.location.href);
-  url.searchParams.set('b', `${osmType}/${osmId}`);
-  history.replaceState(null, '', url.toString());
+  if (url.searchParams.get('b') === nextValue) return;
+  url.searchParams.set('b', nextValue);
+  if (mode === 'replace') {
+    history.replaceState(null, '', url.toString());
+    return;
+  }
+  history.pushState(null, '', url.toString());
 }
 
-function clearBuildingFromUrl() {
+function clearBuildingFromUrl(options = {}) {
+  const mode = options.mode === 'replace' ? 'replace' : 'push';
   const url = new URL(window.location.href);
+  if (!url.searchParams.has('b')) return;
   url.searchParams.delete('b');
-  history.replaceState(null, '', url.toString());
+  if (mode === 'replace') {
+    history.replaceState(null, '', url.toString());
+    return;
+  }
+  history.pushState(null, '', url.toString());
 }
 
 const initialView = readViewFromUrl();
@@ -96,6 +109,7 @@ const MIN_BUILDING_ZOOM = 13;
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
 let selected = null;
+let urlSelectionSyncSeq = 0;
 let isAuthenticated = false;
 let isAdmin = false;
 let loadTimer = null;
@@ -1260,7 +1274,12 @@ function moveMapForModal(feature) {
   });
 }
 
-function openModal(feature) {
+function isModalOpen() {
+  return !modalEl.classList.contains('hidden');
+}
+
+function openModal(feature, options = {}) {
+  const historyMode = options.historyMode === 'replace' ? 'replace' : 'push';
   modalContentEl.innerHTML = buildModalHtml(feature);
   const modalEditForm = document.getElementById('building-edit-form');
   if (modalEditForm) {
@@ -1271,14 +1290,18 @@ function openModal(feature) {
   moveMapForModal(feature);
   const parsed = parseKey(feature.properties?.osm_key);
   if (parsed) {
-    writeBuildingToUrl(parsed.osmType, parsed.osmId);
+    writeBuildingToUrl(parsed.osmType, parsed.osmId, { mode: historyMode });
   }
 }
 
-function closeModal() {
+function closeModal(options = {}) {
+  const shouldUpdateUrl = options.updateUrl !== false;
+  const historyMode = options.historyMode === 'push' ? 'push' : 'replace';
   modalEl.classList.add('hidden');
   modalEl.setAttribute('aria-hidden', 'true');
-  clearBuildingFromUrl();
+  if (shouldUpdateUrl) {
+    clearBuildingFromUrl({ mode: historyMode });
+  }
   selected = null;
   setSelectedFeature(null);
 }
@@ -1681,7 +1704,8 @@ function setSelectedFeature(feature) {
   });
 }
 
-async function selectBuildingFeature(feature) {
+async function selectBuildingFeature(feature, options = {}) {
+  const historyMode = options.historyMode === 'replace' ? 'replace' : 'push';
   normalizeFeatureInfo(feature);
   const parsed = parseKey(feature.properties?.osm_key);
   if (!parsed) return;
@@ -1692,7 +1716,40 @@ async function selectBuildingFeature(feature) {
   };
 
   setSelectedFeature(feature);
-  openModal(feature);
+  openModal(feature, { historyMode });
+}
+
+async function syncSelectedBuildingWithUrl() {
+  const buildingFromUrl = readBuildingFromUrl();
+  if (!buildingFromUrl) {
+    if (selected || isModalOpen()) {
+      closeModal({ updateUrl: false });
+    }
+    return;
+  }
+
+  if (
+    selected &&
+    selected.osmType === buildingFromUrl.osmType &&
+    String(selected.osmId) === String(buildingFromUrl.osmId) &&
+    selected.feature
+  ) {
+    if (!isModalOpen()) {
+      openModal(selected.feature, { historyMode: 'replace' });
+    }
+    return;
+  }
+
+  const syncSeq = ++urlSelectionSyncSeq;
+  const feature = await fetchBuildingById(buildingFromUrl.osmType, buildingFromUrl.osmId);
+  if (syncSeq !== urlSelectionSyncSeq) return;
+
+  if (!feature) {
+    closeModal({ updateUrl: false });
+    return;
+  }
+
+  await selectBuildingFeature(feature, { historyMode: 'replace' });
 }
 
 async function loadBuildingsByViewport() {
@@ -2183,14 +2240,11 @@ map.on('load', async () => {
     addFilterRow();
   }
 
-  const buildingFromUrl = readBuildingFromUrl();
-  if (buildingFromUrl) {
-    const feature = await fetchBuildingById(buildingFromUrl.osmType, buildingFromUrl.osmId);
-    if (feature) {
-      normalizeFeatureInfo(feature);
-      await selectBuildingFeature(feature);
-    }
-  }
+  await syncSelectedBuildingWithUrl();
+});
+
+window.addEventListener('popstate', () => {
+  syncSelectedBuildingWithUrl();
 });
 
 map.on('moveend', scheduleLoadBuildings);
