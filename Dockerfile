@@ -25,6 +25,7 @@ RUN apt-get update \
     python3 \
     python3-pip \
     python3-venv \
+    git \
     ca-certificates \
     libsqlite3-0 \
     zlib1g \
@@ -42,6 +43,13 @@ RUN python3 -m venv /opt/pyosm \
 
 COPY . .
 RUN mkdir -p /app/data/quackosm
+RUN set -eux; \
+  SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"; \
+  VER="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"; \
+  if [ -z "$SHA" ]; then SHA="unknown"; fi; \
+  if [ -z "$VER" ]; then VER="dev"; fi; \
+  printf '{"shortSha":"%s","version":"%s"}\n' "$SHA" "$VER" > /app/build-info.json; \
+  rm -rf /app/.git
 
 ENV NODE_ENV=production
 ENV PYTHON_BIN=/opt/pyosm/bin/python

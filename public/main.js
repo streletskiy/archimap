@@ -88,6 +88,11 @@ const PMTILES_CONFIG = Object.freeze({
   url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
   sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
 });
+const BUILD_INFO_CONFIG = Object.freeze({
+  shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
+  version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
+  repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
+});
 const LOCAL_BUILDING_STYLE_FALLBACK = Object.freeze({
   light: Object.freeze({
     fill: Object.freeze({
@@ -242,6 +247,8 @@ const searchModalInputEl = document.getElementById('search-modal-input');
 const searchResultsStatusEl = document.getElementById('search-results-status');
 const searchResultsListEl = document.getElementById('search-results-list');
 const searchLoadMoreBtnEl = document.getElementById('search-load-more-btn');
+const settingsBuildLinkEl = document.getElementById('settings-build-link');
+const settingsBuildTextEl = document.getElementById('settings-build-text');
 const THEME_STORAGE_KEY = 'archimap-theme';
 const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -466,6 +473,16 @@ function normalizeFeatureInfo(feature) {
       parsed.archimap_description = parsed.description;
     }
     feature.properties.archiInfo = parsed;
+  }
+}
+
+function renderBuildInfoLink() {
+  if (!settingsBuildLinkEl) return;
+  settingsBuildLinkEl.href = BUILD_INFO_CONFIG.repoUrl;
+  if (settingsBuildTextEl) {
+    settingsBuildTextEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
+  } else {
+    settingsBuildLinkEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
   }
 }
 
@@ -3146,6 +3163,7 @@ map.on('style.load', () => {
 });
 
 map.on('load', async () => {
+  renderBuildInfoLink();
   await loadAuthState();
   await ensureDbFilterTagKeysLoaded();
 

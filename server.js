@@ -7,7 +7,7 @@ const session = require('express-session');
 const { RedisStore } = require('connect-redis');
 const { createClient } = require('redis');
 const Database = require('better-sqlite3');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 const app = express();
 
@@ -26,6 +26,10 @@ const MAP_DEFAULT_LAT = Number(process.env.MAP_DEFAULT_LAT ?? 56.3269);
 const MAP_DEFAULT_ZOOM = Number(process.env.MAP_DEFAULT_ZOOM ?? 15);
 const BUILDINGS_PMTILES_FILE = path.basename(String(process.env.BUILDINGS_PMTILES_FILE || 'buildings.pmtiles').trim() || 'buildings.pmtiles');
 const BUILDINGS_PMTILES_SOURCE_LAYER = String(process.env.BUILDINGS_PMTILES_SOURCE_LAYER || 'buildings').trim() || 'buildings';
+const BUILD_SHA = String(process.env.BUILD_SHA || '').trim();
+const BUILD_VERSION = String(process.env.BUILD_VERSION || '').trim();
+const REPO_URL = 'https://github.com/streletskiy/archimap';
+const BUILD_INFO_PATH = path.join(__dirname, 'build-info.json');
 
 const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
@@ -61,6 +65,43 @@ function normalizeMapConfig() {
   const lat = Number.isFinite(MAP_DEFAULT_LAT) ? Math.min(90, Math.max(-90, MAP_DEFAULT_LAT)) : 56.3269;
   const zoom = Number.isFinite(MAP_DEFAULT_ZOOM) ? Math.min(22, Math.max(0, MAP_DEFAULT_ZOOM)) : 15;
   return { lon, lat, zoom };
+}
+
+function readGitValue(command) {
+  try {
+    return String(execSync(command, {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'ignore']
+    }) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function readBuildInfoFromFile() {
+  try {
+    const raw = fs.readFileSync(BUILD_INFO_PATH, 'utf8');
+    const parsed = JSON.parse(String(raw || '{}'));
+    const shortSha = String(parsed?.shortSha || '').trim();
+    const version = String(parsed?.version || '').trim();
+    return {
+      shortSha: shortSha || '',
+      version: version || ''
+    };
+  } catch {
+    return { shortSha: '', version: '' };
+  }
+}
+
+function getBuildInfo() {
+  const fileInfo = readBuildInfoFromFile();
+  const shortSha = fileInfo.shortSha || BUILD_SHA || readGitValue('git rev-parse --short HEAD') || 'unknown';
+  const exactTag = fileInfo.version || BUILD_VERSION || readGitValue('git describe --tags --exact-match HEAD');
+  return {
+    shortSha,
+    version: exactTag || 'dev',
+    repoUrl: REPO_URL
+  };
 }
 
 function validateSecurityConfig() {
@@ -455,8 +496,9 @@ app.get('/app-config.js', (req, res) => {
     url: '/api/buildings.pmtiles',
     sourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER
   };
+  const buildInfo = getBuildInfo();
   res.type('application/javascript').send(
-    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles })};`
+    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo })};`
   );
 });
 

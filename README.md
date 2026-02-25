@@ -247,6 +247,12 @@ Startup sync behavior details:
 - startup sync is skipped automatically when both `building_contours` and PMTiles file already exist;
 - when `AUTO_SYNC_ON_START=false`, app still builds missing PMTiles from existing `building_contours` (without full OSM import).
 
+Build info in settings footer:
+
+- for Docker builds, `shortSha | version` is embedded automatically during image build into `build-info.json` (from git);
+- if no exact tag on `HEAD`, version is `dev`;
+- fallback is `unknown | dev` when git metadata is unavailable.
+
 ## External Projects
 
 - [OpenStreetMap](https://www.openstreetmap.org/) for base geodata and OSM tags.
