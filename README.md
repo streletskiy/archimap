@@ -20,7 +20,7 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 - [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/) map with a customized Positron style.
 - Building contours imported from OSM extracts ([QuackOSM](https://github.com/kraina-ai/quackosm)) or local `.osm.pbf`, stored in local [SQLite](https://www.sqlite.org/).
 - Separate local edits DB (`local-edits.db`) for architectural metadata:
-  `name`, `style`, `levels`, `year`, `architect`, `address`, `description`.
+  `name`, `style`, `levels`, `year`, `architect`, `address`, `archimap_description`.
 - Building modal with in-place editing (authorized users).
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
@@ -28,6 +28,8 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 - Filter-tag keys are served from persistent SQLite cache and rebuilt in a background worker.
 - Global building search (SQLite-wide, not viewport-limited) with FTS5 relevance + distance ranking.
 - Search modal with skeleton loading and quick "go to building" action.
+- Search map markers with zoom-dependent clustering and count labels.
+- Mobile search bottom sheet keeps map visible while browsing results.
 - URL state for map view and selected building.
 - [Redis](https://redis.io/)-backed sessions.
 - Automatic contour sync (startup + scheduled, configurable via env).
@@ -36,7 +38,7 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 ## Tech Stack
 
 - Backend: [Node.js](https://nodejs.org/), [Express](https://expressjs.com/), [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)
-- Frontend: Vanilla JS, [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/), [Tailwind CSS](https://tailwindcss.com/), [Flowbite](https://flowbite.com/)
+- Frontend: Vanilla JS, [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/), [Tailwind CSS](https://tailwindcss.com/)
 - Data import: Python, [QuackOSM](https://github.com/kraina-ai/quackosm), [DuckDB](https://duckdb.org/), [tippecanoe](https://github.com/felt/tippecanoe), [PMTiles](https://github.com/protomaps/PMTiles)
 - Sessions: [Redis](https://redis.io/)
 
@@ -159,8 +161,11 @@ Matching and ranking:
 Pagination and UX:
 
 - response returns `items`, `hasMore`, `nextCursor`;
+- each item includes `lon`, `lat` (building center) for map markers/fit;
 - frontend supports progressive loading via "Показать ещё";
-- results modal shows skeleton on first page.
+- results modal shows skeleton on first page;
+- map centers/fits to current result set and renders clustered markers;
+- mobile search modal is rendered as a bottom sheet so markers remain visible.
 
 Index lifecycle:
 

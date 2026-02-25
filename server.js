@@ -368,6 +368,7 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
   architect TEXT,
   address TEXT,
   description TEXT,
+  archimap_description TEXT,
   updated_by TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -386,7 +387,7 @@ const legacyInfoStats = db.prepare(`
 `).get();
 if (Number(legacyInfoStats?.local_count || 0) === 0 && Number(legacyInfoStats?.main_count || 0) > 0) {
   const inserted = db.prepare(`
-    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, created_at, updated_at)
+    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, created_at, updated_at)
     SELECT
       ai.osm_type,
       ai.osm_id,
@@ -396,6 +397,7 @@ if (Number(legacyInfoStats?.local_count || 0) === 0 && Number(legacyInfoStats?.m
       ai.year_built,
       ai.architect,
       ai.address,
+      ai.description,
       ai.description,
       ai.updated_by,
       coalesce(ai.created_at, datetime('now')),
@@ -428,6 +430,16 @@ if (!archiColumnNames.has('levels')) {
 if (!archiColumnNames.has('updated_by')) {
   db.exec(`ALTER TABLE local.architectural_info ADD COLUMN updated_by TEXT;`);
 }
+if (!archiColumnNames.has('archimap_description')) {
+  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN archimap_description TEXT;`);
+}
+db.exec(`
+UPDATE local.architectural_info
+SET archimap_description = description
+WHERE (archimap_description IS NULL OR trim(archimap_description) = '')
+  AND description IS NOT NULL
+  AND trim(description) <> '';
+`);
 
 const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
 const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
@@ -613,7 +625,7 @@ function attachInfoToFeatures(features) {
       params.push(type, Number(id));
     }
     const rows = db.prepare(`
-      SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at
+      SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE ${clauses}
     `).all(...params);
@@ -672,6 +684,7 @@ function mapFilterDataRow(row) {
         architect: row.architect,
         address: row.address,
         description: row.description,
+        archimap_description: row.archimap_description || row.description || null,
         updated_by: row.updated_by,
         updated_at: row.updated_at
       }
@@ -693,6 +706,7 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ai.architect,
     ai.address,
     ai.description,
+    ai.archimap_description,
     ai.updated_by,
     ai.updated_at
   FROM building_contours bc
@@ -772,6 +786,7 @@ app.get('/api/buildings/filter-data-bbox', (req, res) => {
         ai.architect,
         ai.address,
         ai.description,
+        ai.archimap_description,
         ai.updated_by,
         ai.updated_at
       FROM building_contours_rtree br
@@ -864,7 +879,8 @@ function getOsmBaselineFromTags(tags) {
     year_built: parseIntegerMaybe(tags?.['building:year'] || tags?.start_date || tags?.construction_date || tags?.year_built || null),
     architect: normalizeTagValue(tags?.architect || tags?.architect_name || null),
     address: osmAddressFromTags(tags),
-    description: null
+    description: normalizeTagValue(tags?.['description:ru'] || tags?.description || null),
+    archimap_description: null
   };
 }
 
@@ -884,7 +900,7 @@ function buildChangesFromRows(localRow, tags) {
     { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
     { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
     { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
-    { key: 'description', label: 'Описание', osmTag: null }
+    { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
   ];
 
   const changes = [];
@@ -1158,6 +1174,8 @@ function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, c
       s.address,
       s.style,
       s.architect,
+      s.center_lon,
+      s.center_lat,
       s.local_priority,
       m.rank,
       ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
@@ -1179,6 +1197,8 @@ function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, c
       address: row.address || null,
       style: row.style || null,
       architect: row.architect || null,
+      lon: Number.isFinite(Number(row.center_lon)) ? Number(row.center_lon) : null,
+      lat: Number.isFinite(Number(row.center_lat)) ? Number(row.center_lat) : null,
       score: Number(row.rank || 0)
     })),
     nextCursor,
@@ -1230,6 +1250,8 @@ function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cu
       address,
       style,
       architect,
+      center_lon,
+      center_lat,
       ((center_lon - ?) * (center_lon - ?) + (center_lat - ?) * (center_lat - ?)) AS distance2
     FROM src
     ORDER BY distance2 ASC, updated_at DESC
@@ -1247,6 +1269,8 @@ function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cu
       address: row.address || null,
       style: row.style || null,
       architect: row.architect || null,
+      lon: Number.isFinite(Number(row.center_lon)) ? Number(row.center_lon) : null,
+      lat: Number.isFinite(Number(row.center_lat)) ? Number(row.center_lat) : null,
       score: 0
     })),
     nextCursor,
@@ -1288,7 +1312,7 @@ app.get('/api/building-info/:osmType/:osmId', (req, res) => {
   }
 
   const row = db.prepare(`
-    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at
+    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
   `).get(osmType, osmId);
@@ -1337,8 +1361,8 @@ app.post('/api/building-info', requireAuth, (req, res) => {
   }
 
   const upsert = db.prepare(`
-    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at)
-    VALUES (@osm_type, @osm_id, @name, @style, @levels, @year_built, @architect, @address, @description, @updated_by, datetime('now'))
+    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at)
+    VALUES (@osm_type, @osm_id, @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @updated_by, datetime('now'))
     ON CONFLICT(osm_type, osm_id) DO UPDATE SET
       name = excluded.name,
       style = excluded.style,
@@ -1346,7 +1370,7 @@ app.post('/api/building-info', requireAuth, (req, res) => {
       year_built = excluded.year_built,
       architect = excluded.architect,
       address = excluded.address,
-      description = excluded.description,
+      archimap_description = excluded.archimap_description,
       updated_by = excluded.updated_by,
       updated_at = datetime('now');
   `);
@@ -1360,7 +1384,7 @@ app.post('/api/building-info', requireAuth, (req, res) => {
     year_built: yearBuilt,
     architect: cleanText(body.architect, 200),
     address: cleanText(body.address, 300),
-    description: cleanText(body.description, 1000),
+    archimap_description: cleanText(body.archimapDescription ?? body.description, 1000),
     updated_by: String(req.session?.user?.username || '')
   });
   enqueueSearchIndexRefresh(osmType, osmId);
@@ -1426,7 +1450,7 @@ app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
       ai.year_built,
       ai.architect,
       ai.address,
-      ai.description,
+      ai.archimap_description,
       ai.updated_by,
       ai.updated_at,
       bc.tags_json
@@ -1501,7 +1525,7 @@ app.post('/api/admin/building-edits/reassign', requireAuth, requireAdmin, (req, 
   }
 
   const fromRow = db.prepare(`
-    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by
+    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
   `).get(fromOsmType, fromOsmId);
@@ -1531,7 +1555,7 @@ app.post('/api/admin/building-edits/reassign', requireAuth, requireAdmin, (req, 
 
   const tx = db.transaction(() => {
     db.prepare(`
-      INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, updated_by, updated_at)
+      INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).run(
       toOsmType,
@@ -1542,7 +1566,7 @@ app.post('/api/admin/building-edits/reassign', requireAuth, requireAdmin, (req, 
       fromRow.year_built ?? null,
       fromRow.architect ?? null,
       fromRow.address ?? null,
-      fromRow.description ?? null,
+      fromRow.archimap_description ?? null,
       String(req.session?.user?.username || fromRow.updated_by || '')
     );
 

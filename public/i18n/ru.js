@@ -29,6 +29,7 @@ window.__ARCHIMAP_I18N_RU = Object.freeze({
   modalLabelArchitect: 'Архитектор:',
   modalLabelStyle: 'Архитектурный стиль:',
   modalLabelDescription: 'Описание:',
+  modalLabelExtraInfo: 'Доп. информация:',
   modalStyleNotSet: 'Не указан',
   modalAddressTagsTitle: 'Адрес (OSM теги):',
   modalAddressFull: 'Полный адрес (addr:full)',
