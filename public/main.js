@@ -11,10 +11,21 @@ function readViewFromUrl() {
   return { zoom, center: [lon, lat] };
 }
 
+function saveLastMapHash(hashValue) {
+  const text = String(hashValue || '').trim();
+  if (!text.startsWith('#map=')) return;
+  try {
+    localStorage.setItem('archimap-last-map-hash', text);
+  } catch {
+    // ignore
+  }
+}
+
 function writeViewToUrl() {
   const center = map.getCenter();
   const zoom = map.getZoom();
   const nextHash = `#map=${zoom.toFixed(2)}/${center.lat.toFixed(6)}/${center.lng.toFixed(6)}`;
+  saveLastMapHash(nextHash);
   if (window.location.hash !== nextHash) {
     const url = new URL(window.location.href);
     url.hash = nextHash;
@@ -55,6 +66,29 @@ function clearBuildingFromUrl(options = {}) {
   history.pushState(null, '', url.toString());
 }
 
+function readRequestedPostLoginPath() {
+  try {
+    const url = new URL(window.location.href);
+    const raw = String(url.searchParams.get('next') || '').trim();
+    if (!raw) return null;
+    if (!raw.startsWith('/')) return null;
+    if (raw.startsWith('//')) return null;
+    if (raw.includes('://')) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function shouldOpenAuthFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    return String(url.searchParams.get('auth') || '') === '1';
+  } catch {
+    return false;
+  }
+}
+
 const initialView = readViewFromUrl();
 const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
 const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
@@ -92,6 +126,9 @@ const BUILD_INFO_CONFIG = Object.freeze({
   shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
   version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
   repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
+});
+const AUTH_CONFIG = Object.freeze({
+  registrationEnabled: Boolean(window.__ARCHIMAP_CONFIG?.auth?.registrationEnabled ?? true)
 });
 const LOCAL_BUILDING_STYLE_FALLBACK = Object.freeze({
   light: Object.freeze({
@@ -186,6 +223,9 @@ let selected = null;
 let urlSelectionSyncSeq = 0;
 let isAuthenticated = false;
 let isAdmin = false;
+let isMasterAdmin = false;
+let currentUser = null;
+let canEditBuildings = false;
 let loadTimer = null;
 let currentBuildingsGeojson = { type: 'FeatureCollection', features: [] };
 let filterRowSeq = 0;
@@ -210,6 +250,33 @@ const filterPrefetchInFlight = new Map();
 const authStatusEl = document.getElementById('auth-status');
 const logoutBtn = document.getElementById('logout-btn');
 const loginForm = document.getElementById('login-form');
+const loginUsernameEl = document.getElementById('login-username');
+const authTabLoginEl = document.getElementById('auth-tab-login');
+const authTabRegisterEl = document.getElementById('auth-tab-register');
+const forgotPasswordToggleEl = document.getElementById('forgot-password-toggle');
+const authLoginPanelEl = document.getElementById('auth-login-panel');
+const registerPanelEl = document.getElementById('register-panel');
+const registerFormEl = document.getElementById('register-form');
+const registerFirstNameEl = document.getElementById('register-first-name');
+const registerLastNameEl = document.getElementById('register-last-name');
+const registerEmailEl = document.getElementById('register-email');
+const registerPasswordEl = document.getElementById('register-password');
+const registerPasswordConfirmEl = document.getElementById('register-password-confirm');
+const registerStatusEl = document.getElementById('register-status');
+const forgotPasswordPanelEl = document.getElementById('forgot-password-panel');
+const forgotPasswordFormEl = document.getElementById('forgot-password-form');
+const forgotPasswordEmailEl = document.getElementById('forgot-password-email');
+const forgotPasswordStatusEl = document.getElementById('forgot-password-status');
+const resetPasswordPanelEl = document.getElementById('reset-password-panel');
+const resetPasswordFormEl = document.getElementById('reset-password-form');
+const resetPasswordNewEl = document.getElementById('reset-password-new');
+const resetPasswordConfirmEl = document.getElementById('reset-password-confirm');
+const resetPasswordStatusEl = document.getElementById('reset-password-status');
+const registerVerifyPanelEl = document.getElementById('register-verify-panel');
+const registerVerifyHintEl = document.getElementById('register-verify-hint');
+const registerVerifyFormEl = document.getElementById('register-verify-form');
+const registerVerifyCodeEl = document.getElementById('register-verify-code');
+const registerVerifyStatusEl = document.getElementById('register-verify-status');
 const filterToggleBtnEl = document.getElementById('filter-toggle-btn');
 const filterShellEl = document.getElementById('filter-shell');
 const mobileControlsToggleBtnEl = document.getElementById('mobile-controls-toggle-btn');
@@ -230,13 +297,30 @@ const authFabEl = document.getElementById('auth-fab');
 const authFabLabelEl = document.getElementById('auth-fab-label');
 const authIconLoginEl = document.getElementById('auth-icon-login');
 const authIconUserEl = document.getElementById('auth-icon-user');
-const adminEditsFabEl = document.getElementById('admin-edits-fab');
 const authModalEl = document.getElementById('auth-modal');
 const authModalCloseEl = document.getElementById('auth-modal-close');
-const adminEditsModalEl = document.getElementById('admin-edits-modal');
-const adminEditsCloseEl = document.getElementById('admin-edits-close');
-const adminEditsListEl = document.getElementById('admin-edits-list');
-const adminEditsStatusEl = document.getElementById('admin-edits-status');
+const profileModalEl = document.getElementById('profile-modal');
+const profileModalCloseEl = document.getElementById('profile-modal-close');
+const profileEmailEl = document.getElementById('profile-email');
+const profileFormEl = document.getElementById('profile-form');
+const profileFirstNameEl = document.getElementById('profile-first-name');
+const profileLastNameEl = document.getElementById('profile-last-name');
+const profileStatusEl = document.getElementById('profile-status');
+const changePasswordFormEl = document.getElementById('change-password-form');
+const changePasswordStatusEl = document.getElementById('change-password-status');
+const profileLogoutBtnEl = document.getElementById('profile-logout-btn');
+const adminPanelModalEl = document.getElementById('admin-panel-modal');
+const adminPanelCloseEl = document.getElementById('admin-panel-close');
+const adminPanelEditsListEl = document.getElementById('admin-panel-edits-list');
+const adminPanelEditsStatusEl = document.getElementById('admin-panel-edits-status');
+const adminUsersPanelEl = document.getElementById('admin-users-panel');
+const adminPanelEditsPanelEl = document.getElementById('admin-panel-edits-panel');
+const adminTabUsersEl = document.getElementById('admin-tab-users');
+const adminTabEditsEl = document.getElementById('admin-tab-edits');
+const adminUsersSearchEl = document.getElementById('admin-users-search');
+const adminUsersRefreshEl = document.getElementById('admin-users-refresh');
+const adminUsersStatusEl = document.getElementById('admin-users-status');
+const adminUsersListEl = document.getElementById('admin-users-list');
 const searchFormEl = document.getElementById('search-form');
 const searchInputEl = document.getElementById('search-input');
 const searchMobileBtnEl = document.getElementById('search-mobile-btn');
@@ -249,6 +333,7 @@ const searchResultsListEl = document.getElementById('search-results-list');
 const searchLoadMoreBtnEl = document.getElementById('search-load-more-btn');
 const settingsBuildLinkEl = document.getElementById('settings-build-link');
 const settingsBuildTextEl = document.getElementById('settings-build-text');
+const navLogoLinkEl = document.getElementById('nav-logo-link');
 const THEME_STORAGE_KEY = 'archimap-theme';
 const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -268,6 +353,60 @@ let searchState = {
 };
 let searchMarkersGeojson = { type: 'FeatureCollection', features: [] };
 let adminReassignPickState = null;
+let adminPanelTab = 'edits';
+let pendingResetToken = null;
+let pendingRegisterToken = null;
+let pendingRegistrationEmail = null;
+let csrfToken = null;
+pendingResetToken = readResetTokenFromUrl();
+pendingRegisterToken = readRegisterTokenFromUrl();
+saveLastMapHash(window.location.hash);
+
+if (navLogoLinkEl) {
+  navLogoLinkEl.addEventListener('click', (event) => {
+    event.preventDefault();
+    const hash = String(window.location.hash || '').trim();
+    const target = hash.startsWith('#map=') ? `/${hash}` : '/';
+    window.location.href = target;
+  });
+}
+
+const nativeFetch = window.fetch.bind(window);
+
+function isStateChangingMethod(method) {
+  const m = String(method || 'GET').toUpperCase();
+  return !['GET', 'HEAD', 'OPTIONS'].includes(m);
+}
+
+function isSameOriginRequest(input) {
+  try {
+    if (typeof input === 'string') {
+      if (input.startsWith('http://') || input.startsWith('https://')) {
+        return new URL(input).origin === window.location.origin;
+      }
+      return true;
+    }
+    if (input && typeof input.url === 'string') {
+      return new URL(input.url, window.location.origin).origin === window.location.origin;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+window.fetch = (input, init = {}) => {
+  const nextInit = { ...init };
+  const method = String(nextInit.method || (input?.method || 'GET')).toUpperCase();
+  if (csrfToken && isStateChangingMethod(method) && isSameOriginRequest(input)) {
+    const headers = new Headers(nextInit.headers || {});
+    if (!headers.has('x-csrf-token')) {
+      headers.set('x-csrf-token', csrfToken);
+    }
+    nextInit.headers = headers;
+  }
+  return nativeFetch(input, nextInit);
+};
 
 const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
 const UI_TEXT = Object.freeze(I18N_RU.ui || {});
@@ -1454,28 +1593,46 @@ async function loadAuthState() {
   const resp = await fetch('/api/me');
   const data = await resp.json();
   isAuthenticated = Boolean(data.authenticated);
-  isAdmin = Boolean(data?.user?.isAdmin);
+  currentUser = data?.user || null;
+  isAdmin = Boolean(currentUser?.isAdmin);
+  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+  canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
+  csrfToken = String(data?.csrfToken || '') || null;
   renderAuth();
 }
 
 function renderAuth() {
+  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+  canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
+  if (loginUsernameEl) {
+    loginUsernameEl.placeholder = t('authLoginEmailPlaceholder', null, 'Email');
+  }
+
   if (isAuthenticated) {
     authStatusEl.textContent = t('authLoggedIn', null, 'Вы авторизованы');
     logoutBtn.classList.remove('hidden');
     loginForm.classList.add('hidden');
+    if (registerPanelEl) registerPanelEl.classList.add('hidden');
+    if (forgotPasswordPanelEl) forgotPasswordPanelEl.classList.add('hidden');
+    if (registerVerifyPanelEl) registerVerifyPanelEl.classList.add('hidden');
   } else {
-    authStatusEl.textContent = t('authLoggedOut', null, 'Вход не выполнен');
+    authStatusEl.textContent = '';
     logoutBtn.classList.add('hidden');
     loginForm.classList.remove('hidden');
+    if (authTabRegisterEl) {
+      authTabRegisterEl.classList.toggle('hidden', !AUTH_CONFIG.registrationEnabled);
+    }
   }
 
-  if (adminEditsFabEl) {
-    if (isAuthenticated && isAdmin) {
-      adminEditsFabEl.classList.remove('hidden');
-    } else {
-      adminEditsFabEl.classList.add('hidden');
-      closeAdminEditsModal();
-    }
+  if (!isAuthenticated) {
+    closeProfileModal();
+  } else {
+    const email = String(currentUser?.email || '');
+    const firstName = String(currentUser?.firstName || '').trim();
+    const lastName = String(currentUser?.lastName || '').trim();
+    if (profileEmailEl) profileEmailEl.textContent = email ? `Email: ${email}` : 'Вход выполнен';
+    if (profileFirstNameEl) profileFirstNameEl.value = firstName;
+    if (profileLastNameEl) profileLastNameEl.value = lastName;
   }
 
   if (authFabEl && authIconLoginEl && authIconUserEl) {
@@ -1633,7 +1790,7 @@ function buildModalHtml(feature) {
   const styleOptionsHtml = styleOptions
     .map((option) => `<option value="${escapeHtml(option.key)}" ${styleEditState.selectedKey === option.key ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
     .join('');
-  const editableRows = isAuthenticated
+  const editableRows = canEditBuildings
     ? `
       <form id="building-edit-form" class="grid gap-2">
         <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
@@ -1699,6 +1856,7 @@ function buildModalHtml(feature) {
       </form>
     `
     : `
+      ${isAuthenticated ? `<div class="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">Редактирование доступно только пользователям с разрешением администратора.</div>` : ''}
       ${buildReadonlyField(t('modalLabelName', null, 'Название:'), escapeHtml(shownName))}
       ${buildReadonlyField(t('modalLabelAddress', null, 'Адрес:'), escapeHtml(shownAddress))}
       ${buildReadonlyField(t('modalLabelLevels', null, 'Этажей:'), escapeHtml(shownLevels))}
@@ -1881,6 +2039,10 @@ function showCopyToast(message) {
 }
 
 function openAuthModal() {
+  renderPasswordRecoveryPanels();
+  if (!AUTH_CONFIG.registrationEnabled) {
+    setAuthTab('login');
+  }
   authModalEl.classList.remove('hidden');
   authModalEl.setAttribute('aria-hidden', 'false');
 }
@@ -1888,6 +2050,141 @@ function openAuthModal() {
 function closeAuthModal() {
   authModalEl.classList.add('hidden');
   authModalEl.setAttribute('aria-hidden', 'true');
+}
+
+function readResetTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const token = String(url.searchParams.get('resetToken') || '').trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function readRegisterTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const token = String(url.searchParams.get('registerToken') || '').trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function clearResetTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('resetToken')) return;
+    url.searchParams.delete('resetToken');
+    history.replaceState(null, '', url.toString());
+  } catch {
+    // ignore
+  }
+}
+
+function clearRegisterTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('registerToken')) return;
+    url.searchParams.delete('registerToken');
+    history.replaceState(null, '', url.toString());
+  } catch {
+    // ignore
+  }
+}
+
+function setAuthTab(nextTab) {
+  const tab = ['login', 'register'].includes(nextTab) ? nextTab : 'login';
+  if (authLoginPanelEl) authLoginPanelEl.classList.toggle('hidden', tab !== 'login');
+  if (registerPanelEl) registerPanelEl.classList.toggle('hidden', tab !== 'register' || !AUTH_CONFIG.registrationEnabled);
+  if (forgotPasswordPanelEl && tab !== 'login') forgotPasswordPanelEl.classList.add('hidden');
+
+  const activeClasses = ['bg-slate-100', 'text-slate-900', 'shadow-soft'];
+  const inactiveClasses = ['text-slate-600', 'hover:bg-slate-100'];
+  const applyTabStyle = (el, active) => {
+    if (!el) return;
+    if (active) {
+      el.classList.add(...activeClasses);
+      el.classList.remove(...inactiveClasses);
+      return;
+    }
+    el.classList.remove(...activeClasses);
+    el.classList.add(...inactiveClasses);
+  };
+  applyTabStyle(authTabLoginEl, tab === 'login');
+  applyTabStyle(authTabRegisterEl, tab === 'register');
+}
+
+function renderRegistrationVerifyPanel() {
+  if (!registerVerifyPanelEl) return;
+  const visible = Boolean(pendingRegistrationEmail);
+  registerVerifyPanelEl.classList.toggle('hidden', !visible);
+  if (!visible) return;
+  if (registerVerifyHintEl) {
+    registerVerifyHintEl.textContent = t(
+      'authRegisterVerifyHint',
+      { email: pendingRegistrationEmail },
+      `Мы отправили письмо на ${pendingRegistrationEmail}. Подтвердите регистрацию ссылкой из письма или введите код ниже.`
+    );
+  }
+}
+
+function renderPasswordRecoveryPanels() {
+  if (resetPasswordPanelEl) {
+    if (pendingResetToken) {
+      resetPasswordPanelEl.classList.remove('hidden');
+    } else {
+      resetPasswordPanelEl.classList.add('hidden');
+    }
+  }
+  renderRegistrationVerifyPanel();
+}
+
+async function confirmRegistrationByToken(token) {
+  const value = String(token || '').trim();
+  if (!value) return false;
+  let resp;
+  try {
+    resp = await fetch('/api/register/confirm-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: value })
+    });
+  } catch {
+    if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = t('authRegisterLinkNetworkError', null, 'Ошибка сети при подтверждении ссылки');
+    return false;
+  }
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = String(data?.error || t('authRegisterLinkFailed', null, 'Не удалось подтвердить регистрацию'));
+    return false;
+  }
+
+  isAuthenticated = true;
+  currentUser = data?.user || null;
+  isAdmin = Boolean(currentUser?.isAdmin);
+  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+  canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
+  csrfToken = String(data?.csrfToken || '') || csrfToken;
+  pendingRegistrationEmail = null;
+  pendingRegisterToken = null;
+  clearRegisterTokenFromUrl();
+  renderAuth();
+  return true;
+}
+
+function openProfileModal() {
+  if (!isAuthenticated || !profileModalEl) return;
+  profileModalEl.classList.remove('hidden');
+  profileModalEl.setAttribute('aria-hidden', 'false');
+}
+
+function closeProfileModal() {
+  if (!profileModalEl) return;
+  profileModalEl.classList.add('hidden');
+  profileModalEl.setAttribute('aria-hidden', 'true');
 }
 
 function openSearchModal(prefill = '') {
@@ -2196,9 +2493,9 @@ function formatUpdatedAt(value) {
   return date.toLocaleString('ru-RU');
 }
 
-function renderAdminEdits(items) {
-  if (!adminEditsListEl) return;
-  adminEditsListEl.innerHTML = items.map((item) => {
+function renderAdminPanelEdits(items) {
+  if (!adminPanelEditsListEl) return;
+  adminPanelEditsListEl.innerHTML = items.map((item) => {
     const sourceKey = `${item.osmType}/${item.osmId}`;
     const changesHtml = item.changes.map((change) => `
       <div class="rounded-lg border border-slate-200 bg-white p-2.5">
@@ -2256,11 +2553,11 @@ async function deleteOrphanLocalEdit(osmType, osmId) {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: t('adminDeleteFailed', null, 'Не удалось удалить правки') }));
-    if (adminEditsStatusEl) adminEditsStatusEl.textContent = err.error || t('adminDeleteFailed', null, 'Не удалось удалить правки');
+    if (adminPanelEditsStatusEl) adminPanelEditsStatusEl.textContent = err.error || t('adminDeleteFailed', null, 'Не удалось удалить правки');
     return;
   }
-  if (adminEditsStatusEl) adminEditsStatusEl.textContent = t('adminDeleteDone', { osmKey }, `Локальные правки ${osmKey} удалены`);
-  await loadAdminEdits();
+  if (adminPanelEditsStatusEl) adminPanelEditsStatusEl.textContent = t('adminDeleteDone', { osmKey }, `Локальные правки ${osmKey} удалены`);
+  await loadAdminPanelEdits();
 }
 
 async function reassignLocalEdit(fromOsmType, fromOsmId, toOsmType, toOsmId) {
@@ -2271,51 +2568,142 @@ async function reassignLocalEdit(fromOsmType, fromOsmId, toOsmType, toOsmId) {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: t('adminReassignFailed', null, 'Не удалось переназначить правки') }));
-    if (adminEditsStatusEl) adminEditsStatusEl.textContent = err.error || t('adminReassignFailed', null, 'Не удалось переназначить правки');
+    if (adminPanelEditsStatusEl) adminPanelEditsStatusEl.textContent = err.error || t('adminReassignFailed', null, 'Не удалось переназначить правки');
     return false;
   }
-  if (adminEditsStatusEl) adminEditsStatusEl.textContent = t(
+  if (adminPanelEditsStatusEl) adminPanelEditsStatusEl.textContent = t(
     'adminReassignDone',
     { from: `${fromOsmType}/${fromOsmId}`, to: `${toOsmType}/${toOsmId}` },
     `Правки переназначены: ${fromOsmType}/${fromOsmId} -> ${toOsmType}/${toOsmId}`
   );
-  await loadAdminEdits();
+  await loadAdminPanelEdits();
   return true;
 }
 
-async function loadAdminEdits() {
-  if (!adminEditsStatusEl || !adminEditsListEl) return;
-  adminEditsStatusEl.textContent = t('adminLoading', null, 'Загрузка...');
-  adminEditsListEl.innerHTML = '';
+async function loadAdminPanelEdits() {
+  if (!adminPanelEditsStatusEl || !adminPanelEditsListEl) return;
+  adminPanelEditsStatusEl.textContent = t('adminLoading', null, 'Загрузка...');
+  adminPanelEditsListEl.innerHTML = '';
 
   const resp = await fetch('/api/admin/building-edits');
   if (!resp.ok) {
-    adminEditsStatusEl.textContent = t('adminLoadFailed', null, 'Не удалось загрузить список правок.');
+    adminPanelEditsStatusEl.textContent = t('adminLoadFailed', null, 'Не удалось загрузить список правок.');
     return;
   }
 
   const data = await resp.json().catch(() => ({ total: 0, items: [] }));
   const items = Array.isArray(data.items) ? data.items : [];
   if (items.length === 0) {
-    adminEditsStatusEl.textContent = t('adminNoEdits', null, 'Локальные правки не найдены.');
+    adminPanelEditsStatusEl.textContent = t('adminNoEdits', null, 'Локальные правки не найдены.');
     return;
   }
 
-  adminEditsStatusEl.textContent = t('adminFoundEdits', { count: items.length }, `Найдено правок: ${items.length}`);
-  renderAdminEdits(items);
+  adminPanelEditsStatusEl.textContent = t('adminFoundEdits', { count: items.length }, `Найдено правок: ${items.length}`);
+  renderAdminPanelEdits(items);
 }
 
-function openAdminEditsModal() {
-  if (!isAuthenticated || !isAdmin || !adminEditsModalEl) return;
-  adminEditsModalEl.classList.remove('hidden');
-  adminEditsModalEl.setAttribute('aria-hidden', 'false');
-  loadAdminEdits();
+function openAdminPanelModal() {
+  if (!isAuthenticated || !isAdmin || !adminPanelModalEl) return;
+  adminPanelModalEl.classList.remove('hidden');
+  adminPanelModalEl.setAttribute('aria-hidden', 'false');
+  if (adminPanelTab === 'users') {
+    setAdminPanelTab('users');
+  } else {
+    setAdminPanelTab('edits');
+  }
 }
 
-function closeAdminEditsModal() {
-  if (!adminEditsModalEl) return;
-  adminEditsModalEl.classList.add('hidden');
-  adminEditsModalEl.setAttribute('aria-hidden', 'true');
+function closeAdminPanelModal() {
+  if (!adminPanelModalEl) return;
+  adminPanelModalEl.classList.add('hidden');
+  adminPanelModalEl.setAttribute('aria-hidden', 'true');
+}
+
+function setAdminPanelTab(nextTab) {
+  adminPanelTab = nextTab === 'users' ? 'users' : 'edits';
+  if (adminUsersPanelEl && adminPanelEditsPanelEl) {
+    if (adminPanelTab === 'users') {
+      adminUsersPanelEl.classList.remove('hidden');
+      adminPanelEditsPanelEl.classList.add('hidden');
+    } else {
+      adminUsersPanelEl.classList.add('hidden');
+      adminPanelEditsPanelEl.classList.remove('hidden');
+    }
+  }
+  if (adminTabUsersEl && adminTabEditsEl) {
+    if (adminPanelTab === 'users') {
+      adminTabUsersEl.classList.add('bg-slate-900', 'text-white');
+      adminTabUsersEl.classList.remove('text-slate-700');
+      adminTabEditsEl.classList.remove('bg-slate-900', 'text-white');
+      adminTabEditsEl.classList.add('text-slate-700');
+    } else {
+      adminTabEditsEl.classList.add('bg-slate-900', 'text-white');
+      adminTabEditsEl.classList.remove('text-slate-700');
+      adminTabUsersEl.classList.remove('bg-slate-900', 'text-white');
+      adminTabUsersEl.classList.add('text-slate-700');
+    }
+  }
+  if (adminPanelTab === 'users') {
+    loadAdminUsers();
+  } else {
+    loadAdminPanelEdits();
+  }
+}
+
+function renderAdminUsers(items) {
+  if (!adminUsersListEl) return;
+  adminUsersListEl.innerHTML = items.map((item) => {
+    const email = String(item?.email || '');
+    const name = [String(item?.firstName || '').trim(), String(item?.lastName || '').trim()].filter(Boolean).join(' ');
+    const canEdit = Boolean(item?.canEdit);
+    const admin = Boolean(item?.isAdmin);
+    return `
+      <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="text-sm font-semibold text-slate-900">${escapeHtml(email)}</div>
+            <div class="text-xs text-slate-600">${escapeHtml(name || 'Без имени')}</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button data-action="user-toggle-edit" data-email="${escapeHtml(email)}" data-can-edit="${canEdit ? '1' : '0'}" type="button" class="rounded-md border px-2.5 py-1 text-xs font-semibold ${canEdit ? 'border-emerald-300 text-emerald-700 bg-emerald-50' : 'border-slate-300 text-slate-700 bg-white'}">
+              ${canEdit ? 'Редактирование: да' : 'Редактирование: нет'}
+            </button>
+            ${isMasterAdmin ? `
+              <button data-action="user-toggle-admin" data-email="${escapeHtml(email)}" data-is-admin="${admin ? '1' : '0'}" type="button" class="rounded-md border px-2.5 py-1 text-xs font-semibold ${admin ? 'border-indigo-300 text-indigo-700 bg-indigo-50' : 'border-slate-300 text-slate-700 bg-white'}">
+                ${admin ? 'Админ: да' : 'Админ: нет'}
+              </button>
+            ` : `
+              <span class="rounded-md border ${admin ? 'border-indigo-300 text-indigo-700 bg-indigo-50' : 'border-slate-300 text-slate-600 bg-white'} px-2.5 py-1 text-xs font-semibold">
+                ${admin ? 'Админ: да' : 'Админ: нет'}
+              </span>
+            `}
+          </div>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+async function loadAdminUsers() {
+  if (!adminUsersStatusEl || !adminUsersListEl) return;
+  const q = String(adminUsersSearchEl?.value || '').trim();
+  adminUsersStatusEl.textContent = 'Загрузка пользователей...';
+  adminUsersListEl.innerHTML = '';
+  const url = q ? `/api/admin/users?q=${encodeURIComponent(q)}` : '/api/admin/users';
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    adminUsersStatusEl.textContent = String(err?.error || 'Не удалось загрузить пользователей');
+    return;
+  }
+  const data = await resp.json().catch(() => ({ items: [] }));
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (items.length === 0) {
+    adminUsersStatusEl.textContent = 'Пользователи не найдены.';
+    return;
+  }
+  adminUsersStatusEl.textContent = `Пользователей: ${items.length}`;
+  renderAdminUsers(items);
 }
 
 function setSelectedFeature(feature) {
@@ -2559,30 +2947,305 @@ loginForm.addEventListener('submit', async (event) => {
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
 
-  const resp = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
-  });
+  let resp;
+  try {
+    resp = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+  } catch {
+    authStatusEl.textContent = t('authError', null, 'Ошибка авторизации');
+    return;
+  }
 
   if (!resp.ok) {
-    authStatusEl.textContent = t('authError', null, 'Ошибка авторизации');
+    const err = await resp.json().catch(() => ({}));
+    authStatusEl.textContent = String(err?.error || t('authError', null, 'Ошибка авторизации'));
     return;
   }
 
   const data = await resp.json().catch(() => ({ user: null }));
   isAuthenticated = true;
-  isAdmin = Boolean(data?.user?.isAdmin);
+  currentUser = data?.user || null;
+  isAdmin = Boolean(currentUser?.isAdmin);
+  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+  canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
+  csrfToken = String(data?.csrfToken || '') || csrfToken;
   renderAuth();
   closeAuthModal();
+  const nextPath = readRequestedPostLoginPath();
+  if (nextPath) {
+    window.location.href = nextPath;
+  }
 });
+
+if (registerFormEl && AUTH_CONFIG.registrationEnabled) {
+  registerFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const firstName = String(registerFirstNameEl?.value || '').trim();
+    const lastName = String(registerLastNameEl?.value || '').trim();
+    const email = String(registerEmailEl?.value || '').trim();
+    const password = String(registerPasswordEl?.value || '');
+    const passwordConfirm = String(registerPasswordConfirmEl?.value || '');
+
+    if (!email || !password) {
+      if (registerStatusEl) registerStatusEl.textContent = t('authRegisterFillRequired', null, 'Заполните email и пароль');
+      return;
+    }
+    if (password !== passwordConfirm) {
+      if (registerStatusEl) registerStatusEl.textContent = t('authRegisterPasswordMismatch', null, 'Пароли не совпадают');
+      return;
+    }
+
+    if (registerStatusEl) registerStatusEl.textContent = t('authRegisterSendingMail', null, 'Отправляем письмо для подтверждения...');
+    let resp;
+    try {
+      resp = await fetch('/api/register/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ firstName, lastName, email, password })
+      });
+    } catch {
+      if (registerStatusEl) registerStatusEl.textContent = t('authRegisterNetworkError', null, 'Ошибка сети при отправке письма');
+      return;
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (registerStatusEl) registerStatusEl.textContent = String(data?.error || t('authRegisterSendFailed', null, 'Не удалось отправить письмо'));
+      return;
+    }
+
+    pendingRegistrationEmail = email;
+    renderPasswordRecoveryPanels();
+    if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = '';
+    if (registerVerifyCodeEl) registerVerifyCodeEl.value = '';
+    if (registerVerifyCodeEl) registerVerifyCodeEl.focus();
+    if (registerStatusEl) {
+      const ttl = Number(data?.expiresInMinutes);
+      registerStatusEl.textContent = Number.isFinite(ttl)
+        ? t('authRegisterMailSentTtl', { ttl }, `Письмо отправлено. Код действителен ${ttl} минут.`)
+        : t('authRegisterMailSent', null, 'Письмо отправлено.');
+    }
+  });
+}
+
+if (registerVerifyFormEl && AUTH_CONFIG.registrationEnabled) {
+  registerVerifyFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const email = String(pendingRegistrationEmail || '').trim();
+    const code = String(registerVerifyCodeEl?.value || '').replace(/\D/g, '').slice(0, 6);
+    if (registerVerifyCodeEl) registerVerifyCodeEl.value = code;
+    if (!email || !code) {
+      if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = t('authRegisterCodeRequired', null, 'Введите код из письма');
+      return;
+    }
+    if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = t('authRegisterConfirming', null, 'Подтверждаем регистрацию...');
+
+    let resp;
+    try {
+      resp = await fetch('/api/register/confirm-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code })
+      });
+    } catch {
+      if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = t('authRegisterConfirmNetworkError', null, 'Ошибка сети при подтверждении');
+      return;
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = String(data?.error || t('authRegisterConfirmFailed', null, 'Не удалось завершить регистрацию'));
+      return;
+    }
+
+    if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = t('authRegisterCompleted', null, 'Регистрация завершена');
+    pendingRegistrationEmail = null;
+    pendingRegisterToken = null;
+    clearRegisterTokenFromUrl();
+    isAuthenticated = true;
+    currentUser = data?.user || null;
+    isAdmin = Boolean(currentUser?.isAdmin);
+    isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+    canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
+    csrfToken = String(data?.csrfToken || '') || csrfToken;
+    renderAuth();
+    closeAuthModal();
+    window.location.href = '/account/';
+  });
+}
+
+if (forgotPasswordFormEl) {
+  forgotPasswordFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const email = String(forgotPasswordEmailEl?.value || '').trim();
+    if (!email) {
+      if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = t('authForgotEmailRequired', null, 'Укажите email');
+      return;
+    }
+    if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = t('authForgotSending', null, 'Отправляем ссылку...');
+    let resp;
+    try {
+      resp = await fetch('/api/password-reset/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+    } catch {
+      if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = t('authForgotNetworkError', null, 'Ошибка сети');
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = String(data?.error || t('authForgotFailed', null, 'Не удалось отправить письмо'));
+      return;
+    }
+    if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = t('authForgotDone', null, 'Если аккаунт существует, ссылка отправлена на почту.');
+  });
+}
+
+if (resetPasswordFormEl) {
+  resetPasswordFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!pendingResetToken) {
+      if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetTokenMissing', null, 'Токен сброса не найден в ссылке.');
+      return;
+    }
+    const nextPassword = String(resetPasswordNewEl?.value || '');
+    const confirmPassword = String(resetPasswordConfirmEl?.value || '');
+    if (!nextPassword || !confirmPassword) {
+      if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetFillBoth', null, 'Заполните оба поля пароля');
+      return;
+    }
+    if (nextPassword !== confirmPassword) {
+      if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetPasswordsMismatch', null, 'Пароли не совпадают');
+      return;
+    }
+
+    if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetSaving', null, 'Сохраняем новый пароль...');
+    let resp;
+    try {
+      resp = await fetch('/api/password-reset/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: pendingResetToken, newPassword: nextPassword })
+      });
+    } catch {
+      if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetNetworkError', null, 'Ошибка сети');
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = String(data?.error || t('authResetFailed', null, 'Не удалось сменить пароль'));
+      return;
+    }
+
+    pendingResetToken = null;
+    clearResetTokenFromUrl();
+    renderPasswordRecoveryPanels();
+    if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetDone', null, 'Пароль обновлен. Войдите с новым паролем.');
+    resetPasswordFormEl.reset();
+  });
+}
 
 logoutBtn.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   isAuthenticated = false;
   isAdmin = false;
+  isMasterAdmin = false;
+  currentUser = null;
+  canEditBuildings = false;
+  csrfToken = null;
   renderAuth();
 });
+
+if (profileFormEl) {
+  profileFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const firstName = String(profileFirstNameEl?.value || '').trim();
+    const lastName = String(profileLastNameEl?.value || '').trim();
+    if (profileStatusEl) profileStatusEl.textContent = 'Сохраняем профиль...';
+
+    let resp;
+    try {
+      resp = await fetch('/api/account/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ firstName, lastName })
+      });
+    } catch {
+      if (profileStatusEl) profileStatusEl.textContent = 'Ошибка сети';
+      return;
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (profileStatusEl) profileStatusEl.textContent = String(data?.error || 'Не удалось сохранить профиль');
+      return;
+    }
+
+    currentUser = data?.user || currentUser;
+    if (profileStatusEl) profileStatusEl.textContent = 'Профиль сохранён';
+    renderAuth();
+  });
+}
+
+if (changePasswordFormEl) {
+  changePasswordFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const currentPassword = String(document.getElementById('current-password')?.value || '');
+    const newPassword = String(document.getElementById('new-password')?.value || '');
+    const newPasswordConfirm = String(document.getElementById('new-password-confirm')?.value || '');
+
+    if (!currentPassword || !newPassword || !newPasswordConfirm) {
+      if (changePasswordStatusEl) changePasswordStatusEl.textContent = 'Заполните все поля';
+      return;
+    }
+    if (newPassword !== newPasswordConfirm) {
+      if (changePasswordStatusEl) changePasswordStatusEl.textContent = 'Новый пароль и подтверждение не совпадают';
+      return;
+    }
+
+    if (changePasswordStatusEl) changePasswordStatusEl.textContent = 'Сохраняем новый пароль...';
+    let resp;
+    try {
+      resp = await fetch('/api/account/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+    } catch {
+      if (changePasswordStatusEl) changePasswordStatusEl.textContent = 'Ошибка сети';
+      return;
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (changePasswordStatusEl) changePasswordStatusEl.textContent = String(data?.error || 'Не удалось сменить пароль');
+      return;
+    }
+
+    if (changePasswordStatusEl) changePasswordStatusEl.textContent = 'Пароль успешно обновлён';
+    changePasswordFormEl.reset();
+  });
+}
+
+if (profileLogoutBtnEl) {
+  profileLogoutBtnEl.addEventListener('click', async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    isAuthenticated = false;
+    isAdmin = false;
+    isMasterAdmin = false;
+    currentUser = null;
+    canEditBuildings = false;
+    csrfToken = null;
+    closeProfileModal();
+    renderAuth();
+  });
+}
 
 if (searchFormEl) {
   searchFormEl.addEventListener('submit', async (event) => {
@@ -2664,8 +3327,8 @@ if (searchResultsListEl) {
   });
 }
 
-if (adminEditsListEl) {
-  adminEditsListEl.addEventListener('click', async (event) => {
+if (adminPanelEditsListEl) {
+  adminPanelEditsListEl.addEventListener('click', async (event) => {
     const button = event.target?.closest?.('button[data-action]');
     if (!button) return;
     const action = String(button.getAttribute('data-action') || '').trim();
@@ -2685,11 +3348,11 @@ if (adminEditsListEl) {
 
     if (action === 'admin-reassign-submit') {
       const sourceKey = `${osmType}/${osmId}`;
-      const input = adminEditsListEl.querySelector(`input[data-field="target-osm-key"][data-source-key="${sourceKey}"]`);
+      const input = adminPanelEditsListEl.querySelector(`input[data-field="target-osm-key"][data-source-key="${sourceKey}"]`);
       const raw = String(input?.value || '').trim();
       const parsed = parseKey(raw);
       if (!parsed) {
-        if (adminEditsStatusEl) adminEditsStatusEl.textContent = t('adminReassignInvalidTarget', null, 'Укажите корректный OSM ключ в формате way/123 или relation/123');
+        if (adminPanelEditsStatusEl) adminPanelEditsStatusEl.textContent = t('adminReassignInvalidTarget', null, 'Укажите корректный OSM ключ в формате way/123 или relation/123');
         return;
       }
       button.disabled = true;
@@ -2703,8 +3366,8 @@ if (adminEditsListEl) {
 
     if (action === 'admin-reassign-pick') {
       adminReassignPickState = { fromOsmType: osmType, fromOsmId: osmId };
-      closeAdminEditsModal();
-      if (adminEditsStatusEl) adminEditsStatusEl.textContent = '';
+      closeAdminPanelModal();
+      if (adminPanelEditsStatusEl) adminPanelEditsStatusEl.textContent = '';
       window.alert(t('adminReassignPickHint', { osmKey: `${osmType}/${osmId}` }, `Выберите на карте целевое здание для переназначения правок ${osmType}/${osmId}.`));
     }
   });
@@ -2760,7 +3423,7 @@ if (themeToggleEl) {
 
 async function saveBuildingInfoFromModal(event) {
   event.preventDefault();
-  if (!selected || !isAuthenticated) return;
+  if (!selected || !canEditBuildings) return;
   const form = event.currentTarget;
   const statusEl = document.getElementById('building-save-status');
   if (statusEl) statusEl.textContent = t('saveInProgress', null, 'Сохраняем...');
@@ -2869,23 +3532,106 @@ if (modalContentEl) {
     }, 500);
   });
 }
-authFabEl.addEventListener('click', openAuthModal);
-if (adminEditsFabEl) {
-  adminEditsFabEl.addEventListener('click', openAdminEditsModal);
+
+if (adminUsersListEl) {
+  adminUsersListEl.addEventListener('click', async (event) => {
+    const actionEl = event.target?.closest?.('[data-action]');
+    if (!actionEl) return;
+    const action = String(actionEl.getAttribute('data-action') || '');
+    const email = String(actionEl.getAttribute('data-email') || '').trim();
+    if (!email) return;
+
+    if (action === 'user-toggle-edit') {
+      const current = actionEl.getAttribute('data-can-edit') === '1';
+      const resp = await fetch('/api/admin/users/edit-permission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, canEdit: !current })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        if (adminUsersStatusEl) adminUsersStatusEl.textContent = String(err?.error || 'Не удалось изменить разрешение редактирования');
+        return;
+      }
+      if (adminUsersStatusEl) adminUsersStatusEl.textContent = `Права редактирования обновлены: ${email}`;
+      await loadAdminUsers();
+      return;
+    }
+
+    if (action === 'user-toggle-admin') {
+      const current = actionEl.getAttribute('data-is-admin') === '1';
+      const resp = await fetch('/api/admin/users/role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, isAdmin: !current })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        if (adminUsersStatusEl) adminUsersStatusEl.textContent = String(err?.error || 'Не удалось изменить роль');
+        return;
+      }
+      if (adminUsersStatusEl) adminUsersStatusEl.textContent = `Роль обновлена: ${email}`;
+      await loadAdminUsers();
+    }
+  });
 }
+
+if (adminTabUsersEl) {
+  adminTabUsersEl.addEventListener('click', () => setAdminPanelTab('users'));
+}
+if (adminTabEditsEl) {
+  adminTabEditsEl.addEventListener('click', () => setAdminPanelTab('edits'));
+}
+if (adminUsersRefreshEl) {
+  adminUsersRefreshEl.addEventListener('click', () => loadAdminUsers());
+}
+if (adminUsersSearchEl) {
+  adminUsersSearchEl.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    loadAdminUsers();
+  });
+}
+if (authTabLoginEl) {
+  authTabLoginEl.addEventListener('click', () => setAuthTab('login'));
+}
+if (authTabRegisterEl) {
+  authTabRegisterEl.addEventListener('click', () => setAuthTab('register'));
+}
+if (forgotPasswordToggleEl) {
+  forgotPasswordToggleEl.addEventListener('click', () => {
+    if (!forgotPasswordPanelEl) return;
+    forgotPasswordPanelEl.classList.toggle('hidden');
+  });
+}
+authFabEl.addEventListener('click', () => {
+  if (isAuthenticated) {
+    window.location.href = '/account/';
+    return;
+  }
+  openAuthModal();
+});
 authModalCloseEl.addEventListener('click', closeAuthModal);
 authModalEl.addEventListener('click', (event) => {
   if (event.target === authModalEl) closeAuthModal();
 });
+if (profileModalCloseEl) {
+  profileModalCloseEl.addEventListener('click', closeProfileModal);
+}
+if (profileModalEl) {
+  profileModalEl.addEventListener('click', (event) => {
+    if (event.target === profileModalEl) closeProfileModal();
+  });
+}
 if (searchModalCloseEl) {
   searchModalCloseEl.addEventListener('click', closeSearchModal);
 }
-if (adminEditsCloseEl) {
-  adminEditsCloseEl.addEventListener('click', closeAdminEditsModal);
+if (adminPanelCloseEl) {
+  adminPanelCloseEl.addEventListener('click', closeAdminPanelModal);
 }
-if (adminEditsModalEl) {
-  adminEditsModalEl.addEventListener('click', (event) => {
-    if (event.target === adminEditsModalEl) closeAdminEditsModal();
+if (adminPanelModalEl) {
+  adminPanelModalEl.addEventListener('click', (event) => {
+    if (event.target === adminPanelModalEl) closeAdminPanelModal();
   });
 }
 
@@ -3119,8 +3865,9 @@ async function onBuildingsLayerClick(event) {
   if (adminReassignPickState && isAuthenticated && isAdmin) {
     const { fromOsmType, fromOsmId } = adminReassignPickState;
     adminReassignPickState = null;
+    adminPanelTab = 'edits';
     await reassignLocalEdit(fromOsmType, fromOsmId, parsed.osmType, parsed.osmId);
-    openAdminEditsModal();
+    openAdminPanelModal();
     return;
   }
 
@@ -3165,6 +3912,25 @@ map.on('style.load', () => {
 map.on('load', async () => {
   renderBuildInfoLink();
   await loadAuthState();
+  setAuthTab('login');
+  if (pendingRegisterToken && !isAuthenticated) {
+    openAuthModal();
+    setAuthTab('register');
+    if (registerVerifyStatusEl) registerVerifyStatusEl.textContent = t('authRegisterLinkConfirming', null, 'Подтверждаем регистрацию по ссылке...');
+    const ok = await confirmRegistrationByToken(pendingRegisterToken);
+    if (ok) {
+      window.location.href = '/account/';
+      return;
+    }
+  }
+  if (!isAuthenticated && shouldOpenAuthFromUrl()) {
+    openAuthModal();
+  }
+  if (pendingResetToken && !isAuthenticated) {
+    openAuthModal();
+    if (forgotPasswordPanelEl) forgotPasswordPanelEl.classList.remove('hidden');
+    if (resetPasswordStatusEl) resetPasswordStatusEl.textContent = t('authResetPromptFromLink', null, 'Введите новый пароль для завершения сброса.');
+  }
   await ensureDbFilterTagKeysLoaded();
 
   scheduleLoadBuildings();
@@ -3188,3 +3954,4 @@ map.on('sourcedata', (event) => {
 });
 map.on('moveend', writeViewToUrl);
 map.on('zoomend', writeViewToUrl);
+

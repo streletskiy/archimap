@@ -30,6 +30,8 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - Separate local edits DB (`local-edits.db`) for architectural metadata:
   `name`, `style`, `levels`, `year`, `architect`, `address`, `archimap_description`.
 - Building modal with in-place editing (authorized users).
+- Dedicated account page (`/account/`) for profile and password management.
+- Dedicated admin page (`/admin/`) for user roles/permissions and local-edits moderation.
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
 - Viewport filter prefetch uses SQLite R*Tree bbox index with fallback to B-tree query when R*Tree is unavailable.
@@ -59,8 +61,13 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
   - Filter tag key cache (`filter_tag_keys_cache`)
 - Local metadata DB: `data/local-edits.db`
   - `architectural_info` overrides and additions
+- Auth DB: `data/users.db`
+  - `users`, registration codes, password-reset tokens
 - Tiles artifact: `data/buildings.pmtiles`
 - Main server: `server.js`
+- Auth + email templates:
+  - `auth.js`
+  - `email-templates/index.js`
 - Sync pipeline:
   - `scripts/sync-osm-buildings.js`
   - `scripts/sync-osm-buildings.py`
@@ -216,6 +223,24 @@ Index lifecycle:
 - Auth:
   - `GET /api/me`
   - `POST /api/login`
+  - `POST /api/register/start`
+  - `POST /api/register/confirm-code`
+  - `POST /api/register/confirm-link`
+  - `POST /api/password-reset/request`
+  - `POST /api/password-reset/confirm`
+  - `POST /api/account/profile`
+  - `POST /api/account/change-password`
+  - `GET /api/account/edits`
+  - `GET /api/account/edits/:osmType/:osmId`
+  - `GET /api/admin/users`
+  - `GET /api/admin/users/:email`
+  - `GET /api/admin/users/:email/edits`
+  - `POST /api/admin/users/edit-permission`
+  - `POST /api/admin/users/role`
+  - `GET /api/admin/building-edits`
+  - `GET /api/admin/building-edits/:osmType/:osmId`
+  - `POST /api/admin/building-edits/delete`
+  - `POST /api/admin/building-edits/reassign`
   - `POST /api/logout`
 
 ## Environment Variables
@@ -223,6 +248,7 @@ Index lifecycle:
 | Variable | Description |
 |---|---|
 | `PORT` | Server port. |
+| `TRUST_PROXY` | Set `true` when app works behind reverse proxy/ingress so secure cookies and request protocol are handled correctly. |
 | `SESSION_SECRET` | Session secret. |
 | `REDIS_URL` | Redis URL for sessions (default: `redis://redis:6379`). |
 | `MAP_DEFAULT_LON` | Default map longitude when URL hash has no `#map=...`. |
@@ -230,6 +256,22 @@ Index lifecycle:
 | `MAP_DEFAULT_ZOOM` | Default map zoom when URL hash has no `#map=...`. |
 | `ADMIN_USERNAME` | Admin login. |
 | `ADMIN_PASSWORD` | Admin password. |
+| `APP_DISPLAY_NAME` | App name used in registration emails (default: `Archimap`). |
+| `APP_BASE_URL` | Public application base URL used in password reset links (for example: `https://archimap.example.com`). Recommended to set explicitly for security. |
+| `SMTP_URL` | Full SMTP connection URL (alternative to host/port/user/pass). |
+| `SMTP_HOST` | SMTP host for registration emails. |
+| `SMTP_PORT` | SMTP port for registration emails (default: `587`). |
+| `SMTP_SECURE` | Use TLS SMTP transport (`true/false`). |
+| `SMTP_USER` | SMTP username. |
+| `SMTP_PASS` | SMTP password or app password. |
+| `EMAIL_FROM` | Sender address for registration emails (for example: `Archimap <no-reply@example.com>`). |
+| `REGISTRATION_ENABLED` | Enable/disable email registration (`true/false`, default `true`). When `false`, SMTP setup is not required. |
+| `REGISTRATION_CODE_TTL_MINUTES` | Verification code lifetime in minutes (`2..60`, default `15`). |
+| `REGISTRATION_CODE_RESEND_COOLDOWN_SEC` | Delay before requesting another code in seconds (`10..600`, default `60`). |
+| `REGISTRATION_CODE_MAX_ATTEMPTS` | Maximum wrong code attempts before re-request is required (`3..12`, default `6`). |
+| `REGISTRATION_MIN_PASSWORD_LENGTH` | Minimum password length for new users (`8..72`, default `8`). |
+| `PASSWORD_RESET_TTL_MINUTES` | Password reset link lifetime in minutes (`5..180`, default `60`). |
+| `USER_EDIT_REQUIRES_PERMISSION` | If `true` (default), regular users can edit buildings only when `can_edit=1` in `auth.users`. If `false`, any authenticated user can edit. |
 | `OSM_EXTRACT_QUERY` | Optional single QuackOSM extract query (example: `Gibraltar`). |
 | `OSM_EXTRACT_QUERIES` | Optional semicolon-separated extract queries (example: `Nizhny Novgorod;Moscow Oblast;Russia`). |
 | `OSM_PBF_PATH` | Optional path to local `.osm.pbf`. |

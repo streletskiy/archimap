@@ -7,6 +7,7 @@ const session = require('express-session');
 const { RedisStore } = require('connect-redis');
 const { createClient } = require('redis');
 const Database = require('better-sqlite3');
+const { ensureAuthSchema, registerAuthRoutes } = require('./auth');
 const { spawn, execSync } = require('child_process');
 
 const app = express();
@@ -14,6 +15,10 @@ const app = express();
 const PORT = Number(process.env.PORT || 3252);
 const HOST = process.env.HOST || '0.0.0.0';
 const NODE_ENV = process.env.NODE_ENV || 'development';
+const TRUST_PROXY = String(process.env.TRUST_PROXY ?? 'false').toLowerCase() === 'true';
+if (TRUST_PROXY) {
+  app.set('trust proxy', 1);
+}
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -28,6 +33,22 @@ const BUILDINGS_PMTILES_FILE = path.basename(String(process.env.BUILDINGS_PMTILE
 const BUILDINGS_PMTILES_SOURCE_LAYER = String(process.env.BUILDINGS_PMTILES_SOURCE_LAYER || 'buildings').trim() || 'buildings';
 const BUILD_SHA = String(process.env.BUILD_SHA || '').trim();
 const BUILD_VERSION = String(process.env.BUILD_VERSION || '').trim();
+const SMTP_URL = String(process.env.SMTP_URL || '').trim();
+const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
+const SMTP_USER = String(process.env.SMTP_USER || '').trim();
+const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
+const EMAIL_FROM = String(process.env.EMAIL_FROM || SMTP_USER || '').trim();
+const APP_BASE_URL = String(process.env.APP_BASE_URL || '').trim();
+const USER_EDIT_REQUIRES_PERMISSION = String(process.env.USER_EDIT_REQUIRES_PERMISSION ?? 'true').toLowerCase() === 'true';
+const REGISTRATION_ENABLED = String(process.env.REGISTRATION_ENABLED ?? 'true').toLowerCase() === 'true';
+const REGISTRATION_CODE_TTL_MINUTES = Math.max(2, Math.min(60, Number(process.env.REGISTRATION_CODE_TTL_MINUTES || 15)));
+const REGISTRATION_CODE_RESEND_COOLDOWN_SEC = Math.max(10, Math.min(600, Number(process.env.REGISTRATION_CODE_RESEND_COOLDOWN_SEC || 60)));
+const REGISTRATION_CODE_MAX_ATTEMPTS = Math.max(3, Math.min(12, Number(process.env.REGISTRATION_CODE_MAX_ATTEMPTS || 6)));
+const REGISTRATION_MIN_PASSWORD_LENGTH = Math.max(8, Math.min(72, Number(process.env.REGISTRATION_MIN_PASSWORD_LENGTH || 8)));
+const PASSWORD_RESET_TTL_MINUTES = Math.max(5, Math.min(180, Number(process.env.PASSWORD_RESET_TTL_MINUTES || 60)));
+const APP_DISPLAY_NAME = String(process.env.APP_DISPLAY_NAME || 'Archimap').trim() || 'Archimap';
 const REPO_URL = 'https://github.com/streletskiy/archimap';
 const BUILD_INFO_PATH = path.join(__dirname, 'build-info.json');
 
@@ -35,6 +56,7 @@ const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
+const userAuthDbPath = path.join(dataDir, 'users.db');
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-osm-buildings.js');
 const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
@@ -108,6 +130,7 @@ function validateSecurityConfig() {
   const isProduction = NODE_ENV === 'production';
   const weakSessionSecret = SESSION_SECRET === 'dev-secret-change-me';
   const weakAdminPassword = ADMIN_PASSWORD === 'admin123';
+  const hasAppBaseUrl = APP_BASE_URL.length > 0;
 
   if (!isProduction) {
     if (weakSessionSecret) {
@@ -116,13 +139,17 @@ function validateSecurityConfig() {
     if (weakAdminPassword) {
       console.warn('[security] ADMIN_PASSWORD uses default value (allowed in non-production, unsafe for production)');
     }
+    if (!hasAppBaseUrl) {
+      console.warn('[security] APP_BASE_URL is empty, password reset links will be unavailable');
+    }
     return;
   }
 
-  if (weakSessionSecret || weakAdminPassword) {
+  if (weakSessionSecret || weakAdminPassword || !hasAppBaseUrl) {
     const issues = [];
     if (weakSessionSecret) issues.push('SESSION_SECRET is default');
     if (weakAdminPassword) issues.push('ADMIN_PASSWORD is default');
+    if (!hasAppBaseUrl) issues.push('APP_BASE_URL is required');
     throw new Error(`[security] Refusing to start in production: ${issues.join('; ')}`);
   }
 }
@@ -160,12 +187,6 @@ function createSimpleRateLimiter({ windowMs, maxRequests, message }) {
   };
 }
 
-const loginRateLimiter = createSimpleRateLimiter({
-  windowMs: 10 * 60 * 1000,
-  maxRequests: 20,
-  message: 'Слишком много попыток входа, попробуйте позже'
-});
-
 const searchRateLimiter = createSimpleRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 60,
@@ -176,8 +197,11 @@ db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
 
 db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
+db.prepare(`ATTACH DATABASE ? AS auth`).run(userAuthDbPath);
 db.exec(`PRAGMA local.journal_mode = WAL;`);
 db.exec(`PRAGMA local.synchronous = NORMAL;`);
+db.exec(`PRAGMA auth.journal_mode = WAL;`);
+db.exec(`PRAGMA auth.synchronous = NORMAL;`);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS architectural_info (
@@ -482,6 +506,8 @@ WHERE (archimap_description IS NULL OR trim(archimap_description) = '')
   AND trim(description) <> '';
 `);
 
+ensureAuthSchema(db);
+
 const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
 const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
 if (!searchSourceColumnNames.has('local_priority')) {
@@ -497,12 +523,23 @@ app.get('/app-config.js', (req, res) => {
     sourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER
   };
   const buildInfo = getBuildInfo();
+  const auth = {
+    registrationEnabled: REGISTRATION_ENABLED
+  };
   res.type('application/javascript').send(
-    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo })};`
+    `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth })};`
   );
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get(['/account', '/account/'], (req, res) => {
+  return res.sendFile(path.join(__dirname, 'public', 'account.html'));
+});
+
+app.get(['/admin', '/admin/'], (req, res) => {
+  return res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
 
 app.get('/api/buildings.pmtiles', (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=300');
@@ -864,15 +901,61 @@ function requireAuth(req, res, next) {
 }
 
 function isAdminRequest(req) {
-  const username = String(req.session?.user?.username || '');
-  return Boolean(username) && username === ADMIN_USERNAME;
+  return Boolean(req.session?.user?.isAdmin);
 }
 
 function requireAdmin(req, res, next) {
+  if (!req?.session?.user) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+  if (Boolean(req.session.user.isMasterAdmin)) return next();
   if (!isAdminRequest(req)) {
     return res.status(403).json({ error: 'Требуются права администратора' });
   }
-  next();
+  const email = String(req.session.user.email || '').trim().toLowerCase();
+  if (!email) {
+    return res.status(403).json({ error: 'Требуются права администратора' });
+  }
+  const row = db.prepare('SELECT is_admin FROM auth.users WHERE email = ?').get(email);
+  if (!row || Number(row.is_admin || 0) <= 0) {
+    return res.status(403).json({ error: 'Требуются права администратора' });
+  }
+  return next();
+}
+
+function requireCsrfSession(req, res, next) {
+  if (!req?.session?.user) return next();
+  const expected = String(req.session.csrfToken || '');
+  const provided = String(req.get('x-csrf-token') || '');
+  if (!expected || !provided || expected !== provided) {
+    return res.status(403).json({ error: 'CSRF token missing or invalid' });
+  }
+  return next();
+}
+
+function requireBuildingEditPermission(req, res, next) {
+  if (!req.session?.user) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+
+  if (isAdminRequest(req)) return next();
+  if (!USER_EDIT_REQUIRES_PERMISSION) return next();
+
+  const email = String(req.session.user.email || '').trim().toLowerCase();
+  if (!email) {
+    return res.status(403).json({ error: 'Редактирование недоступно для этой учетной записи' });
+  }
+
+  const row = db.prepare('SELECT can_edit, is_admin FROM auth.users WHERE email = ?').get(email);
+  if (!row) {
+    return res.status(403).json({ error: 'Редактирование недоступно для этой учетной записи' });
+  }
+  if (Number(row.is_admin || 0) > 0) return next();
+  if (Number(row.can_edit || 0) <= 0) {
+    return res.status(403).json({ error: 'Редактирование запрещено. Обратитесь к администратору за доступом.' });
+  }
+
+  return next();
 }
 
 function normalizeTagValue(value) {
@@ -961,6 +1044,108 @@ function buildChangesFromRows(localRow, tags) {
     });
   }
   return changes;
+}
+
+function parseTagsJsonSafe(raw) {
+  try {
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getSessionEditActorKey(req) {
+  const email = String(req?.session?.user?.email || '').trim().toLowerCase();
+  if (email) return email;
+  return String(req?.session?.user?.username || '').trim().toLowerCase();
+}
+
+function getLocalEditsList({ updatedBy = null, limit = 2000 }) {
+  const cappedLimit = Math.max(1, Math.min(5000, Number(limit) || 2000));
+  const whereSql = updatedBy ? 'WHERE lower(trim(ai.updated_by)) = ?' : '';
+  const params = updatedBy ? [String(updatedBy).trim().toLowerCase(), cappedLimit] : [cappedLimit];
+  const rows = db.prepare(`
+    SELECT
+      ai.osm_type,
+      ai.osm_id,
+      ai.name,
+      ai.style,
+      ai.levels,
+      ai.year_built,
+      ai.architect,
+      ai.address,
+      ai.archimap_description,
+      ai.updated_by,
+      ai.updated_at,
+      bc.tags_json
+    FROM local.architectural_info ai
+    LEFT JOIN building_contours bc
+      ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
+    ${whereSql}
+    ORDER BY ai.updated_at DESC
+    LIMIT ?
+  `).all(...params);
+
+  const out = [];
+  for (const row of rows) {
+    const tags = parseTagsJsonSafe(row.tags_json);
+    const changes = buildChangesFromRows(row, tags);
+    if (changes.length === 0) continue;
+    out.push({
+      osmType: row.osm_type,
+      osmId: row.osm_id,
+      orphaned: !row.tags_json,
+      updatedBy: row.updated_by || null,
+      updatedAt: row.updated_at || null,
+      changes
+    });
+  }
+  return out;
+}
+
+function getLocalEditDetails(osmType, osmId) {
+  const row = db.prepare(`
+    SELECT
+      ai.osm_type,
+      ai.osm_id,
+      ai.name,
+      ai.style,
+      ai.levels,
+      ai.year_built,
+      ai.architect,
+      ai.address,
+      ai.archimap_description,
+      ai.updated_by,
+      ai.updated_at,
+      bc.tags_json
+    FROM local.architectural_info ai
+    LEFT JOIN building_contours bc
+      ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
+    WHERE ai.osm_type = ? AND ai.osm_id = ?
+    LIMIT 1
+  `).get(osmType, osmId);
+  if (!row) return null;
+  const tags = parseTagsJsonSafe(row.tags_json);
+  const changes = buildChangesFromRows(row, tags);
+  if (changes.length === 0) return null;
+  return {
+    osmType: row.osm_type,
+    osmId: row.osm_id,
+    orphaned: !row.tags_json,
+    updatedBy: row.updated_by || null,
+    updatedAt: row.updated_at || null,
+    local: {
+      name: row.name ?? null,
+      style: row.style ?? null,
+      levels: row.levels ?? null,
+      yearBuilt: row.year_built ?? null,
+      architect: row.architect ?? null,
+      address: row.address ?? null,
+      archimapDescription: row.archimap_description ?? null
+    },
+    changes
+  };
 }
 
 function normalizeSearchTokens(queryText) {
@@ -1320,30 +1505,31 @@ function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cu
   };
 }
 
-app.get('/api/me', (req, res) => {
-  const authenticated = Boolean(req.session && req.session.user);
-  const user = authenticated
-    ? {
-      ...req.session.user,
-      isAdmin: isAdminRequest(req)
-    }
-    : null;
-  res.json({ authenticated, user });
-});
-
-app.post('/api/login', loginRateLimiter, (req, res) => {
-  const { username, password } = req.body || {};
-  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-    req.session.user = { username, isAdmin: true };
-    return res.json({ ok: true, user: req.session.user });
+registerAuthRoutes({
+  app,
+  db,
+  createSimpleRateLimiter,
+  adminUsername: ADMIN_USERNAME,
+  adminPassword: ADMIN_PASSWORD,
+  sessionSecret: SESSION_SECRET,
+  userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION,
+  registrationEnabled: REGISTRATION_ENABLED,
+  registrationCodeTtlMinutes: REGISTRATION_CODE_TTL_MINUTES,
+  registrationCodeResendCooldownSec: REGISTRATION_CODE_RESEND_COOLDOWN_SEC,
+  registrationCodeMaxAttempts: REGISTRATION_CODE_MAX_ATTEMPTS,
+  registrationMinPasswordLength: REGISTRATION_MIN_PASSWORD_LENGTH,
+  passwordResetTtlMinutes: PASSWORD_RESET_TTL_MINUTES,
+  appBaseUrl: APP_BASE_URL,
+  appDisplayName: APP_DISPLAY_NAME,
+  smtp: {
+    url: SMTP_URL,
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    user: SMTP_USER,
+    pass: SMTP_PASS,
+    from: EMAIL_FROM
   }
-  return res.status(401).json({ error: 'Неверный логин или пароль' });
-});
-
-app.post('/api/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.json({ ok: true });
-  });
 });
 
 app.get('/api/building-info/:osmType/:osmId', (req, res) => {
@@ -1366,7 +1552,7 @@ app.get('/api/building-info/:osmType/:osmId', (req, res) => {
   return res.json(row);
 });
 
-app.post('/api/building-info', requireAuth, (req, res) => {
+app.post('/api/building-info', requireCsrfSession, requireAuth, requireBuildingEditPermission, (req, res) => {
   const body = req.body || {};
   const osmType = body.osmType;
   const osmId = Number(body.osmId);
@@ -1482,56 +1668,110 @@ app.get('/api/search-buildings', searchRateLimiter, (req, res) => {
 });
 
 app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
-  const rows = db.prepare(`
-    SELECT
-      ai.osm_type,
-      ai.osm_id,
-      ai.name,
-      ai.style,
-      ai.levels,
-      ai.year_built,
-      ai.architect,
-      ai.address,
-      ai.archimap_description,
-      ai.updated_by,
-      ai.updated_at,
-      bc.tags_json
-    FROM local.architectural_info ai
-    LEFT JOIN building_contours bc
-      ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
-    ORDER BY ai.updated_at DESC
-    LIMIT 2000
-  `).all();
-
-  const out = [];
-  for (const row of rows) {
-    let tags = {};
-    try {
-      tags = row.tags_json ? JSON.parse(row.tags_json) : {};
-    } catch {
-      tags = {};
-    }
-
-    const changes = buildChangesFromRows(row, tags);
-    if (changes.length === 0) continue;
-
-    out.push({
-      osmType: row.osm_type,
-      osmId: row.osm_id,
-      orphaned: !row.tags_json,
-      updatedBy: row.updated_by || null,
-      updatedAt: row.updated_at || null,
-      changes
-    });
-  }
-
+  const out = getLocalEditsList({ limit: 2000 });
   return res.json({
     total: out.length,
     items: out
   });
 });
 
-app.post('/api/admin/building-edits/delete', requireAuth, requireAdmin, (req, res) => {
+app.get('/api/admin/building-edits/:osmType/:osmId', requireAuth, requireAdmin, (req, res) => {
+  const osmType = String(req.params.osmType || '').trim();
+  const osmId = Number(req.params.osmId);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
+    return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+  }
+  const item = getLocalEditDetails(osmType, osmId);
+  if (!item) {
+    return res.status(404).json({ error: 'Правка не найдена' });
+  }
+  return res.json({ item });
+});
+
+app.get('/api/admin/users/:email', requireAuth, requireAdmin, (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Некорректный email' });
+  }
+  const row = db.prepare(`
+    SELECT
+      u.email,
+      u.first_name,
+      u.last_name,
+      u.can_edit,
+      u.is_admin,
+      u.created_at,
+      COALESCE(e.edit_count, 0) AS edits_count,
+      e.last_edit_at
+    FROM auth.users u
+    LEFT JOIN (
+      SELECT
+        lower(trim(updated_by)) AS updated_by_key,
+        COUNT(*) AS edit_count,
+        MAX(updated_at) AS last_edit_at
+      FROM local.architectural_info
+      GROUP BY lower(trim(updated_by))
+    ) e
+      ON e.updated_by_key = lower(u.email)
+    WHERE lower(u.email) = ?
+    LIMIT 1
+  `).get(email);
+  if (!row) {
+    return res.status(404).json({ error: 'Пользователь не найден' });
+  }
+  return res.json({
+    item: {
+      email: String(row.email || ''),
+      firstName: row.first_name == null ? null : String(row.first_name),
+      lastName: row.last_name == null ? null : String(row.last_name),
+      canEdit: Number(row.can_edit || 0) > 0,
+      isAdmin: Number(row.is_admin || 0) > 0,
+      createdAt: String(row.created_at || ''),
+      editsCount: Number(row.edits_count || 0),
+      lastEditAt: row.last_edit_at ? String(row.last_edit_at) : null
+    }
+  });
+});
+
+app.get('/api/admin/users/:email/edits', requireAuth, requireAdmin, (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Некорректный email' });
+  }
+  const items = getLocalEditsList({ updatedBy: email, limit: 2000 });
+  return res.json({ total: items.length, items });
+});
+
+app.get('/api/account/edits', requireAuth, (req, res) => {
+  const actorKey = getSessionEditActorKey(req);
+  if (!actorKey) {
+    return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
+  }
+  const items = getLocalEditsList({ updatedBy: actorKey, limit: 2000 });
+  return res.json({ total: items.length, items });
+});
+
+app.get('/api/account/edits/:osmType/:osmId', requireAuth, (req, res) => {
+  const actorKey = getSessionEditActorKey(req);
+  if (!actorKey) {
+    return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
+  }
+  const osmType = String(req.params.osmType || '').trim();
+  const osmId = Number(req.params.osmId);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
+    return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+  }
+  const item = getLocalEditDetails(osmType, osmId);
+  if (!item) {
+    return res.status(404).json({ error: 'Правка не найдена' });
+  }
+  if (String(item.updatedBy || '').trim().toLowerCase() !== actorKey) {
+    return res.status(403).json({ error: 'Доступ запрещен' });
+  }
+  return res.json({ item });
+});
+
+app.post('/api/admin/building-edits/delete', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
   const osmType = String(req.body?.osmType || '').trim();
   const osmId = Number(req.body?.osmId);
   if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
@@ -1550,7 +1790,7 @@ app.post('/api/admin/building-edits/delete', requireAuth, requireAdmin, (req, re
   });
 });
 
-app.post('/api/admin/building-edits/reassign', requireAuth, requireAdmin, (req, res) => {
+app.post('/api/admin/building-edits/reassign', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
   const fromOsmType = String(req.body?.fromOsmType || '').trim();
   const fromOsmId = Number(req.body?.fromOsmId);
   const toOsmType = String(req.body?.toOsmType || '').trim();
@@ -1801,6 +2041,7 @@ async function initSessionStore() {
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
+      secure: NODE_ENV === 'production',
       maxAge: 1000 * 60 * 60 * 8
     }
   };
