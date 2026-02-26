@@ -1,8 +1,10 @@
 # archimap
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)
+![Python](https://img.shields.io/badge/python-%3E%3D3.11-3776AB?logo=python&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-enabled-2496ED?logo=docker&logoColor=white)
 ![OSM](https://img.shields.io/badge/data-OpenStreetMap-7EBC6F)
-![Output](https://img.shields.io/badge/output-SVG%20%7C%20PDF-4C8EDA)
+![Output](https://img.shields.io/badge/output-PMTiles-2F855A)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 archimap is a web app with an OSM-based vector map for viewing and editing architectural metadata of buildings.

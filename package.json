@@ -10,7 +10,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "description": "",
   "dependencies": {
     "better-sqlite3": "^12.6.2",
