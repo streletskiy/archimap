@@ -1,6 +1,11 @@
-# ArchiMap
+# archimap
 
-ArchiMap is a web app with an OSM-based vector map for viewing and editing architectural metadata of buildings.
+![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)
+![OSM](https://img.shields.io/badge/data-OpenStreetMap-7EBC6F)
+![Output](https://img.shields.io/badge/output-SVG%20%7C%20PDF-4C8EDA)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+
+archimap is a web app with an OSM-based vector map for viewing and editing architectural metadata of buildings.
 
 ## Contents
 
@@ -14,6 +19,7 @@ ArchiMap is a web app with an OSM-based vector map for viewing and editing archi
 - [API Overview](#api-overview)
 - [Environment Variables](#environment-variables)
 - [External Projects](#external-projects)
+- [License](#license)
 
 ## Highlights
 
@@ -263,3 +269,9 @@ Build info in settings footer:
 - [PMTiles](https://github.com/protomaps/PMTiles) for compact vector tile archives.
 - [tippecanoe](https://github.com/felt/tippecanoe) for vector tile generation.
 - [Redis](https://redis.io/) for session storage.
+
+## License
+
+- Source code: [Apache License 2.0](./LICENSE)
+- Project notices: [NOTICE](./NOTICE)
+- OpenStreetMap-derived data: [ODbL v1.0](https://opendatacommons.org/licenses/odbl/1-0/) (see [DATA_LICENSE.md](./DATA_LICENSE.md))

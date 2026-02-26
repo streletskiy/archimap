@@ -1898,7 +1898,7 @@ initSessionStore()
   .then(() => {
     validateSecurityConfig();
     httpServer = app.listen(PORT, HOST, () => {
-      console.log('[server] ArchiMap started successfully');
+      console.log('[server] archimap started successfully');
       console.log(`[server] Local:   http://localhost:${PORT}`);
       console.log(`[server] Network: http://${HOST}:${PORT}`);
       rebuildSearchIndex('startup');
