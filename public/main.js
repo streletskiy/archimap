@@ -1,24 +1,18 @@
-function readViewFromUrl() {
-  const hash = String(window.location.hash || '');
-  const match = hash.match(/^#map=(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)$/);
-  if (!match) return null;
+const mainMapUtils = window.ArchiMapMainMap || {};
+const mainAuthUtils = window.ArchiMapMainAuth || {};
+const mainSearchUtils = window.ArchiMapMainSearch || {};
+const mainModalUtils = window.ArchiMapMainModal || {};
+const mainFilterUtils = window.ArchiMapMainFilters || {};
 
-  const zoom = Number(match[1]);
-  const lat = Number(match[2]);
-  const lon = Number(match[3]);
-  if ([zoom, lat, lon].some((n) => Number.isNaN(n))) return null;
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-  return { zoom, center: [lon, lat] };
+function readViewFromUrl() {
+  return typeof mainMapUtils.readViewFromUrl === 'function'
+    ? mainMapUtils.readViewFromUrl()
+    : null;
 }
 
 function saveLastMapHash(hashValue) {
-  const text = String(hashValue || '').trim();
-  if (!text.startsWith('#map=')) return;
-  try {
-    localStorage.setItem('archimap-last-map-hash', text);
-  } catch {
-    // ignore
-  }
+  if (typeof mainMapUtils.saveLastMapHash !== 'function') return;
+  mainMapUtils.saveLastMapHash(hashValue);
 }
 
 function writeViewToUrl() {
@@ -34,59 +28,31 @@ function writeViewToUrl() {
 }
 
 function readBuildingFromUrl() {
-  const url = new URL(window.location.href);
-  const raw = url.searchParams.get('b');
-  if (!raw) return null;
-  const parsed = parseKey(raw);
-  return parsed || null;
+  return typeof mainMapUtils.readBuildingFromUrl === 'function'
+    ? mainMapUtils.readBuildingFromUrl()
+    : null;
 }
 
 function writeBuildingToUrl(osmType, osmId, options = {}) {
-  const mode = options.mode === 'replace' ? 'replace' : 'push';
-  const nextValue = `${osmType}/${osmId}`;
-  const url = new URL(window.location.href);
-  if (url.searchParams.get('b') === nextValue) return;
-  url.searchParams.set('b', nextValue);
-  if (mode === 'replace') {
-    history.replaceState(null, '', url.toString());
-    return;
-  }
-  history.pushState(null, '', url.toString());
+  if (typeof mainMapUtils.writeBuildingToUrl !== 'function') return;
+  mainMapUtils.writeBuildingToUrl(osmType, osmId, options);
 }
 
 function clearBuildingFromUrl(options = {}) {
-  const mode = options.mode === 'replace' ? 'replace' : 'push';
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has('b')) return;
-  url.searchParams.delete('b');
-  if (mode === 'replace') {
-    history.replaceState(null, '', url.toString());
-    return;
-  }
-  history.pushState(null, '', url.toString());
+  if (typeof mainMapUtils.clearBuildingFromUrl !== 'function') return;
+  mainMapUtils.clearBuildingFromUrl(options);
 }
 
 function readRequestedPostLoginPath() {
-  try {
-    const url = new URL(window.location.href);
-    const raw = String(url.searchParams.get('next') || '').trim();
-    if (!raw) return null;
-    if (!raw.startsWith('/')) return null;
-    if (raw.startsWith('//')) return null;
-    if (raw.includes('://')) return null;
-    return raw;
-  } catch {
-    return null;
-  }
+  return typeof mainMapUtils.readRequestedPostLoginPath === 'function'
+    ? mainMapUtils.readRequestedPostLoginPath()
+    : null;
 }
 
 function shouldOpenAuthFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    return String(url.searchParams.get('auth') || '') === '1';
-  } catch {
-    return false;
-  }
+  return typeof mainMapUtils.shouldOpenAuthFromUrl === 'function'
+    ? mainMapUtils.shouldOpenAuthFromUrl()
+    : false;
 }
 
 const initialView = readViewFromUrl();
@@ -99,22 +65,8 @@ const FALLBACK_DEFAULT_MAP_VIEW = Object.freeze({
 });
 
 function getDefaultMapView() {
-  const cfg = window.__ARCHIMAP_CONFIG?.mapDefault;
-  const lon = Number(cfg?.lon);
-  const lat = Number(cfg?.lat);
-  const zoom = Number(cfg?.zoom);
-
-  if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(zoom)) {
-    return FALLBACK_DEFAULT_MAP_VIEW;
-  }
-  if (lon < -180 || lon > 180 || lat < -90 || lat > 90 || zoom < 0 || zoom > 22) {
-    return FALLBACK_DEFAULT_MAP_VIEW;
-  }
-
-  return {
-    center: [lon, lat],
-    zoom
-  };
+  if (typeof mainMapUtils.getDefaultMapView !== 'function') return FALLBACK_DEFAULT_MAP_VIEW;
+  return mainMapUtils.getDefaultMapView(window.__ARCHIMAP_CONFIG?.mapDefault, FALLBACK_DEFAULT_MAP_VIEW);
 }
 
 const defaultMapView = getDefaultMapView();
@@ -181,16 +133,22 @@ const LOCAL_BUILDING_STYLE_FALLBACK = Object.freeze({
 });
 
 function getMapStyleForTheme(theme) {
-  return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+  if (typeof mainMapUtils.getMapStyleForTheme !== 'function') {
+    return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+  }
+  return mainMapUtils.getMapStyleForTheme(theme, LIGHT_MAP_STYLE_URL, DARK_MAP_STYLE_URL);
 }
 
 function getLocalBuildingStyleForTheme(theme) {
-  const normalized = theme === 'dark' ? 'dark' : 'light';
-  const external = window.__ARCHIMAP_LOCAL_BUILDING_STYLE;
-  if (external && typeof external === 'object' && external[normalized]) {
-    return external[normalized];
+  if (typeof mainMapUtils.getLocalBuildingStyleForTheme !== 'function') {
+    const normalized = theme === 'dark' ? 'dark' : 'light';
+    const external = window.__ARCHIMAP_LOCAL_BUILDING_STYLE;
+    if (external && typeof external === 'object' && external[normalized]) {
+      return external[normalized];
+    }
+    return LOCAL_BUILDING_STYLE_FALLBACK[normalized];
   }
-  return LOCAL_BUILDING_STYLE_FALLBACK[normalized];
+  return mainMapUtils.getLocalBuildingStyleForTheme(theme, LOCAL_BUILDING_STYLE_FALLBACK, window.__ARCHIMAP_LOCAL_BUILDING_STYLE);
 }
 
 const pmtilesProtocol = new pmtiles.Protocol();
@@ -678,34 +636,17 @@ function normalizeTagValue(value) {
 }
 
 function getFilterRules() {
-  if (!filterRowsEl) return [];
-  const rows = [...filterRowsEl.querySelectorAll('[data-filter-row]')];
-  return rows.map((row) => {
-    const key = String(row.querySelector('[data-field="key"]')?.value || '').trim();
-    const op = String(row.querySelector('[data-field="op"]')?.value || 'contains').trim();
-    const value = String(row.querySelector('[data-field="value"]')?.value || '').trim();
-    return { key, op, value };
-  }).filter((rule) => {
+  if (typeof mainFilterUtils.getFilterRules !== 'function') return [];
+  return mainFilterUtils.getFilterRules(filterRowsEl).filter((rule) => {
     if (!rule.key) return false;
     if (rule.op === 'exists' || rule.op === 'not_exists') return true;
-    return rule.value.length > 0;
+    return String(rule.value || '').length > 0;
   });
 }
 
 function matchesRule(tags, rule) {
-  if (!rule || !rule.key) return false;
-  const hasKey = Object.prototype.hasOwnProperty.call(tags || {}, rule.key);
-  const rawValue = hasKey ? tags[rule.key] : undefined;
-  const lhs = normalizeTagValue(rawValue).toLowerCase();
-  const rhs = String(rule.value || '').toLowerCase();
-
-  if (rule.op === 'exists') return hasKey;
-  if (rule.op === 'not_exists') return !hasKey;
-  if (!hasKey) return false;
-  if (rule.op === 'equals') return lhs === rhs;
-  if (rule.op === 'not_equals') return lhs !== rhs;
-  if (rule.op === 'starts_with') return lhs.startsWith(rhs);
-  return lhs.includes(rhs);
+  if (typeof mainFilterUtils.matchesRule !== 'function') return false;
+  return mainFilterUtils.matchesRule(tags, rule, normalizeTagValue);
 }
 
 function setLocalBuildingFeatureState(osmKey, state) {
@@ -1706,30 +1647,18 @@ function updateBuildingHighlightStyle() {
 }
 
 function splitSemicolonValues(value) {
-  return String(value || '')
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean);
+  if (typeof mainModalUtils.splitSemicolonValues !== 'function') return [];
+  return mainModalUtils.splitSemicolonValues(value);
 }
 
 function buildCopyChips(items, emptyFallback = '-') {
-  if (!Array.isArray(items) || items.length === 0) return escapeHtml(emptyFallback);
-  const chips = items.map((item) => {
-    const raw = String(item?.raw ?? '').trim();
-    const label = String(item?.label ?? raw).trim();
-    if (!raw || !label) return '';
-    return `<button type="button" data-copy-chip="true" data-copy-value="${escapeHtml(raw)}" class="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-800 transition hover:bg-slate-200">${escapeHtml(label)}</button>`;
-  }).join('');
-  return `<div class="flex flex-wrap gap-1.5">${chips}</div>`;
+  if (typeof mainModalUtils.buildCopyChips !== 'function') return escapeHtml(emptyFallback);
+  return mainModalUtils.buildCopyChips(items, emptyFallback, escapeHtml);
 }
 
 function buildReadonlyField(label, valueHtml) {
-  return `
-    <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-      <div class="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(label)}</div>
-      <div class="text-sm leading-5 text-slate-800">${valueHtml}</div>
-    </div>
-  `;
+  if (typeof mainModalUtils.buildReadonlyField !== 'function') return '';
+  return mainModalUtils.buildReadonlyField(label, valueHtml, escapeHtml);
 }
 
 function buildModalHtml(feature) {
@@ -2021,45 +1950,23 @@ function closeAuthModal() {
 }
 
 function readResetTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const token = String(url.searchParams.get('resetToken') || '').trim();
-    return token || null;
-  } catch {
-    return null;
-  }
+  if (typeof mainAuthUtils.readResetTokenFromUrl !== 'function') return null;
+  return mainAuthUtils.readResetTokenFromUrl();
 }
 
 function readRegisterTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const token = String(url.searchParams.get('registerToken') || '').trim();
-    return token || null;
-  } catch {
-    return null;
-  }
+  if (typeof mainAuthUtils.readRegisterTokenFromUrl !== 'function') return null;
+  return mainAuthUtils.readRegisterTokenFromUrl();
 }
 
 function clearResetTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('resetToken')) return;
-    url.searchParams.delete('resetToken');
-    history.replaceState(null, '', url.toString());
-  } catch {
-    // ignore
-  }
+  if (typeof mainAuthUtils.clearResetTokenFromUrl !== 'function') return;
+  mainAuthUtils.clearResetTokenFromUrl();
 }
 
 function clearRegisterTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('registerToken')) return;
-    url.searchParams.delete('registerToken');
-    history.replaceState(null, '', url.toString());
-  } catch {
-    // ignore
-  }
+  if (typeof mainAuthUtils.clearRegisterTokenFromUrl !== 'function') return;
+  mainAuthUtils.clearRegisterTokenFromUrl();
 }
 
 function setAuthTab(nextTab) {
@@ -2168,10 +2075,10 @@ function closeSearchModal() {
 }
 
 function buildSearchCacheKey(query, center, cursor = 0) {
-  const q = String(query || '').trim().toLowerCase();
-  const lon = Number(center?.lng || 0).toFixed(3);
-  const lat = Number(center?.lat || 0).toFixed(3);
-  return `${q}|${lon}|${lat}|${SEARCH_RESULTS_LIMIT}|${Number(cursor) || 0}`;
+  if (typeof mainSearchUtils.buildSearchCacheKey !== 'function') {
+    return `${String(query || '').trim().toLowerCase()}|0.000|0.000|${SEARCH_RESULTS_LIMIT}|${Number(cursor) || 0}`;
+  }
+  return mainSearchUtils.buildSearchCacheKey(query, center, SEARCH_RESULTS_LIMIT, cursor);
 }
 
 function getSearchCache(key) {
@@ -2197,11 +2104,10 @@ function setSearchCache(key, items) {
 }
 
 function debounce(fn, delayMs) {
-  let timer = null;
-  return (...args) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delayMs);
-  };
+  if (typeof mainSearchUtils.debounce !== 'function') {
+    return (...args) => fn(...args);
+  }
+  return mainSearchUtils.debounce(fn, delayMs);
 }
 
 function renderSearchSkeleton(count = 6) {

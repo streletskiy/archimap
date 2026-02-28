@@ -25,6 +25,10 @@ const adminState = {
 
 const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
 const UI_TEXT = Object.freeze(I18N_RU.ui || {});
+const adminUsersUtils = window.ArchiMapAdminUsers || null;
+const adminEditsUtils = window.ArchiMapAdminEdits || null;
+const adminMapUtils = window.ArchiMapAdminMap || null;
+const adminGuideUiKitUtils = window.ArchiMapAdminGuideUiKit || null;
 
 const adminAppEl = document.getElementById('admin-app');
 const adminLoadingEl = document.getElementById('admin-loading');
@@ -464,6 +468,9 @@ function renderAdminGuide() {
 }
 
 function renderUiEmailCard(title, template) {
+  if (adminGuideUiKitUtils?.renderUiEmailCard) {
+    return adminGuideUiKitUtils.renderUiEmailCard(title, template, { t, escapeHtml });
+  }
   const subject = String(template?.subject || '');
   const html = String(template?.html || '');
   const text = String(template?.text || '');
@@ -473,11 +480,11 @@ function renderUiEmailCard(title, template) {
     '<p class="mt-1 text-xs text-slate-500">' + escapeHtml(t('uiEmailSubject', { value: subject }, 'Subject: {value}')) + '</p>',
     '<div class="mt-3 grid gap-3 xl:grid-cols-2">',
     '<div class="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">',
-    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailHtml', 'HTML')) + '</p>',
+    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailHtml', null, 'HTML')) + '</p>',
     '<iframe class="h-[420px] w-full bg-white" sandbox="" referrerpolicy="no-referrer" srcdoc="' + escapeHtml(html) + '"></iframe>',
     '</div>',
     '<div class="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">',
-    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailText', 'Text')) + '</p>',
+    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailText', null, 'Text')) + '</p>',
     '<pre class="m-0 h-[420px] overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-5 text-slate-700">' + escapeHtml(text) + '</pre>',
     '</div>',
     '</div>',
@@ -652,17 +659,17 @@ function renderUserRows(items) {
   }
 
   usersListEl.innerHTML = items.map((item) => {
-    const email = String(item?.email || '').trim().toLowerCase();
-    const firstName = String(item?.firstName || '').trim();
-    const lastName = String(item?.lastName || '').trim();
-    const displayName = [firstName, lastName].filter(Boolean).join(' ') || email;
-    const isAdmin = Boolean(item?.isAdmin);
-    const isMasterAdminAccount = Boolean(item?.isMasterAdmin);
-    const isCurrentUser = Boolean(currentAdminEmail) && email === currentAdminEmail;
-    const isSelfMasterAdminDemotionLocked = isAdmin && isMasterAdminAccount && isCurrentUser;
-    const canEdit = Boolean(item?.canEdit);
-    const editsCount = Number(item?.editsCount || 0);
-    const createdAt = String(item?.createdAt || '').replace('T', ' ').replace('Z', '');
+    const model = adminUsersUtils?.buildUserViewModel
+      ? adminUsersUtils.buildUserViewModel(item, currentAdminEmail)
+      : null;
+    const email = String(model?.email || item?.email || '').trim().toLowerCase();
+    const displayName = String(model?.displayName || email);
+    const isAdmin = Boolean(model?.isAdmin ?? item?.isAdmin);
+    const isMasterAdminAccount = Boolean(model?.isMasterAdminAccount ?? item?.isMasterAdmin);
+    const isSelfMasterAdminDemotionLocked = Boolean(model?.isSelfMasterAdminDemotionLocked);
+    const canEdit = Boolean(model?.canEdit ?? item?.canEdit);
+    const editsCount = Number((model?.editsCount ?? item?.editsCount) || 0);
+    const createdAt = String(model?.createdAt || item?.createdAt || '').replace('T', ' ').replace('Z', '');
 
     return `
       <tr class="border-t border-slate-200 hover:bg-slate-50">
@@ -708,6 +715,9 @@ function getEditAddress(item) {
 }
 
 function getChangeCounters(changes) {
+  if (adminEditsUtils?.getChangeCounters) {
+    return adminEditsUtils.getChangeCounters(changes);
+  }
   const list = Array.isArray(changes) ? changes : [];
   let created = 0;
   let modified = 0;
@@ -999,6 +1009,10 @@ function applyAdminMapTheme(theme) {
 }
 
 function extendBoundsFromCoords(bounds, coords) {
+  if (adminMapUtils?.extendBoundsFromCoords) {
+    adminMapUtils.extendBoundsFromCoords(bounds, coords);
+    return;
+  }
   if (!Array.isArray(coords)) return;
   if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
     bounds.extend([coords[0], coords[1]]);
@@ -1008,6 +1022,9 @@ function extendBoundsFromCoords(bounds, coords) {
 }
 
 function getEditedKeysExpression() {
+  if (adminMapUtils?.getEditedKeysExpression) {
+    return adminMapUtils.getEditedKeysExpression(highlightedEditKeys);
+  }
   const encodedIds = [];
   for (const key of highlightedEditKeys) {
     const [osmType, osmIdRaw] = String(key).split('/');

@@ -73,6 +73,15 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - Auth + email templates:
   - `auth.js`
   - `email-templates/index.js`
+- Backend module layout:
+  - `routes/*.route.js` - HTTP endpoints grouped by domain (`app`, `admin`, `buildings`, `search`, `account`)
+  - `services/*.service.js` - domain/business logic (search, edits, rate limiting)
+  - `infra/*.infra.js` - infrastructure wiring (sessions, headers, sync workers, DB bootstrap)
+  - `server.js` - application bootstrap/composition root (env config, DI, startup/shutdown)
+- Frontend module layout:
+  - `public/main/*/*-module.js` - map/auth/search/modal/filter logic for main page
+  - `public/admin/*/*-module.js` - users/edits/map/uikit logic for admin page
+  - `public/main.js`, `public/admin.js` - page orchestrators that wire modules to DOM
 - Sync pipeline:
   - `scripts/sync-osm-buildings.js`
   - `scripts/sync-osm-buildings.py`
