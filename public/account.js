@@ -2,8 +2,11 @@ let csrfToken = null;
 let ownEditsCache = [];
 let accountMap = null;
 let highlightedEditKeys = new Set();
-const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
-const UI_TEXT = Object.freeze(I18N_RU.ui || {});
+const textTools = window.ArchiMapTextUtils?.createUiTextTools
+  ? window.ArchiMapTextUtils.createUiTextTools()
+  : null;
+const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
+const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
 
 const accountSubtitleEl = document.getElementById('account-subtitle');
 const navLogoLinkEl = document.getElementById('nav-logo-link');
@@ -61,22 +64,6 @@ const accountState = { tab: 'settings', edit: '' };
 
 function getUI() {
   return window.ArchiMapUI || null;
-}
-
-function t(key, params = null, fallback = '') {
-  const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
-  const base = String(template || fallback || '');
-  if (!params || typeof params !== 'object') return base;
-  return base.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? '' : String(params[name])));
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
 }
 
 function isStateChangingMethod(method) {

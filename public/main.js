@@ -342,17 +342,12 @@ window.fetch = (input, init = {}) => {
   return nativeFetch(input, nextInit);
 };
 
-const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
-const UI_TEXT = Object.freeze(I18N_RU.ui || {});
-
-function t(key, params = null, fallback = '') {
-  const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
-  const base = String(template || fallback || '');
-  if (!params || typeof params !== 'object') return base;
-  return base.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? '' : String(params[name])));
-}
-
-const OSM_FILTER_TAG_LABELS_RU = Object.freeze(I18N_RU.filterTagLabels || {});
+const textTools = window.ArchiMapTextUtils?.createUiTextTools
+  ? window.ArchiMapTextUtils.createUiTextTools()
+  : null;
+const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
+const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
+const OSM_FILTER_TAG_LABELS_RU = Object.freeze((window.__ARCHIMAP_I18N_RU?.filterTagLabels) || {});
 
 const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
   'architect',
@@ -390,15 +385,6 @@ const APPEARANCE_FILTER_TAG_PREFIXES = Object.freeze([
   'building:height',
   'building:shape'
 ]);
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
 
 function getSavedTheme() {
   try {
@@ -1292,9 +1278,9 @@ function osmDescriptionFromTags(tags) {
   return tags['description:ru'] || tags.description || null;
 }
 
-const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze(I18N_RU.architectureStyleLabels || {});
+const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze((window.__ARCHIMAP_I18N_RU?.architectureStyleLabels) || {});
 
-const ARCHITECTURE_STYLE_ALIASES = Object.freeze(I18N_RU.architectureStyleAliases || {});
+const ARCHITECTURE_STYLE_ALIASES = Object.freeze((window.__ARCHIMAP_I18N_RU?.architectureStyleAliases) || {});
 
 const ARCHITECTURE_STYLE_KEY_BY_LABEL_NORMALIZED = (() => {
   const map = new Map();
@@ -1646,22 +1632,8 @@ function updateBuildingHighlightStyle() {
   map.setPaintProperty('local-buildings-line', 'line-width', getBuildingLineWidthExpression());
 }
 
-function splitSemicolonValues(value) {
-  if (typeof mainModalUtils.splitSemicolonValues !== 'function') return [];
-  return mainModalUtils.splitSemicolonValues(value);
-}
-
-function buildCopyChips(items, emptyFallback = '-') {
-  if (typeof mainModalUtils.buildCopyChips !== 'function') return escapeHtml(emptyFallback);
-  return mainModalUtils.buildCopyChips(items, emptyFallback, escapeHtml);
-}
-
-function buildReadonlyField(label, valueHtml) {
-  if (typeof mainModalUtils.buildReadonlyField !== 'function') return '';
-  return mainModalUtils.buildReadonlyField(label, valueHtml, escapeHtml);
-}
-
 function buildModalHtml(feature) {
+  if (typeof mainModalUtils.buildModalHtml !== 'function') return '';
   const info = feature.properties?.archiInfo || {};
   const osmTags = getSourceTags(feature);
   const addressForm = getAddressFormState(osmTags, info.address);
@@ -1687,110 +1659,29 @@ function buildModalHtml(feature) {
   const styleOptionsHtml = styleOptions
     .map((option) => `<option value="${escapeHtml(option.key)}" ${styleEditState.selectedKey === option.key ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
     .join('');
-  const editableRows = canEditBuildings
-    ? `
-      <form id="building-edit-form" class="grid gap-2">
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-name" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelName', null, 'Название:'))}</label>
-          <input id="building-name" name="building-name" type="text" value="${escapeHtml(info.name || (shownName !== '-' ? shownName : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-levels" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelLevels', null, 'Этажей:'))}</label>
-          <input id="building-levels" name="building-levels" type="number" value="${escapeHtml(info.levels ?? (shownLevels !== '-' ? shownLevels : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-year" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelYearBuilt', null, 'Год постройки:'))}</label>
-          <input id="building-year" name="building-year" type="number" value="${escapeHtml(info.year_built || (shownYear !== '-' ? shownYear : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-architect" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelArchitect', null, 'Архитектор:'))}</label>
-          <input id="building-architect" name="building-architect" type="text" value="${escapeHtml(info.architect || (shownArchitect !== '-' ? shownArchitect : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-style-select" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelStyle', null, 'Архитектурный стиль:'))}</label>
-          <select id="building-style-select" name="building-style-select" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
-            <option value="" ${styleEditState.selectedKey === '' ? 'selected' : ''}>${escapeHtml(t('modalStyleNotSet', null, 'Не указан'))}</option>
-            ${styleOptionsHtml}
-          </select>
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-archimap-description" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelExtraInfo', null, 'Доп. информация:'))}</label>
-          <textarea id="building-archimap-description" name="building-archimap-description" rows="3" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">${escapeHtml(info.archimap_description || info.description || '')}</textarea>
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <div class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalAddressTagsTitle', null, 'Адрес (OSM теги):'))}</div>
-          <div class="mt-1.5 grid gap-1.5 md:grid-cols-2">
-            <label class="block md:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressFull', null, 'Полный адрес (addr:full)'))}</span>
-              <input id="building-addr-full" name="building-addr-full" type="text" value="${escapeHtml(addressForm.full)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressPostcode', null, 'Индекс (addr:postcode)'))}</span>
-              <input id="building-addr-postcode" name="building-addr-postcode" type="text" value="${escapeHtml(addressForm.postcode)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressCity', null, 'Город (addr:city)'))}</span>
-              <input id="building-addr-city" name="building-addr-city" type="text" value="${escapeHtml(addressForm.city)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressPlace', null, 'Место/локация (addr:place)'))}</span>
-              <input id="building-addr-place" name="building-addr-place" type="text" value="${escapeHtml(addressForm.place)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressStreet', null, 'Улица (addr:street)'))}</span>
-              <input id="building-addr-street" name="building-addr-street" type="text" value="${escapeHtml(addressForm.street)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block md:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressHouseNumber', null, 'Номер дома (addr:housenumber)'))}</span>
-              <input id="building-addr-housenumber" name="building-addr-housenumber" type="text" value="${escapeHtml(addressForm.housenumber)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-          </div>
-        </div>
-        <div class="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-          <p id="building-save-status" class="text-sm text-slate-600"></p>
-          <button type="submit" class="rounded-xl bg-indigo-600 px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-indigo-700">${escapeHtml(t('modalSave', null, 'Сохранить'))}</button>
-        </div>
-      </form>
-    `
-    : `
-      ${isAuthenticated ? `<div class="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">${escapeHtml(t('modalEditRestricted', null, 'Редактирование доступно только пользователям с разрешением администратора.'))}</div>` : ''}
-      ${buildReadonlyField(t('modalLabelName', null, 'Название:'), escapeHtml(shownName))}
-      ${buildReadonlyField(t('modalLabelAddress', null, 'Адрес:'), escapeHtml(shownAddress))}
-      ${buildReadonlyField(t('modalLabelLevels', null, 'Этажей:'), escapeHtml(shownLevels))}
-      ${buildReadonlyField(t('modalLabelYearBuilt', null, 'Год постройки:'), escapeHtml(shownYear))}
-      ${buildReadonlyField(
-        t('modalLabelArchitect', null, 'Архитектор:'),
-        buildCopyChips(
-          splitSemicolonValues(info.architect || osmArchitect).map((raw) => ({ raw, label: raw })),
-          shownArchitect
-        )
-      )}
-      ${buildReadonlyField(
-        t('modalLabelStyle', null, 'Архитектурный стиль:'),
-        buildCopyChips(
-          splitSemicolonValues(info.style || osmStyle).map((raw) => ({
-            raw,
-            label: toHumanArchitectureStyle(raw) || raw
-          })),
-          shownStyle
-        )
-      )}
-      ${buildReadonlyField(t('modalLabelDescription', null, 'Описание:'), escapeHtml(shownDescription))}
-      ${buildReadonlyField(t('modalLabelExtraInfo', null, 'Доп. информация:'), escapeHtml(shownExtraInfo))}
-    `;
-
-  return `
-    <div class="grid gap-2.5">
-      ${editableRows}
-      <details class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-        <summary class="relative cursor-pointer list-none bg-slate-50 px-3 py-2.5 pr-10 font-bold text-slate-900 transition hover:bg-slate-100 after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:content-['▾'] [&::-webkit-details-marker]:hidden [&[open]_summary]:after:rotate-180">${escapeHtml(t('modalOsmTagsSummary', null, 'OSM теги'))}</summary>
-        <pre class="m-0 border-t border-slate-200 bg-white px-3 py-2.5 text-[11px] leading-5 text-slate-700 whitespace-pre-wrap break-words">${escapeHtml(JSON.stringify({
-          osm: feature.properties?.osm_key || '-',
-          ...osmTags
-        }, null, 2))}</pre>
-      </details>
-    </div>
-  `;
+  return mainModalUtils.buildModalHtml({
+    t,
+    escapeHtml,
+    feature,
+    info,
+    osmTags,
+    addressForm,
+    styleEditState,
+    styleOptionsHtml,
+    canEditBuildings,
+    isAuthenticated,
+    shownName,
+    shownAddress,
+    shownLevels,
+    shownYear,
+    shownArchitect,
+    shownStyle,
+    shownDescription,
+    shownExtraInfo,
+    osmArchitect,
+    osmStyle,
+    toHumanArchitectureStyle
+  });
 }
 
 function getFeatureFocusLngLat(feature) {
