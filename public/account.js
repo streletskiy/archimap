@@ -1,22 +1,30 @@
 let csrfToken = null;
+let ownEditsCache = [];
+let accountMap = null;
+let highlightedEditKeys = new Set();
 const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
 const UI_TEXT = Object.freeze(I18N_RU.ui || {});
 
 const accountSubtitleEl = document.getElementById('account-subtitle');
 const navLogoLinkEl = document.getElementById('nav-logo-link');
 const mapReturnLinkEl = document.getElementById('map-return-link');
+const mapReturnMenuLinkEl = document.getElementById('map-return-menu-link');
 const adminLinkEl = document.getElementById('admin-link');
-const logoutBtnEl = document.getElementById('account-logout-btn');
+const uiKitLinkEl = document.getElementById('ui-kit-link');
+const logoutBtnEl = document.getElementById('settings-logout-btn');
+const settingsBuildLinkEl = document.getElementById('settings-build-link');
+const settingsBuildTextEl = document.getElementById('settings-build-text');
 const themeToggleEl = document.getElementById('theme-toggle');
 const navMenuButtonEl = document.getElementById('nav-menu-button');
 const navMenuPanelEl = document.getElementById('nav-menu-panel');
-const tabProfileEl = document.getElementById('account-tab-profile');
+const tabSettingsEl = document.getElementById('account-tab-settings');
 const tabEditsEl = document.getElementById('account-tab-edits');
 const profilePanelEl = document.getElementById('account-profile-panel');
 const editsPanelEl = document.getElementById('account-edits-panel');
 const profileFormEl = document.getElementById('profile-form');
 const firstNameEl = document.getElementById('first-name');
 const lastNameEl = document.getElementById('last-name');
+const profileEmailEl = document.getElementById('profile-email');
 const profileStatusEl = document.getElementById('profile-status');
 const passwordFormEl = document.getElementById('password-form');
 const currentPasswordEl = document.getElementById('current-password');
@@ -25,16 +33,35 @@ const newPasswordConfirmEl = document.getElementById('new-password-confirm');
 const passwordStatusEl = document.getElementById('password-status');
 const editsStatusEl = document.getElementById('account-edits-status');
 const editsListEl = document.getElementById('account-edits-list');
-const editDetailModalEl = document.getElementById('account-edit-detail-modal');
-const editDetailCloseEl = document.getElementById('account-edit-detail-close');
-const editDetailTitleEl = document.getElementById('account-edit-detail-title');
-const editDetailMetaEl = document.getElementById('account-edit-detail-meta');
-const editDetailListEl = document.getElementById('account-edit-detail-list');
+const editsSearchEl = document.getElementById('account-edits-search');
+const editsDateFilterEl = document.getElementById('account-edits-date-filter');
+const editsMapEl = document.getElementById('account-edits-map');
+const accountLayoutEl = document.getElementById('account-layout');
+const editDetailPaneEl = document.getElementById('edit-detail-pane');
+const editDetailCloseEl = document.getElementById('edit-detail-close');
+const editDetailTitleEl = document.getElementById('edit-detail-title');
+const editDetailMetaEl = document.getElementById('edit-detail-meta');
+const editDetailListEl = document.getElementById('edit-detail-list');
 const THEME_STORAGE_KEY = 'archimap-theme';
 const LAST_MAP_HASH_STORAGE_KEY = 'archimap-last-map-hash';
+const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
+const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
+const PMTILES_CONFIG = Object.freeze({
+  url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
+  sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
+});
+const BUILD_INFO_CONFIG = Object.freeze({
+  shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
+  version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
+  repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
+});
 
 const nativeFetch = window.fetch.bind(window);
-const accountState = { tab: 'profile', edit: '' };
+const accountState = { tab: 'settings', edit: '' };
+
+function getUI() {
+  return window.ArchiMapUI || null;
+}
 
 function t(key, params = null, fallback = '') {
   const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
@@ -91,6 +118,7 @@ function applyTheme(theme) {
     // ignore
   }
   if (themeToggleEl) themeToggleEl.checked = next === 'dark';
+  applyAccountMapTheme(next);
 }
 
 function initThemeToggle() {
@@ -100,6 +128,33 @@ function initThemeToggle() {
     themeToggleEl.addEventListener('change', () => {
       applyTheme(themeToggleEl.checked ? 'dark' : 'light');
     });
+  }
+}
+
+function initUiKitClasses() {
+  const ui = getUI();
+  if (!ui) return;
+  if (typeof ui.fieldClass === 'function') {
+    [firstNameEl, lastNameEl, profileEmailEl, currentPasswordEl, newPasswordEl, newPasswordConfirmEl, editsSearchEl, editsDateFilterEl].forEach((el) => {
+      if (el) el.className = ui.fieldClass('input');
+    });
+    if (profileEmailEl) profileEmailEl.classList.add('text-slate-500');
+  }
+  if (typeof ui.buttonClass === 'function') {
+    const saveButton = profileFormEl?.querySelector('button[type="submit"]');
+    const passwordButton = passwordFormEl?.querySelector('button[type="submit"]');
+    if (saveButton) saveButton.className = ui.buttonClass('primary');
+    if (passwordButton) passwordButton.className = ui.buttonClass('outlineBrand');
+  }
+}
+
+function renderBuildInfoLink() {
+  if (!settingsBuildLinkEl) return;
+  settingsBuildLinkEl.href = BUILD_INFO_CONFIG.repoUrl;
+  if (settingsBuildTextEl) {
+    settingsBuildTextEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
+  } else {
+    settingsBuildLinkEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
   }
 }
 
@@ -116,6 +171,7 @@ function initMapReturnLinks() {
   const href = getMapReturnHref();
   if (navLogoLinkEl) navLogoLinkEl.setAttribute('href', href);
   if (mapReturnLinkEl) mapReturnLinkEl.setAttribute('href', href);
+  if (mapReturnMenuLinkEl) mapReturnMenuLinkEl.setAttribute('href', href);
 }
 
 function setNavMenuOpen(open) {
@@ -207,17 +263,42 @@ function writeStateToUrl(options = {}) {
   }
 }
 
+function getNormalizedTab(raw) {
+  const tab = String(raw || '').trim().toLowerCase();
+  if (tab === 'settings' || tab === 'profile' || tab === 'security' || tab === 'notifications') return 'settings';
+  if (tab === 'edits') return 'edits';
+  return 'settings';
+}
+
+function setTabButtonState(button, active) {
+  if (!button) return;
+  const ui = getUI();
+  if (ui && typeof ui.tabButtonClass === 'function') {
+    button.className = ui.tabButtonClass(active);
+    return;
+  }
+  button.className = active
+    ? 'ui-tab-btn ui-tab-btn-active'
+    : 'ui-tab-btn';
+}
+
 function setTab(nextTab, options = {}) {
   const push = options.push !== false;
-  accountState.tab = nextTab === 'edits' ? 'edits' : 'profile';
+  accountState.tab = getNormalizedTab(nextTab);
 
-  if (profilePanelEl) profilePanelEl.classList.toggle('hidden', accountState.tab !== 'profile');
+  if (profilePanelEl) profilePanelEl.classList.toggle('hidden', accountState.tab !== 'settings');
   if (editsPanelEl) editsPanelEl.classList.toggle('hidden', accountState.tab !== 'edits');
 
-  const activeBtn = 'bg-slate-900 text-white hover:bg-slate-800';
-  const idleBtn = 'text-slate-700 hover:bg-slate-100';
-  if (tabProfileEl) tabProfileEl.className = `rounded-md px-3 py-1.5 text-sm font-semibold ${accountState.tab === 'profile' ? activeBtn : idleBtn}`;
-  if (tabEditsEl) tabEditsEl.className = `rounded-md px-3 py-1.5 text-sm font-semibold ${accountState.tab === 'edits' ? activeBtn : idleBtn}`;
+  setTabButtonState(tabSettingsEl, accountState.tab === 'settings');
+  setTabButtonState(tabEditsEl, accountState.tab === 'edits');
+
+  if (accountState.tab === 'edits') {
+    const map = ensureAccountMap();
+    if (map) {
+      setTimeout(() => map.resize(), 0);
+      applyEditedBuildingsPaint();
+    }
+  }
 
   if (push) writeStateToUrl();
 }
@@ -235,12 +316,15 @@ async function loadMe() {
 
   const fullName = [String(user.firstName || '').trim(), String(user.lastName || '').trim()].filter(Boolean).join(' ');
   const title = fullName || String(user.email || user.username || t('accountUserDefault', null, 'Пользователь'));
-  setText(accountSubtitleEl, `${title} (${String(user.email || user.username || t('accountEmailMissing', null, 'без email'))})`);
+  const userEmail = String(user.email || user.username || t('accountEmailMissing', null, 'без email'));
+  setText(accountSubtitleEl, `${title} (${userEmail})`);
 
   if (firstNameEl) firstNameEl.value = String(user.firstName || '');
   if (lastNameEl) lastNameEl.value = String(user.lastName || '');
+  if (profileEmailEl) profileEmailEl.value = userEmail;
 
   if (adminLinkEl) adminLinkEl.classList.toggle('hidden', !Boolean(user.isAdmin));
+  if (uiKitLinkEl) uiKitLinkEl.classList.toggle('hidden', !Boolean(user.isAdmin));
   return user;
 }
 
@@ -275,22 +359,91 @@ async function confirmRegistrationTokenIfPresent() {
 function renderOwnEdits(items) {
   if (!editsListEl) return;
   if (!Array.isArray(items) || items.length === 0) {
-    editsListEl.innerHTML = `<p class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">${escapeHtml(t('adminEditsEmpty', null, 'Локальных правок нет.'))}</p>`;
+    editsListEl.innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-sm text-slate-600">${escapeHtml(t('adminEditsEmpty', null, 'Локальных правок нет.'))}</td></tr>`;
     return;
   }
 
+  const statusBadge = (status) => {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'accepted') return `<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">${escapeHtml(t('editStatusAccepted', null, 'Принято'))}</span>`;
+    if (normalized === 'partially_accepted') return `<span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">${escapeHtml(t('editStatusPartiallyAccepted', null, 'Частично принято'))}</span>`;
+    if (normalized === 'rejected') return `<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">${escapeHtml(t('editStatusRejected', null, 'Отклонено'))}</span>`;
+    if (normalized === 'superseded') return `<span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">${escapeHtml(t('editStatusSuperseded', null, 'Заменено новой правкой'))}</span>`;
+    return `<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">${escapeHtml(t('editStatusPending', null, 'На рассмотрении'))}</span>`;
+  };
+
   editsListEl.innerHTML = items.map((item) => {
     const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
-    const updatedAt = String(item?.updatedAt || '-');
-    const changesCount = Array.isArray(item?.changes) ? item.changes.length : 0;
+    const editId = Number(item?.editId || 0);
+    const address = getEditAddress(item);
+    const author = String(item?.updatedBy || '-');
+    const counters = getChangeCounters(item?.changes);
+    const comment = String(item?.adminComment || '').trim();
     return `
-      <button data-action="open-edit" data-edit-key="${escapeHtml(osmKey)}" class="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-soft hover:border-indigo-300 hover:bg-indigo-50">
-        <div class="text-sm font-semibold text-slate-900">${escapeHtml(osmKey)}</div>
-        <div class="mt-1 text-xs text-slate-600">${escapeHtml(updatedAt)}</div>
-        <div class="mt-2 text-xs text-slate-700">Изменений: ${changesCount}</div>
-      </button>
+      <tr data-action="open-edit" data-edit-key="${escapeHtml(osmKey)}" data-edit-id="${escapeHtml(editId)}" class="cursor-pointer border-t border-slate-200 hover:bg-slate-50">
+        <td class="px-4 py-3">
+          <p class="font-semibold text-slate-900">${escapeHtml(address)}</p>
+          <p class="text-xs text-slate-500">ID: ${escapeHtml(osmKey)}</p>
+          ${comment ? `<p class="mt-1 text-xs text-rose-600">${escapeHtml(t('editCommentLabel', { text: comment }, `Комментарий: ${comment}`))}</p>` : ''}
+        </td>
+        <td class="px-4 py-3">${escapeHtml(author)}</td>
+        <td class="px-4 py-3">${statusBadge(item?.status)}</td>
+        <td class="px-4 py-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">${escapeHtml(t('editCountersTotal', { count: counters.total }, `${counters.total} всего`))}</span>
+            ${counters.created > 0 ? `<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">${escapeHtml(t('editCountersCreated', { count: counters.created }, `+${counters.created} создано`))}</span>` : ''}
+            ${counters.modified > 0 ? `<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">${escapeHtml(t('editCountersModified', { count: counters.modified }, `~${counters.modified} изменено`))}</span>` : ''}
+          </div>
+        </td>
+      </tr>
     `;
   }).join('');
+}
+
+function getEditAddress(item) {
+  const changes = Array.isArray(item?.changes) ? item.changes : [];
+  const addressChange = changes.find((change) => change?.field === 'address');
+  if (addressChange?.localValue) return String(addressChange.localValue);
+  if (addressChange?.osmValue) return String(addressChange.osmValue);
+  if (item?.local?.address) return String(item.local.address);
+  return `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+}
+
+function getChangeCounters(changes) {
+  const list = Array.isArray(changes) ? changes : [];
+  let created = 0;
+  let modified = 0;
+  for (const change of list) {
+    if (change?.osmValue == null && change?.localValue != null) {
+      created += 1;
+    } else {
+      modified += 1;
+    }
+  }
+  return { total: list.length, created, modified };
+}
+
+function syncMapHighlightsWithEdits(items) {
+  highlightedEditKeys = new Set(
+    (Array.isArray(items) ? items : []).map((item) => `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`)
+  );
+  applyEditedBuildingsPaint();
+}
+
+function applyOwnEditsFilters() {
+  const query = String(editsSearchEl?.value || '').trim().toLowerCase();
+  const date = String(editsDateFilterEl?.value || '').trim();
+  const filtered = ownEditsCache.filter((item) => {
+    const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`.toLowerCase();
+    const address = getEditAddress(item).toLowerCase();
+    const updatedAt = String(item?.updatedAt || '');
+    if (query && !address.includes(query) && !osmKey.includes(query)) return false;
+    if (date && !updatedAt.startsWith(date)) return false;
+    return true;
+  });
+  setText(editsStatusEl, t('editsShownSummary', { shown: filtered.length, total: ownEditsCache.length }, `Показано: ${filtered.length} из ${ownEditsCache.length}`));
+  renderOwnEdits(filtered);
+  syncMapHighlightsWithEdits(filtered);
 }
 
 async function loadOwnEdits() {
@@ -309,26 +462,212 @@ async function loadOwnEdits() {
     return;
   }
 
-  const items = Array.isArray(data.items) ? data.items : [];
-  setText(editsStatusEl, t('adminEditsCount', { count: Number(data.total || items.length) }, `Локальных правок: ${Number(data.total || items.length)}`));
-  renderOwnEdits(items);
+  ownEditsCache = Array.isArray(data.items) ? data.items : [];
+  applyOwnEditsFilters();
+  ensureAccountMap();
+}
+
+function getMapStyleForTheme(theme) {
+  return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+}
+
+function ensureAccountMapLayers() {
+  if (!accountMap) return;
+  if (!accountMap.getSource('local-buildings')) {
+    const pmtilesUrl = PMTILES_CONFIG.url.startsWith('http')
+      ? PMTILES_CONFIG.url
+      : `${window.location.origin}${PMTILES_CONFIG.url.startsWith('/') ? '' : '/'}${PMTILES_CONFIG.url}`;
+    accountMap.addSource('local-buildings', { type: 'vector', url: `pmtiles://${pmtilesUrl}` });
+  }
+  if (!accountMap.getSource('selected-building')) {
+    accountMap.addSource('selected-building', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+  }
+  if (!accountMap.getLayer('local-buildings-fill')) {
+    accountMap.addLayer({
+      id: 'local-buildings-fill',
+      type: 'fill',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: { 'fill-color': '#9ca3af', 'fill-opacity': 0.35 }
+    });
+  }
+  if (!accountMap.getLayer('local-buildings-line')) {
+    accountMap.addLayer({
+      id: 'local-buildings-line',
+      type: 'line',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: { 'line-color': '#6b7280', 'line-width': 0.8 }
+    });
+  }
+  if (!accountMap.getLayer('edited-buildings-fill')) {
+    accountMap.addLayer({
+      id: 'edited-buildings-fill',
+      type: 'fill',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0 }
+    });
+  }
+  if (!accountMap.getLayer('edited-buildings-line')) {
+    accountMap.addLayer({
+      id: 'edited-buildings-line',
+      type: 'line',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: { 'line-color': 'rgba(0,0,0,0)', 'line-width': 0 }
+    });
+  }
+  if (!accountMap.getLayer('selected-building-fill')) {
+    accountMap.addLayer({
+      id: 'selected-building-fill',
+      type: 'fill',
+      source: 'selected-building',
+      paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0.24 }
+    });
+  }
+  if (!accountMap.getLayer('selected-building-line')) {
+    accountMap.addLayer({
+      id: 'selected-building-line',
+      type: 'line',
+      source: 'selected-building',
+      paint: { 'line-color': '#5B62F0', 'line-width': 3 }
+    });
+  }
+  applyEditedBuildingsPaint();
+}
+
+function ensureAccountMap() {
+  if (accountMap || !editsMapEl) return accountMap;
+  if (typeof window.maplibregl === 'undefined' || typeof window.pmtiles === 'undefined') {
+    editsMapEl.innerHTML = `<div class="flex h-full items-center justify-center text-sm text-slate-500">${escapeHtml(t('mapLibLoadFailed', null, 'MapLibre/PMTiles не загружены'))}</div>`;
+    return null;
+  }
+  const protocol = new window.pmtiles.Protocol();
+  window.maplibregl.addProtocol('pmtiles', protocol.tile);
+
+  accountMap = new window.maplibregl.Map({
+    container: editsMapEl,
+    style: getMapStyleForTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'),
+    center: [44.0059, 56.3269],
+    zoom: 14
+  });
+  accountMap.addControl(new window.maplibregl.NavigationControl(), 'top-right');
+  accountMap.on('style.load', () => {
+    ensureAccountMapLayers();
+    applyEditedBuildingsPaint();
+  });
+  accountMap.on('load', () => {
+    ensureAccountMapLayers();
+    applyEditedBuildingsPaint();
+  });
+  return accountMap;
+}
+
+function applyAccountMapTheme(theme) {
+  if (!accountMap) return;
+  accountMap.setStyle(getMapStyleForTheme(theme));
+}
+
+function getEditedKeysExpression() {
+  const encodedIds = [];
+  for (const key of highlightedEditKeys) {
+    const [osmType, osmIdRaw] = String(key).split('/');
+    const osmId = Number(osmIdRaw);
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) continue;
+    const typeBit = osmType === 'relation' ? 1 : 0;
+    encodedIds.push((osmId * 2) + typeBit);
+  }
+  return ['in', ['id'], ['literal', encodedIds]];
+}
+
+function applyEditedBuildingsPaint() {
+  if (!accountMap) return;
+  const keyMatchExpr = getEditedKeysExpression();
+  if (accountMap.getLayer('edited-buildings-fill')) {
+    accountMap.setPaintProperty('edited-buildings-fill', 'fill-opacity', ['case', keyMatchExpr, 0.28, 0]);
+  }
+  if (accountMap.getLayer('edited-buildings-line')) {
+    accountMap.setPaintProperty('edited-buildings-line', 'line-color', ['case', keyMatchExpr, '#5B62F0', 'rgba(0,0,0,0)']);
+    accountMap.setPaintProperty('edited-buildings-line', 'line-width', ['case', keyMatchExpr, 2.2, 0]);
+  }
+}
+
+function extendBoundsFromCoords(bounds, coords) {
+  if (!Array.isArray(coords)) return;
+  if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+    bounds.extend([coords[0], coords[1]]);
+    return;
+  }
+  for (const value of coords) extendBoundsFromCoords(bounds, value);
+}
+
+async function updateDetailMapFeature(feature) {
+  const map = ensureAccountMap();
+  if (!map || !feature) return;
+
+  const apply = () => {
+    const source = map.getSource('selected-building');
+    if (!source) return;
+    source.setData(feature);
+    const bounds = new window.maplibregl.LngLatBounds();
+    extendBoundsFromCoords(bounds, feature?.geometry?.coordinates);
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 60, duration: 450, maxZoom: 18 });
+    }
+  };
+
+  if (map.loaded()) apply();
+  else map.once('load', apply);
 }
 
 function closeEditModal(options = {}) {
   const push = options.push !== false;
   accountState.edit = '';
-  if (editDetailModalEl) editDetailModalEl.classList.add('hidden');
+  if (editDetailPaneEl) editDetailPaneEl.classList.add('hidden');
+  if (accountLayoutEl) accountLayoutEl.classList.remove('edit-pane-open');
   if (push) writeStateToUrl();
 }
 
-async function openEditDetails(editKey, options = {}) {
+function renderDiffItem(change) {
+  const oldValue = change?.osmValue == null ? t('diffEmptyValue', null, 'пусто') : String(change.osmValue);
+  const newValue = change?.localValue == null ? t('diffEmptyValue', null, 'пусто') : String(change.localValue);
+  const isNew = change?.osmValue == null && change?.localValue != null;
+  const valueClass = isNew ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700';
+  return `
+    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(String(change?.label || '-'))}:</p>
+      <div class="mt-1 flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-slate-500 line-through">${escapeHtml(oldValue)}</span>
+        <span class="text-slate-400">-&gt;</span>
+        <span class="rounded-md px-2 py-1 ${valueClass}">${escapeHtml(newValue)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function parseEditId(raw) {
+  const id = Number(String(raw || '').trim());
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+}
+
+async function openEditDetails(editIdRaw, options = {}) {
   const push = options.push !== false;
-  const parsed = parseEditKey(editKey);
-  if (!parsed) return;
+  const editId = parseEditId(editIdRaw);
+  if (!editId) return;
+  setTab('edits', { push: false });
 
   let resp;
   try {
-    resp = await fetch(`/api/account/edits/${encodeURIComponent(parsed.osmType)}/${encodeURIComponent(parsed.osmId)}`);
+    resp = await fetch(`/api/account/edits/${encodeURIComponent(editId)}`);
   } catch {
     return;
   }
@@ -336,24 +675,32 @@ async function openEditDetails(editKey, options = {}) {
   if (!resp.ok || !data?.item) return;
 
   const item = data.item;
-  accountState.edit = parsed.key;
+  const editKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+  accountState.edit = String(editId);
   if (push) writeStateToUrl();
 
-  if (editDetailTitleEl) editDetailTitleEl.textContent = `Правка ${parsed.key}`;
-  if (editDetailMetaEl) editDetailMetaEl.textContent = `${String(item.updatedAt || '-')}`;
+  if (editDetailTitleEl) editDetailTitleEl.textContent = getEditAddress(item);
+  if (editDetailMetaEl) editDetailMetaEl.textContent = `${t('accountMetaStatus', { status: String(item.status || 'pending') }, `Статус: ${String(item.status || 'pending')}`)} | ${String(item.updatedAt || '-')}`;
   if (editDetailListEl) {
     const changes = Array.isArray(item.changes) ? item.changes : [];
     editDetailListEl.innerHTML = changes.length === 0
       ? `<p class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">${escapeHtml(t('adminNoChanges', null, 'Без изменений'))}</p>`
-      : changes.map((change) => `
-        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p class="text-sm font-semibold text-slate-900">${escapeHtml(String(change.label || '-'))}</p>
-          <p class="text-xs text-slate-600">OSM: ${escapeHtml(String(change.osmValue ?? '—'))}</p>
-          <p class="text-xs text-slate-800">Локально: ${escapeHtml(String(change.localValue ?? '—'))}</p>
-        </div>
-      `).join('');
+      : changes.map(renderDiffItem).join('');
   }
-  if (editDetailModalEl) editDetailModalEl.classList.remove('hidden');
+  if (editDetailPaneEl) editDetailPaneEl.classList.remove('hidden');
+  if (accountLayoutEl) accountLayoutEl.classList.add('edit-pane-open');
+  let building = null;
+  try {
+    const buildingResp = await fetch(`/api/building/${encodeURIComponent(item.osmType)}/${encodeURIComponent(item.osmId)}`);
+    building = await buildingResp.json().catch(() => ({}));
+  } catch {
+    building = null;
+  }
+  if (building?.type === 'Feature' && building?.geometry) {
+    await updateDetailMapFeature(building);
+  }
+  highlightedEditKeys = new Set([editKey]);
+  applyEditedBuildingsPaint();
 }
 
 if (profileFormEl) {
@@ -428,7 +775,7 @@ if (passwordFormEl) {
   });
 }
 
-if (tabProfileEl) tabProfileEl.addEventListener('click', () => setTab('profile'));
+if (tabSettingsEl) tabSettingsEl.addEventListener('click', () => setTab('settings'));
 if (tabEditsEl) {
   tabEditsEl.addEventListener('click', async () => {
     setTab('edits');
@@ -436,23 +783,27 @@ if (tabEditsEl) {
   });
 }
 
+for (const el of [editsSearchEl, editsDateFilterEl]) {
+  if (!el) continue;
+  const eventName = el === editsSearchEl ? 'input' : 'change';
+  el.addEventListener(eventName, () => {
+    applyOwnEditsFilters();
+  });
+}
+
 if (editsListEl) {
   editsListEl.addEventListener('click', async (event) => {
     const actionEl = event.target?.closest?.('[data-action="open-edit"]');
     if (!actionEl) return;
-    const editKey = String(actionEl.getAttribute('data-edit-key') || '').trim();
-    await openEditDetails(editKey);
+    const editId = String(actionEl.getAttribute('data-edit-id') || '').trim();
+    await openEditDetails(editId);
   });
 }
 
 if (editDetailCloseEl) editDetailCloseEl.addEventListener('click', () => closeEditModal());
-if (editDetailModalEl) {
-  editDetailModalEl.addEventListener('click', (event) => {
-    if (event.target === editDetailModalEl) closeEditModal();
-  });
-}
 
 if (logoutBtnEl) {
+  logoutBtnEl.classList.remove('hidden');
   logoutBtnEl.addEventListener('click', async () => {
     try {
       await fetch('/api/logout', { method: 'POST' });
@@ -465,7 +816,7 @@ if (logoutBtnEl) {
 
 async function restoreFromUrl() {
   const fromUrl = readStateFromUrl();
-  accountState.tab = fromUrl.tab === 'edits' ? 'edits' : 'profile';
+  accountState.tab = getNormalizedTab(fromUrl.tab);
   accountState.edit = String(fromUrl.edit || '').trim();
   setTab(accountState.tab, { push: false });
   writeStateToUrl({ replace: true });
@@ -483,6 +834,8 @@ window.addEventListener('popstate', async () => {
 });
 
 (async () => {
+  initUiKitClasses();
+  renderBuildInfoLink();
   initThemeToggle();
   initNavMenu();
   initMapReturnLinks();

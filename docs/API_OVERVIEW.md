@@ -1,0 +1,36 @@
+# API Overview
+
+- PMTiles:
+  - `GET /api/buildings.pmtiles`
+- Building details:
+  - `GET /api/building/:osmType/:osmId`
+  - `GET /api/building-info/:osmType/:osmId`
+  - `POST /api/building-info`
+- Viewport filter:
+  - `GET /api/buildings/filter-data-bbox`
+  - `POST /api/buildings/filter-data`
+  - `GET /api/filter-tag-keys`
+- Search:
+  - `GET /api/search-buildings`
+- Auth:
+  - `GET /api/me`
+  - `POST /api/login`
+  - `POST /api/register/start`
+  - `POST /api/register/confirm-code`
+  - `POST /api/register/confirm-link`
+  - `POST /api/password-reset/request`
+  - `POST /api/password-reset/confirm`
+  - `POST /api/account/profile`
+  - `POST /api/account/change-password`
+  - `GET /api/account/edits`
+  - `GET /api/account/edits/:editId`
+  - `GET /api/admin/users`
+  - `GET /api/admin/users/:email`
+  - `GET /api/admin/users/:email/edits`
+  - `POST /api/admin/users/edit-permission`
+  - `POST /api/admin/users/role`
+  - `GET /api/admin/building-edits`
+  - `GET /api/admin/building-edits/:editId`
+  - `POST /api/admin/building-edits/:editId/merge`
+  - `POST /api/admin/building-edits/:editId/reject`
+  - `POST /api/logout`

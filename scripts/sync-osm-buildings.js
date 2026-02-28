@@ -42,11 +42,19 @@ function getPythonCandidates() {
   if (envPython) {
     out.push({ exe: envPython, prefixArgs: [] });
   }
-  out.push(
-    { exe: 'python3', prefixArgs: [] },
-    { exe: 'python', prefixArgs: [] },
-    { exe: 'py', prefixArgs: ['-3'] }
-  );
+  if (process.platform === 'win32') {
+    out.push(
+      { exe: 'py', prefixArgs: ['-3'] },
+      { exe: 'python', prefixArgs: [] },
+      { exe: 'python3', prefixArgs: [] }
+    );
+  } else {
+    out.push(
+      { exe: 'python3', prefixArgs: [] },
+      { exe: 'python', prefixArgs: [] },
+      { exe: 'py', prefixArgs: ['-3'] }
+    );
+  }
   return out;
 }
 
@@ -84,26 +92,45 @@ function runPython(args, stdio = 'inherit', preferredCandidate = null) {
 }
 
 function ensurePythonImporterDeps() {
-  const candidate = detectPythonCandidate();
-  if (!candidate) {
+  const candidates = getPythonCandidates().filter((candidate) => {
+    const probe = runPythonWithCandidate(candidate, ['-c', 'import sys; print(sys.executable)'], 'pipe');
+    return probe.ok;
+  });
+  if (candidates.length === 0) {
     throw new Error('Python interpreter not found (python/py -3).');
   }
 
-  const check = runPython(['-c', 'import quackosm, duckdb; print("ok")'], 'ignore', candidate);
-  if (check.ok) return candidate;
+  const installErrors = [];
+  const triedCandidates = [];
+  for (const candidate of candidates) {
+    const check = runPython(['-c', 'import quackosm, duckdb; print("ok")'], 'ignore', candidate);
+    if (check.ok) return candidate;
 
-  console.log(`Python modules quackosm/duckdb not found, installing for ${candidate.exe} ${candidate.prefixArgs.join(' ')}`.trim());
-  const installed = runPython(['-m', 'pip', 'install', 'quackosm', 'duckdb'], 'inherit', candidate).ok;
-  if (!installed) {
-    throw new Error('Failed to install quackosm/duckdb for importer Python.');
+    const pyLabel = `${candidate.exe} ${candidate.prefixArgs.join(' ')}`.trim();
+    triedCandidates.push(pyLabel);
+    console.log(`Python modules quackosm/duckdb not found, installing for ${pyLabel}`);
+    let installed = runPython(['-m', 'pip', 'install', 'quackosm', 'duckdb'], 'inherit', candidate).ok;
+    if (!installed) {
+      console.log('pip install failed, trying ensurepip + user install fallback...');
+      runPython(['-m', 'ensurepip', '--upgrade'], 'inherit', candidate);
+      installed = runPython(['-m', 'pip', 'install', '--user', 'quackosm', 'duckdb'], 'inherit', candidate).ok;
+    }
+    if (!installed) {
+      installErrors.push(`installer failed for ${pyLabel}`);
+      continue;
+    }
+
+    const recheck = runPython(['-c', 'import quackosm, duckdb; print("ok")'], 'ignore', candidate);
+    if (recheck.ok) return candidate;
+    installErrors.push(`modules are not importable after install for ${pyLabel}`);
   }
 
-  const recheck = runPython(['-c', 'import quackosm, duckdb; print("ok")'], 'ignore', candidate);
-  if (!recheck.ok) {
-    throw new Error('quackosm/duckdb are not importable after installation.');
-  }
-
-  return candidate;
+  throw new Error(
+    `Failed to install quackosm/duckdb for importer Python. ` +
+    `Tried interpreters: ${triedCandidates.join(', ')}. ` +
+    `Details: ${installErrors.join('; ')}. ` +
+    `Try manually: "py -3 -m pip install --user quackosm duckdb" and rerun sync.`
+  );
 }
 
 function hasAnyContoursInDb() {
@@ -300,6 +327,11 @@ async function run() {
 }
 
 run().catch((error) => {
-  console.error(error);
+  const message = String(error?.message || error || 'Unknown sync error');
+  console.error(`[sync] ${message}`);
+  if (process.platform === 'win32') {
+    console.error('[sync] Windows hint: install Python 3 + pip, then run "py -3 -m pip install --user quackosm duckdb".');
+  }
+  console.error('[sync] Docker hint: generate tiles in container with "docker compose run --rm archimap node scripts/sync-osm-buildings.js --pmtiles-only".');
   process.exit(1);
 });

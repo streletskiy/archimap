@@ -19,6 +19,7 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - [Contour Sync](#contour-sync)
 - [Search Logic](#search-logic)
 - [API Overview](#api-overview)
+- [Edits Workflow](#edits-workflow)
 - [Environment Variables](#environment-variables)
 - [External Projects](#external-projects)
 - [License](#license)
@@ -27,11 +28,13 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 
 - [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/) map with a customized Positron style.
 - Building contours imported from OSM extracts ([QuackOSM](https://github.com/kraina-ai/quackosm)) or local `.osm.pbf`, stored in local [SQLite](https://www.sqlite.org/).
-- Separate local edits DB (`local-edits.db`) for architectural metadata:
-  `name`, `style`, `levels`, `year`, `architect`, `address`, `archimap_description`.
+- Separate DBs for edits:
+  - `local-edits.db` - merged local architectural metadata.
+  - `user-edits.db` - user submissions with moderation status (`pending/accepted/partially_accepted/rejected/superseded`).
 - Building modal with in-place editing (authorized users).
 - Dedicated account page (`/account/`) for profile and password management.
 - Dedicated admin page (`/admin/`) for user roles/permissions and local-edits moderation.
+- UI kit is integrated as an admin tab (`/admin/?tab=uikit`) rather than a standalone page.
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
 - Viewport filter prefetch uses SQLite R*Tree bbox index with fallback to B-tree query when R*Tree is unavailable.
@@ -60,7 +63,9 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
   - Search structures (`building_search_source`, `building_search_fts`)
   - Filter tag key cache (`filter_tag_keys_cache`)
 - Local metadata DB: `data/local-edits.db`
-  - `architectural_info` overrides and additions
+  - `architectural_info` merged overrides and additions
+- User edits DB: `data/user-edits.db`
+  - `building_user_edits` (author-scoped edits + moderation status and admin comments)
 - Auth DB: `data/users.db`
   - `users`, registration codes, password-reset tokens
 - Tiles artifact: `data/buildings.pmtiles`
@@ -121,6 +126,12 @@ Run manually:
 npm run sync:city
 ```
 
+Local prerequisite (non-Docker):
+
+- Python 3 with pip and importer modules:
+  - `python -m pip install --user quackosm duckdb`
+  - On Windows, if `python` is unavailable, use: `py -3 -m pip install --user quackosm duckdb`
+
 Import modes:
 
 - `OSM_EXTRACT_QUERY` / `OSM_EXTRACT_QUERIES`: QuackOSM auto-finds/downloads extract by query.
@@ -149,7 +160,7 @@ node scripts/sync-osm-buildings.js --pmtiles-only
 ## Search Logic
 
 - API: `GET /api/search-buildings?q=...&lon=...&lat=...&limit=...&cursor=...`
-- Search scope: full local `building_contours` + local overrides from `local-edits.db`.
+- Search scope: full local `building_contours` + merged local overrides from `local-edits.db`.
 
 Search index:
 
@@ -208,100 +219,21 @@ Index lifecycle:
 
 ## API Overview
 
-- PMTiles:
-  - `GET /api/buildings.pmtiles`
-- Building details:
-  - `GET /api/building/:osmType/:osmId`
-  - `GET /api/building-info/:osmType/:osmId`
-  - `POST /api/building-info`
-- Viewport filter:
-  - `GET /api/buildings/filter-data-bbox`
-  - `POST /api/buildings/filter-data`
-  - `GET /api/filter-tag-keys`
-- Search:
-  - `GET /api/search-buildings`
-- Auth:
-  - `GET /api/me`
-  - `POST /api/login`
-  - `POST /api/register/start`
-  - `POST /api/register/confirm-code`
-  - `POST /api/register/confirm-link`
-  - `POST /api/password-reset/request`
-  - `POST /api/password-reset/confirm`
-  - `POST /api/account/profile`
-  - `POST /api/account/change-password`
-  - `GET /api/account/edits`
-  - `GET /api/account/edits/:osmType/:osmId`
-  - `GET /api/admin/users`
-  - `GET /api/admin/users/:email`
-  - `GET /api/admin/users/:email/edits`
-  - `POST /api/admin/users/edit-permission`
-  - `POST /api/admin/users/role`
-  - `GET /api/admin/building-edits`
-  - `GET /api/admin/building-edits/:osmType/:osmId`
-  - `POST /api/admin/building-edits/delete`
-  - `POST /api/admin/building-edits/reassign`
-  - `POST /api/logout`
+Detailed API list:
+
+- [docs/API_OVERVIEW.md](./docs/API_OVERVIEW.md)
+
+## Edits Workflow
+
+Detailed edits workflow:
+
+- [docs/EDITS_WORKFLOW.md](./docs/EDITS_WORKFLOW.md)
 
 ## Environment Variables
 
-| Variable | Description |
-|---|---|
-| `PORT` | Server port. |
-| `TRUST_PROXY` | Set `true` when app works behind reverse proxy/ingress so secure cookies and request protocol are handled correctly. |
-| `SESSION_SECRET` | Session secret. |
-| `REDIS_URL` | Redis URL for sessions (default: `redis://redis:6379`). |
-| `MAP_DEFAULT_LON` | Default map longitude when URL hash has no `#map=...`. |
-| `MAP_DEFAULT_LAT` | Default map latitude when URL hash has no `#map=...`. |
-| `MAP_DEFAULT_ZOOM` | Default map zoom when URL hash has no `#map=...`. |
-| `ADMIN_USERNAME` | Admin login. |
-| `ADMIN_PASSWORD` | Admin password. |
-| `APP_DISPLAY_NAME` | App name used in registration emails (default: `Archimap`). |
-| `APP_BASE_URL` | Public application base URL used in password reset links (for example: `https://archimap.example.com`). Recommended to set explicitly for security. |
-| `SMTP_URL` | Full SMTP connection URL (alternative to host/port/user/pass). |
-| `SMTP_HOST` | SMTP host for registration emails. |
-| `SMTP_PORT` | SMTP port for registration emails (default: `587`). |
-| `SMTP_SECURE` | Use TLS SMTP transport (`true/false`). |
-| `SMTP_USER` | SMTP username. |
-| `SMTP_PASS` | SMTP password or app password. |
-| `EMAIL_FROM` | Sender address for registration emails (for example: `Archimap <no-reply@example.com>`). |
-| `REGISTRATION_ENABLED` | Enable/disable email registration (`true/false`, default `true`). When `false`, SMTP setup is not required. |
-| `REGISTRATION_CODE_TTL_MINUTES` | Verification code lifetime in minutes (`2..60`, default `15`). |
-| `REGISTRATION_CODE_RESEND_COOLDOWN_SEC` | Delay before requesting another code in seconds (`10..600`, default `60`). |
-| `REGISTRATION_CODE_MAX_ATTEMPTS` | Maximum wrong code attempts before re-request is required (`3..12`, default `6`). |
-| `REGISTRATION_MIN_PASSWORD_LENGTH` | Minimum password length for new users (`8..72`, default `8`). |
-| `PASSWORD_RESET_TTL_MINUTES` | Password reset link lifetime in minutes (`5..180`, default `60`). |
-| `USER_EDIT_REQUIRES_PERMISSION` | If `true` (default), regular users can edit buildings only when `can_edit=1` in `auth.users`. If `false`, any authenticated user can edit. |
-| `OSM_EXTRACT_QUERY` | Optional single QuackOSM extract query (example: `Gibraltar`). |
-| `OSM_EXTRACT_QUERIES` | Optional semicolon-separated extract queries (example: `Nizhny Novgorod;Moscow Oblast;Russia`). |
-| `OSM_PBF_PATH` | Optional path to local `.osm.pbf`. |
-| `PBF_PROGRESS_EVERY` | Importer progress print interval. |
-| `PBF_PROGRESS_COUNT_PASS` | Optional fallback retry flag (`--no-count-pass` on retry). |
-| `AUTO_SYNC_ENABLED` | Enable/disable auto sync (`true/false`). |
-| `AUTO_SYNC_ON_START` | Run sync on startup (`true/false`). |
-| `AUTO_SYNC_INTERVAL_HOURS` | Periodic sync interval in hours (`<=0` disables periodic sync). |
-| `SEARCH_INDEX_BATCH_SIZE` | FTS rebuild batch size (`200..20000`, default `2500`). |
-| `RTREE_REBUILD_BATCH_SIZE` | Background R*Tree rebuild batch size (`500..20000`, default `4000`). |
-| `RTREE_REBUILD_PAUSE_MS` | Delay between R*Tree batches in ms (`0..200`, default `8`). |
-| `LOCAL_EDITS_DB_PATH` | Path to local edits DB (default: `data/local-edits.db`). |
-| `BUILDINGS_PMTILES_FILE` | PMTiles output filename inside `data/` (default: `buildings.pmtiles`). |
-| `BUILDINGS_PMTILES_SOURCE_LAYER` | Vector layer name written by tippecanoe (default: `buildings`). |
-| `BUILDINGS_PMTILES_MIN_ZOOM` | Minimum PMTiles zoom (default: `13`). |
-| `BUILDINGS_PMTILES_MAX_ZOOM` | Maximum PMTiles zoom (default: `16`). |
-| `TIPPECANOE_BIN` | Optional absolute path to `tippecanoe`. |
-| `TIPPECANOE_PROGRESS_JSON` | Print tippecanoe progress as JSON lines (default: `true`). |
-| `TIPPECANOE_PROGRESS_INTERVAL_SEC` | Tippecanoe progress update interval in seconds (default: `5`). |
+Full environment variables reference:
 
-Startup sync behavior details:
-
-- startup sync is skipped automatically when both `building_contours` and PMTiles file already exist;
-- when `AUTO_SYNC_ON_START=false`, app still builds missing PMTiles from existing `building_contours` (without full OSM import).
-
-Build info in settings footer:
-
-- for Docker builds, `shortSha | version` is embedded automatically during image build into `build-info.json` (from git);
-- if no exact tag on `HEAD`, version is `dev`;
-- fallback is `unknown | dev` when git metadata is unavailable.
+- [docs/ENVIRONMENT_VARIABLES.md](./docs/ENVIRONMENT_VARIABLES.md)
 
 ## External Projects
 

@@ -7,12 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.css" rel="stylesheet" />
   <script>
     tailwind.config = {
       theme: {
         extend: {
           fontFamily: {
             sans: ["Manrope", "Segoe UI", "Roboto", "Arial", "sans-serif"]
+          },
+          colors: {
+            brand: {
+              purple: "#5B62F0"
+            }
           },
           boxShadow: {
             soft: "0 8px 24px rgba(15, 23, 42, 0.08)"
@@ -42,119 +48,195 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="min-h-screen bg-slate-100 font-sans text-slate-900">
-  <div id="navigation" class="fixed inset-x-0 top-0 z-[930] px-3 pt-3 sm:px-4 sm:pt-4">
-    <div class="relative rounded-2xl border border-slate-300 bg-white/95 px-3 py-2 shadow-soft backdrop-blur">
-      <div class="flex items-center justify-between gap-3">
-        <div class="flex min-w-0 items-center px-2">
-          <a id="nav-logo-link" href="/" class="inline-flex h-10 select-none items-center text-2xl font-extrabold tracking-tight text-black sm:text-xl">/archimap</a>
-          <a id="map-return-link" href="/" class="ml-3 inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Вернуться на карту</a>
-        </div>
-        <div class="flex items-center gap-2">
-          <button id="nav-menu-button" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label="Открыть меню" aria-expanded="false">
-            <svg viewBox="0 0 640 640" width="18" height="18" aria-hidden="true" class="fill-current">
-              <path d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div id="nav-menu-panel" class="pointer-events-none absolute right-0 top-[calc(100%+0.375rem)] sm:top-[calc(100%+0.75rem)] z-[960] flex w-64 flex-col gap-2 rounded-xl border border-slate-300 bg-white/95 p-2 shadow-soft transition-all duration-200 ease-out origin-top-right max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0">
-        <a id="admin-link" href="/admin/" class="hidden block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Админ-панель</a>
-        <a href="/account/" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Кабинет пользователя</a>
-        <div class="my-2 border-t border-slate-200"></div>
-        <div class="flex items-center justify-between rounded-lg px-3 py-2">
-          <span class="text-sm font-semibold text-slate-700">Тема</span>
-          <label for="theme-toggle" class="relative inline-flex h-10 w-[76px] cursor-pointer items-center rounded-full bg-white/95 shadow-soft hover:bg-slate-50">
-            <input id="theme-toggle" type="checkbox" class="peer sr-only" aria-label="Переключить тему" />
-            <span class="absolute inset-1 rounded-full bg-slate-300 transition peer-checked:bg-indigo-500"></span>
-            <span class="pointer-events-none absolute left-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center" aria-hidden="true">
-              <svg class="theme-track-icon-sun h-[14px] w-[14px] fill-current text-slate-700" viewBox="0 0 640 640">
-                <path d="M320 32C328.4 32 336.3 36.4 340.6 43.7L396.1 136.3L500.9 110C509.1 108 517.8 110.4 523.7 116.3C529.6 122.2 532 131 530 139.1L503.7 243.8L596.4 299.3C603.6 303.6 608.1 311.5 608.1 319.9C608.1 328.3 603.7 336.2 596.4 340.5L503.7 396.1L530 500.8C532 509 529.6 517.7 523.7 523.6C517.8 529.5 509 532 500.9 530L396.2 503.7L340.7 596.4C336.4 603.6 328.5 608.1 320.1 608.1C311.7 608.1 303.8 603.7 299.5 596.4L243.9 503.7L139.2 530C131 532 122.4 529.6 116.4 523.7C110.4 517.8 108 509 110 500.8L136.2 396.1L43.6 340.6C36.4 336.2 32 328.4 32 320C32 311.6 36.4 303.7 43.7 299.4L136.3 243.9L110 139.1C108 130.9 110.3 122.3 116.3 116.3C122.3 110.3 131 108 139.2 110L243.9 136.2L299.4 43.6L301.2 41C305.7 35.3 312.6 31.9 320 31.9zM320 176C240.5 176 176 240.5 176 320C176 399.5 240.5 464 320 464C399.5 464 464 399.5 464 320C464 240.5 399.5 176 320 176zM320 416C267 416 224 373 224 320C224 267 267 224 320 224C373 224 416 267 416 320C416 373 373 416 320 416z"></path>
-              </svg>
-            </span>
-            <span class="pointer-events-none absolute right-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center" aria-hidden="true">
-              <svg class="theme-track-icon-moon h-[14px] w-[14px] fill-current text-slate-700" viewBox="0 0 640 640">
-                <path d="M320 64C178.6 64 64 178.6 64 320C64 461.4 178.6 576 320 576C388.8 576 451.3 548.8 497.3 504.6C504.6 497.6 506.7 486.7 502.6 477.5C498.5 468.3 488.9 462.6 478.8 463.4C473.9 463.8 469 464 464 464C362.4 464 280 381.6 280 280C280 207.9 321.5 145.4 382.1 115.2C391.2 110.7 396.4 100.9 395.2 90.8C394 80.7 386.6 72.5 376.7 70.3C358.4 66.2 339.4 64 320 64z"></path>
-              </svg>
-            </span>
-            <span class="pointer-events-none absolute left-1.5 z-[2] inline-flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-sm transition peer-checked:translate-x-[36px]"></span>
-          </label>
-        </div>
-        <button id="account-logout-btn" type="button" class="mt-2 w-full rounded-lg bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600">Выход</button>
-      </div>
-    </div>
-  </div>
+  <div id="top-nav-root"></div>
 
-  <div class="w-full px-3 pb-3 pt-[5.5rem] sm:px-4 sm:pb-4 sm:pt-[5.25rem]">
-    <div class="mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:mb-4">
-      <h1 class="text-xl font-extrabold md:text-2xl">Личный кабинет</h1>
-      <p id="account-subtitle" class="mt-1 text-sm text-slate-600">Загрузка данных...</p>
-    </div>
+  <div id="account-layout" class="page-with-edit-pane w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
+    <div class="w-full">
+      <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
+        <div class="border-b border-slate-200 pb-4">
+          <h1 class="text-2xl font-extrabold">Личный кабинет</h1>
+          <p id="account-subtitle" class="mt-1 text-sm text-slate-600">Загрузка данных...</p>
+        </div>
 
-    <div class="mb-3 inline-flex w-fit rounded-lg border border-slate-300 bg-white p-1 shadow-soft sm:mb-4">
-      <button id="account-tab-profile" type="button" class="rounded-md px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">Профиль</button>
-      <button id="account-tab-edits" type="button" class="rounded-md px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">Мои правки</button>
-    </div>
+        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+          <ul class="-mb-px flex flex-wrap gap-2 text-sm font-medium" id="account-tabs" data-tabs-toggle="#account-tabs-content" role="tablist">
+            <li role="presentation">
+              <button id="account-tab-settings" type="button" role="tab" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Настройки</button>
+            </li>
+            <li role="presentation">
+              <button id="account-tab-edits" type="button" role="tab" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Мои правки</button>
+            </li>
+          </ul>
+        </div>
 
-    <section id="account-profile-panel" class="grid gap-4 md:grid-cols-2">
-      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
-        <h2 class="text-lg font-bold">Профиль</h2>
-        <p class="mt-1 text-sm text-slate-600">Заполните личные данные для более удобной работы.</p>
-        <form id="profile-form" class="mt-4 space-y-3">
-          <div>
-            <label for="first-name" class="mb-1 block text-sm font-medium text-slate-700">Имя</label>
-            <input id="first-name" type="text" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-indigo-500" autocomplete="given-name" />
+        <div id="account-tabs-content" class="mt-4 space-y-4">
+          <section id="account-profile-panel" class="rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 class="text-lg font-bold text-slate-900">Настройки профиля</h2>
+          <p class="mt-1 text-sm text-slate-600">Личные данные, безопасность и уведомления в одном разделе.</p>
+          <div class="mt-5 grid gap-4 xl:grid-cols-3">
+            <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h3 class="text-base font-bold text-slate-900">Личные данные</h3>
+              <form id="profile-form" class="mt-4 space-y-4">
+                <div>
+                  <label for="first-name" class="mb-1 block text-sm font-medium text-slate-700">Имя</label>
+                  <input id="first-name" type="text" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="given-name" placeholder="Иван" />
+                </div>
+                <div>
+                  <label for="last-name" class="mb-1 block text-sm font-medium text-slate-700">Фамилия</label>
+                  <input id="last-name" type="text" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="family-name" placeholder="Иванов" />
+                </div>
+                <div>
+                  <label for="profile-email" class="mb-1 block text-sm font-medium text-slate-700">Email</label>
+                  <input id="profile-email" type="email" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 focus:border-brand-purple focus:ring-brand-purple" readonly value="user@archimap.app" />
+                </div>
+                <button type="submit" class="rounded-[16px] bg-brand-purple px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Сохранить</button>
+                <p id="profile-status" class="text-sm text-slate-600"></p>
+              </form>
+            </section>
+
+            <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h3 class="text-base font-bold text-slate-900">Безопасность</h3>
+              <form id="password-form" class="mt-4 space-y-4">
+                <div>
+                  <label for="current-password" class="mb-1 block text-sm font-medium text-slate-700">Текущий пароль</label>
+                  <input id="current-password" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="current-password" />
+                </div>
+                <div>
+                  <label for="new-password" class="mb-1 block text-sm font-medium text-slate-700">Новый пароль</label>
+                  <input id="new-password" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="new-password" />
+                </div>
+                <div>
+                  <label for="new-password-confirm" class="mb-1 block text-sm font-medium text-slate-700">Повторите новый пароль</label>
+                  <input id="new-password-confirm" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="new-password" />
+                </div>
+                <button type="submit" class="rounded-[16px] border border-brand-purple px-5 py-2.5 text-sm font-semibold text-brand-purple transition hover:bg-brand-purple hover:text-white">Изменить пароль</button>
+                <p id="password-status" class="text-sm text-slate-600"></p>
+              </form>
+            </section>
+
+            <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h3 class="text-base font-bold text-slate-900">Уведомления</h3>
+              <div class="mt-4 space-y-4">
+                <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p class="text-sm font-semibold text-slate-900">Новые комментарии к правкам</p>
+                    <p class="mt-1 text-sm text-slate-500">Письмо, когда администратор комментирует вашу правку.</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input type="checkbox" class="peer sr-only" checked>
+                    <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  </label>
+                </div>
+                <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p class="text-sm font-semibold text-slate-900">Статус модерации</p>
+                    <p class="mt-1 text-sm text-slate-500">Уведомления об одобрении или отклонении изменений.</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input type="checkbox" class="peer sr-only" checked>
+                    <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  </label>
+                </div>
+                <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <p class="text-sm font-semibold text-slate-900">Еженедельная сводка</p>
+                    <p class="mt-1 text-sm text-slate-500">Подборка ваших активностей и новых объектов на карте.</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input type="checkbox" class="peer sr-only">
+                    <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  </label>
+                </div>
+              </div>
+            </section>
           </div>
-          <div>
-            <label for="last-name" class="mb-1 block text-sm font-medium text-slate-700">Фамилия</label>
-            <input id="last-name" type="text" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-indigo-500" autocomplete="family-name" />
+          </section>
+
+          <section id="account-edits-panel" class="hidden space-y-4">
+          <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div id="account-edits-map" class="h-[340px] w-full"></div>
           </div>
-          <button type="submit" class="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">Сохранить</button>
-          <p id="profile-status" class="text-sm text-slate-600"></p>
-        </form>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4">
+            <div class="grid gap-3 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]">
+              <input id="account-edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+              <input id="account-edits-date-filter" type="date" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+              <p id="account-edits-status" class="flex items-center rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600">Загрузка...</p>
+            </div>
+          </div>
+
+          <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm text-slate-700">
+                <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-4 py-3">Объект</th>
+                    <th class="px-4 py-3">Автор</th>
+                    <th class="px-4 py-3">Статус</th>
+                    <th class="px-4 py-3">Изменения тегов</th>
+                  </tr>
+                </thead>
+                <tbody id="account-edits-list">
+                  <tr class="cursor-pointer border-t border-slate-200 hover:bg-slate-50">
+                    <td class="px-4 py-3">
+                      <button type="button" data-action="open-edit" data-edit-key="way/14598322" class="text-left">
+                        <p class="font-semibold text-slate-900">ул. Рождественская, 10</p>
+                        <p class="text-xs text-slate-500">ID: way/14598322</p>
+                      </button>
+                    </td>
+                    <td class="px-4 py-3 text-slate-600">you@example.com</td>
+                    <td class="px-4 py-3"><span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">На рассмотрении</span></td>
+                    <td class="px-4 py-3">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">4 всего</span>
+                        <span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+1 создано</span>
+                        <span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~3 изменено</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr class="cursor-pointer border-t border-slate-200 hover:bg-slate-50">
+                    <td class="px-4 py-3">
+                      <button type="button" data-action="open-edit" data-edit-key="relation/8192631" class="text-left">
+                        <p class="font-semibold text-slate-900">пр-т Гагарина, 58</p>
+                        <p class="text-xs text-slate-500">ID: relation/8192631</p>
+                      </button>
+                    </td>
+                    <td class="px-4 py-3 text-slate-600">you@example.com</td>
+                    <td class="px-4 py-3"><span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Отклонено</span></td>
+                    <td class="px-4 py-3">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">2 всего</span>
+                        <span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~2 изменено</span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </section>
+        </div>
       </section>
-
-      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
-        <h2 class="text-lg font-bold">Смена пароля</h2>
-        <p class="mt-1 text-sm text-slate-600">Для безопасности используйте новый уникальный пароль.</p>
-        <form id="password-form" class="mt-4 space-y-3">
-          <div>
-            <label for="current-password" class="mb-1 block text-sm font-medium text-slate-700">Текущий пароль</label>
-            <input id="current-password" type="password" required class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-indigo-500" autocomplete="current-password" />
-          </div>
-          <div>
-            <label for="new-password" class="mb-1 block text-sm font-medium text-slate-700">Новый пароль</label>
-            <input id="new-password" type="password" required class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-indigo-500" autocomplete="new-password" />
-          </div>
-          <div>
-            <label for="new-password-confirm" class="mb-1 block text-sm font-medium text-slate-700">Повторите пароль</label>
-            <input id="new-password-confirm" type="password" required class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-indigo-500" autocomplete="new-password" />
-          </div>
-          <button type="submit" class="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Обновить пароль</button>
-          <p id="password-status" class="text-sm text-slate-600"></p>
-        </form>
-      </section>
-    </section>
-
-    <section id="account-edits-panel" class="hidden space-y-4">
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-        <p id="account-edits-status" class="text-sm text-slate-600">Загрузка...</p>
-      </div>
-      <div id="account-edits-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
-    </section>
-  </div>
-
-  <div id="account-edit-detail-modal" class="fixed inset-0 z-[1200] hidden bg-slate-900/40 p-3 md:p-6">
-    <div class="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-soft md:p-5">
-      <div class="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
-        <h3 id="account-edit-detail-title" class="text-lg font-bold">Правка</h3>
-        <button id="account-edit-detail-close" type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-100">✕</button>
-      </div>
-      <p id="account-edit-detail-meta" class="text-sm text-slate-600"></p>
-      <div id="account-edit-detail-list" class="mt-3 space-y-2"></div>
     </div>
   </div>
 
+  <div id="edit-detail-pane-root"></div>
+
+  <script src="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.5.2/flowbite.min.js"></script>
+  <script src="/app-config.js"></script>
   <script src="/i18n/ru.js"></script>
+  <script src="/shared/ui.js"></script>
+  <script src="/shared/top-nav.js"></script>
+  <script>window.ArchiMapTopNav.render({ context: 'account' });</script>
+  <script>
+    (function renderSharedEditPane() {
+      var root = document.getElementById('edit-detail-pane-root');
+      if (!root || !window.ArchiMapUI || typeof window.ArchiMapUI.editDetailPane !== 'function') return;
+      root.innerHTML = window.ArchiMapUI.editDetailPane();
+    })();
+  </script>
   <script src="/account.js"></script>
 </body>
 </html>

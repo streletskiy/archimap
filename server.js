@@ -8,9 +8,16 @@ const { RedisStore } = require('connect-redis');
 const { createClient } = require('redis');
 const Database = require('better-sqlite3');
 const { ensureAuthSchema, registerAuthRoutes } = require('./auth');
+const {
+  registrationCodeHtmlTemplate,
+  registrationCodeTextTemplate,
+  passwordResetHtmlTemplate,
+  passwordResetTextTemplate
+} = require('./email-templates');
 const { spawn, execSync } = require('child_process');
 
 const app = express();
+app.disable('x-powered-by');
 
 const PORT = Number(process.env.PORT || 3252);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -20,8 +27,7 @@ if (TRUST_PROXY) {
   app.set('trust proxy', 1);
 }
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const SESSION_ALLOW_MEMORY_FALLBACK = String(process.env.SESSION_ALLOW_MEMORY_FALLBACK ?? (NODE_ENV === 'production' ? 'false' : 'true')).toLowerCase() === 'true';
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED ?? 'true').toLowerCase() === 'true';
 const AUTO_SYNC_ON_START = String(process.env.AUTO_SYNC_ON_START ?? 'true').toLowerCase() === 'true';
 const AUTO_SYNC_INTERVAL_HOURS = Number(process.env.AUTO_SYNC_INTERVAL_HOURS || 168);
@@ -56,7 +62,23 @@ const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'archimap.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
+const userEditsDbPath = process.env.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db');
 const userAuthDbPath = path.join(dataDir, 'users.db');
+
+function ensureParentDir(filePath) {
+  const target = String(filePath || '').trim();
+  if (!target) return;
+  const dir = path.dirname(target);
+  if (!dir) return;
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+ensureParentDir(dbPath);
+ensureParentDir(localEditsDbPath);
+ensureParentDir(userEditsDbPath);
+ensureParentDir(userAuthDbPath);
+ensureParentDir(buildingsPmtilesPath);
+
 const db = new Database(dbPath);
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-osm-buildings.js');
 const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
@@ -129,27 +151,27 @@ function getBuildInfo() {
 function validateSecurityConfig() {
   const isProduction = NODE_ENV === 'production';
   const weakSessionSecret = SESSION_SECRET === 'dev-secret-change-me';
-  const weakAdminPassword = ADMIN_PASSWORD === 'admin123';
   const hasAppBaseUrl = APP_BASE_URL.length > 0;
+  const allowMemoryStoreFallback = SESSION_ALLOW_MEMORY_FALLBACK;
 
   if (!isProduction) {
     if (weakSessionSecret) {
       console.warn('[security] SESSION_SECRET uses default value (allowed in non-production, unsafe for production)');
     }
-    if (weakAdminPassword) {
-      console.warn('[security] ADMIN_PASSWORD uses default value (allowed in non-production, unsafe for production)');
-    }
     if (!hasAppBaseUrl) {
       console.warn('[security] APP_BASE_URL is empty, password reset links will be unavailable');
+    }
+    if (allowMemoryStoreFallback) {
+      console.warn('[security] SESSION_ALLOW_MEMORY_FALLBACK=true (development mode)');
     }
     return;
   }
 
-  if (weakSessionSecret || weakAdminPassword || !hasAppBaseUrl) {
+  if (weakSessionSecret || !hasAppBaseUrl || allowMemoryStoreFallback) {
     const issues = [];
     if (weakSessionSecret) issues.push('SESSION_SECRET is default');
-    if (weakAdminPassword) issues.push('ADMIN_PASSWORD is default');
     if (!hasAppBaseUrl) issues.push('APP_BASE_URL is required');
+    if (allowMemoryStoreFallback) issues.push('SESSION_ALLOW_MEMORY_FALLBACK must be false in production');
     throw new Error(`[security] Refusing to start in production: ${issues.join('; ')}`);
   }
 }
@@ -192,14 +214,27 @@ const searchRateLimiter = createSimpleRateLimiter({
   maxRequests: 60,
   message: 'Слишком много поисковых запросов, попробуйте позже'
 });
+const filterDataRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 90,
+  message: 'Слишком много запросов данных по зданиям, попробуйте позже'
+});
+const filterDataBboxRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+  message: 'Слишком много запросов bbox, попробуйте позже'
+});
 
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
 
 db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
+db.prepare(`ATTACH DATABASE ? AS user_edits`).run(userEditsDbPath);
 db.prepare(`ATTACH DATABASE ? AS auth`).run(userAuthDbPath);
 db.exec(`PRAGMA local.journal_mode = WAL;`);
 db.exec(`PRAGMA local.synchronous = NORMAL;`);
+db.exec(`PRAGMA user_edits.journal_mode = WAL;`);
+db.exec(`PRAGMA user_edits.synchronous = NORMAL;`);
 db.exec(`PRAGMA auth.journal_mode = WAL;`);
 db.exec(`PRAGMA auth.synchronous = NORMAL;`);
 
@@ -443,34 +478,39 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
 CREATE INDEX IF NOT EXISTS local.idx_architectural_info_osm
 ON architectural_info (osm_type, osm_id);
 
-`);
+CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  osm_type TEXT NOT NULL,
+  osm_id INTEGER NOT NULL,
+  created_by TEXT NOT NULL,
+  name TEXT,
+  style TEXT,
+  levels INTEGER,
+  year_built INTEGER,
+  architect TEXT,
+  address TEXT,
+  archimap_description TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  admin_comment TEXT,
+  reviewed_by TEXT,
+  reviewed_at TEXT,
+  merged_by TEXT,
+  merged_at TEXT,
+  merged_fields_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
-const legacyInfoStats = db.prepare(`
-  SELECT
-    (SELECT COUNT(*) FROM main.architectural_info) AS main_count,
-    (SELECT COUNT(*) FROM local.architectural_info) AS local_count
-`).get();
-if (Number(legacyInfoStats?.local_count || 0) === 0 && Number(legacyInfoStats?.main_count || 0) > 0) {
-  const inserted = db.prepare(`
-    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, created_at, updated_at)
-    SELECT
-      ai.osm_type,
-      ai.osm_id,
-      ai.name,
-      ai.style,
-      ai.levels,
-      ai.year_built,
-      ai.architect,
-      ai.address,
-      ai.description,
-      ai.description,
-      ai.updated_by,
-      coalesce(ai.created_at, datetime('now')),
-      coalesce(ai.updated_at, datetime('now'))
-    FROM main.architectural_info ai
-  `).run();
-  console.log(`[db] migrated ${Number(inserted?.changes || 0)} local edits to local-edits.db`);
-}
+CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_lookup
+ON building_user_edits (osm_type, osm_id, created_by, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_author
+ON building_user_edits (created_by, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_status
+ON building_user_edits (status, updated_at DESC);
+
+`);
 
 db.exec(`
 CREATE VIRTUAL TABLE IF NOT EXISTS building_search_fts
@@ -484,35 +524,7 @@ USING fts5(
 );
 `);
 
-const archiColumns = db.prepare(`PRAGMA local.table_info(architectural_info)`).all();
-const archiColumnNames = new Set(archiColumns.map((c) => c.name));
-if (!archiColumnNames.has('name')) {
-  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN name TEXT;`);
-}
-if (!archiColumnNames.has('levels')) {
-  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN levels INTEGER;`);
-}
-if (!archiColumnNames.has('updated_by')) {
-  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN updated_by TEXT;`);
-}
-if (!archiColumnNames.has('archimap_description')) {
-  db.exec(`ALTER TABLE local.architectural_info ADD COLUMN archimap_description TEXT;`);
-}
-db.exec(`
-UPDATE local.architectural_info
-SET archimap_description = description
-WHERE (archimap_description IS NULL OR trim(archimap_description) = '')
-  AND description IS NOT NULL
-  AND trim(description) <> '';
-`);
-
 ensureAuthSchema(db);
-
-const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
-const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
-if (!searchSourceColumnNames.has('local_priority')) {
-  db.exec(`ALTER TABLE building_search_source ADD COLUMN local_priority INTEGER NOT NULL DEFAULT 0;`);
-}
 
 app.use(express.json());
 
@@ -523,15 +535,17 @@ app.get('/app-config.js', (req, res) => {
     sourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER
   };
   const buildInfo = getBuildInfo();
+  const bootstrapFirstAdminAvailable = Number(db.prepare('SELECT COUNT(*) AS total FROM auth.users').get()?.total || 0) === 0;
   const auth = {
-    registrationEnabled: REGISTRATION_ENABLED
+    registrationEnabled: REGISTRATION_ENABLED,
+    bootstrapFirstAdminAvailable
   };
   res.type('application/javascript').send(
     `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth })};`
   );
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+const publicStatic = express.static(path.join(__dirname, 'public'));
 
 app.get(['/account', '/account/'], (req, res) => {
   return res.sendFile(path.join(__dirname, 'public', 'account.html'));
@@ -650,11 +664,94 @@ app.get('/api/filter-tag-keys', (req, res) => {
 });
 
 app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  const cspDirectives = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com",
+    "style-src 'self' 'unsafe-inline' https://unpkg.com",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data: https:",
+    "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'"
+  ];
+  res.setHeader('Content-Security-Policy', cspDirectives.join('; '));
+  if (NODE_ENV === 'production' && req.secure) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
+app.use((req, res, next) => {
   if (!sessionMiddleware) {
     return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
   }
   return sessionMiddleware(req, res, next);
 });
+
+app.get('/api/ui/email-previews', requireAuth, requireAdmin, (req, res) => {
+  const appDisplayName = APP_DISPLAY_NAME;
+  const sample = {
+    registration: {
+      code: '583401',
+      expiresInMinutes: REGISTRATION_CODE_TTL_MINUTES,
+      confirmUrl: `${APP_BASE_URL || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`
+    },
+    passwordReset: {
+      expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+      resetUrl: `${APP_BASE_URL || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`
+    }
+  };
+
+  const registration = {
+    subject: `${appDisplayName}: код подтверждения регистрации`,
+    html: registrationCodeHtmlTemplate({
+      code: sample.registration.code,
+      expiresInMinutes: sample.registration.expiresInMinutes,
+      appDisplayName,
+      confirmUrl: sample.registration.confirmUrl
+    }),
+    text: registrationCodeTextTemplate({
+      code: sample.registration.code,
+      expiresInMinutes: sample.registration.expiresInMinutes,
+      appDisplayName,
+      confirmUrl: sample.registration.confirmUrl
+    })
+  };
+
+  const passwordReset = {
+    subject: `${appDisplayName}: сброс пароля`,
+    html: passwordResetHtmlTemplate({
+      resetUrl: sample.passwordReset.resetUrl,
+      expiresInMinutes: sample.passwordReset.expiresInMinutes,
+      appDisplayName
+    }),
+    text: passwordResetTextTemplate({
+      resetUrl: sample.passwordReset.resetUrl,
+      expiresInMinutes: sample.passwordReset.expiresInMinutes,
+      appDisplayName
+    })
+  };
+
+  return res.json({
+    appDisplayName,
+    generatedAt: new Date().toISOString(),
+    templates: {
+      registration,
+      passwordReset
+    }
+  });
+});
+
+app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {
+  return res.redirect('/admin/?tab=uikit');
+});
+app.use(publicStatic);
 
 function rowToFeature(row) {
   let ring = [];
@@ -686,7 +783,7 @@ function rowToFeature(row) {
   };
 }
 
-function attachInfoToFeatures(features) {
+function attachInfoToFeatures(features, options = {}) {
   const keys = features
     .map((f) => String(f.id || ''))
     .filter((id) => /^(way|relation)\/\d+$/.test(id));
@@ -726,6 +823,11 @@ function attachInfoToFeatures(features) {
     feature.properties.osm_key = key;
     feature.properties.archiInfo = infoByKey.get(key) || null;
     feature.properties.hasExtraInfo = infoByKey.has(key);
+  }
+
+  const actorKey = String(options.actorKey || '').trim().toLowerCase();
+  if (actorKey) {
+    mergePersonalEditsIntoFeatureInfo(features, actorKey);
   }
 
   return features;
@@ -793,7 +895,7 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
 `;
 
-app.post('/api/buildings/filter-data', (req, res) => {
+app.post('/api/buildings/filter-data', filterDataRateLimiter, (req, res) => {
   const rawKeys = Array.isArray(req.body?.keys) ? req.body.keys : [];
   if (!Array.isArray(rawKeys)) {
     return res.status(400).json({ error: 'Ожидается массив keys' });
@@ -835,10 +937,12 @@ app.post('/api/buildings/filter-data', (req, res) => {
     }
   }
 
-  return res.json({ items: [...outByKey.values()] });
+  const actorKey = getSessionEditActorKey(req);
+  const items = applyPersonalEditsToFilterItems([...outByKey.values()], actorKey);
+  return res.json({ items });
 });
 
-app.get('/api/buildings/filter-data-bbox', (req, res) => {
+app.get('/api/buildings/filter-data-bbox', filterDataBboxRateLimiter, (req, res) => {
   const minLon = Number(req.query.minLon);
   const minLat = Number(req.query.minLat);
   const maxLon = Number(req.query.maxLon);
@@ -888,7 +992,8 @@ app.get('/api/buildings/filter-data-bbox', (req, res) => {
       LIMIT ?
     `).all(minLon, maxLon, minLat, maxLat, limit);
 
-  const items = rows.map(mapFilterDataRow);
+  const actorKey = getSessionEditActorKey(req);
+  const items = applyPersonalEditsToFilterItems(rows.map(mapFilterDataRow), actorKey);
   res.setHeader('Cache-Control', 'public, max-age=60');
   return res.json({ items, truncated: rows.length >= limit });
 });
@@ -897,6 +1002,28 @@ function requireAuth(req, res, next) {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
+  const email = String(req.session.user.email || '').trim().toLowerCase();
+  if (!email) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+  const row = db.prepare('SELECT email, can_edit, is_admin, is_master_admin, first_name, last_name FROM auth.users WHERE email = ?').get(email);
+  if (!row) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+  const isMasterAdmin = Number(row.is_master_admin || 0) > 0;
+  const isAdmin = isMasterAdmin || Number(row.is_admin || 0) > 0;
+  const canEdit = Number(row.can_edit || 0) > 0;
+  req.session.user = {
+    ...req.session.user,
+    username: String(row.email || req.session.user.username || ''),
+    email: String(row.email || req.session.user.email || ''),
+    isAdmin,
+    isMasterAdmin,
+    canEdit,
+    canEditBuildings: isAdmin ? true : (USER_EDIT_REQUIRES_PERMISSION ? canEdit : true),
+    firstName: row.first_name == null ? null : String(row.first_name),
+    lastName: row.last_name == null ? null : String(row.last_name)
+  };
   next();
 }
 
@@ -908,16 +1035,7 @@ function requireAdmin(req, res, next) {
   if (!req?.session?.user) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
-  if (Boolean(req.session.user.isMasterAdmin)) return next();
   if (!isAdminRequest(req)) {
-    return res.status(403).json({ error: 'Требуются права администратора' });
-  }
-  const email = String(req.session.user.email || '').trim().toLowerCase();
-  if (!email) {
-    return res.status(403).json({ error: 'Требуются права администратора' });
-  }
-  const row = db.prepare('SELECT is_admin FROM auth.users WHERE email = ?').get(email);
-  if (!row || Number(row.is_admin || 0) <= 0) {
     return res.status(403).json({ error: 'Требуются права администратора' });
   }
   return next();
@@ -1009,6 +1127,40 @@ function getOsmBaselineFromTags(tags) {
   };
 }
 
+function applyPersonalEditsToFilterItems(items, actorKey) {
+  const actor = String(actorKey || '').trim().toLowerCase();
+  if (!actor || !Array.isArray(items) || items.length === 0) return items;
+  const keys = items.map((item) => String(item?.osmKey || '')).filter((key) => /^(way|relation)\/\d+$/.test(key));
+  if (keys.length === 0) return items;
+  const personalByKey = getUserPersonalEditsByKeys(actor, keys, ['pending', 'rejected']);
+  if (personalByKey.size === 0) return items;
+
+  for (const item of items) {
+    const key = String(item?.osmKey || '');
+    const row = personalByKey.get(key);
+    if (!row) continue;
+    item.archiInfo = {
+      osm_type: row.osm_type,
+      osm_id: row.osm_id,
+      name: row.name ?? null,
+      style: row.style ?? null,
+      levels: row.levels ?? null,
+      year_built: row.year_built ?? null,
+      architect: row.architect ?? null,
+      address: row.address ?? null,
+      description: null,
+      archimap_description: row.archimap_description ?? null,
+      updated_by: row.created_by ?? null,
+      updated_at: row.updated_at ?? null,
+      review_status: normalizeUserEditStatus(row.status),
+      admin_comment: row.admin_comment ?? null,
+      user_edit_id: Number(row.id || 0)
+    };
+    item.hasExtraInfo = true;
+  }
+  return items;
+}
+
 function normalizeInfoForDiff(value) {
   if (value == null) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -1016,30 +1168,165 @@ function normalizeInfoForDiff(value) {
   return text ? text : null;
 }
 
-function buildChangesFromRows(localRow, tags) {
-  const baseline = getOsmBaselineFromTags(tags || {});
-  const fields = [
-    { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
-    { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
-    { key: 'levels', label: 'Этажей', osmTag: 'building:levels | levels' },
-    { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
-    { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
-    { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
-    { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
-  ];
+const ARCHI_EDIT_FIELDS = Object.freeze([
+  { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
+  { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
+  { key: 'levels', label: 'Этажей', osmTag: 'building:levels | levels' },
+  { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
+  { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
+  { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
+  { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
+]);
+
+const ARCHI_FIELD_SET = new Set(ARCHI_EDIT_FIELDS.map((f) => f.key));
+
+const USER_EDIT_STATUS_VALUES = new Set(['pending', 'accepted', 'rejected', 'partially_accepted', 'superseded']);
+
+function normalizeUserEditStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (USER_EDIT_STATUS_VALUES.has(normalized)) return normalized;
+  return 'pending';
+}
+
+function sanitizeFieldText(value, maxLen = 500) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  return text.slice(0, maxLen);
+}
+
+function sanitizeYearBuilt(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1000 || parsed > 2100) return null;
+  return parsed;
+}
+
+function sanitizeLevels(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 300) return null;
+  return parsed;
+}
+
+function sanitizeArchiPayload(body) {
+  const yearRaw = body?.yearBuilt ?? body?.year_built;
+  const levelsRaw = body?.levels;
+  const yearBuilt = sanitizeYearBuilt(yearRaw);
+  const levels = sanitizeLevels(levelsRaw);
+  if ((yearRaw !== null && yearRaw !== undefined && String(yearRaw).trim() !== '') && yearBuilt == null) {
+    return { error: 'Год постройки должен быть целым числом от 1000 до 2100' };
+  }
+  if ((levelsRaw !== null && levelsRaw !== undefined && String(levelsRaw).trim() !== '') && levels == null) {
+    return { error: 'Этажность должна быть целым числом от 0 до 300' };
+  }
+  return {
+    value: {
+      name: sanitizeFieldText(body?.name, 250),
+      style: sanitizeFieldText(body?.style, 200),
+      levels,
+      year_built: yearBuilt,
+      architect: sanitizeFieldText(body?.architect, 200),
+      address: sanitizeFieldText(body?.address, 300),
+      archimap_description: sanitizeFieldText(body?.archimapDescription ?? body?.archimap_description ?? body?.description, 1000)
+    }
+  };
+}
+
+function rowToArchiInfo(row) {
+  if (!row) return null;
+  return {
+    name: row.name ?? null,
+    style: row.style ?? null,
+    levels: row.levels ?? null,
+    year_built: row.year_built ?? null,
+    architect: row.architect ?? null,
+    address: row.address ?? null,
+    archimap_description: row.archimap_description ?? row.description ?? null
+  };
+}
+
+function getMergedInfoRow(osmType, osmId) {
+  return db.prepare(`
+    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+    FROM local.architectural_info
+    WHERE osm_type = ? AND osm_id = ?
+    LIMIT 1
+  `).get(osmType, osmId);
+}
+
+function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
+  const actor = String(createdBy || '').trim().toLowerCase();
+  if (!actor) return null;
+  const allowed = Array.isArray(statuses) && statuses.length > 0
+    ? statuses.map(normalizeUserEditStatus)
+    : null;
+  if (allowed && allowed.length > 0) {
+    const placeholders = allowed.map(() => '?').join(', ');
+    return db.prepare(`
+      SELECT *
+      FROM user_edits.building_user_edits
+      WHERE osm_type = ? AND osm_id = ? AND lower(trim(created_by)) = ? AND status IN (${placeholders})
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(osmType, osmId, actor, ...allowed);
+  }
+  return db.prepare(`
+    SELECT *
+    FROM user_edits.building_user_edits
+    WHERE osm_type = ? AND osm_id = ? AND lower(trim(created_by)) = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(osmType, osmId, actor);
+}
+
+function supersedePendingUserEdits(osmType, osmId, createdBy, keepId = null) {
+  const actor = String(createdBy || '').trim().toLowerCase();
+  if (!actor) return;
+  if (keepId && Number.isInteger(Number(keepId)) && Number(keepId) > 0) {
+    db.prepare(`
+      UPDATE user_edits.building_user_edits
+      SET
+        status = 'superseded',
+        updated_at = datetime('now')
+      WHERE osm_type = ? AND osm_id = ? AND lower(trim(created_by)) = ? AND status = 'pending' AND id != ?
+    `).run(osmType, osmId, actor, Number(keepId));
+    return;
+  }
+  db.prepare(`
+    UPDATE user_edits.building_user_edits
+    SET
+      status = 'superseded',
+      updated_at = datetime('now')
+    WHERE osm_type = ? AND osm_id = ? AND lower(trim(created_by)) = ? AND status = 'pending'
+  `).run(osmType, osmId, actor);
+}
+
+function buildChangesFromRows(editRow, tags, mergedRow = null) {
+  const osmBaseline = getOsmBaselineFromTags(tags || {});
+  const mergedInfo = rowToArchiInfo(mergedRow);
+  const baseline = {
+    name: mergedInfo?.name ?? osmBaseline.name,
+    style: mergedInfo?.style ?? osmBaseline.style,
+    levels: mergedInfo?.levels ?? osmBaseline.levels,
+    year_built: mergedInfo?.year_built ?? osmBaseline.year_built,
+    architect: mergedInfo?.architect ?? osmBaseline.architect,
+    address: mergedInfo?.address ?? osmBaseline.address,
+    archimap_description: mergedInfo?.archimap_description ?? null
+  };
 
   const changes = [];
-  for (const field of fields) {
-    const osmValue = normalizeInfoForDiff(baseline[field.key]);
-    const localValue = normalizeInfoForDiff(localRow[field.key]);
+  for (const field of ARCHI_EDIT_FIELDS) {
+    const baselineValue = normalizeInfoForDiff(baseline[field.key]);
+    const localValue = normalizeInfoForDiff(editRow[field.key]);
     if (localValue == null) continue;
-    if (osmValue === localValue) continue;
+    if (baselineValue === localValue) continue;
     changes.push({
       field: field.key,
       label: field.label,
       osmTag: field.osmTag,
       isLocalTag: !field.osmTag,
-      osmValue,
+      osmValue: baselineValue,
       localValue
     });
   }
@@ -1061,12 +1348,42 @@ function getSessionEditActorKey(req) {
   return String(req?.session?.user?.username || '').trim().toLowerCase();
 }
 
-function getLocalEditsList({ updatedBy = null, limit = 2000 }) {
+function mapUserEditRow(row, tags, mergedInfoRow) {
+  const changes = buildChangesFromRows(row, tags, mergedInfoRow);
+  return {
+    editId: Number(row.id || 0),
+    osmType: row.osm_type,
+    osmId: row.osm_id,
+    orphaned: !tags || Object.keys(tags || {}).length === 0,
+    updatedBy: row.created_by || null,
+    updatedAt: row.updated_at || row.created_at || null,
+    createdAt: row.created_at || null,
+    status: normalizeUserEditStatus(row.status),
+    adminComment: row.admin_comment || null,
+    reviewedBy: row.reviewed_by || null,
+    reviewedAt: row.reviewed_at || null,
+    mergedBy: row.merged_by || null,
+    mergedAt: row.merged_at || null,
+    changes
+  };
+}
+
+function getUserEditsList({ createdBy = null, status = null, limit = 2000 }) {
   const cappedLimit = Math.max(1, Math.min(5000, Number(limit) || 2000));
-  const whereSql = updatedBy ? 'WHERE lower(trim(ai.updated_by)) = ?' : '';
-  const params = updatedBy ? [String(updatedBy).trim().toLowerCase(), cappedLimit] : [cappedLimit];
+  const where = [];
+  const params = [];
+  if (createdBy) {
+    where.push('lower(trim(ai.created_by)) = ?');
+    params.push(String(createdBy).trim().toLowerCase());
+  }
+  if (status) {
+    where.push('ai.status = ?');
+    params.push(normalizeUserEditStatus(status));
+  }
+  const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
   const rows = db.prepare(`
     SELECT
+      ai.id,
       ai.osm_type,
       ai.osm_id,
       ai.name,
@@ -1076,37 +1393,56 @@ function getLocalEditsList({ updatedBy = null, limit = 2000 }) {
       ai.architect,
       ai.address,
       ai.archimap_description,
-      ai.updated_by,
+      ai.created_by,
+      ai.status,
+      ai.admin_comment,
+      ai.reviewed_by,
+      ai.reviewed_at,
+      ai.merged_by,
+      ai.merged_at,
+      ai.created_at,
       ai.updated_at,
-      bc.tags_json
-    FROM local.architectural_info ai
+      bc.tags_json,
+      li.name AS merged_name,
+      li.style AS merged_style,
+      li.levels AS merged_levels,
+      li.year_built AS merged_year_built,
+      li.architect AS merged_architect,
+      li.address AS merged_address,
+      li.archimap_description AS merged_archimap_description
+    FROM user_edits.building_user_edits ai
     LEFT JOIN building_contours bc
       ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
+    LEFT JOIN local.architectural_info li
+      ON li.osm_type = ai.osm_type AND li.osm_id = ai.osm_id
     ${whereSql}
-    ORDER BY ai.updated_at DESC
+    ORDER BY ai.updated_at DESC, ai.id DESC
     LIMIT ?
-  `).all(...params);
+  `).all(...params, cappedLimit);
 
   const out = [];
   for (const row of rows) {
     const tags = parseTagsJsonSafe(row.tags_json);
-    const changes = buildChangesFromRows(row, tags);
-    if (changes.length === 0) continue;
-    out.push({
-      osmType: row.osm_type,
-      osmId: row.osm_id,
-      orphaned: !row.tags_json,
-      updatedBy: row.updated_by || null,
-      updatedAt: row.updated_at || null,
-      changes
-    });
+    const mergedInfoRow = {
+      name: row.merged_name,
+      style: row.merged_style,
+      levels: row.merged_levels,
+      year_built: row.merged_year_built,
+      architect: row.merged_architect,
+      address: row.merged_address,
+      archimap_description: row.merged_archimap_description
+    };
+    out.push(mapUserEditRow(row, tags, mergedInfoRow));
   }
   return out;
 }
 
-function getLocalEditDetails(osmType, osmId) {
+function getUserEditDetailsById(editId) {
+  const id = Number(editId);
+  if (!Number.isInteger(id) || id <= 0) return null;
   const row = db.prepare(`
     SELECT
+      ai.id,
       ai.osm_type,
       ai.osm_id,
       ai.name,
@@ -1116,25 +1452,57 @@ function getLocalEditDetails(osmType, osmId) {
       ai.architect,
       ai.address,
       ai.archimap_description,
-      ai.updated_by,
+      ai.created_by,
+      ai.status,
+      ai.admin_comment,
+      ai.reviewed_by,
+      ai.reviewed_at,
+      ai.merged_by,
+      ai.merged_at,
+      ai.created_at,
       ai.updated_at,
-      bc.tags_json
-    FROM local.architectural_info ai
+      bc.tags_json,
+      li.name AS merged_name,
+      li.style AS merged_style,
+      li.levels AS merged_levels,
+      li.year_built AS merged_year_built,
+      li.architect AS merged_architect,
+      li.address AS merged_address,
+      li.archimap_description AS merged_archimap_description
+    FROM user_edits.building_user_edits ai
     LEFT JOIN building_contours bc
       ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
-    WHERE ai.osm_type = ? AND ai.osm_id = ?
+    LEFT JOIN local.architectural_info li
+      ON li.osm_type = ai.osm_type AND li.osm_id = ai.osm_id
+    WHERE ai.id = ?
     LIMIT 1
-  `).get(osmType, osmId);
+  `).get(id);
   if (!row) return null;
   const tags = parseTagsJsonSafe(row.tags_json);
-  const changes = buildChangesFromRows(row, tags);
-  if (changes.length === 0) return null;
+  const mergedInfoRow = {
+    name: row.merged_name,
+    style: row.merged_style,
+    levels: row.merged_levels,
+    year_built: row.merged_year_built,
+    architect: row.merged_architect,
+    address: row.merged_address,
+    archimap_description: row.merged_archimap_description
+  };
+  const mapped = mapUserEditRow(row, tags, mergedInfoRow);
   return {
+    editId: Number(row.id || 0),
     osmType: row.osm_type,
     osmId: row.osm_id,
     orphaned: !row.tags_json,
-    updatedBy: row.updated_by || null,
+    updatedBy: row.created_by || null,
     updatedAt: row.updated_at || null,
+    createdAt: row.created_at || null,
+    status: normalizeUserEditStatus(row.status),
+    adminComment: row.admin_comment || null,
+    reviewedBy: row.reviewed_by || null,
+    reviewedAt: row.reviewed_at || null,
+    mergedBy: row.merged_by || null,
+    mergedAt: row.merged_at || null,
     local: {
       name: row.name ?? null,
       style: row.style ?? null,
@@ -1144,8 +1512,87 @@ function getLocalEditDetails(osmType, osmId) {
       address: row.address ?? null,
       archimapDescription: row.archimap_description ?? null
     },
-    changes
+    changes: mapped.changes
   };
+}
+
+function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
+  const actor = String(actorKey || '').trim().toLowerCase();
+  if (!actor || !Array.isArray(keys) || keys.length === 0) return new Map();
+  const normalizedStatuses = (Array.isArray(statuses) ? statuses : [])
+    .map(normalizeUserEditStatus)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+  if (normalizedStatuses.length === 0) return new Map();
+
+  const out = new Map();
+  const CHUNK_SIZE = 300;
+  for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
+    const chunk = keys.slice(i, i + CHUNK_SIZE);
+    const clauses = [];
+    const params = [actor, ...normalizedStatuses];
+    for (const key of chunk) {
+      const parsed = parseOsmKey(key);
+      if (!parsed) continue;
+      clauses.push('(osm_type = ? AND osm_id = ?)');
+      params.push(parsed.osmType, parsed.osmId);
+    }
+    if (clauses.length === 0) continue;
+    const statusPlaceholders = normalizedStatuses.map(() => '?').join(', ');
+    const rows = db.prepare(`
+      SELECT ue.*
+      FROM user_edits.building_user_edits ue
+      JOIN (
+        SELECT osm_type, osm_id, MAX(id) AS max_id
+        FROM user_edits.building_user_edits
+        WHERE lower(trim(created_by)) = ?
+          AND status IN (${statusPlaceholders})
+          AND (${clauses.join(' OR ')})
+        GROUP BY osm_type, osm_id
+      ) latest
+        ON latest.max_id = ue.id
+    `).all(...params);
+
+    for (const row of rows) {
+      out.set(`${row.osm_type}/${row.osm_id}`, row);
+    }
+  }
+  return out;
+}
+
+function mergePersonalEditsIntoFeatureInfo(features, actorKey) {
+  const keys = features
+    .map((f) => String(f?.id || f?.properties?.osm_key || ''))
+    .filter((id) => /^(way|relation)\/\d+$/.test(id));
+  if (keys.length === 0) return features;
+
+  const personalByKey = getUserPersonalEditsByKeys(actorKey, keys, ['pending', 'rejected']);
+  if (personalByKey.size === 0) return features;
+
+  for (const feature of features) {
+    const key = String(feature?.id || feature?.properties?.osm_key || '');
+    const row = personalByKey.get(key);
+    if (!row) continue;
+    feature.properties = feature.properties || {};
+    feature.properties.archiInfo = {
+      osm_type: row.osm_type,
+      osm_id: row.osm_id,
+      name: row.name ?? null,
+      style: row.style ?? null,
+      levels: row.levels ?? null,
+      year_built: row.year_built ?? null,
+      architect: row.architect ?? null,
+      address: row.address ?? null,
+      archimap_description: row.archimap_description ?? null,
+      updated_by: row.created_by ?? null,
+      updated_at: row.updated_at ?? null,
+      review_status: normalizeUserEditStatus(row.status),
+      admin_comment: row.admin_comment ?? null,
+      user_edit_id: Number(row.id || 0)
+    };
+    feature.properties.hasExtraInfo = true;
+  }
+
+  return features;
 }
 
 function normalizeSearchTokens(queryText) {
@@ -1509,8 +1956,6 @@ registerAuthRoutes({
   app,
   db,
   createSimpleRateLimiter,
-  adminUsername: ADMIN_USERNAME,
-  adminPassword: ADMIN_PASSWORD,
   sessionSecret: SESSION_SECRET,
   userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION,
   registrationEnabled: REGISTRATION_ENABLED,
@@ -1539,17 +1984,31 @@ app.get('/api/building-info/:osmType/:osmId', (req, res) => {
     return res.status(400).json({ error: 'Некорректный идентификатор здания' });
   }
 
-  const row = db.prepare(`
-    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
-    FROM local.architectural_info
-    WHERE osm_type = ? AND osm_id = ?
-  `).get(osmType, osmId);
-
+  const merged = getMergedInfoRow(osmType, osmId);
+  const actorKey = getSessionEditActorKey(req);
+  const personal = actorKey ? getLatestUserEditRow(osmType, osmId, actorKey, ['pending', 'rejected']) : null;
+  const row = personal || merged;
   if (!row) {
     return res.status(404).json({ error: 'Информация не найдена' });
   }
 
-  return res.json(row);
+  return res.json({
+    osm_type: osmType,
+    osm_id: osmId,
+    name: row.name ?? null,
+    style: row.style ?? null,
+    levels: row.levels ?? null,
+    year_built: row.year_built ?? null,
+    architect: row.architect ?? null,
+    address: row.address ?? null,
+    description: row.description ?? null,
+    archimap_description: row.archimap_description ?? row.description ?? null,
+    updated_by: row.created_by ?? row.updated_by ?? null,
+    updated_at: row.updated_at ?? null,
+    review_status: personal ? normalizeUserEditStatus(personal.status) : 'accepted',
+    admin_comment: personal?.admin_comment ?? null,
+    user_edit_id: personal ? Number(personal.id || 0) : null
+  });
 });
 
 app.post('/api/building-info', requireCsrfSession, requireAuth, requireBuildingEditPermission, (req, res) => {
@@ -1561,63 +2020,70 @@ app.post('/api/building-info', requireCsrfSession, requireAuth, requireBuildingE
     return res.status(400).json({ error: 'Некорректный идентификатор здания' });
   }
 
-  const cleanText = (value, maxLen = 500) => {
-    if (value == null) return null;
-    const text = String(value).trim();
-    if (!text) return null;
-    return text.slice(0, maxLen);
-  };
-
-  const yearRaw = body.yearBuilt;
-  let yearBuilt = null;
-  if (yearRaw !== null && yearRaw !== undefined && String(yearRaw).trim() !== '') {
-    const parsed = Number(yearRaw);
-    if (!Number.isInteger(parsed) || parsed < 1000 || parsed > 2100) {
-      return res.status(400).json({ error: 'Год постройки должен быть целым числом от 1000 до 2100' });
-    }
-    yearBuilt = parsed;
+  const validated = sanitizeArchiPayload(body);
+  if (validated.error) {
+    return res.status(400).json({ error: validated.error });
   }
-
-  const levelsRaw = body.levels;
-  let levels = null;
-  if (levelsRaw !== null && levelsRaw !== undefined && String(levelsRaw).trim() !== '') {
-    const parsed = Number(levelsRaw);
-    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 300) {
-      return res.status(400).json({ error: 'Этажность должна быть целым числом от 0 до 300' });
-    }
-    levels = parsed;
+  const actorKey = getSessionEditActorKey(req);
+  if (!actorKey) {
+    return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
   }
+  const payload = validated.value;
 
-  const upsert = db.prepare(`
-    INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at)
-    VALUES (@osm_type, @osm_id, @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @updated_by, datetime('now'))
-    ON CONFLICT(osm_type, osm_id) DO UPDATE SET
-      name = excluded.name,
-      style = excluded.style,
-      levels = excluded.levels,
-      year_built = excluded.year_built,
-      architect = excluded.architect,
-      address = excluded.address,
-      archimap_description = excluded.archimap_description,
-      updated_by = excluded.updated_by,
-      updated_at = datetime('now');
-  `);
+  const tx = db.transaction(() => {
+    const latest = getLatestUserEditRow(osmType, osmId, actorKey, ['pending']);
+    if (latest && Number.isInteger(Number(latest.id)) && Number(latest.id) > 0) {
+      db.prepare(`
+        UPDATE user_edits.building_user_edits
+        SET
+          name = @name,
+          style = @style,
+          levels = @levels,
+          year_built = @year_built,
+          architect = @architect,
+          address = @address,
+          archimap_description = @archimap_description,
+          status = 'pending',
+          admin_comment = NULL,
+          reviewed_by = NULL,
+          reviewed_at = NULL,
+          merged_by = NULL,
+          merged_at = NULL,
+          merged_fields_json = NULL,
+          updated_at = datetime('now')
+        WHERE id = @id
+      `).run({
+        id: latest.id,
+        ...payload
+      });
+      supersedePendingUserEdits(osmType, osmId, actorKey, Number(latest.id));
+      return Number(latest.id || 0);
+    }
 
-  upsert.run({
-    osm_type: osmType,
-    osm_id: osmId,
-    name: cleanText(body.name, 250),
-    style: cleanText(body.style, 200),
-    levels,
-    year_built: yearBuilt,
-    architect: cleanText(body.architect, 200),
-    address: cleanText(body.address, 300),
-    archimap_description: cleanText(body.archimapDescription ?? body.description, 1000),
-    updated_by: String(req.session?.user?.username || '')
+    supersedePendingUserEdits(osmType, osmId, actorKey, null);
+    const inserted = db.prepare(`
+      INSERT INTO user_edits.building_user_edits (
+        osm_type, osm_id, created_by,
+        name, style, levels, year_built, architect, address, archimap_description,
+        status, created_at, updated_at
+      )
+      VALUES (
+        @osm_type, @osm_id, @created_by,
+        @name, @style, @levels, @year_built, @architect, @address, @archimap_description,
+        'pending', datetime('now'), datetime('now')
+      )
+    `).run({
+      osm_type: osmType,
+      osm_id: osmId,
+      created_by: actorKey,
+      ...payload
+    });
+    return Number(inserted?.lastInsertRowid || 0);
   });
-  enqueueSearchIndexRefresh(osmType, osmId);
 
-  return res.json({ ok: true });
+  const editId = tx();
+
+  return res.json({ ok: true, editId, status: 'pending' });
 });
 
 app.get('/api/building/:osmType/:osmId', (req, res) => {
@@ -1638,7 +2104,7 @@ app.get('/api/building/:osmType/:osmId', (req, res) => {
   }
 
   const feature = rowToFeature(row);
-  attachInfoToFeatures([feature]);
+  attachInfoToFeatures([feature], { actorKey: getSessionEditActorKey(req) });
   return res.json(feature);
 });
 
@@ -1668,20 +2134,21 @@ app.get('/api/search-buildings', searchRateLimiter, (req, res) => {
 });
 
 app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
-  const out = getLocalEditsList({ limit: 2000 });
+  const statusRaw = String(req.query?.status || '').trim().toLowerCase();
+  const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
+  const out = getUserEditsList({ status, limit: 5000 });
   return res.json({
     total: out.length,
     items: out
   });
 });
 
-app.get('/api/admin/building-edits/:osmType/:osmId', requireAuth, requireAdmin, (req, res) => {
-  const osmType = String(req.params.osmType || '').trim();
-  const osmId = Number(req.params.osmId);
-  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-    return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+app.get('/api/admin/building-edits/:editId', requireAuth, requireAdmin, (req, res) => {
+  const editId = Number(req.params.editId);
+  if (!Number.isInteger(editId) || editId <= 0) {
+    return res.status(400).json({ error: 'Некорректный идентификатор правки' });
   }
-  const item = getLocalEditDetails(osmType, osmId);
+  const item = getUserEditDetailsById(editId);
   if (!item) {
     return res.status(404).json({ error: 'Правка не найдена' });
   }
@@ -1700,19 +2167,20 @@ app.get('/api/admin/users/:email', requireAuth, requireAdmin, (req, res) => {
       u.last_name,
       u.can_edit,
       u.is_admin,
+      u.is_master_admin,
       u.created_at,
       COALESCE(e.edit_count, 0) AS edits_count,
       e.last_edit_at
     FROM auth.users u
     LEFT JOIN (
       SELECT
-        lower(trim(updated_by)) AS updated_by_key,
+        lower(trim(created_by)) AS created_by_key,
         COUNT(*) AS edit_count,
         MAX(updated_at) AS last_edit_at
-      FROM local.architectural_info
-      GROUP BY lower(trim(updated_by))
+      FROM user_edits.building_user_edits
+      GROUP BY lower(trim(created_by))
     ) e
-      ON e.updated_by_key = lower(u.email)
+      ON e.created_by_key = lower(u.email)
     WHERE lower(u.email) = ?
     LIMIT 1
   `).get(email);
@@ -1725,7 +2193,8 @@ app.get('/api/admin/users/:email', requireAuth, requireAdmin, (req, res) => {
       firstName: row.first_name == null ? null : String(row.first_name),
       lastName: row.last_name == null ? null : String(row.last_name),
       canEdit: Number(row.can_edit || 0) > 0,
-      isAdmin: Number(row.is_admin || 0) > 0,
+      isAdmin: Number(row.is_master_admin || 0) > 0 || Number(row.is_admin || 0) > 0,
+      isMasterAdmin: Number(row.is_master_admin || 0) > 0,
       createdAt: String(row.created_at || ''),
       editsCount: Number(row.edits_count || 0),
       lastEditAt: row.last_edit_at ? String(row.last_edit_at) : null
@@ -1738,7 +2207,7 @@ app.get('/api/admin/users/:email/edits', requireAuth, requireAdmin, (req, res) =
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Некорректный email' });
   }
-  const items = getLocalEditsList({ updatedBy: email, limit: 2000 });
+  const items = getUserEditsList({ createdBy: email, limit: 5000 });
   return res.json({ total: items.length, items });
 });
 
@@ -1747,21 +2216,22 @@ app.get('/api/account/edits', requireAuth, (req, res) => {
   if (!actorKey) {
     return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
   }
-  const items = getLocalEditsList({ updatedBy: actorKey, limit: 2000 });
+  const statusRaw = String(req.query?.status || '').trim().toLowerCase();
+  const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
+  const items = getUserEditsList({ createdBy: actorKey, status, limit: 5000 });
   return res.json({ total: items.length, items });
 });
 
-app.get('/api/account/edits/:osmType/:osmId', requireAuth, (req, res) => {
+app.get('/api/account/edits/:editId', requireAuth, (req, res) => {
   const actorKey = getSessionEditActorKey(req);
   if (!actorKey) {
     return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
   }
-  const osmType = String(req.params.osmType || '').trim();
-  const osmId = Number(req.params.osmId);
-  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-    return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+  const editId = Number(req.params.editId);
+  if (!Number.isInteger(editId) || editId <= 0) {
+    return res.status(400).json({ error: 'Некорректный идентификатор правки' });
   }
-  const item = getLocalEditDetails(osmType, osmId);
+  const item = getUserEditDetailsById(editId);
   if (!item) {
     return res.status(404).json({ error: 'Правка не найдена' });
   }
@@ -1771,101 +2241,180 @@ app.get('/api/account/edits/:osmType/:osmId', requireAuth, (req, res) => {
   return res.json({ item });
 });
 
-app.post('/api/admin/building-edits/delete', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
-  const osmType = String(req.body?.osmType || '').trim();
-  const osmId = Number(req.body?.osmId);
-  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-    return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+app.post('/api/admin/building-edits/:editId/reject', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
+  const editId = Number(req.params.editId);
+  if (!Number.isInteger(editId) || editId <= 0) {
+    return res.status(400).json({ error: 'Некорректный идентификатор правки' });
   }
-
-  const deleted = db.prepare(`
-    DELETE FROM local.architectural_info
-    WHERE osm_type = ? AND osm_id = ?
-  `).run(osmType, osmId);
-
-  enqueueSearchIndexRefresh(osmType, osmId);
-  return res.json({
-    ok: true,
-    deleted: Number(deleted?.changes || 0)
-  });
+  const row = getUserEditDetailsById(editId);
+  if (!row) return res.status(404).json({ error: 'Правка не найдена' });
+  if (normalizeUserEditStatus(row.status) !== 'pending') {
+    return res.status(409).json({ error: 'Правка уже обработана' });
+  }
+  const comment = sanitizeFieldText(req.body?.comment, 1200);
+  const reviewer = getSessionEditActorKey(req) || 'admin';
+  const result = db.prepare(`
+    UPDATE user_edits.building_user_edits
+    SET
+      status = 'rejected',
+      admin_comment = ?,
+      reviewed_by = ?,
+      reviewed_at = datetime('now'),
+      merged_by = NULL,
+      merged_at = NULL,
+      merged_fields_json = NULL,
+      updated_at = datetime('now')
+    WHERE id = ? AND status = 'pending'
+  `).run(comment, reviewer, editId);
+  if (Number(result?.changes || 0) === 0) {
+    return res.status(409).json({ error: 'Правка уже обработана другим администратором' });
+  }
+  return res.json({ ok: true, editId, status: 'rejected' });
 });
 
-app.post('/api/admin/building-edits/reassign', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
-  const fromOsmType = String(req.body?.fromOsmType || '').trim();
-  const fromOsmId = Number(req.body?.fromOsmId);
-  const toOsmType = String(req.body?.toOsmType || '').trim();
-  const toOsmId = Number(req.body?.toOsmId);
+app.post('/api/admin/building-edits/:editId/merge', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
+  const editId = Number(req.params.editId);
+  if (!Number.isInteger(editId) || editId <= 0) {
+    return res.status(400).json({ error: 'Некорректный идентификатор правки' });
+  }
+  const item = getUserEditDetailsById(editId);
+  if (!item) {
+    return res.status(404).json({ error: 'Правка не найдена' });
+  }
+  if (normalizeUserEditStatus(item.status) !== 'pending') {
+    return res.status(409).json({ error: 'Правка уже обработана' });
+  }
+  const forceMerge = Boolean(req.body?.force === true);
 
-  if (!['way', 'relation'].includes(fromOsmType) || !Number.isInteger(fromOsmId)) {
-    return res.status(400).json({ error: 'Некорректный исходный идентификатор здания' });
-  }
-  if (!['way', 'relation'].includes(toOsmType) || !Number.isInteger(toOsmId)) {
-    return res.status(400).json({ error: 'Некорректный целевой идентификатор здания' });
-  }
-  if (fromOsmType === toOsmType && fromOsmId === toOsmId) {
-    return res.status(400).json({ error: 'Исходный и целевой идентификаторы совпадают' });
-  }
-
-  const fromRow = db.prepare(`
-    SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by
-    FROM local.architectural_info
-    WHERE osm_type = ? AND osm_id = ?
-  `).get(fromOsmType, fromOsmId);
-  if (!fromRow) {
-    return res.status(404).json({ error: 'Исходная локальная правка не найдена' });
+  const allowedFields = new Set(item.changes.map((change) => String(change.field || '')));
+  if (allowedFields.size === 0) {
+    return res.status(409).json({ error: 'В правке нет отличий от текущих данных' });
   }
 
-  const targetContour = db.prepare(`
-    SELECT 1
-    FROM building_contours
-    WHERE osm_type = ? AND osm_id = ?
+  const requestedFields = Array.isArray(req.body?.fields)
+    ? req.body.fields.map((value) => String(value || '').trim()).filter((key) => ARCHI_FIELD_SET.has(key) && allowedFields.has(key))
+    : [];
+  const fieldsToMerge = requestedFields.length > 0 ? [...new Set(requestedFields)] : [...allowedFields];
+
+  const valuesRaw = req.body?.values && typeof req.body.values === 'object' ? req.body.values : {};
+  const sanitizedValues = {};
+  for (const key of fieldsToMerge) {
+    if (!Object.prototype.hasOwnProperty.call(valuesRaw, key)) continue;
+    if (key === 'year_built') {
+      const parsed = sanitizeYearBuilt(valuesRaw[key]);
+      if (parsed == null && String(valuesRaw[key] ?? '').trim() !== '') {
+        return res.status(400).json({ error: 'Год постройки должен быть целым числом от 1000 до 2100' });
+      }
+      sanitizedValues[key] = parsed;
+      continue;
+    }
+    if (key === 'levels') {
+      const parsed = sanitizeLevels(valuesRaw[key]);
+      if (parsed == null && String(valuesRaw[key] ?? '').trim() !== '') {
+        return res.status(400).json({ error: 'Этажность должна быть целым числом от 0 до 300' });
+      }
+      sanitizedValues[key] = parsed;
+      continue;
+    }
+    sanitizedValues[key] = sanitizeFieldText(valuesRaw[key], key === 'archimap_description' ? 1000 : 300);
+  }
+
+  const currentMerged = getMergedInfoRow(item.osmType, item.osmId) || {};
+  const editCreatedTs = item.createdAt ? Date.parse(String(item.createdAt)) : NaN;
+  const currentMergedTs = currentMerged?.updated_at ? Date.parse(String(currentMerged.updated_at)) : NaN;
+  if (!forceMerge && Number.isFinite(editCreatedTs) && Number.isFinite(currentMergedTs) && currentMergedTs > editCreatedTs) {
+    return res.status(409).json({
+      error: 'Правка устарела: данные здания были изменены после её создания. Обновите правку или выполните merge с force.',
+      code: 'EDIT_OUTDATED',
+      currentUpdatedAt: currentMerged.updated_at || null,
+      editCreatedAt: item.createdAt || null
+    });
+  }
+  const editSource = db.prepare(`
+    SELECT name, style, levels, year_built, architect, address, archimap_description
+    FROM user_edits.building_user_edits
+    WHERE id = ?
     LIMIT 1
-  `).get(toOsmType, toOsmId);
-  if (!targetContour) {
-    return res.status(404).json({ error: 'Целевое здание не найдено в локальной базе контуров' });
+  `).get(editId) || {};
+
+  const mergedCandidate = {
+    name: currentMerged.name ?? null,
+    style: currentMerged.style ?? null,
+    levels: currentMerged.levels ?? null,
+    year_built: currentMerged.year_built ?? null,
+    architect: currentMerged.architect ?? null,
+    address: currentMerged.address ?? null,
+    archimap_description: currentMerged.archimap_description ?? null
+  };
+  for (const field of fieldsToMerge) {
+    mergedCandidate[field] = Object.prototype.hasOwnProperty.call(sanitizedValues, field)
+      ? sanitizedValues[field]
+      : (editSource[field] ?? null);
   }
 
-  const targetLocal = db.prepare(`
-    SELECT 1
-    FROM local.architectural_info
-    WHERE osm_type = ? AND osm_id = ?
-    LIMIT 1
-  `).get(toOsmType, toOsmId);
-  if (targetLocal) {
-    return res.status(409).json({ error: 'Для целевого здания уже есть локальные правки' });
-  }
+  const reviewer = getSessionEditActorKey(req) || 'admin';
+  const adminComment = sanitizeFieldText(req.body?.comment, 1200);
+  const nextStatus = fieldsToMerge.length < allowedFields.size ? 'partially_accepted' : 'accepted';
 
   const tx = db.transaction(() => {
     db.prepare(`
-      INSERT INTO local.architectural_info (osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at)
+      INSERT INTO local.architectural_info (
+        osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+      )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(osm_type, osm_id) DO UPDATE SET
+        name = excluded.name,
+        style = excluded.style,
+        levels = excluded.levels,
+        year_built = excluded.year_built,
+        architect = excluded.architect,
+        address = excluded.address,
+        archimap_description = excluded.archimap_description,
+        updated_by = excluded.updated_by,
+        updated_at = datetime('now')
     `).run(
-      toOsmType,
-      toOsmId,
-      fromRow.name ?? null,
-      fromRow.style ?? null,
-      fromRow.levels ?? null,
-      fromRow.year_built ?? null,
-      fromRow.architect ?? null,
-      fromRow.address ?? null,
-      fromRow.archimap_description ?? null,
-      String(req.session?.user?.username || fromRow.updated_by || '')
+      item.osmType,
+      item.osmId,
+      mergedCandidate.name,
+      mergedCandidate.style,
+      mergedCandidate.levels,
+      mergedCandidate.year_built,
+      mergedCandidate.architect,
+      mergedCandidate.address,
+      mergedCandidate.archimap_description,
+      reviewer
     );
 
     db.prepare(`
-      DELETE FROM local.architectural_info
-      WHERE osm_type = ? AND osm_id = ?
-    `).run(fromOsmType, fromOsmId);
+      UPDATE user_edits.building_user_edits
+      SET
+        status = ?,
+        admin_comment = ?,
+        reviewed_by = ?,
+        reviewed_at = datetime('now'),
+        merged_by = ?,
+        merged_at = datetime('now'),
+        merged_fields_json = ?,
+        updated_at = datetime('now')
+      WHERE id = ? AND status = 'pending'
+    `).run(nextStatus, adminComment, reviewer, reviewer, JSON.stringify(fieldsToMerge), editId);
   });
 
-  tx();
-  enqueueSearchIndexRefresh(fromOsmType, fromOsmId);
-  enqueueSearchIndexRefresh(toOsmType, toOsmId);
-
+  try {
+    tx();
+  } catch (error) {
+    return res.status(409).json({ error: 'Не удалось применить merge: правка была изменена параллельно' });
+  }
+  const updated = db.prepare(`SELECT status FROM user_edits.building_user_edits WHERE id = ?`).get(editId);
+  if (!updated || (normalizeUserEditStatus(updated.status) !== 'accepted' && normalizeUserEditStatus(updated.status) !== 'partially_accepted')) {
+    return res.status(409).json({ error: 'Правка уже обработана другим администратором' });
+  }
+  enqueueSearchIndexRefresh(item.osmType, item.osmId);
   return res.json({
     ok: true,
-    from: `${fromOsmType}/${fromOsmId}`,
-    to: `${toOsmType}/${toOsmId}`
+    editId,
+    status: nextStatus,
+    mergedFields: fieldsToMerge
   });
 });
 
@@ -1960,6 +2509,7 @@ function runPmtilesBuild(reason = 'startup-missing') {
       console.log('[pmtiles] generation finished successfully');
     } else {
       console.error(`[pmtiles] generation failed with code ${code}`);
+      console.error('[pmtiles] Hint: run "docker compose run --rm archimap node scripts/sync-osm-buildings.js --pmtiles-only" to build tiles in Docker.');
     }
   });
 }
@@ -1991,17 +2541,31 @@ function maybeGeneratePmtilesOnStartup() {
 }
 
 function initAutoSync() {
+  const contoursTotal = Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0);
+  const needsBootstrapSync = contoursTotal <= 0;
+
+  if (needsBootstrapSync) {
+    if (!AUTO_SYNC_ENABLED) {
+      console.log('[auto-sync] bootstrap run: building_contours is empty (AUTO_SYNC_ENABLED ignored for first sync)');
+    } else if (!AUTO_SYNC_ON_START) {
+      console.log('[auto-sync] bootstrap run: building_contours is empty (AUTO_SYNC_ON_START ignored for first sync)');
+    }
+    runCitySync('bootstrap-first-run');
+  }
+
   if (!AUTO_SYNC_ENABLED) {
     console.log('[auto-sync] disabled by AUTO_SYNC_ENABLED=false');
-    maybeGeneratePmtilesOnStartup();
+    if (!needsBootstrapSync) {
+      maybeGeneratePmtilesOnStartup();
+    }
     return;
   }
 
-  if (AUTO_SYNC_ON_START) {
+  if (!needsBootstrapSync && AUTO_SYNC_ON_START) {
     if (shouldRunStartupSync()) {
       runCitySync('startup');
     }
-  } else {
+  } else if (!needsBootstrapSync) {
     maybeGeneratePmtilesOnStartup();
   }
 
@@ -2042,7 +2606,7 @@ async function initSessionStore() {
       httpOnly: true,
       sameSite: 'lax',
       secure: NODE_ENV === 'production',
-      maxAge: 1000 * 60 * 60 * 8
+      maxAge: 1000 * 60 * 60 * 24 * 30
     }
   };
 
@@ -2068,6 +2632,9 @@ async function initSessionStore() {
     });
     console.log(`[session] Redis store connected: ${REDIS_URL}`);
   } catch (error) {
+    if (!SESSION_ALLOW_MEMORY_FALLBACK) {
+      throw new Error(`[session] Redis unavailable and SESSION_ALLOW_MEMORY_FALLBACK=false: ${String(error.message || error)}`);
+    }
     console.error(`[session] Redis unavailable, fallback to MemoryStore: ${String(error.message || error)}`);
     try {
       await redisClient?.quit?.();
@@ -2154,3 +2721,5 @@ initSessionStore()
     console.error(`[server] Failed to initialize session store: ${String(error.message || error)}`);
     process.exit(1);
   });
+
+

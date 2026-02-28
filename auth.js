@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS auth.users (
   last_name TEXT,
   can_edit INTEGER NOT NULL DEFAULT 0,
   is_admin INTEGER NOT NULL DEFAULT 0,
+  is_master_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -90,11 +91,18 @@ CREATE TABLE IF NOT EXISTS auth.email_registration_codes (
   expires_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   last_sent_at INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  password_hash TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  verify_token_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS auth.idx_email_registration_codes_expires
 ON email_registration_codes (expires_at);
+
+CREATE INDEX IF NOT EXISTS auth.idx_email_registration_codes_verify_token
+ON email_registration_codes (verify_token_hash);
 
 CREATE TABLE IF NOT EXISTS auth.password_reset_tokens (
   token_hash TEXT PRIMARY KEY,
@@ -111,47 +119,17 @@ CREATE INDEX IF NOT EXISTS auth.idx_password_reset_tokens_expires
 ON password_reset_tokens (expires_at);
 `);
 
-  const userColumns = db.prepare(`PRAGMA auth.table_info(users)`).all();
-  const userColumnNames = new Set(userColumns.map((column) => String(column?.name || '')));
-  if (!userColumnNames.has('first_name')) {
-    db.exec(`ALTER TABLE auth.users ADD COLUMN first_name TEXT;`);
+  const userColumns = db.prepare('PRAGMA auth.table_info(users)').all();
+  const hasMasterAdminColumn = userColumns.some((column) => String(column?.name || '').trim() === 'is_master_admin');
+  if (!hasMasterAdminColumn) {
+    db.exec('ALTER TABLE auth.users ADD COLUMN is_master_admin INTEGER NOT NULL DEFAULT 0;');
   }
-  if (!userColumnNames.has('last_name')) {
-    db.exec(`ALTER TABLE auth.users ADD COLUMN last_name TEXT;`);
-  }
-  if (!userColumnNames.has('can_edit')) {
-    db.exec(`ALTER TABLE auth.users ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 0;`);
-  }
-  if (!userColumnNames.has('is_admin')) {
-    db.exec(`ALTER TABLE auth.users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;`);
-  }
-
-  const registrationColumns = db.prepare(`PRAGMA auth.table_info(email_registration_codes)`).all();
-  const registrationColumnNames = new Set(registrationColumns.map((column) => String(column?.name || '')));
-  if (!registrationColumnNames.has('password_hash')) {
-    db.exec(`ALTER TABLE auth.email_registration_codes ADD COLUMN password_hash TEXT;`);
-  }
-  if (!registrationColumnNames.has('first_name')) {
-    db.exec(`ALTER TABLE auth.email_registration_codes ADD COLUMN first_name TEXT;`);
-  }
-  if (!registrationColumnNames.has('last_name')) {
-    db.exec(`ALTER TABLE auth.email_registration_codes ADD COLUMN last_name TEXT;`);
-  }
-  if (!registrationColumnNames.has('verify_token_hash')) {
-    db.exec(`ALTER TABLE auth.email_registration_codes ADD COLUMN verify_token_hash TEXT;`);
-  }
-  db.exec(`
-CREATE INDEX IF NOT EXISTS auth.idx_email_registration_codes_verify_token
-ON email_registration_codes (verify_token_hash);
-`);
 }
 
 function registerAuthRoutes({
   app,
   db,
   createSimpleRateLimiter,
-  adminUsername,
-  adminPassword,
   sessionSecret,
   userEditRequiresPermission,
   registrationEnabled,
@@ -180,15 +158,37 @@ function registerAuthRoutes({
     return text.slice(0, maxLen);
   }
 
+  async function establishAuthenticatedSession(req, sessionUser) {
+    const nextUser = sessionUser && typeof sessionUser === 'object' ? sessionUser : null;
+    if (!nextUser) {
+      throw new Error('Session user is required');
+    }
+    if (!req?.session || typeof req.session.regenerate !== 'function') {
+      throw new Error('Session is not initialized');
+    }
+
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((error) => {
+        if (error) return reject(error);
+        return resolve();
+      });
+    });
+
+    req.session.user = nextUser;
+    const csrfToken = ensureCsrfToken(req);
+    return { user: req.session.user, csrfToken };
+  }
+
   function buildSessionUserFromRow(row) {
-    const isAdmin = Number(row?.is_admin || 0) > 0;
+    const isMasterAdmin = Number(row?.is_master_admin || 0) > 0;
+    const isAdmin = isMasterAdmin || Number(row?.is_admin || 0) > 0;
     const canEdit = Number(row?.can_edit || 0) > 0;
     const canEditBuildings = isAdmin ? true : (userEditRequiresPermission ? canEdit : true);
     return {
       username: String(row?.email || ''),
       email: String(row?.email || ''),
       isAdmin,
-      isMasterAdmin: false,
+      isMasterAdmin,
       canEdit,
       canEditBuildings,
       firstName: normalizeProfileName(row?.first_name),
@@ -204,21 +204,9 @@ function registerAuthRoutes({
     const sessionUser = req?.session?.user;
     if (!sessionUser) return null;
 
-    if (isMasterAdminSession(req)) {
-      const user = {
-        ...sessionUser,
-        isAdmin: true,
-        isMasterAdmin: true,
-        canEdit: true,
-        canEditBuildings: true
-      };
-      req.session.user = user;
-      return user;
-    }
-
     const email = normalizeEmail(sessionUser.email);
     if (!isValidEmail(email)) return null;
-    const row = db.prepare('SELECT email, first_name, last_name, can_edit, is_admin FROM auth.users WHERE email = ?').get(email);
+    const row = db.prepare('SELECT email, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
     if (!row) return null;
     const user = buildSessionUserFromRow(row);
     req.session.user = user;
@@ -346,54 +334,57 @@ function registerAuthRoutes({
     res.json({ authenticated, user, csrfToken });
   });
 
-  app.post('/api/login', loginRateLimiter, (req, res) => {
+  app.post('/api/login', loginRateLimiter, async (req, res) => {
     const body = req.body || {};
     const username = String(body.username ?? body.email ?? '').trim();
     const password = String(body.password ?? '');
 
-    if (username === adminUsername && password === adminPassword) {
-      req.session.user = {
-        username,
-        isAdmin: true,
-        isMasterAdmin: true,
-        email: null,
-        canEdit: true,
-        canEditBuildings: true
-      };
-      const csrfToken = ensureCsrfToken(req);
-      return res.json({ ok: true, user: req.session.user, csrfToken });
-    }
-
     const email = normalizeEmail(username);
     if (isValidEmail(email)) {
-      const user = db.prepare('SELECT email, password_hash, first_name, last_name, can_edit, is_admin FROM auth.users WHERE email = ?').get(email);
+      const user = db.prepare('SELECT email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
       if (user && verifyPassword(password, user.password_hash)) {
-        req.session.user = buildSessionUserFromRow(user);
-        const csrfToken = ensureCsrfToken(req);
-        return res.json({ ok: true, user: req.session.user, csrfToken });
+        let authSession;
+        try {
+          authSession = await establishAuthenticatedSession(req, buildSessionUserFromRow(user));
+        } catch (error) {
+          console.error('[auth] failed to establish login session:', error);
+          return res.status(500).json({ error: 'Не удалось создать сессию' });
+        }
+        return res.json({ ok: true, user: authSession.user, csrfToken: authSession.csrfToken });
       }
     }
 
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   });
 
-  function completeRegistration(req, row) {
+  function isFirstUserBootstrapAvailable() {
+    const row = db.prepare('SELECT COUNT(*) AS total FROM auth.users').get();
+    return Number(row?.total || 0) === 0;
+  }
+
+  function completeRegistration(req, row, options = {}) {
     const email = normalizeEmail(row?.email);
     const passwordHash = String(row?.password_hash || '');
     const firstName = normalizeProfileName(row?.first_name);
     const lastName = normalizeProfileName(row?.last_name);
+    const makeAdmin = Boolean(options.makeAdmin);
+    const makeMasterAdmin = Boolean(options.makeMasterAdmin);
+    const allowEdit = Boolean(options.allowEdit || makeAdmin || makeMasterAdmin);
+    const deleteRegistrationCode = options.deleteRegistrationCode !== false;
     if (!isValidEmail(email) || !passwordHash) {
       return { ok: false, status: 400, error: 'Данные регистрации повреждены, начните заново' };
     }
 
-    const tx = db.transaction((nextEmail, nextPasswordHash, nextFirstName, nextLastName) => {
-      db.prepare('INSERT INTO auth.users (email, password_hash, first_name, last_name, can_edit, is_admin) VALUES (?, ?, ?, ?, 0, 0)')
-        .run(nextEmail, nextPasswordHash, nextFirstName, nextLastName);
-      db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(nextEmail);
+    const tx = db.transaction((nextEmail, nextPasswordHash, nextFirstName, nextLastName, nextCanEdit, nextIsAdmin, nextIsMasterAdmin) => {
+      db.prepare('INSERT INTO auth.users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(nextEmail, nextPasswordHash, nextFirstName, nextLastName, nextCanEdit ? 1 : 0, nextIsAdmin ? 1 : 0, nextIsMasterAdmin ? 1 : 0);
+      if (deleteRegistrationCode) {
+        db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(nextEmail);
+      }
     });
 
     try {
-      tx(email, passwordHash, firstName, lastName);
+      tx(email, passwordHash, firstName, lastName, allowEdit, makeAdmin, makeMasterAdmin);
     } catch (error) {
       if (String(error?.message || '').includes('UNIQUE constraint failed: auth.users.email')) {
         return { ok: false, status: 409, error: 'Пользователь с таким email уже зарегистрирован' };
@@ -401,26 +392,23 @@ function registerAuthRoutes({
       throw error;
     }
 
-    req.session.user = {
+    const sessionUser = {
       username: email,
       email,
-      isAdmin: false,
-      isMasterAdmin: false,
-      canEdit: false,
-      canEditBuildings: !userEditRequiresPermission,
+      isAdmin: makeAdmin || makeMasterAdmin,
+      isMasterAdmin: makeMasterAdmin,
+      canEdit: allowEdit,
+      canEditBuildings: (makeAdmin || makeMasterAdmin) ? true : (userEditRequiresPermission ? allowEdit : true),
       firstName: firstName || null,
       lastName: lastName || null
     };
-    const csrfToken = ensureCsrfToken(req);
-    return { ok: true, user: req.session.user, csrfToken };
+    return { ok: true, user: sessionUser };
   }
 
   app.post('/api/register/start', registrationCodeRequestRateLimiter, async (req, res) => {
-    if (!registrationEnabled) {
+    const bootstrapFirstAdmin = isFirstUserBootstrapAvailable();
+    if (!registrationEnabled && !bootstrapFirstAdmin) {
       return res.status(403).json({ error: 'Регистрация отключена' });
-    }
-    if (!isEmailDeliveryConfigured()) {
-      return res.status(503).json({ error: 'Отправка писем не настроена на сервере' });
     }
 
     const email = normalizeEmail(req.body?.email);
@@ -432,6 +420,45 @@ function registerAuthRoutes({
     }
     if (password.length < registrationMinPasswordLength) {
       return res.status(400).json({ error: `Пароль должен содержать минимум ${registrationMinPasswordLength} символов` });
+    }
+
+    if (bootstrapFirstAdmin) {
+      const existingUser = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
+      if (existingUser) {
+        return res.status(409).json({ error: 'Пользователь с таким email уже зарегистрирован' });
+      }
+      const done = completeRegistration(req, {
+        email,
+        password_hash: hashPassword(password),
+        first_name: firstName,
+        last_name: lastName
+      }, {
+        makeAdmin: true,
+        makeMasterAdmin: true,
+        allowEdit: true,
+        deleteRegistrationCode: false
+      });
+      if (!done.ok) {
+        return res.status(done.status).json({ error: done.error });
+      }
+      let authSession;
+      try {
+        authSession = await establishAuthenticatedSession(req, done.user);
+      } catch (error) {
+        console.error('[auth] failed to establish bootstrap session:', error);
+        return res.status(500).json({ error: 'Не удалось создать сессию' });
+      }
+      return res.json({
+        ok: true,
+        user: authSession.user,
+        csrfToken: authSession.csrfToken,
+        directSignup: true,
+        bootstrapAdmin: true
+      });
+    }
+
+    if (!isEmailDeliveryConfigured()) {
+      return res.status(503).json({ error: 'Отправка писем не настроена на сервере' });
     }
 
     const baseUrl = resolveAppBaseUrl(req);
@@ -487,7 +514,7 @@ function registerAuthRoutes({
     return res.json({ ok: true, expiresInMinutes: registrationCodeTtlMinutes });
   });
 
-  app.post('/api/register/confirm-code', registrationConfirmRateLimiter, (req, res) => {
+  app.post('/api/register/confirm-code', registrationConfirmRateLimiter, async (req, res) => {
     if (!registrationEnabled) {
       return res.status(403).json({ error: 'Регистрация отключена' });
     }
@@ -535,10 +562,17 @@ function registerAuthRoutes({
     if (!done.ok) {
       return res.status(done.status).json({ error: done.error });
     }
-    return res.json({ ok: true, user: done.user, csrfToken: done.csrfToken });
+    let authSession;
+    try {
+      authSession = await establishAuthenticatedSession(req, done.user);
+    } catch (error) {
+      console.error('[auth] failed to establish registration (code) session:', error);
+      return res.status(500).json({ error: 'Не удалось создать сессию' });
+    }
+    return res.json({ ok: true, user: authSession.user, csrfToken: authSession.csrfToken });
   });
 
-  app.post('/api/register/confirm-link', registrationConfirmRateLimiter, (req, res) => {
+  app.post('/api/register/confirm-link', registrationConfirmRateLimiter, async (req, res) => {
     if (!registrationEnabled) {
       return res.status(403).json({ error: 'Регистрация отключена' });
     }
@@ -567,7 +601,14 @@ function registerAuthRoutes({
     if (!done.ok) {
       return res.status(done.status).json({ error: done.error });
     }
-    return res.json({ ok: true, user: done.user, csrfToken: done.csrfToken });
+    let authSession;
+    try {
+      authSession = await establishAuthenticatedSession(req, done.user);
+    } catch (error) {
+      console.error('[auth] failed to establish registration (link) session:', error);
+      return res.status(500).json({ error: 'Не удалось создать сессию' });
+    }
+    return res.json({ ok: true, user: authSession.user, csrfToken: authSession.csrfToken });
   });
 
   app.post('/api/logout', requireCsrfSession, (req, res) => {
@@ -738,7 +779,7 @@ function registerAuthRoutes({
       firstName: 'u.first_name',
       lastName: 'u.last_name',
       createdAt: 'u.created_at',
-      isAdmin: 'u.is_admin',
+      isAdmin: 'CASE WHEN u.is_master_admin = 1 OR u.is_admin = 1 THEN 1 ELSE 0 END',
       canEdit: 'u.can_edit',
       editsCount: 'edits_count',
       lastEditAt: 'last_edit_at'
@@ -754,8 +795,8 @@ function registerAuthRoutes({
       const pattern = `%${q}%`;
       params.push(pattern, pattern, pattern);
     }
-    if (roleFilter === 'admin') whereClauses.push('u.is_admin = 1');
-    if (roleFilter === 'user') whereClauses.push('u.is_admin = 0');
+    if (roleFilter === 'admin') whereClauses.push('(u.is_admin = 1 OR u.is_master_admin = 1)');
+    if (roleFilter === 'user') whereClauses.push('(u.is_admin = 0 AND u.is_master_admin = 0)');
     if (canEditFilter === 'true') whereClauses.push('u.can_edit = 1');
     if (canEditFilter === 'false') whereClauses.push('u.can_edit = 0');
     if (hasEditsFilter === 'true') whereClauses.push('COALESCE(e.edit_count, 0) > 0');
@@ -769,19 +810,20 @@ function registerAuthRoutes({
         u.last_name,
         u.can_edit,
         u.is_admin,
+        u.is_master_admin,
         u.created_at,
         COALESCE(e.edit_count, 0) AS edits_count,
         e.last_edit_at
       FROM auth.users u
       LEFT JOIN (
         SELECT
-          lower(trim(updated_by)) AS updated_by_key,
+          lower(trim(created_by)) AS created_by_key,
           COUNT(*) AS edit_count,
           MAX(updated_at) AS last_edit_at
-        FROM local.architectural_info
-        GROUP BY lower(trim(updated_by))
+        FROM user_edits.building_user_edits
+        GROUP BY lower(trim(created_by))
       ) e
-        ON e.updated_by_key = lower(u.email)
+        ON e.created_by_key = lower(u.email)
       ${whereSql}
       ORDER BY ${sortExpr} ${sortDir}, u.created_at DESC
       LIMIT 500
@@ -793,7 +835,8 @@ function registerAuthRoutes({
         firstName: normalizeProfileName(row.first_name),
         lastName: normalizeProfileName(row.last_name),
         canEdit: Number(row.can_edit || 0) > 0,
-        isAdmin: Number(row.is_admin || 0) > 0,
+        isAdmin: Number(row.is_master_admin || 0) > 0 || Number(row.is_admin || 0) > 0,
+        isMasterAdmin: Number(row.is_master_admin || 0) > 0,
         createdAt: String(row.created_at || ''),
         editsCount: Number(row.edits_count || 0),
         lastEditAt: row.last_edit_at ? String(row.last_edit_at) : null,
@@ -809,10 +852,16 @@ function registerAuthRoutes({
       return res.status(400).json({ error: 'Укажите корректный email пользователя' });
     }
 
-    const result = db.prepare('UPDATE auth.users SET is_admin = ? WHERE email = ?').run(isAdmin ? 1 : 0, email);
-    if (Number(result?.changes || 0) === 0) {
+    const target = db.prepare('SELECT is_master_admin FROM auth.users WHERE email = ?').get(email);
+    if (!target) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
+    const targetIsMasterAdmin = Number(target?.is_master_admin || 0) > 0;
+    if (targetIsMasterAdmin && !isAdmin) {
+      return res.status(403).json({ error: 'Мастер-админ не может быть понижен до обычного пользователя' });
+    }
+
+    db.prepare('UPDATE auth.users SET is_admin = ? WHERE email = ?').run(isAdmin ? 1 : 0, email);
 
     return res.json({ ok: true, email, isAdmin });
   });

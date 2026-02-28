@@ -7,12 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.css" rel="stylesheet" />
   <script>
     tailwind.config = {
       theme: {
         extend: {
           fontFamily: {
             sans: ["Manrope", "Segoe UI", "Roboto", "Arial", "sans-serif"]
+          },
+          colors: {
+            brand: {
+              purple: "#5B62F0"
+            }
           },
           boxShadow: {
             soft: "0 8px 24px rgba(15, 23, 42, 0.08)"
@@ -42,162 +48,257 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="min-h-screen bg-slate-100 font-sans text-slate-900">
-  <div id="navigation" class="fixed inset-x-0 top-0 z-[930] px-3 pt-3 sm:px-4 sm:pt-4">
-    <div class="relative rounded-2xl border border-slate-300 bg-white/95 px-3 py-2 shadow-soft backdrop-blur">
-      <div class="flex items-center justify-between gap-3">
-        <div class="flex min-w-0 items-center px-2">
-          <a id="nav-logo-link" href="/" class="inline-flex h-10 select-none items-center text-2xl font-extrabold tracking-tight text-black sm:text-xl">/archimap</a>
-          <a id="map-return-link" href="/" class="ml-3 inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Вернуться на карту</a>
-        </div>
-        <div class="flex items-center gap-2">
-          <button id="nav-menu-button" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label="Открыть меню" aria-expanded="false">
-            <svg viewBox="0 0 640 640" width="18" height="18" aria-hidden="true" class="fill-current">
-              <path d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div id="nav-menu-panel" class="pointer-events-none absolute right-0 top-[calc(100%+0.375rem)] sm:top-[calc(100%+0.75rem)] z-[960] flex w-64 flex-col gap-2 rounded-xl border border-slate-300 bg-white/95 p-2 shadow-soft transition-all duration-200 ease-out origin-top-right max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0">
-        <a href="/admin/" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Админ-панель</a>
-        <a href="/account/" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Кабинет пользователя</a>
-        <div class="my-2 border-t border-slate-200"></div>
-        <div class="flex items-center justify-between rounded-lg px-3 py-2">
-          <span class="text-sm font-semibold text-slate-700">Тема</span>
-          <label for="theme-toggle" class="relative inline-flex h-10 w-[76px] cursor-pointer items-center rounded-full bg-white/95 shadow-soft hover:bg-slate-50">
-            <input id="theme-toggle" type="checkbox" class="peer sr-only" aria-label="Переключить тему" />
-            <span class="absolute inset-1 rounded-full bg-slate-300 transition peer-checked:bg-indigo-500"></span>
-            <span class="pointer-events-none absolute left-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center" aria-hidden="true">
-              <svg class="theme-track-icon-sun h-[14px] w-[14px] fill-current text-slate-700" viewBox="0 0 640 640">
-                <path d="M320 32C328.4 32 336.3 36.4 340.6 43.7L396.1 136.3L500.9 110C509.1 108 517.8 110.4 523.7 116.3C529.6 122.2 532 131 530 139.1L503.7 243.8L596.4 299.3C603.6 303.6 608.1 311.5 608.1 319.9C608.1 328.3 603.7 336.2 596.4 340.5L503.7 396.1L530 500.8C532 509 529.6 517.7 523.7 523.6C517.8 529.5 509 532 500.9 530L396.2 503.7L340.7 596.4C336.4 603.6 328.5 608.1 320.1 608.1C311.7 608.1 303.8 603.7 299.5 596.4L243.9 503.7L139.2 530C131 532 122.4 529.6 116.4 523.7C110.4 517.8 108 509 110 500.8L136.2 396.1L43.6 340.6C36.4 336.2 32 328.4 32 320C32 311.6 36.4 303.7 43.7 299.4L136.3 243.9L110 139.1C108 130.9 110.3 122.3 116.3 116.3C122.3 110.3 131 108 139.2 110L243.9 136.2L299.4 43.6L301.2 41C305.7 35.3 312.6 31.9 320 31.9zM320 176C240.5 176 176 240.5 176 320C176 399.5 240.5 464 320 464C399.5 464 464 399.5 464 320C464 240.5 399.5 176 320 176zM320 416C267 416 224 373 224 320C224 267 267 224 320 224C373 224 416 267 416 320C416 373 373 416 320 416z"></path>
-              </svg>
-            </span>
-            <span class="pointer-events-none absolute right-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center" aria-hidden="true">
-              <svg class="theme-track-icon-moon h-[14px] w-[14px] fill-current text-slate-700" viewBox="0 0 640 640">
-                <path d="M320 64C178.6 64 64 178.6 64 320C64 461.4 178.6 576 320 576C388.8 576 451.3 548.8 497.3 504.6C504.6 497.6 506.7 486.7 502.6 477.5C498.5 468.3 488.9 462.6 478.8 463.4C473.9 463.8 469 464 464 464C362.4 464 280 381.6 280 280C280 207.9 321.5 145.4 382.1 115.2C391.2 110.7 396.4 100.9 395.2 90.8C394 80.7 386.6 72.5 376.7 70.3C358.4 66.2 339.4 64 320 64z"></path>
-              </svg>
-            </span>
-            <span class="pointer-events-none absolute left-1.5 z-[2] inline-flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-sm transition peer-checked:translate-x-[36px]"></span>
-          </label>
-        </div>
-        <button id="admin-logout-btn" type="button" class="mt-2 w-full rounded-lg bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600">Выход</button>
-      </div>
-    </div>
-  </div>
+  <div id="top-nav-root"></div>
 
-  <div id="admin-loading" class="w-full px-3 pb-3 pt-[5.5rem] sm:px-4 sm:pb-4 sm:pt-[6rem]">
-    <div class="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-soft">
+  <div id="admin-loading" class="w-full px-4 pb-5 pt-[5.5rem] sm:pb-6 sm:pt-[6rem]">
+    <div class="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white/95 p-6 text-center shadow-soft backdrop-blur-sm">
       <p class="text-sm font-semibold text-slate-700">Проверка доступа...</p>
     </div>
   </div>
 
-  <div id="admin-app" class="hidden w-full px-3 pb-3 pt-[5.5rem] sm:px-4 sm:pb-4 sm:pt-[5.25rem]">
-    <div class="mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-soft sm:mb-4">
-      <h1 class="text-xl font-extrabold md:text-2xl">Админ-панель</h1>
-      <p id="admin-subtitle" class="mt-1 text-sm text-slate-600">Пользователи и локальные правки</p>
-    </div>
-
-    <div class="mb-3 inline-flex w-fit rounded-lg border border-slate-300 bg-white p-1 shadow-soft sm:mb-4">
-      <button id="tab-users" type="button" class="rounded-md px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">Пользователи</button>
-      <button id="tab-edits" type="button" class="rounded-md px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">Правки</button>
-    </div>
-
-    <section id="users-panel" class="space-y-4">
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-        <div class="grid gap-2 md:grid-cols-6">
-          <input id="users-search" type="search" placeholder="Поиск по email/ФИО" class="md:col-span-2 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm" />
-          <select id="users-role-filter" class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
-            <option value="">Роль: все</option>
-            <option value="admin">Только admin</option>
-            <option value="user">Только user</option>
-          </select>
-          <select id="users-can-edit-filter" class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
-            <option value="">Право редактирования: все</option>
-            <option value="true">Только разрешено</option>
-            <option value="false">Только запрещено</option>
-          </select>
-          <select id="users-has-edits-filter" class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
-            <option value="">Правки: все</option>
-            <option value="true">Только с правками</option>
-            <option value="false">Только без правок</option>
-          </select>
-          <div class="flex gap-2">
-            <button id="users-refresh" type="button" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Обновить</button>
+  <div id="admin-app" class="page-with-edit-pane hidden w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
+    <div class="w-full space-y-4">
+      <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
+          <div>
+            <h1 class="text-2xl font-extrabold">Админ-панель</h1>
+            <p id="admin-subtitle" class="mt-1 text-sm text-slate-600">Пользователи и локальные правки</p>
           </div>
         </div>
-        <div class="mt-2 grid gap-2 md:grid-cols-4">
-          <select id="users-sort-by" class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
-            <option value="createdAt">Сортировка: дата создания</option>
-            <option value="email">Email</option>
-            <option value="firstName">Имя</option>
-            <option value="lastName">Фамилия</option>
-            <option value="editsCount">Количество правок</option>
-            <option value="lastEditAt">Последняя правка</option>
-            <option value="isAdmin">Роль</option>
-            <option value="canEdit">Право редактирования</option>
-          </select>
-          <select id="users-sort-dir" class="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
-            <option value="desc">По убыванию</option>
-            <option value="asc">По возрастанию</option>
-          </select>
-        </div>
-      </div>
 
-      <div class="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+          <ul class="-mb-px flex flex-wrap gap-2 text-sm font-medium" id="admin-tabs" role="tablist">
+            <li role="presentation"><button id="tab-users" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Пользователи</button></li>
+            <li role="presentation"><button id="tab-edits" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Все правки</button></li>
+            <li role="presentation"><button id="tab-guide" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Регламент правок</button></li>
+            <li role="presentation"><button id="tab-uikit" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">UI kit</button></li>
+          </ul>
+        </div>
+
+        <section id="users-panel" class="mt-4 space-y-4">
+        <div class="rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="grid gap-3 lg:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))]">
+            <label class="relative">
+              <span class="sr-only">Поиск пользователей</span>
+              <input id="users-search" type="search" placeholder="Поиск по имени и email" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+            </label>
+            <select id="users-role-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+              <option value="">Роль: все</option>
+              <option value="admin">Только администраторы</option>
+              <option value="user">Только пользователи</option>
+            </select>
+            <select id="users-can-edit-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+              <option value="">Права: все</option>
+              <option value="true">Может редактировать</option>
+              <option value="false">Без прав редактирования</option>
+            </select>
+            <div class="flex gap-2">
+              <select id="users-sort-by" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+                <option value="createdAt">Сортировка: регистрация</option>
+                <option value="editsCount">По количеству правок</option>
+                <option value="email">По email</option>
+                <option value="firstName">По имени</option>
+                <option value="lastName">По фамилии</option>
+              </select>
+              <select id="users-sort-dir" class="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+                <option value="desc">↓</option>
+                <option value="asc">↑</option>
+              </select>
+              <button id="users-refresh" type="button" class="rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Обновить</button>
+            </div>
+          </div>
+          <div class="mt-3 hidden">
+            <select id="users-has-edits-filter">
+              <option value="">Все</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div class="border-b border-slate-200 px-4 py-3">
             <p id="users-status" class="text-sm text-slate-600">Загрузка...</p>
           </div>
           <div class="overflow-x-auto">
-            <table class="min-w-full text-sm">
+            <table class="w-full text-left text-sm text-slate-700">
               <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th class="px-4 py-3 text-left">Пользователь</th>
-                  <th class="px-4 py-3 text-left">Роль</th>
-                  <th class="px-4 py-3 text-left">Правки</th>
-                  <th class="px-4 py-3 text-left">Создан</th>
+                  <th class="px-4 py-3">Пользователь</th>
+                  <th class="px-4 py-3">Регистрация</th>
+                  <th class="px-4 py-3">Права</th>
+                  <th class="px-4 py-3">Правки</th>
                   <th class="px-4 py-3 text-right">Действия</th>
                 </tr>
               </thead>
-              <tbody id="users-list"></tbody>
+              <tbody id="users-list">
+                <tr class="border-t border-slate-200">
+                  <td class="px-4 py-3">
+                    <p class="font-semibold text-slate-900">Анна Петрова</p>
+                    <p class="text-xs text-slate-500">anna@example.com</p>
+                  </td>
+                  <td class="px-4 py-3 text-slate-600">12.01.2026</td>
+                  <td class="px-4 py-3">
+                    <span class="mr-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">Админ</span>
+                    <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">Может редактировать</span>
+                  </td>
+                  <td class="px-4 py-3"><button class="font-semibold text-brand-purple underline">18</button></td>
+                  <td class="px-4 py-3 text-right"></td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </div>
+        </section>
 
-        <aside class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-          <h2 class="text-base font-bold">Пользователь</h2>
-          <p id="user-detail-status" class="mt-1 text-sm text-slate-600">Выберите пользователя в таблице.</p>
-          <div id="user-detail" class="mt-3 hidden space-y-3">
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-              <p id="user-detail-name" class="font-semibold text-slate-900"></p>
-              <p id="user-detail-email" class="text-slate-600"></p>
-              <p id="user-detail-meta" class="mt-1 text-xs text-slate-500"></p>
-            </div>
-            <div class="max-h-[50vh] overflow-y-auto space-y-2" id="user-edits-list"></div>
+        <section id="edits-panel" class="hidden mt-4 space-y-4">
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div id="admin-map" class="h-[340px] w-full"></div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="grid gap-3 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
+            <input id="edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+            <input id="edits-date-filter" type="date" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+            <select id="edits-user-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+              <option value="">Пользователь: все</option>
+            </select>
+            <select id="edits-status-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+              <option value="pending">Статус: на рассмотрении</option>
+              <option value="accepted">Статус: принято</option>
+              <option value="partially_accepted">Статус: частично принято</option>
+              <option value="rejected">Статус: отклонено</option>
+              <option value="superseded">Статус: заменено новой правкой</option>
+              <option value="all">Статус: все</option>
+            </select>
+            <p id="edits-status" class="flex items-center rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600">Загрузка...</p>
           </div>
-        </aside>
-      </div>
-    </section>
+        </div>
 
-    <section id="edits-panel" class="hidden space-y-4">
-      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
-        <p id="edits-status" class="text-sm text-slate-600">Загрузка...</p>
-      </div>
-      <div id="edits-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
-    </section>
-  </div>
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-slate-700">
+              <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th class="px-4 py-3">Здание</th>
+                  <th class="px-4 py-3">Автор</th>
+                  <th class="px-4 py-3">Статус</th>
+                  <th class="px-4 py-3">Изменения тегов</th>
+                </tr>
+              </thead>
+              <tbody id="edits-list">
+                <tr class="border-t border-slate-200 hover:bg-slate-50">
+                  <td class="px-4 py-3">
+                    <p class="font-semibold text-slate-900">ул. Большая Покровская, 12</p>
+                    <p class="text-xs text-slate-500">ID: way/22891444</p>
+                  </td>
+                  <td class="px-4 py-3">Иван Смирнов</td>
+                  <td class="px-4 py-3"><span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">На рассмотрении</span></td>
+                  <td class="px-4 py-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">5 всего</span>
+                      <span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+2 создано</span>
+                      <span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~3 изменено</span>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        </section>
 
-  <div id="edit-detail-modal" class="fixed inset-0 z-[1200] hidden bg-slate-900/40 p-3 md:p-6">
-    <div class="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-soft md:p-5">
-      <div class="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
-        <h3 id="edit-detail-title" class="text-lg font-bold">Правка</h3>
-        <button id="edit-detail-close" type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-100">✕</button>
-      </div>
-      <p id="edit-detail-meta" class="text-sm text-slate-600"></p>
-      <div id="edit-detail-list" class="mt-3 space-y-2"></div>
+        <section id="guide-panel" class="hidden mt-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <h2 id="admin-guide-title" class="text-lg font-extrabold text-slate-900">Регламент обработки правок</h2>
+            <p id="admin-guide-subtitle" class="mt-1 text-sm text-slate-600">Как работает модерация, конфликтные ситуации и статусы.</p>
+            <div id="admin-guide-content" class="mt-4 space-y-3 text-sm text-slate-700"></div>
+          </div>
+        </section>
+
+        <section id="uikit-panel" class="hidden mt-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <h2 id="admin-uikit-title" class="text-lg font-extrabold text-slate-900"></h2>
+            <p id="admin-uikit-subtitle" class="mt-1 text-sm text-slate-600"></p>
+
+            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 id="admin-ui-badges-title" class="text-base font-bold"></h3>
+                <div id="admin-ui-badges" class="mt-3 flex flex-wrap gap-2"></div>
+                <p id="admin-ui-badges-api" class="mt-2 text-xs text-slate-500"></p>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 id="admin-ui-toggles-title" class="text-base font-bold"></h3>
+                <div id="admin-ui-toggles" class="mt-3 flex items-center gap-3"></div>
+                <p id="admin-ui-toggles-api" class="mt-2 text-xs text-slate-500"></p>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 id="admin-ui-panel-title" class="text-base font-bold"></h3>
+                <div id="admin-ui-panel-demo" class="mt-3"></div>
+                <p id="admin-ui-panel-api" class="mt-2 text-xs text-slate-500"></p>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 id="admin-ui-header-title" class="text-base font-bold"></h3>
+                <div id="admin-ui-header-demo" class="mt-3"></div>
+                <p id="admin-ui-header-api" class="mt-2 text-xs text-slate-500"></p>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 id="admin-ui-tabs-title" class="text-base font-bold"></h3>
+                <div id="admin-ui-tabs-demo" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-1"></div>
+                <p id="admin-ui-tabs-api" class="mt-2 text-xs text-slate-500"></p>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h3 id="admin-ui-fields-title" class="text-base font-bold"></h3>
+                <div id="admin-ui-fields-buttons-demo" class="mt-3 space-y-3"></div>
+                <p id="admin-ui-fields-api" class="mt-2 text-xs text-slate-500"></p>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:col-span-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <h3 id="admin-ui-emails-title" class="text-base font-bold"></h3>
+                  <button id="admin-ui-email-refresh" type="button" class="rounded-[12px] border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"></button>
+                </div>
+                <p id="admin-ui-email-status" class="mt-2 text-xs text-slate-500"></p>
+                <div id="admin-ui-email-previews" class="mt-3 space-y-4"></div>
+              </section>
+            </div>
+
+            <section class="ui-info-panel mt-4 rounded-2xl p-4">
+              <h3 id="admin-ui-guide-title" class="ui-info-title text-base font-bold"></h3>
+              <ol class="ui-info-text mt-2 list-decimal space-y-1 pl-5 text-sm">
+                <li id="admin-ui-guide-item-1"></li>
+                <li id="admin-ui-guide-item-2"></li>
+                <li id="admin-ui-guide-item-3"></li>
+                <li id="admin-ui-guide-item-4"></li>
+              </ol>
+            </section>
+          </div>
+        </section>
+      </section>
     </div>
   </div>
 
+  <div id="edit-detail-pane-root"></div>
+
+  <script src="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.5.2/flowbite.min.js"></script>
   <script src="/i18n/ru.js"></script>
+  <script src="/shared/ui.js"></script>
+  <script src="/shared/top-nav.js"></script>
+  <script>window.ArchiMapTopNav.render({ context: 'admin' });</script>
+  <script>
+    (function renderSharedEditPane() {
+      var root = document.getElementById('edit-detail-pane-root');
+      if (!root || !window.ArchiMapUI || typeof window.ArchiMapUI.editDetailPane !== 'function') return;
+      root.innerHTML = window.ArchiMapUI.editDetailPane();
+    })();
+  </script>
+  <script src="/app-config.js"></script>
+  <script src="/styles/local-buildings-style.js"></script>
   <script src="/admin.js"></script>
 </body>
 </html>
