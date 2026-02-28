@@ -10,7 +10,7 @@ function applySecurityHeadersMiddleware(app, { nodeEnv }) {
       "style-src 'self' 'unsafe-inline' https://unpkg.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https:",
-      "connect-src 'self'",
+      "connect-src 'self' https://tiles.basemaps.cartocdn.com https://*.basemaps.cartocdn.com",
       "worker-src 'self' blob:",
       "object-src 'none'",
       "base-uri 'self'",

@@ -2,6 +2,18 @@ const session = require('express-session');
 const { RedisStore } = require('connect-redis');
 const { createClient } = require('redis');
 
+function sanitizeRedisUrl(redisUrl) {
+  const raw = String(redisUrl || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (parsed.password) parsed.password = '***';
+    return parsed.toString();
+  } catch {
+    return '[redacted]';
+  }
+}
+
 async function initSessionStore({
   sessionSecret,
   nodeEnv,
@@ -34,7 +46,7 @@ async function initSessionStore({
       console.error(`[session] Redis error: ${String(error.message || error)}`);
     });
     await redisClient.connect();
-    console.log(`[session] Redis store connected: ${redisUrl}`);
+    console.log(`[session] Redis store connected: ${sanitizeRedisUrl(redisUrl)}`);
     return session({
       ...sessionConfig,
       store: new RedisStore({

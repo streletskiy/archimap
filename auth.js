@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { requireCsrfSession } = require('./services/csrf.service');
 const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
@@ -207,16 +208,6 @@ function registerAuthRoutes({
     const user = buildSessionUserFromRow(row);
     req.session.user = user;
     return user;
-  }
-
-  function requireCsrfSession(req, res, next) {
-    if (!req?.session?.user) return next();
-    const expected = String(req.session.csrfToken || '');
-    const provided = String(req.get('x-csrf-token') || '');
-    if (!expected || !provided || expected !== provided) {
-      return res.status(403).json({ error: 'CSRF token missing or invalid' });
-    }
-    return next();
   }
 
   function requireAdminSession(req, res, next) {

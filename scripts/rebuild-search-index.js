@@ -28,12 +28,23 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
   architect TEXT,
   address TEXT,
   description TEXT,
+  archimap_description TEXT,
   updated_by TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(osm_type, osm_id)
 );
 `);
+
+const localInfoColumns = new Set(
+  db.prepare('PRAGMA local.table_info(architectural_info)').all().map((column) => String(column?.name || '').trim())
+);
+if (!localInfoColumns.has('description')) {
+  db.exec('ALTER TABLE local.architectural_info ADD COLUMN description TEXT;');
+}
+if (!localInfoColumns.has('archimap_description')) {
+  db.exec('ALTER TABLE local.architectural_info ADD COLUMN archimap_description TEXT;');
+}
 
 const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
 const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));

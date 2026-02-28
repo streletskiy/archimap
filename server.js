@@ -8,6 +8,7 @@ const { ensureAuthSchema, registerAuthRoutes } = require('./auth');
 const { createSimpleRateLimiter } = require('./services/rate-limiter.service');
 const { createSearchService } = require('./services/search.service');
 const { createBuildingEditsService } = require('./services/building-edits.service');
+const { requireCsrfSession } = require('./services/csrf.service');
 const {
   normalizeUserEditStatus,
   sanitizeFieldText,
@@ -409,16 +410,6 @@ function requireAdmin(req, res, next) {
   }
   if (!isAdminRequest(req)) {
     return res.status(403).json({ error: 'Требуются права администратора' });
-  }
-  return next();
-}
-
-function requireCsrfSession(req, res, next) {
-  if (!req?.session?.user) return next();
-  const expected = String(req.session.csrfToken || '');
-  const provided = String(req.get('x-csrf-token') || '');
-  if (!expected || !provided || expected !== provided) {
-    return res.status(403).json({ error: 'CSRF token missing or invalid' });
   }
   return next();
 }

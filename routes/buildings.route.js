@@ -82,7 +82,7 @@ function registerBuildingsRoutes(deps) {
   } = deps;
 
   app.post('/api/buildings/filter-data', filterDataRateLimiter, (req, res) => {
-    const rawKeys = Array.isArray(req.body?.keys) ? req.body.keys : [];
+    const rawKeys = req.body?.keys;
     if (!Array.isArray(rawKeys)) {
       return res.status(400).json({ error: 'Ожидается массив keys' });
     }
