@@ -7,6 +7,10 @@
 | `SESSION_SECRET`                        | Session secret.                                                                                                                                          |
 | `REDIS_URL`                             | Redis URL for sessions (default: `redis://redis:6379`).                                                                                                  |
 | `SESSION_ALLOW_MEMORY_FALLBACK`         | Allow fallback to in-memory sessions when Redis is unavailable. Defaults to `true` in development and `false` in production. Keep `false` in production. |
+| `LOG_LEVEL`                             | Structured logger minimum level (`debug`, `info`, `warn`, `error`; default `info`).                                                                     |
+| `METRICS_ENABLED`                       | Enable Prometheus-style `/metrics` endpoint (`true/false`, default `true`).                                                                              |
+| `ARCHIMAP_DB_PATH`                      | Path to primary DB (default: `data/archimap.db`).                                                                                                        |
+| `USER_AUTH_DB_PATH`                     | Path to auth DB (default: `data/users.db`).                                                                                                              |
 | `MAP_DEFAULT_LON`                       | Default map longitude when URL hash has no `#map=...`.                                                                                                   |
 | `MAP_DEFAULT_LAT`                       | Default map latitude when URL hash has no `#map=...`.                                                                                                    |
 | `MAP_DEFAULT_ZOOM`                      | Default map zoom when URL hash has no `#map=...`.                                                                                                        |

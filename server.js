@@ -9,6 +9,7 @@ const { createSimpleRateLimiter } = require('./services/rate-limiter.service');
 const { createSearchService } = require('./services/search.service');
 const { createBuildingEditsService } = require('./services/building-edits.service');
 const { requireCsrfSession } = require('./services/csrf.service');
+const { createLogger } = require('./services/logger.service');
 const {
   normalizeUserEditStatus,
   sanitizeFieldText,
@@ -21,6 +22,7 @@ const { applySecurityHeadersMiddleware } = require('./infra/security-headers.inf
 const { initSessionStore } = require('./infra/session-store.infra');
 const { initSyncWorkersInfra } = require('./infra/sync-workers.infra');
 const { initDbBootstrapInfra } = require('./infra/db-bootstrap.infra');
+const { initObservabilityInfra } = require('./infra/observability.infra');
 const { registerContoursStatusRoute } = require('./routes/contours-status.route');
 const { registerAppRoutes, registerPublicStaticRoute } = require('./routes/app.route');
 const { registerAdminRoutes } = require('./routes/admin.route');
@@ -74,19 +76,22 @@ const REGISTRATION_CODE_MAX_ATTEMPTS = Math.max(3, Math.min(12, Number(process.e
 const REGISTRATION_MIN_PASSWORD_LENGTH = Math.max(8, Math.min(72, Number(process.env.REGISTRATION_MIN_PASSWORD_LENGTH || 8)));
 const PASSWORD_RESET_TTL_MINUTES = Math.max(5, Math.min(180, Number(process.env.PASSWORD_RESET_TTL_MINUTES || 60)));
 const APP_DISPLAY_NAME = String(process.env.APP_DISPLAY_NAME || 'Archimap').trim() || 'Archimap';
+const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase() || 'info';
+const METRICS_ENABLED = String(process.env.METRICS_ENABLED ?? 'true').toLowerCase() === 'true';
 const REPO_URL = 'https://github.com/streletskiy/archimap';
 const BUILD_INFO_PATH = path.join(__dirname, 'build-info.json');
 
 const dataDir = path.join(__dirname, 'data');
-const dbPath = path.join(dataDir, 'archimap.db');
+const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
 const userEditsDbPath = process.env.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db');
-const userAuthDbPath = path.join(dataDir, 'users.db');
+const userAuthDbPath = String(process.env.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db');
 const syncScriptPath = path.join(__dirname, 'scripts', 'sync-osm-buildings.js');
-const searchRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-search-index.js');
-const filterTagKeysRebuildScriptPath = path.join(__dirname, 'scripts', 'rebuild-filter-tag-keys-cache.js');
+const searchRebuildScriptPath = path.join(__dirname, 'workers', 'rebuild-search-index.worker.js');
+const filterTagKeysRebuildScriptPath = path.join(__dirname, 'workers', 'rebuild-filter-tag-keys-cache.worker.js');
 const SEARCH_INDEX_BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
+const logger = createLogger({ level: LOG_LEVEL, service: 'archimap-server' });
 
 let sessionMiddleware = null;
 let currentSearchRebuildChild = null;
@@ -180,7 +185,7 @@ const {
   rtreeRebuildBatchSize: RTREE_REBUILD_BATCH_SIZE,
   rtreeRebuildPauseMs: RTREE_REBUILD_PAUSE_MS,
   isSyncInProgress: () => syncWorkers?.isSyncInProgress?.() || false,
-  logger: console
+  logger
 });
 
 app.use(express.json());
@@ -198,7 +203,7 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
   }
 
   filterTagKeysRebuildInProgress = true;
-  console.log(`[filter-tags] cache rebuild worker started (${reason})`);
+  logger.info('filter_tags_rebuild_started', { reason });
   const child = spawn(process.execPath, [filterTagKeysRebuildScriptPath], {
     cwd: __dirname,
     env: {
@@ -213,7 +218,7 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
   child.on('error', (error) => {
     currentFilterTagKeysRebuildChild = null;
     filterTagKeysRebuildInProgress = false;
-    console.error(`[filter-tags] rebuild worker failed to start: ${String(error.message || error)}`);
+    logger.error('filter_tags_rebuild_start_failed', { reason, error: String(error.message || error) });
     if (queuedFilterTagKeysRebuildReason) {
       const nextReason = queuedFilterTagKeysRebuildReason;
       queuedFilterTagKeysRebuildReason = null;
@@ -225,14 +230,14 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
     currentFilterTagKeysRebuildChild = null;
     filterTagKeysRebuildInProgress = false;
     if (shuttingDown && (signal === 'SIGTERM' || signal === 'SIGINT')) {
-      console.log('[filter-tags] rebuild worker stopped due to shutdown');
+      logger.info('filter_tags_rebuild_stopped', { reason: 'shutdown' });
       return;
     }
     if (code === 0) {
       filterTagKeysCache = { keys: null, loadedAt: 0 };
-      console.log('[filter-tags] cache rebuild worker finished successfully');
+      logger.info('filter_tags_rebuild_finished', { reason });
     } else {
-      console.error(`[filter-tags] rebuild worker failed with code ${code}`);
+      logger.error('filter_tags_rebuild_failed', { reason, code });
     }
     if (queuedFilterTagKeysRebuildReason) {
       const nextReason = queuedFilterTagKeysRebuildReason;
@@ -266,6 +271,15 @@ function getFilterTagKeysCached() {
 }
 
 applySecurityHeadersMiddleware(app, { nodeEnv: NODE_ENV });
+initObservabilityInfra(app, {
+  logger,
+  requestIdFactory: () => logger.requestId(),
+  metricsEnabled: METRICS_ENABLED,
+  getReadinessChecks: () => ({
+    sessionStoreReady: Boolean(sessionMiddleware),
+    dbReady: Boolean(db)
+  })
+});
 
 app.use((req, res, next) => {
   if (!sessionMiddleware) {
@@ -484,7 +498,7 @@ function flushDeferredSearchRefreshes() {
   if (pendingSearchIndexRefreshes.size === 0) return;
   const pending = Array.from(pendingSearchIndexRefreshes);
   pendingSearchIndexRefreshes.clear();
-  console.log(`[search] applying deferred building refreshes: ${pending.length}`);
+  logger.info('search_deferred_refreshes_applied', { pending: pending.length });
   for (const key of pending) {
     const [osmType, osmIdRaw] = String(key).split('/');
     const osmId = Number(osmIdRaw);
@@ -506,7 +520,7 @@ function enqueueSearchIndexRefresh(osmType, osmId) {
     try {
       refreshSearchIndexForBuilding(osmType, osmId);
     } catch (error) {
-      console.error(`[search] incremental refresh failed for ${osmType}/${osmId}: ${String(error.message || error)}`);
+      logger.error('search_incremental_refresh_failed', { osmType, osmId, error: String(error.message || error) });
     }
   });
 }
@@ -515,22 +529,22 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
   const force = Boolean(options.force);
   if (searchIndexRebuildInProgress) {
     queuedSearchIndexRebuildReason = reason;
-    console.log(`[search] rebuild already running; queued next rebuild (${reason})`);
+    logger.info('search_rebuild_queued', { reason });
     return;
   }
 
   if (!force) {
     const decision = getSearchRebuildDecision();
     if (!decision.shouldRebuild) {
-      console.log(`[search] rebuild skipped (${reason}): ${decision.reason}`);
+      logger.info('search_rebuild_skipped', { reason, details: decision.reason });
       return;
     }
-    console.log(`[search] rebuild required (${reason}): ${decision.reason}`);
+    logger.info('search_rebuild_required', { reason, details: decision.reason });
   }
 
   const startedAt = Date.now();
   searchIndexRebuildInProgress = true;
-  console.log(`[search] rebuild worker started (${reason}), batch size: ${SEARCH_INDEX_BATCH_SIZE}`);
+  logger.info('search_rebuild_started', { reason, batchSize: SEARCH_INDEX_BATCH_SIZE });
 
   const child = spawn(process.execPath, [searchRebuildScriptPath], {
     cwd: __dirname,
@@ -547,7 +561,7 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
   child.on('error', (error) => {
     currentSearchRebuildChild = null;
     searchIndexRebuildInProgress = false;
-    console.error(`[search] rebuild worker failed to start: ${String(error.message || error)}`);
+    logger.error('search_rebuild_start_failed', { reason, error: String(error.message || error) });
     flushDeferredSearchRefreshes();
     maybeRunQueuedSearchRebuild();
   });
@@ -557,13 +571,13 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
     searchIndexRebuildInProgress = false;
 
     if (shuttingDown && (signal === 'SIGTERM' || signal === 'SIGINT')) {
-      console.log('[search] rebuild worker stopped due to shutdown');
+      logger.info('search_rebuild_stopped', { reason: 'shutdown' });
       return;
     }
     if (code === 0) {
-      console.log(`[search] index rebuilt in worker in ${Date.now() - startedAt}ms`);
+      logger.info('search_rebuild_finished', { reason, durationMs: Date.now() - startedAt });
     } else {
-      console.error(`[search] rebuild worker failed with code ${code}`);
+      logger.error('search_rebuild_failed', { reason, code });
     }
 
     flushDeferredSearchRefreshes();
@@ -778,7 +792,7 @@ syncWorkers = initSyncWorkersInfra({
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[server] received ${signal}, shutting down...`);
+  logger.info('server_shutdown_started', { signal });
 
   if (syncWorkers) {
     syncWorkers.stop();
@@ -800,7 +814,7 @@ function shutdown(signal) {
 
   if (httpServer) {
     httpServer.close(() => {
-      console.log('[server] shutdown complete');
+      logger.info('server_shutdown_complete');
       process.exit(0);
     });
   } else {
@@ -808,7 +822,7 @@ function shutdown(signal) {
   }
 
   setTimeout(() => {
-    console.error('[server] forced shutdown timeout');
+    logger.error('server_shutdown_forced_timeout');
     process.exit(1);
   }, 10000).unref();
 }
@@ -821,7 +835,8 @@ initSessionStore({
   nodeEnv: NODE_ENV,
   redisUrl: REDIS_URL,
   sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
-  maxAgeMs: 1000 * 60 * 60 * 24 * 30
+  maxAgeMs: 1000 * 60 * 60 * 24 * 30,
+  logger
 })
   .then((middleware) => {
     sessionMiddleware = middleware;
@@ -832,9 +847,11 @@ initSessionStore({
       sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK
     });
     httpServer = app.listen(PORT, HOST, () => {
-      console.log('[server] archimap started successfully');
-      console.log(`[server] Local:   http://localhost:${PORT}`);
-      console.log(`[server] Network: http://${HOST}:${PORT}`);
+      logger.info('server_started', {
+        localUrl: `http://localhost:${PORT}`,
+        networkUrl: `http://${HOST}:${PORT}`,
+        nodeEnv: NODE_ENV
+      });
       rebuildSearchIndex('startup');
       scheduleFilterTagKeysCacheRebuild('startup');
       if (syncWorkers) syncWorkers.initAutoSync();
@@ -844,7 +861,7 @@ initSessionStore({
     });
   })
   .catch((error) => {
-    console.error(`[server] Failed to initialize session store: ${String(error.message || error)}`);
+    logger.error('server_session_store_init_failed', { error: String(error.message || error) });
     process.exit(1);
   });
 

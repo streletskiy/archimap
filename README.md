@@ -14,13 +14,20 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - [Highlights](#highlights)
 - [Tech Stack](#tech-stack)
 - [Architecture at a Glance](#architecture-at-a-glance)
+- [Architecture Decisions](#architecture-decisions)
 - [Quick Start (Local)](#quick-start-local)
 - [Docker Compose](#docker-compose)
+- [Database Migrations](#database-migrations)
 - [Contour Sync](#contour-sync)
 - [Search Logic](#search-logic)
+- [Security](#security)
+- [Observability](#observability)
+- [Troubleshooting](#troubleshooting)
 - [API Overview](#api-overview)
 - [Edits Workflow](#edits-workflow)
 - [Environment Variables](#environment-variables)
+- [OpenAPI](#openapi)
+- [Contributing](#contributing)
 - [External Projects](#external-projects)
 - [License](#license)
 
@@ -78,6 +85,10 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
   - `services/*.service.js` - domain/business logic (search, edits, rate limiting)
   - `infra/*.infra.js` - infrastructure wiring (sessions, headers, sync workers, DB bootstrap)
   - `server.js` - application bootstrap/composition root (env config, DI, startup/shutdown)
+- Workers:
+  - `workers/rebuild-search-index.worker.js` - full-text search index rebuild worker
+  - `workers/rebuild-filter-tag-keys-cache.worker.js` - filter-tag keys cache rebuild worker
+  - `scripts/rebuild-*.js` - compatibility wrappers for direct CLI usage
 - Frontend module layout:
   - `public/main/*/*-module.js` - map/auth/search/modal/filter logic for main page
   - `public/admin/*/*-module.js` - users/edits/map/uikit logic for admin page
@@ -85,8 +96,15 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - Sync pipeline:
   - `scripts/sync-osm-buildings.js`
   - `scripts/sync-osm-buildings.py`
-  - `scripts/rebuild-search-index.js`
-  - `scripts/rebuild-filter-tag-keys-cache.js`
+  - `workers/rebuild-search-index.worker.js`
+  - `workers/rebuild-filter-tag-keys-cache.worker.js`
+
+## Architecture Decisions
+
+- Composition root is centralized in `server.js`; domain behavior is delegated to `routes/`, `services/`, `infra/`.
+- Background rebuild tasks are isolated as workers in `workers/` and executed in child processes.
+- DB schema changes are versioned in `db/migrations/` and can be applied with `npm run migrate`.
+- Security controls are explicit (`CSP`, `CSRF`, session hardening) and configured via environment.
 
 ## Quick Start (Local)
 
@@ -126,6 +144,17 @@ docker compose down
 ```
 
 Persistent data is stored in `./data` via `./data:/app/data`.
+
+## Database Migrations
+
+- Migration files live in `db/migrations/*.migration.js`.
+- Apply migrations manually:
+
+```bash
+npm run migrate
+```
+
+- Migrations are also applied during server bootstrap.
 
 ## Contour Sync
 
@@ -208,7 +237,7 @@ Index lifecycle:
 - full rebuild runs only when data/index changed;
 - incremental refresh runs after `POST /api/building-info`;
 - post-auto-sync rebuild is conditional with the same checks;
-- full rebuild runs in worker process: `scripts/rebuild-search-index.js`.
+- full rebuild runs in worker process: `workers/rebuild-search-index.worker.js`.
 
 ## Viewport Filter Logic
 
@@ -223,8 +252,37 @@ Index lifecycle:
   - rebuild progress is logged in server console.
 - Tag keys for filter UI:
   - served from `filter_tag_keys_cache`,
-  - rebuilt in worker process (`scripts/rebuild-filter-tag-keys-cache.js`) on startup/auto-sync,
+  - rebuilt in worker process (`workers/rebuild-filter-tag-keys-cache.worker.js`) on startup/auto-sync,
   - `/api/filter-tag-keys` returns `{ keys, warmingUp }` while cache is being warmed.
+
+## Security
+
+- CSRF protection is enabled for mutating authenticated endpoints via `x-csrf-token`.
+- Production requirements:
+  - set strong `SESSION_SECRET`;
+  - set `APP_BASE_URL`;
+  - keep `SESSION_ALLOW_MEMORY_FALLBACK=false`.
+- CSP allows required map resources (MapLibre/Carto) and restricts unsafe origins.
+- Disclosure policy: [SECURITY.md](./SECURITY.md).
+
+## Observability
+
+- `GET /healthz`: liveness probe.
+- `GET /readyz`: readiness probe (DB/session checks).
+- `GET /metrics`: Prometheus-style metrics (`METRICS_ENABLED=true`).
+- Structured JSON logs include request metadata and `x-request-id`.
+
+## Troubleshooting
+
+- Startup `503` on API calls:
+  - check readiness with `/readyz`.
+- Redis unavailable:
+  - for development use `SESSION_ALLOW_MEMORY_FALLBACK=true`;
+  - for production keep fallback disabled and restore Redis.
+- Missing basemap:
+  - verify connectivity to `tiles.basemaps.cartocdn.com`.
+- Missing PMTiles:
+  - run `node scripts/sync-osm-buildings.js --pmtiles-only`.
 
 ## API Overview
 
@@ -243,6 +301,14 @@ Detailed edits workflow:
 Full environment variables reference:
 
 - [docs/ENVIRONMENT_VARIABLES.md](./docs/ENVIRONMENT_VARIABLES.md)
+
+## OpenAPI
+
+- Core API contract: [docs/openapi.yaml](./docs/openapi.yaml)
+
+## Contributing
+
+- Contribution guidelines: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## External Projects
 

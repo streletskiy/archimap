@@ -21,6 +21,8 @@ module.exports = [
       'infra/**/*.js',
       'routes/**/*.js',
       'services/**/*.js',
+      'workers/**/*.js',
+      'db/migrations/**/*.js',
       'tests/**/*.js'
     ],
     languageOptions: {

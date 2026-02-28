@@ -19,7 +19,8 @@ async function initSessionStore({
   nodeEnv,
   redisUrl,
   sessionAllowMemoryFallback,
-  maxAgeMs
+  maxAgeMs,
+  logger = console
 }) {
   const sessionConfig = {
     secret: sessionSecret,
@@ -43,10 +44,10 @@ async function initSessionStore({
       }
     });
     redisClient.on('error', (error) => {
-      console.error(`[session] Redis error: ${String(error.message || error)}`);
+      logger.error('session_redis_error', { error: String(error.message || error) });
     });
     await redisClient.connect();
-    console.log(`[session] Redis store connected: ${sanitizeRedisUrl(redisUrl)}`);
+    logger.info('session_redis_connected', { redisUrl: sanitizeRedisUrl(redisUrl) });
     return session({
       ...sessionConfig,
       store: new RedisStore({
@@ -58,7 +59,7 @@ async function initSessionStore({
     if (!sessionAllowMemoryFallback) {
       throw new Error(`[session] Redis unavailable and SESSION_ALLOW_MEMORY_FALLBACK=false: ${String(error.message || error)}`);
     }
-    console.error(`[session] Redis unavailable, fallback to MemoryStore: ${String(error.message || error)}`);
+    logger.warn('session_redis_fallback_memory_store', { error: String(error.message || error) });
     try {
       await redisClient?.quit?.();
     } catch {

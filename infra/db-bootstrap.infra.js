@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { runPendingMigrations } = require('./migrations.infra');
 
 function ensureParentDir(filePath) {
   const target = String(filePath || '').trim();
@@ -20,6 +21,7 @@ function initDbBootstrapInfra(options = {}) {
     ensureAuthSchema,
     rtreeRebuildBatchSize = 4000,
     rtreeRebuildPauseMs = 8,
+    migrationsDir = path.join(__dirname, '..', 'db', 'migrations'),
     isSyncInProgress = () => false,
     logger = console
   } = options;
@@ -330,6 +332,7 @@ USING fts5(
 `);
 
   ensureAuthSchema(db);
+  runPendingMigrations({ db, migrationsDir, logger });
 
   return {
     db,

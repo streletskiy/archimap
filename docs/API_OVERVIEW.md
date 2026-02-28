@@ -1,5 +1,9 @@
 # API Overview
 
+- System:
+  - `GET /healthz`
+  - `GET /readyz`
+  - `GET /metrics` (when `METRICS_ENABLED=true`)
 - PMTiles:
   - `GET /api/buildings.pmtiles`
 - Building details:
@@ -34,3 +38,5 @@
   - `POST /api/admin/building-edits/:editId/merge`
   - `POST /api/admin/building-edits/:editId/reject`
   - `POST /api/logout`
+
+OpenAPI spec for core routes: [openapi.yaml](./openapi.yaml)
