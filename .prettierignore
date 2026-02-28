@@ -1,0 +1,6 @@
+node_modules/
+data/
+.git/
+public/styles/*.json
+public/i18n/ru.js
+package-lock.json

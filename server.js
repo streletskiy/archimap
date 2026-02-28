@@ -658,7 +658,7 @@ app.get('/api/filter-tag-keys', (req, res) => {
       keys,
       warmingUp: filterTagKeysRebuildInProgress || keys.length === 0
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
   }
 });
@@ -2402,7 +2402,7 @@ app.post('/api/admin/building-edits/:editId/merge', requireCsrfSession, requireA
 
   try {
     tx();
-  } catch (error) {
+  } catch {
     return res.status(409).json({ error: 'Не удалось применить merge: правка была изменена параллельно' });
   }
   const updated = db.prepare(`SELECT status FROM user_edits.building_user_edits WHERE id = ?`).get(editId);

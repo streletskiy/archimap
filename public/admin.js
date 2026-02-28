@@ -136,15 +136,6 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function parseEditKey(raw) {
-  const value = String(raw || '').trim();
-  if (!value.includes('/')) return null;
-  const [osmType, osmIdRaw] = value.split('/');
-  const osmId = Number(osmIdRaw);
-  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) return null;
-  return { osmType, osmId, key: `${osmType}/${osmId}` };
-}
-
 function getLoginRedirectUrl() {
   return '/?auth=1&next=' + encodeURIComponent('/admin/');
 }
@@ -1214,7 +1205,7 @@ function buildModerationComment(baseComment, rejectedFields) {
   return comment ? `${comment}\n${note}` : note;
 }
 
-async function submitAdminModeration(action, options = {}) {
+async function submitAdminModeration(action) {
   if (!currentEditId || !currentEditItem) return;
   const statusEl = document.getElementById('edit-admin-status');
   const commentEl = document.getElementById('edit-admin-comment');

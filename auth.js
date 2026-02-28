@@ -196,10 +196,6 @@ function registerAuthRoutes({
     };
   }
 
-  function isMasterAdminSession(req) {
-    return Boolean(req?.session?.user?.isMasterAdmin);
-  }
-
   function resolveSessionUser(req) {
     const sessionUser = req?.session?.user;
     if (!sessionUser) return null;
@@ -286,7 +282,7 @@ function registerAuthRoutes({
     return transporter.sendMail(mailOptions);
   }
 
-  function resolveAppBaseUrl(req) {
+  function resolveAppBaseUrl(_req) {
     if (!appBaseUrl) return '';
     return appBaseUrl.replace(/\/+$/, '');
   }

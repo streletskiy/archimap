@@ -79,15 +79,6 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function parseEditKey(raw) {
-  const value = String(raw || '').trim();
-  if (!value.includes('/')) return null;
-  const [osmType, osmIdRaw] = value.split('/');
-  const osmId = Number(osmIdRaw);
-  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) return null;
-  return { osmType, osmId, key: `${osmType}/${osmId}` };
-}
-
 function isStateChangingMethod(method) {
   const m = String(method || 'GET').toUpperCase();
   return !['GET', 'HEAD', 'OPTIONS'].includes(m);

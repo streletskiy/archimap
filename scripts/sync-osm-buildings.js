@@ -67,16 +67,6 @@ function runPythonWithCandidate(candidate, args, stdio = 'inherit') {
   return { ok: res.status === 0, status: res.status ?? 1 };
 }
 
-function detectPythonCandidate() {
-  for (const candidate of getPythonCandidates()) {
-    const probe = runPythonWithCandidate(candidate, ['-c', 'import sys; print(sys.executable)'], 'pipe');
-    if (probe.ok) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
 function runPython(args, stdio = 'inherit', preferredCandidate = null) {
   if (preferredCandidate) {
     const direct = runPythonWithCandidate(preferredCandidate, args, stdio);

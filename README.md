@@ -59,7 +59,7 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 
 - Primary DB: `data/archimap.db`
   - `building_contours` (geometry + OSM tags)
-  - `building_contours_rtree` (SQLite R*Tree bbox index)
+  - `building_contours_rtree` (SQLite R\*Tree bbox index)
   - Search structures (`building_search_source`, `building_search_fts`)
   - Filter tag key cache (`filter_tag_keys_cache`)
 - Local metadata DB: `data/local-edits.db`
@@ -207,8 +207,8 @@ Index lifecycle:
 - Data API: `POST /api/buildings/filter-data` with `keys: string[]`.
 - BBox query path:
   - primary: `building_contours_rtree` -> `building_contours` -> `local.architectural_info`,
-  - fallback: direct bbox scan on `building_contours` when R*Tree is unavailable/not ready.
-- R*Tree lifecycle:
+  - fallback: direct bbox scan on `building_contours` when R\*Tree is unavailable/not ready.
+- R\*Tree lifecycle:
   - schema + triggers are ensured on startup and during sync,
   - startup never blocks HTTP availability; rebuild runs in background batches,
   - rebuild progress is logged in server console.

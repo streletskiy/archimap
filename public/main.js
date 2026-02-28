@@ -214,7 +214,6 @@ let selected = null;
 let urlSelectionSyncSeq = 0;
 let isAuthenticated = false;
 let isAdmin = false;
-let isMasterAdmin = false;
 let currentUser = null;
 let canEditBuildings = false;
 let loadTimer = null;
@@ -1572,14 +1571,12 @@ async function loadAuthState() {
   isAuthenticated = Boolean(data.authenticated);
   currentUser = data?.user || null;
   isAdmin = Boolean(currentUser?.isAdmin);
-  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
   canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
   csrfToken = String(data?.csrfToken || '') || null;
   renderAuth();
 }
 
 function renderAuth() {
-  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
   canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
   if (loginUsernameEl) {
     loginUsernameEl.placeholder = t('authLoginEmailPlaceholder', null, 'Email');
@@ -2135,7 +2132,6 @@ async function confirmRegistrationByToken(token) {
   isAuthenticated = true;
   currentUser = data?.user || null;
   isAdmin = Boolean(currentUser?.isAdmin);
-  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
   canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
   csrfToken = String(data?.csrfToken || '') || csrfToken;
   pendingRegistrationEmail = null;
@@ -2143,12 +2139,6 @@ async function confirmRegistrationByToken(token) {
   clearRegisterTokenFromUrl();
   renderAuth();
   return true;
-}
-
-function openProfileModal() {
-  if (!isAuthenticated || !profileModalEl) return;
-  profileModalEl.classList.remove('hidden');
-  profileModalEl.setAttribute('aria-hidden', 'false');
 }
 
 function closeProfileModal() {
@@ -2451,18 +2441,6 @@ const runBuildingSearchDebounced = debounce((text) => {
   runBuildingSearch(text, { append: false });
 }, 320);
 
-function formatChangeValue(value) {
-  if (value == null || value === '') return '—';
-  return String(value);
-}
-
-function formatUpdatedAt(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('ru-RU');
-}
-
 function setSelectedFeature(feature) {
   const source = map.getSource('selected-building');
   if (!source) return;
@@ -2726,7 +2704,6 @@ loginForm.addEventListener('submit', async (event) => {
   isAuthenticated = true;
   currentUser = data?.user || null;
   isAdmin = Boolean(currentUser?.isAdmin);
-  isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
   canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
   csrfToken = String(data?.csrfToken || '') || csrfToken;
   renderAuth();
@@ -2783,7 +2760,6 @@ if (registerFormEl && isRegistrationUiEnabled()) {
       isAuthenticated = true;
       currentUser = data.user;
       isAdmin = Boolean(currentUser?.isAdmin);
-      isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
       canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
       csrfToken = String(data?.csrfToken || '') || csrfToken;
       renderAuth();
@@ -2843,7 +2819,6 @@ if (registerVerifyFormEl && isRegistrationUiEnabled()) {
     isAuthenticated = true;
     currentUser = data?.user || null;
     isAdmin = Boolean(currentUser?.isAdmin);
-    isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
     canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
     csrfToken = String(data?.csrfToken || '') || csrfToken;
     renderAuth();
@@ -2929,7 +2904,6 @@ logoutBtn.addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   isAuthenticated = false;
   isAdmin = false;
-  isMasterAdmin = false;
   currentUser = null;
   canEditBuildings = false;
   csrfToken = null;
@@ -2941,7 +2915,6 @@ if (settingsLogoutBtnEl) {
     await fetch('/api/logout', { method: 'POST' });
     isAuthenticated = false;
     isAdmin = false;
-    isMasterAdmin = false;
     currentUser = null;
     canEditBuildings = false;
     csrfToken = null;
@@ -3026,7 +2999,6 @@ if (profileLogoutBtnEl) {
     await fetch('/api/logout', { method: 'POST' });
     isAuthenticated = false;
     isAdmin = false;
-    isMasterAdmin = false;
     currentUser = null;
     canEditBuildings = false;
     csrfToken = null;

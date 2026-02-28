@@ -16,7 +16,7 @@ async function waitForServerReady(timeoutMs = 15000) {
       if (response.ok) {
         return;
       }
-    } catch (_) {
+    } catch {
       // Server is not ready yet.
     }
     await sleep(300);
