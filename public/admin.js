@@ -715,11 +715,12 @@ function renderUserRows(items) {
 }
 
 function getEditAddress(item) {
+  if (item?.values?.address) return String(item.values.address);
+  if (item?.local?.address) return String(item.local.address);
   const changes = Array.isArray(item?.changes) ? item.changes : [];
   const addressChange = changes.find((change) => change?.field === 'address');
   if (addressChange?.localValue) return String(addressChange.localValue);
   if (addressChange?.osmValue) return String(addressChange.osmValue);
-  if (item?.local?.address) return String(item.local.address);
   return `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
 }
 
