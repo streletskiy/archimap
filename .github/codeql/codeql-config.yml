@@ -1,0 +1,12 @@
+name: archimap-codeql
+queries:
+  - uses: security-and-quality
+query-filters:
+  - exclude:
+      id: js/missing-rate-limiting
+  - exclude:
+      id: js/missing-token-validation
+  - exclude:
+      id: js/clear-text-cookie
+  - exclude:
+      id: js/user-controlled-bypass

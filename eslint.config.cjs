@@ -13,7 +13,18 @@ module.exports = [
   },
   js.configs.recommended,
   {
-    files: ['server.js', 'auth.js', 'scripts/**/*.js', 'email-templates/**/*.js'],
+    files: [
+      'server.js',
+      'auth.js',
+      'scripts/**/*.js',
+      'email-templates/**/*.js',
+      'infra/**/*.js',
+      'routes/**/*.js',
+      'services/**/*.js',
+      'workers/**/*.js',
+      'db/migrations/**/*.js',
+      'tests/**/*.js'
+    ],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script',

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { requireCsrfSession } = require('./services/csrf.service');
 const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
@@ -132,17 +133,36 @@ function registerAuthRoutes({
   createSimpleRateLimiter,
   sessionSecret,
   userEditRequiresPermission,
+  getUserEditRequiresPermission,
   registrationEnabled,
+  getRegistrationEnabled,
   registrationCodeTtlMinutes,
   registrationCodeResendCooldownSec,
   registrationCodeMaxAttempts,
   registrationMinPasswordLength,
   passwordResetTtlMinutes,
   appBaseUrl,
+  getAppBaseUrl,
   appDisplayName,
-  smtp
+  getAppDisplayName,
+  smtp,
+  getSmtpConfig
 }) {
   let smtpTransporter = null;
+  let smtpTransportFingerprint = '';
+
+  function resolveSmtpConfig() {
+    const raw = typeof getSmtpConfig === 'function' ? (getSmtpConfig() || {}) : (smtp || {});
+    return {
+      url: String(raw.url || '').trim(),
+      host: String(raw.host || '').trim(),
+      port: Number(raw.port || 587),
+      secure: String(raw.secure ?? 'false').toLowerCase() === 'true' || raw.secure === true,
+      user: String(raw.user || '').trim(),
+      pass: String(raw.pass || '').trim(),
+      from: String(raw.from || raw.user || '').trim()
+    };
+  }
 
   function ensureCsrfToken(req) {
     if (!req?.session) return null;
@@ -150,6 +170,27 @@ function registerAuthRoutes({
       req.session.csrfToken = generateCsrfToken();
     }
     return String(req.session.csrfToken || '');
+  }
+
+  function resolveUserEditRequiresPermission() {
+    if (typeof getUserEditRequiresPermission === 'function') {
+      return Boolean(getUserEditRequiresPermission());
+    }
+    return Boolean(userEditRequiresPermission);
+  }
+
+  function resolveRegistrationEnabled() {
+    if (typeof getRegistrationEnabled === 'function') {
+      return Boolean(getRegistrationEnabled());
+    }
+    return Boolean(registrationEnabled);
+  }
+
+  function resolveAppDisplayName() {
+    if (typeof getAppDisplayName === 'function') {
+      return String(getAppDisplayName() || 'archimap').trim() || 'archimap';
+    }
+    return String(appDisplayName || 'archimap').trim() || 'archimap';
   }
 
   function normalizeProfileName(value, maxLen = 80) {
@@ -183,7 +224,7 @@ function registerAuthRoutes({
     const isMasterAdmin = Number(row?.is_master_admin || 0) > 0;
     const isAdmin = isMasterAdmin || Number(row?.is_admin || 0) > 0;
     const canEdit = Number(row?.can_edit || 0) > 0;
-    const canEditBuildings = isAdmin ? true : (userEditRequiresPermission ? canEdit : true);
+    const canEditBuildings = isAdmin ? true : (resolveUserEditRequiresPermission() ? canEdit : true);
     return {
       username: String(row?.email || ''),
       email: String(row?.email || ''),
@@ -209,16 +250,6 @@ function registerAuthRoutes({
     return user;
   }
 
-  function requireCsrfSession(req, res, next) {
-    if (!req?.session?.user) return next();
-    const expected = String(req.session.csrfToken || '');
-    const provided = String(req.get('x-csrf-token') || '');
-    if (!expected || !provided || expected !== provided) {
-      return res.status(403).json({ error: 'CSRF token missing or invalid' });
-    }
-    return next();
-  }
-
   function requireAdminSession(req, res, next) {
     const user = resolveSessionUser(req);
     if (!user || !user.isAdmin) {
@@ -236,55 +267,74 @@ function registerAuthRoutes({
   }
 
   function isEmailDeliveryConfigured() {
-    if (smtp.url) return Boolean(smtp.from);
-    return Boolean(smtp.host && smtp.port && smtp.user && smtp.pass && smtp.from);
+    const smtpConfig = resolveSmtpConfig();
+    if (smtpConfig.url) return Boolean(smtpConfig.from);
+    return Boolean(smtpConfig.host && smtpConfig.port && smtpConfig.user && smtpConfig.pass && smtpConfig.from);
   }
 
   function getSmtpTransporter() {
-    if (smtpTransporter) return smtpTransporter;
-    if (smtp.url) {
-      smtpTransporter = nodemailer.createTransport(smtp.url);
+    const smtpConfig = resolveSmtpConfig();
+    const fingerprint = JSON.stringify({
+      url: smtpConfig.url,
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      user: smtpConfig.user,
+      pass: smtpConfig.pass
+    });
+    if (smtpTransporter && smtpTransportFingerprint === fingerprint) return smtpTransporter;
+
+    if (smtpConfig.url) {
+      smtpTransporter = nodemailer.createTransport(smtpConfig.url);
+      smtpTransportFingerprint = fingerprint;
       return smtpTransporter;
     }
-    if (!smtp.host || !smtp.port || !smtp.user || !smtp.pass) {
+    if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.user || !smtpConfig.pass) {
       throw new Error('SMTP configuration is incomplete');
     }
     smtpTransporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.secure,
-      auth: { user: smtp.user, pass: smtp.pass }
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      auth: { user: smtpConfig.user, pass: smtpConfig.pass }
     });
+    smtpTransportFingerprint = fingerprint;
     return smtpTransporter;
   }
 
   async function sendRegistrationCodeEmail({ to, code, expiresInMinutes, confirmUrl }) {
+    const effectiveAppDisplayName = resolveAppDisplayName();
+    const smtpConfig = resolveSmtpConfig();
     const transporter = getSmtpTransporter();
     const mailOptions = {
-      from: smtp.from,
+      from: smtpConfig.from,
       to,
-      subject: `${appDisplayName}: код подтверждения регистрации`,
-      text: registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl }),
-      html: registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl })
+      subject: `${effectiveAppDisplayName}: код подтверждения регистрации`,
+      text: registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName: effectiveAppDisplayName, confirmUrl }),
+      html: registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName: effectiveAppDisplayName, confirmUrl })
     };
     return transporter.sendMail(mailOptions);
   }
 
   async function sendPasswordResetEmail({ to, resetUrl, expiresInMinutes }) {
+    const effectiveAppDisplayName = resolveAppDisplayName();
+    const smtpConfig = resolveSmtpConfig();
     const transporter = getSmtpTransporter();
     const mailOptions = {
-      from: smtp.from,
+      from: smtpConfig.from,
       to,
-      subject: `${appDisplayName}: сброс пароля`,
-      text: passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName }),
-      html: passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName })
+      subject: `${effectiveAppDisplayName}: сброс пароля`,
+      text: passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName: effectiveAppDisplayName }),
+      html: passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName: effectiveAppDisplayName })
     };
     return transporter.sendMail(mailOptions);
   }
 
   function resolveAppBaseUrl(_req) {
-    if (!appBaseUrl) return '';
-    return appBaseUrl.replace(/\/+$/, '');
+    const value = typeof getAppBaseUrl === 'function' ? getAppBaseUrl() : appBaseUrl;
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return text.replace(/\/+$/, '');
   }
 
   const loginRateLimiter = createSimpleRateLimiter({
@@ -394,7 +444,7 @@ function registerAuthRoutes({
       isAdmin: makeAdmin || makeMasterAdmin,
       isMasterAdmin: makeMasterAdmin,
       canEdit: allowEdit,
-      canEditBuildings: (makeAdmin || makeMasterAdmin) ? true : (userEditRequiresPermission ? allowEdit : true),
+      canEditBuildings: (makeAdmin || makeMasterAdmin) ? true : (resolveUserEditRequiresPermission() ? allowEdit : true),
       firstName: firstName || null,
       lastName: lastName || null
     };
@@ -403,7 +453,7 @@ function registerAuthRoutes({
 
   app.post('/api/register/start', registrationCodeRequestRateLimiter, async (req, res) => {
     const bootstrapFirstAdmin = isFirstUserBootstrapAvailable();
-    if (!registrationEnabled && !bootstrapFirstAdmin) {
+    if (!resolveRegistrationEnabled() && !bootstrapFirstAdmin) {
       return res.status(403).json({ error: 'Регистрация отключена' });
     }
 
@@ -411,11 +461,16 @@ function registerAuthRoutes({
     const password = String(req.body?.password || '');
     const firstName = normalizeProfileName(req.body?.firstName);
     const lastName = normalizeProfileName(req.body?.lastName);
+    const acceptTerms = req.body?.acceptTerms === true;
+    const acceptPrivacy = req.body?.acceptPrivacy === true;
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Укажите корректный email' });
     }
     if (password.length < registrationMinPasswordLength) {
       return res.status(400).json({ error: `Пароль должен содержать минимум ${registrationMinPasswordLength} символов` });
+    }
+    if (!acceptTerms || !acceptPrivacy) {
+      return res.status(400).json({ error: 'Для регистрации необходимо принять пользовательское соглашение и политику конфиденциальности' });
     }
 
     if (bootstrapFirstAdmin) {
@@ -511,7 +566,7 @@ function registerAuthRoutes({
   });
 
   app.post('/api/register/confirm-code', registrationConfirmRateLimiter, async (req, res) => {
-    if (!registrationEnabled) {
+    if (!resolveRegistrationEnabled()) {
       return res.status(403).json({ error: 'Регистрация отключена' });
     }
 
@@ -569,7 +624,7 @@ function registerAuthRoutes({
   });
 
   app.post('/api/register/confirm-link', registrationConfirmRateLimiter, async (req, res) => {
-    if (!registrationEnabled) {
+    if (!resolveRegistrationEnabled()) {
       return res.status(403).json({ error: 'Регистрация отключена' });
     }
 

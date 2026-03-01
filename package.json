@@ -3,16 +3,19 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{json,md,yml,yaml}\"",
-    "test": "npm run test:syntax && npm run test:smoke",
+    "test": "npm run test:unit && npm run test:integration && npm run test:syntax && npm run test:smoke",
+    "test:unit": "node --test tests/services tests/i18n",
+    "test:integration": "node --test tests/integration",
     "test:syntax": "node --check server.js && node --check auth.js",
     "test:smoke": "node scripts/smoke-test.js",
     "dev": "node server.js",
     "start": "node server.js",
-    "sync:city": "node scripts/sync-osm-buildings.js"
+    "sync:city": "node scripts/sync-osm-buildings.js",
+    "migrate": "node scripts/migrate.js"
   },
   "keywords": [],
   "author": "",

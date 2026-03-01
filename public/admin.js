@@ -23,8 +23,16 @@ const adminState = {
   editsStatus: 'pending'
 };
 
-const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
-const UI_TEXT = Object.freeze(I18N_RU.ui || {});
+const textTools = window.ArchiMapTextUtils?.createUiTextTools
+  ? window.ArchiMapTextUtils.createUiTextTools()
+  : null;
+const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
+const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
+const panelPageUtils = window.ArchiMapPanelPage || null;
+const adminUsersUtils = window.ArchiMapAdminUsers || null;
+const adminEditsUtils = window.ArchiMapAdminEdits || null;
+const adminMapUtils = window.ArchiMapAdminMap || null;
+const adminGuideUiKitUtils = window.ArchiMapAdminGuideUiKit || null;
 
 const adminAppEl = document.getElementById('admin-app');
 const adminLoadingEl = document.getElementById('admin-loading');
@@ -33,17 +41,17 @@ const navLogoLinkEl = document.getElementById('nav-logo-link');
 const mapReturnLinkEl = document.getElementById('map-return-link');
 const mapReturnMenuLinkEl = document.getElementById('map-return-menu-link');
 const logoutBtnEl = document.getElementById('settings-logout-btn');
-const settingsBuildLinkEl = document.getElementById('settings-build-link');
-const settingsBuildTextEl = document.getElementById('settings-build-text');
 const themeToggleEl = document.getElementById('theme-toggle');
 const navMenuButtonEl = document.getElementById('nav-menu-button');
 const navMenuPanelEl = document.getElementById('nav-menu-panel');
 const tabUsersEl = document.getElementById('tab-users');
 const tabEditsEl = document.getElementById('tab-edits');
+const tabSettingsEl = document.getElementById('tab-settings');
 const tabGuideEl = document.getElementById('tab-guide');
 const tabUiKitEl = document.getElementById('tab-uikit');
 const usersPanelEl = document.getElementById('users-panel');
 const editsPanelEl = document.getElementById('edits-panel');
+const settingsPanelEl = document.getElementById('settings-panel');
 const guidePanelEl = document.getElementById('guide-panel');
 const uiKitPanelEl = document.getElementById('uikit-panel');
 const adminGuideTitleEl = document.getElementById('admin-guide-title');
@@ -99,41 +107,38 @@ const editDetailCloseEl = document.getElementById('edit-detail-close');
 const editDetailTitleEl = document.getElementById('edit-detail-title');
 const editDetailMetaEl = document.getElementById('edit-detail-meta');
 const editDetailListEl = document.getElementById('edit-detail-list');
-const THEME_STORAGE_KEY = 'archimap-theme';
-const LAST_MAP_HASH_STORAGE_KEY = 'archimap-last-map-hash';
+const smtpStatusEl = document.getElementById('smtp-settings-status');
+const generalStatusEl = document.getElementById('general-settings-status');
+const generalAppDisplayNameEl = document.getElementById('general-app-display-name');
+const generalAppBaseUrlEl = document.getElementById('general-app-base-url');
+const generalRegistrationEnabledEl = document.getElementById('general-registration-enabled');
+const generalUserEditRequiresPermissionEl = document.getElementById('general-user-edit-requires-permission');
+const generalSaveBtnEl = document.getElementById('general-save-btn');
+const smtpUrlEl = document.getElementById('smtp-url');
+const smtpHostEl = document.getElementById('smtp-host');
+const smtpPortEl = document.getElementById('smtp-port');
+const smtpSecureEl = document.getElementById('smtp-secure');
+const smtpUserEl = document.getElementById('smtp-user');
+const smtpPassEl = document.getElementById('smtp-pass');
+const smtpFromEl = document.getElementById('smtp-from');
+const smtpKeepPasswordEl = document.getElementById('smtp-keep-password');
+const smtpTestBtnEl = document.getElementById('smtp-test-btn');
+const smtpSaveBtnEl = document.getElementById('smtp-save-btn');
 const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
 const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
 const PMTILES_CONFIG = Object.freeze({
   url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
   sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
 });
-const BUILD_INFO_CONFIG = Object.freeze({
-  shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
-  version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
-  repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
-});
 let uiKitInitialized = false;
+let smtpSettingsLoaded = false;
+let smtpHasPassword = false;
+let generalSettingsLoaded = false;
 
 const nativeFetch = window.fetch.bind(window);
 
 function getUI() {
   return window.ArchiMapUI || null;
-}
-
-function t(key, params = null, fallback = '') {
-  const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
-  const base = String(template || fallback || '');
-  if (!params || typeof params !== 'object') return base;
-  return base.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? '' : String(params[name])));
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
 }
 
 function getLoginRedirectUrl() {
@@ -164,7 +169,7 @@ function applyTheme(theme) {
   const next = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, next);
+    localStorage.setItem('archimap-theme', next);
   } catch {
     // ignore
   }
@@ -172,88 +177,42 @@ function applyTheme(theme) {
   applyAdminMapTheme(next);
 }
 
-function initThemeToggle() {
-  const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  if (themeToggleEl) {
-    themeToggleEl.checked = current === 'dark';
-    themeToggleEl.addEventListener('change', () => {
-      applyTheme(themeToggleEl.checked ? 'dark' : 'light');
-    });
-  }
-}
-
 function initUiKitClasses() {
   const ui = getUI();
   if (!ui) return;
   if (typeof ui.fieldClass === 'function') {
-    [usersSearchEl, usersRoleFilterEl, usersCanEditFilterEl, usersSortByEl, editsSearchEl, editsDateFilterEl, editsUserFilterEl].forEach((el) => {
+    [
+      usersSearchEl,
+      usersRoleFilterEl,
+      usersCanEditFilterEl,
+      usersSortByEl,
+      usersSortDirEl,
+      editsSearchEl,
+      editsDateFilterEl,
+      editsUserFilterEl,
+      editsStatusFilterEl,
+      generalAppDisplayNameEl,
+      generalAppBaseUrlEl,
+      smtpUrlEl,
+      smtpHostEl,
+      smtpPortEl,
+      smtpUserEl,
+      smtpPassEl,
+      smtpFromEl
+    ].forEach((el) => {
       if (el) el.className = ui.fieldClass('input');
     });
   }
   if (typeof ui.buttonClass === 'function') {
     if (usersRefreshEl) usersRefreshEl.className = ui.buttonClass('secondary');
+    if (generalSaveBtnEl) generalSaveBtnEl.className = ui.buttonClass('primary');
+    if (smtpTestBtnEl) smtpTestBtnEl.className = ui.buttonClass('secondary');
+    if (smtpSaveBtnEl) smtpSaveBtnEl.className = ui.buttonClass('primary');
+    if (adminUiEmailRefreshEl) adminUiEmailRefreshEl.className = ui.buttonClass('secondary', 'xs');
+    if (logoutBtnEl) logoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
   }
 }
 
-function renderBuildInfoLink() {
-  if (!settingsBuildLinkEl) return;
-  settingsBuildLinkEl.href = BUILD_INFO_CONFIG.repoUrl;
-  if (settingsBuildTextEl) {
-    settingsBuildTextEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
-  } else {
-    settingsBuildLinkEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
-  }
-}
-
-function getMapReturnHref() {
-  try {
-    const hash = String(localStorage.getItem(LAST_MAP_HASH_STORAGE_KEY) || '').trim();
-    return hash.startsWith('#map=') ? `/${hash}` : '/';
-  } catch {
-    return '/';
-  }
-}
-
-function initMapReturnLinks() {
-  const href = getMapReturnHref();
-  if (navLogoLinkEl) navLogoLinkEl.setAttribute('href', href);
-  if (mapReturnLinkEl) mapReturnLinkEl.setAttribute('href', href);
-  if (mapReturnMenuLinkEl) mapReturnMenuLinkEl.setAttribute('href', href);
-}
-
-function setNavMenuOpen(open) {
-  if (!navMenuButtonEl || !navMenuPanelEl) return;
-  navMenuPanelEl.classList.toggle('opacity-0', !open);
-  navMenuPanelEl.classList.toggle('pointer-events-none', !open);
-  navMenuPanelEl.classList.toggle('max-h-0', !open);
-  navMenuPanelEl.classList.toggle('-translate-y-2', !open);
-  navMenuPanelEl.classList.toggle('scale-95', !open);
-  navMenuPanelEl.classList.toggle('max-h-[420px]', open);
-  navMenuPanelEl.classList.toggle('translate-y-0', open);
-  navMenuPanelEl.classList.toggle('scale-100', open);
-  navMenuButtonEl.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-function initNavMenu() {
-  if (!navMenuButtonEl || !navMenuPanelEl) return;
-  setNavMenuOpen(false);
-
-  navMenuButtonEl.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const expanded = navMenuButtonEl.getAttribute('aria-expanded') === 'true';
-    setNavMenuOpen(!expanded);
-  });
-
-  document.addEventListener('click', (event) => {
-    if (!navMenuPanelEl.contains(event.target) && !navMenuButtonEl.contains(event.target)) {
-      setNavMenuOpen(false);
-    }
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setNavMenuOpen(false);
-  });
-}
 
 function setAppVisibility(visible) {
   if (adminAppEl) adminAppEl.classList.toggle('hidden', !visible);
@@ -344,16 +303,20 @@ function setTabButtonState(button, active) {
 function setTab(nextTab, options = {}) {
   adminState.tab = nextTab === 'edits'
     ? 'edits'
-    : (nextTab === 'guide' ? 'guide' : (nextTab === 'uikit' ? 'uikit' : 'users'));
+    : (nextTab === 'settings'
+      ? 'settings'
+      : (nextTab === 'guide' ? 'guide' : (nextTab === 'uikit' ? 'uikit' : 'users')));
   const push = options.push !== false;
 
   if (usersPanelEl) usersPanelEl.classList.toggle('hidden', adminState.tab !== 'users');
   if (editsPanelEl) editsPanelEl.classList.toggle('hidden', adminState.tab !== 'edits');
+  if (settingsPanelEl) settingsPanelEl.classList.toggle('hidden', adminState.tab !== 'settings');
   if (guidePanelEl) guidePanelEl.classList.toggle('hidden', adminState.tab !== 'guide');
   if (uiKitPanelEl) uiKitPanelEl.classList.toggle('hidden', adminState.tab !== 'uikit');
 
   setTabButtonState(tabUsersEl, adminState.tab === 'users');
   setTabButtonState(tabEditsEl, adminState.tab === 'edits');
+  setTabButtonState(tabSettingsEl, adminState.tab === 'settings');
   setTabButtonState(tabGuideEl, adminState.tab === 'guide');
   setTabButtonState(tabUiKitEl, adminState.tab === 'uikit');
 
@@ -366,6 +329,10 @@ function setTab(nextTab, options = {}) {
   }
   if (adminState.tab === 'uikit') {
     renderAdminUiKit();
+  }
+  if (adminState.tab === 'settings') {
+    loadGeneralSettings();
+    loadSmtpSettings();
   }
 
   if (push) writeStateToUrl();
@@ -464,6 +431,9 @@ function renderAdminGuide() {
 }
 
 function renderUiEmailCard(title, template) {
+  if (adminGuideUiKitUtils?.renderUiEmailCard) {
+    return adminGuideUiKitUtils.renderUiEmailCard(title, template, { t, escapeHtml });
+  }
   const subject = String(template?.subject || '');
   const html = String(template?.html || '');
   const text = String(template?.text || '');
@@ -473,11 +443,11 @@ function renderUiEmailCard(title, template) {
     '<p class="mt-1 text-xs text-slate-500">' + escapeHtml(t('uiEmailSubject', { value: subject }, 'Subject: {value}')) + '</p>',
     '<div class="mt-3 grid gap-3 xl:grid-cols-2">',
     '<div class="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">',
-    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailHtml', 'HTML')) + '</p>',
+    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailHtml', null, 'HTML')) + '</p>',
     '<iframe class="h-[420px] w-full bg-white" sandbox="" referrerpolicy="no-referrer" srcdoc="' + escapeHtml(html) + '"></iframe>',
     '</div>',
     '<div class="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">',
-    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailText', 'Text')) + '</p>',
+    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailText', null, 'Text')) + '</p>',
     '<pre class="m-0 h-[420px] overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-5 text-slate-700">' + escapeHtml(text) + '</pre>',
     '</div>',
     '</div>',
@@ -518,7 +488,7 @@ function renderAdminUiKit() {
   setText(adminUiBadgesTitleEl, t('uiSectionBadges', null, 'Бейджи'));
   if (adminUiBadgesApiEl) adminUiBadgesApiEl.innerHTML = t('uiBadgesApiHtml', null, 'API: <code>ArchiMapUI.badge(text, variant)</code>');
   setText(adminUiTogglesTitleEl, t('uiSectionToggles', null, 'Рычажки'));
-  if (adminUiTogglesApiEl) adminUiTogglesApiEl.innerHTML = t('uiTogglesApiHtml', null, 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.');
+  if (adminUiTogglesApiEl) adminUiTogglesApiEl.innerHTML = t('uiTogglesApiHtml', null, 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>disabled</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.');
   setText(adminUiPanelTitleEl, t('uiSectionPanel', null, 'Панель'));
   if (adminUiPanelApiEl) adminUiPanelApiEl.innerHTML = t('uiPanelApiHtml', null, 'API: <code>ArchiMapUI.panel(content, options)</code>');
   setText(adminUiHeaderTitleEl, t('uiSectionHeader', null, 'Section Header'));
@@ -526,7 +496,7 @@ function renderAdminUiKit() {
   setText(adminUiTabsTitleEl, t('uiSectionTabs', null, 'Вкладки'));
   if (adminUiTabsApiEl) adminUiTabsApiEl.innerHTML = t('uiTabsApiHtml', null, 'API: <code>ArchiMapUI.tabButtonClass(active)</code>');
   setText(adminUiFieldsTitleEl, t('uiSectionFields', null, 'Поля и кнопки'));
-  if (adminUiFieldsApiEl) adminUiFieldsApiEl.innerHTML = t('uiFieldsApiHtml', null, 'API: <code>ArchiMapUI.fieldClass(kind)</code>, <code>ArchiMapUI.buttonClass(variant)</code>');
+  if (adminUiFieldsApiEl) adminUiFieldsApiEl.innerHTML = t('uiFieldsApiHtml', null, 'API: <code>ArchiMapUI.fieldClass(kind, size?)</code>, <code>ArchiMapUI.buttonClass(variant, size?)</code>');
   setText(adminUiEmailsTitleEl, t('uiSectionEmails', null, 'Email шаблоны (preview)'));
   setText(adminUiEmailRefreshEl, t('uiRefresh', null, 'Обновить'));
   setText(adminUiEmailStatusEl, t('uiLoading', null, 'Загрузка...'));
@@ -548,8 +518,43 @@ function renderAdminUiKit() {
   }
   if (adminUiTogglesEl) {
     adminUiTogglesEl.innerHTML = [
-      ui.renderToggle({ id: 'admin-demo-theme', ariaLabel: 'theme', withIcons: true, kind: 'theme', checkedColorClass: 'peer-checked:bg-brand-purple', checkedKnobClass: 'peer-checked:bg-violet-50', checkedIconClass: 'peer-checked:text-white' }),
-      ui.renderToggle({ id: 'admin-demo-labels', ariaLabel: 'labels', withIcons: true, kind: 'labels', checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' })
+      '<div class="flex flex-wrap gap-3">',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleEnabled', null, 'Обычный (выключен)')) + '</p>',
+      ui.renderToggle({
+        id: 'admin-demo-theme',
+        ariaLabel: 'theme',
+        withIcons: true,
+        kind: 'theme',
+        checkedColorClass: 'peer-checked:bg-brand-purple',
+        checkedKnobClass: 'peer-checked:bg-violet-50',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700'
+      }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleDisabled', null, 'Disabled')) + '</p>',
+      ui.renderToggle({
+        id: 'admin-demo-theme-disabled',
+        ariaLabel: 'theme-disabled',
+        withIcons: true,
+        kind: 'theme',
+        disabled: true,
+        checkedColorClass: 'peer-checked:bg-brand-purple',
+        checkedKnobClass: 'peer-checked:bg-violet-50',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700'
+      }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleLabels', null, 'Обозначения')) + '</p>',
+      ui.renderToggle({ id: 'admin-demo-labels', ariaLabel: 'labels', withIcons: true, kind: 'labels', checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleLabelsDisabled', null, 'Обозначения (disabled)')) + '</p>',
+      ui.renderToggle({ id: 'admin-demo-labels-disabled', ariaLabel: 'labels-disabled', withIcons: true, kind: 'labels', disabled: true, checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' }),
+      '</div>',
+      '</div>'
     ].join('');
   }
   if (adminUiPanelDemoEl) {
@@ -560,7 +565,7 @@ function renderAdminUiKit() {
   }
   if (adminUiTabsDemoEl) {
     adminUiTabsDemoEl.innerHTML = [
-      '<div class="flex gap-2">',
+      '<div class="ui-tab-shell inline-flex gap-1">',
       '<button type="button" class="' + ui.tabButtonClass(true) + '">' + escapeHtml(t('uiTabActive', null, 'Активная')) + '</button>',
       '<button type="button" class="' + ui.tabButtonClass(false) + '">' + escapeHtml(t('uiTabInactive', null, 'Неактивная')) + '</button>',
       '</div>'
@@ -574,6 +579,8 @@ function renderAdminUiKit() {
       '<button type="button" class="' + ui.buttonClass('primary') + '">Primary</button>',
       '<button type="button" class="' + ui.buttonClass('outlineBrand') + '">Outline Brand</button>',
       '<button type="button" class="' + ui.buttonClass('secondary') + '">Secondary</button>',
+      '<button type="button" class="' + ui.buttonClass('danger') + '">Danger</button>',
+      '<button type="button" class="' + ui.buttonClass('secondary', 'xs') + '">Secondary XS</button>',
       '</div>'
     ].join('');
   }
@@ -627,6 +634,8 @@ async function loadMe() {
   csrfToken = String(data.csrfToken || '') || null;
   isMasterAdmin = Boolean(user.isMasterAdmin);
   currentAdminEmail = String(user.email || '').trim().toLowerCase();
+  if (tabSettingsEl) tabSettingsEl.classList.toggle('hidden', !isMasterAdmin);
+  if (settingsPanelEl && !isMasterAdmin) settingsPanelEl.classList.add('hidden');
 
   if (!user.isAdmin) {
     setText(subtitleEl, t('adminAccessDenied', null, 'Доступ запрещен: нужны права администратора'));
@@ -635,6 +644,7 @@ async function loadMe() {
     return null;
   }
 
+  if (logoutBtnEl) logoutBtnEl.classList.remove('hidden');
   setText(subtitleEl, String(user.email || user.username || 'admin'));
   return user;
 }
@@ -642,6 +652,12 @@ async function loadMe() {
 function renderUserRows(items) {
   if (!usersListEl) return;
   const ui = getUI();
+  const secondarySmallClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'xs')
+    : 'rounded-[12px] border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700';
+  const outlineSmallClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('outlineBrand', 'xs')
+    : 'rounded-[12px] border border-violet-300 bg-white px-2 py-1 text-xs text-violet-700';
   const renderBadge = (text, variant, fallbackClass) => {
     if (ui && typeof ui.badge === 'function') return ui.badge(text, variant);
     return `<span class="rounded-full px-2.5 py-1 text-xs font-medium ${fallbackClass}">${escapeHtml(text)}</span>`;
@@ -652,17 +668,17 @@ function renderUserRows(items) {
   }
 
   usersListEl.innerHTML = items.map((item) => {
-    const email = String(item?.email || '').trim().toLowerCase();
-    const firstName = String(item?.firstName || '').trim();
-    const lastName = String(item?.lastName || '').trim();
-    const displayName = [firstName, lastName].filter(Boolean).join(' ') || email;
-    const isAdmin = Boolean(item?.isAdmin);
-    const isMasterAdminAccount = Boolean(item?.isMasterAdmin);
-    const isCurrentUser = Boolean(currentAdminEmail) && email === currentAdminEmail;
-    const isSelfMasterAdminDemotionLocked = isAdmin && isMasterAdminAccount && isCurrentUser;
-    const canEdit = Boolean(item?.canEdit);
-    const editsCount = Number(item?.editsCount || 0);
-    const createdAt = String(item?.createdAt || '').replace('T', ' ').replace('Z', '');
+    const model = adminUsersUtils?.buildUserViewModel
+      ? adminUsersUtils.buildUserViewModel(item, currentAdminEmail)
+      : null;
+    const email = String(model?.email || item?.email || '').trim().toLowerCase();
+    const displayName = String(model?.displayName || email);
+    const isAdmin = Boolean(model?.isAdmin ?? item?.isAdmin);
+    const isMasterAdminAccount = Boolean(model?.isMasterAdminAccount ?? item?.isMasterAdmin);
+    const isSelfMasterAdminDemotionLocked = Boolean(model?.isSelfMasterAdminDemotionLocked);
+    const canEdit = Boolean(model?.canEdit ?? item?.canEdit);
+    const editsCount = Number((model?.editsCount ?? item?.editsCount) || 0);
+    const createdAt = String(model?.createdAt || item?.createdAt || '').replace('T', ' ').replace('Z', '');
 
     return `
       <tr class="border-t border-slate-200 hover:bg-slate-50">
@@ -681,7 +697,7 @@ function renderUserRows(items) {
         </td>
         <td class="px-4 py-3 text-right">
           <div class="inline-flex gap-1">
-            <button data-action="toggle-edit" data-email="${escapeHtml(email)}" data-can-edit="${canEdit ? '1' : '0'}" class="rounded-[12px] border px-2 py-1 text-xs ${canEdit ? 'border-emerald-300 text-emerald-700' : 'border-slate-300 text-slate-700'}">${canEdit ? escapeHtml(t('adminToggleEditOn', null, 'Запретить')) : escapeHtml(t('adminToggleEditOff', null, 'Разрешить'))}</button>
+            <button data-action="toggle-edit" data-email="${escapeHtml(email)}" data-can-edit="${canEdit ? '1' : '0'}" class="${canEdit ? `${secondarySmallClass} border-emerald-300 text-emerald-700` : secondarySmallClass}">${canEdit ? escapeHtml(t('adminToggleEditOn', null, 'Запретить')) : escapeHtml(t('adminToggleEditOff', null, 'Разрешить'))}</button>
             <button
               data-action="toggle-admin"
               data-email="${escapeHtml(email)}"
@@ -689,7 +705,7 @@ function renderUserRows(items) {
               data-role-locked="${isSelfMasterAdminDemotionLocked ? '1' : '0'}"
               title="${isSelfMasterAdminDemotionLocked ? escapeHtml(t('adminMasterAdminRoleLocked', null, 'Мастер-админ не может снять с себя роль admin')) : ''}"
               ${isSelfMasterAdminDemotionLocked ? 'disabled aria-disabled="true"' : ''}
-              class="rounded-[12px] border px-2 py-1 text-xs ${isAdmin ? 'border-violet-300 text-violet-700' : 'border-slate-300 text-slate-700'} ${isSelfMasterAdminDemotionLocked ? 'cursor-not-allowed border-slate-200 text-slate-400' : ''} ${isMasterAdmin ? '' : 'hidden'}"
+              class="${isAdmin ? outlineSmallClass : secondarySmallClass} ${isSelfMasterAdminDemotionLocked ? 'cursor-not-allowed border-slate-200 text-slate-400' : ''} ${isMasterAdmin ? '' : 'hidden'}"
             >${isAdmin ? escapeHtml(t('adminToggleRoleOn', null, 'Снять admin')) : escapeHtml(t('adminToggleRoleOff', null, 'Сделать admin'))}</button>
           </div>
         </td>
@@ -708,6 +724,9 @@ function getEditAddress(item) {
 }
 
 function getChangeCounters(changes) {
+  if (adminEditsUtils?.getChangeCounters) {
+    return adminEditsUtils.getChangeCounters(changes);
+  }
   const list = Array.isArray(changes) ? changes : [];
   let created = 0;
   let modified = 0;
@@ -999,6 +1018,10 @@ function applyAdminMapTheme(theme) {
 }
 
 function extendBoundsFromCoords(bounds, coords) {
+  if (adminMapUtils?.extendBoundsFromCoords) {
+    adminMapUtils.extendBoundsFromCoords(bounds, coords);
+    return;
+  }
   if (!Array.isArray(coords)) return;
   if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
     bounds.extend([coords[0], coords[1]]);
@@ -1008,6 +1031,9 @@ function extendBoundsFromCoords(bounds, coords) {
 }
 
 function getEditedKeysExpression() {
+  if (adminMapUtils?.getEditedKeysExpression) {
+    return adminMapUtils.getEditedKeysExpression(highlightedEditKeys);
+  }
   const encodedIds = [];
   for (const key of highlightedEditKeys) {
     const [osmType, osmIdRaw] = String(key).split('/');
@@ -1095,6 +1121,21 @@ function parseEditId(raw) {
 function buildAdminReviewActions(item) {
   const changes = Array.isArray(item?.changes) ? item.changes : [];
   const status = String(item?.status || '').trim().toLowerCase();
+  const ui = getUI();
+  const inputClass = (ui && typeof ui.fieldClass === 'function')
+    ? ui.fieldClass('input')
+    : 'w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple';
+  const primaryBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('primary')
+    : 'rounded-[12px] bg-brand-purple px-3 py-2 text-sm font-semibold text-white hover:brightness-110';
+  const outlineBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('outlineBrand')
+    : 'rounded-[12px] border border-brand-purple bg-white px-3 py-2 text-sm font-semibold text-brand-purple hover:bg-indigo-50';
+  const dangerBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('danger')
+    : 'rounded-[12px] border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50';
+  const reviewAcceptActiveClass = 'review-field-btn ' + (ui && typeof ui.buttonClass === 'function' ? ui.buttonClass('primary', 'xs') : 'ui-btn ui-btn-primary ui-btn-xs');
+  const reviewInactiveClass = 'review-field-btn ' + (ui && typeof ui.buttonClass === 'function' ? ui.buttonClass('secondary', 'xs') : 'ui-btn ui-btn-secondary ui-btn-xs');
   if (status !== 'pending') {
     return `
       <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -1117,8 +1158,8 @@ function buildAdminReviewActions(item) {
         <div class="flex flex-wrap items-center justify-between gap-2">
           <span class="font-semibold text-slate-700">${escapeHtml(String(change?.label || field || '-'))}</span>
           <div class="inline-flex items-center gap-1">
-            <button type="button" data-field-action="accept" data-field-name="${escapeHtml(field)}" class="review-field-btn rounded-[10px] border border-brand-purple bg-brand-purple px-2.5 py-1 text-xs font-semibold text-white">${escapeHtml(t('adminFieldAccept', null, 'Принять'))}</button>
-            <button type="button" data-field-action="reject" data-field-name="${escapeHtml(field)}" class="review-field-btn rounded-[10px] border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">${escapeHtml(t('adminFieldReject', null, 'Отклонить'))}</button>
+            <button type="button" data-field-action="accept" data-field-name="${escapeHtml(field)}" class="${reviewAcceptActiveClass}">${escapeHtml(t('adminFieldAccept', null, 'Принять'))}</button>
+            <button type="button" data-field-action="reject" data-field-name="${escapeHtml(field)}" class="${reviewInactiveClass}">${escapeHtml(t('adminFieldReject', null, 'Отклонить'))}</button>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -1126,7 +1167,7 @@ function buildAdminReviewActions(item) {
           <span class="text-slate-400">-&gt;</span>
           <span class="rounded-md px-2 py-1 ${valueClass}">${escapeHtml(newValue)}</span>
         </div>
-        <input type="text" data-merge-value="${escapeHtml(field)}" value="${escapeHtml(value)}" class="w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple" />
+        <input type="text" data-merge-value="${escapeHtml(field)}" value="${escapeHtml(value)}" class="${inputClass}" />
       </div>
     `;
   }).join('');
@@ -1135,11 +1176,11 @@ function buildAdminReviewActions(item) {
     <div class="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
       <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminReviewTitle', null, 'Модерация правки'))}</p>
       <div class="grid gap-2 pr-1">${fieldRows || `<p class="text-sm text-slate-600">${escapeHtml(t('adminNoDiffToMerge', null, 'Нет отличий для мерджа.'))}</p>`}</div>
-      <textarea id="edit-admin-comment" rows="2" placeholder="${escapeHtml(t('adminCommentPlaceholder', null, 'Комментарий администратора (опционально)'))}" class="w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple"></textarea>
+      <textarea id="edit-admin-comment" rows="2" placeholder="${escapeHtml(t('adminCommentPlaceholder', null, 'Комментарий администратора (опционально)'))}" class="${inputClass}"></textarea>
       <div class="flex flex-wrap gap-2">
-        <button id="edit-apply-decisions-btn" type="button" class="rounded-[12px] bg-brand-purple px-3 py-2 text-sm font-semibold text-white hover:brightness-110">${escapeHtml(t('adminApplyDecisions', null, 'Применить решения'))}</button>
-        <button id="edit-merge-all-btn" type="button" class="rounded-[12px] border border-brand-purple bg-white px-3 py-2 text-sm font-semibold text-brand-purple hover:bg-indigo-50">${escapeHtml(t('adminMergeAll', null, 'Принять все'))}</button>
-        <button id="edit-reject-btn" type="button" class="rounded-[12px] border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">${escapeHtml(t('adminRejectAll', null, 'Отклонить все'))}</button>
+        <button id="edit-apply-decisions-btn" type="button" class="${primaryBtnClass}">${escapeHtml(t('adminApplyDecisions', null, 'Применить решения'))}</button>
+        <button id="edit-merge-all-btn" type="button" class="${outlineBtnClass}">${escapeHtml(t('adminMergeAll', null, 'Принять все'))}</button>
+        <button id="edit-reject-btn" type="button" class="${dangerBtnClass}">${escapeHtml(t('adminRejectAll', null, 'Отклонить все'))}</button>
       </div>
       <p id="edit-admin-status" class="text-sm text-slate-600"></p>
     </div>
@@ -1149,6 +1190,13 @@ function buildAdminReviewActions(item) {
 function setReviewFieldDecision(field, decision) {
   const normalizedField = String(field || '').trim();
   const normalizedDecision = decision === 'reject' ? 'reject' : 'accept';
+  const ui = getUI();
+  const secondaryXsClass = ui && typeof ui.buttonClass === 'function'
+    ? ui.buttonClass('secondary', 'xs')
+    : 'ui-btn ui-btn-secondary ui-btn-xs';
+  const primaryXsClass = ui && typeof ui.buttonClass === 'function'
+    ? ui.buttonClass('primary', 'xs')
+    : 'ui-btn ui-btn-primary ui-btn-xs';
   if (!normalizedField) return;
   const row = [...document.querySelectorAll('[data-review-field]')]
     .find((node) => String(node.getAttribute('data-review-field') || '').trim() === normalizedField);
@@ -1158,16 +1206,15 @@ function setReviewFieldDecision(field, decision) {
   buttons.forEach((button) => {
     const action = String(button.getAttribute('data-field-action') || '').trim();
     const isActive = action === normalizedDecision;
-    button.classList.remove('border-brand-purple', 'bg-brand-purple', 'text-white', 'border-rose-300', 'bg-rose-50', 'text-rose-700', 'border-slate-300', 'bg-white', 'text-slate-700');
     if (!isActive) {
-      button.classList.add('border-slate-300', 'bg-white', 'text-slate-700');
+      button.className = 'review-field-btn ' + secondaryXsClass;
       return;
     }
     if (action === 'reject') {
-      button.classList.add('border-rose-300', 'bg-rose-50', 'text-rose-700');
+      button.className = 'review-field-btn ' + secondaryXsClass + ' border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100';
       return;
     }
-    button.classList.add('border-brand-purple', 'bg-brand-purple', 'text-white');
+    button.className = 'review-field-btn ' + primaryXsClass;
   });
 }
 
@@ -1379,14 +1426,161 @@ async function toggleUserRole(email, isAdmin) {
   return true;
 }
 
+function collectGeneralPayloadFromForm() {
+  return {
+    general: {
+      appDisplayName: String(generalAppDisplayNameEl?.value || '').trim(),
+      appBaseUrl: String(generalAppBaseUrlEl?.value || '').trim(),
+      registrationEnabled: Boolean(generalRegistrationEnabledEl?.checked),
+      userEditRequiresPermission: Boolean(generalUserEditRequiresPermissionEl?.checked)
+    }
+  };
+}
+
+function applyGeneralSettingsToForm(item) {
+  const general = item?.general || {};
+  if (generalAppDisplayNameEl) generalAppDisplayNameEl.value = String(general.appDisplayName || 'archimap');
+  if (generalAppBaseUrlEl) generalAppBaseUrlEl.value = String(general.appBaseUrl || '');
+  if (generalRegistrationEnabledEl) generalRegistrationEnabledEl.checked = Boolean(general.registrationEnabled);
+  if (generalUserEditRequiresPermissionEl) generalUserEditRequiresPermissionEl.checked = Boolean(general.userEditRequiresPermission);
+}
+
+async function loadGeneralSettings(options = {}) {
+  if (!isMasterAdmin) {
+    setText(generalStatusEl, 'Только master admin может управлять общими настройками.');
+    return;
+  }
+  if (generalSettingsLoaded && !options.force) return;
+  setText(generalStatusEl, 'Загрузка общих настроек...');
+  const resp = await fetch('/api/admin/app-settings/general');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(generalStatusEl, String(data?.error || 'Не удалось загрузить общие настройки'));
+    return;
+  }
+  applyGeneralSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'env');
+  const updatedAt = String(data?.item?.updatedAt || '').trim();
+  const updatedBy = String(data?.item?.updatedBy || '').trim();
+  const meta = updatedAt ? `, updated: ${updatedAt}${updatedBy ? ` (${updatedBy})` : ''}` : '';
+  setText(generalStatusEl, `Источник: ${source}${meta}`);
+  generalSettingsLoaded = true;
+}
+
+async function saveGeneralSettings() {
+  if (!isMasterAdmin) return;
+  setText(generalStatusEl, 'Сохранение общих настроек...');
+  const resp = await fetch('/api/admin/app-settings/general', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectGeneralPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(generalStatusEl, String(data?.error || 'Не удалось сохранить общие настройки'));
+    return;
+  }
+  applyGeneralSettingsToForm(data?.item || {});
+  setText(generalStatusEl, `Сохранено. Источник: ${String(data?.item?.source || 'db')}`);
+  generalSettingsLoaded = true;
+}
+
+function collectSmtpPayloadFromForm() {
+  return {
+    smtp: {
+      url: String(smtpUrlEl?.value || '').trim(),
+      host: String(smtpHostEl?.value || '').trim(),
+      port: Number(smtpPortEl?.value || 587),
+      secure: Boolean(smtpSecureEl?.checked),
+      user: String(smtpUserEl?.value || '').trim(),
+      pass: String(smtpPassEl?.value || ''),
+      from: String(smtpFromEl?.value || '').trim(),
+      keepPassword: Boolean(smtpKeepPasswordEl?.checked)
+    }
+  };
+}
+
+function applySmtpSettingsToForm(item) {
+  const smtp = item?.smtp || {};
+  if (smtpUrlEl) smtpUrlEl.value = String(smtp.url || '');
+  if (smtpHostEl) smtpHostEl.value = String(smtp.host || '');
+  if (smtpPortEl) smtpPortEl.value = String(smtp.port || 587);
+  if (smtpSecureEl) smtpSecureEl.checked = Boolean(smtp.secure);
+  if (smtpUserEl) smtpUserEl.value = String(smtp.user || '');
+  if (smtpFromEl) smtpFromEl.value = String(smtp.from || '');
+  if (smtpPassEl) smtpPassEl.value = '';
+  smtpHasPassword = Boolean(smtp.hasPassword);
+}
+
+async function loadSmtpSettings(options = {}) {
+  if (!isMasterAdmin) {
+    setText(smtpStatusEl, 'Только master admin может управлять SMTP настройками.');
+    return;
+  }
+  if (smtpSettingsLoaded && !options.force) return;
+  setText(smtpStatusEl, 'Загрузка SMTP настроек...');
+  const resp = await fetch('/api/admin/app-settings/smtp');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Не удалось загрузить SMTP настройки'));
+    return;
+  }
+  applySmtpSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'env');
+  const updatedAt = String(data?.item?.updatedAt || '').trim();
+  const updatedBy = String(data?.item?.updatedBy || '').trim();
+  const passText = smtpHasPassword ? 'пароль сохранён' : 'пароль не сохранён';
+  const meta = updatedAt ? `, updated: ${updatedAt}${updatedBy ? ` (${updatedBy})` : ''}` : '';
+  setText(smtpStatusEl, `Источник: ${source}, ${passText}${meta}`);
+  smtpSettingsLoaded = true;
+}
+
+async function saveSmtpSettings() {
+  if (!isMasterAdmin) return;
+  setText(smtpStatusEl, 'Сохранение SMTP настроек...');
+  const resp = await fetch('/api/admin/app-settings/smtp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectSmtpPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Не удалось сохранить SMTP настройки'));
+    return;
+  }
+  applySmtpSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'db');
+  const passText = smtpHasPassword ? 'пароль сохранён' : 'пароль удалён';
+  setText(smtpStatusEl, `Сохранено. Источник: ${source}, ${passText}`);
+  smtpSettingsLoaded = true;
+}
+
+async function testSmtpSettings() {
+  if (!isMasterAdmin) return;
+  setText(smtpStatusEl, 'Проверка SMTP...');
+  const resp = await fetch('/api/admin/app-settings/smtp/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectSmtpPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Проверка SMTP не прошла'));
+    return;
+  }
+  setText(smtpStatusEl, String(data?.message || 'SMTP проверен успешно'));
+}
+
 async function restoreFromUrl() {
   const fromUrl = readStateFromUrl();
   if (fromUrl.tab) {
     adminState.tab = fromUrl.tab === 'edits'
       ? 'edits'
+      : (fromUrl.tab === 'settings'
+        ? 'settings'
       : (fromUrl.tab === 'guide'
         ? 'guide'
-        : (fromUrl.tab === 'uikit' ? 'uikit' : 'users'));
+        : (fromUrl.tab === 'uikit' ? 'uikit' : 'users')));
   }
   adminState.user = String(fromUrl.user || '').trim().toLowerCase();
   adminState.edit = String(fromUrl.edit || '').trim();
@@ -1400,6 +1594,9 @@ async function restoreFromUrl() {
   adminState.editsDate = String(fromUrl.editsDate || '').trim();
   adminState.editsUser = String(fromUrl.editsUser || '').trim().toLowerCase();
   adminState.editsStatus = String(fromUrl.editsStatus || 'pending').trim().toLowerCase() || 'pending';
+  if (!isMasterAdmin && adminState.tab === 'settings') {
+    adminState.tab = 'users';
+  }
 
   setTab(adminState.tab, { push: false });
   await loadUsers({ silent: true });
@@ -1416,8 +1613,27 @@ async function restoreFromUrl() {
 
 if (tabUsersEl) tabUsersEl.addEventListener('click', () => setTab('users'));
 if (tabEditsEl) tabEditsEl.addEventListener('click', () => setTab('edits'));
+if (tabSettingsEl) tabSettingsEl.addEventListener('click', () => setTab('settings'));
 if (tabGuideEl) tabGuideEl.addEventListener('click', () => setTab('guide'));
 if (tabUiKitEl) tabUiKitEl.addEventListener('click', () => setTab('uikit'));
+
+if (generalSaveBtnEl) {
+  generalSaveBtnEl.addEventListener('click', async () => {
+    await saveGeneralSettings();
+  });
+}
+
+if (smtpSaveBtnEl) {
+  smtpSaveBtnEl.addEventListener('click', async () => {
+    await saveSmtpSettings();
+  });
+}
+
+if (smtpTestBtnEl) {
+  smtpTestBtnEl.addEventListener('click', async () => {
+    await testSmtpSettings();
+  });
+}
 
 if (usersRefreshEl) {
   usersRefreshEl.addEventListener('click', async () => {
@@ -1535,10 +1751,25 @@ window.addEventListener('popstate', async () => {
 (async () => {
   initUiKitClasses();
   renderAdminGuide();
-  renderBuildInfoLink();
-  initThemeToggle();
-  initNavMenu();
-  initMapReturnLinks();
+  if (panelPageUtils && typeof panelPageUtils.initThemeToggle === 'function') {
+    panelPageUtils.initThemeToggle({
+      themeToggleEl,
+      onThemeChange: applyTheme
+    });
+  }
+  if (panelPageUtils && typeof panelPageUtils.initNavMenu === 'function') {
+    panelPageUtils.initNavMenu({
+      navMenuButtonEl,
+      navMenuPanelEl
+    });
+  }
+  if (panelPageUtils && typeof panelPageUtils.initMapReturnLinks === 'function') {
+    panelPageUtils.initMapReturnLinks({
+      navLogoLinkEl,
+      mapReturnLinkEl,
+      mapReturnMenuLinkEl
+    });
+  }
   setAppVisibility(false);
   const user = await loadMe();
   if (!user || !user.isAdmin) return;

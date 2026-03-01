@@ -66,12 +66,13 @@
           </div>
         </div>
 
-        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-2">
-          <ul class="-mb-px flex flex-wrap gap-2 text-sm font-medium" id="admin-tabs" role="tablist">
-            <li role="presentation"><button id="tab-users" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Пользователи</button></li>
-            <li role="presentation"><button id="tab-edits" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Все правки</button></li>
-            <li role="presentation"><button id="tab-guide" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Регламент правок</button></li>
-            <li role="presentation"><button id="tab-uikit" type="button" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">UI kit</button></li>
+        <div class="mt-4">
+          <ul class="ui-tab-shell flex flex-wrap gap-1" id="admin-tabs" role="tablist">
+            <li role="presentation"><button id="tab-users" type="button" class="ui-tab-btn">Пользователи</button></li>
+            <li role="presentation"><button id="tab-edits" type="button" class="ui-tab-btn">Все правки</button></li>
+            <li role="presentation"><button id="tab-settings" type="button" class="ui-tab-btn">Настройки</button></li>
+            <li role="presentation"><button id="tab-guide" type="button" class="ui-tab-btn">Регламент правок</button></li>
+            <li role="presentation"><button id="tab-uikit" type="button" class="ui-tab-btn">UI kit</button></li>
           </ul>
         </div>
 
@@ -80,31 +81,31 @@
           <div class="grid gap-3 lg:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))]">
             <label class="relative">
               <span class="sr-only">Поиск пользователей</span>
-              <input id="users-search" type="search" placeholder="Поиск по имени и email" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+              <input id="users-search" type="search" placeholder="Поиск по имени и email" class="ui-field" />
             </label>
-            <select id="users-role-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+            <select id="users-role-filter" class="ui-field">
               <option value="">Роль: все</option>
               <option value="admin">Только администраторы</option>
               <option value="user">Только пользователи</option>
             </select>
-            <select id="users-can-edit-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+            <select id="users-can-edit-filter" class="ui-field">
               <option value="">Права: все</option>
               <option value="true">Может редактировать</option>
               <option value="false">Без прав редактирования</option>
             </select>
             <div class="flex gap-2">
-              <select id="users-sort-by" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+              <select id="users-sort-by" class="ui-field">
                 <option value="createdAt">Сортировка: регистрация</option>
                 <option value="editsCount">По количеству правок</option>
                 <option value="email">По email</option>
                 <option value="firstName">По имени</option>
                 <option value="lastName">По фамилии</option>
               </select>
-              <select id="users-sort-dir" class="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+              <select id="users-sort-dir" class="ui-field">
                 <option value="desc">↓</option>
                 <option value="asc">↑</option>
               </select>
-              <button id="users-refresh" type="button" class="rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Обновить</button>
+              <button id="users-refresh" type="button" class="ui-btn ui-btn-secondary">Обновить</button>
             </div>
           </div>
           <div class="mt-3 hidden">
@@ -156,12 +157,12 @@
 
         <div class="rounded-2xl border border-slate-200 bg-white p-4">
           <div class="grid gap-3 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
-            <input id="edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
-            <input id="edits-date-filter" type="date" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
-            <select id="edits-user-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+            <input id="edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="ui-field" />
+            <input id="edits-date-filter" type="date" class="ui-field" />
+            <select id="edits-user-filter" class="ui-field">
               <option value="">Пользователь: все</option>
             </select>
-            <select id="edits-status-filter" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple">
+            <select id="edits-status-filter" class="ui-field">
               <option value="pending">Статус: на рассмотрении</option>
               <option value="accepted">Статус: принято</option>
               <option value="partially_accepted">Статус: частично принято</option>
@@ -204,6 +205,94 @@
             </table>
           </div>
         </div>
+        </section>
+
+        <section id="settings-panel" class="hidden mt-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-extrabold text-slate-900">Настройки приложения: Общие</h2>
+                <p class="mt-1 text-sm text-slate-600">Влияет на регистрацию, отображаемое название и ссылки в email.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="general-save-btn" type="button" class="ui-btn ui-btn-primary">Сохранить общие</button>
+              </div>
+            </div>
+            <p id="general-settings-status" class="mt-3 text-sm text-slate-600"></p>
+
+            <div class="mt-4 grid gap-3 lg:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">Название приложения</span>
+                <input id="general-app-display-name" type="text" placeholder="archimap" class="ui-field" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">APP_BASE_URL</span>
+                <input id="general-app-base-url" type="text" placeholder="https://archimap.example.com" class="ui-field" />
+              </label>
+            </div>
+            <div class="mt-3 flex flex-wrap items-center gap-4">
+              <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input id="general-registration-enabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-purple focus:ring-brand-purple" />
+                Разрешить регистрацию
+              </label>
+              <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input id="general-user-edit-requires-permission" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-purple focus:ring-brand-purple" />
+                Правки зданий только при can_edit=1
+              </label>
+            </div>
+          </div>
+
+          <div class="mt-4 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-extrabold text-slate-900">Настройки приложения: SMTP</h2>
+                <p class="mt-1 text-sm text-slate-600">Доступно только master admin. Пароль хранится в зашифрованном виде.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="smtp-test-btn" type="button" class="ui-btn ui-btn-secondary">Проверить SMTP</button>
+                <button id="smtp-save-btn" type="button" class="ui-btn ui-btn-primary">Сохранить</button>
+              </div>
+            </div>
+            <p id="smtp-settings-status" class="mt-3 text-sm text-slate-600"></p>
+
+            <div class="mt-4 grid gap-3 lg:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">SMTP URL (опционально)</span>
+                <input id="smtp-url" type="text" placeholder="smtp://user:pass@mail.example.com:587" class="ui-field" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">From</span>
+                <input id="smtp-from" type="text" placeholder="archimap <no-reply@example.com>" class="ui-field" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">SMTP Host</span>
+                <input id="smtp-host" type="text" placeholder="smtp.example.com" class="ui-field" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">SMTP Port</span>
+                <input id="smtp-port" type="number" min="1" max="65535" placeholder="587" class="ui-field" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">SMTP User</span>
+                <input id="smtp-user" type="text" placeholder="no-reply@example.com" class="ui-field" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-semibold text-slate-700">SMTP Password</span>
+                <input id="smtp-pass" type="password" placeholder="Оставьте пустым, чтобы не менять" class="ui-field" />
+              </label>
+            </div>
+
+            <div class="mt-3 flex flex-wrap items-center gap-4">
+              <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input id="smtp-secure" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-brand-purple focus:ring-brand-purple" />
+                SMTPS / secure
+              </label>
+              <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input id="smtp-keep-password" type="checkbox" checked class="h-4 w-4 rounded border-slate-300 text-brand-purple focus:ring-brand-purple" />
+                Сохранить текущий пароль, если поле пустое
+              </label>
+            </div>
+          </div>
         </section>
 
         <section id="guide-panel" class="hidden mt-4">
@@ -259,7 +348,7 @@
               <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:col-span-2">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <h3 id="admin-ui-emails-title" class="text-base font-bold"></h3>
-                  <button id="admin-ui-email-refresh" type="button" class="rounded-[12px] border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"></button>
+                  <button id="admin-ui-email-refresh" type="button" class="ui-btn ui-btn-secondary ui-btn-xs"></button>
                 </div>
                 <p id="admin-ui-email-status" class="mt-2 text-xs text-slate-500"></p>
                 <div id="admin-ui-email-previews" class="mt-3 space-y-4"></div>
@@ -287,8 +376,15 @@
   <script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.5.2/flowbite.min.js"></script>
   <script src="/i18n/ru.js"></script>
+  <script src="/shared/text-utils.js"></script>
   <script src="/shared/ui.js"></script>
+  <script src="/shared/top-nav-templates.js"></script>
   <script src="/shared/top-nav.js"></script>
+  <script src="/shared/panel-page.js"></script>
+  <script src="/admin/users/users-module.js"></script>
+  <script src="/admin/edits/edits-module.js"></script>
+  <script src="/admin/map/map-module.js"></script>
+  <script src="/admin/guide-uikit/guide-uikit-module.js"></script>
   <script>window.ArchiMapTopNav.render({ context: 'admin' });</script>
   <script>
     (function renderSharedEditPane() {

@@ -2,18 +2,45 @@ let csrfToken = null;
 let ownEditsCache = [];
 let accountMap = null;
 let highlightedEditKeys = new Set();
-const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
-const UI_TEXT = Object.freeze(I18N_RU.ui || {});
+const textTools = window.ArchiMapTextUtils?.createUiTextTools
+  ? window.ArchiMapTextUtils.createUiTextTools()
+  : null;
+const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
+const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
+const panelPageUtils = window.ArchiMapPanelPage || {};
 
 const accountSubtitleEl = document.getElementById('account-subtitle');
+const accountPageTitleEl = document.getElementById('account-page-title');
+const accountHeadingEl = document.getElementById('account-heading');
+const accountSettingsTitleEl = document.getElementById('account-settings-title');
+const accountSettingsHintEl = document.getElementById('account-settings-hint');
+const accountPersonalTitleEl = document.getElementById('account-personal-title');
+const accountLabelFirstNameEl = document.getElementById('account-label-first-name');
+const accountLabelLastNameEl = document.getElementById('account-label-last-name');
+const accountLabelEmailEl = document.getElementById('account-label-email');
+const accountProfileSaveBtnEl = document.getElementById('account-profile-save-btn');
+const accountSecurityTitleEl = document.getElementById('account-security-title');
+const accountLabelCurrentPasswordEl = document.getElementById('account-label-current-password');
+const accountLabelNewPasswordEl = document.getElementById('account-label-new-password');
+const accountLabelNewPasswordConfirmEl = document.getElementById('account-label-new-password-confirm');
+const accountPasswordSaveBtnEl = document.getElementById('account-password-save-btn');
+const accountNotificationsTitleEl = document.getElementById('account-notifications-title');
+const accountNotifyCommentsTitleEl = document.getElementById('account-notify-comments-title');
+const accountNotifyCommentsHintEl = document.getElementById('account-notify-comments-hint');
+const accountNotifyModerationTitleEl = document.getElementById('account-notify-moderation-title');
+const accountNotifyModerationHintEl = document.getElementById('account-notify-moderation-hint');
+const accountNotifyWeeklyTitleEl = document.getElementById('account-notify-weekly-title');
+const accountNotifyWeeklyHintEl = document.getElementById('account-notify-weekly-hint');
+const accountEditsColObjectEl = document.getElementById('account-edits-col-object');
+const accountEditsColAuthorEl = document.getElementById('account-edits-col-author');
+const accountEditsColStatusEl = document.getElementById('account-edits-col-status');
+const accountEditsColChangesEl = document.getElementById('account-edits-col-changes');
 const navLogoLinkEl = document.getElementById('nav-logo-link');
 const mapReturnLinkEl = document.getElementById('map-return-link');
 const mapReturnMenuLinkEl = document.getElementById('map-return-menu-link');
 const adminLinkEl = document.getElementById('admin-link');
 const uiKitLinkEl = document.getElementById('ui-kit-link');
 const logoutBtnEl = document.getElementById('settings-logout-btn');
-const settingsBuildLinkEl = document.getElementById('settings-build-link');
-const settingsBuildTextEl = document.getElementById('settings-build-text');
 const themeToggleEl = document.getElementById('theme-toggle');
 const navMenuButtonEl = document.getElementById('nav-menu-button');
 const navMenuPanelEl = document.getElementById('nav-menu-panel');
@@ -42,18 +69,15 @@ const editDetailCloseEl = document.getElementById('edit-detail-close');
 const editDetailTitleEl = document.getElementById('edit-detail-title');
 const editDetailMetaEl = document.getElementById('edit-detail-meta');
 const editDetailListEl = document.getElementById('edit-detail-list');
-const THEME_STORAGE_KEY = 'archimap-theme';
-const LAST_MAP_HASH_STORAGE_KEY = 'archimap-last-map-hash';
+const accountLegalTitleEl = document.getElementById('account-legal-title');
+const accountLegalHintEl = document.getElementById('account-legal-hint');
+const accountLegalUserAgreementLinkEl = document.getElementById('account-legal-user-agreement-link');
+const accountLegalPrivacyLinkEl = document.getElementById('account-legal-privacy-link');
 const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
 const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
 const PMTILES_CONFIG = Object.freeze({
   url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
   sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
-});
-const BUILD_INFO_CONFIG = Object.freeze({
-  shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
-  version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
-  repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
 });
 
 const nativeFetch = window.fetch.bind(window);
@@ -61,22 +85,6 @@ const accountState = { tab: 'settings', edit: '' };
 
 function getUI() {
   return window.ArchiMapUI || null;
-}
-
-function t(key, params = null, fallback = '') {
-  const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
-  const base = String(template || fallback || '');
-  if (!params || typeof params !== 'object') return base;
-  return base.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? '' : String(params[name])));
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
 }
 
 function isStateChangingMethod(method) {
@@ -104,22 +112,12 @@ function applyTheme(theme) {
   const next = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, next);
+    localStorage.setItem('archimap-theme', next);
   } catch {
     // ignore
   }
   if (themeToggleEl) themeToggleEl.checked = next === 'dark';
   applyAccountMapTheme(next);
-}
-
-function initThemeToggle() {
-  const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  if (themeToggleEl) {
-    themeToggleEl.checked = current === 'dark';
-    themeToggleEl.addEventListener('change', () => {
-      applyTheme(themeToggleEl.checked ? 'dark' : 'light');
-    });
-  }
 }
 
 function initUiKitClasses() {
@@ -136,67 +134,47 @@ function initUiKitClasses() {
     const passwordButton = passwordFormEl?.querySelector('button[type="submit"]');
     if (saveButton) saveButton.className = ui.buttonClass('primary');
     if (passwordButton) passwordButton.className = ui.buttonClass('outlineBrand');
+    if (logoutBtnEl) logoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
   }
 }
 
-function renderBuildInfoLink() {
-  if (!settingsBuildLinkEl) return;
-  settingsBuildLinkEl.href = BUILD_INFO_CONFIG.repoUrl;
-  if (settingsBuildTextEl) {
-    settingsBuildTextEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
-  } else {
-    settingsBuildLinkEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
-  }
+function applyLegalSectionTexts() {
+  setText(accountLegalTitleEl, t('accountLegalTitle', null, 'Правовая информация'));
+  setText(accountLegalHintEl, t('accountLegalHint', null, 'Соглашения и политика конфиденциальности доступны в разделе информации.'));
+  setText(accountLegalUserAgreementLinkEl, t('infoTabUserAgreement', null, 'Пользовательское соглашение'));
+  setText(accountLegalPrivacyLinkEl, t('infoTabPrivacyPolicy', null, 'Политика конфиденциальности'));
 }
 
-function getMapReturnHref() {
-  try {
-    const hash = String(localStorage.getItem(LAST_MAP_HASH_STORAGE_KEY) || '').trim();
-    return hash.startsWith('#map=') ? `/${hash}` : '/';
-  } catch {
-    return '/';
-  }
-}
-
-function initMapReturnLinks() {
-  const href = getMapReturnHref();
-  if (navLogoLinkEl) navLogoLinkEl.setAttribute('href', href);
-  if (mapReturnLinkEl) mapReturnLinkEl.setAttribute('href', href);
-  if (mapReturnMenuLinkEl) mapReturnMenuLinkEl.setAttribute('href', href);
-}
-
-function setNavMenuOpen(open) {
-  if (!navMenuButtonEl || !navMenuPanelEl) return;
-  navMenuPanelEl.classList.toggle('opacity-0', !open);
-  navMenuPanelEl.classList.toggle('pointer-events-none', !open);
-  navMenuPanelEl.classList.toggle('max-h-0', !open);
-  navMenuPanelEl.classList.toggle('-translate-y-2', !open);
-  navMenuPanelEl.classList.toggle('scale-95', !open);
-  navMenuPanelEl.classList.toggle('max-h-[420px]', open);
-  navMenuPanelEl.classList.toggle('translate-y-0', open);
-  navMenuPanelEl.classList.toggle('scale-100', open);
-  navMenuButtonEl.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-function initNavMenu() {
-  if (!navMenuButtonEl || !navMenuPanelEl) return;
-  setNavMenuOpen(false);
-
-  navMenuButtonEl.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const expanded = navMenuButtonEl.getAttribute('aria-expanded') === 'true';
-    setNavMenuOpen(!expanded);
-  });
-
-  document.addEventListener('click', (event) => {
-    if (!navMenuPanelEl.contains(event.target) && !navMenuButtonEl.contains(event.target)) {
-      setNavMenuOpen(false);
-    }
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setNavMenuOpen(false);
-  });
+function applyAccountStaticTexts() {
+  setText(accountPageTitleEl, t('accountPageTitle', null, 'Личный кабинет | archimap'));
+  setText(accountHeadingEl, t('accountHeading', null, 'Личный кабинет'));
+  setText(tabSettingsEl, t('accountTabSettings', null, 'Настройки'));
+  setText(tabEditsEl, t('accountTabEdits', null, 'Мои правки'));
+  setText(accountSettingsTitleEl, t('accountSettingsTitle', null, 'Настройки профиля'));
+  setText(accountSettingsHintEl, t('accountSettingsHint', null, 'Личные данные, безопасность и уведомления в одном разделе.'));
+  setText(accountPersonalTitleEl, t('accountPersonalTitle', null, 'Личные данные'));
+  setText(accountLabelFirstNameEl, t('accountLabelFirstName', null, 'Имя'));
+  setText(accountLabelLastNameEl, t('accountLabelLastName', null, 'Фамилия'));
+  setText(accountLabelEmailEl, t('accountLabelEmail', null, 'Email'));
+  setText(accountProfileSaveBtnEl, t('accountProfileSaveBtn', null, 'Сохранить'));
+  setText(accountSecurityTitleEl, t('accountSecurityTitle', null, 'Безопасность'));
+  setText(accountLabelCurrentPasswordEl, t('accountLabelCurrentPassword', null, 'Текущий пароль'));
+  setText(accountLabelNewPasswordEl, t('accountLabelNewPassword', null, 'Новый пароль'));
+  setText(accountLabelNewPasswordConfirmEl, t('accountLabelNewPasswordConfirm', null, 'Повторите новый пароль'));
+  setText(accountPasswordSaveBtnEl, t('accountPasswordSaveBtn', null, 'Изменить пароль'));
+  setText(accountNotificationsTitleEl, t('accountNotificationsTitle', null, 'Уведомления'));
+  setText(accountNotifyCommentsTitleEl, t('accountNotifyCommentsTitle', null, 'Новые комментарии к правкам'));
+  setText(accountNotifyCommentsHintEl, t('accountNotifyCommentsHint', null, 'Письмо, когда администратор комментирует вашу правку.'));
+  setText(accountNotifyModerationTitleEl, t('accountNotifyModerationTitle', null, 'Статус модерации'));
+  setText(accountNotifyModerationHintEl, t('accountNotifyModerationHint', null, 'Уведомления об одобрении или отклонении изменений.'));
+  setText(accountNotifyWeeklyTitleEl, t('accountNotifyWeeklyTitle', null, 'Еженедельная сводка'));
+  setText(accountNotifyWeeklyHintEl, t('accountNotifyWeeklyHint', null, 'Подборка ваших активностей и новых объектов на карте.'));
+  if (editsSearchEl) editsSearchEl.placeholder = t('accountEditsSearchPlaceholder', null, 'Поиск по адресу или ID здания');
+  if (editsStatusEl) editsStatusEl.textContent = t('adminEditsLoading', null, 'Загрузка...');
+  setText(accountEditsColObjectEl, t('accountEditsColObject', null, 'Объект'));
+  setText(accountEditsColAuthorEl, t('accountEditsColAuthor', null, 'Автор'));
+  setText(accountEditsColStatusEl, t('accountEditsColStatus', null, 'Статус'));
+  setText(accountEditsColChangesEl, t('accountEditsColChanges', null, 'Изменения тегов'));
 }
 
 function getLoginRedirectUrl() {
@@ -313,6 +291,7 @@ async function loadMe() {
   if (firstNameEl) firstNameEl.value = String(user.firstName || '');
   if (lastNameEl) lastNameEl.value = String(user.lastName || '');
   if (profileEmailEl) profileEmailEl.value = userEmail;
+  if (logoutBtnEl) logoutBtnEl.classList.remove('hidden');
 
   if (adminLinkEl) adminLinkEl.classList.toggle('hidden', !Boolean(user.isAdmin));
   if (uiKitLinkEl) uiKitLinkEl.classList.toggle('hidden', !Boolean(user.isAdmin));
@@ -826,10 +805,27 @@ window.addEventListener('popstate', async () => {
 
 (async () => {
   initUiKitClasses();
-  renderBuildInfoLink();
-  initThemeToggle();
-  initNavMenu();
-  initMapReturnLinks();
+  applyAccountStaticTexts();
+  applyLegalSectionTexts();
+  if (typeof panelPageUtils.initThemeToggle === 'function') {
+    panelPageUtils.initThemeToggle({
+      themeToggleEl,
+      onThemeChange: applyTheme
+    });
+  }
+  if (typeof panelPageUtils.initNavMenu === 'function') {
+    panelPageUtils.initNavMenu({
+      navMenuButtonEl,
+      navMenuPanelEl
+    });
+  }
+  if (typeof panelPageUtils.initMapReturnLinks === 'function') {
+    panelPageUtils.initMapReturnLinks({
+      navLogoLinkEl,
+      mapReturnLinkEl,
+      mapReturnMenuLinkEl
+    });
+  }
   await confirmRegistrationTokenIfPresent();
   await loadMe();
   await restoreFromUrl();

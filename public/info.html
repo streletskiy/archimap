@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title id="info-page-title">Информация | archimap</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Manrope", "Segoe UI", "Roboto", "Arial", "sans-serif"]
+          },
+          colors: {
+            brand: {
+              purple: "#5B62F0"
+            }
+          },
+          boxShadow: {
+            soft: "0 8px 24px rgba(15, 23, 42, 0.08)"
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    (function applyInitialTheme() {
+      const key = 'archimap-theme';
+      let theme = 'light';
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored === 'light' || stored === 'dark') {
+          theme = stored;
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          theme = 'dark';
+        }
+      } catch {
+        theme = 'light';
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="min-h-screen bg-slate-100 font-sans text-slate-900">
+  <div id="top-nav-root"></div>
+
+  <main class="w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
+    <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
+      <div class="border-b border-slate-200 pb-4">
+        <h1 id="info-heading" class="text-2xl font-extrabold text-slate-900">Информация</h1>
+        <p id="info-subheading" class="mt-1 text-sm text-slate-600">О сервисе, техническая информация и юридические документы.</p>
+      </div>
+
+      <div class="mt-4">
+        <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
+          <li role="presentation"><button id="info-tab-about" type="button" class="ui-tab-btn">О сервисе</button></li>
+          <li role="presentation"><button id="info-tab-user-agreement" type="button" class="ui-tab-btn">Пользовательское соглашение</button></li>
+          <li role="presentation"><button id="info-tab-privacy-policy" type="button" class="ui-tab-btn">Политика конфиденциальности</button></li>
+        </ul>
+      </div>
+
+      <section id="info-panel-about" class="mt-4 space-y-4">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 id="info-about-title" class="text-lg font-bold text-slate-900">О сервисе</h2>
+          <p id="info-about-text" class="mt-2 text-sm leading-7 text-slate-700">archimap помогает собирать и модератировать архитектурные данные зданий на карте. Изменения пользователей проходят модерацию и могут использоваться в экосистеме OSM в соответствии с правилами лицензирования.</p>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 id="info-tech-title" class="text-lg font-bold text-slate-900">Техническая информация</h2>
+          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+              <span id="info-tech-version-label" class="font-semibold uppercase tracking-wide text-slate-500">Версия</span>
+              <span id="info-build-version" class="font-semibold text-slate-900">-</span>
+            </div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+              <span id="info-tech-commit-label" class="font-semibold uppercase tracking-wide text-slate-500">Коммит</span>
+              <span id="info-build-sha" class="font-semibold text-slate-900">-</span>
+            </div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+              <span id="info-tech-repo-label" class="font-semibold uppercase tracking-wide text-slate-500">Репозиторий</span>
+              <a id="info-build-repo-link" href="https://github.com/streletskiy/archimap" target="_blank" rel="noopener noreferrer" class="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-800">
+                github
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="info-panel-user-agreement" class="mt-4 hidden">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+          <div class="mx-auto max-w-3xl">
+            <h2 id="info-user-agreement-title" class="text-xl font-bold text-slate-900">Пользовательское соглашение</h2>
+            <div id="info-user-agreement-content" class="mt-4 space-y-4"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="info-panel-privacy-policy" class="mt-4 hidden">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+          <div class="mx-auto max-w-3xl">
+            <h2 id="info-privacy-policy-title" class="text-xl font-bold text-slate-900">Политика конфиденциальности</h2>
+            <div id="info-privacy-policy-content" class="mt-4 space-y-4"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app-config.js"></script>
+  <script src="/i18n/ru.js"></script>
+  <script src="/shared/text-utils.js"></script>
+  <script src="/shared/ui.js"></script>
+  <script src="/shared/top-nav-templates.js"></script>
+  <script src="/shared/top-nav.js"></script>
+  <script src="/shared/panel-page.js"></script>
+  <script>window.ArchiMapTopNav.render({ context: 'info', showProfileLink: false, showAuthLink: true, authHref: '/?auth=1&next=%2Finfo%2F' });</script>
+  <script src="/info.js"></script>
+</body>
+</html>

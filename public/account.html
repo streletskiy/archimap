@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Личный кабинет | archimap</title>
+  <title id="account-page-title">Личный кабинет | archimap</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -54,99 +54,108 @@
     <div class="w-full">
       <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
         <div class="border-b border-slate-200 pb-4">
-          <h1 class="text-2xl font-extrabold">Личный кабинет</h1>
+          <h1 id="account-heading" class="text-2xl font-extrabold">Личный кабинет</h1>
           <p id="account-subtitle" class="mt-1 text-sm text-slate-600">Загрузка данных...</p>
         </div>
 
-        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-2">
-          <ul class="-mb-px flex flex-wrap gap-2 text-sm font-medium" id="account-tabs" data-tabs-toggle="#account-tabs-content" role="tablist">
+        <div class="mt-4">
+          <ul class="ui-tab-shell flex flex-wrap gap-1" id="account-tabs" data-tabs-toggle="#account-tabs-content" role="tablist">
             <li role="presentation">
-              <button id="account-tab-settings" type="button" role="tab" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Настройки</button>
+              <button id="account-tab-settings" type="button" role="tab" class="ui-tab-btn">Настройки</button>
             </li>
             <li role="presentation">
-              <button id="account-tab-edits" type="button" role="tab" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Мои правки</button>
+              <button id="account-tab-edits" type="button" role="tab" class="ui-tab-btn">Мои правки</button>
             </li>
           </ul>
         </div>
 
         <div id="account-tabs-content" class="mt-4 space-y-4">
           <section id="account-profile-panel" class="rounded-2xl border border-slate-200 bg-white p-6">
-          <h2 class="text-lg font-bold text-slate-900">Настройки профиля</h2>
-          <p class="mt-1 text-sm text-slate-600">Личные данные, безопасность и уведомления в одном разделе.</p>
+          <h2 id="account-settings-title" class="text-lg font-bold text-slate-900">Настройки профиля</h2>
+          <p id="account-settings-hint" class="mt-1 text-sm text-slate-600">Личные данные, безопасность и уведомления в одном разделе.</p>
           <div class="mt-5 grid gap-4 xl:grid-cols-3">
             <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <h3 class="text-base font-bold text-slate-900">Личные данные</h3>
+              <h3 id="account-personal-title" class="text-base font-bold text-slate-900">Личные данные</h3>
               <form id="profile-form" class="mt-4 space-y-4">
                 <div>
-                  <label for="first-name" class="mb-1 block text-sm font-medium text-slate-700">Имя</label>
-                  <input id="first-name" type="text" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="given-name" placeholder="Иван" />
+                  <label id="account-label-first-name" for="first-name" class="mb-1 block text-sm font-medium text-slate-700">Имя</label>
+                  <input id="first-name" type="text" class="ui-field bg-white" autocomplete="given-name" placeholder="Иван" />
                 </div>
                 <div>
-                  <label for="last-name" class="mb-1 block text-sm font-medium text-slate-700">Фамилия</label>
-                  <input id="last-name" type="text" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="family-name" placeholder="Иванов" />
+                  <label id="account-label-last-name" for="last-name" class="mb-1 block text-sm font-medium text-slate-700">Фамилия</label>
+                  <input id="last-name" type="text" class="ui-field bg-white" autocomplete="family-name" placeholder="Иванов" />
                 </div>
                 <div>
-                  <label for="profile-email" class="mb-1 block text-sm font-medium text-slate-700">Email</label>
-                  <input id="profile-email" type="email" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 focus:border-brand-purple focus:ring-brand-purple" readonly value="user@archimap.app" />
+                  <label id="account-label-email" for="profile-email" class="mb-1 block text-sm font-medium text-slate-700">Email</label>
+                  <input id="profile-email" type="email" class="ui-field bg-white text-slate-500" readonly value="user@archimap.app" />
                 </div>
-                <button type="submit" class="rounded-[16px] bg-brand-purple px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Сохранить</button>
+                <button id="account-profile-save-btn" type="submit" class="ui-btn ui-btn-primary">Сохранить</button>
                 <p id="profile-status" class="text-sm text-slate-600"></p>
               </form>
             </section>
 
             <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <h3 class="text-base font-bold text-slate-900">Безопасность</h3>
+              <h3 id="account-security-title" class="text-base font-bold text-slate-900">Безопасность</h3>
               <form id="password-form" class="mt-4 space-y-4">
                 <div>
-                  <label for="current-password" class="mb-1 block text-sm font-medium text-slate-700">Текущий пароль</label>
-                  <input id="current-password" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="current-password" />
+                  <label id="account-label-current-password" for="current-password" class="mb-1 block text-sm font-medium text-slate-700">Текущий пароль</label>
+                  <input id="current-password" type="password" required class="ui-field bg-white" autocomplete="current-password" />
                 </div>
                 <div>
-                  <label for="new-password" class="mb-1 block text-sm font-medium text-slate-700">Новый пароль</label>
-                  <input id="new-password" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="new-password" />
+                  <label id="account-label-new-password" for="new-password" class="mb-1 block text-sm font-medium text-slate-700">Новый пароль</label>
+                  <input id="new-password" type="password" required class="ui-field bg-white" autocomplete="new-password" />
                 </div>
                 <div>
-                  <label for="new-password-confirm" class="mb-1 block text-sm font-medium text-slate-700">Повторите новый пароль</label>
-                  <input id="new-password-confirm" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="new-password" />
+                  <label id="account-label-new-password-confirm" for="new-password-confirm" class="mb-1 block text-sm font-medium text-slate-700">Повторите новый пароль</label>
+                  <input id="new-password-confirm" type="password" required class="ui-field bg-white" autocomplete="new-password" />
                 </div>
-                <button type="submit" class="rounded-[16px] border border-brand-purple px-5 py-2.5 text-sm font-semibold text-brand-purple transition hover:bg-brand-purple hover:text-white">Изменить пароль</button>
+                <button id="account-password-save-btn" type="submit" class="ui-btn ui-btn-outline-brand">Изменить пароль</button>
                 <p id="password-status" class="text-sm text-slate-600"></p>
               </form>
             </section>
 
             <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <h3 class="text-base font-bold text-slate-900">Уведомления</h3>
+              <h3 id="account-notifications-title" class="text-base font-bold text-slate-900">Уведомления</h3>
               <div class="mt-4 space-y-4">
                 <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
                   <div>
-                    <p class="text-sm font-semibold text-slate-900">Новые комментарии к правкам</p>
-                    <p class="mt-1 text-sm text-slate-500">Письмо, когда администратор комментирует вашу правку.</p>
+                    <p id="account-notify-comments-title" class="text-sm font-semibold text-slate-900">Новые комментарии к правкам</p>
+                    <p id="account-notify-comments-hint" class="mt-1 text-sm text-slate-500">Письмо, когда администратор комментирует вашу правку.</p>
                   </div>
-                  <label class="relative inline-flex cursor-pointer items-center">
-                    <input type="checkbox" class="peer sr-only" checked>
+                  <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
+                    <input type="checkbox" class="peer sr-only" disabled aria-disabled="true">
                     <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
                   </label>
                 </div>
                 <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
                   <div>
-                    <p class="text-sm font-semibold text-slate-900">Статус модерации</p>
-                    <p class="mt-1 text-sm text-slate-500">Уведомления об одобрении или отклонении изменений.</p>
+                    <p id="account-notify-moderation-title" class="text-sm font-semibold text-slate-900">Статус модерации</p>
+                    <p id="account-notify-moderation-hint" class="mt-1 text-sm text-slate-500">Уведомления об одобрении или отклонении изменений.</p>
                   </div>
-                  <label class="relative inline-flex cursor-pointer items-center">
-                    <input type="checkbox" class="peer sr-only" checked>
+                  <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
+                    <input type="checkbox" class="peer sr-only" disabled aria-disabled="true">
                     <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
                   </label>
                 </div>
                 <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
                   <div>
-                    <p class="text-sm font-semibold text-slate-900">Еженедельная сводка</p>
-                    <p class="mt-1 text-sm text-slate-500">Подборка ваших активностей и новых объектов на карте.</p>
+                    <p id="account-notify-weekly-title" class="text-sm font-semibold text-slate-900">Еженедельная сводка</p>
+                    <p id="account-notify-weekly-hint" class="mt-1 text-sm text-slate-500">Подборка ваших активностей и новых объектов на карте.</p>
                   </div>
-                  <label class="relative inline-flex cursor-pointer items-center">
-                    <input type="checkbox" class="peer sr-only">
+                  <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
+                    <input type="checkbox" class="peer sr-only" disabled aria-disabled="true">
                     <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
                   </label>
                 </div>
+              </div>
+            </section>
+
+            <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h3 id="account-legal-title" class="text-base font-bold text-slate-900">Правовая информация</h3>
+              <p id="account-legal-hint" class="mt-1 text-sm text-slate-600">Соглашения и политика конфиденциальности доступны в разделе информации.</p>
+              <div class="mt-4 space-y-2">
+                <a id="account-legal-user-agreement-link" href="/info/?tab=user-agreement" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Пользовательское соглашение</a>
+                <a id="account-legal-privacy-link" href="/info/?tab=privacy-policy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Политика конфиденциальности</a>
               </div>
             </section>
           </div>
@@ -159,8 +168,8 @@
 
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
             <div class="grid gap-3 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]">
-              <input id="account-edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
-              <input id="account-edits-date-filter" type="date" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+              <input id="account-edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="ui-field" />
+              <input id="account-edits-date-filter" type="date" class="ui-field" />
               <p id="account-edits-status" class="flex items-center rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600">Загрузка...</p>
             </div>
           </div>
@@ -170,10 +179,10 @@
               <table class="w-full text-left text-sm text-slate-700">
                 <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th class="px-4 py-3">Объект</th>
-                    <th class="px-4 py-3">Автор</th>
-                    <th class="px-4 py-3">Статус</th>
-                    <th class="px-4 py-3">Изменения тегов</th>
+                    <th id="account-edits-col-object" class="px-4 py-3">Объект</th>
+                    <th id="account-edits-col-author" class="px-4 py-3">Автор</th>
+                    <th id="account-edits-col-status" class="px-4 py-3">Статус</th>
+                    <th id="account-edits-col-changes" class="px-4 py-3">Изменения тегов</th>
                   </tr>
                 </thead>
                 <tbody id="account-edits-list">
@@ -227,8 +236,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.5.2/flowbite.min.js"></script>
   <script src="/app-config.js"></script>
   <script src="/i18n/ru.js"></script>
+  <script src="/shared/text-utils.js"></script>
   <script src="/shared/ui.js"></script>
+  <script src="/shared/top-nav-templates.js"></script>
   <script src="/shared/top-nav.js"></script>
+  <script src="/shared/panel-page.js"></script>
   <script>window.ArchiMapTopNav.render({ context: 'account' });</script>
   <script>
     (function renderSharedEditPane() {

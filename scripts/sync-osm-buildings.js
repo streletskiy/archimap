@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const os = require('os');
@@ -7,6 +7,7 @@ const { spawnSync } = require('child_process');
 const Database = require('better-sqlite3');
 
 const OSM_PBF_PATH = String(process.env.OSM_PBF_PATH || '').trim();
+const OSM_DB_PATH = String(process.env.OSM_DB_PATH || path.join(__dirname, '..', 'data', 'osm.db')).trim() || path.join(__dirname, '..', 'data', 'osm.db');
 const OSM_EXTRACT_QUERY = String(process.env.OSM_EXTRACT_QUERY || '').trim();
 const OSM_EXTRACT_QUERIES = parseExtractQueries(process.env.OSM_EXTRACT_QUERIES || '');
 const PMTILES_ONLY = process.argv.includes('--pmtiles-only');
@@ -125,8 +126,7 @@ function ensurePythonImporterDeps() {
 
 function hasAnyContoursInDb() {
   try {
-    const dbPath = path.join(__dirname, '..', 'data', 'archimap.db');
-    const db = new Database(dbPath, { fileMustExist: false });
+    const db = new Database(OSM_DB_PATH, { fileMustExist: false });
     db.exec(`
 CREATE TABLE IF NOT EXISTS building_contours (
   osm_type TEXT NOT NULL,
@@ -181,11 +181,10 @@ function buildPmtilesFromSQLite() {
   }
 
   const dataDir = path.join(__dirname, '..', 'data');
-  const dbPath = path.join(dataDir, 'archimap.db');
   const outPath = path.join(dataDir, PMTILES_FILE_NAME);
   const tmpInputPath = path.join(os.tmpdir(), `archimap-buildings-${Date.now()}.ndjson`);
 
-  const db = new Database(dbPath, { fileMustExist: true, readonly: true });
+  const db = new Database(OSM_DB_PATH, { fileMustExist: true, readonly: true });
   const fd = fs.openSync(tmpInputPath, 'w');
   let total = 0;
   let cursor = 0;

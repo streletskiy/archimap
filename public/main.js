@@ -1,24 +1,18 @@
-function readViewFromUrl() {
-  const hash = String(window.location.hash || '');
-  const match = hash.match(/^#map=(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)$/);
-  if (!match) return null;
+const mainMapUtils = window.ArchiMapMainMap || {};
+const mainAuthUtils = window.ArchiMapMainAuth || {};
+const mainSearchUtils = window.ArchiMapMainSearch || {};
+const mainModalUtils = window.ArchiMapMainModal || {};
+const mainFilterUtils = window.ArchiMapMainFilters || {};
 
-  const zoom = Number(match[1]);
-  const lat = Number(match[2]);
-  const lon = Number(match[3]);
-  if ([zoom, lat, lon].some((n) => Number.isNaN(n))) return null;
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-  return { zoom, center: [lon, lat] };
+function readViewFromUrl() {
+  return typeof mainMapUtils.readViewFromUrl === 'function'
+    ? mainMapUtils.readViewFromUrl()
+    : null;
 }
 
 function saveLastMapHash(hashValue) {
-  const text = String(hashValue || '').trim();
-  if (!text.startsWith('#map=')) return;
-  try {
-    localStorage.setItem('archimap-last-map-hash', text);
-  } catch {
-    // ignore
-  }
+  if (typeof mainMapUtils.saveLastMapHash !== 'function') return;
+  mainMapUtils.saveLastMapHash(hashValue);
 }
 
 function writeViewToUrl() {
@@ -34,59 +28,40 @@ function writeViewToUrl() {
 }
 
 function readBuildingFromUrl() {
-  const url = new URL(window.location.href);
-  const raw = url.searchParams.get('b');
-  if (!raw) return null;
-  const parsed = parseKey(raw);
-  return parsed || null;
+  return typeof mainMapUtils.readBuildingFromUrl === 'function'
+    ? mainMapUtils.readBuildingFromUrl()
+    : null;
 }
 
 function writeBuildingToUrl(osmType, osmId, options = {}) {
-  const mode = options.mode === 'replace' ? 'replace' : 'push';
-  const nextValue = `${osmType}/${osmId}`;
-  const url = new URL(window.location.href);
-  if (url.searchParams.get('b') === nextValue) return;
-  url.searchParams.set('b', nextValue);
-  if (mode === 'replace') {
-    history.replaceState(null, '', url.toString());
-    return;
-  }
-  history.pushState(null, '', url.toString());
+  if (typeof mainMapUtils.writeBuildingToUrl !== 'function') return;
+  mainMapUtils.writeBuildingToUrl(osmType, osmId, options);
 }
 
 function clearBuildingFromUrl(options = {}) {
-  const mode = options.mode === 'replace' ? 'replace' : 'push';
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has('b')) return;
-  url.searchParams.delete('b');
-  if (mode === 'replace') {
-    history.replaceState(null, '', url.toString());
-    return;
-  }
-  history.pushState(null, '', url.toString());
+  if (typeof mainMapUtils.clearBuildingFromUrl !== 'function') return;
+  mainMapUtils.clearBuildingFromUrl(options);
 }
 
 function readRequestedPostLoginPath() {
-  try {
-    const url = new URL(window.location.href);
-    const raw = String(url.searchParams.get('next') || '').trim();
-    if (!raw) return null;
-    if (!raw.startsWith('/')) return null;
-    if (raw.startsWith('//')) return null;
-    if (raw.includes('://')) return null;
-    return raw;
-  } catch {
-    return null;
-  }
+  return typeof mainMapUtils.readRequestedPostLoginPath === 'function'
+    ? mainMapUtils.readRequestedPostLoginPath()
+    : null;
+}
+
+function resolvePostLoginRedirectPath(value) {
+  const normalized = String(value || '').trim();
+  if (normalized === '/account' || normalized === '/account/') return '/account/';
+  if (normalized === '/admin' || normalized === '/admin/') return '/admin/';
+  if (normalized === '/info' || normalized === '/info/') return '/info/';
+  if (normalized === '/' || normalized === '') return '/';
+  return '/';
 }
 
 function shouldOpenAuthFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    return String(url.searchParams.get('auth') || '') === '1';
-  } catch {
-    return false;
-  }
+  return typeof mainMapUtils.shouldOpenAuthFromUrl === 'function'
+    ? mainMapUtils.shouldOpenAuthFromUrl()
+    : false;
 }
 
 const initialView = readViewFromUrl();
@@ -99,33 +74,14 @@ const FALLBACK_DEFAULT_MAP_VIEW = Object.freeze({
 });
 
 function getDefaultMapView() {
-  const cfg = window.__ARCHIMAP_CONFIG?.mapDefault;
-  const lon = Number(cfg?.lon);
-  const lat = Number(cfg?.lat);
-  const zoom = Number(cfg?.zoom);
-
-  if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(zoom)) {
-    return FALLBACK_DEFAULT_MAP_VIEW;
-  }
-  if (lon < -180 || lon > 180 || lat < -90 || lat > 90 || zoom < 0 || zoom > 22) {
-    return FALLBACK_DEFAULT_MAP_VIEW;
-  }
-
-  return {
-    center: [lon, lat],
-    zoom
-  };
+  if (typeof mainMapUtils.getDefaultMapView !== 'function') return FALLBACK_DEFAULT_MAP_VIEW;
+  return mainMapUtils.getDefaultMapView(window.__ARCHIMAP_CONFIG?.mapDefault, FALLBACK_DEFAULT_MAP_VIEW);
 }
 
 const defaultMapView = getDefaultMapView();
 const PMTILES_CONFIG = Object.freeze({
   url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
   sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
-});
-const BUILD_INFO_CONFIG = Object.freeze({
-  shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
-  version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
-  repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
 });
 const AUTH_CONFIG = Object.freeze({
   registrationEnabled: Boolean(window.__ARCHIMAP_CONFIG?.auth?.registrationEnabled ?? true),
@@ -181,16 +137,22 @@ const LOCAL_BUILDING_STYLE_FALLBACK = Object.freeze({
 });
 
 function getMapStyleForTheme(theme) {
-  return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+  if (typeof mainMapUtils.getMapStyleForTheme !== 'function') {
+    return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+  }
+  return mainMapUtils.getMapStyleForTheme(theme, LIGHT_MAP_STYLE_URL, DARK_MAP_STYLE_URL);
 }
 
 function getLocalBuildingStyleForTheme(theme) {
-  const normalized = theme === 'dark' ? 'dark' : 'light';
-  const external = window.__ARCHIMAP_LOCAL_BUILDING_STYLE;
-  if (external && typeof external === 'object' && external[normalized]) {
-    return external[normalized];
+  if (typeof mainMapUtils.getLocalBuildingStyleForTheme !== 'function') {
+    const normalized = theme === 'dark' ? 'dark' : 'light';
+    const external = window.__ARCHIMAP_LOCAL_BUILDING_STYLE;
+    if (external && typeof external === 'object' && external[normalized]) {
+      return external[normalized];
+    }
+    return LOCAL_BUILDING_STYLE_FALLBACK[normalized];
   }
-  return LOCAL_BUILDING_STYLE_FALLBACK[normalized];
+  return mainMapUtils.getLocalBuildingStyleForTheme(theme, LOCAL_BUILDING_STYLE_FALLBACK, window.__ARCHIMAP_LOCAL_BUILDING_STYLE);
 }
 
 const pmtilesProtocol = new pmtiles.Protocol();
@@ -252,6 +214,12 @@ const registerLastNameEl = document.getElementById('register-last-name');
 const registerEmailEl = document.getElementById('register-email');
 const registerPasswordEl = document.getElementById('register-password');
 const registerPasswordConfirmEl = document.getElementById('register-password-confirm');
+const registerAcceptUserAgreementEl = document.getElementById('register-accept-user-agreement');
+const registerAcceptPrivacyPolicyEl = document.getElementById('register-accept-privacy-policy');
+const registerAcceptUserAgreementPrefixEl = document.getElementById('register-accept-user-agreement-prefix');
+const registerAcceptUserAgreementLinkEl = document.getElementById('register-accept-user-agreement-link');
+const registerAcceptPrivacyPolicyPrefixEl = document.getElementById('register-accept-privacy-policy-prefix');
+const registerAcceptPrivacyPolicyLinkEl = document.getElementById('register-accept-privacy-policy-link');
 const registerStatusEl = document.getElementById('register-status');
 const forgotPasswordPanelEl = document.getElementById('forgot-password-panel');
 const forgotPasswordFormEl = document.getElementById('forgot-password-form');
@@ -309,11 +277,10 @@ const searchModalInputEl = document.getElementById('search-modal-input');
 const searchResultsStatusEl = document.getElementById('search-results-status');
 const searchResultsListEl = document.getElementById('search-results-list');
 const searchLoadMoreBtnEl = document.getElementById('search-load-more-btn');
-const settingsBuildLinkEl = document.getElementById('settings-build-link');
-const settingsBuildTextEl = document.getElementById('settings-build-text');
 const navLogoLinkEl = document.getElementById('nav-logo-link');
 const THEME_STORAGE_KEY = 'archimap-theme';
-const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
+const LABELS_VISIBLE_STORAGE_KEY = 'archimap-labels-visible';
+const LEGACY_LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_RESULTS_LIMIT = 30;
 const SEARCH_RESULTS_SOURCE_ID = 'search-results-points';
@@ -384,17 +351,81 @@ window.fetch = (input, init = {}) => {
   return nativeFetch(input, nextInit);
 };
 
-const I18N_RU = window.__ARCHIMAP_I18N_RU || {};
-const UI_TEXT = Object.freeze(I18N_RU.ui || {});
+const textTools = window.ArchiMapTextUtils?.createUiTextTools
+  ? window.ArchiMapTextUtils.createUiTextTools()
+  : null;
+const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
+const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
+const OSM_FILTER_TAG_LABELS_RU = Object.freeze((window.__ARCHIMAP_I18N_RU?.filterTagLabels) || {});
 
-function t(key, params = null, fallback = '') {
-  const template = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : fallback;
-  const base = String(template || fallback || '');
-  if (!params || typeof params !== 'object') return base;
-  return base.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? '' : String(params[name])));
+function getUI() {
+  return window.ArchiMapUI || null;
 }
 
-const OSM_FILTER_TAG_LABELS_RU = Object.freeze(I18N_RU.filterTagLabels || {});
+function initMainUiKitClasses() {
+  const ui = getUI();
+  if (!ui) return;
+  const loginPasswordInputEl = document.getElementById('login-password');
+  const changeCurrentPasswordInputEl = document.getElementById('current-password');
+  const changeNewPasswordInputEl = document.getElementById('new-password');
+  const changeNewPasswordConfirmInputEl = document.getElementById('new-password-confirm');
+
+  if (typeof ui.fieldClass === 'function') {
+    [
+      loginUsernameEl,
+      loginPasswordInputEl,
+      registerFirstNameEl,
+      registerLastNameEl,
+      registerEmailEl,
+      registerPasswordEl,
+      registerPasswordConfirmEl,
+      forgotPasswordEmailEl,
+      resetPasswordNewEl,
+      resetPasswordConfirmEl,
+      registerVerifyCodeEl,
+      profileFirstNameEl,
+      profileLastNameEl,
+      changeCurrentPasswordInputEl,
+      changeNewPasswordInputEl,
+      changeNewPasswordConfirmInputEl
+    ].forEach((el) => {
+      if (!el) return;
+      el.className = ui.fieldClass('input');
+    });
+    if (registerVerifyCodeEl) registerVerifyCodeEl.className += ' text-center text-lg tracking-[0.3em]';
+  }
+
+  if (typeof ui.buttonClass === 'function') {
+    const loginSubmitEl = loginForm?.querySelector('button[type="submit"]');
+    const registerSubmitEl = registerFormEl?.querySelector('button[type="submit"]');
+    const forgotSubmitEl = forgotPasswordFormEl?.querySelector('button[type="submit"]');
+    const resetSubmitEl = resetPasswordFormEl?.querySelector('button[type="submit"]');
+    const registerVerifySubmitEl = registerVerifyFormEl?.querySelector('button[type="submit"]');
+    const profileSubmitEl = profileFormEl?.querySelector('button[type="submit"]');
+    const changePasswordSubmitEl = changePasswordFormEl?.querySelector('button[type="submit"]');
+    if (loginSubmitEl) loginSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (registerSubmitEl) registerSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (forgotSubmitEl) forgotSubmitEl.className = ui.buttonClass('secondary') + ' w-full';
+    if (resetSubmitEl) resetSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (registerVerifySubmitEl) registerVerifySubmitEl.className = ui.buttonClass('secondary') + ' w-full';
+    if (profileSubmitEl) profileSubmitEl.className = ui.buttonClass('secondary') + ' w-full';
+    if (changePasswordSubmitEl) changePasswordSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (logoutBtn) logoutBtn.className = ui.buttonClass('danger') + ' hidden w-full';
+    if (profileLogoutBtnEl) profileLogoutBtnEl.className = ui.buttonClass('danger') + ' mt-4 w-full';
+    if (settingsLogoutBtnEl) settingsLogoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
+    if (searchLoadMoreBtnEl) searchLoadMoreBtnEl.className = ui.buttonClass('secondary') + ' hidden w-full';
+  }
+}
+
+function applyRegistrationLegalTexts() {
+  if (registerAcceptUserAgreementPrefixEl) registerAcceptUserAgreementPrefixEl.textContent = t('authRegisterAcceptPrefix', null, 'Я принимаю');
+  if (registerAcceptPrivacyPolicyPrefixEl) registerAcceptPrivacyPolicyPrefixEl.textContent = t('authRegisterAcceptPrefix', null, 'Я принимаю');
+  if (registerAcceptUserAgreementLinkEl) registerAcceptUserAgreementLinkEl.textContent = t('infoTabUserAgreement', null, 'Пользовательское соглашение');
+  if (registerAcceptPrivacyPolicyLinkEl) registerAcceptPrivacyPolicyLinkEl.textContent = t('infoTabPrivacyPolicy', null, 'Политика конфиденциальности');
+}
+
+applyRegistrationLegalTexts();
+initMainUiKitClasses();
 
 const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
   'architect',
@@ -433,15 +464,6 @@ const APPEARANCE_FILTER_TAG_PREFIXES = Object.freeze([
   'building:shape'
 ]);
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
 function getSavedTheme() {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
@@ -464,11 +486,14 @@ function getCurrentTheme() {
   return attr === 'dark' ? 'dark' : 'light';
 }
 
-function getSavedLabelsHidden() {
+function getSavedLabelsVisible() {
   try {
-    const stored = localStorage.getItem(LABELS_HIDDEN_STORAGE_KEY);
+    const stored = localStorage.getItem(LABELS_VISIBLE_STORAGE_KEY);
     if (stored === 'true') return true;
     if (stored === 'false') return false;
+    const legacy = localStorage.getItem(LEGACY_LABELS_HIDDEN_STORAGE_KEY);
+    if (legacy === 'true') return false;
+    if (legacy === 'false') return true;
   } catch {
     // ignore localStorage access failures
   }
@@ -500,25 +525,26 @@ function applyTheme(theme, options = {}) {
   }
 }
 
-function applyLabelsHidden(hidden, options = {}) {
+function applyLabelsVisibility(show, options = {}) {
   const { persist = true } = options;
-  const normalized = Boolean(hidden);
+  const normalized = Boolean(show);
 
   if (labelsToggleEl) {
     labelsToggleEl.checked = normalized;
     labelsToggleEl.setAttribute(
       'aria-label',
       normalized
-        ? t('labelsShow', null, 'Показывать обозначения карты')
-        : t('labelsHide', null, 'Скрыть обозначения карты')
+        ? t('labelsHide', null, 'Скрыть обозначения карты')
+        : t('labelsShow', null, 'Показывать обозначения карты')
     );
   }
 
-  setLabelsVisibility(!normalized);
+  setLabelsVisibility(normalized);
 
   if (persist) {
     try {
-      localStorage.setItem(LABELS_HIDDEN_STORAGE_KEY, String(normalized));
+      localStorage.setItem(LABELS_VISIBLE_STORAGE_KEY, String(normalized));
+      localStorage.removeItem(LEGACY_LABELS_HIDDEN_STORAGE_KEY);
     } catch {
       // ignore localStorage access failures
     }
@@ -588,16 +614,6 @@ function normalizeFeatureInfo(feature) {
       parsed.archimap_description = parsed.description;
     }
     feature.properties.archiInfo = parsed;
-  }
-}
-
-function renderBuildInfoLink() {
-  if (!settingsBuildLinkEl) return;
-  settingsBuildLinkEl.href = BUILD_INFO_CONFIG.repoUrl;
-  if (settingsBuildTextEl) {
-    settingsBuildTextEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
-  } else {
-    settingsBuildLinkEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
   }
 }
 
@@ -678,34 +694,17 @@ function normalizeTagValue(value) {
 }
 
 function getFilterRules() {
-  if (!filterRowsEl) return [];
-  const rows = [...filterRowsEl.querySelectorAll('[data-filter-row]')];
-  return rows.map((row) => {
-    const key = String(row.querySelector('[data-field="key"]')?.value || '').trim();
-    const op = String(row.querySelector('[data-field="op"]')?.value || 'contains').trim();
-    const value = String(row.querySelector('[data-field="value"]')?.value || '').trim();
-    return { key, op, value };
-  }).filter((rule) => {
+  if (typeof mainFilterUtils.getFilterRules !== 'function') return [];
+  return mainFilterUtils.getFilterRules(filterRowsEl).filter((rule) => {
     if (!rule.key) return false;
     if (rule.op === 'exists' || rule.op === 'not_exists') return true;
-    return rule.value.length > 0;
+    return String(rule.value || '').length > 0;
   });
 }
 
 function matchesRule(tags, rule) {
-  if (!rule || !rule.key) return false;
-  const hasKey = Object.prototype.hasOwnProperty.call(tags || {}, rule.key);
-  const rawValue = hasKey ? tags[rule.key] : undefined;
-  const lhs = normalizeTagValue(rawValue).toLowerCase();
-  const rhs = String(rule.value || '').toLowerCase();
-
-  if (rule.op === 'exists') return hasKey;
-  if (rule.op === 'not_exists') return !hasKey;
-  if (!hasKey) return false;
-  if (rule.op === 'equals') return lhs === rhs;
-  if (rule.op === 'not_equals') return lhs !== rhs;
-  if (rule.op === 'starts_with') return lhs.startsWith(rhs);
-  return lhs.includes(rhs);
+  if (typeof mainFilterUtils.matchesRule !== 'function') return false;
+  return mainFilterUtils.matchesRule(tags, rule, normalizeTagValue);
 }
 
 function setLocalBuildingFeatureState(osmKey, state) {
@@ -988,9 +987,16 @@ function buildFilterRow() {
   const row = document.createElement('div');
   row.dataset.filterRow = String(++filterRowSeq);
   row.className = 'grid grid-cols-[1fr_auto_1fr_auto] items-center gap-1.5';
+  const ui = getUI();
+  const filterFieldClass = (ui && typeof ui.fieldClass === 'function')
+    ? ui.fieldClass('input', 'xs')
+    : 'w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200';
+  const filterRemoveClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'squareSm')
+    : 'inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-500 hover:bg-slate-100 hover:text-slate-900';
   row.innerHTML = `
-    <input data-field="key" list="filter-tag-keys" placeholder="${escapeHtml(t('filterKeyPlaceholder', null, 'Тег, например building:levels'))}" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-    <select data-field="op" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
+    <input data-field="key" list="filter-tag-keys" placeholder="${escapeHtml(t('filterKeyPlaceholder', null, 'Тег, например building:levels'))}" class="${filterFieldClass}" />
+    <select data-field="op" class="${filterFieldClass}">
       <option value="contains">${escapeHtml(t('filterOpContains', null, 'содержит'))}</option>
       <option value="equals">${escapeHtml(t('filterOpEquals', null, 'равно'))}</option>
       <option value="not_equals">${escapeHtml(t('filterOpNotEquals', null, 'не равно'))}</option>
@@ -998,8 +1004,8 @@ function buildFilterRow() {
       <option value="exists">${escapeHtml(t('filterOpExists', null, 'существует'))}</option>
       <option value="not_exists">${escapeHtml(t('filterOpNotExists', null, 'отсутствует'))}</option>
     </select>
-    <input data-field="value" placeholder="${escapeHtml(t('filterValuePlaceholder', null, 'Значение'))}" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-    <button data-action="remove" type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-500 hover:bg-slate-100 hover:text-slate-900">×</button>
+    <input data-field="value" placeholder="${escapeHtml(t('filterValuePlaceholder', null, 'Значение'))}" class="${filterFieldClass}" />
+    <button data-action="remove" type="button" class="${filterRemoveClass}">×</button>
   `;
   return row;
 }
@@ -1351,9 +1357,9 @@ function osmDescriptionFromTags(tags) {
   return tags['description:ru'] || tags.description || null;
 }
 
-const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze(I18N_RU.architectureStyleLabels || {});
+const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze((window.__ARCHIMAP_I18N_RU?.architectureStyleLabels) || {});
 
-const ARCHITECTURE_STYLE_ALIASES = Object.freeze(I18N_RU.architectureStyleAliases || {});
+const ARCHITECTURE_STYLE_ALIASES = Object.freeze((window.__ARCHIMAP_I18N_RU?.architectureStyleAliases) || {});
 
 const ARCHITECTURE_STYLE_KEY_BY_LABEL_NORMALIZED = (() => {
   const map = new Map();
@@ -1705,34 +1711,8 @@ function updateBuildingHighlightStyle() {
   map.setPaintProperty('local-buildings-line', 'line-width', getBuildingLineWidthExpression());
 }
 
-function splitSemicolonValues(value) {
-  return String(value || '')
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function buildCopyChips(items, emptyFallback = '-') {
-  if (!Array.isArray(items) || items.length === 0) return escapeHtml(emptyFallback);
-  const chips = items.map((item) => {
-    const raw = String(item?.raw ?? '').trim();
-    const label = String(item?.label ?? raw).trim();
-    if (!raw || !label) return '';
-    return `<button type="button" data-copy-chip="true" data-copy-value="${escapeHtml(raw)}" class="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-800 transition hover:bg-slate-200">${escapeHtml(label)}</button>`;
-  }).join('');
-  return `<div class="flex flex-wrap gap-1.5">${chips}</div>`;
-}
-
-function buildReadonlyField(label, valueHtml) {
-  return `
-    <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-      <div class="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(label)}</div>
-      <div class="text-sm leading-5 text-slate-800">${valueHtml}</div>
-    </div>
-  `;
-}
-
 function buildModalHtml(feature) {
+  if (typeof mainModalUtils.buildModalHtml !== 'function') return '';
   const info = feature.properties?.archiInfo || {};
   const osmTags = getSourceTags(feature);
   const addressForm = getAddressFormState(osmTags, info.address);
@@ -1758,110 +1738,29 @@ function buildModalHtml(feature) {
   const styleOptionsHtml = styleOptions
     .map((option) => `<option value="${escapeHtml(option.key)}" ${styleEditState.selectedKey === option.key ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
     .join('');
-  const editableRows = canEditBuildings
-    ? `
-      <form id="building-edit-form" class="grid gap-2">
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-name" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelName', null, 'Название:'))}</label>
-          <input id="building-name" name="building-name" type="text" value="${escapeHtml(info.name || (shownName !== '-' ? shownName : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-levels" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelLevels', null, 'Этажей:'))}</label>
-          <input id="building-levels" name="building-levels" type="number" value="${escapeHtml(info.levels ?? (shownLevels !== '-' ? shownLevels : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-year" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelYearBuilt', null, 'Год постройки:'))}</label>
-          <input id="building-year" name="building-year" type="number" value="${escapeHtml(info.year_built || (shownYear !== '-' ? shownYear : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-architect" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelArchitect', null, 'Архитектор:'))}</label>
-          <input id="building-architect" name="building-architect" type="text" value="${escapeHtml(info.architect || (shownArchitect !== '-' ? shownArchitect : ''))}" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-style-select" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelStyle', null, 'Архитектурный стиль:'))}</label>
-          <select id="building-style-select" name="building-style-select" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
-            <option value="" ${styleEditState.selectedKey === '' ? 'selected' : ''}>${escapeHtml(t('modalStyleNotSet', null, 'Не указан'))}</option>
-            ${styleOptionsHtml}
-          </select>
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <label for="building-archimap-description" class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalLabelExtraInfo', null, 'Доп. информация:'))}</label>
-          <textarea id="building-archimap-description" name="building-archimap-description" rows="3" class="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">${escapeHtml(info.archimap_description || info.description || '')}</textarea>
-        </div>
-        <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-slate-700 shadow-soft">
-          <div class="mb-1 block text-xs font-bold text-slate-900">${escapeHtml(t('modalAddressTagsTitle', null, 'Адрес (OSM теги):'))}</div>
-          <div class="mt-1.5 grid gap-1.5 md:grid-cols-2">
-            <label class="block md:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressFull', null, 'Полный адрес (addr:full)'))}</span>
-              <input id="building-addr-full" name="building-addr-full" type="text" value="${escapeHtml(addressForm.full)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressPostcode', null, 'Индекс (addr:postcode)'))}</span>
-              <input id="building-addr-postcode" name="building-addr-postcode" type="text" value="${escapeHtml(addressForm.postcode)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressCity', null, 'Город (addr:city)'))}</span>
-              <input id="building-addr-city" name="building-addr-city" type="text" value="${escapeHtml(addressForm.city)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressPlace', null, 'Место/локация (addr:place)'))}</span>
-              <input id="building-addr-place" name="building-addr-place" type="text" value="${escapeHtml(addressForm.place)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressStreet', null, 'Улица (addr:street)'))}</span>
-              <input id="building-addr-street" name="building-addr-street" type="text" value="${escapeHtml(addressForm.street)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-            <label class="block md:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-slate-700">${escapeHtml(t('modalAddressHouseNumber', null, 'Номер дома (addr:housenumber)'))}</span>
-              <input id="building-addr-housenumber" name="building-addr-housenumber" type="text" value="${escapeHtml(addressForm.housenumber)}" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-            </label>
-          </div>
-        </div>
-        <div class="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-          <p id="building-save-status" class="text-sm text-slate-600"></p>
-          <button type="submit" class="rounded-xl bg-indigo-600 px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-indigo-700">${escapeHtml(t('modalSave', null, 'Сохранить'))}</button>
-        </div>
-      </form>
-    `
-    : `
-      ${isAuthenticated ? `<div class="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">${escapeHtml(t('modalEditRestricted', null, 'Редактирование доступно только пользователям с разрешением администратора.'))}</div>` : ''}
-      ${buildReadonlyField(t('modalLabelName', null, 'Название:'), escapeHtml(shownName))}
-      ${buildReadonlyField(t('modalLabelAddress', null, 'Адрес:'), escapeHtml(shownAddress))}
-      ${buildReadonlyField(t('modalLabelLevels', null, 'Этажей:'), escapeHtml(shownLevels))}
-      ${buildReadonlyField(t('modalLabelYearBuilt', null, 'Год постройки:'), escapeHtml(shownYear))}
-      ${buildReadonlyField(
-        t('modalLabelArchitect', null, 'Архитектор:'),
-        buildCopyChips(
-          splitSemicolonValues(info.architect || osmArchitect).map((raw) => ({ raw, label: raw })),
-          shownArchitect
-        )
-      )}
-      ${buildReadonlyField(
-        t('modalLabelStyle', null, 'Архитектурный стиль:'),
-        buildCopyChips(
-          splitSemicolonValues(info.style || osmStyle).map((raw) => ({
-            raw,
-            label: toHumanArchitectureStyle(raw) || raw
-          })),
-          shownStyle
-        )
-      )}
-      ${buildReadonlyField(t('modalLabelDescription', null, 'Описание:'), escapeHtml(shownDescription))}
-      ${buildReadonlyField(t('modalLabelExtraInfo', null, 'Доп. информация:'), escapeHtml(shownExtraInfo))}
-    `;
-
-  return `
-    <div class="grid gap-2.5">
-      ${editableRows}
-      <details class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-        <summary class="relative cursor-pointer list-none bg-slate-50 px-3 py-2.5 pr-10 font-bold text-slate-900 transition hover:bg-slate-100 after:absolute after:right-3 after:top-1/2 after:-translate-y-1/2 after:content-['▾'] [&::-webkit-details-marker]:hidden [&[open]_summary]:after:rotate-180">${escapeHtml(t('modalOsmTagsSummary', null, 'OSM теги'))}</summary>
-        <pre class="m-0 border-t border-slate-200 bg-white px-3 py-2.5 text-[11px] leading-5 text-slate-700 whitespace-pre-wrap break-words">${escapeHtml(JSON.stringify({
-          osm: feature.properties?.osm_key || '-',
-          ...osmTags
-        }, null, 2))}</pre>
-      </details>
-    </div>
-  `;
+  return mainModalUtils.buildModalHtml({
+    t,
+    escapeHtml,
+    feature,
+    info,
+    osmTags,
+    addressForm,
+    styleEditState,
+    styleOptionsHtml,
+    canEditBuildings,
+    isAuthenticated,
+    shownName,
+    shownAddress,
+    shownLevels,
+    shownYear,
+    shownArchitect,
+    shownStyle,
+    shownDescription,
+    shownExtraInfo,
+    osmArchitect,
+    osmStyle,
+    toHumanArchitectureStyle
+  });
 }
 
 function getFeatureFocusLngLat(feature) {
@@ -2021,45 +1920,23 @@ function closeAuthModal() {
 }
 
 function readResetTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const token = String(url.searchParams.get('resetToken') || '').trim();
-    return token || null;
-  } catch {
-    return null;
-  }
+  if (typeof mainAuthUtils.readResetTokenFromUrl !== 'function') return null;
+  return mainAuthUtils.readResetTokenFromUrl();
 }
 
 function readRegisterTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const token = String(url.searchParams.get('registerToken') || '').trim();
-    return token || null;
-  } catch {
-    return null;
-  }
+  if (typeof mainAuthUtils.readRegisterTokenFromUrl !== 'function') return null;
+  return mainAuthUtils.readRegisterTokenFromUrl();
 }
 
 function clearResetTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('resetToken')) return;
-    url.searchParams.delete('resetToken');
-    history.replaceState(null, '', url.toString());
-  } catch {
-    // ignore
-  }
+  if (typeof mainAuthUtils.clearResetTokenFromUrl !== 'function') return;
+  mainAuthUtils.clearResetTokenFromUrl();
 }
 
 function clearRegisterTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('registerToken')) return;
-    url.searchParams.delete('registerToken');
-    history.replaceState(null, '', url.toString());
-  } catch {
-    // ignore
-  }
+  if (typeof mainAuthUtils.clearRegisterTokenFromUrl !== 'function') return;
+  mainAuthUtils.clearRegisterTokenFromUrl();
 }
 
 function setAuthTab(nextTab) {
@@ -2168,10 +2045,10 @@ function closeSearchModal() {
 }
 
 function buildSearchCacheKey(query, center, cursor = 0) {
-  const q = String(query || '').trim().toLowerCase();
-  const lon = Number(center?.lng || 0).toFixed(3);
-  const lat = Number(center?.lat || 0).toFixed(3);
-  return `${q}|${lon}|${lat}|${SEARCH_RESULTS_LIMIT}|${Number(cursor) || 0}`;
+  if (typeof mainSearchUtils.buildSearchCacheKey !== 'function') {
+    return `${String(query || '').trim().toLowerCase()}|0.000|0.000|${SEARCH_RESULTS_LIMIT}|${Number(cursor) || 0}`;
+  }
+  return mainSearchUtils.buildSearchCacheKey(query, center, SEARCH_RESULTS_LIMIT, cursor);
 }
 
 function getSearchCache(key) {
@@ -2197,11 +2074,10 @@ function setSearchCache(key, items) {
 }
 
 function debounce(fn, delayMs) {
-  let timer = null;
-  return (...args) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delayMs);
-  };
+  if (typeof mainSearchUtils.debounce !== 'function') {
+    return (...args) => fn(...args);
+  }
+  return mainSearchUtils.debounce(fn, delayMs);
 }
 
 function renderSearchSkeleton(count = 6) {
@@ -2222,6 +2098,10 @@ function renderSearchSkeleton(count = 6) {
 function renderSearchResults(items, options = {}) {
   const { hasMore = false, loadingMore = false } = options;
   if (!searchResultsListEl || !searchResultsStatusEl) return;
+  const ui = getUI();
+  const resultActionBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'xs')
+    : 'ui-btn ui-btn-secondary ui-btn-xs';
   const data = Array.isArray(items) ? items : [];
   if (data.length === 0) {
     searchResultsStatusEl.textContent = t('searchNoResults', null, 'Ничего не найдено.');
@@ -2252,7 +2132,7 @@ function renderSearchResults(items, options = {}) {
         ${line3 ? `<div class="mb-2 text-xs text-slate-700">${escapeHtml(line3)}</div>` : '<div class="mb-2"></div>'}
         <div class="flex items-center justify-between gap-2">
           <div class="text-[11px] text-slate-500">${escapeHtml(`${item.osmType}/${item.osmId}`)}</div>
-          <button data-action="go-to-building" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+          <button data-action="go-to-building" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="${resultActionBtnClass}">
             ${escapeHtml(t('searchGoToBuilding', null, 'К зданию'))}
           </button>
         </div>
@@ -2710,7 +2590,7 @@ loginForm.addEventListener('submit', async (event) => {
   closeAuthModal();
   const nextPath = readRequestedPostLoginPath();
   if (nextPath) {
-    window.location.href = nextPath;
+    window.location.href = resolvePostLoginRedirectPath(nextPath);
   }
 });
 
@@ -2723,6 +2603,8 @@ if (registerFormEl && isRegistrationUiEnabled()) {
     const email = String(registerEmailEl?.value || '').trim();
     const password = String(registerPasswordEl?.value || '');
     const passwordConfirm = String(registerPasswordConfirmEl?.value || '');
+    const acceptUserAgreement = Boolean(registerAcceptUserAgreementEl?.checked);
+    const acceptPrivacyPolicy = Boolean(registerAcceptPrivacyPolicyEl?.checked);
 
     if (!email || !password) {
       if (registerStatusEl) registerStatusEl.textContent = t('authRegisterFillRequired', null, 'Заполните email и пароль');
@@ -2732,6 +2614,10 @@ if (registerFormEl && isRegistrationUiEnabled()) {
       if (registerStatusEl) registerStatusEl.textContent = t('authRegisterPasswordMismatch', null, 'Пароли не совпадают');
       return;
     }
+    if (!acceptUserAgreement || !acceptPrivacyPolicy) {
+      if (registerStatusEl) registerStatusEl.textContent = t('authRegisterAcceptRequired', null, 'Подтвердите пользовательское соглашение и политику конфиденциальности');
+      return;
+    }
 
     if (registerStatusEl) registerStatusEl.textContent = t('authRegisterSendingMail', null, 'Отправляем письмо для подтверждения...');
     let resp;
@@ -2739,7 +2625,14 @@ if (registerFormEl && isRegistrationUiEnabled()) {
       resp = await fetch('/api/register/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, password })
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          password,
+          acceptTerms: acceptUserAgreement,
+          acceptPrivacy: acceptPrivacyPolicy
+        })
       });
     } catch {
       if (registerStatusEl) registerStatusEl.textContent = t('authRegisterNetworkError', null, 'Ошибка сети при отправке письма');
@@ -3119,10 +3012,10 @@ if (filterRowsEl) {
 }
 if (labelsToggleEl) {
   labelsToggleEl.addEventListener('change', () => {
-    applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: true });
+    applyLabelsVisibility(Boolean(labelsToggleEl.checked), { persist: true });
   });
-  const savedLabelsHidden = getSavedLabelsHidden();
-  applyLabelsHidden(savedLabelsHidden == null ? false : savedLabelsHidden, { persist: false });
+  const savedLabelsVisible = getSavedLabelsVisible();
+  applyLabelsVisibility(savedLabelsVisible == null ? true : savedLabelsVisible, { persist: false });
 }
 if (themeToggleEl) {
   applyTheme(getCurrentTheme(), { persist: false });
@@ -3546,12 +3439,11 @@ map.on('style.load', () => {
   updateBuildingHighlightStyle();
   updateCartoBuildingsVisibility();
   if (labelsToggleEl) {
-    applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: false });
+    applyLabelsVisibility(Boolean(labelsToggleEl.checked), { persist: false });
   }
 });
 
 map.on('load', async () => {
-  renderBuildInfoLink();
   await loadAuthState();
   setAuthTab('login');
   if (pendingRegisterToken && !isAuthenticated) {

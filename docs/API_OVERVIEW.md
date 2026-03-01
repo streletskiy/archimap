@@ -1,5 +1,9 @@
 # API Overview
 
+- System:
+  - `GET /healthz`
+  - `GET /readyz`
+  - `GET /metrics` (when `METRICS_ENABLED=true`)
 - PMTiles:
   - `GET /api/buildings.pmtiles`
 - Building details:
@@ -15,11 +19,12 @@
 - Auth:
   - `GET /api/me`
   - `POST /api/login`
-  - `POST /api/register/start`
+  - `POST /api/register/start` (requires `acceptTerms=true` and `acceptPrivacy=true`)
   - `POST /api/register/confirm-code`
   - `POST /api/register/confirm-link`
   - `POST /api/password-reset/request`
   - `POST /api/password-reset/confirm`
+  - `GET /api/legal-docs/:slug` (`user-agreement`, `privacy-policy`)
   - `POST /api/account/profile`
   - `POST /api/account/change-password`
   - `GET /api/account/edits`
@@ -33,4 +38,11 @@
   - `GET /api/admin/building-edits/:editId`
   - `POST /api/admin/building-edits/:editId/merge`
   - `POST /api/admin/building-edits/:editId/reject`
+  - `GET /api/admin/app-settings/general`
+  - `POST /api/admin/app-settings/general`
+  - `GET /api/admin/app-settings/smtp`
+  - `POST /api/admin/app-settings/smtp`
+  - `POST /api/admin/app-settings/smtp/test`
   - `POST /api/logout`
+
+OpenAPI spec for core routes: [openapi.yaml](./openapi.yaml)

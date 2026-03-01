@@ -24,6 +24,25 @@ window.__ARCHIMAP_I18N_RU = Object.freeze({
   authFabLogin: 'Войти',
   navOpenMenu: 'Открыть меню',
   navAdminPanel: 'Админ-панель',
+  navInfo: 'Информация',
+  infoPageTitle: 'Информация | archimap',
+  infoHeading: 'Информация',
+  infoSubheading: 'О сервисе, техническая информация и юридические документы.',
+  infoTabAbout: 'О сервисе',
+  infoTabUserAgreement: 'Пользовательское соглашение',
+  infoTabPrivacyPolicy: 'Политика конфиденциальности',
+  infoAboutTitle: 'О сервисе',
+  infoAboutText: 'archimap помогает собирать и модератировать архитектурные данные зданий на карте. Изменения пользователей проходят модерацию и могут использоваться в экосистеме OSM в соответствии с правилами лицензирования.',
+  infoTechTitle: 'Техническая информация',
+  infoTechVersionLabel: 'Версия',
+  infoTechCommitLabel: 'Коммит',
+  infoTechRepoLabel: 'Репозиторий',
+  infoTechRepoLinkText: 'github',
+  infoDocLoading: 'Загрузка документа...',
+  infoDocLoadNetworkError: 'Ошибка сети при загрузке документа.',
+  infoDocLoadFailed: 'Не удалось загрузить документ',
+  accountLegalTitle: 'Правовая информация',
+  accountLegalHint: 'Соглашения и политика конфиденциальности доступны в разделе информации.',
   navUiKit: 'UI kit',
   navLogout: 'Выход',
   navTheme: 'Тема',
@@ -96,8 +115,10 @@ window.__ARCHIMAP_I18N_RU = Object.freeze({
   saveFailed: 'Не удалось сохранить',
   saveDone: 'Сохранено',
   authLoginEmailPlaceholder: 'Email',
+  authRegisterAcceptPrefix: 'Я принимаю',
   authRegisterFillRequired: 'Заполните email и пароль',
   authRegisterPasswordMismatch: 'Пароли не совпадают',
+  authRegisterAcceptRequired: 'Подтвердите пользовательское соглашение и политику конфиденциальности',
   authRegisterSendingMail: 'Отправляем письмо для подтверждения...',
   authRegisterNetworkError: 'Ошибка сети при отправке письма',
   authRegisterSendFailed: 'Не удалось отправить письмо',
@@ -125,6 +146,34 @@ window.__ARCHIMAP_I18N_RU = Object.freeze({
   authRegisterLinkNetworkError: 'Ошибка сети при подтверждении ссылки',
   authRegisterLinkFailed: 'Не удалось подтвердить регистрацию',
   authResetPromptFromLink: 'Введите новый пароль для завершения сброса.',
+  accountPageTitle: 'Личный кабинет | archimap',
+  accountHeading: 'Личный кабинет',
+  accountTabSettings: 'Настройки',
+  accountTabEdits: 'Мои правки',
+  accountSettingsTitle: 'Настройки профиля',
+  accountSettingsHint: 'Личные данные, безопасность и уведомления в одном разделе.',
+  accountPersonalTitle: 'Личные данные',
+  accountLabelFirstName: 'Имя',
+  accountLabelLastName: 'Фамилия',
+  accountLabelEmail: 'Email',
+  accountProfileSaveBtn: 'Сохранить',
+  accountSecurityTitle: 'Безопасность',
+  accountLabelCurrentPassword: 'Текущий пароль',
+  accountLabelNewPassword: 'Новый пароль',
+  accountLabelNewPasswordConfirm: 'Повторите новый пароль',
+  accountPasswordSaveBtn: 'Изменить пароль',
+  accountNotificationsTitle: 'Уведомления',
+  accountNotifyCommentsTitle: 'Новые комментарии к правкам',
+  accountNotifyCommentsHint: 'Письмо, когда администратор комментирует вашу правку.',
+  accountNotifyModerationTitle: 'Статус модерации',
+  accountNotifyModerationHint: 'Уведомления об одобрении или отклонении изменений.',
+  accountNotifyWeeklyTitle: 'Еженедельная сводка',
+  accountNotifyWeeklyHint: 'Подборка ваших активностей и новых объектов на карте.',
+  accountEditsSearchPlaceholder: 'Поиск по адресу или ID здания',
+  accountEditsColObject: 'Объект',
+  accountEditsColAuthor: 'Автор',
+  accountEditsColStatus: 'Статус',
+  accountEditsColChanges: 'Изменения тегов',
   accountLoadError: 'Ошибка загрузки данных',
   accountProfileSaving: 'Сохраняем...',
   accountProfileNetworkError: 'Ошибка сети',
@@ -165,116 +214,120 @@ window.__ARCHIMAP_I18N_RU = Object.freeze({
   adminDeleteOneDone: 'Удалено: {osmKey}',
   adminTargetKeyInvalid: 'Укажите целевой OSM ключ в формате way/123 или relation/123',
   adminReassignOneFailed: 'Не удалось переназначить правку',
-  adminReassignOneDone: 'Перенесено: {from} -> {to}'
-  ,editStatusAccepted: 'Принято'
-  ,editStatusPartiallyAccepted: 'Частично принято'
-  ,editStatusRejected: 'Отклонено'
-  ,editStatusPending: 'На рассмотрении'
-  ,editStatusSuperseded: 'Заменено новой правкой'
-  ,editCommentLabel: 'Комментарий: {text}'
-  ,editCountersTotal: '{count} всего'
-  ,editCountersCreated: '+{count} создано'
-  ,editCountersModified: '~{count} изменено'
-  ,editsShownSummary: 'Показано: {shown} из {total}'
-  ,adminUserFilterAll: 'Пользователь: все'
-  ,mapLibLoadFailed: 'MapLibre/PMTiles не загружены'
-  ,diffEmptyValue: 'пусто'
-  ,adminReviewStatus: 'Статус правки:'
-  ,adminReviewTitle: 'Модерация правки'
-  ,adminNoDiffToMerge: 'Нет отличий для мерджа.'
-  ,adminCommentPlaceholder: 'Комментарий администратора (опционально)'
-  ,adminApplyDecisions: 'Применить решения'
-  ,adminMergeAll: 'Принять все'
-  ,adminRejectAction: 'Отклонить'
-  ,adminRejectAll: 'Отклонить все'
-  ,adminFieldAccept: 'Принять'
-  ,adminFieldReject: 'Отклонить'
-  ,adminNoFieldDecisions: 'Нет выбранных полей'
-  ,adminEditPartiallyAccepted: 'Решения по тегам применены'
-  ,adminRejectedFieldsNote: 'Отклонены теги'
-  ,adminAllAcceptedMarked: 'Все теги отмечены как принятые. Нажмите "Применить решения".'
-  ,adminAllRejectedMarked: 'Все теги отмечены как отклоненные. Нажмите "Применить решения".'
-  ,adminActionSaving: 'Сохраняем...'
-  ,adminActionFailed: 'Не удалось выполнить действие'
-  ,adminEditAccepted: 'Правка принята'
-  ,adminEditRejected: 'Правка отклонена'
-  ,adminMetaAuthor: 'Автор: {author}'
-  ,adminMetaId: 'ID: {id}'
-  ,adminMetaStatus: 'Статус: {status}'
-  ,adminGuideTitle: 'Регламент обработки правок'
-  ,adminTabGuide: 'Регламент правок'
-  ,adminGuideSubtitle: 'Как работает модерация, конфликтные ситуации и статусы.'
-  ,adminGuideStatusesTitle: 'Статусы правок и их смысл'
-  ,adminGuideFlowTitle: 'Пошаговый workflow'
-  ,adminGuideFlow1: 'Пользователь создает или обновляет pending-правку по зданию.'
-  ,adminGuideFlow2: 'Для одного пользователя и здания сохраняется только одна активная pending-правка.'
-  ,adminGuideFlow3: 'Админ выбирает решение по каждому тегу: принять или отклонить, с возможностью отредактировать значение.'
-  ,adminGuideFlow4: '"Принять все/Отклонить все" только выставляют решения по тегам, а не применяют их сразу.'
-  ,adminGuideFlow5: 'Изменения применяются только после кнопки "Применить решения".'
-  ,adminGuideExampleTitle: 'Пример: частичное принятие'
-  ,adminGuideExampleText: 'Здание way/22891444: из 5 изменений админ принял 3 и отклонил 2. Статус правки станет "Частично принято". В комментарий автоматически добавится список отклоненных тегов.'
-  ,adminGuideCornerTitle: 'Corner cases и защита от ошибок'
-  ,adminGuideCorner1Title: 'Параллельная модерация двумя администраторами'
-  ,adminGuideCorner1: 'Если два администратора одновременно применяют решение по одной правке, запись изменяется только при status=pending. Второй запрос получает 409 и не перезаписывает результат первого.'
-  ,adminGuideCorner2Title: 'Устаревшая правка (конфликт ревизии)'
-  ,adminGuideCorner2: 'Если локальная запись здания изменилась после создания пользовательской правки, merge блокируется с кодом EDIT_OUTDATED. Админу нужно открыть актуальные данные и повторно принять решение.'
-  ,adminGuideCorner3Title: 'Повторные правки одного пользователя по тому же зданию'
-  ,adminGuideCorner3: 'Для одного пользователя и здания поддерживается только одна активная pending-правка. Лишние pending автоматически помечаются как superseded, чтобы в модерации не было дублей.'
-  ,adminGuideCorner4Title: 'Частичное принятие тегов'
-  ,adminGuideCorner4: 'Если принята только часть тегов, правка получает статус partially_accepted. Принятые поля попадают в merged_fields_json, отклоненные остаются в комментарии для прозрачной истории.'
-  ,accountMetaStatus: 'Статус: {status}'
-  ,accountChangePasswordFillAll: 'Заполните все поля'
-  ,accountChangePasswordMismatch: 'Новый пароль и подтверждение не совпадают'
-  ,accountChangePasswordSaving: 'Сохраняем новый пароль...'
-  ,accountChangePasswordDone: 'Пароль успешно обновлён'
-  ,saveQueued: 'Отправлено на рассмотрение'
-  ,copied: 'Скопировано'
-  ,profileEmailPrefix: 'Email: {email}'
-  ,authLoggedInShort: 'Вход выполнен'
-  ,adminRoleBadgeAdmin: 'Админ'
-  ,adminRoleBadgeMasterAdmin: 'Мастер-админ'
-  ,adminRoleBadgeUser: 'Пользователь'
-  ,adminPermCanEdit: 'Может редактировать'
-  ,adminPermReadOnly: 'Только просмотр'
-  ,adminMasterAdminRoleLocked: 'Мастер-админ не может снять с себя роль admin'
-  ,modalEditRestricted: 'Редактирование доступно только пользователям с разрешением администратора.'
-  ,uiReadmeTitle: 'UI README'
-  ,uiReadmeSubtitleHtml: 'Единая библиотека компонентов: <code>public/shared/ui.js</code>. Используйте её для общих шаблонов и классов.'
-  ,uiSectionBadges: 'Бейджи'
-  ,uiBadgesApiHtml: 'API: <code>ArchiMapUI.badge(text, variant)</code>'
-  ,uiSectionToggles: 'Рычажки'
-  ,uiTogglesApiHtml: 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.'
-  ,uiSectionPanel: 'Панель'
-  ,uiPanelApiHtml: 'API: <code>ArchiMapUI.panel(content, options)</code>'
-  ,uiSectionHeader: 'Section Header'
-  ,uiHeaderApiHtml: 'API: <code>ArchiMapUI.sectionHeader(title, subtitle)</code>'
-  ,uiSectionTabs: 'Вкладки'
-  ,uiTabsApiHtml: 'API: <code>ArchiMapUI.tabButtonClass(active)</code>'
-  ,uiSectionFields: 'Поля и кнопки'
-  ,uiFieldsApiHtml: 'API: <code>ArchiMapUI.fieldClass(kind)</code>, <code>ArchiMapUI.buttonClass(variant)</code>'
-  ,uiSectionEmails: 'Email шаблоны (preview)'
-  ,uiRefresh: 'Обновить'
-  ,uiLoading: 'Загрузка...'
-  ,uiGuideTitle: 'Инструкция по использованию'
-  ,uiGuideItem1Html: 'Подключай <code>/shared/ui.js</code> перед любыми шаблонами/страницами.'
-  ,uiGuideItem2Html: 'Для навигации подключай <code>/shared/top-nav.js</code> и рендери <code>ArchiMapTopNav.render({ context })</code>.'
-  ,uiGuideItem3Html: 'Новые общие UI-элементы сначала добавляй в <code>ui.js</code>, потом используй в страницах.'
-  ,uiGuideItem4Html: 'Дублирующиеся классы в HTML постепенно заменяй на шаблоны из <code>ArchiMapUI</code>.'
-  ,uiPanelDemoText: 'Контент внутри стандартизованной панели.'
-  ,uiHeaderDemoTitle: 'Заголовок секции'
-  ,uiHeaderDemoSubtitle: 'Подзаголовок и описание в одном стиле'
-  ,uiTabActive: 'Активная'
-  ,uiTabInactive: 'Неактивная'
-  ,uiInputPlaceholder: 'Текстовое поле'
-  ,uiSelectPlaceholder: 'Селект'
-  ,uiEmailSubject: 'Subject: {value}'
-  ,uiEmailHtml: 'HTML'
-  ,uiEmailText: 'Text'
-  ,uiEmailLoadNetworkError: 'Ошибка сети при загрузке email шаблонов'
-  ,uiEmailLoadFailed: 'Не удалось загрузить email шаблоны'
-  ,uiEmailRegistrationTitle: 'Письмо: подтверждение регистрации'
-  ,uiEmailResetTitle: 'Письмо: сброс пароля'
-  ,uiUpdatedAt: 'Обновлено: {value}'
+  adminReassignOneDone: 'Перенесено: {from} -> {to}',
+  editStatusAccepted: 'Принято',
+  editStatusPartiallyAccepted: 'Частично принято',
+  editStatusRejected: 'Отклонено',
+  editStatusPending: 'На рассмотрении',
+  editStatusSuperseded: 'Заменено новой правкой',
+  editCommentLabel: 'Комментарий: {text}',
+  editCountersTotal: '{count} всего',
+  editCountersCreated: '+{count} создано',
+  editCountersModified: '~{count} изменено',
+  editsShownSummary: 'Показано: {shown} из {total}',
+  adminUserFilterAll: 'Пользователь: все',
+  mapLibLoadFailed: 'MapLibre/PMTiles не загружены',
+  diffEmptyValue: 'пусто',
+  adminReviewStatus: 'Статус правки:',
+  adminReviewTitle: 'Модерация правки',
+  adminNoDiffToMerge: 'Нет отличий для мерджа.',
+  adminCommentPlaceholder: 'Комментарий администратора (опционально)',
+  adminApplyDecisions: 'Применить решения',
+  adminMergeAll: 'Принять все',
+  adminRejectAction: 'Отклонить',
+  adminRejectAll: 'Отклонить все',
+  adminFieldAccept: 'Принять',
+  adminFieldReject: 'Отклонить',
+  adminNoFieldDecisions: 'Нет выбранных полей',
+  adminEditPartiallyAccepted: 'Решения по тегам применены',
+  adminRejectedFieldsNote: 'Отклонены теги',
+  adminAllAcceptedMarked: 'Все теги отмечены как принятые. Нажмите "Применить решения".',
+  adminAllRejectedMarked: 'Все теги отмечены как отклоненные. Нажмите "Применить решения".',
+  adminActionSaving: 'Сохраняем...',
+  adminActionFailed: 'Не удалось выполнить действие',
+  adminEditAccepted: 'Правка принята',
+  adminEditRejected: 'Правка отклонена',
+  adminMetaAuthor: 'Автор: {author}',
+  adminMetaId: 'ID: {id}',
+  adminMetaStatus: 'Статус: {status}',
+  adminGuideTitle: 'Регламент обработки правок',
+  adminTabGuide: 'Регламент правок',
+  adminGuideSubtitle: 'Как работает модерация, конфликтные ситуации и статусы.',
+  adminGuideStatusesTitle: 'Статусы правок и их смысл',
+  adminGuideFlowTitle: 'Пошаговый workflow',
+  adminGuideFlow1: 'Пользователь создает или обновляет pending-правку по зданию.',
+  adminGuideFlow2: 'Для одного пользователя и здания сохраняется только одна активная pending-правка.',
+  adminGuideFlow3: 'Админ выбирает решение по каждому тегу: принять или отклонить, с возможностью отредактировать значение.',
+  adminGuideFlow4: '"Принять все/Отклонить все" только выставляют решения по тегам, а не применяют их сразу.',
+  adminGuideFlow5: 'Изменения применяются только после кнопки "Применить решения".',
+  adminGuideExampleTitle: 'Пример: частичное принятие',
+  adminGuideExampleText: 'Здание way/22891444: из 5 изменений админ принял 3 и отклонил 2. Статус правки станет "Частично принято". В комментарий автоматически добавится список отклоненных тегов.',
+  adminGuideCornerTitle: 'Corner cases и защита от ошибок',
+  adminGuideCorner1Title: 'Параллельная модерация двумя администраторами',
+  adminGuideCorner1: 'Если два администратора одновременно применяют решение по одной правке, запись изменяется только при status=pending. Второй запрос получает 409 и не перезаписывает результат первого.',
+  adminGuideCorner2Title: 'Устаревшая правка (конфликт ревизии)',
+  adminGuideCorner2: 'Если локальная запись здания изменилась после создания пользовательской правки, merge блокируется с кодом EDIT_OUTDATED. Админу нужно открыть актуальные данные и повторно принять решение.',
+  adminGuideCorner3Title: 'Повторные правки одного пользователя по тому же зданию',
+  adminGuideCorner3: 'Для одного пользователя и здания поддерживается только одна активная pending-правка. Лишние pending автоматически помечаются как superseded, чтобы в модерации не было дублей.',
+  adminGuideCorner4Title: 'Частичное принятие тегов',
+  adminGuideCorner4: 'Если принята только часть тегов, правка получает статус partially_accepted. Принятые поля попадают в merged_fields_json, отклоненные остаются в комментарии для прозрачной истории.',
+  accountMetaStatus: 'Статус: {status}',
+  accountChangePasswordFillAll: 'Заполните все поля',
+  accountChangePasswordMismatch: 'Новый пароль и подтверждение не совпадают',
+  accountChangePasswordSaving: 'Сохраняем новый пароль...',
+  accountChangePasswordDone: 'Пароль успешно обновлён',
+  saveQueued: 'Отправлено на рассмотрение',
+  copied: 'Скопировано',
+  profileEmailPrefix: 'Email: {email}',
+  authLoggedInShort: 'Вход выполнен',
+  adminRoleBadgeAdmin: 'Админ',
+  adminRoleBadgeMasterAdmin: 'Мастер-админ',
+  adminRoleBadgeUser: 'Пользователь',
+  adminPermCanEdit: 'Может редактировать',
+  adminPermReadOnly: 'Только просмотр',
+  adminMasterAdminRoleLocked: 'Мастер-админ не может снять с себя роль admin',
+  modalEditRestricted: 'Редактирование доступно только пользователям с разрешением администратора.',
+  uiReadmeTitle: 'UI README',
+  uiReadmeSubtitleHtml: 'Единая библиотека компонентов: <code>public/shared/ui.js</code>. Используйте её для общих шаблонов и классов.',
+  uiSectionBadges: 'Бейджи',
+  uiBadgesApiHtml: 'API: <code>ArchiMapUI.badge(text, variant)</code>',
+  uiSectionToggles: 'Рычажки',
+  uiTogglesApiHtml: 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>disabled</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.',
+  uiToggleExampleEnabled: 'Обычный (выключен)',
+  uiToggleExampleDisabled: 'Disabled',
+  uiToggleExampleLabels: 'Обозначения',
+  uiToggleExampleLabelsDisabled: 'Обозначения (disabled)',
+  uiSectionPanel: 'Панель',
+  uiPanelApiHtml: 'API: <code>ArchiMapUI.panel(content, options)</code>',
+  uiSectionHeader: 'Section Header',
+  uiHeaderApiHtml: 'API: <code>ArchiMapUI.sectionHeader(title, subtitle)</code>',
+  uiSectionTabs: 'Вкладки',
+  uiTabsApiHtml: 'API: <code>ArchiMapUI.tabButtonClass(active)</code>',
+  uiSectionFields: 'Поля и кнопки',
+  uiFieldsApiHtml: 'API: <code>ArchiMapUI.fieldClass(kind)</code>, <code>ArchiMapUI.buttonClass(variant)</code>',
+  uiSectionEmails: 'Email шаблоны (preview)',
+  uiRefresh: 'Обновить',
+  uiLoading: 'Загрузка...',
+  uiGuideTitle: 'Инструкция по использованию',
+  uiGuideItem1Html: 'Подключай <code>/shared/ui.js</code> перед любыми шаблонами/страницами.',
+  uiGuideItem2Html: 'Для навигации подключай <code>/shared/top-nav.js</code> и рендери <code>ArchiMapTopNav.render({ context })</code>.',
+  uiGuideItem3Html: 'Новые общие UI-элементы сначала добавляй в <code>ui.js</code>, потом используй в страницах.',
+  uiGuideItem4Html: 'Дублирующиеся классы в HTML постепенно заменяй на шаблоны из <code>ArchiMapUI</code>.',
+  uiPanelDemoText: 'Контент внутри стандартизованной панели.',
+  uiHeaderDemoTitle: 'Заголовок секции',
+  uiHeaderDemoSubtitle: 'Подзаголовок и описание в одном стиле',
+  uiTabActive: 'Активная',
+  uiTabInactive: 'Неактивная',
+  uiInputPlaceholder: 'Текстовое поле',
+  uiSelectPlaceholder: 'Селект',
+  uiEmailSubject: 'Subject: {value}',
+  uiEmailHtml: 'HTML',
+  uiEmailText: 'Text',
+  uiEmailLoadNetworkError: 'Ошибка сети при загрузке email шаблонов',
+  uiEmailLoadFailed: 'Не удалось загрузить email шаблоны',
+  uiEmailRegistrationTitle: 'Письмо: подтверждение регистрации',
+  uiEmailResetTitle: 'Письмо: сброс пароля',
+  uiUpdatedAt: 'Обновлено: {value}'
 }),
   filterTagLabels: Object.freeze({
   'abandoned': 'Искусственная функция, заброшенная и больше не поддерживаемая. См. также key:abandoned:*.',
