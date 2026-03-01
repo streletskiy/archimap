@@ -1,5 +1,13 @@
-function registerAccountRoutes({ app, requireAuth, getSessionEditActorKey, normalizeUserEditStatus, getUserEditsList, getUserEditDetailsById }) {
-  app.get('/api/account/edits', requireAuth, (req, res) => {
+function registerAccountRoutes({
+  app,
+  accountReadRateLimiter,
+  requireAuth,
+  getSessionEditActorKey,
+  normalizeUserEditStatus,
+  getUserEditsList,
+  getUserEditDetailsById
+}) {
+  app.get('/api/account/edits', accountReadRateLimiter, requireAuth, (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
       return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
@@ -10,7 +18,7 @@ function registerAccountRoutes({ app, requireAuth, getSessionEditActorKey, norma
     return res.json({ total: items.length, items });
   });
 
-  app.get('/api/account/edits/:editId', requireAuth, (req, res) => {
+  app.get('/api/account/edits/:editId', accountReadRateLimiter, requireAuth, (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
       return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });

@@ -6,6 +6,7 @@ function registerAppRoutes(deps) {
   const {
     app,
     db,
+    publicApiRateLimiter,
     rootDir,
     buildingsPmtilesPath,
     normalizeMapConfig,
@@ -27,7 +28,7 @@ function registerAppRoutes(deps) {
     };
   }
 
-  app.get('/app-config.js', (req, res) => {
+  app.get('/app-config.js', publicApiRateLimiter, (req, res) => {
     const mapDefault = normalizeMapConfig();
     const buildingsPmtiles = {
       url: '/api/buildings.pmtiles',
@@ -59,7 +60,7 @@ function registerAppRoutes(deps) {
     return res.sendFile(path.join(rootDir, 'public', 'info.html'));
   });
 
-  app.get('/api/legal-docs/:slug', (req, res) => {
+  app.get('/api/legal-docs/:slug', publicApiRateLimiter, (req, res) => {
     const slug = String(req.params?.slug || '').trim().toLowerCase();
     const bySlug = {
       'user-agreement': { fileName: 'user-agreement.ru.md', title: 'Пользовательское соглашение' },
@@ -82,7 +83,7 @@ function registerAppRoutes(deps) {
     }
   });
 
-  app.get('/api/buildings.pmtiles', (req, res) => {
+  app.get('/api/buildings.pmtiles', publicApiRateLimiter, (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=300');
     return res.sendFile(buildingsPmtilesPath, (error) => {
       if (!error) return;
@@ -98,7 +99,7 @@ function registerAppRoutes(deps) {
     });
   });
 
-  app.get('/api/filter-tag-keys', (req, res) => {
+  app.get('/api/filter-tag-keys', publicApiRateLimiter, (req, res) => {
     try {
       const keys = getFilterTagKeysCached();
       res.json({

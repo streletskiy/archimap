@@ -49,6 +49,15 @@ function readRequestedPostLoginPath() {
     : null;
 }
 
+function resolvePostLoginRedirectPath(value) {
+  const normalized = String(value || '').trim();
+  if (normalized === '/account' || normalized === '/account/') return '/account/';
+  if (normalized === '/admin' || normalized === '/admin/') return '/admin/';
+  if (normalized === '/info' || normalized === '/info/') return '/info/';
+  if (normalized === '/' || normalized === '') return '/';
+  return '/';
+}
+
 function shouldOpenAuthFromUrl() {
   return typeof mainMapUtils.shouldOpenAuthFromUrl === 'function'
     ? mainMapUtils.shouldOpenAuthFromUrl()
@@ -2581,7 +2590,7 @@ loginForm.addEventListener('submit', async (event) => {
   closeAuthModal();
   const nextPath = readRequestedPostLoginPath();
   if (nextPath) {
-    window.location.href = nextPath;
+    window.location.href = resolvePostLoginRedirectPath(nextPath);
   }
 });
 

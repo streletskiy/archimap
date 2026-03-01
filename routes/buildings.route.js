@@ -65,6 +65,8 @@ function registerBuildingsRoutes(deps) {
     app,
     db,
     rtreeState,
+    buildingsReadRateLimiter,
+    buildingsWriteRateLimiter,
     filterDataRateLimiter,
     filterDataBboxRateLimiter,
     requireCsrfSession,
@@ -184,7 +186,7 @@ function registerBuildingsRoutes(deps) {
     return res.json({ items, truncated: rows.length >= limit });
   });
 
-  app.get('/api/building-info/:osmType/:osmId', (req, res) => {
+  app.get('/api/building-info/:osmType/:osmId', buildingsReadRateLimiter, (req, res) => {
     const osmType = req.params.osmType;
     const osmId = Number(req.params.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
@@ -218,7 +220,7 @@ function registerBuildingsRoutes(deps) {
     });
   });
 
-  app.post('/api/building-info', requireCsrfSession, requireAuth, requireBuildingEditPermission, (req, res) => {
+  app.post('/api/building-info', buildingsWriteRateLimiter, requireCsrfSession, requireAuth, requireBuildingEditPermission, (req, res) => {
     const body = req.body || {};
     const osmType = body.osmType;
     const osmId = Number(body.osmId);
@@ -292,7 +294,7 @@ function registerBuildingsRoutes(deps) {
     return res.json({ ok: true, editId, status: 'pending' });
   });
 
-  app.get('/api/building/:osmType/:osmId', (req, res) => {
+  app.get('/api/building/:osmType/:osmId', buildingsReadRateLimiter, (req, res) => {
     const osmType = req.params.osmType;
     const osmId = Number(req.params.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {

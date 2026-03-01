@@ -165,6 +165,21 @@ const searchRateLimiter = createSimpleRateLimiter({
   maxRequests: 60,
   message: 'Слишком много поисковых запросов, попробуйте позже'
 });
+const publicApiRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 180,
+  message: 'Слишком много запросов, попробуйте позже'
+});
+const accountReadRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 120,
+  message: 'Слишком много запросов аккаунта, попробуйте позже'
+});
+const adminApiRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 120,
+  message: 'Слишком много административных запросов, попробуйте позже'
+});
 const filterDataRateLimiter = createSimpleRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 90,
@@ -174,6 +189,21 @@ const filterDataBboxRateLimiter = createSimpleRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 60,
   message: 'Слишком много запросов bbox, попробуйте позже'
+});
+const buildingsReadRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 120,
+  message: 'Слишком много запросов к зданиям, попробуйте позже'
+});
+const buildingsWriteRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+  message: 'Слишком много изменений по зданиям, попробуйте позже'
+});
+const contoursStatusRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+  message: 'Слишком много запросов статуса контуров, попробуйте позже'
 });
 
 const RTREE_REBUILD_BATCH_SIZE = Math.max(500, Math.min(20000, Number(process.env.RTREE_REBUILD_BATCH_SIZE || 4000)));
@@ -755,6 +785,7 @@ registerAuthRoutes({
 registerAppRoutes({
   app,
   db,
+  publicApiRateLimiter,
   rootDir: __dirname,
   buildingsPmtilesPath,
   normalizeMapConfig,
@@ -769,6 +800,7 @@ registerAppRoutes({
 registerAdminRoutes({
   app,
   db,
+  adminApiRateLimiter,
   requireAuth,
   requireAdmin,
   requireCsrfSession,
@@ -799,6 +831,8 @@ registerBuildingsRoutes({
   app,
   db,
   rtreeState,
+  buildingsReadRateLimiter,
+  buildingsWriteRateLimiter,
   filterDataRateLimiter,
   filterDataBboxRateLimiter,
   requireCsrfSession,
@@ -823,6 +857,7 @@ registerSearchRoutes({
 
 registerAccountRoutes({
   app,
+  accountReadRateLimiter,
   requireAuth,
   getSessionEditActorKey,
   normalizeUserEditStatus,
@@ -830,7 +865,7 @@ registerAccountRoutes({
   getUserEditDetailsById
 });
 
-registerContoursStatusRoute(app, db);
+registerContoursStatusRoute(app, db, contoursStatusRateLimiter);
 registerPublicStaticRoute({ app, rootDir: __dirname });
 syncWorkers = initSyncWorkersInfra({
   spawn,

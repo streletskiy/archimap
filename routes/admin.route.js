@@ -4,6 +4,7 @@ function registerAdminRoutes(deps) {
   const {
     app,
     db,
+    adminApiRateLimiter,
     requireAuth,
     requireAdmin,
     requireCsrfSession,
@@ -53,6 +54,22 @@ function registerAdminRoutes(deps) {
     }
     return next();
   }
+
+  function isLikelyEmail(value) {
+    const email = String(value || '').trim().toLowerCase();
+    if (!email || email.length > 254) return false;
+    if (email.includes(' ') || email.includes('\t') || email.includes('\n')) return false;
+    const atIndex = email.indexOf('@');
+    if (atIndex <= 0 || atIndex !== email.lastIndexOf('@')) return false;
+    const local = email.slice(0, atIndex);
+    const domain = email.slice(atIndex + 1);
+    if (!local || !domain) return false;
+    if (domain.startsWith('.') || domain.endsWith('.')) return false;
+    return domain.includes('.');
+  }
+
+  app.use('/api/admin', adminApiRateLimiter);
+  app.use('/api/ui/email-previews', adminApiRateLimiter);
 
   app.get('/api/ui/email-previews', requireAuth, requireAdmin, (req, res) => {
     const currentAppDisplayName = resolveAppDisplayName();
@@ -222,7 +239,7 @@ function registerAdminRoutes(deps) {
 
   app.get('/api/admin/users/:email', requireAuth, requireAdmin, (req, res) => {
     const email = String(req.params.email || '').trim().toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isLikelyEmail(email)) {
       return res.status(400).json({ error: 'Некорректный email' });
     }
     const row = db.prepare(`
@@ -269,7 +286,7 @@ function registerAdminRoutes(deps) {
 
   app.get('/api/admin/users/:email/edits', requireAuth, requireAdmin, (req, res) => {
     const email = String(req.params.email || '').trim().toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isLikelyEmail(email)) {
       return res.status(400).json({ error: 'Некорректный email' });
     }
     const items = getUserEditsList({ createdBy: email, limit: 5000 });

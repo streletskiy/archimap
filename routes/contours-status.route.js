@@ -1,5 +1,5 @@
-function registerContoursStatusRoute(app, db) {
-  app.get('/api/contours-status', (req, res) => {
+function registerContoursStatusRoute(app, db, contoursStatusRateLimiter) {
+  app.get('/api/contours-status', contoursStatusRateLimiter, (req, res) => {
     const summary = db.prepare(`
       SELECT COUNT(*) AS total, MAX(updated_at) AS last_updated
       FROM osm.building_contours
