@@ -13,10 +13,12 @@
 
   function matchesRule(tags, rule, normalizeTagValue) {
     if (!rule || !rule.key) return true;
-    const actual = normalizeTagValue(tags?.[rule.key]);
+    const rawValue = tags?.[rule.key];
+    const actual = normalizeTagValue(rawValue);
     const expected = String(rule.value || '');
-    if (rule.op === 'exists') return actual != null;
-    if (rule.op === 'not_exists') return actual == null;
+    const hasValue = actual != null && String(actual).trim().length > 0;
+    if (rule.op === 'exists') return hasValue;
+    if (rule.op === 'not_exists') return !hasValue;
     if (actual == null) return false;
     const left = String(actual).toLowerCase();
     const right = expected.toLowerCase();

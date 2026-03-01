@@ -83,7 +83,7 @@ function registerAppRoutes(deps) {
     }
   });
 
-  app.get('/api/buildings.pmtiles', publicApiRateLimiter, (req, res) => {
+  app.get('/api/buildings.pmtiles', (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=300');
     return res.sendFile(buildingsPmtilesPath, (error) => {
       if (!error) return;

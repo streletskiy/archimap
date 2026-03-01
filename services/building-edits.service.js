@@ -6,6 +6,34 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return text ? text : null;
   }
 
+  function pickTagValue(tags, keys) {
+    for (const key of keys) {
+      const value = normalizeInfoForDiff(tags?.[key]);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  function osmAddressFromTags(tags) {
+    const full = pickTagValue(tags, ['addr:full']);
+    if (full != null) return full;
+    const parts = [
+      pickTagValue(tags, ['addr:postcode', 'addr_postcode']),
+      pickTagValue(tags, ['addr:city', 'addr_city']),
+      pickTagValue(tags, ['addr:place', 'addr_place']),
+      pickTagValue(tags, ['addr:street', 'addr_street', 'addr_stree'])
+    ].filter((value) => value != null);
+    const house = pickTagValue(tags, ['addr:housenumber', 'addr_housenumber', 'addr_hous']);
+    if (house != null) {
+      if (parts.length > 0) {
+        parts[parts.length - 1] = `${parts[parts.length - 1]}, ${house}`;
+      } else {
+        parts.push(house);
+      }
+    }
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+
   const ARCHI_EDIT_FIELDS = Object.freeze([
     { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
     { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
@@ -81,29 +109,33 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
   }
 
   function buildChangesFromRows(editRow, tags, mergedRow = null) {
-    const baseline = mergedRow
+    const osmBaseline = {
+      name: pickTagValue(tags, ['name', 'name:ru', 'official_name']),
+      style: pickTagValue(tags, ['building:architecture', 'architecture', 'style']),
+      levels: pickTagValue(tags, ['building:levels', 'levels']),
+      year_built: pickTagValue(tags, ['building:year', 'start_date', 'construction_date', 'year_built']),
+      architect: pickTagValue(tags, ['architect', 'architect_name']),
+      address: osmAddressFromTags(tags),
+      archimap_description: null
+    };
+
+    const mergedBaseline = mergedRow
       ? {
-        name: mergedRow.name ?? null,
-        style: mergedRow.style ?? null,
-        levels: mergedRow.levels ?? null,
-        year_built: mergedRow.year_built ?? null,
-        architect: mergedRow.architect ?? null,
-        address: mergedRow.address ?? null,
-        archimap_description: mergedRow.archimap_description ?? mergedRow.description ?? null
+        name: normalizeInfoForDiff(mergedRow.name),
+        style: normalizeInfoForDiff(mergedRow.style),
+        levels: normalizeInfoForDiff(mergedRow.levels),
+        year_built: normalizeInfoForDiff(mergedRow.year_built),
+        architect: normalizeInfoForDiff(mergedRow.architect),
+        address: normalizeInfoForDiff(mergedRow.address),
+        archimap_description: normalizeInfoForDiff(mergedRow.archimap_description ?? mergedRow.description ?? null)
       }
-      : {
-        name: tags.name ?? tags['name:ru'] ?? tags.official_name ?? null,
-        style: tags['building:architecture'] ?? tags.architecture ?? tags.style ?? null,
-        levels: tags['building:levels'] ?? tags.levels ?? null,
-        year_built: tags['building:year'] ?? tags.start_date ?? tags.construction_date ?? tags.year_built ?? null,
-        architect: tags.architect ?? tags.architect_name ?? null,
-        address: tags['addr:full'] ?? null,
-        archimap_description: null
-      };
+      : null;
 
     const changes = [];
     for (const field of ARCHI_EDIT_FIELDS) {
-      const baselineValue = normalizeInfoForDiff(baseline[field.key]);
+      const baselineValue = mergedBaseline
+        ? (mergedBaseline[field.key] ?? osmBaseline[field.key] ?? null)
+        : (osmBaseline[field.key] ?? null);
       const localValue = normalizeInfoForDiff(editRow[field.key]);
       const differs = baselineValue !== localValue;
       if (!differs) continue;
