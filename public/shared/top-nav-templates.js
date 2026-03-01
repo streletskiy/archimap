@@ -4,6 +4,7 @@
       var renderToggle = deps.renderToggle;
       var authLoginText = t('authFabLogin', 'Войти');
       var adminPanelText = t('navAdminPanel', 'Админ-панель');
+      var infoText = t('navInfo', 'Информация');
       var logoutText = t('navLogout', 'Выход');
       var themeText = t('navTheme', 'Тема');
       var labelsText = t('navLabels', 'Обозначения');
@@ -66,13 +67,13 @@
             <div id="mobile-controls-shell" class="pointer-events-none absolute right-0 top-[calc(100%+0.375rem)] sm:top-[calc(100%+0.75rem)] z-[960] flex w-64 flex-col gap-2 rounded-xl border border-slate-300 bg-white/95 p-2 shadow-soft transition-all duration-200 ease-out origin-top-right max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0">
               <a id="auth-fab" href="/?auth=1&next=%2F" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" aria-label="${authLoginText}">${authLoginText}</a>
               <a id="admin-link" href="/admin/" class="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${adminPanelText}</a>
+              <a id="info-link" href="/info/" class="rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${infoText}</a>
               <button id="settings-logout-btn" type="button" class="hidden rounded-[16px] bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600">${logoutText}</button>
               <div class="my-1 border-t border-slate-200"></div>
               <div class="space-y-1">
                 <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${themeText}</span>${themeToggle}</div>
                 <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${labelsText}</span>${labelsToggle}</div>
               </div>
-              <a id="settings-build-link" href="https://github.com/streletskiy/archimap" target="_blank" rel="noopener noreferrer" class="block w-full rounded-lg px-2 py-1 text-center text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"><span id="settings-build-text">unknown | dev | archimap</span></a>
             </div>
           </div>
         </div>
@@ -95,9 +96,14 @@
       var opts = options || {};
       var isAdmin = mode === 'admin';
       var showMapLink = opts.showMapLink !== false;
+      var showProfileLink = opts.showProfileLink !== false;
+      var showAuthLink = opts.showAuthLink === true;
+      var authHref = String(opts.authHref || '/?auth=1&next=%2F').trim() || '/?auth=1&next=%2F';
       var profileText = t('authFabProfile', 'Профиль');
+      var authLoginText = t('authFabLogin', 'Войти');
       var backToMapText = t('navBackToMap', 'Вернуться на карту');
       var adminPanelText = t('navAdminPanel', 'Админ-панель');
+      var infoText = t('navInfo', 'Информация');
       var logoutText = t('navLogout', 'Выход');
       var themeText = t('navTheme', 'Тема');
       var openMenuText = t('navOpenMenu', 'Открыть меню');
@@ -106,12 +112,17 @@
       var profileLink = mode === 'account'
         ? '<a id="auth-fab" href="/account/" class="block rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">' + profileText + '</a>'
         : '<a id="auth-fab" href="/account/" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">' + profileText + '</a>';
+      var authLink = '<a id="auth-fab" href="' + authHref + '" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">' + authLoginText + '</a>';
+      var topAuthLink = showAuthLink ? authLink : (showProfileLink ? profileLink : '');
+      var infoLink = mode === 'info'
+        ? '<a id="info-link" href="/info/" class="block rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">' + infoText + '</a>'
+        : '<a id="info-link" href="/info/" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">' + infoText + '</a>';
       var mapLink = showMapLink
         ? '<a id="map-return-menu-link" href="/" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">' + backToMapText + '</a>'
         : '';
       var themeToggle = renderToggle({
         id: 'theme-toggle',
-        ariaLabel: 'Переключить тему',
+        ariaLabel: t('themeEnableDark', 'Переключить тему'),
         checkedColorClass: 'peer-checked:bg-indigo-500',
         checkedKnobClass: 'peer-checked:bg-indigo-50',
         checkedIconClass: 'peer-checked:text-white',
@@ -131,13 +142,13 @@
           </div>
         </div>
         <div id="nav-menu-panel" class="pointer-events-none absolute right-0 top-[calc(100%+0.375rem)] sm:top-[calc(100%+0.75rem)] z-[960] flex w-64 flex-col gap-2 rounded-xl border border-slate-300 bg-white/95 p-2 shadow-soft transition-all duration-200 ease-out origin-top-right max-h-0 -translate-y-2 scale-95 overflow-hidden opacity-0">
-          ${profileLink}
+          ${topAuthLink}
+          ${infoLink}
           ${mapLink}
           <a id="admin-link" href="/admin/" class="${adminLinkClass + activeAdmin} rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${adminPanelText}</a>
           <button id="settings-logout-btn" type="button" class="hidden rounded-[16px] bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600">${logoutText}</button>
           <div class="my-2 border-t border-slate-200"></div>
           <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${themeText}</span>${themeToggle}</div>
-          <a id="settings-build-link" href="https://github.com/streletskiy/archimap" target="_blank" rel="noopener noreferrer" class="mt-1 block w-full rounded-lg px-2 py-1 text-center text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"><span id="settings-build-text">unknown | dev | archimap</span></a>
         </div>
       </div>
     </div>`;

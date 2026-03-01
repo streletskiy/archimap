@@ -74,11 +74,6 @@ const PMTILES_CONFIG = Object.freeze({
   url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
   sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
 });
-const BUILD_INFO_CONFIG = Object.freeze({
-  shortSha: String(window.__ARCHIMAP_CONFIG?.buildInfo?.shortSha || 'unknown').trim() || 'unknown',
-  version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
-  repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
-});
 const AUTH_CONFIG = Object.freeze({
   registrationEnabled: Boolean(window.__ARCHIMAP_CONFIG?.auth?.registrationEnabled ?? true),
   bootstrapFirstAdminAvailable: Boolean(window.__ARCHIMAP_CONFIG?.auth?.bootstrapFirstAdminAvailable ?? false)
@@ -210,6 +205,12 @@ const registerLastNameEl = document.getElementById('register-last-name');
 const registerEmailEl = document.getElementById('register-email');
 const registerPasswordEl = document.getElementById('register-password');
 const registerPasswordConfirmEl = document.getElementById('register-password-confirm');
+const registerAcceptUserAgreementEl = document.getElementById('register-accept-user-agreement');
+const registerAcceptPrivacyPolicyEl = document.getElementById('register-accept-privacy-policy');
+const registerAcceptUserAgreementPrefixEl = document.getElementById('register-accept-user-agreement-prefix');
+const registerAcceptUserAgreementLinkEl = document.getElementById('register-accept-user-agreement-link');
+const registerAcceptPrivacyPolicyPrefixEl = document.getElementById('register-accept-privacy-policy-prefix');
+const registerAcceptPrivacyPolicyLinkEl = document.getElementById('register-accept-privacy-policy-link');
 const registerStatusEl = document.getElementById('register-status');
 const forgotPasswordPanelEl = document.getElementById('forgot-password-panel');
 const forgotPasswordFormEl = document.getElementById('forgot-password-form');
@@ -267,8 +268,6 @@ const searchModalInputEl = document.getElementById('search-modal-input');
 const searchResultsStatusEl = document.getElementById('search-results-status');
 const searchResultsListEl = document.getElementById('search-results-list');
 const searchLoadMoreBtnEl = document.getElementById('search-load-more-btn');
-const settingsBuildLinkEl = document.getElementById('settings-build-link');
-const settingsBuildTextEl = document.getElementById('settings-build-text');
 const navLogoLinkEl = document.getElementById('nav-logo-link');
 const THEME_STORAGE_KEY = 'archimap-theme';
 const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
@@ -348,6 +347,15 @@ const textTools = window.ArchiMapTextUtils?.createUiTextTools
 const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
 const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
 const OSM_FILTER_TAG_LABELS_RU = Object.freeze((window.__ARCHIMAP_I18N_RU?.filterTagLabels) || {});
+
+function applyRegistrationLegalTexts() {
+  if (registerAcceptUserAgreementPrefixEl) registerAcceptUserAgreementPrefixEl.textContent = t('authRegisterAcceptPrefix', null, 'Я принимаю');
+  if (registerAcceptPrivacyPolicyPrefixEl) registerAcceptPrivacyPolicyPrefixEl.textContent = t('authRegisterAcceptPrefix', null, 'Я принимаю');
+  if (registerAcceptUserAgreementLinkEl) registerAcceptUserAgreementLinkEl.textContent = t('infoTabUserAgreement', null, 'Пользовательское соглашение');
+  if (registerAcceptPrivacyPolicyLinkEl) registerAcceptPrivacyPolicyLinkEl.textContent = t('infoTabPrivacyPolicy', null, 'Политика конфиденциальности');
+}
+
+applyRegistrationLegalTexts();
 
 const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
   'architect',
@@ -532,16 +540,6 @@ function normalizeFeatureInfo(feature) {
       parsed.archimap_description = parsed.description;
     }
     feature.properties.archiInfo = parsed;
-  }
-}
-
-function renderBuildInfoLink() {
-  if (!settingsBuildLinkEl) return;
-  settingsBuildLinkEl.href = BUILD_INFO_CONFIG.repoUrl;
-  if (settingsBuildTextEl) {
-    settingsBuildTextEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
-  } else {
-    settingsBuildLinkEl.textContent = `${BUILD_INFO_CONFIG.shortSha} | ${BUILD_INFO_CONFIG.version} | archimap`;
   }
 }
 
@@ -2520,6 +2518,8 @@ if (registerFormEl && isRegistrationUiEnabled()) {
     const email = String(registerEmailEl?.value || '').trim();
     const password = String(registerPasswordEl?.value || '');
     const passwordConfirm = String(registerPasswordConfirmEl?.value || '');
+    const acceptUserAgreement = Boolean(registerAcceptUserAgreementEl?.checked);
+    const acceptPrivacyPolicy = Boolean(registerAcceptPrivacyPolicyEl?.checked);
 
     if (!email || !password) {
       if (registerStatusEl) registerStatusEl.textContent = t('authRegisterFillRequired', null, 'Заполните email и пароль');
@@ -2529,6 +2529,10 @@ if (registerFormEl && isRegistrationUiEnabled()) {
       if (registerStatusEl) registerStatusEl.textContent = t('authRegisterPasswordMismatch', null, 'Пароли не совпадают');
       return;
     }
+    if (!acceptUserAgreement || !acceptPrivacyPolicy) {
+      if (registerStatusEl) registerStatusEl.textContent = t('authRegisterAcceptRequired', null, 'Подтвердите пользовательское соглашение и политику конфиденциальности');
+      return;
+    }
 
     if (registerStatusEl) registerStatusEl.textContent = t('authRegisterSendingMail', null, 'Отправляем письмо для подтверждения...');
     let resp;
@@ -2536,7 +2540,14 @@ if (registerFormEl && isRegistrationUiEnabled()) {
       resp = await fetch('/api/register/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, password })
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          password,
+          acceptTerms: acceptUserAgreement,
+          acceptPrivacy: acceptPrivacyPolicy
+        })
       });
     } catch {
       if (registerStatusEl) registerStatusEl.textContent = t('authRegisterNetworkError', null, 'Ошибка сети при отправке письма');
@@ -3348,7 +3359,6 @@ map.on('style.load', () => {
 });
 
 map.on('load', async () => {
-  renderBuildInfoLink();
   await loadAuthState();
   setAuthTab('login');
   if (pendingRegisterToken && !isAuthenticated) {

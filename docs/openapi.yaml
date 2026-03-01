@@ -55,7 +55,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [email, password, acceptTerms, acceptPrivacy]
               properties:
                 email:
                   type: string
@@ -65,6 +65,10 @@ paths:
                   type: string
                 lastName:
                   type: string
+                acceptTerms:
+                  type: boolean
+                acceptPrivacy:
+                  type: boolean
       responses:
         '200':
           description: Registration started

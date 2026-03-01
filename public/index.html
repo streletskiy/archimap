@@ -123,6 +123,26 @@
                 <label for="register-password-confirm" class="mb-1 block text-xs font-semibold text-slate-700">Повторите пароль *</label>
                 <input id="register-password-confirm" class="w-full rounded-lg border border-slate-300 bg-slate-50 p-2.5 text-sm text-slate-900 focus:border-sky-500 focus:ring-sky-500" type="password" placeholder="Повторите пароль" required />
               </div>
+              <div class="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <label class="flex items-start gap-2 text-xs text-slate-700">
+                  <input id="register-accept-user-agreement" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" required />
+                  <span>
+                    <span id="register-accept-user-agreement-prefix">Я принимаю</span>
+                    <a id="register-accept-user-agreement-link" href="/info/?tab=user-agreement" target="_blank" rel="noopener noreferrer" class="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-800">
+                      Пользовательское соглашение
+                    </a>
+                  </span>
+                </label>
+                <label class="flex items-start gap-2 text-xs text-slate-700">
+                  <input id="register-accept-privacy-policy" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" required />
+                  <span>
+                    <span id="register-accept-privacy-policy-prefix">Я принимаю</span>
+                    <a id="register-accept-privacy-policy-link" href="/info/?tab=privacy-policy" target="_blank" rel="noopener noreferrer" class="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-800">
+                      Политику конфиденциальности
+                    </a>
+                  </span>
+                </label>
+              </div>
               <button class="w-full rounded-lg bg-indigo-600 px-5 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300" type="submit">Создать аккаунт</button>
             </form>
             <p id="register-status" class="text-sm text-slate-600"></p>

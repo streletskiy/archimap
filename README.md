@@ -41,6 +41,8 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - Building modal with in-place editing (authorized users).
 - Dedicated account page (`/account/`) for profile and password management.
 - Dedicated admin page (`/admin/`) for user roles/permissions, app settings (general + SMTP), and local-edits moderation.
+- Dedicated information page (`/info/`) with tabs for service details, technical build info, user agreement, and privacy policy.
+- Registration requires explicit acceptance of user agreement and privacy policy checkboxes.
 - UI kit is integrated as an admin tab (`/admin/?tab=uikit`) rather than a standalone page.
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
@@ -259,6 +261,7 @@ Index lifecycle:
 ## Security
 
 - CSRF protection is enabled for mutating authenticated endpoints via `x-csrf-token`.
+- Registration flow requires `acceptTerms=true` and `acceptPrivacy=true` in `POST /api/register/start`.
 - Production requirements:
   - set strong `SESSION_SECRET`;
   - set `APP_BASE_URL`;
@@ -290,6 +293,11 @@ Index lifecycle:
 Detailed API list:
 
 - [docs/API_OVERVIEW.md](./docs/API_OVERVIEW.md)
+
+Legal document texts used by `/info/`:
+
+- [legal/user-agreement.ru.md](./legal/user-agreement.ru.md)
+- [legal/privacy-policy.ru.md](./legal/privacy-policy.ru.md)
 
 ## Edits Workflow
 

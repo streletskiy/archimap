@@ -19,11 +19,12 @@
 - Auth:
   - `GET /api/me`
   - `POST /api/login`
-  - `POST /api/register/start`
+  - `POST /api/register/start` (requires `acceptTerms=true` and `acceptPrivacy=true`)
   - `POST /api/register/confirm-code`
   - `POST /api/register/confirm-link`
   - `POST /api/password-reset/request`
   - `POST /api/password-reset/confirm`
+  - `GET /api/legal-docs/:slug` (`user-agreement`, `privacy-policy`)
   - `POST /api/account/profile`
   - `POST /api/account/change-password`
   - `GET /api/account/edits`

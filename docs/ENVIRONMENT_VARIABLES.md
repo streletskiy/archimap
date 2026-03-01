@@ -59,8 +59,8 @@ Startup sync behavior details:
 - startup sync is skipped automatically when both `osm.building_contours` and PMTiles file already exist;
 - when `AUTO_SYNC_ON_START=false`, app still builds missing PMTiles from existing `osm.building_contours` (without full OSM import).
 
-Build info in settings footer:
+Build info in `/info/` page:
 
-- for Docker builds, `shortSha | version` is embedded automatically during image build into `build-info.json` (from git);
+- for Docker builds, `shortSha` + `version` are embedded automatically during image build into `build-info.json` (from git metadata);
 - if no exact tag on `HEAD`, version is `dev`;
-- fallback is `unknown | dev` when git metadata is unavailable.
+- fallback is `unknown` + `dev` when git metadata is unavailable.

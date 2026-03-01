@@ -461,11 +461,16 @@ function registerAuthRoutes({
     const password = String(req.body?.password || '');
     const firstName = normalizeProfileName(req.body?.firstName);
     const lastName = normalizeProfileName(req.body?.lastName);
+    const acceptTerms = req.body?.acceptTerms === true;
+    const acceptPrivacy = req.body?.acceptPrivacy === true;
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Укажите корректный email' });
     }
     if (password.length < registrationMinPasswordLength) {
       return res.status(400).json({ error: `Пароль должен содержать минимум ${registrationMinPasswordLength} символов` });
+    }
+    if (!acceptTerms || !acceptPrivacy) {
+      return res.status(400).json({ error: 'Для регистрации необходимо принять пользовательское соглашение и политику конфиденциальности' });
     }
 
     if (bootstrapFirstAdmin) {

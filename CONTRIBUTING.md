@@ -33,5 +33,5 @@ Conventional commit style is recommended:
 
 - Scope is focused and clearly described.
 - Tests added/updated for behavioral changes.
-- Docs updated (`README`, env docs, API docs) when needed.
+- Docs updated (`README`, env docs, API docs, `legal/*.md`) when needed.
 - No secrets or credentials in code or logs.

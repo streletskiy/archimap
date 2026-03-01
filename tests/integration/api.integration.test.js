@@ -120,7 +120,9 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           email: 'admin@example.com',
           password: '12345678',
           firstName: 'Admin',
-          lastName: 'User'
+          lastName: 'User',
+          acceptTerms: true,
+          acceptPrivacy: true
         })
       });
       assert.equal(registerStart.status, 200);

@@ -31,7 +31,7 @@
     }
 
     var deps = { t: t, renderToggle: renderToggle };
-    root.innerHTML = (context === 'account' || context === 'admin')
+    root.innerHTML = (context === 'account' || context === 'admin' || context === 'info')
       ? templates.getPanelTemplate(context, options || {}, deps)
       : templates.getIndexTemplate(deps);
   }
