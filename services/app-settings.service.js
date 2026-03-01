@@ -238,8 +238,9 @@ function createAppSettingsService(options = {}) {
 
     const hasPasswordField = Object.prototype.hasOwnProperty.call(input, 'pass');
     const passRaw = hasPasswordField ? String(input.pass || '') : '';
+    const passTrimmed = passRaw.trim();
     const pass = hasPasswordField
-      ? passRaw.trim()
+      ? (passTrimmed || (keepPassword ? String(existing.pass || '') : ''))
       : (keepPassword ? String(existing.pass || '') : '');
 
     return {

@@ -42,7 +42,7 @@
   - `POST /api/admin/app-settings/general`
   - `GET /api/admin/app-settings/smtp`
   - `POST /api/admin/app-settings/smtp`
-  - `POST /api/admin/app-settings/smtp/test`
+  - `POST /api/admin/app-settings/smtp/test` (sends test email to provided `testEmail`)
   - `POST /api/logout`
 
 OpenAPI spec for core routes: [openapi.yaml](./openapi.yaml)
