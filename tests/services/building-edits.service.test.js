@@ -126,3 +126,46 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', () 
   assert.equal(fields.has('architect'), false);
 });
 
+test('buildChangesFromRows does not report levels diff for numeric-equivalent values', () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2002,
+    JSON.stringify({
+      name: 'Тестовый дом',
+      'building:levels': '1'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    2,
+    'way',
+    2002,
+    'user@example.com',
+    null,
+    null,
+    1,
+    null,
+    null,
+    null,
+    null,
+    'pending'
+  );
+
+  const items = service.getUserEditsList({ status: 'pending', limit: 10 });
+  assert.equal(items.length, 1);
+
+  const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));
+  assert.equal(fields.has('levels'), false);
+});
+

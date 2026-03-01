@@ -6,6 +6,23 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return text ? text : null;
   }
 
+  function normalizeComparableForField(fieldKey, value) {
+    const normalized = normalizeInfoForDiff(value);
+    if (normalized == null) return null;
+
+    const key = String(fieldKey || '').trim();
+    if (key === 'levels' || key === 'year_built') {
+      const text = String(normalized).trim();
+      if (/^-?\d+(?:\.\d+)?$/.test(text)) {
+        const num = Number(text);
+        if (Number.isFinite(num)) return String(num);
+      }
+      return text;
+    }
+
+    return normalized;
+  }
+
   function pickTagValue(tags, keys) {
     for (const key of keys) {
       const value = normalizeInfoForDiff(tags?.[key]);
@@ -137,7 +154,9 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
         ? (mergedBaseline[field.key] ?? osmBaseline[field.key] ?? null)
         : (osmBaseline[field.key] ?? null);
       const localValue = normalizeInfoForDiff(editRow[field.key]);
-      const differs = baselineValue !== localValue;
+      const baselineComparable = normalizeComparableForField(field.key, baselineValue);
+      const localComparable = normalizeComparableForField(field.key, localValue);
+      const differs = baselineComparable !== localComparable;
       if (!differs) continue;
       changes.push({
         field: field.key,
