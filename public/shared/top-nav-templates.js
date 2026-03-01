@@ -68,7 +68,7 @@
               <a id="auth-fab" href="/?auth=1&next=%2F" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" aria-label="${authLoginText}">${authLoginText}</a>
               <a id="admin-link" href="/admin/" class="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${adminPanelText}</a>
               <a id="info-link" href="/info/" class="rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${infoText}</a>
-              <button id="settings-logout-btn" type="button" class="hidden rounded-[16px] bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600">${logoutText}</button>
+              <button id="settings-logout-btn" type="button" class="ui-btn ui-btn-danger hidden">${logoutText}</button>
               <div class="my-1 border-t border-slate-200"></div>
               <div class="space-y-1">
                 <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${themeText}</span>${themeToggle}</div>
@@ -81,7 +81,7 @@
           <div id="filter-panel">
             <div class="mb-3 flex items-center justify-between"><h3 class="text-base font-extrabold text-slate-900">${filterTitleText}</h3><button id="filter-close-btn" type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="${closeText}">✕</button></div>
             <p class="mb-3 text-xs text-slate-600">${filterHintText}</p>
-            <form id="filter-form" class="space-y-3"><div id="filter-rows" class="space-y-2"></div><div class="flex items-center gap-2"><button id="filter-add-row-btn" type="button" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">${addCriterionText}</button><button id="filter-reset-btn" type="button" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">${resetText}</button></div></form>
+            <form id="filter-form" class="space-y-3"><div id="filter-rows" class="space-y-2"></div><div class="flex items-center gap-2"><button id="filter-add-row-btn" type="button" class="ui-btn ui-btn-secondary ui-btn-xs">${addCriterionText}</button><button id="filter-reset-btn" type="button" class="ui-btn ui-btn-secondary ui-btn-xs">${resetText}</button></div></form>
             <p id="filter-status" class="mt-3 text-xs text-slate-600">${t('filterInactive', 'Фильтр не активен.')}</p>
             <datalist id="filter-tag-keys"></datalist>
           </div>
@@ -146,7 +146,7 @@
           ${infoLink}
           ${mapLink}
           <a id="admin-link" href="/admin/" class="${adminLinkClass + activeAdmin} rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${adminPanelText}</a>
-          <button id="settings-logout-btn" type="button" class="hidden rounded-[16px] bg-rose-500 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-600">${logoutText}</button>
+          <button id="settings-logout-btn" type="button" class="ui-btn ui-btn-danger hidden">${logoutText}</button>
           <div class="my-2 border-t border-slate-200"></div>
           <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${themeText}</span>${themeToggle}</div>
         </div>

@@ -134,6 +134,7 @@ function initUiKitClasses() {
     const passwordButton = passwordFormEl?.querySelector('button[type="submit"]');
     if (saveButton) saveButton.className = ui.buttonClass('primary');
     if (passwordButton) passwordButton.className = ui.buttonClass('outlineBrand');
+    if (logoutBtnEl) logoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
   }
 }
 

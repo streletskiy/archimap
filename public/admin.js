@@ -181,12 +181,35 @@ function initUiKitClasses() {
   const ui = getUI();
   if (!ui) return;
   if (typeof ui.fieldClass === 'function') {
-    [usersSearchEl, usersRoleFilterEl, usersCanEditFilterEl, usersSortByEl, editsSearchEl, editsDateFilterEl, editsUserFilterEl].forEach((el) => {
+    [
+      usersSearchEl,
+      usersRoleFilterEl,
+      usersCanEditFilterEl,
+      usersSortByEl,
+      usersSortDirEl,
+      editsSearchEl,
+      editsDateFilterEl,
+      editsUserFilterEl,
+      editsStatusFilterEl,
+      generalAppDisplayNameEl,
+      generalAppBaseUrlEl,
+      smtpUrlEl,
+      smtpHostEl,
+      smtpPortEl,
+      smtpUserEl,
+      smtpPassEl,
+      smtpFromEl
+    ].forEach((el) => {
       if (el) el.className = ui.fieldClass('input');
     });
   }
   if (typeof ui.buttonClass === 'function') {
     if (usersRefreshEl) usersRefreshEl.className = ui.buttonClass('secondary');
+    if (generalSaveBtnEl) generalSaveBtnEl.className = ui.buttonClass('primary');
+    if (smtpTestBtnEl) smtpTestBtnEl.className = ui.buttonClass('secondary');
+    if (smtpSaveBtnEl) smtpSaveBtnEl.className = ui.buttonClass('primary');
+    if (adminUiEmailRefreshEl) adminUiEmailRefreshEl.className = ui.buttonClass('secondary', 'xs');
+    if (logoutBtnEl) logoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
   }
 }
 
@@ -473,7 +496,7 @@ function renderAdminUiKit() {
   setText(adminUiTabsTitleEl, t('uiSectionTabs', null, 'Вкладки'));
   if (adminUiTabsApiEl) adminUiTabsApiEl.innerHTML = t('uiTabsApiHtml', null, 'API: <code>ArchiMapUI.tabButtonClass(active)</code>');
   setText(adminUiFieldsTitleEl, t('uiSectionFields', null, 'Поля и кнопки'));
-  if (adminUiFieldsApiEl) adminUiFieldsApiEl.innerHTML = t('uiFieldsApiHtml', null, 'API: <code>ArchiMapUI.fieldClass(kind)</code>, <code>ArchiMapUI.buttonClass(variant)</code>');
+  if (adminUiFieldsApiEl) adminUiFieldsApiEl.innerHTML = t('uiFieldsApiHtml', null, 'API: <code>ArchiMapUI.fieldClass(kind, size?)</code>, <code>ArchiMapUI.buttonClass(variant, size?)</code>');
   setText(adminUiEmailsTitleEl, t('uiSectionEmails', null, 'Email шаблоны (preview)'));
   setText(adminUiEmailRefreshEl, t('uiRefresh', null, 'Обновить'));
   setText(adminUiEmailStatusEl, t('uiLoading', null, 'Загрузка...'));
@@ -507,7 +530,7 @@ function renderAdminUiKit() {
   }
   if (adminUiTabsDemoEl) {
     adminUiTabsDemoEl.innerHTML = [
-      '<div class="flex gap-2">',
+      '<div class="ui-tab-shell inline-flex gap-1">',
       '<button type="button" class="' + ui.tabButtonClass(true) + '">' + escapeHtml(t('uiTabActive', null, 'Активная')) + '</button>',
       '<button type="button" class="' + ui.tabButtonClass(false) + '">' + escapeHtml(t('uiTabInactive', null, 'Неактивная')) + '</button>',
       '</div>'
@@ -521,6 +544,8 @@ function renderAdminUiKit() {
       '<button type="button" class="' + ui.buttonClass('primary') + '">Primary</button>',
       '<button type="button" class="' + ui.buttonClass('outlineBrand') + '">Outline Brand</button>',
       '<button type="button" class="' + ui.buttonClass('secondary') + '">Secondary</button>',
+      '<button type="button" class="' + ui.buttonClass('danger') + '">Danger</button>',
+      '<button type="button" class="' + ui.buttonClass('secondary', 'xs') + '">Secondary XS</button>',
       '</div>'
     ].join('');
   }
@@ -591,6 +616,12 @@ async function loadMe() {
 function renderUserRows(items) {
   if (!usersListEl) return;
   const ui = getUI();
+  const secondarySmallClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'xs')
+    : 'rounded-[12px] border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700';
+  const outlineSmallClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('outlineBrand', 'xs')
+    : 'rounded-[12px] border border-violet-300 bg-white px-2 py-1 text-xs text-violet-700';
   const renderBadge = (text, variant, fallbackClass) => {
     if (ui && typeof ui.badge === 'function') return ui.badge(text, variant);
     return `<span class="rounded-full px-2.5 py-1 text-xs font-medium ${fallbackClass}">${escapeHtml(text)}</span>`;
@@ -630,7 +661,7 @@ function renderUserRows(items) {
         </td>
         <td class="px-4 py-3 text-right">
           <div class="inline-flex gap-1">
-            <button data-action="toggle-edit" data-email="${escapeHtml(email)}" data-can-edit="${canEdit ? '1' : '0'}" class="rounded-[12px] border px-2 py-1 text-xs ${canEdit ? 'border-emerald-300 text-emerald-700' : 'border-slate-300 text-slate-700'}">${canEdit ? escapeHtml(t('adminToggleEditOn', null, 'Запретить')) : escapeHtml(t('adminToggleEditOff', null, 'Разрешить'))}</button>
+            <button data-action="toggle-edit" data-email="${escapeHtml(email)}" data-can-edit="${canEdit ? '1' : '0'}" class="${canEdit ? `${secondarySmallClass} border-emerald-300 text-emerald-700` : secondarySmallClass}">${canEdit ? escapeHtml(t('adminToggleEditOn', null, 'Запретить')) : escapeHtml(t('adminToggleEditOff', null, 'Разрешить'))}</button>
             <button
               data-action="toggle-admin"
               data-email="${escapeHtml(email)}"
@@ -638,7 +669,7 @@ function renderUserRows(items) {
               data-role-locked="${isSelfMasterAdminDemotionLocked ? '1' : '0'}"
               title="${isSelfMasterAdminDemotionLocked ? escapeHtml(t('adminMasterAdminRoleLocked', null, 'Мастер-админ не может снять с себя роль admin')) : ''}"
               ${isSelfMasterAdminDemotionLocked ? 'disabled aria-disabled="true"' : ''}
-              class="rounded-[12px] border px-2 py-1 text-xs ${isAdmin ? 'border-violet-300 text-violet-700' : 'border-slate-300 text-slate-700'} ${isSelfMasterAdminDemotionLocked ? 'cursor-not-allowed border-slate-200 text-slate-400' : ''} ${isMasterAdmin ? '' : 'hidden'}"
+              class="${isAdmin ? outlineSmallClass : secondarySmallClass} ${isSelfMasterAdminDemotionLocked ? 'cursor-not-allowed border-slate-200 text-slate-400' : ''} ${isMasterAdmin ? '' : 'hidden'}"
             >${isAdmin ? escapeHtml(t('adminToggleRoleOn', null, 'Снять admin')) : escapeHtml(t('adminToggleRoleOff', null, 'Сделать admin'))}</button>
           </div>
         </td>
@@ -1054,6 +1085,21 @@ function parseEditId(raw) {
 function buildAdminReviewActions(item) {
   const changes = Array.isArray(item?.changes) ? item.changes : [];
   const status = String(item?.status || '').trim().toLowerCase();
+  const ui = getUI();
+  const inputClass = (ui && typeof ui.fieldClass === 'function')
+    ? ui.fieldClass('input')
+    : 'w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple';
+  const primaryBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('primary')
+    : 'rounded-[12px] bg-brand-purple px-3 py-2 text-sm font-semibold text-white hover:brightness-110';
+  const outlineBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('outlineBrand')
+    : 'rounded-[12px] border border-brand-purple bg-white px-3 py-2 text-sm font-semibold text-brand-purple hover:bg-indigo-50';
+  const dangerBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('danger')
+    : 'rounded-[12px] border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50';
+  const reviewAcceptActiveClass = 'review-field-btn ' + (ui && typeof ui.buttonClass === 'function' ? ui.buttonClass('primary', 'xs') : 'ui-btn ui-btn-primary ui-btn-xs');
+  const reviewInactiveClass = 'review-field-btn ' + (ui && typeof ui.buttonClass === 'function' ? ui.buttonClass('secondary', 'xs') : 'ui-btn ui-btn-secondary ui-btn-xs');
   if (status !== 'pending') {
     return `
       <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -1076,8 +1122,8 @@ function buildAdminReviewActions(item) {
         <div class="flex flex-wrap items-center justify-between gap-2">
           <span class="font-semibold text-slate-700">${escapeHtml(String(change?.label || field || '-'))}</span>
           <div class="inline-flex items-center gap-1">
-            <button type="button" data-field-action="accept" data-field-name="${escapeHtml(field)}" class="review-field-btn rounded-[10px] border border-brand-purple bg-brand-purple px-2.5 py-1 text-xs font-semibold text-white">${escapeHtml(t('adminFieldAccept', null, 'Принять'))}</button>
-            <button type="button" data-field-action="reject" data-field-name="${escapeHtml(field)}" class="review-field-btn rounded-[10px] border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">${escapeHtml(t('adminFieldReject', null, 'Отклонить'))}</button>
+            <button type="button" data-field-action="accept" data-field-name="${escapeHtml(field)}" class="${reviewAcceptActiveClass}">${escapeHtml(t('adminFieldAccept', null, 'Принять'))}</button>
+            <button type="button" data-field-action="reject" data-field-name="${escapeHtml(field)}" class="${reviewInactiveClass}">${escapeHtml(t('adminFieldReject', null, 'Отклонить'))}</button>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -1085,7 +1131,7 @@ function buildAdminReviewActions(item) {
           <span class="text-slate-400">-&gt;</span>
           <span class="rounded-md px-2 py-1 ${valueClass}">${escapeHtml(newValue)}</span>
         </div>
-        <input type="text" data-merge-value="${escapeHtml(field)}" value="${escapeHtml(value)}" class="w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple" />
+        <input type="text" data-merge-value="${escapeHtml(field)}" value="${escapeHtml(value)}" class="${inputClass}" />
       </div>
     `;
   }).join('');
@@ -1094,11 +1140,11 @@ function buildAdminReviewActions(item) {
     <div class="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
       <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminReviewTitle', null, 'Модерация правки'))}</p>
       <div class="grid gap-2 pr-1">${fieldRows || `<p class="text-sm text-slate-600">${escapeHtml(t('adminNoDiffToMerge', null, 'Нет отличий для мерджа.'))}</p>`}</div>
-      <textarea id="edit-admin-comment" rows="2" placeholder="${escapeHtml(t('adminCommentPlaceholder', null, 'Комментарий администратора (опционально)'))}" class="w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple"></textarea>
+      <textarea id="edit-admin-comment" rows="2" placeholder="${escapeHtml(t('adminCommentPlaceholder', null, 'Комментарий администратора (опционально)'))}" class="${inputClass}"></textarea>
       <div class="flex flex-wrap gap-2">
-        <button id="edit-apply-decisions-btn" type="button" class="rounded-[12px] bg-brand-purple px-3 py-2 text-sm font-semibold text-white hover:brightness-110">${escapeHtml(t('adminApplyDecisions', null, 'Применить решения'))}</button>
-        <button id="edit-merge-all-btn" type="button" class="rounded-[12px] border border-brand-purple bg-white px-3 py-2 text-sm font-semibold text-brand-purple hover:bg-indigo-50">${escapeHtml(t('adminMergeAll', null, 'Принять все'))}</button>
-        <button id="edit-reject-btn" type="button" class="rounded-[12px] border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50">${escapeHtml(t('adminRejectAll', null, 'Отклонить все'))}</button>
+        <button id="edit-apply-decisions-btn" type="button" class="${primaryBtnClass}">${escapeHtml(t('adminApplyDecisions', null, 'Применить решения'))}</button>
+        <button id="edit-merge-all-btn" type="button" class="${outlineBtnClass}">${escapeHtml(t('adminMergeAll', null, 'Принять все'))}</button>
+        <button id="edit-reject-btn" type="button" class="${dangerBtnClass}">${escapeHtml(t('adminRejectAll', null, 'Отклонить все'))}</button>
       </div>
       <p id="edit-admin-status" class="text-sm text-slate-600"></p>
     </div>
@@ -1108,6 +1154,13 @@ function buildAdminReviewActions(item) {
 function setReviewFieldDecision(field, decision) {
   const normalizedField = String(field || '').trim();
   const normalizedDecision = decision === 'reject' ? 'reject' : 'accept';
+  const ui = getUI();
+  const secondaryXsClass = ui && typeof ui.buttonClass === 'function'
+    ? ui.buttonClass('secondary', 'xs')
+    : 'ui-btn ui-btn-secondary ui-btn-xs';
+  const primaryXsClass = ui && typeof ui.buttonClass === 'function'
+    ? ui.buttonClass('primary', 'xs')
+    : 'ui-btn ui-btn-primary ui-btn-xs';
   if (!normalizedField) return;
   const row = [...document.querySelectorAll('[data-review-field]')]
     .find((node) => String(node.getAttribute('data-review-field') || '').trim() === normalizedField);
@@ -1117,16 +1170,15 @@ function setReviewFieldDecision(field, decision) {
   buttons.forEach((button) => {
     const action = String(button.getAttribute('data-field-action') || '').trim();
     const isActive = action === normalizedDecision;
-    button.classList.remove('border-brand-purple', 'bg-brand-purple', 'text-white', 'border-rose-300', 'bg-rose-50', 'text-rose-700', 'border-slate-300', 'bg-white', 'text-slate-700');
     if (!isActive) {
-      button.classList.add('border-slate-300', 'bg-white', 'text-slate-700');
+      button.className = 'review-field-btn ' + secondaryXsClass;
       return;
     }
     if (action === 'reject') {
-      button.classList.add('border-rose-300', 'bg-rose-50', 'text-rose-700');
+      button.className = 'review-field-btn ' + secondaryXsClass + ' border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100';
       return;
     }
-    button.classList.add('border-brand-purple', 'bg-brand-purple', 'text-white');
+    button.className = 'review-field-btn ' + primaryXsClass;
   });
 }
 

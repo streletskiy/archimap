@@ -17,6 +17,18 @@ Before opening a PR, run:
 - `npm run lint`
 - `npm test`
 
+## UI Kit Reuse (Required)
+
+When changing or adding frontend UI, reuse shared UI primitives from `public/shared/ui.js`.
+
+- Use `ArchiMapUI.tabButtonClass(active)` for tabs.
+- Use `ArchiMapUI.fieldClass(kind, size?)` for inputs/selects/textarea.
+- Use `ArchiMapUI.buttonClass(variant, size?)` for buttons.
+- Use shared classes from `public/styles.css` (`ui-*`) instead of creating one-off utility combinations.
+- If a needed visual pattern does not exist, extend UI kit first (`ui.js` + `styles.css`) and then consume it in pages/modules.
+- Avoid duplicating similar Tailwind class strings across pages (this is treated as UI “ai slop” and should be refactored).
+- PRs that introduce new manual UI patterns without UI kit reuse should be considered incomplete.
+
 ## Commit Convention
 
 Conventional commit style is recommended:

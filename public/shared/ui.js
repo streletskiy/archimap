@@ -71,19 +71,25 @@
       : base;
   }
 
-  function fieldClass(kind) {
+  function fieldClass(kind, size) {
     var base = 'ui-field';
-    if (kind === 'textarea') return base + ' min-h-[120px]';
+    var sizeClass = size === 'xs' ? ' ui-field-xs' : '';
+    if (kind === 'textarea') return base + sizeClass + ' min-h-[120px]';
+    if (kind === 'select') return base + sizeClass;
     return base;
   }
 
-  function buttonClass(variant) {
+  function buttonClass(variant, size) {
     var map = {
       primary: 'ui-btn ui-btn-primary',
       outlineBrand: 'ui-btn ui-btn-outline-brand',
-      secondary: 'ui-btn ui-btn-secondary'
+      secondary: 'ui-btn ui-btn-secondary',
+      danger: 'ui-btn ui-btn-danger'
     };
-    return map[variant] || map.secondary;
+    var sizeClass = '';
+    if (size === 'xs') sizeClass = ' ui-btn-xs';
+    if (size === 'squareSm') sizeClass = ' ui-btn-square-sm';
+    return (map[variant] || map.secondary) + sizeClass;
   }
 
   function editDetailPane() {

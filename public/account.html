@@ -58,13 +58,13 @@
           <p id="account-subtitle" class="mt-1 text-sm text-slate-600">Загрузка данных...</p>
         </div>
 
-        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-2">
-          <ul class="-mb-px flex flex-wrap gap-2 text-sm font-medium" id="account-tabs" data-tabs-toggle="#account-tabs-content" role="tablist">
+        <div class="mt-4">
+          <ul class="ui-tab-shell flex flex-wrap gap-1" id="account-tabs" data-tabs-toggle="#account-tabs-content" role="tablist">
             <li role="presentation">
-              <button id="account-tab-settings" type="button" role="tab" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Настройки</button>
+              <button id="account-tab-settings" type="button" role="tab" class="ui-tab-btn">Настройки</button>
             </li>
             <li role="presentation">
-              <button id="account-tab-edits" type="button" role="tab" class="rounded-[12px] px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">Мои правки</button>
+              <button id="account-tab-edits" type="button" role="tab" class="ui-tab-btn">Мои правки</button>
             </li>
           </ul>
         </div>
@@ -79,17 +79,17 @@
               <form id="profile-form" class="mt-4 space-y-4">
                 <div>
                   <label id="account-label-first-name" for="first-name" class="mb-1 block text-sm font-medium text-slate-700">Имя</label>
-                  <input id="first-name" type="text" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="given-name" placeholder="Иван" />
+                  <input id="first-name" type="text" class="ui-field bg-white" autocomplete="given-name" placeholder="Иван" />
                 </div>
                 <div>
                   <label id="account-label-last-name" for="last-name" class="mb-1 block text-sm font-medium text-slate-700">Фамилия</label>
-                  <input id="last-name" type="text" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="family-name" placeholder="Иванов" />
+                  <input id="last-name" type="text" class="ui-field bg-white" autocomplete="family-name" placeholder="Иванов" />
                 </div>
                 <div>
                   <label id="account-label-email" for="profile-email" class="mb-1 block text-sm font-medium text-slate-700">Email</label>
-                  <input id="profile-email" type="email" class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 focus:border-brand-purple focus:ring-brand-purple" readonly value="user@archimap.app" />
+                  <input id="profile-email" type="email" class="ui-field bg-white text-slate-500" readonly value="user@archimap.app" />
                 </div>
-                <button id="account-profile-save-btn" type="submit" class="rounded-[16px] bg-brand-purple px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110">Сохранить</button>
+                <button id="account-profile-save-btn" type="submit" class="ui-btn ui-btn-primary">Сохранить</button>
                 <p id="profile-status" class="text-sm text-slate-600"></p>
               </form>
             </section>
@@ -99,17 +99,17 @@
               <form id="password-form" class="mt-4 space-y-4">
                 <div>
                   <label id="account-label-current-password" for="current-password" class="mb-1 block text-sm font-medium text-slate-700">Текущий пароль</label>
-                  <input id="current-password" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="current-password" />
+                  <input id="current-password" type="password" required class="ui-field bg-white" autocomplete="current-password" />
                 </div>
                 <div>
                   <label id="account-label-new-password" for="new-password" class="mb-1 block text-sm font-medium text-slate-700">Новый пароль</label>
-                  <input id="new-password" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="new-password" />
+                  <input id="new-password" type="password" required class="ui-field bg-white" autocomplete="new-password" />
                 </div>
                 <div>
                   <label id="account-label-new-password-confirm" for="new-password-confirm" class="mb-1 block text-sm font-medium text-slate-700">Повторите новый пароль</label>
-                  <input id="new-password-confirm" type="password" required class="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-sm focus:border-brand-purple focus:ring-brand-purple" autocomplete="new-password" />
+                  <input id="new-password-confirm" type="password" required class="ui-field bg-white" autocomplete="new-password" />
                 </div>
-                <button id="account-password-save-btn" type="submit" class="rounded-[16px] border border-brand-purple px-5 py-2.5 text-sm font-semibold text-brand-purple transition hover:bg-brand-purple hover:text-white">Изменить пароль</button>
+                <button id="account-password-save-btn" type="submit" class="ui-btn ui-btn-outline-brand">Изменить пароль</button>
                 <p id="password-status" class="text-sm text-slate-600"></p>
               </form>
             </section>
@@ -168,8 +168,8 @@
 
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
             <div class="grid gap-3 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]">
-              <input id="account-edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
-              <input id="account-edits-date-filter" type="date" class="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:border-brand-purple focus:ring-brand-purple" />
+              <input id="account-edits-search" type="search" placeholder="Поиск по адресу или ID здания" class="ui-field" />
+              <input id="account-edits-date-filter" type="date" class="ui-field" />
               <p id="account-edits-status" class="flex items-center rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600">Загрузка...</p>
             </div>
           </div>

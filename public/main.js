@@ -348,6 +348,65 @@ const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
 const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
 const OSM_FILTER_TAG_LABELS_RU = Object.freeze((window.__ARCHIMAP_I18N_RU?.filterTagLabels) || {});
 
+function getUI() {
+  return window.ArchiMapUI || null;
+}
+
+function initMainUiKitClasses() {
+  const ui = getUI();
+  if (!ui) return;
+  const loginPasswordInputEl = document.getElementById('login-password');
+  const changeCurrentPasswordInputEl = document.getElementById('current-password');
+  const changeNewPasswordInputEl = document.getElementById('new-password');
+  const changeNewPasswordConfirmInputEl = document.getElementById('new-password-confirm');
+
+  if (typeof ui.fieldClass === 'function') {
+    [
+      loginUsernameEl,
+      loginPasswordInputEl,
+      registerFirstNameEl,
+      registerLastNameEl,
+      registerEmailEl,
+      registerPasswordEl,
+      registerPasswordConfirmEl,
+      forgotPasswordEmailEl,
+      resetPasswordNewEl,
+      resetPasswordConfirmEl,
+      registerVerifyCodeEl,
+      profileFirstNameEl,
+      profileLastNameEl,
+      changeCurrentPasswordInputEl,
+      changeNewPasswordInputEl,
+      changeNewPasswordConfirmInputEl
+    ].forEach((el) => {
+      if (!el) return;
+      el.className = ui.fieldClass('input');
+    });
+    if (registerVerifyCodeEl) registerVerifyCodeEl.className += ' text-center text-lg tracking-[0.3em]';
+  }
+
+  if (typeof ui.buttonClass === 'function') {
+    const loginSubmitEl = loginForm?.querySelector('button[type="submit"]');
+    const registerSubmitEl = registerFormEl?.querySelector('button[type="submit"]');
+    const forgotSubmitEl = forgotPasswordFormEl?.querySelector('button[type="submit"]');
+    const resetSubmitEl = resetPasswordFormEl?.querySelector('button[type="submit"]');
+    const registerVerifySubmitEl = registerVerifyFormEl?.querySelector('button[type="submit"]');
+    const profileSubmitEl = profileFormEl?.querySelector('button[type="submit"]');
+    const changePasswordSubmitEl = changePasswordFormEl?.querySelector('button[type="submit"]');
+    if (loginSubmitEl) loginSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (registerSubmitEl) registerSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (forgotSubmitEl) forgotSubmitEl.className = ui.buttonClass('secondary') + ' w-full';
+    if (resetSubmitEl) resetSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (registerVerifySubmitEl) registerVerifySubmitEl.className = ui.buttonClass('secondary') + ' w-full';
+    if (profileSubmitEl) profileSubmitEl.className = ui.buttonClass('secondary') + ' w-full';
+    if (changePasswordSubmitEl) changePasswordSubmitEl.className = ui.buttonClass('primary') + ' w-full';
+    if (logoutBtn) logoutBtn.className = ui.buttonClass('danger') + ' hidden w-full';
+    if (profileLogoutBtnEl) profileLogoutBtnEl.className = ui.buttonClass('danger') + ' mt-4 w-full';
+    if (settingsLogoutBtnEl) settingsLogoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
+    if (searchLoadMoreBtnEl) searchLoadMoreBtnEl.className = ui.buttonClass('secondary') + ' hidden w-full';
+  }
+}
+
 function applyRegistrationLegalTexts() {
   if (registerAcceptUserAgreementPrefixEl) registerAcceptUserAgreementPrefixEl.textContent = t('authRegisterAcceptPrefix', null, 'Я принимаю');
   if (registerAcceptPrivacyPolicyPrefixEl) registerAcceptPrivacyPolicyPrefixEl.textContent = t('authRegisterAcceptPrefix', null, 'Я принимаю');
@@ -356,6 +415,7 @@ function applyRegistrationLegalTexts() {
 }
 
 applyRegistrationLegalTexts();
+initMainUiKitClasses();
 
 const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
   'architect',
@@ -913,9 +973,16 @@ function buildFilterRow() {
   const row = document.createElement('div');
   row.dataset.filterRow = String(++filterRowSeq);
   row.className = 'grid grid-cols-[1fr_auto_1fr_auto] items-center gap-1.5';
+  const ui = getUI();
+  const filterFieldClass = (ui && typeof ui.fieldClass === 'function')
+    ? ui.fieldClass('input', 'xs')
+    : 'w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200';
+  const filterRemoveClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'squareSm')
+    : 'inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-500 hover:bg-slate-100 hover:text-slate-900';
   row.innerHTML = `
-    <input data-field="key" list="filter-tag-keys" placeholder="${escapeHtml(t('filterKeyPlaceholder', null, 'Тег, например building:levels'))}" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-    <select data-field="op" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
+    <input data-field="key" list="filter-tag-keys" placeholder="${escapeHtml(t('filterKeyPlaceholder', null, 'Тег, например building:levels'))}" class="${filterFieldClass}" />
+    <select data-field="op" class="${filterFieldClass}">
       <option value="contains">${escapeHtml(t('filterOpContains', null, 'содержит'))}</option>
       <option value="equals">${escapeHtml(t('filterOpEquals', null, 'равно'))}</option>
       <option value="not_equals">${escapeHtml(t('filterOpNotEquals', null, 'не равно'))}</option>
@@ -923,8 +990,8 @@ function buildFilterRow() {
       <option value="exists">${escapeHtml(t('filterOpExists', null, 'существует'))}</option>
       <option value="not_exists">${escapeHtml(t('filterOpNotExists', null, 'отсутствует'))}</option>
     </select>
-    <input data-field="value" placeholder="${escapeHtml(t('filterValuePlaceholder', null, 'Значение'))}" class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" />
-    <button data-action="remove" type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-500 hover:bg-slate-100 hover:text-slate-900">×</button>
+    <input data-field="value" placeholder="${escapeHtml(t('filterValuePlaceholder', null, 'Значение'))}" class="${filterFieldClass}" />
+    <button data-action="remove" type="button" class="${filterRemoveClass}">×</button>
   `;
   return row;
 }
@@ -2017,6 +2084,10 @@ function renderSearchSkeleton(count = 6) {
 function renderSearchResults(items, options = {}) {
   const { hasMore = false, loadingMore = false } = options;
   if (!searchResultsListEl || !searchResultsStatusEl) return;
+  const ui = getUI();
+  const resultActionBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'xs')
+    : 'ui-btn ui-btn-secondary ui-btn-xs';
   const data = Array.isArray(items) ? items : [];
   if (data.length === 0) {
     searchResultsStatusEl.textContent = t('searchNoResults', null, 'Ничего не найдено.');
@@ -2047,7 +2118,7 @@ function renderSearchResults(items, options = {}) {
         ${line3 ? `<div class="mb-2 text-xs text-slate-700">${escapeHtml(line3)}</div>` : '<div class="mb-2"></div>'}
         <div class="flex items-center justify-between gap-2">
           <div class="text-[11px] text-slate-500">${escapeHtml(`${item.osmType}/${item.osmId}`)}</div>
-          <button data-action="go-to-building" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+          <button data-action="go-to-building" data-osm-type="${escapeHtml(item.osmType)}" data-osm-id="${escapeHtml(item.osmId)}" type="button" class="${resultActionBtnClass}">
             ${escapeHtml(t('searchGoToBuilding', null, 'К зданию'))}
           </button>
         </div>
