@@ -209,7 +209,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
         ai.updated_by AS merged_updated_by,
         ai.updated_at AS merged_updated_at
       FROM user_edits.building_user_edits ue
-      LEFT JOIN building_contours bc
+      LEFT JOIN osm.building_contours bc
         ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
       LEFT JOIN local.architectural_info ai
         ON ai.osm_type = ue.osm_type AND ai.osm_id = ue.osm_id
@@ -260,7 +260,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
         ai.updated_by AS merged_updated_by,
         ai.updated_at AS merged_updated_at
       FROM user_edits.building_user_edits ue
-      LEFT JOIN building_contours bc
+      LEFT JOIN osm.building_contours bc
         ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
       LEFT JOIN local.architectural_info ai
         ON ai.osm_type = ue.osm_type AND ai.osm_id = ue.osm_id

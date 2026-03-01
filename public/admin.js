@@ -47,10 +47,12 @@ const navMenuButtonEl = document.getElementById('nav-menu-button');
 const navMenuPanelEl = document.getElementById('nav-menu-panel');
 const tabUsersEl = document.getElementById('tab-users');
 const tabEditsEl = document.getElementById('tab-edits');
+const tabSettingsEl = document.getElementById('tab-settings');
 const tabGuideEl = document.getElementById('tab-guide');
 const tabUiKitEl = document.getElementById('tab-uikit');
 const usersPanelEl = document.getElementById('users-panel');
 const editsPanelEl = document.getElementById('edits-panel');
+const settingsPanelEl = document.getElementById('settings-panel');
 const guidePanelEl = document.getElementById('guide-panel');
 const uiKitPanelEl = document.getElementById('uikit-panel');
 const adminGuideTitleEl = document.getElementById('admin-guide-title');
@@ -106,6 +108,23 @@ const editDetailCloseEl = document.getElementById('edit-detail-close');
 const editDetailTitleEl = document.getElementById('edit-detail-title');
 const editDetailMetaEl = document.getElementById('edit-detail-meta');
 const editDetailListEl = document.getElementById('edit-detail-list');
+const smtpStatusEl = document.getElementById('smtp-settings-status');
+const generalStatusEl = document.getElementById('general-settings-status');
+const generalAppDisplayNameEl = document.getElementById('general-app-display-name');
+const generalAppBaseUrlEl = document.getElementById('general-app-base-url');
+const generalRegistrationEnabledEl = document.getElementById('general-registration-enabled');
+const generalUserEditRequiresPermissionEl = document.getElementById('general-user-edit-requires-permission');
+const generalSaveBtnEl = document.getElementById('general-save-btn');
+const smtpUrlEl = document.getElementById('smtp-url');
+const smtpHostEl = document.getElementById('smtp-host');
+const smtpPortEl = document.getElementById('smtp-port');
+const smtpSecureEl = document.getElementById('smtp-secure');
+const smtpUserEl = document.getElementById('smtp-user');
+const smtpPassEl = document.getElementById('smtp-pass');
+const smtpFromEl = document.getElementById('smtp-from');
+const smtpKeepPasswordEl = document.getElementById('smtp-keep-password');
+const smtpTestBtnEl = document.getElementById('smtp-test-btn');
+const smtpSaveBtnEl = document.getElementById('smtp-save-btn');
 const THEME_STORAGE_KEY = 'archimap-theme';
 const LAST_MAP_HASH_STORAGE_KEY = 'archimap-last-map-hash';
 const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
@@ -120,6 +139,9 @@ const BUILD_INFO_CONFIG = Object.freeze({
   repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
 });
 let uiKitInitialized = false;
+let smtpSettingsLoaded = false;
+let smtpHasPassword = false;
+let generalSettingsLoaded = false;
 
 const nativeFetch = window.fetch.bind(window);
 
@@ -335,16 +357,20 @@ function setTabButtonState(button, active) {
 function setTab(nextTab, options = {}) {
   adminState.tab = nextTab === 'edits'
     ? 'edits'
-    : (nextTab === 'guide' ? 'guide' : (nextTab === 'uikit' ? 'uikit' : 'users'));
+    : (nextTab === 'settings'
+      ? 'settings'
+      : (nextTab === 'guide' ? 'guide' : (nextTab === 'uikit' ? 'uikit' : 'users')));
   const push = options.push !== false;
 
   if (usersPanelEl) usersPanelEl.classList.toggle('hidden', adminState.tab !== 'users');
   if (editsPanelEl) editsPanelEl.classList.toggle('hidden', adminState.tab !== 'edits');
+  if (settingsPanelEl) settingsPanelEl.classList.toggle('hidden', adminState.tab !== 'settings');
   if (guidePanelEl) guidePanelEl.classList.toggle('hidden', adminState.tab !== 'guide');
   if (uiKitPanelEl) uiKitPanelEl.classList.toggle('hidden', adminState.tab !== 'uikit');
 
   setTabButtonState(tabUsersEl, adminState.tab === 'users');
   setTabButtonState(tabEditsEl, adminState.tab === 'edits');
+  setTabButtonState(tabSettingsEl, adminState.tab === 'settings');
   setTabButtonState(tabGuideEl, adminState.tab === 'guide');
   setTabButtonState(tabUiKitEl, adminState.tab === 'uikit');
 
@@ -357,6 +383,10 @@ function setTab(nextTab, options = {}) {
   }
   if (adminState.tab === 'uikit') {
     renderAdminUiKit();
+  }
+  if (adminState.tab === 'settings') {
+    loadGeneralSettings();
+    loadSmtpSettings();
   }
 
   if (push) writeStateToUrl();
@@ -621,6 +651,8 @@ async function loadMe() {
   csrfToken = String(data.csrfToken || '') || null;
   isMasterAdmin = Boolean(user.isMasterAdmin);
   currentAdminEmail = String(user.email || '').trim().toLowerCase();
+  if (tabSettingsEl) tabSettingsEl.classList.toggle('hidden', !isMasterAdmin);
+  if (settingsPanelEl && !isMasterAdmin) settingsPanelEl.classList.add('hidden');
 
   if (!user.isAdmin) {
     setText(subtitleEl, t('adminAccessDenied', null, 'Доступ запрещен: нужны права администратора'));
@@ -1383,14 +1415,161 @@ async function toggleUserRole(email, isAdmin) {
   return true;
 }
 
+function collectGeneralPayloadFromForm() {
+  return {
+    general: {
+      appDisplayName: String(generalAppDisplayNameEl?.value || '').trim(),
+      appBaseUrl: String(generalAppBaseUrlEl?.value || '').trim(),
+      registrationEnabled: Boolean(generalRegistrationEnabledEl?.checked),
+      userEditRequiresPermission: Boolean(generalUserEditRequiresPermissionEl?.checked)
+    }
+  };
+}
+
+function applyGeneralSettingsToForm(item) {
+  const general = item?.general || {};
+  if (generalAppDisplayNameEl) generalAppDisplayNameEl.value = String(general.appDisplayName || 'Archimap');
+  if (generalAppBaseUrlEl) generalAppBaseUrlEl.value = String(general.appBaseUrl || '');
+  if (generalRegistrationEnabledEl) generalRegistrationEnabledEl.checked = Boolean(general.registrationEnabled);
+  if (generalUserEditRequiresPermissionEl) generalUserEditRequiresPermissionEl.checked = Boolean(general.userEditRequiresPermission);
+}
+
+async function loadGeneralSettings(options = {}) {
+  if (!isMasterAdmin) {
+    setText(generalStatusEl, 'Только master admin может управлять общими настройками.');
+    return;
+  }
+  if (generalSettingsLoaded && !options.force) return;
+  setText(generalStatusEl, 'Загрузка общих настроек...');
+  const resp = await fetch('/api/admin/app-settings/general');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(generalStatusEl, String(data?.error || 'Не удалось загрузить общие настройки'));
+    return;
+  }
+  applyGeneralSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'env');
+  const updatedAt = String(data?.item?.updatedAt || '').trim();
+  const updatedBy = String(data?.item?.updatedBy || '').trim();
+  const meta = updatedAt ? `, updated: ${updatedAt}${updatedBy ? ` (${updatedBy})` : ''}` : '';
+  setText(generalStatusEl, `Источник: ${source}${meta}`);
+  generalSettingsLoaded = true;
+}
+
+async function saveGeneralSettings() {
+  if (!isMasterAdmin) return;
+  setText(generalStatusEl, 'Сохранение общих настроек...');
+  const resp = await fetch('/api/admin/app-settings/general', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectGeneralPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(generalStatusEl, String(data?.error || 'Не удалось сохранить общие настройки'));
+    return;
+  }
+  applyGeneralSettingsToForm(data?.item || {});
+  setText(generalStatusEl, `Сохранено. Источник: ${String(data?.item?.source || 'db')}`);
+  generalSettingsLoaded = true;
+}
+
+function collectSmtpPayloadFromForm() {
+  return {
+    smtp: {
+      url: String(smtpUrlEl?.value || '').trim(),
+      host: String(smtpHostEl?.value || '').trim(),
+      port: Number(smtpPortEl?.value || 587),
+      secure: Boolean(smtpSecureEl?.checked),
+      user: String(smtpUserEl?.value || '').trim(),
+      pass: String(smtpPassEl?.value || ''),
+      from: String(smtpFromEl?.value || '').trim(),
+      keepPassword: Boolean(smtpKeepPasswordEl?.checked)
+    }
+  };
+}
+
+function applySmtpSettingsToForm(item) {
+  const smtp = item?.smtp || {};
+  if (smtpUrlEl) smtpUrlEl.value = String(smtp.url || '');
+  if (smtpHostEl) smtpHostEl.value = String(smtp.host || '');
+  if (smtpPortEl) smtpPortEl.value = String(smtp.port || 587);
+  if (smtpSecureEl) smtpSecureEl.checked = Boolean(smtp.secure);
+  if (smtpUserEl) smtpUserEl.value = String(smtp.user || '');
+  if (smtpFromEl) smtpFromEl.value = String(smtp.from || '');
+  if (smtpPassEl) smtpPassEl.value = '';
+  smtpHasPassword = Boolean(smtp.hasPassword);
+}
+
+async function loadSmtpSettings(options = {}) {
+  if (!isMasterAdmin) {
+    setText(smtpStatusEl, 'Только master admin может управлять SMTP настройками.');
+    return;
+  }
+  if (smtpSettingsLoaded && !options.force) return;
+  setText(smtpStatusEl, 'Загрузка SMTP настроек...');
+  const resp = await fetch('/api/admin/app-settings/smtp');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Не удалось загрузить SMTP настройки'));
+    return;
+  }
+  applySmtpSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'env');
+  const updatedAt = String(data?.item?.updatedAt || '').trim();
+  const updatedBy = String(data?.item?.updatedBy || '').trim();
+  const passText = smtpHasPassword ? 'пароль сохранён' : 'пароль не сохранён';
+  const meta = updatedAt ? `, updated: ${updatedAt}${updatedBy ? ` (${updatedBy})` : ''}` : '';
+  setText(smtpStatusEl, `Источник: ${source}, ${passText}${meta}`);
+  smtpSettingsLoaded = true;
+}
+
+async function saveSmtpSettings() {
+  if (!isMasterAdmin) return;
+  setText(smtpStatusEl, 'Сохранение SMTP настроек...');
+  const resp = await fetch('/api/admin/app-settings/smtp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectSmtpPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Не удалось сохранить SMTP настройки'));
+    return;
+  }
+  applySmtpSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'db');
+  const passText = smtpHasPassword ? 'пароль сохранён' : 'пароль удалён';
+  setText(smtpStatusEl, `Сохранено. Источник: ${source}, ${passText}`);
+  smtpSettingsLoaded = true;
+}
+
+async function testSmtpSettings() {
+  if (!isMasterAdmin) return;
+  setText(smtpStatusEl, 'Проверка SMTP...');
+  const resp = await fetch('/api/admin/app-settings/smtp/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectSmtpPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Проверка SMTP не прошла'));
+    return;
+  }
+  setText(smtpStatusEl, String(data?.message || 'SMTP проверен успешно'));
+}
+
 async function restoreFromUrl() {
   const fromUrl = readStateFromUrl();
   if (fromUrl.tab) {
     adminState.tab = fromUrl.tab === 'edits'
       ? 'edits'
+      : (fromUrl.tab === 'settings'
+        ? 'settings'
       : (fromUrl.tab === 'guide'
         ? 'guide'
-        : (fromUrl.tab === 'uikit' ? 'uikit' : 'users'));
+        : (fromUrl.tab === 'uikit' ? 'uikit' : 'users')));
   }
   adminState.user = String(fromUrl.user || '').trim().toLowerCase();
   adminState.edit = String(fromUrl.edit || '').trim();
@@ -1404,6 +1583,9 @@ async function restoreFromUrl() {
   adminState.editsDate = String(fromUrl.editsDate || '').trim();
   adminState.editsUser = String(fromUrl.editsUser || '').trim().toLowerCase();
   adminState.editsStatus = String(fromUrl.editsStatus || 'pending').trim().toLowerCase() || 'pending';
+  if (!isMasterAdmin && adminState.tab === 'settings') {
+    adminState.tab = 'users';
+  }
 
   setTab(adminState.tab, { push: false });
   await loadUsers({ silent: true });
@@ -1420,8 +1602,27 @@ async function restoreFromUrl() {
 
 if (tabUsersEl) tabUsersEl.addEventListener('click', () => setTab('users'));
 if (tabEditsEl) tabEditsEl.addEventListener('click', () => setTab('edits'));
+if (tabSettingsEl) tabSettingsEl.addEventListener('click', () => setTab('settings'));
 if (tabGuideEl) tabGuideEl.addEventListener('click', () => setTab('guide'));
 if (tabUiKitEl) tabUiKitEl.addEventListener('click', () => setTab('uikit'));
+
+if (generalSaveBtnEl) {
+  generalSaveBtnEl.addEventListener('click', async () => {
+    await saveGeneralSettings();
+  });
+}
+
+if (smtpSaveBtnEl) {
+  smtpSaveBtnEl.addEventListener('click', async () => {
+    await saveSmtpSettings();
+  });
+}
+
+if (smtpTestBtnEl) {
+  smtpTestBtnEl.addEventListener('click', async () => {
+    await testSmtpSettings();
+  });
+}
 
 if (usersRefreshEl) {
   usersRefreshEl.addEventListener('click', async () => {

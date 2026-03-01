@@ -143,3 +143,141 @@ paths:
           description: Search result page
         '400':
           description: Invalid query
+  /api/admin/app-settings/general:
+    get:
+      summary: Get general app settings (master admin)
+      responses:
+        '200':
+          description: General settings
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+    post:
+      summary: Save general app settings (CSRF, master admin)
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                general:
+                  type: object
+                  properties:
+                    appDisplayName:
+                      type: string
+                    appBaseUrl:
+                      type: string
+                    registrationEnabled:
+                      type: boolean
+                    userEditRequiresPermission:
+                      type: boolean
+      responses:
+        '200':
+          description: Saved
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden or CSRF failed
+  /api/admin/app-settings/smtp:
+    get:
+      summary: Get SMTP settings (master admin)
+      responses:
+        '200':
+          description: SMTP settings
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+    post:
+      summary: Save SMTP settings (CSRF, master admin)
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                smtp:
+                  type: object
+                  properties:
+                    url:
+                      type: string
+                    host:
+                      type: string
+                    port:
+                      type: integer
+                    secure:
+                      type: boolean
+                    user:
+                      type: string
+                    pass:
+                      type: string
+                    from:
+                      type: string
+                    keepPassword:
+                      type: boolean
+      responses:
+        '200':
+          description: Saved
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden or CSRF failed
+  /api/admin/app-settings/smtp/test:
+    post:
+      summary: Verify SMTP settings without sending an email (CSRF, master admin)
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                smtp:
+                  type: object
+                  properties:
+                    url:
+                      type: string
+                    host:
+                      type: string
+                    port:
+                      type: integer
+                    secure:
+                      type: boolean
+                    user:
+                      type: string
+                    pass:
+                      type: string
+                    from:
+                      type: string
+                    keepPassword:
+                      type: boolean
+      responses:
+        '200':
+          description: SMTP config is valid
+        '400':
+          description: Invalid SMTP config
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden or CSRF failed

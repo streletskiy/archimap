@@ -55,7 +55,7 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ai.archimap_description,
     ai.updated_by,
     ai.updated_at
-  FROM building_contours bc
+  FROM osm.building_contours bc
   LEFT JOIN local.architectural_info ai
     ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
 `;
@@ -158,8 +158,8 @@ function registerBuildingsRoutes(deps) {
           ai.archimap_description,
           ai.updated_by,
           ai.updated_at
-        FROM building_contours_rtree br
-        JOIN building_contours bc
+        FROM osm.building_contours_rtree br
+        JOIN osm.building_contours bc
           ON bc.rowid = br.contour_rowid
         LEFT JOIN local.architectural_info ai
           ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
@@ -301,7 +301,7 @@ function registerBuildingsRoutes(deps) {
 
     const row = db.prepare(`
       SELECT osm_type, osm_id, tags_json, geometry_json
-      FROM building_contours
+      FROM osm.building_contours
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId);
 

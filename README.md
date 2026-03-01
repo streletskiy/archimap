@@ -40,7 +40,7 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
   - `user-edits.db` - user submissions with moderation status (`pending/accepted/partially_accepted/rejected/superseded`).
 - Building modal with in-place editing (authorized users).
 - Dedicated account page (`/account/`) for profile and password management.
-- Dedicated admin page (`/admin/`) for user roles/permissions and local-edits moderation.
+- Dedicated admin page (`/admin/`) for user roles/permissions, app settings (general + SMTP), and local-edits moderation.
 - UI kit is integrated as an admin tab (`/admin/?tab=uikit`) rather than a standalone page.
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
@@ -64,11 +64,12 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 
 ## Architecture at a Glance
 
-- Primary DB: `data/archimap.db`
-  - `building_contours` (geometry + OSM tags)
-  - `building_contours_rtree` (SQLite R\*Tree bbox index)
+- Primary app DB: `data/archimap.db`
   - Search structures (`building_search_source`, `building_search_fts`)
   - Filter tag key cache (`filter_tag_keys_cache`)
+- OSM contours DB: `data/osm.db`
+  - `building_contours` (geometry + OSM tags)
+  - `building_contours_rtree` (SQLite R\*Tree bbox index)
 - Local metadata DB: `data/local-edits.db`
   - `architectural_info` merged overrides and additions
 - User edits DB: `data/user-edits.db`
@@ -177,7 +178,7 @@ Import modes:
 
 What sync does:
 
-- imports building geometries + all available OSM tags into `building_contours`;
+- imports building geometries + all available OSM tags into `osm.building_contours` (`data/osm.db`);
 - removes stale buildings not present in the latest import;
 - rebuilds `data/buildings.pmtiles` from local [SQLite](https://www.sqlite.org/) via [tippecanoe](https://github.com/felt/tippecanoe);
 - writes minimal PMTiles attributes (`feature.id` + `osm_id`) to keep tiles compact;
@@ -187,7 +188,7 @@ Importer details:
 
 - extracts building features via [QuackOSM](https://github.com/kraina-ai/quackosm) (`tags_filter={"building": true}`);
 - computes geometry and bbox in [DuckDB](https://duckdb.org/) (spatial extension);
-- writes into `building_contours` directly from DuckDB (`INSERT/UPSERT` style SQL, no per-row Python loop).
+- performs batch transfer into SQLite (`sqlite3`) and set-based upsert into `building_contours`.
 
 PMTiles-only mode (no OSM import):
 
@@ -198,7 +199,7 @@ node scripts/sync-osm-buildings.js --pmtiles-only
 ## Search Logic
 
 - API: `GET /api/search-buildings?q=...&lon=...&lat=...&limit=...&cursor=...`
-- Search scope: full local `building_contours` + merged local overrides from `local-edits.db`.
+- Search scope: full local `osm.building_contours` + merged local overrides from `local-edits.db`.
 
 Search index:
 
@@ -244,8 +245,8 @@ Index lifecycle:
 - Prefetch API: `GET /api/buildings/filter-data-bbox?minLon=...&minLat=...&maxLon=...&maxLat=...&limit=...`
 - Data API: `POST /api/buildings/filter-data` with `keys: string[]`.
 - BBox query path:
-  - primary: `building_contours_rtree` -> `building_contours` -> `local.architectural_info`,
-  - fallback: direct bbox scan on `building_contours` when R\*Tree is unavailable/not ready.
+  - primary: `osm.building_contours_rtree` -> `osm.building_contours` -> `local.architectural_info`,
+  - fallback: direct bbox scan on `osm.building_contours` when R\*Tree is unavailable/not ready.
 - R\*Tree lifecycle:
   - schema + triggers are ensured on startup and during sync,
   - startup never blocks HTTP availability; rebuild runs in background batches,

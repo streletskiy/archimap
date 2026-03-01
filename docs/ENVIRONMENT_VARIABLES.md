@@ -7,9 +7,11 @@
 | `SESSION_SECRET`                        | Session secret.                                                                                                                                          |
 | `REDIS_URL`                             | Redis URL for sessions (default: `redis://redis:6379`).                                                                                                  |
 | `SESSION_ALLOW_MEMORY_FALLBACK`         | Allow fallback to in-memory sessions when Redis is unavailable. Defaults to `true` in development and `false` in production. Keep `false` in production. |
-| `LOG_LEVEL`                             | Structured logger minimum level (`debug`, `info`, `warn`, `error`; default `info`).                                                                     |
+| `SESSION_COOKIE_SECURE`                 | Force secure session cookie (`true/false`). If not set, defaults to `true` in production and `false` otherwise. Set `false` for local HTTP Docker runs.  |
+| `LOG_LEVEL`                             | Structured logger minimum level (`debug`, `info`, `warn`, `error`; default `info`).                                                                      |
 | `METRICS_ENABLED`                       | Enable Prometheus-style `/metrics` endpoint (`true/false`, default `true`).                                                                              |
 | `ARCHIMAP_DB_PATH`                      | Path to primary DB (default: `data/archimap.db`).                                                                                                        |
+| `OSM_DB_PATH`                           | Path to OSM contours DB (default: `data/osm.db`).                                                                                                        |
 | `USER_AUTH_DB_PATH`                     | Path to auth DB (default: `data/users.db`).                                                                                                              |
 | `MAP_DEFAULT_LON`                       | Default map longitude when URL hash has no `#map=...`.                                                                                                   |
 | `MAP_DEFAULT_LAT`                       | Default map latitude when URL hash has no `#map=...`.                                                                                                    |
@@ -17,6 +19,7 @@
 | `USER_EDITS_DB_PATH`                    | Optional custom path for user moderation DB (default: `data/user-edits.db`).                                                                             |
 | `APP_DISPLAY_NAME`                      | App name used in registration emails (default: `Archimap`).                                                                                              |
 | `APP_BASE_URL`                          | Public application base URL used in password reset links (for example: `https://archimap.example.com`). Recommended to set explicitly for security.      |
+| `APP_SETTINGS_SECRET`                   | Secret used to encrypt app settings in DB (for example SMTP password). Defaults to `SESSION_SECRET` if not set.                                          |
 | `SMTP_URL`                              | Full SMTP connection URL (alternative to host/port/user/pass).                                                                                           |
 | `SMTP_HOST`                             | SMTP host for registration emails.                                                                                                                       |
 | `SMTP_PORT`                             | SMTP port for registration emails (default: `587`).                                                                                                      |
@@ -53,8 +56,8 @@
 
 Startup sync behavior details:
 
-- startup sync is skipped automatically when both `building_contours` and PMTiles file already exist;
-- when `AUTO_SYNC_ON_START=false`, app still builds missing PMTiles from existing `building_contours` (without full OSM import).
+- startup sync is skipped automatically when both `osm.building_contours` and PMTiles file already exist;
+- when `AUTO_SYNC_ON_START=false`, app still builds missing PMTiles from existing `osm.building_contours` (without full OSM import).
 
 Build info in settings footer:
 

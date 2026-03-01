@@ -1,3 +1,5 @@
+const nodemailer = require('nodemailer');
+
 function registerAdminRoutes(deps) {
   const {
     app,
@@ -19,63 +21,177 @@ function registerAdminRoutes(deps) {
     registrationCodeTextTemplate,
     passwordResetHtmlTemplate,
     passwordResetTextTemplate,
+    appSettingsService,
     appDisplayName,
+    getAppDisplayName,
     appBaseUrl,
+    getAppBaseUrl,
     registrationCodeTtlMinutes,
     passwordResetTtlMinutes
   } = deps;
 
+  function resolveAppDisplayName() {
+    if (typeof getAppDisplayName === 'function') {
+      return String(getAppDisplayName() || 'Archimap').trim() || 'Archimap';
+    }
+    return String(appDisplayName || 'Archimap').trim() || 'Archimap';
+  }
+
+  function resolveAppBaseUrl() {
+    if (typeof getAppBaseUrl === 'function') {
+      return String(getAppBaseUrl() || '').trim();
+    }
+    return String(appBaseUrl || '').trim();
+  }
+
+  function requireMasterAdmin(req, res, next) {
+    if (!req?.session?.user) {
+      return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+    if (!req.session.user.isMasterAdmin) {
+      return res.status(403).json({ error: 'Требуются права master admin' });
+    }
+    return next();
+  }
+
   app.get('/api/ui/email-previews', requireAuth, requireAdmin, (req, res) => {
+    const currentAppDisplayName = resolveAppDisplayName();
+    const currentAppBaseUrl = resolveAppBaseUrl();
     const sample = {
       registration: {
         code: '583401',
         expiresInMinutes: registrationCodeTtlMinutes,
-        confirmUrl: `${appBaseUrl || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`
+        confirmUrl: `${currentAppBaseUrl || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`
       },
       passwordReset: {
         expiresInMinutes: passwordResetTtlMinutes,
-        resetUrl: `${appBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`
+        resetUrl: `${currentAppBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`
       }
     };
 
     const registration = {
-      subject: `${appDisplayName}: код подтверждения регистрации`,
+      subject: `${currentAppDisplayName}: код подтверждения регистрации`,
       html: registrationCodeHtmlTemplate({
         code: sample.registration.code,
         expiresInMinutes: sample.registration.expiresInMinutes,
-        appDisplayName,
+        appDisplayName: currentAppDisplayName,
         confirmUrl: sample.registration.confirmUrl
       }),
       text: registrationCodeTextTemplate({
         code: sample.registration.code,
         expiresInMinutes: sample.registration.expiresInMinutes,
-        appDisplayName,
+        appDisplayName: currentAppDisplayName,
         confirmUrl: sample.registration.confirmUrl
       })
     };
 
     const passwordReset = {
-      subject: `${appDisplayName}: сброс пароля`,
+      subject: `${currentAppDisplayName}: сброс пароля`,
       html: passwordResetHtmlTemplate({
         resetUrl: sample.passwordReset.resetUrl,
         expiresInMinutes: sample.passwordReset.expiresInMinutes,
-        appDisplayName
+        appDisplayName: currentAppDisplayName
       }),
       text: passwordResetTextTemplate({
         resetUrl: sample.passwordReset.resetUrl,
         expiresInMinutes: sample.passwordReset.expiresInMinutes,
-        appDisplayName
+        appDisplayName: currentAppDisplayName
       })
     };
 
     return res.json({
-      appDisplayName,
+      appDisplayName: currentAppDisplayName,
       generatedAt: new Date().toISOString(),
       templates: {
         registration,
         passwordReset
       }
     });
+  });
+
+  app.get('/api/admin/app-settings/smtp', requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+    if (!appSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек недоступен' });
+    }
+    return res.json({
+      ok: true,
+      item: appSettingsService.getSmtpSettingsForAdmin()
+    });
+  });
+
+  app.get('/api/admin/app-settings/general', requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+    if (!appSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек недоступен' });
+    }
+    return res.json({
+      ok: true,
+      item: appSettingsService.getGeneralSettingsForAdmin()
+    });
+  });
+
+  app.post('/api/admin/app-settings/general', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+    if (!appSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек недоступен' });
+    }
+    const general = req.body?.general && typeof req.body.general === 'object' ? req.body.general : {};
+    const actor = getSessionEditActorKey(req) || 'admin';
+    const saved = appSettingsService.saveGeneralSettings(general, actor);
+    return res.json({
+      ok: true,
+      item: saved
+    });
+  });
+
+  app.post('/api/admin/app-settings/smtp', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+    if (!appSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек недоступен' });
+    }
+    const smtp = req.body?.smtp && typeof req.body.smtp === 'object' ? req.body.smtp : {};
+    const actor = getSessionEditActorKey(req) || 'admin';
+    const saved = appSettingsService.saveSmtpSettings(smtp, actor);
+    return res.json({
+      ok: true,
+      item: saved
+    });
+  });
+
+  app.post('/api/admin/app-settings/smtp/test', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!appSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек недоступен' });
+    }
+    const smtp = req.body?.smtp && typeof req.body.smtp === 'object' ? req.body.smtp : {};
+    const keepPassword = smtp.keepPassword !== false;
+    const candidate = appSettingsService.buildSmtpConfigFromInput(smtp, { keepPassword });
+
+    if (candidate.url) {
+      try {
+        const transporter = nodemailer.createTransport(candidate.url);
+        await transporter.verify();
+      } catch (error) {
+        return res.status(400).json({ error: `SMTP verify failed: ${String(error?.message || error)}` });
+      }
+      return res.json({ ok: true, message: 'SMTP URL проверен успешно' });
+    }
+
+    if (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from) {
+      return res.status(400).json({ error: 'Для проверки нужны host/port/user/password/from или smtp url' });
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host: candidate.host,
+        port: candidate.port,
+        secure: candidate.secure,
+        auth: {
+          user: candidate.user,
+          pass: candidate.pass
+        }
+      });
+      await transporter.verify();
+      return res.json({ ok: true, message: 'SMTP проверен успешно' });
+    } catch (error) {
+      return res.status(400).json({ error: `SMTP verify failed: ${String(error?.message || error)}` });
+    }
   });
 
   app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {

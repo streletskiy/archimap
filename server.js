@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
@@ -8,6 +8,7 @@ const { ensureAuthSchema, registerAuthRoutes } = require('./auth');
 const { createSimpleRateLimiter } = require('./services/rate-limiter.service');
 const { createSearchService } = require('./services/search.service');
 const { createBuildingEditsService } = require('./services/building-edits.service');
+const { createAppSettingsService } = require('./services/app-settings.service');
 const { requireCsrfSession } = require('./services/csrf.service');
 const { createLogger } = require('./services/logger.service');
 const {
@@ -49,6 +50,12 @@ if (TRUST_PROXY) {
 }
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
 const SESSION_ALLOW_MEMORY_FALLBACK = String(process.env.SESSION_ALLOW_MEMORY_FALLBACK ?? (NODE_ENV === 'production' ? 'false' : 'true')).toLowerCase() === 'true';
+const SESSION_COOKIE_SECURE_RAW = String(process.env.SESSION_COOKIE_SECURE || '').trim().toLowerCase();
+const SESSION_COOKIE_SECURE = SESSION_COOKIE_SECURE_RAW === 'true'
+  ? true
+  : (SESSION_COOKIE_SECURE_RAW === 'false'
+    ? false
+    : (NODE_ENV === 'production'));
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED ?? 'true').toLowerCase() === 'true';
 const AUTO_SYNC_ON_START = String(process.env.AUTO_SYNC_ON_START ?? 'true').toLowerCase() === 'true';
 const AUTO_SYNC_INTERVAL_HOURS = Number(process.env.AUTO_SYNC_INTERVAL_HOURS || 168);
@@ -67,6 +74,7 @@ const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() ===
 const SMTP_USER = String(process.env.SMTP_USER || '').trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
 const EMAIL_FROM = String(process.env.EMAIL_FROM || SMTP_USER || '').trim();
+const APP_SETTINGS_SECRET = String(process.env.APP_SETTINGS_SECRET || SESSION_SECRET).trim() || SESSION_SECRET;
 const APP_BASE_URL = String(process.env.APP_BASE_URL || '').trim();
 const USER_EDIT_REQUIRES_PERMISSION = String(process.env.USER_EDIT_REQUIRES_PERMISSION ?? 'true').toLowerCase() === 'true';
 const REGISTRATION_ENABLED = String(process.env.REGISTRATION_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -83,6 +91,7 @@ const BUILD_INFO_PATH = path.join(__dirname, 'build-info.json');
 
 const dataDir = path.join(__dirname, 'data');
 const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
+const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
 const userEditsDbPath = process.env.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db');
@@ -177,6 +186,7 @@ const {
 } = initDbBootstrapInfra({
   Database,
   dbPath,
+  osmDbPath,
   localEditsDbPath,
   userEditsDbPath,
   userAuthDbPath,
@@ -187,6 +197,55 @@ const {
   isSyncInProgress: () => syncWorkers?.isSyncInProgress?.() || false,
   logger
 });
+
+const appSettingsService = createAppSettingsService({
+  db,
+  settingsSecret: APP_SETTINGS_SECRET,
+  fallbackGeneral: {
+    appDisplayName: APP_DISPLAY_NAME,
+    appBaseUrl: APP_BASE_URL,
+    registrationEnabled: REGISTRATION_ENABLED,
+    userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION
+  },
+  fallbackSmtp: {
+    url: SMTP_URL,
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    user: SMTP_USER,
+    pass: SMTP_PASS,
+    from: EMAIL_FROM
+  }
+});
+
+function getEffectiveGeneralConfig() {
+  try {
+    return appSettingsService.getEffectiveGeneralConfig().config;
+  } catch {
+    return {
+      appDisplayName: APP_DISPLAY_NAME,
+      appBaseUrl: APP_BASE_URL,
+      registrationEnabled: REGISTRATION_ENABLED,
+      userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION
+    };
+  }
+}
+
+function getUserEditRequiresPermission() {
+  return Boolean(getEffectiveGeneralConfig().userEditRequiresPermission);
+}
+
+function getRegistrationEnabled() {
+  return Boolean(getEffectiveGeneralConfig().registrationEnabled);
+}
+
+function getAppBaseUrl() {
+  return String(getEffectiveGeneralConfig().appBaseUrl || '').trim();
+}
+
+function getAppDisplayName() {
+  return String(getEffectiveGeneralConfig().appDisplayName || 'Archimap').trim() || 'Archimap';
+}
 
 app.use(express.json());
 
@@ -209,6 +268,7 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
     env: {
       ...process.env,
       ARCHIMAP_DB_PATH: dbPath,
+      OSM_DB_PATH: osmDbPath,
       FILTER_TAG_KEYS_REBUILD_REASON: reason
     },
     stdio: 'inherit'
@@ -407,7 +467,7 @@ function requireAuth(req, res, next) {
     isAdmin,
     isMasterAdmin,
     canEdit,
-    canEditBuildings: isAdmin ? true : (USER_EDIT_REQUIRES_PERMISSION ? canEdit : true),
+    canEditBuildings: isAdmin ? true : (getUserEditRequiresPermission() ? canEdit : true),
     firstName: row.first_name == null ? null : String(row.first_name),
     lastName: row.last_name == null ? null : String(row.last_name)
   };
@@ -434,7 +494,7 @@ function requireBuildingEditPermission(req, res, next) {
   }
 
   if (isAdminRequest(req)) return next();
-  if (!USER_EDIT_REQUIRES_PERMISSION) return next();
+  if (!getUserEditRequiresPermission()) return next();
 
   const email = String(req.session.user.email || '').trim().toLowerCase();
   if (!email) {
@@ -463,7 +523,7 @@ searchService = createSearchService({
 function getSearchIndexCountsSnapshot() {
   return db.prepare(`
     SELECT
-      (SELECT COUNT(*) FROM building_contours) AS contours_count,
+      (SELECT COUNT(*) FROM osm.building_contours) AS contours_count,
       (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
       (SELECT COUNT(*) FROM building_search_fts) AS search_fts_count
   `).get();
@@ -550,6 +610,8 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
     cwd: __dirname,
     env: {
       ...process.env,
+      ARCHIMAP_DB_PATH: dbPath,
+      OSM_DB_PATH: osmDbPath,
       SEARCH_REBUILD_REASON: reason,
       SEARCH_INDEX_BATCH_SIZE: String(SEARCH_INDEX_BATCH_SIZE),
       LOCAL_EDITS_DB_PATH: localEditsDbPath
@@ -631,7 +693,7 @@ function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
       CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
       (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
       (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
-    FROM building_contours bc
+    FROM osm.building_contours bc
     LEFT JOIN local.architectural_info ai
       ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
     WHERE bc.osm_type = ? AND bc.osm_id = ?
@@ -675,23 +737,19 @@ registerAuthRoutes({
   createSimpleRateLimiter,
   sessionSecret: SESSION_SECRET,
   userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION,
+  getUserEditRequiresPermission,
   registrationEnabled: REGISTRATION_ENABLED,
+  getRegistrationEnabled,
   registrationCodeTtlMinutes: REGISTRATION_CODE_TTL_MINUTES,
   registrationCodeResendCooldownSec: REGISTRATION_CODE_RESEND_COOLDOWN_SEC,
   registrationCodeMaxAttempts: REGISTRATION_CODE_MAX_ATTEMPTS,
   registrationMinPasswordLength: REGISTRATION_MIN_PASSWORD_LENGTH,
   passwordResetTtlMinutes: PASSWORD_RESET_TTL_MINUTES,
   appBaseUrl: APP_BASE_URL,
+  getAppBaseUrl,
   appDisplayName: APP_DISPLAY_NAME,
-  smtp: {
-    url: SMTP_URL,
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE,
-    user: SMTP_USER,
-    pass: SMTP_PASS,
-    from: EMAIL_FROM
-  }
+  getAppDisplayName,
+  getSmtpConfig: () => appSettingsService.getEffectiveSmtpConfig().config
 });
 
 registerAppRoutes({
@@ -702,6 +760,7 @@ registerAppRoutes({
   normalizeMapConfig,
   getBuildInfo,
   registrationEnabled: REGISTRATION_ENABLED,
+  getRegistrationEnabled,
   buildingsPmtilesSourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER,
   getFilterTagKeysCached,
   isFilterTagKeysRebuildInProgress: () => filterTagKeysRebuildInProgress
@@ -727,8 +786,11 @@ registerAdminRoutes({
   registrationCodeTextTemplate,
   passwordResetHtmlTemplate,
   passwordResetTextTemplate,
+  appSettingsService,
   appDisplayName: APP_DISPLAY_NAME,
+  getAppDisplayName,
   appBaseUrl: APP_BASE_URL,
+  getAppBaseUrl,
   registrationCodeTtlMinutes: REGISTRATION_CODE_TTL_MINUTES,
   passwordResetTtlMinutes: PASSWORD_RESET_TTL_MINUTES
 });
@@ -781,8 +843,12 @@ syncWorkers = initSyncWorkersInfra({
   autoSyncIntervalHours: AUTO_SYNC_INTERVAL_HOURS,
   buildingsPmtilesPath,
   isShuttingDown: () => shuttingDown,
-  getContoursTotal: () => Number(db.prepare('SELECT COUNT(*) AS total FROM building_contours').get()?.total || 0),
+  getContoursTotal: () => Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0),
   onSyncSuccess: () => {
+    if (!fs.existsSync(buildingsPmtilesPath)) {
+      logger.warn('pmtiles_missing_after_sync', { path: buildingsPmtilesPath });
+      syncWorkers?.runPmtilesBuild?.('post-sync-missing');
+    }
     rebuildSearchIndex('auto-sync');
     filterTagKeysCache = { keys: null, loadedAt: 0 };
     scheduleFilterTagKeysCacheRebuild('auto-sync');
@@ -833,6 +899,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 initSessionStore({
   sessionSecret: SESSION_SECRET,
   nodeEnv: NODE_ENV,
+  sessionCookieSecure: SESSION_COOKIE_SECURE,
   redisUrl: REDIS_URL,
   sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
   maxAgeMs: 1000 * 60 * 60 * 24 * 30,

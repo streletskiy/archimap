@@ -273,7 +273,7 @@ WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
 '''
 
 def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection) -> None:
-    for ext in ('spatial', 'sqlite'):
+    for ext in ('spatial',):
         try:
             con.load_extension(ext)
         except Exception:
@@ -283,7 +283,7 @@ def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection) -> None:
 
 def import_rows_direct_duckdb_sqlite(
     duckdb_path: Path,
-    sqlite_db_path: str,
+    sqlite_conn: sqlite3.Connection,
     import_limit: int,
     run_marker: str,
 ) -> Tuple[int, int]:
@@ -292,29 +292,6 @@ def import_rows_direct_duckdb_sqlite(
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con)
-        sqlite_path_sql = str(Path(sqlite_db_path).resolve()).replace("'", "''")
-        run_marker_sql = run_marker.replace("'", "''")
-
-        con.execute(f"ATTACH '{sqlite_path_sql}' AS sqlite_db (TYPE SQLITE);")
-        con.execute('''
-CREATE TABLE IF NOT EXISTS sqlite_db.main.building_contours (
-  osm_type TEXT NOT NULL,
-  osm_id INTEGER NOT NULL,
-  tags_json TEXT,
-  geometry_json TEXT NOT NULL,
-  min_lon REAL NOT NULL,
-  min_lat REAL NOT NULL,
-  max_lon REAL NOT NULL,
-  max_lat REAL NOT NULL,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (osm_type, osm_id)
-);
-''')
-        con.execute('''
-CREATE INDEX IF NOT EXISTS idx_building_contours_bbox
-ON sqlite_db.main.building_contours (min_lon, max_lon, min_lat, max_lat);
-''')
-
         con.execute(f'CREATE OR REPLACE TEMP TABLE import_rows AS {select_sql}')
         imported = int(con.execute('SELECT COUNT(*) FROM import_rows').fetchone()[0] or 0)
         processed = imported
@@ -322,33 +299,58 @@ ON sqlite_db.main.building_contours (min_lon, max_lon, min_lat, max_lat);
             print('Progress: imported=0, processed=0, rate=0 rows/s', flush=True)
             return 0, 0
 
+        sqlite_conn.execute('BEGIN')
         try:
-            con.execute(f'''
-MERGE INTO sqlite_db.main.building_contours AS t
-USING import_rows AS s
-ON t.osm_type = s.osm_type AND t.osm_id = s.osm_id
-WHEN MATCHED THEN UPDATE SET
-  tags_json = s.tags_json,
-  geometry_json = s.geometry_json,
-  min_lon = s.min_lon,
-  min_lat = s.min_lat,
-  max_lon = s.max_lon,
-  max_lat = s.max_lat,
-  updated_at = '{run_marker_sql}'
-WHEN NOT MATCHED THEN INSERT (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at)
-VALUES (s.osm_type, s.osm_id, s.tags_json, s.geometry_json, s.min_lon, s.min_lat, s.max_lon, s.max_lat, '{run_marker_sql}');
+            sqlite_conn.execute('''
+CREATE TEMP TABLE IF NOT EXISTS _import_rows_tmp (
+  osm_type TEXT NOT NULL,
+  osm_id INTEGER NOT NULL,
+  tags_json TEXT,
+  geometry_json TEXT NOT NULL,
+  min_lon REAL NOT NULL,
+  min_lat REAL NOT NULL,
+  max_lon REAL NOT NULL,
+  max_lat REAL NOT NULL
+);
 ''')
+            sqlite_conn.execute('DELETE FROM _import_rows_tmp;')
+
+            insert_tmp_sql = '''
+INSERT INTO _import_rows_tmp
+  (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+'''
+            cursor = con.execute('''
+SELECT osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat
+FROM import_rows
+''')
+            while True:
+                chunk = cursor.fetchmany(BATCH_SIZE)
+                if not chunk:
+                    break
+                sqlite_conn.executemany(insert_tmp_sql, chunk)
+
+            sqlite_conn.execute('''
+DELETE FROM building_contours
+WHERE EXISTS (
+  SELECT 1
+  FROM _import_rows_tmp src
+  WHERE src.osm_type = building_contours.osm_type
+    AND src.osm_id = building_contours.osm_id
+);
+''')
+
+            sqlite_conn.execute('''
+INSERT INTO building_contours
+  (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at)
+SELECT
+  osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, ?
+FROM _import_rows_tmp;
+''', (run_marker,))
+            sqlite_conn.execute('COMMIT')
         except Exception:
-            con.execute('''
-DELETE FROM sqlite_db.main.building_contours AS t
-USING import_rows AS s
-WHERE t.osm_type = s.osm_type AND t.osm_id = s.osm_id;
-''')
-            con.execute(f'''
-INSERT INTO sqlite_db.main.building_contours (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at)
-SELECT osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, '{run_marker_sql}'
-FROM import_rows;
-''')
+            sqlite_conn.execute('ROLLBACK')
+            raise
 
         elapsed = max(0.001, time.time() - started_at)
         rate = imported / elapsed
@@ -413,7 +415,7 @@ def main() -> None:
     if args.no_count_pass:
         with_count_pass = False
 
-    db_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'archimap.db')
+    db_path = str((Path(os.getenv('OSM_DB_PATH', '')).expanduser().resolve()) if os.getenv('OSM_DB_PATH') else (Path(os.path.dirname(__file__)) / '..' / 'data' / 'osm.db').resolve())
     conn = sqlite3.connect(db_path)
     ensure_sqlite_schema(conn)
     migrate_sqlite_schema_for_duckdb(conn)
@@ -441,7 +443,7 @@ def main() -> None:
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
             p, i = import_rows_direct_duckdb_sqlite(
                 duckdb_path=duckdb_path,
-                sqlite_db_path=db_path,
+                sqlite_conn=conn,
                 import_limit=per_query_limit,
                 run_marker=run_marker,
             )
@@ -452,7 +454,7 @@ def main() -> None:
         duckdb_path = run_quackosm_to_duckdb(pbf_path, work_dir)
         processed, imported = import_rows_direct_duckdb_sqlite(
             duckdb_path=duckdb_path,
-            sqlite_db_path=db_path,
+            sqlite_conn=conn,
             import_limit=import_limit,
             run_marker=run_marker,
         )

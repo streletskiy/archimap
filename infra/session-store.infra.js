@@ -17,11 +17,16 @@ function sanitizeRedisUrl(redisUrl) {
 async function initSessionStore({
   sessionSecret,
   nodeEnv,
+  sessionCookieSecure,
   redisUrl,
   sessionAllowMemoryFallback,
   maxAgeMs,
   logger = console
 }) {
+  const cookieSecure = typeof sessionCookieSecure === 'boolean'
+    ? sessionCookieSecure
+    : nodeEnv === 'production';
+
   const sessionConfig = {
     secret: sessionSecret,
     resave: false,
@@ -29,7 +34,7 @@ async function initSessionStore({
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: nodeEnv === 'production',
+      secure: cookieSecure,
       maxAge: maxAgeMs
     }
   };

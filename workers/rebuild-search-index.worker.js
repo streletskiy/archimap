@@ -1,10 +1,11 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const path = require('path');
 const Database = require('better-sqlite3');
 
 const dataDir = path.join(__dirname, '..', 'data');
 const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
+const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
 const localEditsDbPath = String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() || path.join(dataDir, 'local-edits.db');
 const db = new Database(dbPath);
 
@@ -13,7 +14,10 @@ const BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX
 
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
+db.prepare(`ATTACH DATABASE ? AS osm`).run(osmDbPath);
 db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
+db.exec(`PRAGMA osm.journal_mode = WAL;`);
+db.exec(`PRAGMA osm.synchronous = NORMAL;`);
 db.exec(`PRAGMA local.journal_mode = WAL;`);
 db.exec(`PRAGMA local.synchronous = NORMAL;`);
 db.exec(`
@@ -60,7 +64,7 @@ async function run() {
   const startedAt = Date.now();
   console.log(`[search-worker] rebuild started (${REASON}), batch size: ${BATCH_SIZE}`);
 
-  const totalContours = Number(db.prepare(`SELECT COUNT(*) AS total FROM building_contours`).get()?.total || 0);
+  const totalContours = Number(db.prepare(`SELECT COUNT(*) AS total FROM osm.building_contours`).get()?.total || 0);
 
   db.exec('BEGIN');
   try {
@@ -119,7 +123,7 @@ const selectSourceBatch = db.prepare(`
       CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
       (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
       (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
-    FROM building_contours bc
+    FROM osm.building_contours bc
     LEFT JOIN local.architectural_info ai
       ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
     WHERE bc.rowid > ?

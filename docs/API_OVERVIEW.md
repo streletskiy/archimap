@@ -37,6 +37,11 @@
   - `GET /api/admin/building-edits/:editId`
   - `POST /api/admin/building-edits/:editId/merge`
   - `POST /api/admin/building-edits/:editId/reject`
+  - `GET /api/admin/app-settings/general`
+  - `POST /api/admin/app-settings/general`
+  - `GET /api/admin/app-settings/smtp`
+  - `POST /api/admin/app-settings/smtp`
+  - `POST /api/admin/app-settings/smtp/test`
   - `POST /api/logout`
 
 OpenAPI spec for core routes: [openapi.yaml](./openapi.yaml)

@@ -58,7 +58,7 @@ function createSearchService(options = {}) {
           ((bc.min_lon + bc.max_lon) / 2.0) AS center_lon,
           ((bc.min_lat + bc.max_lat) / 2.0) AS center_lat
         FROM local.architectural_info ai
-        LEFT JOIN building_contours bc
+        LEFT JOIN osm.building_contours bc
           ON bc.osm_type = ai.osm_type AND bc.osm_id = ai.osm_id
         WHERE bc.osm_id IS NOT NULL AND (${whereSql})
       )

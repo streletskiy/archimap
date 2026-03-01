@@ -10,6 +10,7 @@ function registerAppRoutes(deps) {
     normalizeMapConfig,
     getBuildInfo,
     registrationEnabled,
+    getRegistrationEnabled,
     buildingsPmtilesSourceLayer,
     getFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress
@@ -23,8 +24,11 @@ function registerAppRoutes(deps) {
     };
     const buildInfo = getBuildInfo();
     const bootstrapFirstAdminAvailable = Number(db.prepare('SELECT COUNT(*) AS total FROM auth.users').get()?.total || 0) === 0;
+    const effectiveRegistrationEnabled = typeof getRegistrationEnabled === 'function'
+      ? Boolean(getRegistrationEnabled())
+      : Boolean(registrationEnabled);
     const auth = {
-      registrationEnabled,
+      registrationEnabled: effectiveRegistrationEnabled,
       bootstrapFirstAdminAvailable
     };
     res.type('application/javascript').send(
