@@ -177,21 +177,45 @@ function registerAdminRoutes(deps) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
     const smtp = req.body?.smtp && typeof req.body.smtp === 'object' ? req.body.smtp : {};
+    const testEmail = String(req.body?.testEmail || '').trim().toLowerCase();
+    if (!isLikelyEmail(testEmail)) {
+      return res.status(400).json({ error: 'Укажите корректный email для тестового письма' });
+    }
     const keepPassword = smtp.keepPassword !== false;
     const candidate = appSettingsService.buildSmtpConfigFromInput(smtp, { keepPassword });
+    if (!candidate.from) {
+      return res.status(400).json({ error: 'Для отправки тестового письма укажите поле From' });
+    }
+
+    const effectiveAppDisplayName = resolveAppDisplayName();
+    const subject = `${effectiveAppDisplayName}: SMTP test`;
+    const nowIso = new Date().toISOString();
+    const text = [
+      `Это тестовое письмо от ${effectiveAppDisplayName}.`,
+      '',
+      `Дата: ${nowIso}`,
+      `Host: ${candidate.host || '(from SMTP URL)'}`,
+      `Port: ${candidate.port || '(from SMTP URL)'}`,
+      `Secure: ${candidate.secure ? 'true' : 'false'}`
+    ].join('\n');
 
     if (candidate.url) {
       try {
         const transporter = nodemailer.createTransport(candidate.url);
-        await transporter.verify();
+        await transporter.sendMail({
+          from: candidate.from,
+          to: testEmail,
+          subject,
+          text
+        });
       } catch (error) {
-        return res.status(400).json({ error: `SMTP verify failed: ${String(error?.message || error)}` });
+        return res.status(400).json({ error: `SMTP test send failed: ${String(error?.message || error)}` });
       }
-      return res.json({ ok: true, message: 'SMTP URL проверен успешно' });
+      return res.json({ ok: true, message: `Тестовое письмо отправлено на ${testEmail}` });
     }
 
     if (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from) {
-      return res.status(400).json({ error: 'Для проверки нужны host/port/user/password/from или smtp url' });
+      return res.status(400).json({ error: 'Для тестовой отправки нужны host/port/user/password/from или smtp url' });
     }
 
     try {
@@ -204,10 +228,15 @@ function registerAdminRoutes(deps) {
           pass: candidate.pass
         }
       });
-      await transporter.verify();
-      return res.json({ ok: true, message: 'SMTP проверен успешно' });
+      await transporter.sendMail({
+        from: candidate.from,
+        to: testEmail,
+        subject,
+        text
+      });
+      return res.json({ ok: true, message: `Тестовое письмо отправлено на ${testEmail}` });
     } catch (error) {
-      return res.status(400).json({ error: `SMTP verify failed: ${String(error?.message || error)}` });
+      return res.status(400).json({ error: `SMTP test send failed: ${String(error?.message || error)}` });
     }
   });
 

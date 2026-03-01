@@ -243,7 +243,7 @@ paths:
           description: Forbidden or CSRF failed
   /api/admin/app-settings/smtp/test:
     post:
-      summary: Verify SMTP settings without sending an email (CSRF, master admin)
+      summary: Send SMTP test email with provided settings (CSRF, master admin)
       parameters:
         - in: header
           name: x-csrf-token
@@ -276,9 +276,11 @@ paths:
                       type: string
                     keepPassword:
                       type: boolean
+                testEmail:
+                  type: string
       responses:
         '200':
-          description: SMTP config is valid
+          description: Test email sent
         '400':
           description: Invalid SMTP config
         '401':

@@ -131,6 +131,8 @@ const smtpSecureEl = document.getElementById('smtp-secure');
 const smtpUserEl = document.getElementById('smtp-user');
 const smtpPassEl = document.getElementById('smtp-pass');
 const smtpFromEl = document.getElementById('smtp-from');
+const smtpTestEmailLabelEl = document.getElementById('smtp-test-email-label');
+const smtpTestEmailEl = document.getElementById('smtp-test-email');
 const smtpKeepPasswordEl = document.getElementById('smtp-keep-password');
 const smtpTestBtnEl = document.getElementById('smtp-test-btn');
 const smtpSaveBtnEl = document.getElementById('smtp-save-btn');
@@ -208,7 +210,8 @@ function initUiKitClasses() {
       smtpPortEl,
       smtpUserEl,
       smtpPassEl,
-      smtpFromEl
+      smtpFromEl,
+      smtpTestEmailEl
     ].forEach((el) => {
       if (el) el.className = ui.fieldClass('input');
     });
@@ -645,6 +648,9 @@ async function loadMe() {
   csrfToken = String(data.csrfToken || '') || null;
   isMasterAdmin = Boolean(user.isMasterAdmin);
   currentAdminEmail = String(user.email || '').trim().toLowerCase();
+  if (smtpTestEmailEl && !String(smtpTestEmailEl.value || '').trim()) {
+    smtpTestEmailEl.value = currentAdminEmail;
+  }
   if (tabSettingsEl) tabSettingsEl.classList.toggle('hidden', !isMasterAdmin);
   if (settingsPanelEl && !isMasterAdmin) settingsPanelEl.classList.add('hidden');
 
@@ -1812,18 +1818,32 @@ async function saveSmtpSettings() {
 
 async function testSmtpSettings() {
   if (!isMasterAdmin) return;
-  setText(smtpStatusEl, 'Проверка SMTP...');
-  const resp = await fetch('/api/admin/app-settings/smtp/test', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(collectSmtpPayloadFromForm())
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    setText(smtpStatusEl, String(data?.error || 'Проверка SMTP не прошла'));
+  const testEmail = String(smtpTestEmailEl?.value || '').trim().toLowerCase();
+  if (!testEmail) {
+    setText(smtpStatusEl, t('adminSmtpTestEmailRequired', null, 'Укажите email для тестового письма'));
     return;
   }
-  setText(smtpStatusEl, String(data?.message || 'SMTP проверен успешно'));
+  setText(smtpStatusEl, t('adminSmtpTesting', null, 'Отправка тестового письма...'));
+  let resp;
+  try {
+    resp = await fetch('/api/admin/app-settings/smtp/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...collectSmtpPayloadFromForm(),
+        testEmail
+      })
+    });
+  } catch {
+    setText(smtpStatusEl, t('adminSmtpTestFailed', null, 'Тестовое письмо не отправлено'));
+    return;
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || t('adminSmtpTestFailed', null, 'Тестовое письмо не отправлено')));
+    return;
+  }
+  setText(smtpStatusEl, String(data?.message || t('adminSmtpTestSent', null, 'Тестовое письмо отправлено')));
 }
 
 async function restoreFromUrl() {
@@ -2006,6 +2026,8 @@ window.addEventListener('popstate', async () => {
 (async () => {
   initUiKitClasses();
   renderAdminGuide();
+  setText(smtpTestEmailLabelEl, t('adminSmtpTestEmailLabel', null, 'Email для тестового письма'));
+  if (smtpTestEmailEl) smtpTestEmailEl.placeholder = t('adminSmtpTestEmailPlaceholder', null, 'admin@example.com');
   if (panelPageUtils && typeof panelPageUtils.initThemeToggle === 'function') {
     panelPageUtils.initThemeToggle({
       themeToggleEl,

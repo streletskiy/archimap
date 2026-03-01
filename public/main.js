@@ -2772,8 +2772,8 @@ if (registerFormEl && isRegistrationUiEnabled()) {
     if (registerStatusEl) {
       const ttl = Number(data?.expiresInMinutes);
       registerStatusEl.textContent = Number.isFinite(ttl)
-        ? t('authRegisterMailSentTtl', { ttl }, `Письмо отправлено. Код действителен ${ttl} минут.`)
-        : t('authRegisterMailSent', null, 'Письмо отправлено.');
+        ? t('authRegisterMailSentTtl', { ttl }, `Письмо отправлено. Проверьте папку "Спам". Код действителен ${ttl} минут.`)
+        : t('authRegisterMailSent', null, 'Письмо отправлено. Проверьте папку "Спам".');
     }
   });
 }
@@ -2848,7 +2848,7 @@ if (forgotPasswordFormEl) {
       if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = String(data?.error || t('authForgotFailed', null, 'Не удалось отправить письмо'));
       return;
     }
-    if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = t('authForgotDone', null, 'Если аккаунт существует, ссылка отправлена на почту.');
+    if (forgotPasswordStatusEl) forgotPasswordStatusEl.textContent = t('authForgotDone', null, 'Если аккаунт существует, ссылка отправлена на почту. Проверьте папку "Спам".');
   });
 }
 
