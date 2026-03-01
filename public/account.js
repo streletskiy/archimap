@@ -2,6 +2,16 @@ let csrfToken = null;
 let ownEditsCache = [];
 let accountMap = null;
 let highlightedEditKeys = new Set();
+let accountMapHandlersBound = false;
+let accountEditedPointsUpdateSeq = 0;
+const accountEditIdByOsmKey = new Map();
+const accountEditedCenterByOsmKey = new Map();
+const accountEditedFeaturePromiseByOsmKey = new Map();
+const EDITS_CONTOUR_MIN_ZOOM = 13;
+const EDITED_POINTS_SOURCE_ID = 'edited-buildings-points';
+const EDITED_POINTS_CLUSTER_LAYER_ID = 'edited-buildings-points-clusters';
+const EDITED_POINTS_CLUSTER_COUNT_LAYER_ID = 'edited-buildings-points-cluster-count';
+const EDITED_POINTS_UNCLUSTERED_LAYER_ID = 'edited-buildings-points-unclustered';
 const textTools = window.ArchiMapTextUtils?.createUiTextTools
   ? window.ArchiMapTextUtils.createUiTextTools()
   : null;
@@ -266,6 +276,7 @@ function setTab(nextTab, options = {}) {
     if (map) {
       setTimeout(() => map.resize(), 0);
       applyEditedBuildingsPaint();
+      ensureEditedPointsAndFit([...highlightedEditKeys]);
     }
   }
 
@@ -395,10 +406,19 @@ function getChangeCounters(changes) {
 }
 
 function syncMapHighlightsWithEdits(items) {
-  highlightedEditKeys = new Set(
-    (Array.isArray(items) ? items : []).map((item) => `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`)
-  );
+  const keys = [];
+  accountEditIdByOsmKey.clear();
+  for (const item of Array.isArray(items) ? items : []) {
+    const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+    const editId = Number(item?.editId || 0);
+    if (!accountEditIdByOsmKey.has(osmKey) && editId > 0) {
+      accountEditIdByOsmKey.set(osmKey, editId);
+    }
+    keys.push(osmKey);
+  }
+  highlightedEditKeys = new Set(keys);
   applyEditedBuildingsPaint();
+  ensureEditedPointsAndFit([...highlightedEditKeys]);
 }
 
 function applyOwnEditsFilters() {
@@ -442,6 +462,194 @@ function getMapStyleForTheme(theme) {
   return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
 }
 
+function parseOsmKey(osmKey) {
+  const [osmType, osmIdRaw] = String(osmKey || '').split('/');
+  const osmId = Number(osmIdRaw);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return null;
+  return { osmType, osmId };
+}
+
+function decodeOsmKeyFromEncodedFeatureId(value) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const osmType = (id % 2) === 1 ? 'relation' : 'way';
+  const osmId = Math.floor(id / 2);
+  if (!Number.isInteger(osmId) || osmId <= 0) return null;
+  return `${osmType}/${osmId}`;
+}
+
+function getGeometryCenter(geometry) {
+  if (!geometry || !Array.isArray(geometry.coordinates)) return null;
+  const bounds = new window.maplibregl.LngLatBounds();
+  extendBoundsFromCoords(bounds, geometry.coordinates);
+  if (bounds.isEmpty()) return null;
+  const center = bounds.getCenter();
+  if (!Number.isFinite(center?.lng) || !Number.isFinite(center?.lat)) return null;
+  return [center.lng, center.lat];
+}
+
+async function fetchBuildingFeatureByOsmKey(osmKey) {
+  const parsed = parseOsmKey(osmKey);
+  if (!parsed) return null;
+  const cached = accountEditedCenterByOsmKey.get(osmKey);
+  if (cached) return cached;
+
+  const pending = accountEditedFeaturePromiseByOsmKey.get(osmKey);
+  if (pending) return pending;
+
+  const task = (async () => {
+    let resp;
+    try {
+      resp = await fetch(`/api/building/${encodeURIComponent(parsed.osmType)}/${encodeURIComponent(parsed.osmId)}`);
+    } catch {
+      return null;
+    }
+    if (!resp.ok) return null;
+    const feature = await resp.json().catch(() => null);
+    if (!feature?.geometry) return null;
+    const center = getGeometryCenter(feature.geometry);
+    if (!center) return null;
+    accountEditedCenterByOsmKey.set(osmKey, center);
+    return center;
+  })().finally(() => {
+    accountEditedFeaturePromiseByOsmKey.delete(osmKey);
+  });
+
+  accountEditedFeaturePromiseByOsmKey.set(osmKey, task);
+  return task;
+}
+
+function buildEditedPointsGeoJson(keys) {
+  const features = [];
+  for (const osmKey of keys) {
+    const center = accountEditedCenterByOsmKey.get(osmKey);
+    if (!center) continue;
+    const editId = Number(accountEditIdByOsmKey.get(osmKey) || 0);
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: center
+      },
+      properties: {
+        osmKey,
+        editId: editId > 0 ? editId : null
+      }
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function setEditedPointsSourceData(keys) {
+  if (!accountMap) return;
+  const source = accountMap.getSource(EDITED_POINTS_SOURCE_ID);
+  if (!source) return;
+  source.setData(buildEditedPointsGeoJson(keys));
+}
+
+function updateAccountMapModeByZoom() {
+  if (!accountMap) return;
+  const zoom = Number(accountMap.getZoom() || 0);
+  const showPins = zoom < EDITS_CONTOUR_MIN_ZOOM;
+  const pinVisibility = showPins ? 'visible' : 'none';
+
+  if (accountMap.getLayer(EDITED_POINTS_CLUSTER_LAYER_ID)) {
+    accountMap.setLayoutProperty(EDITED_POINTS_CLUSTER_LAYER_ID, 'visibility', pinVisibility);
+  }
+  if (accountMap.getLayer(EDITED_POINTS_CLUSTER_COUNT_LAYER_ID)) {
+    accountMap.setLayoutProperty(EDITED_POINTS_CLUSTER_COUNT_LAYER_ID, 'visibility', pinVisibility);
+  }
+  if (accountMap.getLayer(EDITED_POINTS_UNCLUSTERED_LAYER_ID)) {
+    accountMap.setLayoutProperty(EDITED_POINTS_UNCLUSTERED_LAYER_ID, 'visibility', pinVisibility);
+  }
+}
+
+function bindAccountMapInteractionHandlers() {
+  if (!accountMap || accountMapHandlersBound) return;
+  accountMapHandlersBound = true;
+
+  accountMap.on('click', EDITED_POINTS_CLUSTER_LAYER_ID, (event) => {
+    const feature = event?.features?.[0];
+    const clusterId = Number(feature?.properties?.cluster_id);
+    if (!Number.isInteger(clusterId)) return;
+    const source = accountMap.getSource(EDITED_POINTS_SOURCE_ID);
+    if (!source || typeof source.getClusterExpansionZoom !== 'function') return;
+    source.getClusterExpansionZoom(clusterId, (error, zoom) => {
+      if (error) return;
+      accountMap.easeTo({
+        center: feature.geometry?.coordinates || accountMap.getCenter(),
+        zoom,
+        duration: 350
+      });
+    });
+  });
+
+  accountMap.on('click', EDITED_POINTS_UNCLUSTERED_LAYER_ID, async (event) => {
+    const feature = event?.features?.[0];
+    const osmKey = String(feature?.properties?.osmKey || '').trim();
+    const editIdFromPoint = Number(feature?.properties?.editId || 0);
+    const editId = editIdFromPoint > 0 ? editIdFromPoint : Number(accountEditIdByOsmKey.get(osmKey) || 0);
+    if (editId > 0) await openEditDetails(String(editId));
+  });
+
+  const handleContourClick = async (event) => {
+    const feature = event?.features?.[0];
+    const osmKey = decodeOsmKeyFromEncodedFeatureId(feature?.id);
+    if (!osmKey) return;
+    const editId = Number(accountEditIdByOsmKey.get(osmKey) || 0);
+    if (editId > 0) await openEditDetails(String(editId));
+  };
+  accountMap.on('click', 'edited-buildings-fill', handleContourClick);
+  accountMap.on('click', 'edited-buildings-line', handleContourClick);
+
+  const pointerLayers = [
+    EDITED_POINTS_CLUSTER_LAYER_ID,
+    EDITED_POINTS_UNCLUSTERED_LAYER_ID,
+    'edited-buildings-fill',
+    'edited-buildings-line'
+  ];
+  for (const layerId of pointerLayers) {
+    accountMap.on('mouseenter', layerId, () => {
+      accountMap.getCanvas().style.cursor = 'pointer';
+    });
+    accountMap.on('mouseleave', layerId, () => {
+      accountMap.getCanvas().style.cursor = '';
+    });
+  }
+
+  accountMap.on('zoomend', updateAccountMapModeByZoom);
+}
+
+async function ensureEditedPointsAndFit(keys) {
+  const map = ensureAccountMap();
+  if (!map) return;
+  const seq = ++accountEditedPointsUpdateSeq;
+
+  const missingKeys = keys.filter((key) => !accountEditedCenterByOsmKey.has(key));
+  if (missingKeys.length > 0) {
+    await Promise.all(missingKeys.map((key) => fetchBuildingFeatureByOsmKey(key)));
+  }
+  if (seq !== accountEditedPointsUpdateSeq) return;
+
+  setEditedPointsSourceData(keys);
+  const bounds = new window.maplibregl.LngLatBounds();
+  let count = 0;
+  for (const key of keys) {
+    const center = accountEditedCenterByOsmKey.get(key);
+    if (!center) continue;
+    bounds.extend(center);
+    count += 1;
+  }
+  if (count === 0 || bounds.isEmpty()) return;
+
+  map.fitBounds(bounds, { padding: 60, duration: 450, maxZoom: 17 });
+  const onMoveEnd = () => {
+    map.off('moveend', onMoveEnd);
+    updateAccountMapModeByZoom();
+  };
+  map.on('moveend', onMoveEnd);
+}
+
 function ensureAccountMapLayers() {
   if (!accountMap) return;
   if (!accountMap.getSource('local-buildings')) {
@@ -454,6 +662,15 @@ function ensureAccountMapLayers() {
     accountMap.addSource('selected-building', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] }
+    });
+  }
+  if (!accountMap.getSource(EDITED_POINTS_SOURCE_ID)) {
+    accountMap.addSource(EDITED_POINTS_SOURCE_ID, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      cluster: true,
+      clusterRadius: 44,
+      clusterMaxZoom: 12
     });
   }
   if (!accountMap.getLayer('local-buildings-fill')) {
@@ -483,7 +700,7 @@ function ensureAccountMapLayers() {
       source: 'local-buildings',
       'source-layer': PMTILES_CONFIG.sourceLayer,
       minzoom: 13,
-      paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0 }
+      paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0.28 }
     });
   }
   if (!accountMap.getLayer('edited-buildings-line')) {
@@ -493,7 +710,7 @@ function ensureAccountMapLayers() {
       source: 'local-buildings',
       'source-layer': PMTILES_CONFIG.sourceLayer,
       minzoom: 13,
-      paint: { 'line-color': 'rgba(0,0,0,0)', 'line-width': 0 }
+      paint: { 'line-color': '#5B62F0', 'line-width': 2.2 }
     });
   }
   if (!accountMap.getLayer('selected-building-fill')) {
@@ -512,6 +729,52 @@ function ensureAccountMapLayers() {
       paint: { 'line-color': '#5B62F0', 'line-width': 3 }
     });
   }
+  if (!accountMap.getLayer(EDITED_POINTS_CLUSTER_LAYER_ID)) {
+    accountMap.addLayer({
+      id: EDITED_POINTS_CLUSTER_LAYER_ID,
+      type: 'circle',
+      source: EDITED_POINTS_SOURCE_ID,
+      filter: ['has', 'point_count'],
+      paint: {
+        'circle-color': '#5B62F0',
+        'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23],
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+  }
+  if (!accountMap.getLayer(EDITED_POINTS_CLUSTER_COUNT_LAYER_ID)) {
+    accountMap.addLayer({
+      id: EDITED_POINTS_CLUSTER_COUNT_LAYER_ID,
+      type: 'symbol',
+      source: EDITED_POINTS_SOURCE_ID,
+      filter: ['has', 'point_count'],
+      layout: {
+        'text-field': ['get', 'point_count_abbreviated'],
+        'text-size': 12,
+        'text-font': ['Open Sans Bold']
+      },
+      paint: {
+        'text-color': '#ffffff'
+      }
+    });
+  }
+  if (!accountMap.getLayer(EDITED_POINTS_UNCLUSTERED_LAYER_ID)) {
+    accountMap.addLayer({
+      id: EDITED_POINTS_UNCLUSTERED_LAYER_ID,
+      type: 'circle',
+      source: EDITED_POINTS_SOURCE_ID,
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-color': '#5B62F0',
+        'circle-radius': 7,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+  }
+  setEditedPointsSourceData([...highlightedEditKeys]);
+  updateAccountMapModeByZoom();
   applyEditedBuildingsPaint();
 }
 
@@ -531,6 +794,7 @@ function ensureAccountMap() {
     zoom: 14
   });
   accountMap.addControl(new window.maplibregl.NavigationControl(), 'top-right');
+  bindAccountMapInteractionHandlers();
   accountMap.on('style.load', () => {
     ensureAccountMapLayers();
     applyEditedBuildingsPaint();
@@ -563,12 +827,12 @@ function applyEditedBuildingsPaint() {
   if (!accountMap) return;
   const keyMatchExpr = getEditedKeysExpression();
   if (accountMap.getLayer('edited-buildings-fill')) {
-    accountMap.setPaintProperty('edited-buildings-fill', 'fill-opacity', ['case', keyMatchExpr, 0.28, 0]);
+    accountMap.setFilter('edited-buildings-fill', keyMatchExpr);
   }
   if (accountMap.getLayer('edited-buildings-line')) {
-    accountMap.setPaintProperty('edited-buildings-line', 'line-color', ['case', keyMatchExpr, '#5B62F0', 'rgba(0,0,0,0)']);
-    accountMap.setPaintProperty('edited-buildings-line', 'line-width', ['case', keyMatchExpr, 2.2, 0]);
+    accountMap.setFilter('edited-buildings-line', keyMatchExpr);
   }
+  updateAccountMapModeByZoom();
 }
 
 function extendBoundsFromCoords(bounds, coords) {
@@ -670,8 +934,11 @@ async function openEditDetails(editIdRaw, options = {}) {
   if (building?.type === 'Feature' && building?.geometry) {
     await updateDetailMapFeature(building);
   }
+  accountEditIdByOsmKey.clear();
+  accountEditIdByOsmKey.set(editKey, editId);
   highlightedEditKeys = new Set([editKey]);
   applyEditedBuildingsPaint();
+  setEditedPointsSourceData([editKey]);
 }
 
 if (profileFormEl) {
