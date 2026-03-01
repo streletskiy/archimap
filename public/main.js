@@ -203,6 +203,7 @@ const authStatusEl = document.getElementById('auth-status');
 const logoutBtn = document.getElementById('logout-btn');
 const loginForm = document.getElementById('login-form');
 const loginUsernameEl = document.getElementById('login-username');
+const loginPasswordEl = document.getElementById('login-password');
 const authTabLoginEl = document.getElementById('auth-tab-login');
 const authTabRegisterEl = document.getElementById('auth-tab-register');
 const forgotPasswordToggleEl = document.getElementById('forgot-password-toggle');
@@ -1582,6 +1583,66 @@ async function loadAuthState() {
   renderAuth();
 }
 
+function setAuthStatus(message, tone = 'neutral') {
+  if (!authStatusEl) return;
+  const text = String(message || '').trim();
+  if (!text) {
+    authStatusEl.textContent = '';
+    authStatusEl.className = 'hidden text-sm';
+    authStatusEl.removeAttribute('role');
+    authStatusEl.removeAttribute('aria-live');
+    return;
+  }
+
+  const normalizedTone = ['neutral', 'success', 'error'].includes(tone) ? tone : 'neutral';
+  const toneClasses = normalizedTone === 'error'
+    ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
+    : normalizedTone === 'success'
+      ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'
+      : 'rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700';
+
+  authStatusEl.textContent = text;
+  authStatusEl.className = toneClasses;
+  authStatusEl.setAttribute('role', normalizedTone === 'error' ? 'alert' : 'status');
+  authStatusEl.setAttribute('aria-live', normalizedTone === 'error' ? 'assertive' : 'polite');
+}
+
+function clearAuthStatus() {
+  setAuthStatus('', 'neutral');
+}
+
+function setLoginFieldErrorState(hasError) {
+  const fields = [loginUsernameEl, loginPasswordEl];
+  for (const field of fields) {
+    if (!field) continue;
+    if (hasError) {
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-describedby', 'auth-status');
+    } else {
+      field.removeAttribute('aria-invalid');
+      field.removeAttribute('aria-describedby');
+    }
+  }
+}
+
+function setLoginSubmitPending(isPending) {
+  if (!loginForm) return;
+  const submitBtn = loginForm.querySelector('button[type="submit"]');
+  if (!submitBtn) return;
+  const pending = Boolean(isPending);
+  submitBtn.disabled = pending;
+  if (pending) {
+    submitBtn.dataset.defaultText = submitBtn.dataset.defaultText || submitBtn.textContent || '';
+    submitBtn.textContent = t('authLoginSubmitting', null, 'Входим...');
+    submitBtn.setAttribute('aria-busy', 'true');
+    submitBtn.classList.add('opacity-80', 'cursor-not-allowed');
+  } else {
+    if (submitBtn.dataset.defaultText) submitBtn.textContent = submitBtn.dataset.defaultText;
+    submitBtn.removeAttribute('aria-busy');
+    submitBtn.classList.remove('opacity-80', 'cursor-not-allowed');
+  }
+}
+
 function renderAuth() {
   canEditBuildings = Boolean(currentUser?.canEditBuildings || isAdmin);
   if (loginUsernameEl) {
@@ -1589,14 +1650,17 @@ function renderAuth() {
   }
 
   if (isAuthenticated) {
-    authStatusEl.textContent = t('authLoggedIn', null, 'Вы авторизованы');
+    setAuthStatus(t('authLoggedIn', null, 'Вы авторизованы'), 'success');
+    setLoginFieldErrorState(false);
     logoutBtn.classList.remove('hidden');
     loginForm.classList.add('hidden');
     if (registerPanelEl) registerPanelEl.classList.add('hidden');
     if (forgotPasswordPanelEl) forgotPasswordPanelEl.classList.add('hidden');
     if (registerVerifyPanelEl) registerVerifyPanelEl.classList.add('hidden');
   } else {
-    authStatusEl.textContent = '';
+    clearAuthStatus();
+    setLoginFieldErrorState(false);
+    setLoginSubmitPending(false);
     logoutBtn.classList.add('hidden');
     loginForm.classList.remove('hidden');
     if (authTabRegisterEl) authTabRegisterEl.classList.toggle('hidden', !isRegistrationUiEnabled());
@@ -1906,6 +1970,9 @@ function showCopyToast(message) {
 }
 
 function openAuthModal() {
+  clearAuthStatus();
+  setLoginFieldErrorState(false);
+  setLoginSubmitPending(false);
   renderPasswordRecoveryPanels();
   if (!isRegistrationUiEnabled()) {
     setAuthTab('login');
@@ -1915,6 +1982,9 @@ function openAuthModal() {
 }
 
 function closeAuthModal() {
+  clearAuthStatus();
+  setLoginFieldErrorState(false);
+  setLoginSubmitPending(false);
   authModalEl.classList.add('hidden');
   authModalEl.setAttribute('aria-hidden', 'true');
 }
@@ -1941,6 +2011,11 @@ function clearRegisterTokenFromUrl() {
 
 function setAuthTab(nextTab) {
   const tab = ['login', 'register'].includes(nextTab) ? nextTab : 'login';
+  if (tab !== 'login') {
+    clearAuthStatus();
+    setLoginFieldErrorState(false);
+    setLoginSubmitPending(false);
+  }
   if (authLoginPanelEl) authLoginPanelEl.classList.toggle('hidden', tab !== 'login');
   if (registerPanelEl) registerPanelEl.classList.toggle('hidden', tab !== 'register' || !isRegistrationUiEnabled());
   if (forgotPasswordPanelEl && tab !== 'login') forgotPasswordPanelEl.classList.add('hidden');
@@ -2559,8 +2634,11 @@ function scheduleLoadBuildings() {
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const username = document.getElementById('login-username').value.trim();
-  const password = document.getElementById('login-password').value;
+  const username = String(loginUsernameEl?.value || '').trim();
+  const password = String(loginPasswordEl?.value || '');
+  clearAuthStatus();
+  setLoginFieldErrorState(false);
+  setLoginSubmitPending(true);
 
   let resp;
   try {
@@ -2570,17 +2648,28 @@ loginForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({ username, password })
     });
   } catch {
-    authStatusEl.textContent = t('authError', null, 'Ошибка авторизации');
+    setAuthStatus(t('authLoginNetworkError', null, 'Ошибка сети. Проверьте соединение и попробуйте снова.'), 'error');
+    setLoginFieldErrorState(false);
+    setLoginSubmitPending(false);
     return;
   }
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    authStatusEl.textContent = String(err?.error || t('authError', null, 'Ошибка авторизации'));
+    const isInvalidCredentials = resp.status === 401;
+    const fallbackMessage = isInvalidCredentials
+      ? t('authLoginInvalidCredentials', null, 'Неверный логин или пароль')
+      : t('authError', null, 'Ошибка авторизации');
+    setAuthStatus(String(err?.error || fallbackMessage), 'error');
+    setLoginFieldErrorState(isInvalidCredentials);
+    setLoginSubmitPending(false);
     return;
   }
 
   const data = await resp.json().catch(() => ({ user: null }));
+  clearAuthStatus();
+  setLoginFieldErrorState(false);
+  setLoginSubmitPending(false);
   isAuthenticated = true;
   currentUser = data?.user || null;
   isAdmin = Boolean(currentUser?.isAdmin);
@@ -2593,6 +2682,20 @@ loginForm.addEventListener('submit', async (event) => {
     window.location.href = resolvePostLoginRedirectPath(nextPath);
   }
 });
+
+if (loginUsernameEl) {
+  loginUsernameEl.addEventListener('input', () => {
+    clearAuthStatus();
+    setLoginFieldErrorState(false);
+  });
+}
+
+if (loginPasswordEl) {
+  loginPasswordEl.addEventListener('input', () => {
+    clearAuthStatus();
+    setLoginFieldErrorState(false);
+  });
+}
 
 if (registerFormEl && isRegistrationUiEnabled()) {
   registerFormEl.addEventListener('submit', async (event) => {
