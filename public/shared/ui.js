@@ -14,6 +14,7 @@
   function renderToggle(options) {
     var id = options.id;
     var ariaLabel = options.ariaLabel || 'toggle';
+    var disabled = Boolean(options.disabled);
     var checkedColorClass = options.checkedColorClass || 'peer-checked:bg-indigo-500';
     var checkedKnobClass = options.checkedKnobClass || '';
     var checkedIconClass = options.checkedIconClass || '';
@@ -32,6 +33,12 @@
       if (!options.checkedIconKnobClass) checkedIconKnobClass = checkedIconClass;
     }
     var wrapperClass = options.wrapperClass || 'relative inline-flex h-10 w-[76px] cursor-pointer items-center rounded-full bg-white/95 shadow-soft hover:bg-slate-50';
+    var disabledTrackClass = options.disabledTrackClass || 'bg-slate-200 ring-1 ring-slate-300/80';
+    var disabledKnobClass = options.disabledKnobClass || 'bg-slate-100 shadow-none';
+    var disabledIconClass = options.disabledIconClass || 'text-slate-400';
+    if (disabled) {
+      wrapperClass += ' cursor-not-allowed hover:bg-white/95';
+    }
 
     var startIcon = '';
     var endIcon = '';
@@ -40,17 +47,31 @@
     if (isThemeToggle) {
       startIcon = '<span class="pointer-events-none absolute left-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center text-slate-700 transition ' + checkedIconStartClass + '" aria-hidden="true">' + sunIcon() + '</span>';
       endIcon = '<span class="pointer-events-none absolute right-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center text-slate-700 transition ' + checkedIconEndClass + '" aria-hidden="true">' + moonIcon() + '</span>';
+      if (disabled) {
+        startIcon = '<span class="pointer-events-none absolute left-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center transition ' + disabledIconClass + '" aria-hidden="true">' + sunIcon() + '</span>';
+        endIcon = '<span class="pointer-events-none absolute right-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center transition ' + disabledIconClass + '" aria-hidden="true">' + moonIcon() + '</span>';
+      }
     }
 
     if (isLabelsToggle) {
       knobIcon = '<span class="pointer-events-none absolute left-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center text-slate-700 transition peer-checked:translate-x-[36px] ' + checkedIconKnobClass + '" aria-hidden="true">' + labelsIcon() + '</span>';
+      if (disabled) {
+        knobIcon = '<span class="pointer-events-none absolute left-1.5 z-[3] inline-flex h-7 w-7 items-center justify-center transition peer-checked:translate-x-[36px] ' + disabledIconClass + '" aria-hidden="true">' + labelsIcon() + '</span>';
+      }
+    }
+
+    var trackClass = 'absolute inset-1 rounded-full bg-slate-300 transition ' + checkedColorClass;
+    var knobClass = 'pointer-events-none absolute left-1.5 z-[2] inline-flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-sm transition peer-checked:translate-x-[36px] ' + checkedKnobClass;
+    if (disabled) {
+      trackClass += ' ' + disabledTrackClass;
+      knobClass += ' ' + disabledKnobClass;
     }
 
     return '<label for="' + id + '" class="' + wrapperClass + '">' +
-      '<input id="' + id + '" type="checkbox" class="peer sr-only" aria-label="' + ariaLabel + '" />' +
-      '<span class="absolute inset-1 rounded-full bg-slate-300 transition ' + checkedColorClass + '"></span>' +
+      '<input id="' + id + '" type="checkbox" class="peer sr-only" aria-label="' + ariaLabel + '"' + (disabled ? ' disabled aria-disabled="true"' : '') + ' />' +
+      '<span class="' + trackClass + '"></span>' +
       startIcon + endIcon + knobIcon +
-      '<span class="pointer-events-none absolute left-1.5 z-[2] inline-flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-sm transition peer-checked:translate-x-[36px] ' + checkedKnobClass + '"></span>' +
+      '<span class="' + knobClass + '"></span>' +
       '</label>';
   }
 

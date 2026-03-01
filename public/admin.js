@@ -488,7 +488,7 @@ function renderAdminUiKit() {
   setText(adminUiBadgesTitleEl, t('uiSectionBadges', null, 'Бейджи'));
   if (adminUiBadgesApiEl) adminUiBadgesApiEl.innerHTML = t('uiBadgesApiHtml', null, 'API: <code>ArchiMapUI.badge(text, variant)</code>');
   setText(adminUiTogglesTitleEl, t('uiSectionToggles', null, 'Рычажки'));
-  if (adminUiTogglesApiEl) adminUiTogglesApiEl.innerHTML = t('uiTogglesApiHtml', null, 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.');
+  if (adminUiTogglesApiEl) adminUiTogglesApiEl.innerHTML = t('uiTogglesApiHtml', null, 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>disabled</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.');
   setText(adminUiPanelTitleEl, t('uiSectionPanel', null, 'Панель'));
   if (adminUiPanelApiEl) adminUiPanelApiEl.innerHTML = t('uiPanelApiHtml', null, 'API: <code>ArchiMapUI.panel(content, options)</code>');
   setText(adminUiHeaderTitleEl, t('uiSectionHeader', null, 'Section Header'));
@@ -518,6 +518,9 @@ function renderAdminUiKit() {
   }
   if (adminUiTogglesEl) {
     adminUiTogglesEl.innerHTML = [
+      '<div class="flex flex-wrap gap-3">',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleEnabled', null, 'Обычный (выключен)')) + '</p>',
       ui.renderToggle({
         id: 'admin-demo-theme',
         ariaLabel: 'theme',
@@ -528,7 +531,30 @@ function renderAdminUiKit() {
         checkedIconStartClass: 'peer-checked:text-white',
         checkedIconEndClass: 'peer-checked:text-slate-700'
       }),
-      ui.renderToggle({ id: 'admin-demo-labels', ariaLabel: 'labels', withIcons: true, kind: 'labels', checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' })
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleDisabled', null, 'Disabled')) + '</p>',
+      ui.renderToggle({
+        id: 'admin-demo-theme-disabled',
+        ariaLabel: 'theme-disabled',
+        withIcons: true,
+        kind: 'theme',
+        disabled: true,
+        checkedColorClass: 'peer-checked:bg-brand-purple',
+        checkedKnobClass: 'peer-checked:bg-violet-50',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700'
+      }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleLabels', null, 'Обозначения')) + '</p>',
+      ui.renderToggle({ id: 'admin-demo-labels', ariaLabel: 'labels', withIcons: true, kind: 'labels', checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleLabelsDisabled', null, 'Обозначения (disabled)')) + '</p>',
+      ui.renderToggle({ id: 'admin-demo-labels-disabled', ariaLabel: 'labels-disabled', withIcons: true, kind: 'labels', disabled: true, checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' }),
+      '</div>',
+      '</div>'
     ].join('');
   }
   if (adminUiPanelDemoEl) {
