@@ -36,7 +36,8 @@
         ariaLabel: themeAria,
         checkedColorClass: 'peer-checked:bg-indigo-500',
         checkedKnobClass: 'peer-checked:bg-indigo-50',
-        checkedIconClass: 'peer-checked:text-white',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700',
         withIcons: true,
         kind: 'theme'
       });
@@ -46,7 +47,7 @@
       <div class="relative rounded-2xl border border-slate-300 bg-white/95 px-3 py-2 shadow-float backdrop-blur">
         <div class="flex items-center justify-between gap-1">
           <div class="flex min-w-0 items-center gap-2">
-            <a id="nav-logo-link" href="/" class="inline-flex h-10 select-none items-center px-2 text-2xl font-extrabold tracking-tight text-black sm:text-xl">/archimap</a>
+            <a id="nav-logo-link" href="/" class="inline-flex h-10 select-none items-center px-2 text-2xl font-extrabold tracking-tight text-black sm:text-xl">archimap</a>
             <button id="filter-toggle-btn" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-800 transition-colors hover:bg-slate-50" aria-label="${filterOpenText}" aria-expanded="false">
               <svg viewBox="0 0 512 512" width="15" height="15" aria-hidden="true" class="fill-current"><path d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"></path></svg>
             </button>
@@ -68,12 +69,13 @@
               <a id="auth-fab" href="/?auth=1&next=%2F" class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" aria-label="${authLoginText}">${authLoginText}</a>
               <a id="admin-link" href="/admin/" class="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${adminPanelText}</a>
               <a id="info-link" href="/info/" class="rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${infoText}</a>
-              <button id="settings-logout-btn" type="button" class="ui-btn ui-btn-danger hidden">${logoutText}</button>
               <div class="my-1 border-t border-slate-200"></div>
               <div class="space-y-1">
                 <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${themeText}</span>${themeToggle}</div>
                 <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${labelsText}</span>${labelsToggle}</div>
               </div>
+              <div class="my-2 border-t border-slate-200"></div>
+              <button id="settings-logout-btn" type="button" class="ui-btn ui-btn-danger hidden">${logoutText}</button>
             </div>
           </div>
         </div>
@@ -125,7 +127,8 @@
         ariaLabel: t('themeEnableDark', 'Переключить тему'),
         checkedColorClass: 'peer-checked:bg-indigo-500',
         checkedKnobClass: 'peer-checked:bg-indigo-50',
-        checkedIconClass: 'peer-checked:text-white',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700',
         withIcons: true,
         kind: 'theme'
       });
@@ -135,7 +138,7 @@
       <div class="relative rounded-2xl border border-slate-300 bg-white/95 px-3 py-2 shadow-soft backdrop-blur-sm">
         <div class="flex items-center justify-between gap-3">
           <div class="flex min-w-0 items-center px-2">
-            <a id="nav-logo-link" href="/" class="inline-flex h-10 select-none items-center text-2xl font-extrabold tracking-tight text-black sm:text-xl">/archimap</a>
+            <a id="nav-logo-link" href="/" class="inline-flex h-10 select-none items-center text-2xl font-extrabold tracking-tight text-black sm:text-xl">archimap</a>
           </div>
           <div class="flex items-center gap-2">
             <button id="nav-menu-button" type="button" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label="${openMenuText}" aria-expanded="false"><svg viewBox="0 0 640 640" width="24" height="24" aria-hidden="true" class="fill-current"><path d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"></path></svg></button>
@@ -146,9 +149,9 @@
           ${infoLink}
           ${mapLink}
           <a id="admin-link" href="/admin/" class="${adminLinkClass + activeAdmin} rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">${adminPanelText}</a>
-          <button id="settings-logout-btn" type="button" class="ui-btn ui-btn-danger hidden">${logoutText}</button>
-          <div class="my-2 border-t border-slate-200"></div>
           <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="text-sm font-semibold text-slate-700">${themeText}</span>${themeToggle}</div>
+          <div class="my-2 border-t border-slate-200"></div>
+          <button id="settings-logout-btn" type="button" class="ui-btn ui-btn-danger hidden">${logoutText}</button>
         </div>
       </div>
     </div>`;

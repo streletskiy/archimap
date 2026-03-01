@@ -24,7 +24,7 @@ function emailShell({ title, pretitle, intro, contentHtml, footer }) {
           <tr>
             <td style="padding:14px 20px;border-bottom:1px solid #e2e8f0;background:#ffffff;">
               <div style="display:flex;align-items:center;gap:10px;">
-                <span style="font-size:26px;font-weight:800;line-height:1;letter-spacing:-0.02em;color:#0f172a;">/archimap</span>
+                <span style="font-size:26px;font-weight:800;line-height:1;letter-spacing:-0.02em;color:#0f172a;">archimap</span>
               </div>
             </td>
           </tr>

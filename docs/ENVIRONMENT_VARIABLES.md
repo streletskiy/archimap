@@ -17,7 +17,7 @@
 | `MAP_DEFAULT_LAT`                       | Default map latitude when URL hash has no `#map=...`.                                                                                                    |
 | `MAP_DEFAULT_ZOOM`                      | Default map zoom when URL hash has no `#map=...`.                                                                                                        |
 | `USER_EDITS_DB_PATH`                    | Optional custom path for user moderation DB (default: `data/user-edits.db`).                                                                             |
-| `APP_DISPLAY_NAME`                      | App name used in registration emails (default: `Archimap`).                                                                                              |
+| `APP_DISPLAY_NAME`                      | App name used in registration emails (default: `archimap`).                                                                                              |
 | `APP_BASE_URL`                          | Public application base URL used in password reset links (for example: `https://archimap.example.com`). Recommended to set explicitly for security.      |
 | `APP_SETTINGS_SECRET`                   | Secret used to encrypt app settings in DB (for example SMTP password). Defaults to `SESSION_SECRET` if not set.                                          |
 | `SMTP_URL`                              | Full SMTP connection URL (alternative to host/port/user/pass).                                                                                           |
@@ -26,7 +26,7 @@
 | `SMTP_SECURE`                           | Use TLS SMTP transport (`true/false`).                                                                                                                   |
 | `SMTP_USER`                             | SMTP username.                                                                                                                                           |
 | `SMTP_PASS`                             | SMTP password or app password.                                                                                                                           |
-| `EMAIL_FROM`                            | Sender address for registration emails (for example: `Archimap <no-reply@example.com>`).                                                                 |
+| `EMAIL_FROM`                            | Sender address for registration emails (for example: `archimap <no-reply@example.com>`).                                                                 |
 | `REGISTRATION_ENABLED`                  | Enable/disable regular email registration (`true/false`, default `true`). Note: first-user bootstrap admin signup is still allowed even when `false`.    |
 | `REGISTRATION_CODE_TTL_MINUTES`         | Verification code lifetime in minutes (`2..60`, default `15`).                                                                                           |
 | `REGISTRATION_CODE_RESEND_COOLDOWN_SEC` | Delay before requesting another code in seconds (`10..600`, default `60`).                                                                               |

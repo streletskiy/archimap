@@ -36,6 +36,10 @@ body {
   color: #4338ca !important;
 }
 
+.peer:checked ~ .peer-checked\:text-slate-700 {
+  color: #334155 !important;
+}
+
 .peer:checked ~ .peer-checked\:translate-x-\[36px\] {
   transform: translateX(36px);
 }
@@ -271,11 +275,6 @@ body {
   background: rgba(226, 232, 240, 0.95);
 }
 
-html[data-theme='dark'] .theme-track-icon-sun,
-html[data-theme='dark'] .theme-track-icon-moon {
-  color: #ffffff;
-}
-
 html[data-theme='dark'] #building-modal > div,
 html[data-theme='dark'] #search-results-list {
   scrollbar-color: rgba(71, 85, 105, 0.84) transparent;
@@ -326,6 +325,10 @@ html[data-theme='dark'] .bg-white\/90 {
 
 html[data-theme='dark'] .bg-slate-100 {
   background-color: #0b1220 !important;
+}
+
+html[data-theme='dark'] .bg-slate-300 {
+  background-color: #334155 !important;
 }
 
 /* Dark theme tuning for status badges/counters (accepted/rejected/pending/diff). */

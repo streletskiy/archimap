@@ -3,11 +3,12 @@ const { escapeHtml, emailShell } = require('./shell');
 function passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName }) {
   const safeResetUrl = escapeHtml(resetUrl);
   const safeMinutes = escapeHtml(expiresInMinutes);
-  const safeAppName = escapeHtml(appDisplayName);
+  const appName = String(appDisplayName || '').trim() || 'archimap';
+  const safeAppName = escapeHtml(appName);
 
   return emailShell({
     title: 'Сброс пароля',
-    pretitle: safeAppName || 'ArchiMap',
+    pretitle: safeAppName || 'archimap',
     intro: 'Нажмите кнопку ниже, чтобы задать новый пароль.',
     contentHtml: `
       <p style="margin:0 0 12px 0;">
@@ -22,8 +23,9 @@ function passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName 
 }
 
 function passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName }) {
+  const appName = String(appDisplayName || '').trim() || 'archimap';
   return [
-    `${appDisplayName}: сброс пароля`,
+    `${appName}: сброс пароля`,
     '',
     `Откройте ссылку, чтобы задать новый пароль: ${resetUrl}`,
     `Ссылка действительна ${expiresInMinutes} минут.`,

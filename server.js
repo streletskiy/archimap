@@ -83,7 +83,7 @@ const REGISTRATION_CODE_RESEND_COOLDOWN_SEC = Math.max(10, Math.min(600, Number(
 const REGISTRATION_CODE_MAX_ATTEMPTS = Math.max(3, Math.min(12, Number(process.env.REGISTRATION_CODE_MAX_ATTEMPTS || 6)));
 const REGISTRATION_MIN_PASSWORD_LENGTH = Math.max(8, Math.min(72, Number(process.env.REGISTRATION_MIN_PASSWORD_LENGTH || 8)));
 const PASSWORD_RESET_TTL_MINUTES = Math.max(5, Math.min(180, Number(process.env.PASSWORD_RESET_TTL_MINUTES || 60)));
-const APP_DISPLAY_NAME = String(process.env.APP_DISPLAY_NAME || 'Archimap').trim() || 'Archimap';
+const APP_DISPLAY_NAME = String(process.env.APP_DISPLAY_NAME || 'archimap').trim() || 'archimap';
 const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase() || 'info';
 const METRICS_ENABLED = String(process.env.METRICS_ENABLED ?? 'true').toLowerCase() === 'true';
 const REPO_URL = 'https://github.com/streletskiy/archimap';
@@ -244,7 +244,7 @@ function getAppBaseUrl() {
 }
 
 function getAppDisplayName() {
-  return String(getEffectiveGeneralConfig().appDisplayName || 'Archimap').trim() || 'Archimap';
+  return String(getEffectiveGeneralConfig().appDisplayName || 'archimap').trim() || 'archimap';
 }
 
 app.use(express.json());

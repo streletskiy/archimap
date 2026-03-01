@@ -518,7 +518,16 @@ function renderAdminUiKit() {
   }
   if (adminUiTogglesEl) {
     adminUiTogglesEl.innerHTML = [
-      ui.renderToggle({ id: 'admin-demo-theme', ariaLabel: 'theme', withIcons: true, kind: 'theme', checkedColorClass: 'peer-checked:bg-brand-purple', checkedKnobClass: 'peer-checked:bg-violet-50', checkedIconClass: 'peer-checked:text-white' }),
+      ui.renderToggle({
+        id: 'admin-demo-theme',
+        ariaLabel: 'theme',
+        withIcons: true,
+        kind: 'theme',
+        checkedColorClass: 'peer-checked:bg-brand-purple',
+        checkedKnobClass: 'peer-checked:bg-violet-50',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700'
+      }),
       ui.renderToggle({ id: 'admin-demo-labels', ariaLabel: 'labels', withIcons: true, kind: 'labels', checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' })
     ].join('');
   }
@@ -609,6 +618,7 @@ async function loadMe() {
     return null;
   }
 
+  if (logoutBtnEl) logoutBtnEl.classList.remove('hidden');
   setText(subtitleEl, String(user.email || user.username || 'admin'));
   return user;
 }
@@ -1403,7 +1413,7 @@ function collectGeneralPayloadFromForm() {
 
 function applyGeneralSettingsToForm(item) {
   const general = item?.general || {};
-  if (generalAppDisplayNameEl) generalAppDisplayNameEl.value = String(general.appDisplayName || 'Archimap');
+  if (generalAppDisplayNameEl) generalAppDisplayNameEl.value = String(general.appDisplayName || 'archimap');
   if (generalAppBaseUrlEl) generalAppBaseUrlEl.value = String(general.appBaseUrl || '');
   if (generalRegistrationEnabledEl) generalRegistrationEnabledEl.checked = Boolean(general.registrationEnabled);
   if (generalUserEditRequiresPermissionEl) generalUserEditRequiresPermissionEl.checked = Boolean(general.userEditRequiresPermission);

@@ -32,9 +32,9 @@ function registerAdminRoutes(deps) {
 
   function resolveAppDisplayName() {
     if (typeof getAppDisplayName === 'function') {
-      return String(getAppDisplayName() || 'Archimap').trim() || 'Archimap';
+      return String(getAppDisplayName() || 'archimap').trim() || 'archimap';
     }
-    return String(appDisplayName || 'Archimap').trim() || 'Archimap';
+    return String(appDisplayName || 'archimap').trim() || 'archimap';
   }
 
   function resolveAppBaseUrl() {

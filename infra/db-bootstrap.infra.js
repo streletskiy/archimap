@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS app_smtp_settings (
 
 CREATE TABLE IF NOT EXISTS app_general_settings (
   id INTEGER PRIMARY KEY CHECK(id = 1),
-  app_display_name TEXT NOT NULL DEFAULT 'Archimap',
+  app_display_name TEXT NOT NULL DEFAULT 'archimap',
   app_base_url TEXT,
   registration_enabled INTEGER NOT NULL DEFAULT 1,
   user_edit_requires_permission INTEGER NOT NULL DEFAULT 1,

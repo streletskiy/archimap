@@ -270,7 +270,8 @@ const searchResultsListEl = document.getElementById('search-results-list');
 const searchLoadMoreBtnEl = document.getElementById('search-load-more-btn');
 const navLogoLinkEl = document.getElementById('nav-logo-link');
 const THEME_STORAGE_KEY = 'archimap-theme';
-const LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
+const LABELS_VISIBLE_STORAGE_KEY = 'archimap-labels-visible';
+const LEGACY_LABELS_HIDDEN_STORAGE_KEY = 'archimap-labels-hidden';
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_RESULTS_LIMIT = 30;
 const SEARCH_RESULTS_SOURCE_ID = 'search-results-points';
@@ -476,11 +477,14 @@ function getCurrentTheme() {
   return attr === 'dark' ? 'dark' : 'light';
 }
 
-function getSavedLabelsHidden() {
+function getSavedLabelsVisible() {
   try {
-    const stored = localStorage.getItem(LABELS_HIDDEN_STORAGE_KEY);
+    const stored = localStorage.getItem(LABELS_VISIBLE_STORAGE_KEY);
     if (stored === 'true') return true;
     if (stored === 'false') return false;
+    const legacy = localStorage.getItem(LEGACY_LABELS_HIDDEN_STORAGE_KEY);
+    if (legacy === 'true') return false;
+    if (legacy === 'false') return true;
   } catch {
     // ignore localStorage access failures
   }
@@ -512,25 +516,26 @@ function applyTheme(theme, options = {}) {
   }
 }
 
-function applyLabelsHidden(hidden, options = {}) {
+function applyLabelsVisibility(show, options = {}) {
   const { persist = true } = options;
-  const normalized = Boolean(hidden);
+  const normalized = Boolean(show);
 
   if (labelsToggleEl) {
     labelsToggleEl.checked = normalized;
     labelsToggleEl.setAttribute(
       'aria-label',
       normalized
-        ? t('labelsShow', null, 'Показывать обозначения карты')
-        : t('labelsHide', null, 'Скрыть обозначения карты')
+        ? t('labelsHide', null, 'Скрыть обозначения карты')
+        : t('labelsShow', null, 'Показывать обозначения карты')
     );
   }
 
-  setLabelsVisibility(!normalized);
+  setLabelsVisibility(normalized);
 
   if (persist) {
     try {
-      localStorage.setItem(LABELS_HIDDEN_STORAGE_KEY, String(normalized));
+      localStorage.setItem(LABELS_VISIBLE_STORAGE_KEY, String(normalized));
+      localStorage.removeItem(LEGACY_LABELS_HIDDEN_STORAGE_KEY);
     } catch {
       // ignore localStorage access failures
     }
@@ -2998,10 +3003,10 @@ if (filterRowsEl) {
 }
 if (labelsToggleEl) {
   labelsToggleEl.addEventListener('change', () => {
-    applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: true });
+    applyLabelsVisibility(Boolean(labelsToggleEl.checked), { persist: true });
   });
-  const savedLabelsHidden = getSavedLabelsHidden();
-  applyLabelsHidden(savedLabelsHidden == null ? false : savedLabelsHidden, { persist: false });
+  const savedLabelsVisible = getSavedLabelsVisible();
+  applyLabelsVisibility(savedLabelsVisible == null ? true : savedLabelsVisible, { persist: false });
 }
 if (themeToggleEl) {
   applyTheme(getCurrentTheme(), { persist: false });
@@ -3425,7 +3430,7 @@ map.on('style.load', () => {
   updateBuildingHighlightStyle();
   updateCartoBuildingsVisibility();
   if (labelsToggleEl) {
-    applyLabelsHidden(Boolean(labelsToggleEl.checked), { persist: false });
+    applyLabelsVisibility(Boolean(labelsToggleEl.checked), { persist: false });
   }
 });
 

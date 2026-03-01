@@ -291,6 +291,7 @@ async function loadMe() {
   if (firstNameEl) firstNameEl.value = String(user.firstName || '');
   if (lastNameEl) lastNameEl.value = String(user.lastName || '');
   if (profileEmailEl) profileEmailEl.value = userEmail;
+  if (logoutBtnEl) logoutBtnEl.classList.remove('hidden');
 
   if (adminLinkEl) adminLinkEl.classList.toggle('hidden', !Boolean(user.isAdmin));
   if (uiKitLinkEl) uiKitLinkEl.classList.toggle('hidden', !Boolean(user.isAdmin));

@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Archimap API
+  title: archimap API
   version: 1.0.0
   description: Core API contract for auth, buildings, search, and system endpoints.
 servers:

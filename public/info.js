@@ -9,6 +9,9 @@ const mapReturnMenuLinkEl = document.getElementById('map-return-menu-link');
 const navMenuButtonEl = document.getElementById('nav-menu-button');
 const navMenuPanelEl = document.getElementById('nav-menu-panel');
 const themeToggleEl = document.getElementById('theme-toggle');
+const authFabEl = document.getElementById('auth-fab');
+const adminLinkEl = document.getElementById('admin-link');
+const logoutBtnEl = document.getElementById('settings-logout-btn');
 const infoPageTitleEl = document.getElementById('info-page-title');
 const infoHeadingEl = document.getElementById('info-heading');
 const infoSubheadingEl = document.getElementById('info-subheading');
@@ -37,6 +40,8 @@ const BUILD_INFO_CONFIG = Object.freeze({
   version: String(window.__ARCHIMAP_CONFIG?.buildInfo?.version || 'dev').trim() || 'dev',
   repoUrl: String(window.__ARCHIMAP_CONFIG?.buildInfo?.repoUrl || 'https://github.com/streletskiy/archimap').trim() || 'https://github.com/streletskiy/archimap'
 });
+
+let csrfToken = null;
 
 const infoState = {
   tab: 'about',
@@ -178,7 +183,7 @@ function applyInfoTexts() {
   if (infoTabUserAgreementEl) infoTabUserAgreementEl.textContent = t('infoTabUserAgreement', null, 'Пользовательское соглашение');
   if (infoTabPrivacyPolicyEl) infoTabPrivacyPolicyEl.textContent = t('infoTabPrivacyPolicy', null, 'Политика конфиденциальности');
   if (infoAboutTitleEl) infoAboutTitleEl.textContent = t('infoAboutTitle', null, 'О сервисе');
-  if (infoAboutTextEl) infoAboutTextEl.textContent = t('infoAboutText', null, 'Archimap помогает собирать и модератировать архитектурные данные зданий на карте. Изменения пользователей проходят модерацию и могут использоваться в экосистеме OSM в соответствии с правилами лицензирования.');
+  if (infoAboutTextEl) infoAboutTextEl.textContent = t('infoAboutText', null, 'archimap помогает собирать и модератировать архитектурные данные зданий на карте. Изменения пользователей проходят модерацию и могут использоваться в экосистеме OSM в соответствии с правилами лицензирования.');
   if (infoTechTitleEl) infoTechTitleEl.textContent = t('infoTechTitle', null, 'Техническая информация');
   if (infoTechVersionLabelEl) infoTechVersionLabelEl.textContent = t('infoTechVersionLabel', null, 'Версия');
   if (infoTechCommitLabelEl) infoTechCommitLabelEl.textContent = t('infoTechCommitLabel', null, 'Коммит');
@@ -249,6 +254,52 @@ function readInitialTabFromUrl() {
   }
 }
 
+function applyAuthMenuState(data = {}) {
+  const authenticated = Boolean(data?.authenticated);
+  const user = data?.user || null;
+  const isAdmin = Boolean(user?.isAdmin);
+
+  csrfToken = authenticated ? (String(data?.csrfToken || '').trim() || null) : null;
+
+  if (authFabEl) {
+    if (authenticated) {
+      const profileText = t('authFabProfile', null, 'Профиль');
+      authFabEl.textContent = profileText;
+      authFabEl.setAttribute('aria-label', profileText);
+      authFabEl.setAttribute('href', '/account/');
+    } else {
+      const loginText = t('authFabLogin', null, 'Войти');
+      authFabEl.textContent = loginText;
+      authFabEl.setAttribute('aria-label', loginText);
+      authFabEl.setAttribute('href', '/?auth=1&next=%2Finfo%2F');
+    }
+  }
+
+  if (adminLinkEl) {
+    adminLinkEl.classList.toggle('hidden', !authenticated || !isAdmin);
+  }
+
+  if (logoutBtnEl) {
+    logoutBtnEl.classList.toggle('hidden', !authenticated);
+  }
+}
+
+async function loadAuthMenuState() {
+  let resp;
+  try {
+    resp = await fetch('/api/me');
+  } catch {
+    applyAuthMenuState({ authenticated: false, user: null, csrfToken: null });
+    return;
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    applyAuthMenuState({ authenticated: false, user: null, csrfToken: null });
+    return;
+  }
+  applyAuthMenuState(data);
+}
+
 if (infoTabAboutEl) infoTabAboutEl.addEventListener('click', async () => setTab('about'));
 if (infoTabUserAgreementEl) infoTabUserAgreementEl.addEventListener('click', async () => setTab('user-agreement'));
 if (infoTabPrivacyPolicyEl) infoTabPrivacyPolicyEl.addEventListener('click', async () => setTab('privacy-policy'));
@@ -278,6 +329,23 @@ window.addEventListener('popstate', async () => {
       mapReturnMenuLinkEl
     });
   }
+  if (logoutBtnEl) {
+    logoutBtnEl.addEventListener('click', async () => {
+      try {
+        const headers = csrfToken ? { 'x-csrf-token': csrfToken } : undefined;
+        await fetch('/api/logout', { method: 'POST', headers });
+      } catch {
+        // ignore
+      }
+      applyAuthMenuState({ authenticated: false, user: null, csrfToken: null });
+      if (navMenuButtonEl && navMenuPanelEl) {
+        navMenuButtonEl.setAttribute('aria-expanded', 'false');
+        navMenuPanelEl.classList.add('opacity-0', 'pointer-events-none', 'max-h-0', '-translate-y-2', 'scale-95');
+        navMenuPanelEl.classList.remove('max-h-[420px]', 'translate-y-0', 'scale-100');
+      }
+    });
+  }
+  await loadAuthMenuState();
   renderBuildInfo();
   const initialTab = readInitialTabFromUrl();
   await setTab(initialTab, { push: false });

@@ -40,7 +40,7 @@ function createAppSettingsService(options = {}) {
   }
 
   function normalizeGeneralShape(raw = {}) {
-    const appDisplayName = String(raw.appDisplayName || raw.app_display_name || 'Archimap').trim() || 'Archimap';
+    const appDisplayName = String(raw.appDisplayName || raw.app_display_name || 'archimap').trim() || 'archimap';
     const appBaseUrl = String(raw.appBaseUrl || raw.app_base_url || '').trim();
     const registrationEnabled = normalizeBoolean(raw.registrationEnabled ?? raw.registration_enabled, true);
     const userEditRequiresPermission = normalizeBoolean(raw.userEditRequiresPermission ?? raw.user_edit_requires_permission, true);

@@ -4,11 +4,12 @@ function registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName, 
   const safeCode = escapeHtml(String(code || '').trim());
   const safeMinutes = escapeHtml(expiresInMinutes);
   const safeConfirmUrl = escapeHtml(confirmUrl);
-  const safeAppName = escapeHtml(appDisplayName);
+  const appName = String(appDisplayName || '').trim() || 'archimap';
+  const safeAppName = escapeHtml(appName);
 
   return emailShell({
     title: 'Подтверждение регистрации',
-    pretitle: safeAppName || 'ArchiMap',
+    pretitle: safeAppName || 'archimap',
     intro: 'Используйте код ниже, чтобы завершить создание аккаунта.',
     contentHtml: `
       <div style="margin:0 auto 16px auto;max-width:340px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:14px 16px;text-align:center;">
@@ -27,8 +28,9 @@ function registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName, 
 }
 
 function registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl }) {
+  const appName = String(appDisplayName || '').trim() || 'archimap';
   return [
-    `${appDisplayName}: код подтверждения регистрации`,
+    `${appName}: код подтверждения регистрации`,
     '',
     `Ваш код: ${String(code || '').trim()}`,
     `Код действителен ${expiresInMinutes} минут.`,
