@@ -1,6 +1,10 @@
 @import 'maplibre-gl/dist/maplibre-gl.css';
 @import './legacy-ui.css';
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --bg: #f1f5f9;
   --fg: #0f172a;

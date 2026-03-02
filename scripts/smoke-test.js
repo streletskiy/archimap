@@ -2,7 +2,7 @@ const { spawn } = require('child_process');
 
 const TEST_PORT = 3322;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
-const CHECKS = ['/', '/account', '/admin', '/app-config.js', '/api/contours-status'];
+const PAGE_CHECKS = ['/', '/account', '/admin', '/info', '/app-config.js', '/api/contours-status'];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,11 +25,30 @@ async function waitForServerReady(timeoutMs = 15000) {
 }
 
 async function checkEndpoints() {
-  for (const path of CHECKS) {
+  for (const path of PAGE_CHECKS) {
     const response = await fetch(`${BASE_URL}${path}`);
     if (!response.ok) {
       throw new Error(`${path} returned HTTP ${response.status}`);
     }
+  }
+
+  const mapDataResp = await fetch(`${BASE_URL}/api/search-buildings?q=test&limit=5`);
+  if (!mapDataResp.ok) {
+    throw new Error(`/api/search-buildings returned HTTP ${mapDataResp.status}`);
+  }
+
+  const meResp = await fetch(`${BASE_URL}/api/me`);
+  if (meResp.status !== 200) {
+    throw new Error(`/api/me must return 200, got ${meResp.status}`);
+  }
+  const mePayload = await meResp.json().catch(() => null);
+  if (!mePayload || mePayload.authenticated !== false) {
+    throw new Error('/api/me must indicate authenticated=false for anonymous user');
+  }
+
+  const adminResp = await fetch(`${BASE_URL}/api/admin/users`);
+  if (![401, 403].includes(adminResp.status)) {
+    throw new Error(`/api/admin/users must return 401/403 for anonymous user, got ${adminResp.status}`);
   }
 }
 
