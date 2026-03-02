@@ -43,7 +43,6 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - Dedicated admin page (`/admin/`) for user roles/permissions, app settings (general + SMTP), and local-edits moderation.
 - Dedicated information page (`/info/`) with tabs for service details, technical build info, user agreement, and privacy policy.
 - Registration requires explicit acceptance of user agreement and privacy policy checkboxes.
-- UI kit is integrated as an admin tab (`/admin/?tab=uikit`) rather than a standalone page.
 - OSM tags viewer in the building modal.
 - OSM-tag filter panel with highlight of matching buildings.
 - Viewport filter prefetch uses SQLite R*Tree bbox index with fallback to B-tree query when R*Tree is unavailable.
@@ -60,7 +59,7 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 ## Tech Stack
 
 - Backend: [Node.js](https://nodejs.org/), [Express](https://expressjs.com/), [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)
-- Frontend: Vanilla JS, [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/), [Tailwind CSS](https://tailwindcss.com/)
+- Frontend: [SvelteKit](https://kit.svelte.dev/), [Svelte](https://svelte.dev/), [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/), [PMTiles](https://github.com/protomaps/PMTiles)
 - Data import: Python, [QuackOSM](https://github.com/kraina-ai/quackosm), [DuckDB](https://duckdb.org/), [tippecanoe](https://github.com/felt/tippecanoe), [PMTiles](https://github.com/protomaps/PMTiles)
 - Sessions: [Redis](https://redis.io/)
 
@@ -93,9 +92,10 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
   - `workers/rebuild-filter-tag-keys-cache.worker.js` - filter-tag keys cache rebuild worker
   - `scripts/rebuild-*.js` - compatibility wrappers for direct CLI usage
 - Frontend module layout:
-  - `public/main/*/*-module.js` - map/auth/search/modal/filter logic for main page
-  - `public/admin/*/*-module.js` - users/edits/map/uikit logic for admin page
-  - `public/main.js`, `public/admin.js` - page orchestrators that wire modules to DOM
+  - `frontend/src/routes/*` - page routes (`/`, `/info`, `/account`, `/admin`)
+  - `frontend/src/lib/components/*` - reusable UI and map components
+  - `frontend/src/lib/stores/*` - reactive app state (auth/ui/map)
+  - `frontend/src/lib/services/*` - API/config clients
 - Sync pipeline:
   - `scripts/sync-osm-buildings.js`
   - `scripts/sync-osm-buildings.py`

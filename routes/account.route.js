@@ -7,6 +7,13 @@ function registerAccountRoutes({
   getUserEditsList,
   getUserEditDetailsById
 }) {
+  function parseLimit(raw, fallback = 200, min = 1, max = 500) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    const v = Math.trunc(n);
+    return Math.max(min, Math.min(max, v));
+  }
+
   app.get('/api/account/edits', accountReadRateLimiter, requireAuth, (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
@@ -14,7 +21,8 @@ function registerAccountRoutes({
     }
     const statusRaw = String(req.query?.status || '').trim().toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
-    const items = getUserEditsList({ createdBy: actorKey, status, limit: 5000 });
+    const limit = parseLimit(req.query?.limit, 200, 1, 500);
+    const items = getUserEditsList({ createdBy: actorKey, status, limit, summary: false });
     return res.json({ total: items.length, items });
   });
 

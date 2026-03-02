@@ -227,7 +227,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function getUserEditsList({ createdBy = null, status = null, limit = 2000 }) {
+  function getUserEditsList({ createdBy = null, status = null, limit = 2000, summary = false }) {
     const cap = Math.max(1, Math.min(5000, Number(limit) || 2000));
     const clauses = [];
     const params = [];
@@ -244,6 +244,34 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     }
 
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    if (summary) {
+      const rows = db.prepare(`
+      SELECT
+        ue.id,
+        ue.osm_type,
+        ue.osm_id,
+        ue.created_by,
+        ue.updated_at,
+        ue.created_at,
+        ue.status
+      FROM user_edits.building_user_edits ue
+      ${whereSql}
+      ORDER BY ue.updated_at DESC, ue.id DESC
+      LIMIT ?
+    `).all(...params, cap);
+
+      return rows.map((row) => ({
+        id: Number(row.id || 0),
+        editId: Number(row.id || 0),
+        osmType: row.osm_type,
+        osmId: row.osm_id,
+        updatedBy: row.created_by,
+        updatedAt: row.updated_at,
+        createdAt: row.created_at,
+        status: normalizeUserEditStatus(row.status)
+      }));
+    }
 
     const rows = db.prepare(`
       SELECT

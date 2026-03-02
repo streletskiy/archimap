@@ -68,6 +68,13 @@ function registerAdminRoutes(deps) {
     return domain.includes('.');
   }
 
+  function parseLimit(raw, fallback = 200, min = 1, max = 1000) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    const v = Math.trunc(n);
+    return Math.max(min, Math.min(max, v));
+  }
+
   app.use('/api/admin', adminApiRateLimiter);
   app.use('/api/ui/email-previews', adminApiRateLimiter);
 
@@ -241,13 +248,14 @@ function registerAdminRoutes(deps) {
   });
 
   app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {
-    return res.redirect('/admin/?tab=uikit');
+    return res.redirect('/admin');
   });
 
   app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
     const statusRaw = String(req.query?.status || '').trim().toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
-    const out = getUserEditsList({ status, limit: 5000 });
+    const limit = parseLimit(req.query?.limit, 200, 1, 1000);
+    const out = getUserEditsList({ status, limit, summary: false });
     return res.json({
       total: out.length,
       items: out
@@ -318,7 +326,8 @@ function registerAdminRoutes(deps) {
     if (!isLikelyEmail(email)) {
       return res.status(400).json({ error: 'Некорректный email' });
     }
-    const items = getUserEditsList({ createdBy: email, limit: 5000 });
+    const limit = parseLimit(req.query?.limit, 200, 1, 1000);
+    const items = getUserEditsList({ createdBy: email, limit, summary: true });
     return res.json({ total: items.length, items });
   });
 

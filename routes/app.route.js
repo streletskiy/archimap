@@ -48,30 +48,38 @@ function registerAppRoutes(deps) {
     );
   });
 
-  app.get(['/account', '/account/'], (req, res) => {
-    return res.sendFile(path.join(rootDir, 'public', 'account.html'));
+  app.get('/favicon.ico', (req, res) => {
+    return res.status(204).end();
   });
 
-  app.get(['/admin', '/admin/'], (req, res) => {
-    return res.sendFile(path.join(rootDir, 'public', 'admin.html'));
+  // Chrome DevTools sometimes probes this endpoint; return 204 to avoid noisy 404s.
+  app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => {
+    return res.status(204).end();
   });
 
-  app.get(['/info', '/info/'], (req, res) => {
-    return res.sendFile(path.join(rootDir, 'public', 'info.html'));
+  app.get(['/', /^\/(?:admin|account|info|app)(?:\/.*)?$/], (req, res) => {
+    const svelteAppPath = path.join(rootDir, 'public', 'app', 'index.html');
+    if (!fs.existsSync(svelteAppPath)) {
+      return res.status(503).type('text/plain').send('Svelte frontend is not built yet. Run: npm run frontend:build');
+    }
+    return res.sendFile(svelteAppPath);
   });
 
   app.get('/api/legal-docs/:slug', publicApiRateLimiter, (req, res) => {
     const slug = String(req.params?.slug || '').trim().toLowerCase();
     const bySlug = {
       'user-agreement': { fileName: 'user-agreement.ru.md', title: 'Пользовательское соглашение' },
-      'privacy-policy': { fileName: 'privacy-policy.ru.md', title: 'Политика конфиденциальности' }
+      'privacy-policy': { fileName: 'privacy-policy.ru.md', title: 'Политика конфиденциальности' },
+      'edits-workflow': { fileName: path.join('docs', 'EDITS_WORKFLOW.md'), title: 'Регламент правок', fromRoot: true }
     };
     const target = bySlug[slug];
     if (!target) {
       return res.status(404).json({ error: 'Документ не найден' });
     }
     try {
-      const doc = readLegalDoc(target.fileName, target.title);
+      const doc = target.fromRoot
+        ? { title: target.title, markdown: fs.readFileSync(path.join(rootDir, target.fileName), 'utf8') }
+        : readLegalDoc(target.fileName, target.title);
       return res.json({
         ok: true,
         slug,
@@ -116,6 +124,7 @@ function registerAppRoutes(deps) {
 module.exports = {
   registerAppRoutes,
   registerPublicStaticRoute({ app, rootDir }) {
-    app.use(express.static(path.join(rootDir, 'public')));
+    app.use('/_app', express.static(path.join(rootDir, 'public', 'app', '_app')));
+    app.use('/styles', express.static(path.join(rootDir, 'public', 'styles')));
   }
 };

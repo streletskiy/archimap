@@ -1,0 +1,2033 @@
+let csrfToken = null;
+let isMasterAdmin = false;
+let currentAdminEmail = '';
+let currentEditId = null;
+let currentEditItem = null;
+let allEditsCache = [];
+let adminMap = null;
+let highlightedEditKeys = new Set();
+let adminMapHandlersBound = false;
+let adminEditedPointsUpdateSeq = 0;
+const adminEditIdByOsmKey = new Map();
+const adminEditedCenterByOsmKey = new Map();
+const adminEditedFeaturePromiseByOsmKey = new Map();
+const EDITS_CONTOUR_MIN_ZOOM = 13;
+const EDITED_POINTS_SOURCE_ID = 'edited-buildings-points';
+const EDITED_POINTS_CLUSTER_LAYER_ID = 'edited-buildings-points-clusters';
+const EDITED_POINTS_CLUSTER_COUNT_LAYER_ID = 'edited-buildings-points-cluster-count';
+const EDITED_POINTS_UNCLUSTERED_LAYER_ID = 'edited-buildings-points-unclustered';
+
+const adminState = {
+  tab: 'users',
+  q: '',
+  role: '',
+  canEdit: '',
+  hasEdits: '',
+  sortBy: 'createdAt',
+  sortDir: 'desc',
+  user: '',
+  edit: '',
+  editsQ: '',
+  editsDate: '',
+  editsUser: '',
+  editsStatus: 'pending'
+};
+
+const textTools = window.ArchiMapTextUtils?.createUiTextTools
+  ? window.ArchiMapTextUtils.createUiTextTools()
+  : null;
+const t = textTools?.t || ((_, __, fallback = '') => String(fallback || ''));
+const escapeHtml = textTools?.escapeHtml || ((value) => String(value ?? ''));
+const panelPageUtils = window.ArchiMapPanelPage || null;
+const adminUsersUtils = window.ArchiMapAdminUsers || null;
+const adminEditsUtils = window.ArchiMapAdminEdits || null;
+const adminMapUtils = window.ArchiMapAdminMap || null;
+const adminGuideUiKitUtils = window.ArchiMapAdminGuideUiKit || null;
+
+const adminAppEl = document.getElementById('admin-app');
+const adminLoadingEl = document.getElementById('admin-loading');
+const subtitleEl = document.getElementById('admin-subtitle');
+const navLogoLinkEl = document.getElementById('nav-logo-link');
+const mapReturnLinkEl = document.getElementById('map-return-link');
+const mapReturnMenuLinkEl = document.getElementById('map-return-menu-link');
+const logoutBtnEl = document.getElementById('settings-logout-btn');
+const themeToggleEl = document.getElementById('theme-toggle');
+const navMenuButtonEl = document.getElementById('nav-menu-button');
+const navMenuPanelEl = document.getElementById('nav-menu-panel');
+const tabUsersEl = document.getElementById('tab-users');
+const tabEditsEl = document.getElementById('tab-edits');
+const tabSettingsEl = document.getElementById('tab-settings');
+const tabGuideEl = document.getElementById('tab-guide');
+const tabUiKitEl = document.getElementById('tab-uikit');
+const usersPanelEl = document.getElementById('users-panel');
+const editsPanelEl = document.getElementById('edits-panel');
+const settingsPanelEl = document.getElementById('settings-panel');
+const guidePanelEl = document.getElementById('guide-panel');
+const uiKitPanelEl = document.getElementById('uikit-panel');
+const adminGuideTitleEl = document.getElementById('admin-guide-title');
+const adminGuideSubtitleEl = document.getElementById('admin-guide-subtitle');
+const adminGuideContentEl = document.getElementById('admin-guide-content');
+const adminUiKitTitleEl = document.getElementById('admin-uikit-title');
+const adminUiKitSubtitleEl = document.getElementById('admin-uikit-subtitle');
+const adminUiBadgesTitleEl = document.getElementById('admin-ui-badges-title');
+const adminUiBadgesEl = document.getElementById('admin-ui-badges');
+const adminUiBadgesApiEl = document.getElementById('admin-ui-badges-api');
+const adminUiTogglesTitleEl = document.getElementById('admin-ui-toggles-title');
+const adminUiTogglesEl = document.getElementById('admin-ui-toggles');
+const adminUiTogglesApiEl = document.getElementById('admin-ui-toggles-api');
+const adminUiPanelTitleEl = document.getElementById('admin-ui-panel-title');
+const adminUiPanelDemoEl = document.getElementById('admin-ui-panel-demo');
+const adminUiPanelApiEl = document.getElementById('admin-ui-panel-api');
+const adminUiHeaderTitleEl = document.getElementById('admin-ui-header-title');
+const adminUiHeaderDemoEl = document.getElementById('admin-ui-header-demo');
+const adminUiHeaderApiEl = document.getElementById('admin-ui-header-api');
+const adminUiTabsTitleEl = document.getElementById('admin-ui-tabs-title');
+const adminUiTabsDemoEl = document.getElementById('admin-ui-tabs-demo');
+const adminUiTabsApiEl = document.getElementById('admin-ui-tabs-api');
+const adminUiFieldsTitleEl = document.getElementById('admin-ui-fields-title');
+const adminUiFieldsButtonsDemoEl = document.getElementById('admin-ui-fields-buttons-demo');
+const adminUiFieldsApiEl = document.getElementById('admin-ui-fields-api');
+const adminUiEmailsTitleEl = document.getElementById('admin-ui-emails-title');
+const adminUiEmailRefreshEl = document.getElementById('admin-ui-email-refresh');
+const adminUiEmailStatusEl = document.getElementById('admin-ui-email-status');
+const adminUiEmailPreviewsEl = document.getElementById('admin-ui-email-previews');
+const adminUiGuideTitleEl = document.getElementById('admin-ui-guide-title');
+const adminUiGuideItem1El = document.getElementById('admin-ui-guide-item-1');
+const adminUiGuideItem2El = document.getElementById('admin-ui-guide-item-2');
+const adminUiGuideItem3El = document.getElementById('admin-ui-guide-item-3');
+const adminUiGuideItem4El = document.getElementById('admin-ui-guide-item-4');
+const usersSearchEl = document.getElementById('users-search');
+const usersRoleFilterEl = document.getElementById('users-role-filter');
+const usersCanEditFilterEl = document.getElementById('users-can-edit-filter');
+const usersHasEditsFilterEl = document.getElementById('users-has-edits-filter');
+const usersSortByEl = document.getElementById('users-sort-by');
+const usersSortDirEl = document.getElementById('users-sort-dir');
+const usersRefreshEl = document.getElementById('users-refresh');
+const usersStatusEl = document.getElementById('users-status');
+const usersListEl = document.getElementById('users-list');
+const editsSearchEl = document.getElementById('edits-search');
+const editsDateFilterEl = document.getElementById('edits-date-filter');
+const editsUserFilterEl = document.getElementById('edits-user-filter');
+const editsStatusFilterEl = document.getElementById('edits-status-filter');
+const editsStatusEl = document.getElementById('edits-status');
+const editsListEl = document.getElementById('edits-list');
+const adminMapEl = document.getElementById('admin-map');
+const editDetailPaneEl = document.getElementById('edit-detail-pane');
+const editDetailCloseEl = document.getElementById('edit-detail-close');
+const editDetailTitleEl = document.getElementById('edit-detail-title');
+const editDetailMetaEl = document.getElementById('edit-detail-meta');
+const editDetailListEl = document.getElementById('edit-detail-list');
+const smtpStatusEl = document.getElementById('smtp-settings-status');
+const generalStatusEl = document.getElementById('general-settings-status');
+const generalAppDisplayNameEl = document.getElementById('general-app-display-name');
+const generalAppBaseUrlEl = document.getElementById('general-app-base-url');
+const generalRegistrationEnabledEl = document.getElementById('general-registration-enabled');
+const generalUserEditRequiresPermissionEl = document.getElementById('general-user-edit-requires-permission');
+const generalSaveBtnEl = document.getElementById('general-save-btn');
+const smtpUrlEl = document.getElementById('smtp-url');
+const smtpHostEl = document.getElementById('smtp-host');
+const smtpPortEl = document.getElementById('smtp-port');
+const smtpSecureEl = document.getElementById('smtp-secure');
+const smtpUserEl = document.getElementById('smtp-user');
+const smtpPassEl = document.getElementById('smtp-pass');
+const smtpFromEl = document.getElementById('smtp-from');
+const smtpKeepPasswordEl = document.getElementById('smtp-keep-password');
+const smtpTestBtnEl = document.getElementById('smtp-test-btn');
+const smtpSaveBtnEl = document.getElementById('smtp-save-btn');
+const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
+const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
+const PMTILES_CONFIG = Object.freeze({
+  url: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.url || '/api/buildings.pmtiles'),
+  sourceLayer: String(window.__ARCHIMAP_CONFIG?.buildingsPmtiles?.sourceLayer || 'buildings')
+});
+let uiKitInitialized = false;
+let smtpSettingsLoaded = false;
+let smtpHasPassword = false;
+let generalSettingsLoaded = false;
+
+const nativeFetch = window.fetch.bind(window);
+
+function getUI() {
+  return window.ArchiMapUI || null;
+}
+
+function getLoginRedirectUrl() {
+  return '/?auth=1&next=' + encodeURIComponent('/admin/');
+}
+
+function isStateChangingMethod(method) {
+  const m = String(method || 'GET').toUpperCase();
+  return !['GET', 'HEAD', 'OPTIONS'].includes(m);
+}
+
+window.fetch = (input, init = {}) => {
+  const nextInit = { ...init };
+  const method = String(nextInit.method || (input?.method || 'GET')).toUpperCase();
+  if (csrfToken && isStateChangingMethod(method)) {
+    const headers = new Headers(nextInit.headers || {});
+    if (!headers.has('x-csrf-token')) headers.set('x-csrf-token', csrfToken);
+    nextInit.headers = headers;
+  }
+  return nativeFetch(input, nextInit);
+};
+
+function setText(el, text) {
+  if (el) el.textContent = String(text || '');
+}
+
+function applyTheme(theme) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem('archimap-theme', next);
+  } catch {
+    // ignore
+  }
+  if (themeToggleEl) themeToggleEl.checked = next === 'dark';
+  applyAdminMapTheme(next);
+}
+
+function initUiKitClasses() {
+  const ui = getUI();
+  if (!ui) return;
+  if (typeof ui.fieldClass === 'function') {
+    [
+      usersSearchEl,
+      usersRoleFilterEl,
+      usersCanEditFilterEl,
+      usersSortByEl,
+      usersSortDirEl,
+      editsSearchEl,
+      editsDateFilterEl,
+      editsUserFilterEl,
+      editsStatusFilterEl,
+      generalAppDisplayNameEl,
+      generalAppBaseUrlEl,
+      smtpUrlEl,
+      smtpHostEl,
+      smtpPortEl,
+      smtpUserEl,
+      smtpPassEl,
+      smtpFromEl
+    ].forEach((el) => {
+      if (el) el.className = ui.fieldClass('input');
+    });
+  }
+  if (typeof ui.buttonClass === 'function') {
+    if (usersRefreshEl) usersRefreshEl.className = ui.buttonClass('secondary');
+    if (generalSaveBtnEl) generalSaveBtnEl.className = ui.buttonClass('primary');
+    if (smtpTestBtnEl) smtpTestBtnEl.className = ui.buttonClass('secondary');
+    if (smtpSaveBtnEl) smtpSaveBtnEl.className = ui.buttonClass('primary');
+    if (adminUiEmailRefreshEl) adminUiEmailRefreshEl.className = ui.buttonClass('secondary', 'xs');
+    if (logoutBtnEl) logoutBtnEl.className = ui.buttonClass('danger') + ' hidden';
+  }
+}
+
+
+function setAppVisibility(visible) {
+  if (adminAppEl) adminAppEl.classList.toggle('hidden', !visible);
+  if (adminLoadingEl) adminLoadingEl.classList.toggle('hidden', visible);
+}
+
+function readStateFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    return {
+      tab: String(url.searchParams.get('tab') || '').trim(),
+      user: String(url.searchParams.get('user') || '').trim().toLowerCase(),
+      edit: String(url.searchParams.get('edit') || '').trim(),
+      q: String(url.searchParams.get('q') || '').trim(),
+      role: String(url.searchParams.get('role') || '').trim(),
+      canEdit: String(url.searchParams.get('canEdit') || '').trim(),
+      hasEdits: String(url.searchParams.get('hasEdits') || '').trim(),
+      sortBy: String(url.searchParams.get('sortBy') || '').trim(),
+      sortDir: String(url.searchParams.get('sortDir') || '').trim(),
+      editsQ: String(url.searchParams.get('editsQ') || '').trim(),
+      editsDate: String(url.searchParams.get('editsDate') || '').trim(),
+      editsUser: String(url.searchParams.get('editsUser') || '').trim().toLowerCase(),
+      editsStatus: String(url.searchParams.get('editsStatus') || '').trim().toLowerCase()
+    };
+  } catch {
+    return {};
+  }
+}
+
+function writeStateToUrl(options = {}) {
+  const replace = Boolean(options.replace);
+  const url = new URL(window.location.href);
+  const setOrDelete = (key, value) => {
+    const val = String(value || '').trim();
+    if (!val) {
+      url.searchParams.delete(key);
+      return;
+    }
+    url.searchParams.set(key, val);
+  };
+
+  setOrDelete('tab', adminState.tab);
+  setOrDelete('user', adminState.user);
+  setOrDelete('edit', adminState.edit);
+  setOrDelete('q', adminState.q);
+  setOrDelete('role', adminState.role);
+  setOrDelete('canEdit', adminState.canEdit);
+  setOrDelete('hasEdits', adminState.hasEdits);
+  setOrDelete('sortBy', adminState.sortBy);
+  setOrDelete('sortDir', adminState.sortDir);
+  setOrDelete('editsQ', adminState.editsQ);
+  setOrDelete('editsDate', adminState.editsDate);
+  setOrDelete('editsUser', adminState.editsUser);
+  setOrDelete('editsStatus', adminState.editsStatus);
+
+  if (replace) {
+    history.replaceState(null, '', url.toString());
+  } else {
+    history.pushState(null, '', url.toString());
+  }
+}
+
+function applyStateToControls() {
+  if (usersSearchEl) usersSearchEl.value = adminState.q;
+  if (usersRoleFilterEl) usersRoleFilterEl.value = adminState.role;
+  if (usersCanEditFilterEl) usersCanEditFilterEl.value = adminState.canEdit;
+  if (usersHasEditsFilterEl) usersHasEditsFilterEl.value = adminState.hasEdits;
+  if (usersSortByEl) usersSortByEl.value = adminState.sortBy;
+  if (usersSortDirEl) usersSortDirEl.value = adminState.sortDir;
+  if (editsSearchEl) editsSearchEl.value = adminState.editsQ;
+  if (editsDateFilterEl) editsDateFilterEl.value = adminState.editsDate;
+  if (editsUserFilterEl) editsUserFilterEl.value = adminState.editsUser;
+  if (editsStatusFilterEl) editsStatusFilterEl.value = adminState.editsStatus || 'pending';
+}
+
+function setTabButtonState(button, active) {
+  if (!button) return;
+  const ui = getUI();
+  if (ui && typeof ui.tabButtonClass === 'function') {
+    button.className = ui.tabButtonClass(active);
+    return;
+  }
+  button.className = active
+    ? 'ui-tab-btn ui-tab-btn-active'
+    : 'ui-tab-btn';
+}
+
+function setTab(nextTab, options = {}) {
+  adminState.tab = nextTab === 'edits'
+    ? 'edits'
+    : (nextTab === 'settings'
+      ? 'settings'
+      : (nextTab === 'guide' ? 'guide' : (nextTab === 'uikit' ? 'uikit' : 'users')));
+  const push = options.push !== false;
+
+  if (usersPanelEl) usersPanelEl.classList.toggle('hidden', adminState.tab !== 'users');
+  if (editsPanelEl) editsPanelEl.classList.toggle('hidden', adminState.tab !== 'edits');
+  if (settingsPanelEl) settingsPanelEl.classList.toggle('hidden', adminState.tab !== 'settings');
+  if (guidePanelEl) guidePanelEl.classList.toggle('hidden', adminState.tab !== 'guide');
+  if (uiKitPanelEl) uiKitPanelEl.classList.toggle('hidden', adminState.tab !== 'uikit');
+
+  setTabButtonState(tabUsersEl, adminState.tab === 'users');
+  setTabButtonState(tabEditsEl, adminState.tab === 'edits');
+  setTabButtonState(tabSettingsEl, adminState.tab === 'settings');
+  setTabButtonState(tabGuideEl, adminState.tab === 'guide');
+  setTabButtonState(tabUiKitEl, adminState.tab === 'uikit');
+
+  if (adminState.tab === 'edits') {
+    const map = ensureAdminMap();
+    if (map) {
+      setTimeout(() => map.resize(), 0);
+      applyEditedBuildingsPaint();
+      ensureAdminEditedPointsAndFit([...highlightedEditKeys]);
+    }
+  }
+  if (adminState.tab === 'uikit') {
+    renderAdminUiKit();
+  }
+  if (adminState.tab === 'settings') {
+    loadGeneralSettings();
+    loadSmtpSettings();
+  }
+
+  if (push) writeStateToUrl();
+}
+
+function renderAdminGuide() {
+  if (!adminGuideContentEl) return;
+  if (tabGuideEl) setText(tabGuideEl, t('adminTabGuide', null, 'Регламент правок'));
+  if (adminGuideTitleEl) setText(adminGuideTitleEl, t('adminGuideTitle', null, 'Регламент обработки правок'));
+  if (adminGuideSubtitleEl) setText(adminGuideSubtitleEl, t('adminGuideSubtitle', null, 'Как работает модерация, конфликтные ситуации и статусы.'));
+  const flowItems = [
+    t('adminGuideFlow1', null, 'Пользователь создает или обновляет pending-правку по зданию.'),
+    t('adminGuideFlow2', null, 'Для одного пользователя и здания сохраняется только одна активная pending-правка.'),
+    t('adminGuideFlow3', null, 'Админ выбирает решение по каждому тегу: принять или отклонить, с возможностью отредактировать значение.'),
+    t('adminGuideFlow4', null, '"Принять все/Отклонить все" только выставляют решения по тегам, а не применяют их сразу.'),
+    t('adminGuideFlow5', null, 'Изменения применяются только после кнопки "Применить решения".')
+  ];
+  const cornerCards = [
+    {
+      title: t('adminGuideCorner1Title', null, 'Параллельная модерация двумя администраторами'),
+      text: t('adminGuideCorner1', null, 'Если два администратора одновременно применяют решение по одной правке, запись изменяется только при status=pending. Второй запрос получает 409 и не перезаписывает результат первого.'),
+      badges: [
+        '<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">' + escapeHtml(t('editStatusPending', null, 'На рассмотрении')) + '</span>',
+        '<span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">HTTP 409</span>'
+      ].join('')
+    },
+    {
+      title: t('adminGuideCorner2Title', null, 'Устаревшая правка (конфликт ревизии)'),
+      text: t('adminGuideCorner2', null, 'Если локальная запись здания изменилась после создания пользовательской правки, merge блокируется с кодом EDIT_OUTDATED. Админу нужно открыть актуальные данные и повторно принять решение.'),
+      badges: [
+        '<span class="rounded-md bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">EDIT_OUTDATED</span>',
+        '<span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">HTTP 409</span>'
+      ].join('')
+    },
+    {
+      title: t('adminGuideCorner3Title', null, 'Повторные правки одного пользователя по тому же зданию'),
+      text: t('adminGuideCorner3', null, 'Для одного пользователя и здания поддерживается только одна активная pending-правка. Лишние pending автоматически помечаются как superseded, чтобы в модерации не было дублей.'),
+      badges: [
+        '<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">' + escapeHtml(t('editStatusPending', null, 'На рассмотрении')) + '</span>',
+        '<span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">' + escapeHtml(t('editStatusSuperseded', null, 'Заменено новой правкой')) + '</span>'
+      ].join('')
+    },
+    {
+      title: t('adminGuideCorner4Title', null, 'Частичное принятие тегов'),
+      text: t('adminGuideCorner4', null, 'Если принята только часть тегов, правка получает статус partially_accepted. Принятые поля попадают в merged_fields_json, отклоненные остаются в комментарии для прозрачной истории.'),
+      badges: [
+        '<span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">' + escapeHtml(t('editStatusPartiallyAccepted', null, 'Частично принято')) + '</span>',
+        '<span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">merged_fields_json</span>'
+      ].join('')
+    }
+  ];
+
+  adminGuideContentEl.innerHTML = `
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminGuideStatusesTitle', null, 'Статусы правок и их смысл'))}</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">${escapeHtml(t('editStatusPending', null, 'На рассмотрении'))}</span>
+        <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">${escapeHtml(t('editStatusAccepted', null, 'Принято'))}</span>
+        <span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">${escapeHtml(t('editStatusPartiallyAccepted', null, 'Частично принято'))}</span>
+        <span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">${escapeHtml(t('editStatusRejected', null, 'Отклонено'))}</span>
+        <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">${escapeHtml(t('editStatusSuperseded', null, 'Заменено новой правкой'))}</span>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminGuideFlowTitle', null, 'Пошаговый workflow'))}</p>
+      <div class="mt-2 grid gap-2">
+        ${flowItems.map((line) => `<p class="rounded-lg border border-slate-200 bg-white px-3 py-2">${escapeHtml(line)}</p>`).join('')}
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminGuideExampleTitle', null, 'Пример: частичное принятие'))}</p>
+      <p class="mt-2 text-sm text-slate-700">${escapeHtml(t('adminGuideExampleText', null, 'Здание way/22891444: из 5 изменений админ принял 3 и отклонил 2. Статус правки станет "Частично принято". В комментарий автоматически добавится список отклоненных тегов.'))}</p>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">${escapeHtml(t('editCountersTotal', { count: 5 }, '5 всего'))}</span>
+        <span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">${escapeHtml(t('editCountersCreated', { count: 2 }, '+2 создано'))}</span>
+        <span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">${escapeHtml(t('editCountersModified', { count: 3 }, '~3 изменено'))}</span>
+        <span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">${escapeHtml(t('editStatusPartiallyAccepted', null, 'Частично принято'))}</span>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminGuideCornerTitle', null, 'Corner cases и защита от ошибок'))}</p>
+      <div class="mt-2 grid gap-2">
+        ${cornerCards.map((card) => `
+          <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <p class="text-sm font-semibold text-slate-900">${escapeHtml(card.title)}</p>
+            <p class="mt-1 text-sm text-slate-700">${escapeHtml(card.text)}</p>
+            <div class="mt-2 flex flex-wrap gap-2">${card.badges}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderUiEmailCard(title, template) {
+  if (adminGuideUiKitUtils?.renderUiEmailCard) {
+    return adminGuideUiKitUtils.renderUiEmailCard(title, template, { t, escapeHtml });
+  }
+  const subject = String(template?.subject || '');
+  const html = String(template?.html || '');
+  const text = String(template?.text || '');
+  return [
+    '<article class="rounded-2xl border border-slate-200 bg-white p-3">',
+    '<h3 class="text-sm font-semibold text-slate-900">' + escapeHtml(title) + '</h3>',
+    '<p class="mt-1 text-xs text-slate-500">' + escapeHtml(t('uiEmailSubject', { value: subject }, 'Subject: {value}')) + '</p>',
+    '<div class="mt-3 grid gap-3 xl:grid-cols-2">',
+    '<div class="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">',
+    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailHtml', null, 'HTML')) + '</p>',
+    '<iframe class="h-[420px] w-full bg-white" sandbox="" referrerpolicy="no-referrer" srcdoc="' + escapeHtml(html) + '"></iframe>',
+    '</div>',
+    '<div class="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">',
+    '<p class="border-b border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiEmailText', null, 'Text')) + '</p>',
+    '<pre class="m-0 h-[420px] overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-5 text-slate-700">' + escapeHtml(text) + '</pre>',
+    '</div>',
+    '</div>',
+    '</article>'
+  ].join('');
+}
+
+async function loadAdminUiEmailPreviews() {
+  if (!adminUiEmailStatusEl || !adminUiEmailPreviewsEl) return;
+  adminUiEmailStatusEl.textContent = t('uiLoading', null, 'Загрузка...');
+  adminUiEmailPreviewsEl.innerHTML = '';
+  let resp;
+  try {
+    resp = await fetch('/api/ui/email-previews');
+  } catch {
+    adminUiEmailStatusEl.textContent = t('uiEmailLoadNetworkError', null, 'Ошибка сети при загрузке email шаблонов');
+    return;
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data?.templates) {
+    adminUiEmailStatusEl.textContent = String(data?.error || t('uiEmailLoadFailed', null, 'Не удалось загрузить email шаблоны'));
+    return;
+  }
+  const registration = renderUiEmailCard(t('uiEmailRegistrationTitle', null, 'Письмо: подтверждение регистрации'), data.templates.registration);
+  const passwordReset = renderUiEmailCard(t('uiEmailResetTitle', null, 'Письмо: сброс пароля'), data.templates.passwordReset);
+  adminUiEmailPreviewsEl.innerHTML = registration + passwordReset;
+  adminUiEmailStatusEl.textContent = t('uiUpdatedAt', { value: new Date().toLocaleString() }, 'Обновлено: {value}');
+}
+
+function renderAdminUiKit() {
+  if (uiKitInitialized) return;
+  const ui = getUI();
+  if (!ui) return;
+  if (tabUiKitEl) setText(tabUiKitEl, t('navUiKit', null, 'UI kit'));
+
+  setText(adminUiKitTitleEl, t('uiReadmeTitle', null, 'UI README'));
+  if (adminUiKitSubtitleEl) adminUiKitSubtitleEl.innerHTML = t('uiReadmeSubtitleHtml', null, 'Единая библиотека компонентов: <code>public/shared/ui.js</code>. Используйте её для общих шаблонов и классов.');
+  setText(adminUiBadgesTitleEl, t('uiSectionBadges', null, 'Бейджи'));
+  if (adminUiBadgesApiEl) adminUiBadgesApiEl.innerHTML = t('uiBadgesApiHtml', null, 'API: <code>ArchiMapUI.badge(text, variant)</code>');
+  setText(adminUiTogglesTitleEl, t('uiSectionToggles', null, 'Рычажки'));
+  if (adminUiTogglesApiEl) adminUiTogglesApiEl.innerHTML = t('uiTogglesApiHtml', null, 'API: <code>ArchiMapUI.renderToggle({...})</code>, поддержка <code>withIcons</code>, <code>kind</code>, <code>disabled</code>, <code>checkedColorClass</code>, <code>checkedKnobClass</code>, <code>checkedIconClass</code>.');
+  setText(adminUiPanelTitleEl, t('uiSectionPanel', null, 'Панель'));
+  if (adminUiPanelApiEl) adminUiPanelApiEl.innerHTML = t('uiPanelApiHtml', null, 'API: <code>ArchiMapUI.panel(content, options)</code>');
+  setText(adminUiHeaderTitleEl, t('uiSectionHeader', null, 'Section Header'));
+  if (adminUiHeaderApiEl) adminUiHeaderApiEl.innerHTML = t('uiHeaderApiHtml', null, 'API: <code>ArchiMapUI.sectionHeader(title, subtitle)</code>');
+  setText(adminUiTabsTitleEl, t('uiSectionTabs', null, 'Вкладки'));
+  if (adminUiTabsApiEl) adminUiTabsApiEl.innerHTML = t('uiTabsApiHtml', null, 'API: <code>ArchiMapUI.tabButtonClass(active)</code>');
+  setText(adminUiFieldsTitleEl, t('uiSectionFields', null, 'Поля и кнопки'));
+  if (adminUiFieldsApiEl) adminUiFieldsApiEl.innerHTML = t('uiFieldsApiHtml', null, 'API: <code>ArchiMapUI.fieldClass(kind, size?)</code>, <code>ArchiMapUI.buttonClass(variant, size?)</code>');
+  setText(adminUiEmailsTitleEl, t('uiSectionEmails', null, 'Email шаблоны (preview)'));
+  setText(adminUiEmailRefreshEl, t('uiRefresh', null, 'Обновить'));
+  setText(adminUiEmailStatusEl, t('uiLoading', null, 'Загрузка...'));
+  setText(adminUiGuideTitleEl, t('uiGuideTitle', null, 'Инструкция по использованию'));
+  if (adminUiGuideItem1El) adminUiGuideItem1El.innerHTML = t('uiGuideItem1Html', null, 'Подключай <code>/shared/ui.js</code> перед любыми шаблонами/страницами.');
+  if (adminUiGuideItem2El) adminUiGuideItem2El.innerHTML = t('uiGuideItem2Html', null, 'Для навигации подключай <code>/shared/top-nav.js</code> и рендери <code>ArchiMapTopNav.render({ context })</code>.');
+  if (adminUiGuideItem3El) adminUiGuideItem3El.innerHTML = t('uiGuideItem3Html', null, 'Новые общие UI-элементы сначала добавляй в <code>ui.js</code>, потом используй в страницах.');
+  if (adminUiGuideItem4El) adminUiGuideItem4El.innerHTML = t('uiGuideItem4Html', null, 'Дублирующиеся классы в HTML постепенно заменяй на шаблоны из <code>ArchiMapUI</code>.');
+
+  if (adminUiBadgesEl) {
+    adminUiBadgesEl.innerHTML = [
+      ui.badge('neutral', 'neutral'),
+      ui.badge('success', 'success'),
+      ui.badge('info', 'info'),
+      ui.badge('brand', 'brand'),
+      ui.badge('warning', 'warning'),
+      ui.badge('danger', 'danger')
+    ].join('');
+  }
+  if (adminUiTogglesEl) {
+    adminUiTogglesEl.innerHTML = [
+      '<div class="flex flex-wrap gap-3">',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleEnabled', null, 'Обычный (выключен)')) + '</p>',
+      ui.renderToggle({
+        id: 'admin-demo-theme',
+        ariaLabel: 'theme',
+        withIcons: true,
+        kind: 'theme',
+        checkedColorClass: 'peer-checked:bg-brand-purple',
+        checkedKnobClass: 'peer-checked:bg-violet-50',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700'
+      }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleDisabled', null, 'Disabled')) + '</p>',
+      ui.renderToggle({
+        id: 'admin-demo-theme-disabled',
+        ariaLabel: 'theme-disabled',
+        withIcons: true,
+        kind: 'theme',
+        disabled: true,
+        checkedColorClass: 'peer-checked:bg-brand-purple',
+        checkedKnobClass: 'peer-checked:bg-violet-50',
+        checkedIconStartClass: 'peer-checked:text-white',
+        checkedIconEndClass: 'peer-checked:text-slate-700'
+      }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleLabels', null, 'Обозначения')) + '</p>',
+      ui.renderToggle({ id: 'admin-demo-labels', ariaLabel: 'labels', withIcons: true, kind: 'labels', checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' }),
+      '</div>',
+      '<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">',
+      '<p class="mb-2 text-xs font-semibold text-slate-600">' + escapeHtml(t('uiToggleExampleLabelsDisabled', null, 'Обозначения (disabled)')) + '</p>',
+      ui.renderToggle({ id: 'admin-demo-labels-disabled', ariaLabel: 'labels-disabled', withIcons: true, kind: 'labels', disabled: true, checkedColorClass: 'peer-checked:bg-indigo-500', checkedKnobClass: 'peer-checked:bg-indigo-50', checkedIconClass: 'peer-checked:text-indigo-700' }),
+      '</div>',
+      '</div>'
+    ].join('');
+  }
+  if (adminUiPanelDemoEl) {
+    adminUiPanelDemoEl.innerHTML = ui.panel(`<p class="text-sm text-slate-700">${escapeHtml(t('uiPanelDemoText', null, 'Контент внутри стандартизованной панели.'))}</p>`, { className: 'rounded-2xl border border-slate-200 bg-white p-4' });
+  }
+  if (adminUiHeaderDemoEl) {
+    adminUiHeaderDemoEl.innerHTML = ui.sectionHeader(t('uiHeaderDemoTitle', null, 'Заголовок секции'), t('uiHeaderDemoSubtitle', null, 'Подзаголовок и описание в одном стиле'));
+  }
+  if (adminUiTabsDemoEl) {
+    adminUiTabsDemoEl.innerHTML = [
+      '<div class="ui-tab-shell inline-flex gap-1">',
+      '<button type="button" class="' + ui.tabButtonClass(true) + '">' + escapeHtml(t('uiTabActive', null, 'Активная')) + '</button>',
+      '<button type="button" class="' + ui.tabButtonClass(false) + '">' + escapeHtml(t('uiTabInactive', null, 'Неактивная')) + '</button>',
+      '</div>'
+    ].join('');
+  }
+  if (adminUiFieldsButtonsDemoEl) {
+    adminUiFieldsButtonsDemoEl.innerHTML = [
+      '<input type="text" class="' + ui.fieldClass('input') + '" placeholder="' + escapeHtml(t('uiInputPlaceholder', null, 'Текстовое поле')) + '" />',
+      '<select class="' + ui.fieldClass('select') + '"><option>' + escapeHtml(t('uiSelectPlaceholder', null, 'Селект')) + '</option></select>',
+      '<div class="flex flex-wrap gap-2">',
+      '<button type="button" class="' + ui.buttonClass('primary') + '">Primary</button>',
+      '<button type="button" class="' + ui.buttonClass('outlineBrand') + '">Outline Brand</button>',
+      '<button type="button" class="' + ui.buttonClass('secondary') + '">Secondary</button>',
+      '<button type="button" class="' + ui.buttonClass('danger') + '">Danger</button>',
+      '<button type="button" class="' + ui.buttonClass('secondary', 'xs') + '">Secondary XS</button>',
+      '</div>'
+    ].join('');
+  }
+
+  if (adminUiEmailRefreshEl) adminUiEmailRefreshEl.addEventListener('click', loadAdminUiEmailPreviews);
+  loadAdminUiEmailPreviews();
+  uiKitInitialized = true;
+}
+
+function collectUsersFiltersFromControls() {
+  adminState.q = String(usersSearchEl?.value || '').trim();
+  adminState.role = String(usersRoleFilterEl?.value || '').trim();
+  adminState.canEdit = String(usersCanEditFilterEl?.value || '').trim();
+  adminState.hasEdits = String(usersHasEditsFilterEl?.value || '').trim();
+  adminState.sortBy = String(usersSortByEl?.value || 'createdAt').trim();
+  adminState.sortDir = String(usersSortDirEl?.value || 'desc').trim();
+}
+
+function collectEditsFiltersFromControls() {
+  adminState.editsQ = String(editsSearchEl?.value || '').trim();
+  adminState.editsDate = String(editsDateFilterEl?.value || '').trim();
+  adminState.editsUser = String(editsUserFilterEl?.value || '').trim().toLowerCase();
+  adminState.editsStatus = String(editsStatusFilterEl?.value || 'pending').trim().toLowerCase() || 'pending';
+}
+
+function buildUsersQuery() {
+  const url = new URL('/api/admin/users', window.location.origin);
+  const pairs = [
+    ['q', adminState.q],
+    ['role', adminState.role],
+    ['canEdit', adminState.canEdit],
+    ['hasEdits', adminState.hasEdits],
+    ['sortBy', adminState.sortBy],
+    ['sortDir', adminState.sortDir]
+  ];
+  for (const [key, value] of pairs) {
+    if (String(value || '').trim()) url.searchParams.set(key, String(value).trim());
+  }
+  return `${url.pathname}${url.search}`;
+}
+
+async function loadMe() {
+  const resp = await fetch('/api/me');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data?.authenticated || !data?.user) {
+    window.location.href = getLoginRedirectUrl();
+    return null;
+  }
+
+  const user = data.user;
+  csrfToken = String(data.csrfToken || '') || null;
+  isMasterAdmin = Boolean(user.isMasterAdmin);
+  currentAdminEmail = String(user.email || '').trim().toLowerCase();
+  if (tabSettingsEl) tabSettingsEl.classList.toggle('hidden', !isMasterAdmin);
+  if (settingsPanelEl && !isMasterAdmin) settingsPanelEl.classList.add('hidden');
+
+  if (!user.isAdmin) {
+    setText(subtitleEl, t('adminAccessDenied', null, 'Доступ запрещен: нужны права администратора'));
+    if (usersPanelEl) usersPanelEl.classList.add('hidden');
+    if (editsPanelEl) editsPanelEl.classList.add('hidden');
+    return null;
+  }
+
+  if (logoutBtnEl) logoutBtnEl.classList.remove('hidden');
+  setText(subtitleEl, String(user.email || user.username || 'admin'));
+  return user;
+}
+
+function renderUserRows(items) {
+  if (!usersListEl) return;
+  const ui = getUI();
+  const secondarySmallClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('secondary', 'xs')
+    : 'rounded-[12px] border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700';
+  const outlineSmallClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('outlineBrand', 'xs')
+    : 'rounded-[12px] border border-violet-300 bg-white px-2 py-1 text-xs text-violet-700';
+  const renderBadge = (text, variant, fallbackClass) => {
+    if (ui && typeof ui.badge === 'function') return ui.badge(text, variant);
+    return `<span class="rounded-full px-2.5 py-1 text-xs font-medium ${fallbackClass}">${escapeHtml(text)}</span>`;
+  };
+  if (!Array.isArray(items) || items.length === 0) {
+    usersListEl.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-sm text-slate-600">${escapeHtml(t('adminUsersEmpty', null, 'Пользователи не найдены.'))}</td></tr>`;
+    return;
+  }
+
+  usersListEl.innerHTML = items.map((item) => {
+    const model = adminUsersUtils?.buildUserViewModel
+      ? adminUsersUtils.buildUserViewModel(item, currentAdminEmail)
+      : null;
+    const email = String(model?.email || item?.email || '').trim().toLowerCase();
+    const displayName = String(model?.displayName || email);
+    const isAdmin = Boolean(model?.isAdmin ?? item?.isAdmin);
+    const isMasterAdminAccount = Boolean(model?.isMasterAdminAccount ?? item?.isMasterAdmin);
+    const isSelfMasterAdminDemotionLocked = Boolean(model?.isSelfMasterAdminDemotionLocked);
+    const canEdit = Boolean(model?.canEdit ?? item?.canEdit);
+    const editsCount = Number((model?.editsCount ?? item?.editsCount) || 0);
+    const createdAt = String(model?.createdAt || item?.createdAt || '').replace('T', ' ').replace('Z', '');
+
+    return `
+      <tr class="border-t border-slate-200 hover:bg-slate-50">
+        <td class="px-4 py-3">
+          <p class="font-semibold text-slate-900">${escapeHtml(displayName)}</p>
+          <p class="text-xs text-slate-500">${escapeHtml(email)}</p>
+        </td>
+        <td class="px-4 py-3 text-slate-600">${escapeHtml(createdAt || '-')}</td>
+        <td class="px-4 py-3">
+          ${isMasterAdminAccount ? `<span class="mr-1">${renderBadge(t('adminRoleBadgeMasterAdmin', null, 'Мастер-админ'), 'warning', 'bg-amber-100 text-amber-700')}</span>` : ''}
+          <span class="mr-1">${renderBadge(isAdmin ? t('adminRoleBadgeAdmin', null, 'Админ') : t('adminRoleBadgeUser', null, 'Пользователь'), isAdmin ? 'brand' : 'neutral', isAdmin ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700')}</span>
+          ${renderBadge(canEdit ? t('adminPermCanEdit', null, 'Может редактировать') : t('adminPermReadOnly', null, 'Только просмотр'), canEdit ? 'success' : 'neutral', canEdit ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700')}
+        </td>
+        <td class="px-4 py-3">
+          <button data-action="open-user-edits" data-email="${escapeHtml(email)}" class="font-semibold text-brand-purple underline underline-offset-2 hover:text-indigo-700">${editsCount}</button>
+        </td>
+        <td class="px-4 py-3 text-right">
+          <div class="inline-flex gap-1">
+            <button data-action="toggle-edit" data-email="${escapeHtml(email)}" data-can-edit="${canEdit ? '1' : '0'}" class="${canEdit ? `${secondarySmallClass} border-emerald-300 text-emerald-700` : secondarySmallClass}">${canEdit ? escapeHtml(t('adminToggleEditOn', null, 'Запретить')) : escapeHtml(t('adminToggleEditOff', null, 'Разрешить'))}</button>
+            <button
+              data-action="toggle-admin"
+              data-email="${escapeHtml(email)}"
+              data-is-admin="${isAdmin ? '1' : '0'}"
+              data-role-locked="${isSelfMasterAdminDemotionLocked ? '1' : '0'}"
+              title="${isSelfMasterAdminDemotionLocked ? escapeHtml(t('adminMasterAdminRoleLocked', null, 'Мастер-админ не может снять с себя роль admin')) : ''}"
+              ${isSelfMasterAdminDemotionLocked ? 'disabled aria-disabled="true"' : ''}
+              class="${isAdmin ? outlineSmallClass : secondarySmallClass} ${isSelfMasterAdminDemotionLocked ? 'cursor-not-allowed border-slate-200 text-slate-400' : ''} ${isMasterAdmin ? '' : 'hidden'}"
+            >${isAdmin ? escapeHtml(t('adminToggleRoleOn', null, 'Снять admin')) : escapeHtml(t('adminToggleRoleOff', null, 'Сделать admin'))}</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function getEditAddress(item) {
+  if (item?.values?.address) return String(item.values.address);
+  if (item?.local?.address) return String(item.local.address);
+  const changes = Array.isArray(item?.changes) ? item.changes : [];
+  const addressChange = changes.find((change) => change?.field === 'address');
+  if (addressChange?.localValue) return String(addressChange.localValue);
+  if (addressChange?.osmValue) return String(addressChange.osmValue);
+  return `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+}
+
+function getChangeCounters(changes) {
+  if (adminEditsUtils?.getChangeCounters) {
+    return adminEditsUtils.getChangeCounters(changes);
+  }
+  const list = Array.isArray(changes) ? changes : [];
+  let created = 0;
+  let modified = 0;
+  for (const change of list) {
+    if (change?.osmValue == null && change?.localValue != null) {
+      created += 1;
+    } else {
+      modified += 1;
+    }
+  }
+  return { total: list.length, created, modified };
+}
+
+function renderEditStatusBadge(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'accepted') {
+    return `<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">${escapeHtml(t('editStatusAccepted', null, 'Принято'))}</span>`;
+  }
+  if (normalized === 'partially_accepted') {
+    return `<span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">${escapeHtml(t('editStatusPartiallyAccepted', null, 'Частично принято'))}</span>`;
+  }
+  if (normalized === 'rejected') {
+    return `<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">${escapeHtml(t('editStatusRejected', null, 'Отклонено'))}</span>`;
+  }
+  if (normalized === 'superseded') {
+    return `<span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">${escapeHtml(t('editStatusSuperseded', null, 'Заменено новой правкой'))}</span>`;
+  }
+  return `<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">${escapeHtml(t('editStatusPending', null, 'На рассмотрении'))}</span>`;
+}
+
+function renderEditsRows(items) {
+  if (!editsListEl) return;
+  if (!Array.isArray(items) || items.length === 0) {
+    editsListEl.innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-sm text-slate-600">${escapeHtml(t('adminEditsEmpty', null, 'Локальных правок нет.'))}</td></tr>`;
+    return;
+  }
+
+  editsListEl.innerHTML = items.map((item) => {
+    const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+    const editId = Number(item?.editId || 0);
+    const address = getEditAddress(item);
+    const author = String(item?.updatedBy || '-');
+    const counters = getChangeCounters(item?.changes);
+
+    return `
+      <tr data-action="open-edit" data-edit-key="${escapeHtml(osmKey)}" data-edit-id="${escapeHtml(editId)}" class="cursor-pointer border-t border-slate-200 hover:bg-slate-50">
+        <td class="px-4 py-3">
+          <p class="font-semibold text-slate-900">${escapeHtml(address)}</p>
+          <p class="text-xs text-slate-500">ID: ${escapeHtml(osmKey)}</p>
+        </td>
+        <td class="px-4 py-3">${escapeHtml(author)}</td>
+        <td class="px-4 py-3">${renderEditStatusBadge(item?.status)}</td>
+        <td class="px-4 py-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">${escapeHtml(t('editCountersTotal', { count: counters.total }, `${counters.total} всего`))}</span>
+            ${counters.created > 0 ? `<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">${escapeHtml(t('editCountersCreated', { count: counters.created }, `+${counters.created} создано`))}</span>` : ''}
+            ${counters.modified > 0 ? `<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">${escapeHtml(t('editCountersModified', { count: counters.modified }, `~${counters.modified} изменено`))}</span>` : ''}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function populateEditsUserFilter(items) {
+  if (!editsUserFilterEl) return;
+  const selected = adminState.editsUser;
+  const users = [...new Set((Array.isArray(items) ? items : []).map((item) => String(item?.updatedBy || '').trim().toLowerCase()).filter(Boolean))].sort();
+  editsUserFilterEl.innerHTML = `<option value="">${escapeHtml(t('adminUserFilterAll', null, 'Пользователь: все'))}</option>` + users.map((user) => `<option value="${escapeHtml(user)}">${escapeHtml(user)}</option>`).join('');
+  editsUserFilterEl.value = selected;
+}
+
+function syncMapHighlightsWithEdits(items) {
+  const keys = [];
+  adminEditIdByOsmKey.clear();
+  for (const item of Array.isArray(items) ? items : []) {
+    const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+    const editId = Number(item?.editId || 0);
+    if (!adminEditIdByOsmKey.has(osmKey) && editId > 0) {
+      adminEditIdByOsmKey.set(osmKey, editId);
+    }
+    keys.push(osmKey);
+  }
+  highlightedEditKeys = new Set(keys);
+  applyEditedBuildingsPaint();
+  if (adminState.tab === 'edits') {
+    ensureAdminEditedPointsAndFit([...highlightedEditKeys]);
+  }
+}
+
+function applyEditsFilters() {
+  const query = adminState.editsQ.toLowerCase();
+  const date = adminState.editsDate;
+  const user = adminState.editsUser;
+  const status = String(adminState.editsStatus || 'pending').trim().toLowerCase();
+
+  const filtered = allEditsCache.filter((item) => {
+    const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`.toLowerCase();
+    const address = getEditAddress(item).toLowerCase();
+    const author = String(item?.updatedBy || '').trim().toLowerCase();
+    const updatedAt = String(item?.updatedAt || '');
+
+    if (query && !address.includes(query) && !osmKey.includes(query)) return false;
+    if (date && !updatedAt.startsWith(date)) return false;
+    if (user && author !== user) return false;
+    if (status && status !== 'all' && String(item?.status || '').trim().toLowerCase() !== status) return false;
+    return true;
+  });
+
+  setText(editsStatusEl, t('editsShownSummary', { shown: filtered.length, total: allEditsCache.length }, `Показано: ${filtered.length} из ${allEditsCache.length}`));
+  renderEditsRows(filtered);
+  syncMapHighlightsWithEdits(filtered);
+}
+
+async function loadUsers(options = {}) {
+  const silent = Boolean(options.silent);
+  if (!silent) setText(usersStatusEl, t('adminUsersLoading', null, 'Загрузка...'));
+
+  const url = buildUsersQuery();
+  let resp;
+  try {
+    resp = await fetch(url);
+  } catch {
+    setText(usersStatusEl, t('adminUsersNetworkError', null, 'Ошибка сети'));
+    return [];
+  }
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(usersStatusEl, String(data?.error || t('adminUsersLoadFailed', null, 'Не удалось загрузить пользователей')));
+    return [];
+  }
+
+  const items = Array.isArray(data.items) ? data.items : [];
+  renderUserRows(items);
+  setText(usersStatusEl, t('adminUsersFound', { count: items.length }, `Найдено: ${items.length}`));
+  return items;
+}
+
+async function loadAllEdits() {
+  setText(editsStatusEl, t('adminEditsLoading', null, 'Загрузка...'));
+  let resp;
+  try {
+    resp = await fetch('/api/admin/building-edits?status=all');
+  } catch {
+    setText(editsStatusEl, t('adminEditsNetworkError', null, 'Ошибка сети'));
+    return;
+  }
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(editsStatusEl, String(data?.error || t('adminEditsLoadFailed', null, 'Не удалось загрузить правки')));
+    return;
+  }
+
+  allEditsCache = Array.isArray(data.items) ? data.items : [];
+  populateEditsUserFilter(allEditsCache);
+  applyEditsFilters();
+}
+
+function closeEditModal(options = {}) {
+  const push = options.push !== false;
+  currentEditId = null;
+  currentEditItem = null;
+  adminState.edit = '';
+  if (editDetailPaneEl) editDetailPaneEl.classList.add('hidden');
+  if (adminAppEl) adminAppEl.classList.remove('edit-pane-open');
+  if (push) writeStateToUrl();
+}
+
+function getMapStyleForTheme(theme) {
+  return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+}
+
+function parseOsmKey(osmKey) {
+  const [osmType, osmIdRaw] = String(osmKey || '').split('/');
+  const osmId = Number(osmIdRaw);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return null;
+  return { osmType, osmId };
+}
+
+function decodeOsmKeyFromEncodedFeatureId(value) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const osmType = (id % 2) === 1 ? 'relation' : 'way';
+  const osmId = Math.floor(id / 2);
+  if (!Number.isInteger(osmId) || osmId <= 0) return null;
+  return `${osmType}/${osmId}`;
+}
+
+function getGeometryCenter(geometry) {
+  if (!geometry || !Array.isArray(geometry.coordinates)) return null;
+  const bounds = new window.maplibregl.LngLatBounds();
+  extendBoundsFromCoords(bounds, geometry.coordinates);
+  if (bounds.isEmpty()) return null;
+  const center = bounds.getCenter();
+  if (!Number.isFinite(center?.lng) || !Number.isFinite(center?.lat)) return null;
+  return [center.lng, center.lat];
+}
+
+async function fetchBuildingCenterByOsmKey(osmKey) {
+  const parsed = parseOsmKey(osmKey);
+  if (!parsed) return null;
+  const cached = adminEditedCenterByOsmKey.get(osmKey);
+  if (cached) return cached;
+
+  const pending = adminEditedFeaturePromiseByOsmKey.get(osmKey);
+  if (pending) return pending;
+
+  const task = (async () => {
+    let resp;
+    try {
+      resp = await fetch(`/api/building/${encodeURIComponent(parsed.osmType)}/${encodeURIComponent(parsed.osmId)}`);
+    } catch {
+      return null;
+    }
+    if (!resp.ok) return null;
+    const feature = await resp.json().catch(() => null);
+    if (!feature?.geometry) return null;
+    const center = getGeometryCenter(feature.geometry);
+    if (!center) return null;
+    adminEditedCenterByOsmKey.set(osmKey, center);
+    return center;
+  })().finally(() => {
+    adminEditedFeaturePromiseByOsmKey.delete(osmKey);
+  });
+
+  adminEditedFeaturePromiseByOsmKey.set(osmKey, task);
+  return task;
+}
+
+function buildAdminEditedPointsGeoJson(keys) {
+  const features = [];
+  for (const osmKey of keys) {
+    const center = adminEditedCenterByOsmKey.get(osmKey);
+    if (!center) continue;
+    const editId = Number(adminEditIdByOsmKey.get(osmKey) || 0);
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: center
+      },
+      properties: {
+        osmKey,
+        editId: editId > 0 ? editId : null
+      }
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function setAdminEditedPointsSourceData(keys) {
+  if (!adminMap) return;
+  const source = adminMap.getSource(EDITED_POINTS_SOURCE_ID);
+  if (!source) return;
+  source.setData(buildAdminEditedPointsGeoJson(keys));
+}
+
+function updateAdminMapModeByZoom() {
+  if (!adminMap) return;
+  const zoom = Number(adminMap.getZoom() || 0);
+  const showPins = zoom < EDITS_CONTOUR_MIN_ZOOM;
+  const pinVisibility = showPins ? 'visible' : 'none';
+
+  if (adminMap.getLayer(EDITED_POINTS_CLUSTER_LAYER_ID)) {
+    adminMap.setLayoutProperty(EDITED_POINTS_CLUSTER_LAYER_ID, 'visibility', pinVisibility);
+  }
+  if (adminMap.getLayer(EDITED_POINTS_CLUSTER_COUNT_LAYER_ID)) {
+    adminMap.setLayoutProperty(EDITED_POINTS_CLUSTER_COUNT_LAYER_ID, 'visibility', pinVisibility);
+  }
+  if (adminMap.getLayer(EDITED_POINTS_UNCLUSTERED_LAYER_ID)) {
+    adminMap.setLayoutProperty(EDITED_POINTS_UNCLUSTERED_LAYER_ID, 'visibility', pinVisibility);
+  }
+}
+
+function bindAdminMapInteractionHandlers() {
+  if (!adminMap || adminMapHandlersBound) return;
+  adminMapHandlersBound = true;
+
+  adminMap.on('click', EDITED_POINTS_CLUSTER_LAYER_ID, (event) => {
+    const feature = event?.features?.[0];
+    const clusterId = Number(feature?.properties?.cluster_id);
+    if (!Number.isInteger(clusterId)) return;
+    const source = adminMap.getSource(EDITED_POINTS_SOURCE_ID);
+    if (!source || typeof source.getClusterExpansionZoom !== 'function') return;
+    source.getClusterExpansionZoom(clusterId, (error, zoom) => {
+      if (error) return;
+      adminMap.easeTo({
+        center: feature.geometry?.coordinates || adminMap.getCenter(),
+        zoom,
+        duration: 350
+      });
+    });
+  });
+
+  adminMap.on('click', EDITED_POINTS_UNCLUSTERED_LAYER_ID, async (event) => {
+    const feature = event?.features?.[0];
+    const osmKey = String(feature?.properties?.osmKey || '').trim();
+    const editIdFromPoint = Number(feature?.properties?.editId || 0);
+    const editId = editIdFromPoint > 0 ? editIdFromPoint : Number(adminEditIdByOsmKey.get(osmKey) || 0);
+    if (editId > 0) await openEditDetails(String(editId));
+  });
+
+  const handleContourClick = async (event) => {
+    const feature = event?.features?.[0];
+    const osmKey = decodeOsmKeyFromEncodedFeatureId(feature?.id);
+    if (!osmKey) return;
+    const editId = Number(adminEditIdByOsmKey.get(osmKey) || 0);
+    if (editId > 0) await openEditDetails(String(editId));
+  };
+  adminMap.on('click', 'edited-buildings-fill', handleContourClick);
+  adminMap.on('click', 'edited-buildings-line', handleContourClick);
+
+  const pointerLayers = [
+    EDITED_POINTS_CLUSTER_LAYER_ID,
+    EDITED_POINTS_UNCLUSTERED_LAYER_ID,
+    'edited-buildings-fill',
+    'edited-buildings-line'
+  ];
+  for (const layerId of pointerLayers) {
+    adminMap.on('mouseenter', layerId, () => {
+      adminMap.getCanvas().style.cursor = 'pointer';
+    });
+    adminMap.on('mouseleave', layerId, () => {
+      adminMap.getCanvas().style.cursor = '';
+    });
+  }
+
+  adminMap.on('zoomend', updateAdminMapModeByZoom);
+}
+
+async function ensureAdminEditedPointsAndFit(keys) {
+  const map = ensureAdminMap();
+  if (!map) return;
+  const seq = ++adminEditedPointsUpdateSeq;
+
+  const missingKeys = keys.filter((key) => !adminEditedCenterByOsmKey.has(key));
+  if (missingKeys.length > 0) {
+    await Promise.all(missingKeys.map((key) => fetchBuildingCenterByOsmKey(key)));
+  }
+  if (seq !== adminEditedPointsUpdateSeq) return;
+
+  setAdminEditedPointsSourceData(keys);
+  const bounds = new window.maplibregl.LngLatBounds();
+  let count = 0;
+  for (const key of keys) {
+    const center = adminEditedCenterByOsmKey.get(key);
+    if (!center) continue;
+    bounds.extend(center);
+    count += 1;
+  }
+  if (count === 0 || bounds.isEmpty()) return;
+
+  map.fitBounds(bounds, { padding: 60, duration: 450, maxZoom: 17 });
+  const onMoveEnd = () => {
+    map.off('moveend', onMoveEnd);
+    updateAdminMapModeByZoom();
+  };
+  map.on('moveend', onMoveEnd);
+}
+
+function ensureAdminMapLayers() {
+  if (!adminMap) return;
+  if (!adminMap.getSource('local-buildings')) {
+    const pmtilesUrl = PMTILES_CONFIG.url.startsWith('http')
+      ? PMTILES_CONFIG.url
+      : `${window.location.origin}${PMTILES_CONFIG.url.startsWith('/') ? '' : '/'}${PMTILES_CONFIG.url}`;
+    adminMap.addSource('local-buildings', {
+      type: 'vector',
+      url: `pmtiles://${pmtilesUrl}`
+    });
+  }
+  if (!adminMap.getSource('selected-building')) {
+    adminMap.addSource('selected-building', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+  }
+  if (!adminMap.getSource(EDITED_POINTS_SOURCE_ID)) {
+    adminMap.addSource(EDITED_POINTS_SOURCE_ID, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      cluster: true,
+      clusterRadius: 44,
+      clusterMaxZoom: 12
+    });
+  }
+  if (!adminMap.getLayer('local-buildings-fill')) {
+    adminMap.addLayer({
+      id: 'local-buildings-fill',
+      type: 'fill',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: {
+        'fill-color': '#9ca3af',
+        'fill-opacity': 0.35
+      }
+    });
+  }
+  if (!adminMap.getLayer('local-buildings-line')) {
+    adminMap.addLayer({
+      id: 'local-buildings-line',
+      type: 'line',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: {
+        'line-color': '#6b7280',
+        'line-width': 0.8
+      }
+    });
+  }
+  if (!adminMap.getLayer('edited-buildings-fill')) {
+    adminMap.addLayer({
+      id: 'edited-buildings-fill',
+      type: 'fill',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: {
+        'fill-color': '#5B62F0',
+        'fill-opacity': 0.28
+      }
+    });
+  }
+  if (!adminMap.getLayer('edited-buildings-line')) {
+    adminMap.addLayer({
+      id: 'edited-buildings-line',
+      type: 'line',
+      source: 'local-buildings',
+      'source-layer': PMTILES_CONFIG.sourceLayer,
+      minzoom: 13,
+      paint: {
+        'line-color': '#5B62F0',
+        'line-width': 2.2
+      }
+    });
+  }
+  if (!adminMap.getLayer('selected-building-fill')) {
+    adminMap.addLayer({
+      id: 'selected-building-fill',
+      type: 'fill',
+      source: 'selected-building',
+      paint: {
+        'fill-color': '#5B62F0',
+        'fill-opacity': 0.24
+      }
+    });
+  }
+  if (!adminMap.getLayer('selected-building-line')) {
+    adminMap.addLayer({
+      id: 'selected-building-line',
+      type: 'line',
+      source: 'selected-building',
+      paint: {
+        'line-color': '#5B62F0',
+        'line-width': 3
+      }
+    });
+  }
+  if (!adminMap.getLayer(EDITED_POINTS_CLUSTER_LAYER_ID)) {
+    adminMap.addLayer({
+      id: EDITED_POINTS_CLUSTER_LAYER_ID,
+      type: 'circle',
+      source: EDITED_POINTS_SOURCE_ID,
+      filter: ['has', 'point_count'],
+      paint: {
+        'circle-color': '#5B62F0',
+        'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23],
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+  }
+  if (!adminMap.getLayer(EDITED_POINTS_CLUSTER_COUNT_LAYER_ID)) {
+    adminMap.addLayer({
+      id: EDITED_POINTS_CLUSTER_COUNT_LAYER_ID,
+      type: 'symbol',
+      source: EDITED_POINTS_SOURCE_ID,
+      filter: ['has', 'point_count'],
+      layout: {
+        'text-field': ['get', 'point_count_abbreviated'],
+        'text-size': 12,
+        'text-font': ['Open Sans Bold']
+      },
+      paint: {
+        'text-color': '#ffffff'
+      }
+    });
+  }
+  if (!adminMap.getLayer(EDITED_POINTS_UNCLUSTERED_LAYER_ID)) {
+    adminMap.addLayer({
+      id: EDITED_POINTS_UNCLUSTERED_LAYER_ID,
+      type: 'circle',
+      source: EDITED_POINTS_SOURCE_ID,
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-color': '#5B62F0',
+        'circle-radius': 7,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+  }
+  setAdminEditedPointsSourceData([...highlightedEditKeys]);
+  updateAdminMapModeByZoom();
+  applyEditedBuildingsPaint();
+}
+
+function ensureAdminMap() {
+  if (adminMap || !adminMapEl) return adminMap;
+  if (typeof window.maplibregl === 'undefined' || typeof window.pmtiles === 'undefined') {
+    adminMapEl.innerHTML = `<div class="flex h-full items-center justify-center text-sm text-slate-500">${escapeHtml(t('mapLibLoadFailed', null, 'MapLibre/PMTiles не загружены'))}</div>`;
+    return null;
+  }
+
+  const protocol = new window.pmtiles.Protocol();
+  window.maplibregl.addProtocol('pmtiles', protocol.tile);
+
+  adminMap = new window.maplibregl.Map({
+    container: adminMapEl,
+    style: getMapStyleForTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'),
+    center: [44.0059, 56.3269],
+    zoom: 14
+  });
+  adminMap.addControl(new window.maplibregl.NavigationControl(), 'top-right');
+  bindAdminMapInteractionHandlers();
+  adminMap.on('style.load', () => {
+    ensureAdminMapLayers();
+    applyEditedBuildingsPaint();
+  });
+  adminMap.on('load', () => {
+    ensureAdminMapLayers();
+    applyEditedBuildingsPaint();
+  });
+  return adminMap;
+}
+
+function applyAdminMapTheme(theme) {
+  if (!adminMap) return;
+  adminMap.setStyle(getMapStyleForTheme(theme));
+}
+
+function extendBoundsFromCoords(bounds, coords) {
+  if (adminMapUtils?.extendBoundsFromCoords) {
+    adminMapUtils.extendBoundsFromCoords(bounds, coords);
+    return;
+  }
+  if (!Array.isArray(coords)) return;
+  if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+    bounds.extend([coords[0], coords[1]]);
+    return;
+  }
+  for (const value of coords) extendBoundsFromCoords(bounds, value);
+}
+
+function getEditedKeysExpression() {
+  if (adminMapUtils?.getEditedKeysExpression) {
+    return adminMapUtils.getEditedKeysExpression(highlightedEditKeys);
+  }
+  const encodedIds = [];
+  for (const key of highlightedEditKeys) {
+    const [osmType, osmIdRaw] = String(key).split('/');
+    const osmId = Number(osmIdRaw);
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) continue;
+    const typeBit = osmType === 'relation' ? 1 : 0;
+    encodedIds.push((osmId * 2) + typeBit);
+  }
+  return ['in', ['id'], ['literal', encodedIds]];
+}
+
+function applyEditedBuildingsPaint() {
+  if (!adminMap) return;
+  const keyMatchExpr = getEditedKeysExpression();
+  if (adminMap.getLayer('edited-buildings-fill')) {
+    adminMap.setFilter('edited-buildings-fill', keyMatchExpr);
+  }
+  if (adminMap.getLayer('edited-buildings-line')) {
+    adminMap.setFilter('edited-buildings-line', keyMatchExpr);
+  }
+  updateAdminMapModeByZoom();
+}
+
+async function updateDetailMapFeature(feature) {
+  const map = ensureAdminMap();
+  if (!map || !feature) return;
+
+  const apply = () => {
+    const source = map.getSource('selected-building');
+    if (!source) return;
+    source.setData(feature);
+
+    const bounds = new window.maplibregl.LngLatBounds();
+    extendBoundsFromCoords(bounds, feature?.geometry?.coordinates);
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 60, duration: 450, maxZoom: 18 });
+    }
+  };
+
+  if (map.loaded()) {
+    apply();
+  } else {
+    map.once('load', apply);
+  }
+}
+
+function renderDiffItem(change) {
+  const oldValue = change?.osmValue == null ? t('diffEmptyValue', null, 'пусто') : String(change.osmValue);
+  const newValue = change?.localValue == null ? t('diffEmptyValue', null, 'пусто') : String(change.localValue);
+  const isNew = change?.osmValue == null && change?.localValue != null;
+  const valueClass = isNew ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700';
+  return `
+    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(String(change?.label || '-'))}:</p>
+      <div class="mt-1 flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-slate-500 line-through">${escapeHtml(oldValue)}</span>
+        <span class="text-slate-400">-&gt;</span>
+        <span class="rounded-md px-2 py-1 ${valueClass}">${escapeHtml(newValue)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function parseEditId(raw) {
+  const id = Number(String(raw || '').trim());
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+}
+
+function buildAdminReviewActions(item) {
+  const changes = Array.isArray(item?.changes) ? item.changes : [];
+  const status = String(item?.status || '').trim().toLowerCase();
+  const ui = getUI();
+  const inputClass = (ui && typeof ui.fieldClass === 'function')
+    ? ui.fieldClass('input')
+    : 'w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-purple focus:ring-brand-purple';
+  const primaryBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('primary')
+    : 'rounded-[12px] bg-brand-purple px-3 py-2 text-sm font-semibold text-white hover:brightness-110';
+  const outlineBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('outlineBrand')
+    : 'rounded-[12px] border border-brand-purple bg-white px-3 py-2 text-sm font-semibold text-brand-purple hover:bg-indigo-50';
+  const dangerBtnClass = (ui && typeof ui.buttonClass === 'function')
+    ? ui.buttonClass('danger')
+    : 'rounded-[12px] border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50';
+  const reviewAcceptActiveClass = 'review-field-btn ' + (ui && typeof ui.buttonClass === 'function' ? ui.buttonClass('primary', 'xs') : 'ui-btn ui-btn-primary ui-btn-xs');
+  const reviewInactiveClass = 'review-field-btn ' + (ui && typeof ui.buttonClass === 'function' ? ui.buttonClass('secondary', 'xs') : 'ui-btn ui-btn-secondary ui-btn-xs');
+  if (status !== 'pending') {
+    return `
+      <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        <div class="flex flex-wrap items-center gap-2">
+          <span>${escapeHtml(t('adminReviewStatus', null, 'Статус правки:'))}</span>
+          ${renderEditStatusBadge(status)}
+        </div>
+      </div>
+    `;
+  }
+  const fieldRows = changes.map((change) => {
+    const field = String(change?.field || '').trim();
+    const value = change?.localValue == null ? '' : String(change.localValue);
+    const oldValue = change?.osmValue == null ? t('diffEmptyValue', null, 'пусто') : String(change.osmValue);
+    const newValue = change?.localValue == null ? t('diffEmptyValue', null, 'пусто') : String(change.localValue);
+    const isNew = change?.osmValue == null && change?.localValue != null;
+    const valueClass = isNew ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700';
+    return `
+      <div data-review-field="${escapeHtml(field)}" data-field-decision="accept" class="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 text-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="font-semibold text-slate-700">${escapeHtml(String(change?.label || field || '-'))}</span>
+          <div class="inline-flex items-center gap-1">
+            <button type="button" data-field-action="accept" data-field-name="${escapeHtml(field)}" class="${reviewAcceptActiveClass}">${escapeHtml(t('adminFieldAccept', null, 'Принять'))}</button>
+            <button type="button" data-field-action="reject" data-field-name="${escapeHtml(field)}" class="${reviewInactiveClass}">${escapeHtml(t('adminFieldReject', null, 'Отклонить'))}</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class="text-slate-500 line-through">${escapeHtml(oldValue)}</span>
+          <span class="text-slate-400">-&gt;</span>
+          <span class="rounded-md px-2 py-1 ${valueClass}">${escapeHtml(newValue)}</span>
+        </div>
+        <input type="text" data-merge-value="${escapeHtml(field)}" value="${escapeHtml(value)}" class="${inputClass}" />
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p class="text-sm font-semibold text-slate-900">${escapeHtml(t('adminReviewTitle', null, 'Модерация правки'))}</p>
+      <div class="grid gap-2 pr-1">${fieldRows || `<p class="text-sm text-slate-600">${escapeHtml(t('adminNoDiffToMerge', null, 'Нет отличий для мерджа.'))}</p>`}</div>
+      <textarea id="edit-admin-comment" rows="2" placeholder="${escapeHtml(t('adminCommentPlaceholder', null, 'Комментарий администратора (опционально)'))}" class="${inputClass}"></textarea>
+      <div class="flex flex-wrap gap-2">
+        <button id="edit-apply-decisions-btn" type="button" class="${primaryBtnClass}">${escapeHtml(t('adminApplyDecisions', null, 'Применить решения'))}</button>
+        <button id="edit-merge-all-btn" type="button" class="${outlineBtnClass}">${escapeHtml(t('adminMergeAll', null, 'Принять все'))}</button>
+        <button id="edit-reject-btn" type="button" class="${dangerBtnClass}">${escapeHtml(t('adminRejectAll', null, 'Отклонить все'))}</button>
+      </div>
+      <p id="edit-admin-status" class="text-sm text-slate-600"></p>
+    </div>
+  `;
+}
+
+function setReviewFieldDecision(field, decision) {
+  const normalizedField = String(field || '').trim();
+  const normalizedDecision = decision === 'reject' ? 'reject' : 'accept';
+  const ui = getUI();
+  const secondaryXsClass = ui && typeof ui.buttonClass === 'function'
+    ? ui.buttonClass('secondary', 'xs')
+    : 'ui-btn ui-btn-secondary ui-btn-xs';
+  const primaryXsClass = ui && typeof ui.buttonClass === 'function'
+    ? ui.buttonClass('primary', 'xs')
+    : 'ui-btn ui-btn-primary ui-btn-xs';
+  if (!normalizedField) return;
+  const row = [...document.querySelectorAll('[data-review-field]')]
+    .find((node) => String(node.getAttribute('data-review-field') || '').trim() === normalizedField);
+  if (!row) return;
+  row.setAttribute('data-field-decision', normalizedDecision);
+  const buttons = row.querySelectorAll('[data-field-action]');
+  buttons.forEach((button) => {
+    const action = String(button.getAttribute('data-field-action') || '').trim();
+    const isActive = action === normalizedDecision;
+    if (!isActive) {
+      button.className = 'review-field-btn ' + secondaryXsClass;
+      return;
+    }
+    if (action === 'reject') {
+      button.className = 'review-field-btn ' + secondaryXsClass + ' border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100';
+      return;
+    }
+    button.className = 'review-field-btn ' + primaryXsClass;
+  });
+}
+
+function collectFieldDecisions() {
+  const rows = [...document.querySelectorAll('[data-review-field]')];
+  const accepted = [];
+  const rejected = [];
+  for (const row of rows) {
+    const field = String(row.getAttribute('data-review-field') || '').trim();
+    if (!field) continue;
+    const decision = String(row.getAttribute('data-field-decision') || 'accept').trim().toLowerCase();
+    if (decision === 'reject') {
+      rejected.push(field);
+    } else {
+      accepted.push(field);
+    }
+  }
+  return { accepted, rejected };
+}
+
+function setAllReviewFieldDecisions(decision) {
+  const rows = [...document.querySelectorAll('[data-review-field]')];
+  rows.forEach((row) => {
+    const field = String(row.getAttribute('data-review-field') || '').trim();
+    if (!field) return;
+    setReviewFieldDecision(field, decision);
+  });
+}
+
+function buildModerationComment(baseComment, rejectedFields) {
+  const comment = String(baseComment || '').trim();
+  if (!Array.isArray(rejectedFields) || rejectedFields.length === 0) return comment;
+  const notePrefix = t('adminRejectedFieldsNote', null, 'Отклонены теги');
+  const note = `${notePrefix}: ${rejectedFields.join(', ')}`;
+  return comment ? `${comment}\n${note}` : note;
+}
+
+async function submitAdminModeration(action) {
+  if (!currentEditId || !currentEditItem) return;
+  const statusEl = document.getElementById('edit-admin-status');
+  const commentEl = document.getElementById('edit-admin-comment');
+  const comment = String(commentEl?.value || '').trim();
+  if (statusEl) statusEl.textContent = t('adminActionSaving', null, 'Сохраняем...');
+
+  let url = '';
+  let body = {};
+  const valueInputs = [...document.querySelectorAll('[data-merge-value]')];
+  const valueByField = new Map();
+  for (const input of valueInputs) {
+    const key = String(input.getAttribute('data-merge-value') || '').trim();
+    if (!key) continue;
+    valueByField.set(key, String(input.value || '').trim());
+  }
+  if (action === 'merge') {
+    const fields = [...valueByField.keys()];
+    const values = Object.fromEntries(fields.map((field) => [field, valueByField.get(field)]));
+    url = `/api/admin/building-edits/${encodeURIComponent(currentEditId)}/merge`;
+    body = { fields, values, comment };
+  } else if (action === 'apply') {
+    const { accepted, rejected } = collectFieldDecisions();
+    if (accepted.length === 0 && rejected.length === 0) {
+      if (statusEl) statusEl.textContent = t('adminNoFieldDecisions', null, 'Нет выбранных полей');
+      return;
+    }
+    if (accepted.length === 0) {
+      url = `/api/admin/building-edits/${encodeURIComponent(currentEditId)}/reject`;
+      body = { comment: buildModerationComment(comment, rejected) };
+    } else {
+      const values = Object.fromEntries(accepted.map((field) => [field, valueByField.get(field) || '']));
+      url = `/api/admin/building-edits/${encodeURIComponent(currentEditId)}/merge`;
+      body = {
+        fields: accepted,
+        values,
+        comment: buildModerationComment(comment, rejected)
+      };
+    }
+  } else {
+    url = `/api/admin/building-edits/${encodeURIComponent(currentEditId)}/reject`;
+    body = { comment };
+  }
+
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    if (statusEl) statusEl.textContent = t('adminEditsNetworkError', null, 'Ошибка сети');
+    return;
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    if (statusEl) statusEl.textContent = String(data?.error || t('adminActionFailed', null, 'Не удалось выполнить действие'));
+    return;
+  }
+  if (statusEl) {
+    if (action === 'merge') {
+      statusEl.textContent = t('adminEditAccepted', null, 'Правка принята');
+    } else if (action === 'apply') {
+      statusEl.textContent = data?.status === 'rejected'
+        ? t('adminEditRejected', null, 'Правка отклонена')
+        : t('adminEditPartiallyAccepted', null, 'Решения по тегам применены');
+    } else {
+      statusEl.textContent = t('adminEditRejected', null, 'Правка отклонена');
+    }
+  }
+  await loadAllEdits();
+  await openEditDetails(String(currentEditId), { push: false });
+}
+
+async function openEditDetails(editIdRaw, options = {}) {
+  const push = options.push !== false;
+  const editId = parseEditId(editIdRaw);
+  if (!editId) return;
+  setTab('edits', { push: false });
+
+  const url = `/api/admin/building-edits/${encodeURIComponent(editId)}`;
+  let resp;
+  try {
+    resp = await fetch(url);
+  } catch {
+    return;
+  }
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data?.item) return;
+
+  const item = data.item;
+  const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+  currentEditId = Number(item?.editId || editId);
+  currentEditItem = item;
+  adminState.edit = String(currentEditId);
+  if (push) writeStateToUrl();
+
+  const address = getEditAddress(item);
+  if (editDetailTitleEl) editDetailTitleEl.textContent = address;
+  if (editDetailMetaEl) editDetailMetaEl.textContent = `${t('adminMetaAuthor', { author: String(item.updatedBy || '-') }, `Автор: ${String(item.updatedBy || '-')}`)} | ${t('adminMetaId', { id: osmKey }, `ID: ${osmKey}`)} | ${t('adminMetaStatus', { status: String(item.status || 'pending') }, `Статус: ${String(item.status || 'pending')}`)} | ${String(item.updatedAt || '-')}`;
+
+  if (editDetailListEl) {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    if (String(item?.status || '').trim().toLowerCase() === 'pending') {
+      editDetailListEl.innerHTML = buildAdminReviewActions(item);
+    } else {
+      const listHtml = changes.length === 0
+        ? `<p class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">${escapeHtml(t('adminNoChanges', null, 'Без изменений'))}</p>`
+        : changes.map(renderDiffItem).join('');
+      editDetailListEl.innerHTML = listHtml + buildAdminReviewActions(item);
+    }
+  }
+
+  if (editDetailPaneEl) editDetailPaneEl.classList.remove('hidden');
+  if (adminAppEl) adminAppEl.classList.add('edit-pane-open');
+  let building = null;
+  try {
+    const buildingResp = await fetch(`/api/building/${encodeURIComponent(item.osmType)}/${encodeURIComponent(item.osmId)}`);
+    building = await buildingResp.json().catch(() => ({}));
+  } catch {
+    building = null;
+  }
+  if (building?.type === 'Feature' && building?.geometry) {
+    await updateDetailMapFeature(building);
+  }
+  const mergeBtn = document.getElementById('edit-merge-all-btn');
+  const applyDecisionsBtn = document.getElementById('edit-apply-decisions-btn');
+  const rejectBtn = document.getElementById('edit-reject-btn');
+  const statusEl = document.getElementById('edit-admin-status');
+  if (mergeBtn) mergeBtn.addEventListener('click', () => {
+    setAllReviewFieldDecisions('accept');
+    if (statusEl) statusEl.textContent = t('adminAllAcceptedMarked', null, 'Все теги отмечены как принятые. Нажмите "Применить решения".');
+  });
+  if (applyDecisionsBtn) applyDecisionsBtn.addEventListener('click', () => submitAdminModeration('apply'));
+  if (rejectBtn) rejectBtn.addEventListener('click', () => {
+    setAllReviewFieldDecisions('reject');
+    if (statusEl) statusEl.textContent = t('adminAllRejectedMarked', null, 'Все теги отмечены как отклоненные. Нажмите "Применить решения".');
+  });
+  adminEditIdByOsmKey.clear();
+  adminEditIdByOsmKey.set(osmKey, Number(currentEditId || editId));
+  highlightedEditKeys = new Set([osmKey]);
+  applyEditedBuildingsPaint();
+  setAdminEditedPointsSourceData([osmKey]);
+}
+
+async function toggleUserPermission(email, canEdit) {
+  const resp = await fetch('/api/admin/users/edit-permission', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, canEdit })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(usersStatusEl, String(data?.error || t('adminEditPermissionFailed', null, 'Не удалось изменить право редактирования')));
+    return false;
+  }
+  setText(usersStatusEl, t('adminUpdated', { email }, `Обновлено: ${email}`));
+  return true;
+}
+
+async function toggleUserRole(email, isAdmin) {
+  const resp = await fetch('/api/admin/users/role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, isAdmin })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(usersStatusEl, String(data?.error || t('adminRoleFailed', null, 'Не удалось изменить роль')));
+    return false;
+  }
+  setText(usersStatusEl, t('adminRoleUpdated', { email }, `Роль обновлена: ${email}`));
+  return true;
+}
+
+function collectGeneralPayloadFromForm() {
+  return {
+    general: {
+      appDisplayName: String(generalAppDisplayNameEl?.value || '').trim(),
+      appBaseUrl: String(generalAppBaseUrlEl?.value || '').trim(),
+      registrationEnabled: Boolean(generalRegistrationEnabledEl?.checked),
+      userEditRequiresPermission: Boolean(generalUserEditRequiresPermissionEl?.checked)
+    }
+  };
+}
+
+function applyGeneralSettingsToForm(item) {
+  const general = item?.general || {};
+  if (generalAppDisplayNameEl) generalAppDisplayNameEl.value = String(general.appDisplayName || 'archimap');
+  if (generalAppBaseUrlEl) generalAppBaseUrlEl.value = String(general.appBaseUrl || '');
+  if (generalRegistrationEnabledEl) generalRegistrationEnabledEl.checked = Boolean(general.registrationEnabled);
+  if (generalUserEditRequiresPermissionEl) generalUserEditRequiresPermissionEl.checked = Boolean(general.userEditRequiresPermission);
+}
+
+async function loadGeneralSettings(options = {}) {
+  if (!isMasterAdmin) {
+    setText(generalStatusEl, 'Только master admin может управлять общими настройками.');
+    return;
+  }
+  if (generalSettingsLoaded && !options.force) return;
+  setText(generalStatusEl, 'Загрузка общих настроек...');
+  const resp = await fetch('/api/admin/app-settings/general');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(generalStatusEl, String(data?.error || 'Не удалось загрузить общие настройки'));
+    return;
+  }
+  applyGeneralSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'env');
+  const updatedAt = String(data?.item?.updatedAt || '').trim();
+  const updatedBy = String(data?.item?.updatedBy || '').trim();
+  const meta = updatedAt ? `, updated: ${updatedAt}${updatedBy ? ` (${updatedBy})` : ''}` : '';
+  setText(generalStatusEl, `Источник: ${source}${meta}`);
+  generalSettingsLoaded = true;
+}
+
+async function saveGeneralSettings() {
+  if (!isMasterAdmin) return;
+  setText(generalStatusEl, 'Сохранение общих настроек...');
+  const resp = await fetch('/api/admin/app-settings/general', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectGeneralPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(generalStatusEl, String(data?.error || 'Не удалось сохранить общие настройки'));
+    return;
+  }
+  applyGeneralSettingsToForm(data?.item || {});
+  setText(generalStatusEl, `Сохранено. Источник: ${String(data?.item?.source || 'db')}`);
+  generalSettingsLoaded = true;
+}
+
+function collectSmtpPayloadFromForm() {
+  return {
+    smtp: {
+      url: String(smtpUrlEl?.value || '').trim(),
+      host: String(smtpHostEl?.value || '').trim(),
+      port: Number(smtpPortEl?.value || 587),
+      secure: Boolean(smtpSecureEl?.checked),
+      user: String(smtpUserEl?.value || '').trim(),
+      pass: String(smtpPassEl?.value || ''),
+      from: String(smtpFromEl?.value || '').trim(),
+      keepPassword: Boolean(smtpKeepPasswordEl?.checked)
+    }
+  };
+}
+
+function applySmtpSettingsToForm(item) {
+  const smtp = item?.smtp || {};
+  if (smtpUrlEl) smtpUrlEl.value = String(smtp.url || '');
+  if (smtpHostEl) smtpHostEl.value = String(smtp.host || '');
+  if (smtpPortEl) smtpPortEl.value = String(smtp.port || 587);
+  if (smtpSecureEl) smtpSecureEl.checked = Boolean(smtp.secure);
+  if (smtpUserEl) smtpUserEl.value = String(smtp.user || '');
+  if (smtpFromEl) smtpFromEl.value = String(smtp.from || '');
+  if (smtpPassEl) smtpPassEl.value = '';
+  smtpHasPassword = Boolean(smtp.hasPassword);
+}
+
+async function loadSmtpSettings(options = {}) {
+  if (!isMasterAdmin) {
+    setText(smtpStatusEl, 'Только master admin может управлять SMTP настройками.');
+    return;
+  }
+  if (smtpSettingsLoaded && !options.force) return;
+  setText(smtpStatusEl, 'Загрузка SMTP настроек...');
+  const resp = await fetch('/api/admin/app-settings/smtp');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Не удалось загрузить SMTP настройки'));
+    return;
+  }
+  applySmtpSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'env');
+  const updatedAt = String(data?.item?.updatedAt || '').trim();
+  const updatedBy = String(data?.item?.updatedBy || '').trim();
+  const passText = smtpHasPassword ? 'пароль сохранён' : 'пароль не сохранён';
+  const meta = updatedAt ? `, updated: ${updatedAt}${updatedBy ? ` (${updatedBy})` : ''}` : '';
+  setText(smtpStatusEl, `Источник: ${source}, ${passText}${meta}`);
+  smtpSettingsLoaded = true;
+}
+
+async function saveSmtpSettings() {
+  if (!isMasterAdmin) return;
+  setText(smtpStatusEl, 'Сохранение SMTP настроек...');
+  const resp = await fetch('/api/admin/app-settings/smtp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectSmtpPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Не удалось сохранить SMTP настройки'));
+    return;
+  }
+  applySmtpSettingsToForm(data?.item || {});
+  const source = String(data?.item?.source || 'db');
+  const passText = smtpHasPassword ? 'пароль сохранён' : 'пароль удалён';
+  setText(smtpStatusEl, `Сохранено. Источник: ${source}, ${passText}`);
+  smtpSettingsLoaded = true;
+}
+
+async function testSmtpSettings() {
+  if (!isMasterAdmin) return;
+  setText(smtpStatusEl, 'Проверка SMTP...');
+  const resp = await fetch('/api/admin/app-settings/smtp/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectSmtpPayloadFromForm())
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    setText(smtpStatusEl, String(data?.error || 'Проверка SMTP не прошла'));
+    return;
+  }
+  setText(smtpStatusEl, String(data?.message || 'SMTP проверен успешно'));
+}
+
+async function restoreFromUrl() {
+  const fromUrl = readStateFromUrl();
+  if (fromUrl.tab) {
+    adminState.tab = fromUrl.tab === 'edits'
+      ? 'edits'
+      : (fromUrl.tab === 'settings'
+        ? 'settings'
+      : (fromUrl.tab === 'guide'
+        ? 'guide'
+        : (fromUrl.tab === 'uikit' ? 'uikit' : 'users')));
+  }
+  adminState.user = String(fromUrl.user || '').trim().toLowerCase();
+  adminState.edit = String(fromUrl.edit || '').trim();
+  adminState.q = String(fromUrl.q || '').trim();
+  adminState.role = String(fromUrl.role || '').trim();
+  adminState.canEdit = String(fromUrl.canEdit || '').trim();
+  adminState.hasEdits = String(fromUrl.hasEdits || '').trim();
+  adminState.sortBy = String(fromUrl.sortBy || 'createdAt').trim();
+  adminState.sortDir = String(fromUrl.sortDir || 'desc').trim().toLowerCase() === 'asc' ? 'asc' : 'desc';
+  adminState.editsQ = String(fromUrl.editsQ || '').trim();
+  adminState.editsDate = String(fromUrl.editsDate || '').trim();
+  adminState.editsUser = String(fromUrl.editsUser || '').trim().toLowerCase();
+  adminState.editsStatus = String(fromUrl.editsStatus || 'pending').trim().toLowerCase() || 'pending';
+  if (!isMasterAdmin && adminState.tab === 'settings') {
+    adminState.tab = 'users';
+  }
+
+  setTab(adminState.tab, { push: false });
+  await loadUsers({ silent: true });
+  await loadAllEdits();
+  applyStateToControls();
+  applyEditsFilters();
+
+  writeStateToUrl({ replace: true });
+
+  if (adminState.edit) {
+    await openEditDetails(adminState.edit, { push: false });
+  }
+}
+
+if (tabUsersEl) tabUsersEl.addEventListener('click', () => setTab('users'));
+if (tabEditsEl) tabEditsEl.addEventListener('click', () => setTab('edits'));
+if (tabSettingsEl) tabSettingsEl.addEventListener('click', () => setTab('settings'));
+if (tabGuideEl) tabGuideEl.addEventListener('click', () => setTab('guide'));
+if (tabUiKitEl) tabUiKitEl.addEventListener('click', () => setTab('uikit'));
+
+if (generalSaveBtnEl) {
+  generalSaveBtnEl.addEventListener('click', async () => {
+    await saveGeneralSettings();
+  });
+}
+
+if (smtpSaveBtnEl) {
+  smtpSaveBtnEl.addEventListener('click', async () => {
+    await saveSmtpSettings();
+  });
+}
+
+if (smtpTestBtnEl) {
+  smtpTestBtnEl.addEventListener('click', async () => {
+    await testSmtpSettings();
+  });
+}
+
+if (usersRefreshEl) {
+  usersRefreshEl.addEventListener('click', async () => {
+    collectUsersFiltersFromControls();
+    writeStateToUrl();
+    await loadUsers();
+  });
+}
+
+for (const el of [usersRoleFilterEl, usersCanEditFilterEl, usersHasEditsFilterEl, usersSortByEl, usersSortDirEl]) {
+  if (!el) continue;
+  el.addEventListener('change', async () => {
+    collectUsersFiltersFromControls();
+    writeStateToUrl();
+    await loadUsers();
+  });
+}
+
+if (usersSearchEl) {
+  usersSearchEl.addEventListener('keydown', async (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    collectUsersFiltersFromControls();
+    writeStateToUrl();
+    await loadUsers();
+  });
+}
+
+if (usersListEl) {
+  usersListEl.addEventListener('click', async (event) => {
+    const actionEl = event.target?.closest?.('[data-action]');
+    if (!actionEl) return;
+
+    const action = String(actionEl.getAttribute('data-action') || '');
+    const email = String(actionEl.getAttribute('data-email') || '').trim().toLowerCase();
+
+    if (action === 'open-user-edits' && email) {
+      adminState.editsUser = email;
+      if (editsUserFilterEl) editsUserFilterEl.value = email;
+      setTab('edits');
+      applyEditsFilters();
+      writeStateToUrl();
+      return;
+    }
+
+    if (action === 'toggle-edit' && email) {
+      const current = actionEl.getAttribute('data-can-edit') === '1';
+      const ok = await toggleUserPermission(email, !current);
+      if (ok) {
+        await loadUsers();
+      }
+      return;
+    }
+
+    if (action === 'toggle-admin' && email) {
+      if (actionEl.getAttribute('data-role-locked') === '1' || actionEl.disabled) return;
+      const current = actionEl.getAttribute('data-is-admin') === '1';
+      const ok = await toggleUserRole(email, !current);
+      if (ok) {
+        await loadUsers();
+      }
+    }
+  });
+}
+
+for (const el of [editsSearchEl, editsDateFilterEl, editsUserFilterEl, editsStatusFilterEl]) {
+  if (!el) continue;
+  const eventName = el === editsSearchEl ? 'input' : 'change';
+  el.addEventListener(eventName, () => {
+    collectEditsFiltersFromControls();
+    applyEditsFilters();
+    writeStateToUrl();
+  });
+}
+
+if (editsListEl) {
+  editsListEl.addEventListener('click', async (event) => {
+    const row = event.target?.closest?.('[data-action="open-edit"]');
+    if (!row) return;
+    const editId = String(row.getAttribute('data-edit-id') || '').trim();
+    await openEditDetails(editId);
+  });
+}
+
+if (editDetailListEl) {
+  editDetailListEl.addEventListener('click', (event) => {
+    const actionEl = event.target?.closest?.('[data-field-action][data-field-name]');
+    if (!actionEl) return;
+    event.preventDefault();
+    const decision = String(actionEl.getAttribute('data-field-action') || '').trim().toLowerCase();
+    const field = String(actionEl.getAttribute('data-field-name') || '').trim();
+    if (!field || !['accept', 'reject'].includes(decision)) return;
+    setReviewFieldDecision(field, decision);
+  });
+}
+
+if (editDetailCloseEl) editDetailCloseEl.addEventListener('click', () => closeEditModal());
+
+if (logoutBtnEl) {
+  logoutBtnEl.classList.remove('hidden');
+  logoutBtnEl.addEventListener('click', async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    window.location.href = '/';
+  });
+}
+
+window.addEventListener('popstate', async () => {
+  await restoreFromUrl();
+});
+
+(async () => {
+  initUiKitClasses();
+  renderAdminGuide();
+  if (panelPageUtils && typeof panelPageUtils.initThemeToggle === 'function') {
+    panelPageUtils.initThemeToggle({
+      themeToggleEl,
+      onThemeChange: applyTheme
+    });
+  }
+  if (panelPageUtils && typeof panelPageUtils.initNavMenu === 'function') {
+    panelPageUtils.initNavMenu({
+      navMenuButtonEl,
+      navMenuPanelEl
+    });
+  }
+  if (panelPageUtils && typeof panelPageUtils.initMapReturnLinks === 'function') {
+    panelPageUtils.initMapReturnLinks({
+      navLogoLinkEl,
+      mapReturnLinkEl,
+      mapReturnMenuLinkEl
+    });
+  }
+  setAppVisibility(false);
+  const user = await loadMe();
+  if (!user || !user.isAdmin) return;
+  setAppVisibility(true);
+  await restoreFromUrl();
+})();

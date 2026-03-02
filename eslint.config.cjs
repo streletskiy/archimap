@@ -7,8 +7,10 @@ module.exports = [
       'node_modules/**',
       'data/**',
       '.git/**',
+      'public/**/*.js',
       'public/styles/*.json',
-      'public/i18n/ru.js'
+      'public/app/**',
+      'frontend/.svelte-kit/**'
     ]
   },
   js.configs.recommended,
@@ -39,10 +41,10 @@ module.exports = [
     }
   },
   {
-    files: ['public/**/*.js'],
+    files: ['frontend/src/**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: 'script',
+      sourceType: 'module',
       globals: {
         ...globals.browser,
         maplibregl: 'readonly',

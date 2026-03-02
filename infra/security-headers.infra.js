@@ -7,7 +7,7 @@ function applySecurityHeadersMiddleware(app, { nodeEnv }) {
     const cspDirectives = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com",
-      "style-src 'self' 'unsafe-inline' https://unpkg.com",
+      "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https:",
       "connect-src 'self' https://tiles.basemaps.cartocdn.com https://*.basemaps.cartocdn.com",
