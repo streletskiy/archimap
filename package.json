@@ -14,7 +14,7 @@
     "test:integration": "node --test tests/integration",
     "test:syntax": "node --check server.js && node --check auth.js",
     "test:smoke": "node scripts/smoke-test.js",
-    "dev": "node server.js",
+    "dev": "npm run frontend:build && node server.js",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:preview": "npm --prefix frontend run preview",

@@ -19,8 +19,8 @@ Legacy static frontend has been removed from runtime routes. All user-facing pag
 ## Build and runtime
 
 - Source: `frontend/`
-- Build target: `public/app/`
-- Express serves Svelte entrypoint and static bundle.
+- Build target: `frontend/build/` (SvelteKit static adapter, SPA fallback)
+- Express serves static assets from `frontend/build` and returns `frontend/build/index.html` for app routes (`/`, `/account`, `/admin`, `/info`, `/app/*`).
 
 ## Legacy policy
 

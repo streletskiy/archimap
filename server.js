@@ -25,7 +25,7 @@ const { initSyncWorkersInfra } = require('./infra/sync-workers.infra');
 const { initDbBootstrapInfra } = require('./infra/db-bootstrap.infra');
 const { initObservabilityInfra } = require('./infra/observability.infra');
 const { registerContoursStatusRoute } = require('./routes/contours-status.route');
-const { registerAppRoutes, registerPublicStaticRoute } = require('./routes/app.route');
+const { registerAppRoutes, registerFrontendStaticRoute } = require('./routes/app.route');
 const { registerAdminRoutes } = require('./routes/admin.route');
 const { registerBuildingsRoutes } = require('./routes/buildings.route');
 const { registerSearchRoutes } = require('./routes/search.route');
@@ -866,7 +866,7 @@ registerAccountRoutes({
 });
 
 registerContoursStatusRoute(app, db, contoursStatusRateLimiter);
-registerPublicStaticRoute({ app, rootDir: __dirname });
+registerFrontendStaticRoute({ app, rootDir: __dirname });
 syncWorkers = initSyncWorkersInfra({
   spawn,
   processExecPath: process.execPath,

@@ -55,6 +55,10 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
   && /opt/pyosm/bin/pip install "quackosm==${QUACKOSM_VERSION}" "duckdb==${DUCKDB_VERSION}"
 
 COPY . .
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+  npm --prefix frontend ci \
+  && npm --prefix frontend run build \
+  && rm -rf /app/frontend/node_modules
 RUN mkdir -p /app/data/quackosm
 RUN set -eux; \
   SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"; \

@@ -6,7 +6,7 @@ This folder contains the reactive frontend migration target for Archimap.
 
 - `npm install` (inside `frontend/`)
 - `npm run dev` - local Svelte dev server
-- `npm run build` - outputs static app into `../public/app`
+- `npm run build` - outputs static SvelteKit build into `frontend/build`
 - `npm run preview` - preview built Svelte app
 
 ## Integration

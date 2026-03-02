@@ -29,6 +29,8 @@ coverage/
 __pycache__/
 *.pyc
 frontend/.svelte-kit/
+frontend/build/
 public/app/
+tmp/
 scripts/release-docker.ps1
 LOCAL_CONTEXT.md

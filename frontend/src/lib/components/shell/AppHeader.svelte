@@ -33,6 +33,8 @@
   let filterTagKeys = [];
   let filterTagKeysRetryTimer = null;
   let searchText = '';
+  let handledRegisterToken = '';
+  let handledResetToken = '';
 
   const FILTER_TAG_LABELS_RU = Object.freeze({
     architect: 'Архитектор',
@@ -365,6 +367,56 @@
     }
   }
 
+  function stripAuthQueryParams(params) {
+    if (typeof window === 'undefined') return;
+    const next = new URL(window.location.href);
+    let changed = false;
+    for (const key of params) {
+      if (next.searchParams.has(key)) {
+        next.searchParams.delete(key);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    const query = next.searchParams.toString();
+    const suffix = query ? `?${query}` : '';
+    window.history.replaceState(window.history.state, '', `${next.pathname}${suffix}${next.hash}`);
+  }
+
+  async function handleRegisterTokenFromQuery(rawToken) {
+    const token = String(rawToken || '').trim();
+    if (!token || token === handledRegisterToken) return;
+    handledRegisterToken = token;
+    status = 'Подтверждаем регистрацию...';
+    try {
+      const data = await apiJson('/api/register/confirm-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
+      status = 'Регистрация подтверждена';
+      authOpen = false;
+    } catch (error) {
+      status = String(error.message || 'Не удалось подтвердить регистрацию');
+      openAuth('register');
+    } finally {
+      stripAuthQueryParams(['registerToken']);
+    }
+  }
+
+  function handleResetTokenFromQuery(rawToken) {
+    const token = String(rawToken || '').trim();
+    if (!token || token === handledResetToken) return;
+    handledResetToken = token;
+    resetToken = token;
+    resetMode = true;
+    authTab = 'login';
+    authOpen = true;
+    menuOpen = false;
+    stripAuthQueryParams(['resetToken', 'reset', 'auth']);
+  }
+
   async function logout() {
     try {
       await apiJson('/api/logout', { method: 'POST' });
@@ -417,6 +469,20 @@
       filterTagKeysRetryTimer = null;
     }
   });
+
+  $: {
+    const registerTokenFromQuery = $page.url.searchParams.get('registerToken');
+    if (registerTokenFromQuery) {
+      handleRegisterTokenFromQuery(registerTokenFromQuery);
+    }
+  }
+
+  $: {
+    const resetTokenFromQuery = $page.url.searchParams.get('resetToken') || $page.url.searchParams.get('reset');
+    if (resetTokenFromQuery) {
+      handleResetTokenFromQuery(resetTokenFromQuery);
+    }
+  }
 </script>
 
 <header class="nav-shell">
