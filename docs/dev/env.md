@@ -5,13 +5,14 @@
 - Server secrets stay private in process env and server-only modules.
 - Do not add secrets to frontend source or static assets.
 
-## Core required variables
+## Core required variables (production)
 - `SESSION_SECRET`
-- `APP_BASE_URL`
-- `TRUST_PROXY` (for reverse proxy setups)
-- `SESSION_COOKIE_SECURE` (explicit override for non-HTTPS local env)
+- `REDIS_URL`
+- `DATABASE_PATH` (alias for `ARCHIMAP_DB_PATH`)
+- `BOOTSTRAP_ADMIN_ENABLED`
 
 ## Data/database paths
+- `DATABASE_PATH` (alias)
 - `ARCHIMAP_DB_PATH`
 - `OSM_DB_PATH`
 - `USER_AUTH_DB_PATH`
@@ -19,6 +20,9 @@
 - `USER_EDITS_DB_PATH`
 
 ## Security knobs
+- `APP_BASE_URL`
+- `TRUST_PROXY`
+- `SESSION_COOKIE_SECURE`
 - `BOOTSTRAP_ADMIN_ENABLED`
 - `BOOTSTRAP_ADMIN_SECRET`
 - `BOOTSTRAP_ADMIN_ALLOWED_IPS`

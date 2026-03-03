@@ -96,7 +96,7 @@ const FRONTEND_INDEX_PATH = path.join(__dirname, 'frontend', 'build', 'index.htm
 const CSP_SCRIPT_HASHES = collectInlineScriptHashesFromFile(FRONTEND_INDEX_PATH);
 
 const dataDir = path.join(__dirname, 'data');
-const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
+const dbPath = String(process.env.DATABASE_PATH || process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
 const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');

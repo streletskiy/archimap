@@ -1,88 +1,81 @@
-# archimap
+# ArchiMap
 
-archimap is a self-hosted architecture map platform built on a Node/Express backend and a SvelteKit frontend.
-It serves local PMTiles for building footprints, searchable building metadata, and moderated user edits.
-The runtime is optimized for private deployments where data, auth, and tiles stay under your control.
-Security defaults include strict CSP, centralized security headers, CSRF protection, and sanitized logs.
-The project ships with unit/integration/e2e checks and CI-ready scripts.
+## What It Is
+ArchiMap is a self-hosted platform for an interactive architectural map.
+Building data is based on OpenStreetMap and enriched locally in SQLite.
+The map is rendered with MapLibre and vector PMTiles.
+The backend runs on Node.js + Express, and the UI is built with SvelteKit.
+The project is designed for private deployments with full control over data, tiles, and sessions.
 
-## Architecture Overview
-- Backend entrypoint: `server.js`
-- Server modules: `src/lib/server/**`, route adapters in `src/routes/**`
-- Frontend: `frontend/` (SvelteKit static build)
-- Datastores: SQLite (multiple attached DB files) + optional Redis for sessions
-- Tiles: `/api/buildings.pmtiles` with Range streaming
+## How It Works
+- Architectural data is sourced from OpenStreetMap.
+- Data is imported, normalized, and stored in SQLite.
+- A PMTiles file is generated from building contours for efficient map delivery.
+- The SvelteKit UI loads tiles and renders them through MapLibre.
+- Users can submit building info edits.
+- Administrators moderate and merge approved changes into the local layer.
+
+References:
+- https://www.openstreetmap.org/
+- https://maplibre.org/
+- https://github.com/protomaps/PMTiles
+
+## Architecture (Short)
+- SvelteKit (UI)
+- API layer (Express)
+- SQLite
+- PMTiles
+- Redis (optional, for sessions)
+
+Details -> `docs/architecture.md`
 
 ## Quick Start
+```bash
+npm ci
+npm run dev
+```
 
-### Development
-1. Install dependencies:
-   - `npm ci`
-   - `npm --prefix frontend ci`
-2. Copy env template:
-   - `.env.example` -> `.env`
-3. Build frontend:
-   - `npm run build`
-4. Start app:
-   - `npm run start`
+Production:
+```bash
+npm run build
+npm run start
+```
 
-### Docker
-1. `docker compose up --build`
-2. Open `http://localhost:3252`
+Docker:
+```bash
+docker-compose up
+```
 
-### Production
-1. Set required env variables.
-2. `npm run build`
-3. `npm run start`
-4. Verify `/readyz` and `/healthz`.
-
-## Required Environment Variable Names
+## Environment Variables
+Required for production:
+- `DATABASE_PATH` (or `ARCHIMAP_DB_PATH`)
+- `REDIS_URL`
 - `SESSION_SECRET`
-- `APP_BASE_URL`
-- `TRUST_PROXY`
-- `SESSION_COOKIE_SECURE`
-- `ARCHIMAP_DB_PATH`
-- `OSM_DB_PATH`
-- `USER_AUTH_DB_PATH`
-- `LOCAL_EDITS_DB_PATH`
-- `USER_EDITS_DB_PATH`
-- `BUILDINGS_PMTILES_FILE`
-- `BUILDINGS_PMTILES_SOURCE_LAYER`
+- `BOOTSTRAP_ADMIN_ENABLED`
 
-See full reference: [`docs/dev/env.md`](docs/dev/env.md).
+Full list -> `docs/dev/env.md`
 
-## NPM Scripts (short list)
-- `npm run dev`
-- `npm run build`
-- `npm run start`
-- `npm run lint`
-- `npm run test`
-- `npm run test:e2e`
-- `npm run perf:smoke`
-- `npm run analyze`
-- `npm run db:seed`
-- `npm run tiles:build`
+## Scripts
+- `dev`
+- `build`
+- `start`
+- `test`
+- `lint`
+- `perf:smoke`
+- `analyze`
+- `db:seed`
+- `tiles:build`
 
 ## Documentation
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-- Data flow: [`docs/data-flow.md`](docs/data-flow.md)
-- API: [`docs/api.md`](docs/api.md)
-- Security: [`docs/security.md`](docs/security.md)
-- Performance baseline: [`docs/performance/baseline.md`](docs/performance/baseline.md)
-- Server perf: [`docs/performance/server.md`](docs/performance/server.md)
-- Client perf: [`docs/performance/client.md`](docs/performance/client.md)
-- PMTiles perf: [`docs/performance/pmtiles.md`](docs/performance/pmtiles.md)
-- Bundle: [`docs/performance/bundle.md`](docs/performance/bundle.md)
-- Profiling: [`docs/performance/profiling.md`](docs/performance/profiling.md)
-- Dev setup: [`docs/dev/setup.md`](docs/dev/setup.md)
-- Dev scripts: [`docs/dev/scripts.md`](docs/dev/scripts.md)
-- Dev testing: [`docs/dev/testing.md`](docs/dev/testing.md)
-- Dataset: [`docs/dev/dataset.md`](docs/dev/dataset.md)
-- Runbook: [`docs/runbook.md`](docs/runbook.md)
-- Migration history: [`docs/migration-history.md`](docs/migration-history.md)
+- Architecture -> `docs/architecture.md`
+- API -> `docs/api.md`
+- Security -> `docs/security.md`
+- Performance -> `docs/performance/`
+- Runbook -> `docs/runbook.md`
 
 ## License
-Apache-2.0. See [`LICENSE`](LICENSE).
+Apache-2.0. See `LICENSE`.
 
-## Project Status
-Active. Stage 3 performance hardening is in place; main remaining bottleneck is large map vendor chunk and aggregate-heavy contours status query.
+## Status
+Stages 1-3 are complete: SvelteKit migration, security hardening, and performance/DX improvements are in place.
+The repository is now in a production-ready state for open-source maintenance.

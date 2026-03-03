@@ -5,9 +5,11 @@
 - Prod profile:
   - `default-src 'self'`
   - `script-src 'self'` (no `unsafe-inline`)
-  - `style-src 'self'` (no `unsafe-inline`)
-  - `img-src 'self' data:`
-  - `font-src 'self'`
+  - `style-src 'self'`
+  - `style-src-attr 'unsafe-inline'`
+  - `img-src 'self' data: blob: <extra-origins>`
+  - `font-src 'self' data: <extra-origins>`
+  - `connect-src 'self' <extra-origins>`
   - `object-src 'none'`
   - `base-uri 'self'`
   - `frame-ancestors 'none'`
@@ -19,7 +21,7 @@
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `X-Frame-Options: DENY`
-- `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+- `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`
 - `Strict-Transport-Security` enabled for HTTPS production deployments.
 
 ## Cookies/session
