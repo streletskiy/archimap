@@ -6,6 +6,15 @@ function initObservabilityInfra(app, options = {}) {
     ? options.requestIdFactory
     : (() => `${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const metricsEnabled = String(options.metricsEnabled ?? 'true').toLowerCase() !== 'false';
+  const getVersionInfo = typeof options.getVersionInfo === 'function'
+    ? options.getVersionInfo
+    : (() => ({
+      version: '0.0.0',
+      git: { describe: 'unknown', commit: 'unknown', dirty: false },
+      buildTime: new Date().toISOString(),
+      runtime: 'node',
+      app: 'archimap'
+    }));
 
   const startedAt = Date.now();
   let requestTotal = 0;
@@ -41,10 +50,12 @@ function initObservabilityInfra(app, options = {}) {
   });
 
   app.get('/healthz', (req, res) => {
+    const version = getVersionInfo();
     return res.status(200).json({
       ok: true,
       status: 'healthy',
-      uptimeSec: Math.round(process.uptime())
+      uptimeSec: Math.round(process.uptime()),
+      version
     });
   });
 

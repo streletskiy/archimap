@@ -69,6 +69,14 @@ Full list -> `docs/dev/env.md`
 - `i18n:extract`
 - `i18n:validate`
 - `i18n:check`
+- `version:print`
+
+## Build Version
+- Runtime build version is generated from Git metadata by `scripts/generate-version.js`.
+- UI build info is shown on `/info`.
+- API build info is available at `/api/version` and included in `/healthz`.
+- Release source of truth is Git tags in `vX.Y.Z` format.
+- If `.git` is unavailable (for example source tarball builds), version falls back to `package.json` version.
 
 ## Documentation
 - Architecture -> `docs/architecture.md`
@@ -76,6 +84,7 @@ Full list -> `docs/dev/env.md`
 - Security -> `docs/security.md`
 - Performance -> `docs/performance/`
 - Runbook -> `docs/runbook.md`
+- Release guide -> `docs/dev/release.md`
 
 ## Deep Links (URL state)
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`

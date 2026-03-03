@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "prestart": "npm run frontend:build",
+    "predev": "node scripts/generate-version.js",
+    "prebuild": "node scripts/generate-version.js",
+    "prestart": "node scripts/generate-version.js && npm run frontend:build",
+    "prefrontend:build": "node scripts/generate-version.js",
+    "prefrontend:dev": "node scripts/generate-version.js",
     "build": "npm run frontend:build",
     "lint": "eslint . --max-warnings=0 && npm run frontend:lint",
     "lint:fix": "eslint . --fix",
@@ -32,7 +36,8 @@
     "db:seed": "node scripts/db-seed.js",
     "tiles:build": "node scripts/tiles-build.js",
     "sync:city": "node scripts/sync-osm-buildings.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "version:print": "node -e \"console.log(JSON.stringify(require('./src/lib/version.generated.json'), null, 2))\""
   },
   "keywords": [],
   "author": "",

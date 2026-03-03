@@ -38,3 +38,5 @@ playwright-report/
 test-results/
 scripts/release-docker.ps1
 LOCAL_CONTEXT.md
+src/lib/version.generated.json
+frontend/src/lib/version.generated.json

@@ -6,6 +6,8 @@
 - `npm run start`: run server.
 - `npm run lint`: backend + frontend lint.
 - `npm run test`: full CI-like local suite.
+- `node scripts/generate-version.js`: generate backend/frontend build version files.
+- `npm run version:print`: print generated version payload.
 
 ## Testing
 - `npm run test:unit`

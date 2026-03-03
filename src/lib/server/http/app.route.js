@@ -13,6 +13,7 @@ function registerAppRoutes(deps) {
     buildingsPmtilesPath,
     normalizeMapConfig,
     getBuildInfo,
+    getAppVersion,
     registrationEnabled,
     getRegistrationEnabled,
     buildingsPmtilesSourceLayer,
@@ -50,6 +51,26 @@ function registerAppRoutes(deps) {
     res.type('application/javascript').send(
       `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth })};`
     );
+  });
+
+  app.get('/api/version', publicApiRateLimiter, (req, res) => {
+    const version = typeof getAppVersion === 'function'
+      ? getAppVersion()
+      : {
+        version: String(getBuildInfo?.()?.version || '0.0.0'),
+        git: {
+          describe: 'unknown',
+          commit: String(getBuildInfo?.()?.shortSha || 'unknown'),
+          dirty: false
+        },
+        buildTime: new Date().toISOString(),
+        runtime: 'node',
+        app: 'archimap',
+        isTaggedRelease: false
+      };
+    return sendCachedJson(req, res, version, {
+      cacheControl: 'no-store'
+    });
   });
 
   app.get('/favicon.ico', (req, res) => {

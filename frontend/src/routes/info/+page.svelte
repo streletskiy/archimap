@@ -5,6 +5,7 @@
   import { t, translateNow } from '$lib/i18n/index';
   import { marked } from 'marked';
   import { apiJson } from '$lib/services/http';
+  import { APP_REPO_URL, APP_VERSION, APP_VERSION_DISPLAY } from '$lib/version';
 
   let activeTab = 'about';
   let infoUrlSyncBusy = false;
@@ -147,8 +148,9 @@
         <div class="rounded-2xl border border-slate-200 bg-white p-5">
           <h2 class="text-lg font-bold text-slate-900">{$t('info.techTitle')}</h2>
           <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.version')}</span><span class="font-semibold text-slate-900">-</span></div>
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.commit')}</span><span class="font-semibold text-slate-900">-</span></div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.version')}</span><span class="font-semibold text-slate-900">{APP_VERSION_DISPLAY}</span></div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.commit')}</span><span class="font-semibold text-slate-900">{APP_VERSION.git.describe}</span></div>
+            <a class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-100" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
         </div>
       </section>

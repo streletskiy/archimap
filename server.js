@@ -33,13 +33,14 @@ const { registerAdminRoutes } = require('./src/routes/admin.route');
 const { registerBuildingsRoutes } = require('./src/routes/buildings.route');
 const { registerSearchRoutes } = require('./src/routes/search.route');
 const { registerAccountRoutes } = require('./src/routes/account.route');
+const { getAppVersion, getBuildInfo } = require('./src/lib/server/version');
 const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
   passwordResetHtmlTemplate,
   passwordResetTextTemplate
 } = require('./src/lib/server/email-templates');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 
 const app = express();
 app.disable('x-powered-by');
@@ -69,8 +70,6 @@ const MAP_DEFAULT_LAT = Number(process.env.MAP_DEFAULT_LAT ?? 56.3269);
 const MAP_DEFAULT_ZOOM = Number(process.env.MAP_DEFAULT_ZOOM ?? 15);
 const BUILDINGS_PMTILES_FILE = path.basename(String(process.env.BUILDINGS_PMTILES_FILE || 'buildings.pmtiles').trim() || 'buildings.pmtiles');
 const BUILDINGS_PMTILES_SOURCE_LAYER = String(process.env.BUILDINGS_PMTILES_SOURCE_LAYER || 'buildings').trim() || 'buildings';
-const BUILD_SHA = String(process.env.BUILD_SHA || '').trim();
-const BUILD_VERSION = String(process.env.BUILD_VERSION || '').trim();
 const SMTP_URL = String(process.env.SMTP_URL || '').trim();
 const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -90,8 +89,6 @@ const PASSWORD_RESET_TTL_MINUTES = Math.max(5, Math.min(180, Number(process.env.
 const APP_DISPLAY_NAME = String(process.env.APP_DISPLAY_NAME || 'archimap').trim() || 'archimap';
 const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase() || 'info';
 const METRICS_ENABLED = String(process.env.METRICS_ENABLED ?? 'true').toLowerCase() === 'true';
-const REPO_URL = 'https://github.com/streletskiy/archimap';
-const BUILD_INFO_PATH = path.join(__dirname, 'build-info.json');
 const FRONTEND_INDEX_PATH = path.join(__dirname, 'frontend', 'build', 'index.html');
 const CSP_SCRIPT_HASHES = collectInlineScriptHashesFromFile(FRONTEND_INDEX_PATH);
 
@@ -127,43 +124,6 @@ function normalizeMapConfig() {
   const lat = Number.isFinite(MAP_DEFAULT_LAT) ? Math.min(90, Math.max(-90, MAP_DEFAULT_LAT)) : 56.3269;
   const zoom = Number.isFinite(MAP_DEFAULT_ZOOM) ? Math.min(22, Math.max(0, MAP_DEFAULT_ZOOM)) : 15;
   return { lon, lat, zoom };
-}
-
-function readGitValue(command) {
-  try {
-    return String(execSync(command, {
-      cwd: __dirname,
-      stdio: ['ignore', 'pipe', 'ignore']
-    }) || '').trim();
-  } catch {
-    return '';
-  }
-}
-
-function readBuildInfoFromFile() {
-  try {
-    const raw = fs.readFileSync(BUILD_INFO_PATH, 'utf8');
-    const parsed = JSON.parse(String(raw || '{}'));
-    const shortSha = String(parsed?.shortSha || '').trim();
-    const version = String(parsed?.version || '').trim();
-    return {
-      shortSha: shortSha || '',
-      version: version || ''
-    };
-  } catch {
-    return { shortSha: '', version: '' };
-  }
-}
-
-function getBuildInfo() {
-  const fileInfo = readBuildInfoFromFile();
-  const shortSha = fileInfo.shortSha || BUILD_SHA || readGitValue('git rev-parse --short HEAD') || 'unknown';
-  const exactTag = fileInfo.version || BUILD_VERSION || readGitValue('git describe --tags --exact-match HEAD');
-  return {
-    shortSha,
-    version: exactTag || 'dev',
-    repoUrl: REPO_URL
-  };
 }
 
 const searchRateLimiter = createSimpleRateLimiter({
@@ -375,6 +335,7 @@ initObservabilityInfra(app, {
   logger,
   requestIdFactory: () => logger.requestId(),
   metricsEnabled: METRICS_ENABLED,
+  getVersionInfo: getAppVersion,
   getReadinessChecks: () => ({
     sessionStoreReady: Boolean(sessionMiddleware),
     dbReady: Boolean(db)
@@ -804,6 +765,7 @@ registerAppRoutes({
   buildingsPmtilesPath,
   normalizeMapConfig,
   getBuildInfo,
+  getAppVersion,
   registrationEnabled: REGISTRATION_ENABLED,
   getRegistrationEnabled,
   buildingsPmtilesSourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER,

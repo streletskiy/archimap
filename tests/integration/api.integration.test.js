@@ -104,6 +104,16 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(health.status, 200);
       const healthBody = await health.json();
       assert.equal(healthBody.ok, true);
+      assert.equal(typeof healthBody.version?.version, 'string');
+      assert.equal(typeof healthBody.version?.git?.commit, 'string');
+
+      const version = await callApi('/api/version');
+      assert.equal(version.status, 200);
+      const versionBody = await version.json();
+      assert.equal(typeof versionBody.version, 'string');
+      assert.equal(typeof versionBody.git?.describe, 'string');
+      assert.equal(typeof versionBody.git?.commit, 'string');
+      assert.equal(typeof versionBody.buildTime, 'string');
 
       const ready = await callApi('/readyz');
       assert.equal(ready.status, 200);
