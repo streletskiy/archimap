@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { maskSensitive } = require('../../shared/log-sanitizer');
 
 function normalizeLevel(value) {
   const normalized = String(value || 'info').trim().toLowerCase();
@@ -24,9 +25,10 @@ function createLogger(options = {}) {
       ts: new Date().toISOString(),
       level: nextLevel,
       service,
-      msg: String(message || ''),
-      ...fields
+      msg: String(message || '')
     };
+    const extraFields = fields && typeof fields === 'object' ? maskSensitive(fields) : {};
+    Object.assign(payload, extraFields);
     process.stdout.write(`${JSON.stringify(payload)}\n`);
   }
 

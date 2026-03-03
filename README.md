@@ -26,6 +26,8 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - [API Overview](#api-overview)
 - [Edits Workflow](#edits-workflow)
 - [Environment Variables](#environment-variables)
+- [Runbook](#runbook)
+- [Testing](#testing)
 - [OpenAPI](#openapi)
 - [Contributing](#contributing)
 - [External Projects](#external-projects)
@@ -80,13 +82,15 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 - Tiles artifact: `data/buildings.pmtiles`
 - Main server: `server.js`
 - Auth + email templates:
-  - `auth.js`
-  - `email-templates/index.js`
+  - `src/lib/server/auth/index.js`
+  - `src/lib/server/email-templates/index.js`
 - Backend module layout:
-  - `routes/*.route.js` - HTTP endpoints grouped by domain (`app`, `admin`, `buildings`, `search`, `account`)
-  - `services/*.service.js` - domain/business logic (search, edits, rate limiting)
-  - `infra/*.infra.js` - infrastructure wiring (sessions, headers, sync workers, DB bootstrap)
-  - `server.js` - application bootstrap/composition root (env config, DI, startup/shutdown)
+  - `src/routes/*.route.js` - thin HTTP endpoint wiring grouped by domain (`app`, `admin`, `buildings`, `search`, `account`)
+  - `src/lib/server/http/*.route.js` - route handlers
+  - `src/lib/server/services/*.service.js` - domain/business logic (search, edits, rate limiting)
+  - `src/lib/server/infra/*.infra.js` - infrastructure wiring (sessions, headers, sync workers, DB bootstrap)
+  - `src/lib/shared/*` - shared backend-safe utilities (sanitizers, helpers)
+  - `server.js` - composition/bootstrap entrypoint (env config, DI, startup/shutdown)
 - Workers:
   - `workers/rebuild-search-index.worker.js` - full-text search index rebuild worker
   - `workers/rebuild-filter-tag-keys-cache.worker.js` - filter-tag keys cache rebuild worker
@@ -104,10 +108,11 @@ archimap is a web app with an OSM-based vector map for viewing and editing archi
 
 ## Architecture Decisions
 
-- Composition root is centralized in `server.js`; domain behavior is delegated to `routes/`, `services/`, `infra/`.
+- Composition root is centralized in `server.js`; domain behavior is delegated to `src/routes/`, `src/lib/server/services/`, `src/lib/server/infra/`.
 - Background rebuild tasks are isolated as workers in `workers/` and executed in child processes.
 - DB schema changes are versioned in `db/migrations/` and can be applied with `npm run migrate`.
 - Security controls are explicit (`CSP`, `CSRF`, session hardening) and configured via environment.
+- Frontend map stack is lazy-loaded to avoid inflating startup bundles; large map vendor code is isolated into dedicated chunks.
 
 ## Quick Start (Local)
 
@@ -266,8 +271,10 @@ Index lifecycle:
   - set strong `SESSION_SECRET`;
   - set `APP_BASE_URL`;
   - keep `SESSION_ALLOW_MEMORY_FALLBACK=false`.
-- CSP allows required map resources (MapLibre/Carto) and restricts unsafe origins.
+- First-admin bootstrap is controlled by `BOOTSTRAP_ADMIN_ENABLED`, `BOOTSTRAP_ADMIN_SECRET`, and `BOOTSTRAP_ADMIN_ALLOWED_IPS`.
+- CSP/security headers are generated centrally and tested; production CSP does not use `unsafe-inline` for scripts/styles.
 - Disclosure policy: [SECURITY.md](./SECURITY.md).
+- Detailed policy: [docs/security.md](./docs/security.md).
 
 ## Observability
 
@@ -310,6 +317,14 @@ Detailed edits workflow:
 Full environment variables reference:
 
 - [docs/ENVIRONMENT_VARIABLES.md](./docs/ENVIRONMENT_VARIABLES.md)
+
+## Runbook
+
+- [docs/runbook.md](./docs/runbook.md)
+
+## Testing
+
+- [docs/testing.md](./docs/testing.md)
 
 ## OpenAPI
 

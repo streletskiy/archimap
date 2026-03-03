@@ -4,10 +4,15 @@
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`                                  | Server port.                                                                                                                                             |
 | `TRUST_PROXY`                           | Set `true` when app works behind reverse proxy/ingress so secure cookies and request protocol are handled correctly.                                     |
+| `HOST`                                  | Bind host for HTTP listener (default `0.0.0.0`).                                                                                                         |
 | `SESSION_SECRET`                        | Session secret.                                                                                                                                          |
 | `REDIS_URL`                             | Redis URL for sessions (default: `redis://redis:6379`).                                                                                                  |
 | `SESSION_ALLOW_MEMORY_FALLBACK`         | Allow fallback to in-memory sessions when Redis is unavailable. Defaults to `true` in development and `false` in production. Keep `false` in production. |
 | `SESSION_COOKIE_SECURE`                 | Force secure session cookie (`true/false`). If not set, defaults to `true` in production and `false` otherwise. Set `false` for local HTTP Docker runs.  |
+| `BOOTSTRAP_ADMIN_ENABLED`               | Controls first-admin bootstrap endpoint (`/api/register/start` when no users exist). Defaults to `true` in non-production, `false` in production.         |
+| `BOOTSTRAP_ADMIN_SECRET`                | Optional secret header (`x-bootstrap-admin-secret`) for first-admin bootstrap. Required when bootstrap is enabled in production.                          |
+| `BOOTSTRAP_ADMIN_ALLOWED_IPS`           | Comma-separated allowlist of client IPs permitted for first-admin bootstrap (default `127.0.0.1,::1`).                                                   |
+| `CSP_CONNECT_SRC_EXTRA`                 | Comma-separated extra origins for CSP `connect-src`/`img-src`/`font-src` (default: `https://tiles.basemaps.cartocdn.com,https://*.basemaps.cartocdn.com`). |
 | `LOG_LEVEL`                             | Structured logger minimum level (`debug`, `info`, `warn`, `error`; default `info`).                                                                      |
 | `METRICS_ENABLED`                       | Enable Prometheus-style `/metrics` endpoint (`true/false`, default `true`).                                                                              |
 | `ARCHIMAP_DB_PATH`                      | Path to primary DB (default: `data/archimap.db`).                                                                                                        |
@@ -27,7 +32,7 @@
 | `SMTP_USER`                             | SMTP username.                                                                                                                                           |
 | `SMTP_PASS`                             | SMTP password or app password.                                                                                                                           |
 | `EMAIL_FROM`                            | Sender address for registration emails (for example: `archimap <no-reply@example.com>`).                                                                 |
-| `REGISTRATION_ENABLED`                  | Enable/disable regular email registration (`true/false`, default `true`). Note: first-user bootstrap admin signup is still allowed even when `false`.    |
+| `REGISTRATION_ENABLED`                  | Enable/disable regular email registration (`true/false`, default `true`).                                                                                 |
 | `REGISTRATION_CODE_TTL_MINUTES`         | Verification code lifetime in minutes (`2..60`, default `15`).                                                                                           |
 | `REGISTRATION_CODE_RESEND_COOLDOWN_SEC` | Delay before requesting another code in seconds (`10..600`, default `60`).                                                                               |
 | `REGISTRATION_CODE_MAX_ATTEMPTS`        | Maximum wrong code attempts before re-request is required (`3..12`, default `6`).                                                                        |

@@ -2,7 +2,8 @@ function validateSecurityConfig({
   nodeEnv,
   sessionSecret,
   appBaseUrl,
-  sessionAllowMemoryFallback
+  sessionAllowMemoryFallback,
+  bootstrapAdminEnabled
 }) {
   const isProduction = nodeEnv === 'production';
   const weakSessionSecret = sessionSecret === 'dev-secret-change-me';
@@ -19,14 +20,18 @@ function validateSecurityConfig({
     if (allowMemoryStoreFallback) {
       console.warn('[security] SESSION_ALLOW_MEMORY_FALLBACK=true (development mode)');
     }
+    if (bootstrapAdminEnabled) {
+      console.warn('[security] BOOTSTRAP_ADMIN_ENABLED=true (development mode)');
+    }
     return;
   }
 
-  if (weakSessionSecret || !hasAppBaseUrl || allowMemoryStoreFallback) {
+  if (weakSessionSecret || !hasAppBaseUrl || allowMemoryStoreFallback || bootstrapAdminEnabled) {
     const issues = [];
     if (weakSessionSecret) issues.push('SESSION_SECRET is default');
     if (!hasAppBaseUrl) issues.push('APP_BASE_URL is required');
     if (allowMemoryStoreFallback) issues.push('SESSION_ALLOW_MEMORY_FALLBACK must be false in production');
+    if (bootstrapAdminEnabled) issues.push('BOOTSTRAP_ADMIN_ENABLED must be false in production');
     throw new Error(`[security] Refusing to start in production: ${issues.join('; ')}`);
   }
 }

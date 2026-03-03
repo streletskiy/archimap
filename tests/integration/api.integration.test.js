@@ -34,6 +34,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-it-'));
   const port = 3600 + Math.floor(Math.random() * 400);
   const baseUrl = `http://127.0.0.1:${port}`;
+  const pmtilesFileName = `test-buildings-${Date.now()}.pmtiles`;
+  const repoDataDir = path.join(__dirname, '..', '..', 'data');
+  const pmtilesPath = path.join(repoDataDir, pmtilesFileName);
+  fs.mkdirSync(repoDataDir, { recursive: true });
+  fs.writeFileSync(pmtilesPath, Buffer.alloc(4096, 7));
 
   const server = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..', '..'),
@@ -54,7 +59,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       LOCAL_EDITS_DB_PATH: path.join(tempRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tempRoot, 'user-edits.db'),
       USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: 'test-buildings.pmtiles'
+      BUILDINGS_PMTILES_FILE: pmtilesFileName
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -109,6 +114,16 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(metrics.status, 200);
       const metricsText = await metrics.text();
       assert.match(metricsText, /archimap_http_requests_total/);
+
+      const mainPage = await callApi('/');
+      assert.equal(mainPage.status, 200);
+      const csp = String(mainPage.headers.get('content-security-policy') || '');
+      assert.ok(csp.length > 0);
+      assert.equal(/\bscript-src\s[^;]*unsafe-inline/.test(csp), false);
+      assert.equal(/\bstyle-src\s[^;]*unsafe-inline/.test(csp), false);
+      assert.equal(mainPage.headers.get('x-content-type-options'), 'nosniff');
+      const html = await mainPage.text();
+      assert.equal(/cdn|unpkg|cdnjs|fonts\.googleapis/i.test(html), false);
     });
 
     let csrfToken = '';
@@ -165,12 +180,26 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const searchBody = await shortQuery.json();
       assert.match(String(searchBody.error || ''), /Минимальная длина/);
     });
+
+    await t.test('pmtiles supports range requests', async () => {
+      const response = await callApi('/api/buildings.pmtiles', {
+        headers: {
+          range: 'bytes=0-1023'
+        }
+      });
+      assert.equal(response.status, 206);
+      assert.equal(response.headers.get('accept-ranges'), 'bytes');
+      assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
+      const payload = new Uint8Array(await response.arrayBuffer());
+      assert.equal(payload.length, 1024);
+    });
   } finally {
     if (server.exitCode == null) {
       server.kill('SIGTERM');
       await new Promise((resolve) => server.once('exit', resolve));
     }
     fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(pmtilesPath, { force: true });
   }
 
   if (server.exitCode && server.exitCode !== 0) {

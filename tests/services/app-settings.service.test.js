@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
-const { createAppSettingsService } = require('../../services/app-settings.service');
+const { createAppSettingsService } = require('../../src/lib/server/services/app-settings.service');
 
 function createTestDb() {
   const db = new Database(':memory:');

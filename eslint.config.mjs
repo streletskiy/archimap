@@ -7,9 +7,7 @@ export default [
       'node_modules/**',
       'data/**',
       '.git/**',
-      'public/**/*.js',
-      'public/styles/*.json',
-      'public/app/**',
+      'legacy/**',
       'frontend/.svelte-kit/**'
     ]
   },
@@ -17,12 +15,9 @@ export default [
   {
     files: [
       'server.js',
-      'auth.js',
+      'playwright.config.js',
+      'src/**/*.js',
       'scripts/**/*.js',
-      'email-templates/**/*.js',
-      'infra/**/*.js',
-      'routes/**/*.js',
-      'services/**/*.js',
       'workers/**/*.js',
       'db/migrations/**/*.js',
       'tests/**/*.js'
@@ -41,7 +36,7 @@ export default [
     }
   },
   {
-    files: ['frontend/src/**/*.js'],
+    files: ['frontend/src/**/*.js', 'frontend/static/**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',

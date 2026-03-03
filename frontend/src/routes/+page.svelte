@@ -1,6 +1,6 @@
 <script>
+  import { onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import MapCanvas from '$lib/components/map/MapCanvas.svelte';
   import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
   import SearchModal from '$lib/components/shell/SearchModal.svelte';
   import { apiJson } from '$lib/services/http';
@@ -25,11 +25,17 @@
   } from '$lib/stores/search';
 
   let buildingDetails = null;
+  let MapCanvasComponent = null;
   let selectedBuildingIdentity = null;
   let saveBuildingPending = false;
   let saveBuildingStatus = '';
   let lastSearchCommandId = null;
   let activeSearchRequestToken = 0;
+
+  onMount(async () => {
+    const module = await import('$lib/components/map/MapCanvas.svelte');
+    MapCanvasComponent = module.default;
+  });
 
   function normalizeArchiInfo(payload) {
     const info = payload || {};
@@ -304,7 +310,11 @@
   }
 </script>
 
-<MapCanvas on:buildingClick={onBuildingClick} />
+{#if MapCanvasComponent}
+  <svelte:component this={MapCanvasComponent} on:buildingClick={onBuildingClick} />
+{:else}
+  <div class="map-loading">Loading map...</div>
+{/if}
 <BuildingModal
   {buildingDetails}
   isAuthenticated={$session.authenticated}
@@ -314,3 +324,15 @@
   on:save={onSaveBuildingEdit}
 />
 <SearchModal on:selectResult={onSelectSearchResult} />
+
+<style>
+  .map-loading {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 0.95rem;
+    color: #64748b;
+    background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+  }
+</style>

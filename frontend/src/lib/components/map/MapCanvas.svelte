@@ -19,6 +19,21 @@
   const SEARCH_RESULTS_LAYER_ID = 'search-results-points-layer';
   const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
   const SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID = 'search-results-clusters-count-layer';
+  const STYLE_OVERLAY_FADE_MS = 260;
+  const BUILDING_THEME = {
+    light: {
+      fillColor: '#a3a3a3',
+      fillOpacity: 0.32,
+      lineColor: '#bcbcbc',
+      lineWidth: 0.9
+    },
+    dark: {
+      fillColor: '#64748b',
+      fillOpacity: 0.36,
+      lineColor: '#94a3b8',
+      lineWidth: 1
+    }
+  };
 
   let container;
   let map = null;
@@ -29,6 +44,10 @@
   let lastSearchFitSeq = 0;
   let lastMapFocusRequestId = null;
   let currentMapStyleUrl = LIGHT_MAP_STYLE_URL;
+  let runtimeConfig = null;
+  let styleTransitionOverlaySrc = null;
+  let styleTransitionOverlayVisible = false;
+  let styleTransitionTimer = null;
 
   function parseOsmKey(raw) {
     const text = String(raw || '').trim();
@@ -269,6 +288,48 @@
     return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
   }
 
+  function getBuildingThemePaint(theme) {
+    return theme === 'dark' ? BUILDING_THEME.dark : BUILDING_THEME.light;
+  }
+
+  function applyBuildingThemePaint(theme) {
+    if (!map) return;
+    const paint = getBuildingThemePaint(theme);
+    if (map.getLayer(BUILDINGS_FILL_LAYER_ID)) {
+      map.setPaintProperty(BUILDINGS_FILL_LAYER_ID, 'fill-color', paint.fillColor);
+      map.setPaintProperty(BUILDINGS_FILL_LAYER_ID, 'fill-opacity', paint.fillOpacity);
+    }
+    if (map.getLayer(BUILDINGS_LINE_LAYER_ID)) {
+      map.setPaintProperty(BUILDINGS_LINE_LAYER_ID, 'line-color', paint.lineColor);
+      map.setPaintProperty(BUILDINGS_LINE_LAYER_ID, 'line-width', paint.lineWidth);
+    }
+  }
+
+  function clearStyleTransitionOverlaySoon() {
+    if (styleTransitionTimer) {
+      clearTimeout(styleTransitionTimer);
+      styleTransitionTimer = null;
+    }
+    styleTransitionOverlayVisible = false;
+    styleTransitionTimer = setTimeout(() => {
+      styleTransitionOverlaySrc = null;
+      styleTransitionTimer = null;
+    }, STYLE_OVERLAY_FADE_MS);
+  }
+
+  function captureStyleTransitionOverlay() {
+    if (!map) return;
+    try {
+      const canvas = map.getCanvas();
+      if (!canvas || typeof canvas.toDataURL !== 'function') return;
+      styleTransitionOverlaySrc = canvas.toDataURL('image/png');
+      styleTransitionOverlayVisible = true;
+    } catch {
+      styleTransitionOverlaySrc = null;
+      styleTransitionOverlayVisible = false;
+    }
+  }
+
   function onPointerEnter() {
     if (!map) return;
     map.getCanvas().style.cursor = 'pointer';
@@ -328,6 +389,7 @@
 
   function ensureMapSourcesAndLayers(config) {
     if (!map) return;
+    const buildingPaint = getBuildingThemePaint(getCurrentTheme());
 
     const pmtilesUrl = config.buildingsPmtiles.url.startsWith('http')
       ? config.buildingsPmtiles.url
@@ -358,8 +420,8 @@
         'source-layer': config.buildingsPmtiles.sourceLayer,
         minzoom: 13,
         paint: {
-          'fill-color': '#a3a3a3',
-          'fill-opacity': 0.32
+          'fill-color': buildingPaint.fillColor,
+          'fill-opacity': buildingPaint.fillOpacity
         }
       });
     }
@@ -372,8 +434,8 @@
         'source-layer': config.buildingsPmtiles.sourceLayer,
         minzoom: 13,
         paint: {
-          'line-color': '#bcbcbc',
-          'line-width': 0.9
+          'line-color': buildingPaint.lineColor,
+          'line-width': buildingPaint.lineWidth
         }
       });
     }
@@ -460,15 +522,32 @@
     bindStyleInteractionHandlers();
     applySelectionFromStore($selectedBuilding);
     updateSearchMarkers($searchState.items);
+    applyBuildingThemePaint(getCurrentTheme());
     applyLabelLayerVisibility($mapLabelsVisible);
+  }
+
+  function restoreCustomLayersAfterStyleChange() {
+    if (!map || !runtimeConfig) return;
+    const tryRestore = () => {
+      if (!map || !runtimeConfig) return;
+      if (!map.isStyleLoaded()) return;
+      ensureMapSourcesAndLayers(runtimeConfig);
+      applyBuildingThemePaint(getCurrentTheme());
+      applyBuildingFilters($buildingFilterRules);
+      clearStyleTransitionOverlaySoon();
+    };
+    map.once('styledata', tryRestore);
+    map.once('idle', tryRestore);
   }
 
   function applyThemeToMap(theme) {
     if (!map) return;
     const nextStyle = getMapStyleForTheme(theme);
     if (nextStyle === currentMapStyleUrl) return;
+    captureStyleTransitionOverlay();
     currentMapStyleUrl = nextStyle;
     map.setStyle(nextStyle);
+    restoreCustomLayersAfterStyleChange();
   }
 
   function normalizeTagValue(value) {
@@ -607,6 +686,7 @@
 
   onMount(() => {
     const config = getRuntimeConfig();
+    runtimeConfig = config;
     protocol = new Protocol();
     maplibregl.addProtocol('pmtiles', protocol.tile);
     currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
@@ -649,10 +729,15 @@
       themeObserver.disconnect();
       themeObserver = null;
     }
+    if (styleTransitionTimer) {
+      clearTimeout(styleTransitionTimer);
+      styleTransitionTimer = null;
+    }
     if (map) {
       map.remove();
       map = null;
     }
+    runtimeConfig = null;
     if (protocol) {
       protocol?.destroy?.();
       protocol = null;
@@ -661,10 +746,35 @@
 </script>
 
 <div class="map-canvas" bind:this={container}></div>
+{#if styleTransitionOverlaySrc}
+  <img
+    class:visible={styleTransitionOverlayVisible}
+    class="map-style-transition-overlay"
+    src={styleTransitionOverlaySrc}
+    alt=""
+    aria-hidden="true"
+  />
+{/if}
 
 <style>
   .map-canvas {
     position: fixed;
     inset: 0;
+  }
+
+  .map-style-transition-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 260ms ease;
+  }
+
+  .map-style-transition-overlay.visible {
+    opacity: 1;
   }
 </style>

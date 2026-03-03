@@ -1,3 +1,5 @@
+const { sanitizeUrl } = require('../../shared/log-sanitizer');
+
 function initObservabilityInfra(app, options = {}) {
   const logger = options.logger || console;
   const requestIdFactory = typeof options.requestIdFactory === 'function'
@@ -28,7 +30,7 @@ function initObservabilityInfra(app, options = {}) {
       logger.info('http_request', {
         requestId,
         method: req.method,
-        path: req.originalUrl || req.url,
+        path: sanitizeUrl(req.originalUrl || req.url),
         status,
         durationMs,
         ip: req.ip

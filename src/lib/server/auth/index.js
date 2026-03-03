@@ -1,12 +1,12 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const { requireCsrfSession } = require('./services/csrf.service');
+const { requireCsrfSession } = require('../services/csrf.service');
 const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
   passwordResetHtmlTemplate,
   passwordResetTextTemplate
-} = require('./email-templates');
+} = require('../email-templates');
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
@@ -131,6 +131,7 @@ function registerAuthRoutes({
   app,
   db,
   createSimpleRateLimiter,
+  logger = console,
   sessionSecret,
   userEditRequiresPermission,
   getUserEditRequiresPermission,
@@ -145,6 +146,9 @@ function registerAuthRoutes({
   getAppBaseUrl,
   appDisplayName,
   getAppDisplayName,
+  bootstrapAdminEnabled = true,
+  bootstrapAdminSecret = '',
+  bootstrapAdminAllowedIps = ['127.0.0.1', '::1'],
   smtp,
   getSmtpConfig
 }) {
@@ -393,7 +397,7 @@ function registerAuthRoutes({
         try {
           authSession = await establishAuthenticatedSession(req, buildSessionUserFromRow(user));
         } catch (error) {
-          console.error('[auth] failed to establish login session:', error);
+          logger.error('auth_login_session_failed', { error: String(error.message || error) });
           return res.status(500).json({ error: 'Не удалось создать сессию' });
         }
         return res.json({ ok: true, user: authSession.user, csrfToken: authSession.csrfToken });
@@ -406,6 +410,23 @@ function registerAuthRoutes({
   function isFirstUserBootstrapAvailable() {
     const row = db.prepare('SELECT COUNT(*) AS total FROM auth.users').get();
     return Number(row?.total || 0) === 0;
+  }
+
+  function normalizeIp(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('::ffff:')) return raw.slice('::ffff:'.length);
+    return raw;
+  }
+
+  function isBootstrapIpAllowed(req) {
+    const allowed = new Set((Array.isArray(bootstrapAdminAllowedIps) ? bootstrapAdminAllowedIps : [])
+      .map((item) => normalizeIp(item))
+      .filter(Boolean));
+    if (allowed.size === 0) return true;
+    const requestIp = normalizeIp(req?.ip || req?.socket?.remoteAddress || '');
+    if (!requestIp) return false;
+    return allowed.has(requestIp);
   }
 
   function completeRegistration(req, row, options = {}) {
@@ -474,6 +495,30 @@ function registerAuthRoutes({
     }
 
     if (bootstrapFirstAdmin) {
+      if (!bootstrapAdminEnabled) {
+        logger.warn('bootstrap_admin_blocked', {
+          reason: 'disabled',
+          ip: normalizeIp(req?.ip || req?.socket?.remoteAddress || '')
+        });
+        return res.status(403).json({ error: 'Bootstrap admin registration is disabled' });
+      }
+      if (!isBootstrapIpAllowed(req)) {
+        logger.warn('bootstrap_admin_blocked', {
+          reason: 'ip_not_allowed',
+          ip: normalizeIp(req?.ip || req?.socket?.remoteAddress || '')
+        });
+        return res.status(403).json({ error: 'Bootstrap admin registration is not allowed from this IP' });
+      }
+      if (bootstrapAdminSecret) {
+        const providedSecret = String(req.get('x-bootstrap-admin-secret') || '').trim();
+        if (!providedSecret || providedSecret !== bootstrapAdminSecret) {
+          logger.warn('bootstrap_admin_blocked', {
+            reason: 'secret_mismatch',
+            ip: normalizeIp(req?.ip || req?.socket?.remoteAddress || '')
+          });
+          return res.status(403).json({ error: 'Bootstrap admin secret is required' });
+        }
+      }
       const existingUser = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
       if (existingUser) {
         return res.status(409).json({ error: 'Пользователь с таким email уже зарегистрирован' });
@@ -496,7 +541,7 @@ function registerAuthRoutes({
       try {
         authSession = await establishAuthenticatedSession(req, done.user);
       } catch (error) {
-        console.error('[auth] failed to establish bootstrap session:', error);
+        logger.error('auth_bootstrap_session_failed', { error: String(error.message || error) });
         return res.status(500).json({ error: 'Не удалось создать сессию' });
       }
       return res.json({
@@ -558,7 +603,7 @@ function registerAuthRoutes({
     try {
       await sendRegistrationCodeEmail({ to: email, code, expiresInMinutes: registrationCodeTtlMinutes, confirmUrl });
     } catch (error) {
-      console.error(`[auth] failed to send registration code to ${email}:`, error);
+      logger.error('auth_registration_code_send_failed', { email, error: String(error.message || error) });
       return res.status(502).json({ error: 'Не удалось отправить письмо с кодом подтверждения' });
     }
 
@@ -617,7 +662,7 @@ function registerAuthRoutes({
     try {
       authSession = await establishAuthenticatedSession(req, done.user);
     } catch (error) {
-      console.error('[auth] failed to establish registration (code) session:', error);
+      logger.error('auth_registration_code_session_failed', { error: String(error.message || error) });
       return res.status(500).json({ error: 'Не удалось создать сессию' });
     }
     return res.json({ ok: true, user: authSession.user, csrfToken: authSession.csrfToken });
@@ -656,7 +701,7 @@ function registerAuthRoutes({
     try {
       authSession = await establishAuthenticatedSession(req, done.user);
     } catch (error) {
-      console.error('[auth] failed to establish registration (link) session:', error);
+      logger.error('auth_registration_link_session_failed', { error: String(error.message || error) });
       return res.status(500).json({ error: 'Не удалось создать сессию' });
     }
     return res.json({ ok: true, user: authSession.user, csrfToken: authSession.csrfToken });
@@ -739,7 +784,7 @@ function registerAuthRoutes({
     try {
       await sendPasswordResetEmail({ to: email, resetUrl, expiresInMinutes: passwordResetTtlMinutes });
     } catch (error) {
-      console.error(`[auth] failed to send password reset email to ${email}:`, error);
+      logger.error('auth_password_reset_send_failed', { email, error: String(error.message || error) });
       return res.status(502).json({ error: 'Не удалось отправить письмо для сброса пароля' });
     }
 

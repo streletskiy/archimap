@@ -26,10 +26,14 @@ body {
   padding: 0;
   width: 100%;
   min-height: 100%;
-  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   color: var(--fg);
   background: var(--bg);
   overflow-x: hidden;
+}
+
+#svelte-root {
+  display: contents;
 }
 
 button,
