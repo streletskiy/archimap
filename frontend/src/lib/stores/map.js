@@ -1,11 +1,23 @@
 import { writable } from 'svelte/store';
 
+function getInitialLabelsVisibility() {
+  if (typeof window === 'undefined') return true;
+  try {
+    const stored = localStorage.getItem('archimap-map-labels-visible');
+    if (stored === '0') return false;
+    if (stored === '1') return true;
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
 export const selectedBuilding = writable(null);
 export const mapReady = writable(false);
 export const mapCenter = writable(null);
 export const mapZoom = writable(null);
 export const mapFocusRequest = writable(null);
-export const mapLabelsVisible = writable(true);
+export const mapLabelsVisible = writable(getInitialLabelsVisibility());
 
 export function setSelectedBuilding(item) {
   selectedBuilding.set(item || null);

@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
   import { buildingModalOpen, closeBuildingModal } from '$lib/stores/ui';
   import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
@@ -172,8 +173,10 @@
     tabindex="0"
     on:click={closeOnBackdrop}
     on:keydown={closeOnKeydown}
+    in:fade={{ duration: 160 }}
+    out:fade={{ duration: 150 }}
   >
-    <section id="building-modal" class="modal">
+    <section id="building-modal" class="modal" in:fly={{ x: 18, y: -6, duration: 210, opacity: 0.2 }} out:fly={{ x: 18, y: -6, duration: 180, opacity: 0.2 }}>
       <header>
         <h3>{$t('buildingModal.title')}</h3>
         <button type="button" class="close ui-btn ui-btn-secondary ui-btn-xs" on:click={closeModal}>×</button>

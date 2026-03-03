@@ -1,5 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
   import { page } from '$app/stores';
   import { clearSession, session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
@@ -36,6 +37,7 @@
   let searchText = '';
   let handledRegisterToken = '';
   let handledResetToken = '';
+  let themeObserver = null;
 
   const FILTER_TAG_LABEL_KEYS = Object.freeze({
     architect: 'header.filterLabels.architect',
@@ -137,6 +139,14 @@
     menuOpen = false;
   }
 
+  function toggleFilterPanel() {
+    filterOpen = !filterOpen;
+  }
+
+  function toggleMenuPanel() {
+    menuOpen = !menuOpen;
+  }
+
   function addFilterRow() {
     const nextId = Math.max(0, ...filterRows.map((row) => Number(row.id) || 0)) + 1;
     filterRows = [...filterRows, { id: nextId, key: '', op: 'contains', value: '' }];
@@ -170,6 +180,10 @@
   function closeFloatingPanels() {
     menuOpen = false;
     filterOpen = false;
+  }
+
+  function getCurrentTheme() {
+    return String(document.documentElement.getAttribute('data-theme') || '').toLowerCase() === 'dark' ? 'dark' : 'light';
   }
 
   function getFilterTagDisplayName(tagKey) {
@@ -453,7 +467,7 @@
 
   onMount(() => {
     loadMe();
-    darkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
+    darkTheme = getCurrentTheme() === 'dark';
     searchText = String($searchState.query || '');
     try {
       const storedLabels = localStorage.getItem('archimap-map-labels-visible');
@@ -463,10 +477,18 @@
     } catch {
       // ignore
     }
+    themeObserver = new MutationObserver(() => {
+      darkTheme = getCurrentTheme() === 'dark';
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     loadFilterTagKeys();
   });
 
   onDestroy(() => {
+    if (themeObserver) {
+      themeObserver.disconnect();
+      themeObserver = null;
+    }
     if (filterTagKeysRetryTimer) {
       clearTimeout(filterTagKeysRetryTimer);
       filterTagKeysRetryTimer = null;
@@ -492,7 +514,7 @@
   <div class="nav">
     <div class="left">
       <a href={navHref('/')} class="logo">{$t('common.appName')}</a>
-      <button type="button" class="icon-btn" aria-label={$t('header.openFilters')} on:click={() => (filterOpen = !filterOpen)}>
+      <button type="button" class="icon-btn" aria-label={$t('header.openFilters')} on:click={toggleFilterPanel}>
         <svg viewBox="0 0 512 512" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
       </button>
     </div>
@@ -506,18 +528,18 @@
       <button type="button" class="icon-btn search-mobile-btn" aria-label={$t('header.openSearch')} on:click={openMobileSearch}>
         <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
       </button>
-      <button type="button" class="icon-btn menu-btn-trigger" aria-label={$t('header.openMenu')} aria-expanded={menuOpen} on:click={() => (menuOpen = !menuOpen)}>
+      <button type="button" class="icon-btn menu-btn-trigger" aria-label={$t('header.openMenu')} aria-expanded={menuOpen} on:click={toggleMenuPanel}>
         <svg viewBox="0 0 640 640" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"/></svg>
       </button>
     </div>
   </div>
 
   {#if menuOpen || filterOpen}
-    <button type="button" class="nav-backdrop" aria-label={$t('header.closePanels')} on:click={closeFloatingPanels}></button>
+    <button type="button" class="nav-backdrop" aria-label={$t('header.closePanels')} on:click={closeFloatingPanels} in:fade={{ duration: 140 }} out:fade={{ duration: 140 }}></button>
   {/if}
 
   {#if filterOpen}
-    <div class="filter-panel">
+    <div class="filter-panel" in:fly={{ x: -10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: -10, y: -8, duration: 170, opacity: 0.2 }}>
       <div class="filter-head">
         <h4>{$t('header.filterTitle')}</h4>
         <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('header.closeFilter')} on:click={() => (filterOpen = false)}>×</button>
@@ -569,7 +591,7 @@
   {/if}
 
   {#if menuOpen}
-    <div class="menu">
+    <div class="menu" in:fly={{ x: 10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: 10, y: -8, duration: 170, opacity: 0.2 }}>
       {#if !$session.authenticated}
         <button type="button" class="ui-btn ui-btn-primary menu-btn" on:click={() => openAuth('login')}>{$t('header.login')}</button>
         <button type="button" class="ui-btn ui-btn-secondary menu-btn" on:click={() => openAuth('register')}>{$t('header.register')}</button>
@@ -759,8 +781,9 @@
     display: none;
   }
   .menu {
-    margin-top: 0.35rem;
-    margin-left: auto;
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0.75rem;
     width: min(17rem, calc(100vw - 1.5rem));
     border: 1px solid #cbd5e1;
     border-radius: 0.85rem;
@@ -770,11 +793,12 @@
     display: grid;
     gap: 0.35rem;
     pointer-events: auto;
-    position: relative;
     z-index: 2;
   }
   .filter-panel {
-    margin-top: 0.35rem;
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 0.75rem;
     width: min(30rem, calc(100vw - 1.5rem));
     border: 1px solid #cbd5e1;
     border-radius: 0.85rem;
@@ -784,7 +808,6 @@
     display: grid;
     gap: 0.5rem;
     pointer-events: auto;
-    position: relative;
     z-index: 2;
   }
   .nav-backdrop {
@@ -856,16 +879,16 @@
   }
   .switch {
     position: relative;
-    --switch-width: 2.8rem;
-    --switch-height: 1.55rem;
-    --switch-pad: 0.16rem;
-    --knob-size: 1.2rem;
+    --switch-width: 3.15rem;
+    --switch-height: 1.5rem;
+    --switch-pad: 0.12rem;
+    --knob-size: 1.25rem;
     width: var(--switch-width);
     height: var(--switch-height);
     display: inline-flex;
   }
   .switch-icons {
-    --switch-width: 4.75rem;
+    --switch-width: 3.15rem;
     width: var(--switch-width);
   }
   .switch-icons .icon-on,
@@ -884,11 +907,11 @@
     pointer-events: none;
   }
   .switch-icons .icon-on {
-    left: calc(var(--switch-pad) + 0.03rem);
+    left: calc(var(--switch-pad) + 0.08rem);
     color: #1f2937;
   }
   .switch-icons .icon-off {
-    right: calc(var(--switch-pad) + 0.03rem);
+    right: calc(var(--switch-pad) + 0.08rem);
     opacity: 0.9;
   }
   .switch-icons .icon-center {
@@ -905,6 +928,12 @@
     transform: translateY(-50%);
     transition: transform 0.2s, color 0.2s;
     pointer-events: none;
+  }
+  .switch-icons .icon-on svg,
+  .switch-icons .icon-off svg,
+  .switch-icons .icon-center svg {
+    width: 0.72rem;
+    height: 0.72rem;
   }
   .switch-labels input:checked ~ .icon-center {
     transform: translate(
