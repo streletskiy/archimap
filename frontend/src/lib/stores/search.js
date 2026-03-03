@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { UI_STRINGS } from '$lib/i18n/ui-strings';
+import { translateNow } from '$lib/i18n/index';
 
 const initialState = {
   modalOpen: false,
@@ -9,7 +9,7 @@ const initialState = {
   nextCursor: null,
   loading: false,
   loadingMore: false,
-  status: UI_STRINGS.search.minChars,
+  status: translateNow('search.minChars'),
   error: '',
   fitSeq: 0
 };
@@ -41,7 +41,7 @@ export function closeSearchModal() {
   }));
 }
 
-export function resetSearchState(message = UI_STRINGS.search.minChars) {
+export function resetSearchState(message = translateNow('search.minChars')) {
   searchState.update((state) => ({
     ...state,
     items: [],
@@ -49,7 +49,7 @@ export function resetSearchState(message = UI_STRINGS.search.minChars) {
     nextCursor: null,
     loading: false,
     loadingMore: false,
-    status: String(message || UI_STRINGS.search.minChars),
+    status: String(message || translateNow('search.minChars')),
     error: ''
   }));
 }
@@ -60,7 +60,9 @@ export function setSearchLoading({ append = false } = {}) {
     loading: !append,
     loadingMore: Boolean(append),
     error: '',
-    status: append ? UI_STRINGS.search.found(state.items.length) : UI_STRINGS.search.searching
+    status: append
+      ? translateNow('search.found', { count: state.items.length })
+      : translateNow('search.searching')
   }));
 }
 
@@ -77,14 +79,16 @@ export function applySearchResults({ query, items, hasMore, nextCursor, append =
       loading: false,
       loadingMore: false,
       error: '',
-      status: nextItems.length > 0 ? UI_STRINGS.search.found(nextItems.length) : UI_STRINGS.search.notFound,
+      status: nextItems.length > 0
+        ? translateNow('search.found', { count: nextItems.length })
+        : translateNow('search.notFound'),
       fitSeq: append ? state.fitSeq : state.fitSeq + 1
     };
   });
 }
 
 export function setSearchError(message, { append = false } = {}) {
-  const text = String(message || UI_STRINGS.search.failed);
+  const text = String(message || translateNow('search.failed'));
   searchState.update((state) => ({
     ...state,
     loading: false,

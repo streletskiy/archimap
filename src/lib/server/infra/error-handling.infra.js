@@ -1,7 +1,7 @@
 function registerErrorHandlers(app, { logger = console, nodeEnv = 'development' } = {}) {
   app.use((req, res, next) => {
     if (res.headersSent) return next();
-    return res.status(404).json({ error: 'Not found' });
+    return res.status(404).json({ code: 'ERR_NOT_FOUND', error: 'Not found' });
   });
 
   app.use((error, req, res, _next) => {
@@ -19,6 +19,7 @@ function registerErrorHandlers(app, { logger = console, nodeEnv = 'development' 
     });
 
     const payload = {
+      code: String(error?.code || (safeStatus >= 500 ? 'ERR_INTERNAL' : 'ERR_REQUEST_FAILED')),
       error: safeStatus >= 500 ? 'Internal server error' : String(error?.message || 'Request failed'),
       requestId: requestId || null
     };

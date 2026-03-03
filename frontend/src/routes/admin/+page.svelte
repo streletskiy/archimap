@@ -9,6 +9,7 @@
   import { session } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
   import { getRuntimeConfig } from '$lib/services/config';
+  import { t, translateNow } from '$lib/i18n/index';
 
   const LIGHT = '/styles/positron-custom.json';
   const DARK = '/styles/dark-matter-custom.json';
@@ -21,7 +22,7 @@
 
   let users = [];
   let usersLoading = false;
-  let usersStatus = 'Загрузка...';
+  let usersStatus = translateNow('admin.loading');
   let usersQuery = '';
   let usersRole = 'all';
   let usersCanEdit = 'all';
@@ -32,7 +33,7 @@
   let edits = [];
   let visibleEdits = [];
   let editsLoading = false;
-  let editsStatus = 'Загрузка...';
+  let editsStatus = translateNow('admin.loading');
   let editsFilter = 'all';
   let editsLimit = 200;
   let editsQuery = '';
@@ -77,11 +78,11 @@
 
   function statusBadgeMeta(status) {
     const s = String(status || '').trim().toLowerCase();
-    if (s === 'accepted') return { text: 'Принято', cls: 'bg-emerald-100 text-emerald-700' };
-    if (s === 'partially_accepted') return { text: 'Частично принято', cls: 'bg-blue-50 text-blue-700' };
-    if (s === 'rejected') return { text: 'Отклонено', cls: 'bg-rose-100 text-rose-700' };
-    if (s === 'superseded') return { text: 'Заменено новой правкой', cls: 'bg-slate-100 text-slate-700' };
-    return { text: 'На рассмотрении', cls: 'bg-amber-100 text-amber-700' };
+    if (s === 'accepted') return { text: translateNow('admin.status.accepted'), cls: 'bg-emerald-100 text-emerald-700' };
+    if (s === 'partially_accepted') return { text: translateNow('admin.status.partially_accepted'), cls: 'bg-blue-50 text-blue-700' };
+    if (s === 'rejected') return { text: translateNow('admin.status.rejected'), cls: 'bg-rose-100 text-rose-700' };
+    if (s === 'superseded') return { text: translateNow('admin.status.superseded'), cls: 'bg-slate-100 text-slate-700' };
+    return { text: translateNow('admin.status.pending'), cls: 'bg-amber-100 text-amber-700' };
   }
 
   function keyOf(item) {
@@ -287,7 +288,7 @@
 
   async function loadUsers() {
     usersLoading = true;
-    usersStatus = 'Загрузка...';
+    usersStatus = translateNow('admin.loading');
     try {
       const p = new URLSearchParams();
       if (String(usersQuery || '').trim()) p.set('q', String(usersQuery).trim());
@@ -300,10 +301,10 @@
       p.set('sortDir', usersSortDir);
       const data = await apiJson(`/api/admin/users?${p.toString()}`);
       users = Array.isArray(data?.items) ? data.items : [];
-      usersStatus = users.length ? `Найдено: ${users.length}` : 'Пусто';
+      usersStatus = users.length ? translateNow('admin.users.found', { count: users.length }) : translateNow('admin.empty');
     } catch (e) {
       users = [];
-      usersStatus = msg(e, 'Не удалось загрузить пользователей');
+      usersStatus = msg(e, translateNow('admin.users.loadFailed'));
     } finally {
       usersLoading = false;
     }
@@ -318,7 +319,7 @@
       });
       await loadUsers();
     } catch (e) {
-      usersStatus = msg(e, 'Не удалось изменить право редактирования');
+      usersStatus = msg(e, translateNow('admin.users.permUpdateFailed'));
     }
   }
 
@@ -331,13 +332,13 @@
       });
       await loadUsers();
     } catch (e) {
-      usersStatus = msg(e, 'Не удалось изменить роль');
+      usersStatus = msg(e, translateNow('admin.users.roleUpdateFailed'));
     }
   }
 
   async function loadEdits() {
     editsLoading = true;
-    editsStatus = 'Загрузка...';
+    editsStatus = translateNow('admin.loading');
     try {
       const p = new URLSearchParams();
       p.set('status', 'all');
@@ -355,12 +356,14 @@
       ensureMap();
       applyMapData();
       fitAllEdited();
-      editsStatus = visibleEdits.length ? `Показано: ${visibleEdits.length} из ${edits.length}` : 'Пусто';
+      editsStatus = visibleEdits.length
+        ? translateNow('admin.edits.statusShown', { visible: visibleEdits.length, total: edits.length })
+        : translateNow('admin.empty');
       await maybeOpenPendingUrlEdit();
     } catch (e) {
       edits = [];
       visibleEdits = [];
-      editsStatus = msg(e, 'Не удалось загрузить правки');
+      editsStatus = msg(e, translateNow('admin.edits.loadFailed'));
     } finally {
       editsLoading = false;
     }
@@ -374,7 +377,7 @@
     detailPaneVisible = true;
     selectedEdit = null;
     detailLoading = true;
-    detailStatus = 'Загрузка...';
+    detailStatus = translateNow('admin.loading');
     fieldDecisions = {};
     fieldValues = {};
     moderationComment = '';
@@ -404,7 +407,7 @@
     } catch (e) {
       if (requestToken !== detailRequestToken) return;
       selectedEdit = null;
-      detailStatus = msg(e, 'Не удалось загрузить детали');
+      detailStatus = msg(e, translateNow('admin.edits.detailsLoadFailed'));
     } finally {
       if (requestToken === detailRequestToken) detailLoading = false;
     }
@@ -438,7 +441,7 @@
   function commentWithRejected(base, rejected) {
     const b = String(base || '').trim();
     if (!rejected.length) return b;
-    const note = `Отклонены поля: ${rejected.join(', ')}`;
+    const note = translateNow('admin.edits.commentRejectedFields', { fields: rejected.join(', ') });
     return b ? `${b}\n\n${note}` : note;
   }
 
@@ -477,7 +480,7 @@
       await loadEdits();
       await openEdit(selectedEdit.editId || selectedEdit.id);
     } catch (e) {
-      detailStatus = msg(e, 'Не удалось применить решение');
+      detailStatus = msg(e, translateNow('admin.edits.decisionFailed'));
     } finally {
       moderationBusy = false;
     }
@@ -485,13 +488,13 @@
 
   async function loadGeneral() {
     generalLoading = true;
-    generalStatus = 'Загрузка...';
+    generalStatus = translateNow('admin.loading');
     try {
       const data = await apiJson('/api/admin/app-settings/general');
       general = data?.item?.general || general;
       generalStatus = '';
     } catch (e) {
-      generalStatus = msg(e, 'Не удалось загрузить настройки');
+      generalStatus = msg(e, translateNow('admin.settings.loadGeneralFailed'));
     } finally {
       generalLoading = false;
     }
@@ -500,16 +503,16 @@
   async function saveGeneral(event) {
     event.preventDefault();
     generalLoading = true;
-    generalStatus = 'Сохраняем...';
+    generalStatus = translateNow('admin.settings.saving');
     try {
       await apiJson('/api/admin/app-settings/general', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ general })
       });
-      generalStatus = 'Сохранено';
+      generalStatus = translateNow('admin.settings.saved');
     } catch (e) {
-      generalStatus = msg(e, 'Не удалось сохранить');
+      generalStatus = msg(e, translateNow('admin.settings.saveGeneralFailed'));
     } finally {
       generalLoading = false;
     }
@@ -517,14 +520,14 @@
 
   async function loadSmtp() {
     smtpLoading = true;
-    smtpStatus = 'Загрузка...';
+    smtpStatus = translateNow('admin.loading');
     try {
       const data = await apiJson('/api/admin/app-settings/smtp');
       const s = data?.item?.smtp || {};
       smtp = { url: String(s.url || ''), host: String(s.host || ''), port: Number(s.port || 587), secure: Boolean(s.secure), user: String(s.user || ''), pass: '', from: String(s.from || ''), hasPassword: Boolean(s.hasPassword) };
       smtpStatus = '';
     } catch (e) {
-      smtpStatus = msg(e, 'Не удалось загрузить SMTP');
+      smtpStatus = msg(e, translateNow('admin.settings.loadSmtpFailed'));
     } finally {
       smtpLoading = false;
     }
@@ -533,7 +536,7 @@
   async function saveSmtp(event) {
     event.preventDefault();
     smtpLoading = true;
-    smtpStatus = 'Сохраняем...';
+    smtpStatus = translateNow('admin.settings.saving');
     try {
       await apiJson('/api/admin/app-settings/smtp', {
         method: 'POST',
@@ -541,9 +544,9 @@
         body: JSON.stringify({ smtp: { ...smtp, keepPassword: String(smtp.pass || '').trim() === '' } })
       });
       smtp.pass = '';
-      smtpStatus = 'SMTP сохранен';
+      smtpStatus = translateNow('admin.settings.smtpSaved');
     } catch (e) {
-      smtpStatus = msg(e, 'Не удалось сохранить SMTP');
+      smtpStatus = msg(e, translateNow('admin.settings.saveSmtpFailed'));
     } finally {
       smtpLoading = false;
     }
@@ -551,16 +554,16 @@
 
   async function testSmtp() {
     smtpLoading = true;
-    smtpStatus = 'Тестируем...';
+    smtpStatus = translateNow('admin.settings.smtpTesting');
     try {
       const data = await apiJson('/api/admin/app-settings/smtp/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ testEmail: smtpTestEmail, smtp: { ...smtp, keepPassword: String(smtp.pass || '').trim() === '' } })
       });
-      smtpStatus = String(data?.message || 'Тест отправлен');
+      smtpStatus = String(data?.message || translateNow('admin.settings.smtpTestSent'));
     } catch (e) {
-      smtpStatus = msg(e, 'Не удалось отправить тест');
+      smtpStatus = msg(e, translateNow('admin.settings.smtpTestFailed'));
     } finally {
       smtpLoading = false;
     }
@@ -627,7 +630,9 @@
       applyMapData();
       fitAllEdited();
     }
-    editsStatus = editsLoading ? 'Загрузка...' : `Показано: ${visibleEdits.length} из ${edits.length}`;
+    editsStatus = editsLoading
+      ? translateNow('admin.loading')
+      : translateNow('admin.edits.statusShown', { visible: visibleEdits.length, total: edits.length });
   }
 
   onMount(() => {
@@ -655,45 +660,45 @@
 </script>
 
 {#if !$session.authenticated}
-  <main class="w-full px-3 pb-5 pt-[5.5rem]"><section class="rounded-2xl border border-slate-200 bg-white/95 p-5"><h1 class="text-xl font-extrabold text-slate-900">Требуется вход</h1></section></main>
+  <main class="w-full px-3 pb-5 pt-[5.5rem]"><section class="rounded-2xl border border-slate-200 bg-white/95 p-5"><h1 class="text-xl font-extrabold text-slate-900">{$t('admin.authRequired')}</h1></section></main>
 {:else if !$session.user?.isAdmin}
-  <main class="w-full px-3 pb-5 pt-[5.5rem]"><section class="rounded-2xl border border-slate-200 bg-white/95 p-5"><h1 class="text-xl font-extrabold text-slate-900">Доступ запрещен</h1></section></main>
+  <main class="w-full px-3 pb-5 pt-[5.5rem]"><section class="rounded-2xl border border-slate-200 bg-white/95 p-5"><h1 class="text-xl font-extrabold text-slate-900">{$t('admin.forbidden')}</h1></section></main>
 {:else}
   <section class="page-with-edit-pane w-full px-3 pb-5 pt-[5.5rem]">
     <section class="rounded-2xl border border-slate-200 bg-white/95 p-4">
       <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
-        <li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'edits'} on:click={() => switchTab('edits')}>Все правки</button></li>
-        <li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'users'} on:click={() => switchTab('users')}>Пользователи</button></li>
-        <li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'settings'} on:click={() => switchTab('settings')}>Настройки</button></li>
+        <li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'edits'} on:click={() => switchTab('edits')}>{$t('admin.tabs.edits')}</button></li>
+        <li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'users'} on:click={() => switchTab('users')}>{$t('admin.tabs.users')}</button></li>
+        <li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'settings'} on:click={() => switchTab('settings')}>{$t('admin.tabs.settings')}</button></li>
       </ul>
 
       {#if activeTab === 'users'}
         <div class="mt-3 space-y-3">
           <form class="grid gap-2 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]" on:submit|preventDefault={loadUsers}>
-            <input class="ui-field" type="search" placeholder="Поиск по имени и email" bind:value={usersQuery} />
-            <select class="ui-field" bind:value={usersRole}><option value="all">Роль: все</option><option value="admin">Только админы</option><option value="user">Только пользователи</option></select>
-            <select class="ui-field" bind:value={usersCanEdit}><option value="all">Право правки: все</option><option value="yes">Может редактировать</option><option value="no">Без правки</option></select>
-            <select class="ui-field" bind:value={usersHasEdits}><option value="all">Правки: все</option><option value="yes">Есть правки</option><option value="no">Нет правок</option></select>
-            <div class="flex gap-2"><select class="ui-field" bind:value={usersSortBy}><option value="createdAt">Сортировка: регистрация</option><option value="email">Email</option><option value="editsCount">Число правок</option><option value="lastEditAt">Последняя правка</option><option value="firstName">Имя</option><option value="lastName">Фамилия</option></select><select class="ui-field ui-field-xs" bind:value={usersSortDir}><option value="desc">DESC</option><option value="asc">ASC</option></select><button type="submit" class="ui-btn ui-btn-secondary">Обновить</button></div>
+            <input class="ui-field" type="search" placeholder={$t('admin.users.search')} bind:value={usersQuery} />
+            <select class="ui-field" bind:value={usersRole}><option value="all">{$t('admin.users.roleAll')}</option><option value="admin">{$t('admin.users.roleAdmins')}</option><option value="user">{$t('admin.users.roleUsers')}</option></select>
+            <select class="ui-field" bind:value={usersCanEdit}><option value="all">{$t('admin.users.permAll')}</option><option value="yes">{$t('admin.users.permYes')}</option><option value="no">{$t('admin.users.permNo')}</option></select>
+            <select class="ui-field" bind:value={usersHasEdits}><option value="all">{$t('admin.users.editsAll')}</option><option value="yes">{$t('admin.users.editsYes')}</option><option value="no">{$t('admin.users.editsNo')}</option></select>
+            <div class="flex gap-2"><select class="ui-field" bind:value={usersSortBy}><option value="createdAt">{$t('admin.users.sortRegistered')}</option><option value="email">{$t('admin.users.sortEmail')}</option><option value="editsCount">{$t('admin.users.sortEditsCount')}</option><option value="lastEditAt">{$t('admin.users.sortLastEdit')}</option><option value="firstName">{$t('admin.users.sortFirstName')}</option><option value="lastName">{$t('admin.users.sortLastName')}</option></select><select class="ui-field ui-field-xs" bind:value={usersSortDir}><option value="desc">{$t('common.desc')}</option><option value="asc">{$t('common.asc')}</option></select><button type="submit" class="ui-btn ui-btn-secondary">{$t('common.refresh')}</button></div>
           </form>
           <p class="text-sm text-slate-600">{usersStatus}</p>
           <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
             <table class="min-w-full text-sm">
               <thead>
                 <tr class="border-b border-slate-200 text-left text-slate-600">
-                  <th class="px-3 py-2">Email</th>
-                  <th class="px-3 py-2">Роль</th>
-                  <th class="px-3 py-2">Правки</th>
-                  <th class="px-3 py-2">Регистрация</th>
-                  <th class="px-3 py-2">Последняя правка</th>
-                  <th class="px-3 py-2">Действия</th>
+                  <th class="px-3 py-2">{$t('admin.users.table.email')}</th>
+                  <th class="px-3 py-2">{$t('admin.users.table.role')}</th>
+                  <th class="px-3 py-2">{$t('admin.users.table.edits')}</th>
+                  <th class="px-3 py-2">{$t('admin.users.table.registration')}</th>
+                  <th class="px-3 py-2">{$t('admin.users.table.lastEdit')}</th>
+                  <th class="px-3 py-2">{$t('admin.users.table.actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {#if usersLoading}
-                  <tr><td colspan="6" class="px-3 py-3 text-slate-500">Загрузка...</td></tr>
+                  <tr><td colspan="6" class="px-3 py-3 text-slate-500">{$t('admin.loading')}</td></tr>
                 {:else if users.length===0}
-                  <tr><td colspan="6" class="px-3 py-3 text-slate-500">Пусто</td></tr>
+                  <tr><td colspan="6" class="px-3 py-3 text-slate-500">{$t('admin.empty')}</td></tr>
                 {:else}
                   {#each users as u (`${u.email}`)}
                     <tr class="border-b border-slate-100">
@@ -705,17 +710,17 @@
                       </td>
                       <td class="px-3 py-2">
                         {#if u.isMasterAdmin}
-                          <span class="badge-pill mr-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Мастер-админ</span>
+                          <span class="badge-pill mr-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">{$t('admin.users.masterAdmin')}</span>
                         {/if}
-                        <span class="badge-pill mr-1 rounded-full px-2.5 py-1 text-xs font-semibold {u.isAdmin ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700'}">{u.isAdmin ? 'Админ' : 'Пользователь'}</span>
-                        <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {u.canEdit ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}">{u.canEdit ? 'Может редактировать' : 'Только просмотр'}</span>
+                        <span class="badge-pill mr-1 rounded-full px-2.5 py-1 text-xs font-semibold {u.isAdmin ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700'}">{u.isAdmin ? $t('admin.users.admin') : $t('admin.users.user')}</span>
+                        <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {u.canEdit ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}">{u.canEdit ? $t('admin.users.canEdit') : $t('admin.users.readOnly')}</span>
                       </td>
                       <td class="px-3 py-2">{u.editsCount || 0}</td>
                       <td class="px-3 py-2">{fmt(u.createdAt)}</td>
                       <td class="px-3 py-2">{fmt(u.lastEditAt)}</td>
                       <td class="px-3 py-2">
-                        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => toggleCanEdit(u)}>{u.canEdit ? 'Отключить правку' : 'Разрешить правку'}</button>
-                        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => toggleAdmin(u)} disabled={!$session.user?.isMasterAdmin || Boolean(u.isMasterAdmin)}>{u.isAdmin ? 'Снять admin' : 'Сделать admin'}</button>
+                        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => toggleCanEdit(u)}>{u.canEdit ? $t('admin.users.disableEdit') : $t('admin.users.enableEdit')}</button>
+                        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => toggleAdmin(u)} disabled={!$session.user?.isMasterAdmin || Boolean(u.isMasterAdmin)}>{u.isAdmin ? $t('admin.users.demoteAdmin') : $t('admin.users.promoteAdmin')}</button>
                       </td>
                     </tr>
                   {/each}
@@ -726,34 +731,34 @@
         </div>
       {:else if activeTab === 'settings'}
         {#if !$session.user?.isMasterAdmin}
-          <p class="mt-3 text-sm text-slate-600">Раздел доступен только `master admin`.</p>
+          <p class="mt-3 text-sm text-slate-600">{$t('admin.settings.masterOnly')}</p>
         {:else}
           <div class="mt-3 grid gap-4 lg:grid-cols-2">
-            <form class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" on:submit={saveGeneral}><h3 class="text-base font-bold text-slate-900">Общие настройки</h3><input class="ui-field" bind:value={general.appDisplayName} placeholder="Название приложения" /><input class="ui-field" bind:value={general.appBaseUrl} placeholder="https://example.com" /><label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" bind:checked={general.registrationEnabled} /> Регистрация включена</label><label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" bind:checked={general.userEditRequiresPermission} /> Редактирование требует отдельного разрешения</label><button type="submit" class="ui-btn ui-btn-primary" disabled={generalLoading}>Сохранить</button>{#if generalStatus}<p class="text-sm text-slate-600">{generalStatus}</p>{/if}</form>
-            <form class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" on:submit={saveSmtp}><h3 class="text-base font-bold text-slate-900">SMTP</h3><input class="ui-field" bind:value={smtp.url} placeholder="SMTP URL" /><div class="grid gap-2 sm:grid-cols-2"><input class="ui-field" bind:value={smtp.host} placeholder="Host" /><input class="ui-field" type="number" min="1" max="65535" bind:value={smtp.port} placeholder="Port" /></div><input class="ui-field" bind:value={smtp.user} placeholder="User" /><input class="ui-field" type="password" bind:value={smtp.pass} placeholder={smtp.hasPassword ? 'Оставьте пустым, чтобы не менять' : 'Password'} /><input class="ui-field" bind:value={smtp.from} placeholder="From" /><label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" bind:checked={smtp.secure} /> Secure</label><div class="grid gap-2 sm:grid-cols-[1fr_auto_auto]"><input class="ui-field" type="email" bind:value={smtpTestEmail} placeholder="email для теста" /><button type="button" class="ui-btn ui-btn-secondary" on:click={testSmtp} disabled={smtpLoading}>Тест</button><button type="submit" class="ui-btn ui-btn-primary" disabled={smtpLoading}>Сохранить SMTP</button></div>{#if smtpStatus}<p class="text-sm text-slate-600">{smtpStatus}</p>{/if}</form>
+            <form class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" on:submit={saveGeneral}><h3 class="text-base font-bold text-slate-900">{$t('admin.settings.generalTitle')}</h3><input class="ui-field" bind:value={general.appDisplayName} placeholder={$t('admin.settings.appNamePlaceholder')} /><input class="ui-field" bind:value={general.appBaseUrl} placeholder={$t('admin.settings.baseUrlPlaceholder')} /><label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" bind:checked={general.registrationEnabled} /> {$t('admin.settings.registrationEnabled')}</label><label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" bind:checked={general.userEditRequiresPermission} /> {$t('admin.settings.editRequiresPermission')}</label><button type="submit" class="ui-btn ui-btn-primary" disabled={generalLoading}>{$t('common.save')}</button>{#if generalStatus}<p class="text-sm text-slate-600">{generalStatus}</p>{/if}</form>
+            <form class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" on:submit={saveSmtp}><h3 class="text-base font-bold text-slate-900">{$t('admin.settings.smtpTitle')}</h3><input class="ui-field" bind:value={smtp.url} placeholder={$t('admin.settings.smtpUrl')} /><div class="grid gap-2 sm:grid-cols-2"><input class="ui-field" bind:value={smtp.host} placeholder={$t('admin.settings.host')} /><input class="ui-field" type="number" min="1" max="65535" bind:value={smtp.port} placeholder={$t('admin.settings.port')} /></div><input class="ui-field" bind:value={smtp.user} placeholder={$t('admin.settings.user')} /><input class="ui-field" type="password" bind:value={smtp.pass} placeholder={smtp.hasPassword ? $t('admin.settings.passwordKeep') : $t('admin.settings.password')} /><input class="ui-field" bind:value={smtp.from} placeholder={$t('admin.settings.from')} /><label class="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" bind:checked={smtp.secure} /> {$t('admin.settings.secure')}</label><div class="grid gap-2 sm:grid-cols-[1fr_auto_auto]"><input class="ui-field" type="email" bind:value={smtpTestEmail} placeholder={$t('admin.settings.testEmail')} /><button type="button" class="ui-btn ui-btn-secondary" on:click={testSmtp} disabled={smtpLoading}>{$t('admin.settings.smtpTest')}</button><button type="submit" class="ui-btn ui-btn-primary" disabled={smtpLoading}>{$t('admin.settings.smtpSave')}</button></div>{#if smtpStatus}<p class="text-sm text-slate-600">{smtpStatus}</p>{/if}</form>
           </div>
         {/if}
       {:else}
         <div class="mt-3 grid gap-4 overflow-x-hidden" class:lg:grid-cols-[1.1fr_1fr]={detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus)} class:lg:grid-cols-1={!(detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus))}>
           <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
-            <div class="grid gap-2 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]"><input class="ui-field" type="search" placeholder="Поиск по адресу или ID здания" bind:value={editsQuery} /><input class="ui-field" type="date" bind:value={editsDate} /><select class="ui-field" bind:value={editsUser}><option value="">Пользователь: все</option>{#each editsUsers as user (user)}<option value={user}>{user}</option>{/each}</select><select class="ui-field ui-field-xs" bind:value={editsFilter}><option value="all">Статус: все</option><option value="pending">Статус: на рассмотрении</option><option value="accepted">Статус: принято</option><option value="partially_accepted">Статус: частично принято</option><option value="rejected">Статус: отклонено</option><option value="superseded">Статус: заменено новой правкой</option></select><div class="flex gap-2"><select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select><button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>Обновить</button></div></div>
+            <div class="grid gap-2 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]"><input class="ui-field" type="search" placeholder={$t('admin.edits.search')} bind:value={editsQuery} /><input class="ui-field" type="date" bind:value={editsDate} /><select class="ui-field" bind:value={editsUser}><option value="">{$t('admin.edits.userAll')}</option>{#each editsUsers as user (user)}<option value={user}>{user}</option>{/each}</select><select class="ui-field ui-field-xs" bind:value={editsFilter}><option value="all">{$t('admin.edits.statusAll')}</option><option value="pending">{$t('admin.edits.statusPending')}</option><option value="accepted">{$t('admin.edits.statusAccepted')}</option><option value="partially_accepted">{$t('admin.edits.statusPartiallyAccepted')}</option><option value="rejected">{$t('admin.edits.statusRejected')}</option><option value="superseded">{$t('admin.edits.statusSuperseded')}</option></select><div class="flex gap-2"><select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select><button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>{$t('common.refresh')}</button></div></div>
             <p class="text-sm text-slate-600">{editsStatus}</p>
             <div class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border border-slate-200" bind:this={mapEl}></div>
             <div class="overflow-x-auto rounded-xl border border-slate-200">
               <table class="min-w-full text-sm">
                 <thead>
                   <tr class="border-b border-slate-200 text-left text-slate-600">
-                    <th class="px-3 py-2">Здание</th>
-                    <th class="px-3 py-2">Автор</th>
-                    <th class="px-3 py-2">Статус</th>
-                    <th class="px-3 py-2">Изменения тегов</th>
+                    <th class="px-3 py-2">{$t('admin.edits.tableBuilding')}</th>
+                    <th class="px-3 py-2">{$t('admin.edits.tableAuthor')}</th>
+                    <th class="px-3 py-2">{$t('admin.edits.tableStatus')}</th>
+                    <th class="px-3 py-2">{$t('admin.edits.tableChanges')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {#if editsLoading}
-                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">Загрузка...</td></tr>
+                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('admin.loading')}</td></tr>
                   {:else if visibleEdits.length===0}
-                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">Пусто</td></tr>
+                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('admin.empty')}</td></tr>
                   {:else}
                     {#each visibleEdits as it (`${it.id || it.editId}`)}
                       {@const statusMeta = statusBadgeMeta(it.status)}
@@ -762,7 +767,7 @@
                         <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">ID: {it.osmType}/{it.osmId}</p></td>
                         <td class="px-3 py-2">{it.updatedBy || '-'}</td>
                         <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
-                        <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} всего</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} создано</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~{counters.modified} изменено</span>{/if}</div></td>
+                        <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('admin.edits.changesTotal')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('admin.edits.changesCreated')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~{counters.modified} {$t('admin.edits.changesModified')}</span>{/if}</div></td>
                       </tr>
                     {/each}
                   {/if}
@@ -773,19 +778,19 @@
           {#if detailPaneVisible}
           <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-base font-bold text-slate-900">Детали правки</h3>
-              <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" aria-label="Закрыть панель правки" on:click={closeEditPanel}>×</button>
+              <h3 class="text-base font-bold text-slate-900">{$t('admin.edits.detailTitle')}</h3>
+              <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" aria-label={$t('admin.edits.closeDetail')} on:click={closeEditPanel}>×</button>
             </div>
             {#if detailLoading}
-              <p class="text-sm text-slate-500">Загрузка...</p>
+              <p class="text-sm text-slate-500">{$t('admin.loading')}</p>
             {:else if !selectedEdit}
-              <p class="text-sm text-slate-500">Выберите правку в таблице или на карте.</p>
+              <p class="text-sm text-slate-500">{$t('admin.edits.selectHint')}</p>
             {:else}
               {@const selectedStatusMeta = statusBadgeMeta(selectedEdit.status)}
               <p class="flex flex-wrap items-center gap-2 text-sm text-slate-600"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
-              <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border border-slate-200 p-2">{#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length===0}<p class="text-sm text-slate-500">Без изменений</p>{:else}{#each selectedEdit.changes as ch (`${ch.field}`)}<div class="rounded-lg border border-slate-200 bg-slate-50 p-2"><div class="mb-1 flex items-center justify-between gap-2"><p class="text-sm font-semibold text-slate-900">{ch.label || ch.field}</p><div class="flex items-center gap-1"><button type="button" class="ui-btn ui-btn-xs" class:ui-btn-primary={fieldDecisions[ch.field] !== 'reject'} class:ui-btn-secondary={fieldDecisions[ch.field] === 'reject'} on:click={() => (fieldDecisions = { ...fieldDecisions, [ch.field]: 'accept' })}>Принять</button><button type="button" class="ui-btn ui-btn-xs" class:ui-btn-primary={fieldDecisions[ch.field] === 'reject'} class:ui-btn-secondary={fieldDecisions[ch.field] !== 'reject'} on:click={() => (fieldDecisions = { ...fieldDecisions, [ch.field]: 'reject' })}>Отклонить</button></div></div><p class="text-xs text-slate-600"><span class="line-through">{String(ch.osmValue ?? 'пусто')}</span> -> <strong>{String(ch.localValue ?? 'пусто')}</strong></p>{#if fieldDecisions[ch.field] !== 'reject'}<input class="ui-field mt-2" value={fieldValues[ch.field] ?? ''} on:input={(e) => (fieldValues = { ...fieldValues, [ch.field]: e.currentTarget.value })} />{/if}</div>{/each}{/if}</div>
-              <textarea class="ui-field min-h-[84px]" placeholder="Комментарий модератора (необязательно)" bind:value={moderationComment}></textarea>
-              <div class="flex flex-wrap gap-2"><button type="button" class="ui-btn ui-btn-secondary" on:click={() => setAll('accept')}>Принять все поля</button><button type="button" class="ui-btn ui-btn-secondary" on:click={() => setAll('reject')}>Отклонить все поля</button><button type="button" class="ui-btn ui-btn-primary" disabled={moderationBusy} on:click={() => applyDecision('apply')}>Применить решения</button><button type="button" class="ui-btn ui-btn-danger" disabled={moderationBusy} on:click={() => applyDecision('reject')}>Отклонить правку</button></div>
+              <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border border-slate-200 p-2">{#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length===0}<p class="text-sm text-slate-500">{$t('admin.edits.noChanges')}</p>{:else}{#each selectedEdit.changes as ch (`${ch.field}`)}<div class="rounded-lg border border-slate-200 bg-slate-50 p-2"><div class="mb-1 flex items-center justify-between gap-2"><p class="text-sm font-semibold text-slate-900">{ch.label || ch.field}</p><div class="flex items-center gap-1"><button type="button" class="ui-btn ui-btn-xs" class:ui-btn-primary={fieldDecisions[ch.field] !== 'reject'} class:ui-btn-secondary={fieldDecisions[ch.field] === 'reject'} on:click={() => (fieldDecisions = { ...fieldDecisions, [ch.field]: 'accept' })}>{$t('admin.edits.accept')}</button><button type="button" class="ui-btn ui-btn-xs" class:ui-btn-primary={fieldDecisions[ch.field] === 'reject'} class:ui-btn-secondary={fieldDecisions[ch.field] !== 'reject'} on:click={() => (fieldDecisions = { ...fieldDecisions, [ch.field]: 'reject' })}>{$t('admin.edits.reject')}</button></div></div><p class="text-xs text-slate-600"><span class="line-through">{String(ch.osmValue ?? $t('admin.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('admin.edits.emptyValue'))}</strong></p>{#if fieldDecisions[ch.field] !== 'reject'}<input class="ui-field mt-2" value={fieldValues[ch.field] ?? ''} on:input={(e) => (fieldValues = { ...fieldValues, [ch.field]: e.currentTarget.value })} />{/if}</div>{/each}{/if}</div>
+              <textarea class="ui-field min-h-[84px]" placeholder={$t('admin.edits.moderatorComment')} bind:value={moderationComment}></textarea>
+              <div class="flex flex-wrap gap-2"><button type="button" class="ui-btn ui-btn-secondary" on:click={() => setAll('accept')}>{$t('admin.edits.acceptAll')}</button><button type="button" class="ui-btn ui-btn-secondary" on:click={() => setAll('reject')}>{$t('admin.edits.rejectAll')}</button><button type="button" class="ui-btn ui-btn-primary" disabled={moderationBusy} on:click={() => applyDecision('apply')}>{$t('admin.edits.applyDecision')}</button><button type="button" class="ui-btn ui-btn-danger" disabled={moderationBusy} on:click={() => applyDecision('reject')}>{$t('admin.edits.rejectEdit')}</button></div>
               {#if detailStatus}<p class="text-sm text-slate-600">{detailStatus}</p>{/if}
             {/if}
           </section>

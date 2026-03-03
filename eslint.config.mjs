@@ -23,7 +23,7 @@ export default [
       'tests/**/*.js'
     ],
     languageOptions: {
-      ecmaVersion: 2022,
+      ecmaVersion: 'latest',
       sourceType: 'script',
       globals: {
         ...globals.node
@@ -38,7 +38,7 @@ export default [
   {
     files: ['frontend/src/**/*.js', 'frontend/static/**/*.js'],
     languageOptions: {
-      ecmaVersion: 2022,
+      ecmaVersion: 'latest',
       sourceType: 'module',
       globals: {
         ...globals.browser,

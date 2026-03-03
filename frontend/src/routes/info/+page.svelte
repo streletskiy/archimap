@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
-  import { UI_STRINGS } from '$lib/i18n/ui-strings';
+  import { t, translateNow } from '$lib/i18n/index';
   import { marked } from 'marked';
   import { apiJson } from '$lib/services/http';
 
@@ -10,8 +10,8 @@
   let infoUrlSyncBusy = false;
   let agreementLoading = true;
   let privacyLoading = true;
-  let agreementTitle = UI_STRINGS.info.agreementFallback;
-  let privacyTitle = UI_STRINGS.info.privacyFallback;
+  let agreementTitle = translateNow('info.agreementFallback');
+  let privacyTitle = translateNow('info.privacyFallback');
   let agreementText = '';
   let privacyText = '';
   let agreementError = '';
@@ -37,11 +37,11 @@
     agreementError = '';
     try {
       const payload = await loadLegalDoc('user-agreement');
-      agreementTitle = String(payload?.title || UI_STRINGS.info.agreementFallback);
+      agreementTitle = String(payload?.title || translateNow('info.agreementFallback'));
       agreementText = String(payload?.markdown || '');
       agreementHtml = markdownToHtml(agreementText);
     } catch (error) {
-      agreementError = String(error?.message || UI_STRINGS.info.agreementLoadError);
+      agreementError = String(error?.message || translateNow('info.agreementLoadError'));
       agreementText = '';
       agreementHtml = '';
     } finally {
@@ -54,11 +54,11 @@
     privacyError = '';
     try {
       const payload = await loadLegalDoc('privacy-policy');
-      privacyTitle = String(payload?.title || UI_STRINGS.info.privacyFallback);
+      privacyTitle = String(payload?.title || translateNow('info.privacyFallback'));
       privacyText = String(payload?.markdown || '');
       privacyHtml = markdownToHtml(privacyText);
     } catch (error) {
-      privacyError = String(error?.message || UI_STRINGS.info.privacyLoadError);
+      privacyError = String(error?.message || translateNow('info.privacyLoadError'));
       privacyText = '';
       privacyHtml = '';
     } finally {
@@ -125,30 +125,30 @@
 <main class="w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
   <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
     <div class="border-b border-slate-200 pb-4">
-      <h1 class="text-2xl font-extrabold text-slate-900">{UI_STRINGS.info.title}</h1>
-      <p class="mt-1 text-sm text-slate-600">{UI_STRINGS.info.subtitle}</p>
+      <h1 class="text-2xl font-extrabold text-slate-900">{$t('info.title')}</h1>
+      <p class="mt-1 text-sm text-slate-600">{$t('info.subtitle')}</p>
     </div>
 
     <div class="mt-4">
       <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => setTab('about')}>{UI_STRINGS.info.tabAbout}</button></li>
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => setTab('agreement')}>{UI_STRINGS.info.tabAgreement}</button></li>
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => setTab('privacy')}>{UI_STRINGS.info.tabPrivacy}</button></li>
+        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => setTab('about')}>{$t('info.tabAbout')}</button></li>
+        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => setTab('agreement')}>{$t('info.tabAgreement')}</button></li>
+        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => setTab('privacy')}>{$t('info.tabPrivacy')}</button></li>
       </ul>
     </div>
 
     {#if activeTab === 'about'}
       <section class="mt-4 space-y-4">
         <div class="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 class="text-lg font-bold text-slate-900">{UI_STRINGS.info.aboutTitle}</h2>
-          <p class="mt-2 text-sm leading-7 text-slate-700">{UI_STRINGS.info.aboutText}</p>
+          <h2 class="text-lg font-bold text-slate-900">{$t('info.aboutTitle')}</h2>
+          <p class="mt-2 text-sm leading-7 text-slate-700">{$t('info.aboutText')}</p>
         </div>
 
         <div class="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 class="text-lg font-bold text-slate-900">{UI_STRINGS.info.techTitle}</h2>
+          <h2 class="text-lg font-bold text-slate-900">{$t('info.techTitle')}</h2>
           <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{UI_STRINGS.info.version}</span><span class="font-semibold text-slate-900">-</span></div>
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{UI_STRINGS.info.commit}</span><span class="font-semibold text-slate-900">-</span></div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.version')}</span><span class="font-semibold text-slate-900">-</span></div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.commit')}</span><span class="font-semibold text-slate-900">-</span></div>
           </div>
         </div>
       </section>
@@ -156,7 +156,7 @@
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 class="text-lg font-bold text-slate-900">{agreementTitle}</h2>
         {#if agreementLoading}
-          <p class="mt-3 text-sm leading-7 text-slate-700">{UI_STRINGS.info.loadingDoc}</p>
+          <p class="mt-3 text-sm leading-7 text-slate-700">{$t('info.loadingDoc')}</p>
         {:else if agreementError}
           <p class="mt-3 text-sm leading-7 text-rose-600">{agreementError}</p>
         {:else}
@@ -167,7 +167,7 @@
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 class="text-lg font-bold text-slate-900">{privacyTitle}</h2>
         {#if privacyLoading}
-          <p class="mt-3 text-sm leading-7 text-slate-700">{UI_STRINGS.info.loadingDoc}</p>
+          <p class="mt-3 text-sm leading-7 text-slate-700">{$t('info.loadingDoc')}</p>
         {:else if privacyError}
           <p class="mt-3 text-sm leading-7 text-rose-600">{privacyError}</p>
         {:else}

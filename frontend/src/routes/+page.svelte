@@ -6,12 +6,12 @@
   import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
   import SearchModal from '$lib/components/shell/SearchModal.svelte';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
-  import { UI_STRINGS } from '$lib/i18n/ui-strings';
+  import { t, translateNow } from '$lib/i18n/index';
   import { apiJson, apiJsonCached } from '$lib/services/http';
   import { session } from '$lib/stores/auth';
   import { mapCenter, mapReady, mapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
   import { buildingModalOpen, openBuildingModal } from '$lib/stores/ui';
-  import { normalizeArchitectureStyleKey, toHumanArchitectureStyle } from '$lib/utils/architecture-style';
+  import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
   import {
     filterSearchItemsByStyleKey,
     filterSearchItemsByStyleKeys,
@@ -135,7 +135,7 @@
     const info = payload || {};
     const rawStyle = info.style ?? info.architecture ?? info['building:style'] ?? info['building:architecture'] ?? null;
     const styleRaw = rawStyle ? String(rawStyle) : null;
-    const style = styleRaw ? (toHumanArchitectureStyle(styleRaw) || styleRaw) : '-';
+    const style = styleRaw || '-';
     return {
       name: info.name ?? info['name:ru'] ?? info['name:en'] ?? '-',
       style,
@@ -224,7 +224,7 @@
     return {
       name: coerceNullableText(payload?.name) || '-',
       styleRaw: rawStyle,
-      style: rawStyle ? (toHumanArchitectureStyle(rawStyle) || rawStyle) : '-',
+      style: rawStyle || '-',
       levels: coerceNullableText(payload?.levels) || '-',
       year_built: coerceNullableText(payload?.yearBuilt) || '-',
       architect: coerceNullableText(payload?.architect) || '-',
@@ -239,11 +239,11 @@
     const detail = event?.detail || {};
     if (!detail?.osmType || !detail?.osmId) return;
     if (!$session.authenticated) {
-      saveBuildingStatus = UI_STRINGS.mapPage.authRequired;
+      saveBuildingStatus = translateNow('mapPage.authRequired');
       return;
     }
     saveBuildingPending = true;
-    saveBuildingStatus = UI_STRINGS.mapPage.saving;
+    saveBuildingStatus = translateNow('mapPage.saving');
     const payload = {
       osmType: detail.osmType,
       osmId: Number(detail.osmId),
@@ -273,9 +273,9 @@
           }
         };
       }
-      saveBuildingStatus = UI_STRINGS.mapPage.submitted;
+      saveBuildingStatus = translateNow('mapPage.submitted');
     } catch (error) {
-      saveBuildingStatus = String(error?.message || UI_STRINGS.mapPage.saveFailed);
+      saveBuildingStatus = String(error?.message || translateNow('mapPage.saveFailed'));
     } finally {
       saveBuildingPending = false;
     }
@@ -288,7 +288,7 @@
     const styleSearchKeys = resolveArchitectureStyleSearchKeys(text);
     const searchQuery = String(styleSearchKey || text).slice(0, 120);
     if (text.length < 2) {
-      resetSearchState(UI_STRINGS.mapPage.minChars);
+      resetSearchState(translateNow('search.minChars'));
       return;
     }
 
@@ -348,7 +348,7 @@
       } catch (error) {
         if (String(error?.name || '').toLowerCase() === 'aborterror') return;
         if (token !== activeSearchRequestToken) return;
-        setSearchError(error?.message || UI_STRINGS.mapPage.searchFailed, { append: false });
+        setSearchError(error?.message || translateNow('mapPage.searchFailed'), { append: false });
       }
       return;
     }
@@ -385,7 +385,7 @@
     } catch (error) {
       if (String(error?.name || '').toLowerCase() === 'aborterror') return;
       if (token !== activeSearchRequestToken) return;
-      setSearchError(error?.message || UI_STRINGS.mapPage.searchFailed, { append });
+      setSearchError(error?.message || translateNow('mapPage.searchFailed'), { append });
     } finally {
       if (activeSearchAbortController?.signal === signal) {
         activeSearchAbortController = null;
@@ -449,7 +449,7 @@
 {#if MapCanvasComponent}
   <svelte:component this={MapCanvasComponent} on:buildingClick={onBuildingClick} />
 {:else}
-  <div class="map-loading">{UI_STRINGS.mapPage.mapLoading}</div>
+  <div class="map-loading">{$t('mapPage.mapLoading')}</div>
 {/if}
 <BuildingModal
   {buildingDetails}

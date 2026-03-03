@@ -1,52 +1,59 @@
-const ARCHITECTURE_STYLE_LABELS_RU = Object.freeze({
-  islamic: 'Исламская архитектура',
-  mamluk: 'Мамлюкская архитектура',
-  romanesque: 'Романская архитектура',
-  gothic: 'Готическая архитектура',
-  renaissance: 'Архитектура Возрождения',
-  mannerism: 'Маньеризм',
-  ottoman: 'Османская архитектура',
-  baroque: 'Архитектура барокко',
-  rococo: 'Рококо',
-  classicism: 'Классицизм',
-  neoclassicism: 'Классицизм',
-  empire: 'Ампир',
-  moorish_revival: 'Неомавританский стиль',
-  'pseudo-russian': 'Псевдорусский стиль',
-  eclectic: 'Эклектика',
-  georgian: 'Георгианская архитектура',
-  victorian: 'Викторианская архитектура',
-  historicism: 'Историцизм',
-  'neo-romanesque': 'Неороманский стиль',
-  'neo-gothic': 'Неоготика',
-  'pseudo-gothic': 'Русская псевдоготика',
-  russian_gothic: 'Русская псевдоготика',
-  'neo-byzantine': 'Неовизантийский стиль',
-  'neo-renaissance': 'Неоренессанс',
-  'neo-baroque': 'Необарокко',
-  art_nouveau: 'Архитектура модерна',
-  nothern_modern: 'Северный модерн',
-  functionalism: 'Функционализм',
-  cubism: 'Кубизм',
-  new_objectivity: 'Новая вещественность',
-  art_deco: 'Ар-деко',
-  modern: 'Архитектурный модернизм',
-  amsterdam_school: 'Амстердамская школа',
-  international_style: 'Интернациональный стиль',
-  constructivism: 'Конструктивизм',
-  postconstructivism: 'Постконструктивизм',
-  stalinist_neoclassicism: 'Сталинский ампир',
-  brutalist: 'Брутализм',
-  postmodern: 'Архитектура постмодернизма',
-  contemporary: 'Современная архитектура',
-  vernacular: 'Народная архитектура',
-  classic_swahili: 'Классический суахили',
-  omani: 'Оманская архитектура (Занзибар)',
-  indian: 'Индийское влияние (Занзибар)',
-  british_colonial: 'Британская колониальная архитектура',
-  modernism: 'Модернизм',
-  hypermodern: 'Гипермодернизм'
-});
+import { get } from 'svelte/store';
+import { locale as activeLocale, translateNow } from '$lib/i18n/index';
+import en from '$lib/i18n/locales/en.json' with { type: 'json' };
+import ru from '$lib/i18n/locales/ru.json' with { type: 'json' };
+
+const STYLE_KEYS = Object.freeze([
+  'islamic',
+  'mamluk',
+  'romanesque',
+  'gothic',
+  'renaissance',
+  'mannerism',
+  'ottoman',
+  'baroque',
+  'rococo',
+  'classicism',
+  'neoclassicism',
+  'empire',
+  'moorish_revival',
+  'pseudo-russian',
+  'eclectic',
+  'georgian',
+  'victorian',
+  'historicism',
+  'neo-romanesque',
+  'neo-gothic',
+  'pseudo-gothic',
+  'russian_gothic',
+  'neo-byzantine',
+  'neo-renaissance',
+  'neo-baroque',
+  'art_nouveau',
+  'nothern_modern',
+  'functionalism',
+  'cubism',
+  'new_objectivity',
+  'art_deco',
+  'modern',
+  'amsterdam_school',
+  'international_style',
+  'constructivism',
+  'postconstructivism',
+  'stalinist_neoclassicism',
+  'brutalist',
+  'postmodern',
+  'contemporary',
+  'vernacular',
+  'classic_swahili',
+  'omani',
+  'indian',
+  'british_colonial',
+  'modernism',
+  'hypermodern'
+]);
+
+const STYLE_KEY_SET = new Set(STYLE_KEYS);
 
 const ARCHITECTURE_STYLE_ALIASES = Object.freeze({
   brutalism: 'brutalist',
@@ -54,7 +61,35 @@ const ARCHITECTURE_STYLE_ALIASES = Object.freeze({
   'stalinist neoclassicism': 'stalinist_neoclassicism'
 });
 
-export function toHumanArchitectureStyle(value) {
+const STYLE_LABELS = Object.freeze({
+  en: en?.architectureStyles || {},
+  ru: ru?.architectureStyles || {}
+});
+
+function normalizeLocaleCode(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'ru') return 'ru';
+  return 'en';
+}
+
+function getStyleLabelByLocale(key, localeCode) {
+  const dict = STYLE_LABELS[normalizeLocaleCode(localeCode)] || STYLE_LABELS.en;
+  return dict[String(key || '').trim()] || STYLE_LABELS.en[String(key || '').trim()] || null;
+}
+
+function getActiveLocaleCode() {
+  return normalizeLocaleCode(get(activeLocale));
+}
+
+function resolveLocaleCode(localeCode) {
+  return localeCode ? normalizeLocaleCode(localeCode) : getActiveLocaleCode();
+}
+
+function styleLabelKey(styleKey) {
+  return `architectureStyles.${styleKey}`;
+}
+
+export function toHumanArchitectureStyle(value, localeCode = null) {
   if (value == null) return null;
   const text = String(value).trim();
   if (!text) return null;
@@ -65,10 +100,11 @@ export function toHumanArchitectureStyle(value) {
     .filter(Boolean);
   if (parts.length === 0) return text;
 
+  const currentLocale = resolveLocaleCode(localeCode);
   const translated = parts.map((part) => {
     const rawKey = part.toLowerCase();
     const key = ARCHITECTURE_STYLE_ALIASES[rawKey] || rawKey;
-    return ARCHITECTURE_STYLE_LABELS_RU[key] || part;
+    return translateNow(styleLabelKey(key)) || getStyleLabelByLocale(key, currentLocale) || part;
   });
   return translated.join('; ');
 }
@@ -83,18 +119,33 @@ export function normalizeStyleSearchText(value) {
 
 const ARCHITECTURE_STYLE_KEY_BY_LABEL_NORMALIZED = (() => {
   const map = new Map();
-  for (const [key, label] of Object.entries(ARCHITECTURE_STYLE_LABELS_RU)) {
-    const normalizedLabel = normalizeStyleSearchText(label);
-    if (normalizedLabel) map.set(normalizedLabel, key);
+  for (const key of STYLE_KEYS) {
+    const labels = [getStyleLabelByLocale(key, 'ru'), getStyleLabelByLocale(key, 'en')].filter(Boolean);
+    for (const label of labels) {
+      const normalizedLabel = normalizeStyleSearchText(label);
+      if (normalizedLabel) map.set(normalizedLabel, key);
+    }
+  }
+  for (const key of STYLE_KEYS) {
+    const normalizedKey = normalizeStyleSearchText(String(key).replace(/_/g, ' '));
+    if (normalizedKey) map.set(normalizedKey, key);
+  }
+  for (const [alias, canonical] of Object.entries(ARCHITECTURE_STYLE_ALIASES)) {
+    const normalizedAlias = normalizeStyleSearchText(alias.replace(/_/g, ' '));
+    if (normalizedAlias) map.set(normalizedAlias, canonical);
   }
   return map;
 })();
 
-export const ARCHITECTURE_STYLE_OPTIONS_RU = Object.freeze(
-  Object.entries(ARCHITECTURE_STYLE_LABELS_RU)
-    .map(([value, label]) => ({ value, label }))
-    .sort((a, b) => a.label.localeCompare(b.label, 'ru'))
-);
+export function getArchitectureStyleOptions(localeCode = null) {
+  const resolvedLocaleCode = resolveLocaleCode(localeCode);
+  return STYLE_KEYS
+    .map((value) => ({
+      value,
+      label: getStyleLabelByLocale(value, resolvedLocaleCode) || value
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
+}
 
 export function resolveArchitectureStyleSearchKey(queryText) {
   const raw = String(queryText || '').trim();
@@ -102,7 +153,7 @@ export function resolveArchitectureStyleSearchKey(queryText) {
   const normalizedQuery = normalizeStyleSearchText(raw);
   if (!normalizedQuery) return null;
 
-  if (ARCHITECTURE_STYLE_LABELS_RU[normalizedQuery]) {
+  if (STYLE_KEY_SET.has(normalizedQuery)) {
     return normalizedQuery;
   }
 
@@ -123,15 +174,22 @@ export function resolveArchitectureStyleSearchKeys(queryText) {
   if (!normalizedQuery || normalizedQuery.length < 2) return [];
 
   const matched = new Set();
-  for (const [key, label] of Object.entries(ARCHITECTURE_STYLE_LABELS_RU)) {
-    const normalizedLabel = normalizeStyleSearchText(label);
+  for (const key of STYLE_KEYS) {
+    const labels = [getStyleLabelByLocale(key, 'ru'), getStyleLabelByLocale(key, 'en')].filter(Boolean);
     const normalizedKey = normalizeStyleSearchText(key.replace(/_/g, ' '));
-    if (
-      normalizedLabel.includes(normalizedQuery) ||
-      normalizedQuery.includes(normalizedLabel) ||
-      normalizedKey.includes(normalizedQuery)
-    ) {
+    if (normalizedKey.includes(normalizedQuery) || normalizedQuery.includes(normalizedKey)) {
       matched.add(key);
+      continue;
+    }
+    for (const label of labels) {
+      const normalizedLabel = normalizeStyleSearchText(label);
+      if (
+        normalizedLabel.includes(normalizedQuery) ||
+        normalizedQuery.includes(normalizedLabel)
+      ) {
+        matched.add(key);
+        break;
+      }
     }
   }
 

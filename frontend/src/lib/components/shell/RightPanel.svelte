@@ -2,23 +2,24 @@
   import { sidebarOpen } from '$lib/stores/ui';
   import { selectedBuilding } from '$lib/stores/map';
   import { openBuildingModal } from '$lib/stores/ui';
+  import { t } from '$lib/i18n/index';
 
   $: hasSelection = Boolean($selectedBuilding);
 </script>
 
 <aside class:closed={!$sidebarOpen} class="panel">
-  <h2>Боковая панель</h2>
+  <h2>{$t('common.panels')}</h2>
   <p>
-    Состояние интерфейса и выбранного объекта управляется реактивно, без прямого манипулирования DOM.
+    {$t('panel.description')}
   </p>
   {#if hasSelection}
     <div class="card">
-      <div class="label">Выбранный объект</div>
+      <div class="label">{$t('panel.selected')}</div>
       <div class="value">{$selectedBuilding.osmType}/{$selectedBuilding.osmId}</div>
-      <button type="button" class="ui-btn ui-btn-primary" on:click={openBuildingModal}>Открыть карточку</button>
+      <button type="button" class="ui-btn ui-btn-primary" on:click={openBuildingModal}>{$t('panel.openCard')}</button>
     </div>
   {:else}
-    <p class="hint">Кликните по зданию на карте.</p>
+    <p class="hint">{$t('panel.pickBuilding')}</p>
   {/if}
 </aside>
 

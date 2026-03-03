@@ -23,6 +23,12 @@
   - opens `/app`
   - waits for map canvas
   - checks runtime console/page errors
+  - verifies language switch updates visible UI strings
+
+## i18n checks
+- `npm run i18n:extract` - outputs translation keys used in frontend code.
+- `npm run i18n:validate` - validates locale key consistency (missing/extra keys).
+- `npm run i18n:check` - static check for potential hardcoded UI strings outside i18n.
 
 ## Security + smoke checks
 - `npm run test:security` (CSP/no-CDN/header checks)

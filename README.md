@@ -6,6 +6,7 @@ Building data is based on OpenStreetMap and enriched locally in SQLite.
 The map is rendered with MapLibre and vector PMTiles.
 The backend runs on Node.js + Express, and the UI is built with SvelteKit.
 The project is designed for private deployments with full control over data, tiles, and sessions.
+The UI is multilingual (`en` + `ru`) with runtime locale switching.
 
 ## How It Works
 - Architectural data is sourced from OpenStreetMap.
@@ -65,6 +66,9 @@ Full list -> `docs/dev/env.md`
 - `analyze`
 - `db:seed`
 - `tiles:build`
+- `i18n:extract`
+- `i18n:validate`
+- `i18n:check`
 
 ## Documentation
 - Architecture -> `docs/architecture.md`

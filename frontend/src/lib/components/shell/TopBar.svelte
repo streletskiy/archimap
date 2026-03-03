@@ -1,15 +1,16 @@
 <script>
   import { mapReady } from '$lib/stores/map';
   import { toggleSidebar } from '$lib/stores/ui';
+  import { t } from '$lib/i18n/index';
 </script>
 
 <header class="topbar">
   <div class="brand">
-    <strong>archimap</strong>
-    <span class="status">{$mapReady ? 'map ready' : 'loading map...'}</span>
+    <strong>{$t('common.appName')}</strong>
+    <span class="status">{$mapReady ? $t('common.ready') : $t('mapPage.mapLoading')}</span>
   </div>
   <button type="button" class="sidebar-toggle" on:click={() => toggleSidebar()}>
-    Panels
+    {$t('common.panels')}
   </button>
 </header>
 

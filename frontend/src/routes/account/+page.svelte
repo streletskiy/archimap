@@ -6,6 +6,7 @@
   import { session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
   import { getRuntimeConfig } from '$lib/services/config';
+  import { t, translateNow } from '$lib/i18n/index';
 
   const LIGHT = '/styles/positron-custom.json';
   const DARK = '/styles/dark-matter-custom.json';
@@ -27,7 +28,7 @@
   let edits = [];
   let visibleEdits = [];
   let editsLoading = false;
-  let editsStatus = 'Загрузка...';
+  let editsStatus = translateNow('account.edits.loading');
   let editsFilter = 'all';
   let editsLimit = 200;
   let editsQuery = '';
@@ -61,11 +62,11 @@
 
   function statusBadgeMeta(status) {
     const s = String(status || '').trim().toLowerCase();
-    if (s === 'accepted') return { text: 'Принято', cls: 'bg-emerald-100 text-emerald-700' };
-    if (s === 'partially_accepted') return { text: 'Частично принято', cls: 'bg-blue-50 text-blue-700' };
-    if (s === 'rejected') return { text: 'Отклонено', cls: 'bg-rose-100 text-rose-700' };
-    if (s === 'superseded') return { text: 'Заменено новой правкой', cls: 'bg-slate-100 text-slate-700' };
-    return { text: 'На рассмотрении', cls: 'bg-amber-100 text-amber-700' };
+    if (s === 'accepted') return { text: translateNow('admin.status.accepted'), cls: 'bg-emerald-100 text-emerald-700' };
+    if (s === 'partially_accepted') return { text: translateNow('admin.status.partially_accepted'), cls: 'bg-blue-50 text-blue-700' };
+    if (s === 'rejected') return { text: translateNow('admin.status.rejected'), cls: 'bg-rose-100 text-rose-700' };
+    if (s === 'superseded') return { text: translateNow('admin.status.superseded'), cls: 'bg-slate-100 text-slate-700' };
+    return { text: translateNow('admin.status.pending'), cls: 'bg-amber-100 text-amber-700' };
   }
 
   function keyOf(item) {
@@ -254,7 +255,7 @@
 
   async function saveProfile(event) {
     event.preventDefault();
-    profileStatus = 'Сохраняем...';
+    profileStatus = translateNow('account.profileStatus.saving');
     try {
       const data = await apiJson('/api/account/profile', {
         method: 'POST',
@@ -262,17 +263,17 @@
         body: JSON.stringify({ firstName: String(firstName || '').trim(), lastName: String(lastName || '').trim() })
       });
       if (data?.user) setSession({ ...$session, user: { ...$session.user, ...data.user } });
-      profileStatus = 'Профиль сохранен';
+      profileStatus = translateNow('account.profileStatus.saved');
     } catch (e) {
-      profileStatus = msg(e, 'Не удалось сохранить профиль');
+      profileStatus = msg(e, translateNow('account.profileStatus.saveFailed'));
     }
   }
 
   async function changePassword(event) {
     event.preventDefault();
-    if (!currentPassword || !newPassword) { passwordStatus = 'Введите текущий и новый пароль'; return; }
-    if (newPassword !== confirmNewPassword) { passwordStatus = 'Новые пароли не совпадают'; return; }
-    passwordStatus = 'Меняем пароль...';
+    if (!currentPassword || !newPassword) { passwordStatus = translateNow('account.security.needPasswords'); return; }
+    if (newPassword !== confirmNewPassword) { passwordStatus = translateNow('account.security.mismatch'); return; }
+    passwordStatus = translateNow('account.security.changing');
     try {
       await apiJson('/api/account/change-password', {
         method: 'POST',
@@ -280,15 +281,15 @@
         body: JSON.stringify({ currentPassword, newPassword })
       });
       currentPassword = ''; newPassword = ''; confirmNewPassword = '';
-      passwordStatus = 'Пароль успешно изменен';
+      passwordStatus = translateNow('account.security.changed');
     } catch (e) {
-      passwordStatus = msg(e, 'Не удалось сменить пароль');
+      passwordStatus = msg(e, translateNow('account.security.changeFailed'));
     }
   }
 
   async function loadEdits() {
     editsLoading = true;
-    editsStatus = 'Загрузка...';
+    editsStatus = translateNow('account.edits.loading');
     try {
       const p = new URLSearchParams();
       if (editsFilter !== 'all') p.set('status', editsFilter);
@@ -305,10 +306,12 @@
       ensureMap();
       applyMapData();
       fitAllEdited();
-      editsStatus = visibleEdits.length ? `Показано: ${visibleEdits.length} из ${edits.length}` : 'Правки не найдены';
+      editsStatus = visibleEdits.length
+        ? translateNow('account.edits.statusShown', { visible: visibleEdits.length, total: edits.length })
+        : translateNow('account.edits.statusEmpty');
     } catch (e) {
       edits = [];
-      editsStatus = msg(e, 'Не удалось загрузить правки');
+      editsStatus = msg(e, translateNow('account.edits.loadFailed'));
     } finally {
       editsLoading = false;
     }
@@ -320,7 +323,7 @@
     const requestToken = ++detailRequestToken;
     detailPaneVisible = true;
     detailLoading = true;
-    detailStatus = 'Загрузка...';
+    detailStatus = translateNow('account.edits.loading');
     selectedEdit = null;
     try {
       const data = await apiJson(`/api/account/edits/${id}`);
@@ -335,7 +338,7 @@
       } catch {}
     } catch (e) {
       if (requestToken !== detailRequestToken) return;
-      detailStatus = msg(e, 'Не удалось загрузить детали');
+      detailStatus = msg(e, translateNow('account.edits.detailsLoadFailed'));
       selectedEdit = null;
     } finally {
       if (requestToken === detailRequestToken) detailLoading = false;
@@ -392,7 +395,9 @@
       applyMapData();
       fitAllEdited();
     }
-    editsStatus = editsLoading ? 'Загрузка...' : `Показано: ${visibleEdits.length} из ${edits.length}`;
+    editsStatus = editsLoading
+      ? translateNow('account.edits.loading')
+      : translateNow('account.edits.statusShown', { visible: visibleEdits.length, total: edits.length });
   }
 
   onMount(() => {
@@ -407,23 +412,23 @@
 </script>
 
 {#if !$session.authenticated}
-  <main class="w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]"><section class="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-soft backdrop-blur-sm"><h1 class="text-xl font-extrabold text-slate-900">Требуется вход</h1><p class="mt-2 text-sm text-slate-600">Для просмотра личного кабинета авторизуйтесь через кнопку «Войти» в шапке.</p></section></main>
+  <main class="w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]"><section class="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-soft backdrop-blur-sm"><h1 class="text-xl font-extrabold text-slate-900">{$t('account.authRequiredTitle')}</h1><p class="mt-2 text-sm text-slate-600">{$t('account.authRequiredText')}</p></section></main>
 {:else}
   <section class="page-with-edit-pane w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
     <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
-      <div class="border-b border-slate-200 pb-4"><h1 class="text-2xl font-extrabold">Личный кабинет</h1><p class="mt-1 text-sm text-slate-600">Настройки профиля и история правок.</p></div>
-      <ul class="ui-tab-shell mt-4 flex flex-wrap gap-1" role="tablist"><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'settings'} on:click={() => switchTab('settings')}>Настройки</button></li><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'edits'} on:click={() => switchTab('edits')}>Мои правки</button></li></ul>
+      <div class="border-b border-slate-200 pb-4"><h1 class="text-2xl font-extrabold">{$t('account.title')}</h1><p class="mt-1 text-sm text-slate-600">{$t('account.subtitle')}</p></div>
+      <ul class="ui-tab-shell mt-4 flex flex-wrap gap-1" role="tablist"><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'settings'} on:click={() => switchTab('settings')}>{$t('account.tabs.settings')}</button></li><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'edits'} on:click={() => switchTab('edits')}>{$t('account.tabs.edits')}</button></li></ul>
       {#if activeTab === 'settings'}
         <div class="mt-4 grid gap-4 xl:grid-cols-3">
-          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 class="text-base font-bold text-slate-900">Личные данные</h3><form class="mt-4 space-y-4" on:submit={saveProfile}><div><label for="account-first-name" class="mb-1 block text-sm font-medium text-slate-700">Имя</label><input id="account-first-name" class="ui-field bg-white" bind:value={firstName} /></div><div><label for="account-last-name" class="mb-1 block text-sm font-medium text-slate-700">Фамилия</label><input id="account-last-name" class="ui-field bg-white" bind:value={lastName} /></div><div><label for="account-email" class="mb-1 block text-sm font-medium text-slate-700">Email</label><input id="account-email" class="ui-field bg-white text-slate-500" readonly value={email} /></div><button type="submit" class="ui-btn ui-btn-primary">Сохранить</button></form>{#if profileStatus}<p class="mt-3 text-sm text-slate-600">{profileStatus}</p>{/if}</section>
-          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 class="text-base font-bold text-slate-900">Безопасность</h3><form class="mt-4 space-y-4" on:submit={changePassword}><input type="password" class="ui-field bg-white" placeholder="Текущий пароль" bind:value={currentPassword} required /><input type="password" class="ui-field bg-white" placeholder="Новый пароль" bind:value={newPassword} required /><input type="password" class="ui-field bg-white" placeholder="Повторите новый пароль" bind:value={confirmNewPassword} required /><button type="submit" class="ui-btn ui-btn-outline-brand">Изменить пароль</button></form>{#if passwordStatus}<p class="mt-3 text-sm text-slate-600">{passwordStatus}</p>{/if}</section>
+          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 class="text-base font-bold text-slate-900">{$t('account.profile.title')}</h3><form class="mt-4 space-y-4" on:submit={saveProfile}><div><label for="account-first-name" class="mb-1 block text-sm font-medium text-slate-700">{$t('account.profile.firstName')}</label><input id="account-first-name" class="ui-field bg-white" bind:value={firstName} /></div><div><label for="account-last-name" class="mb-1 block text-sm font-medium text-slate-700">{$t('account.profile.lastName')}</label><input id="account-last-name" class="ui-field bg-white" bind:value={lastName} /></div><div><label for="account-email" class="mb-1 block text-sm font-medium text-slate-700">{$t('account.profile.email')}</label><input id="account-email" class="ui-field bg-white text-slate-500" readonly value={email} /></div><button type="submit" class="ui-btn ui-btn-primary">{$t('account.profile.save')}</button></form>{#if profileStatus}<p class="mt-3 text-sm text-slate-600">{profileStatus}</p>{/if}</section>
+          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 class="text-base font-bold text-slate-900">{$t('account.security.title')}</h3><form class="mt-4 space-y-4" on:submit={changePassword}><input type="password" class="ui-field bg-white" placeholder={$t('account.security.currentPassword')} bind:value={currentPassword} required /><input type="password" class="ui-field bg-white" placeholder={$t('account.security.newPassword')} bind:value={newPassword} required /><input type="password" class="ui-field bg-white" placeholder={$t('account.security.repeatPassword')} bind:value={confirmNewPassword} required /><button type="submit" class="ui-btn ui-btn-outline-brand">{$t('account.security.change')}</button></form>{#if passwordStatus}<p class="mt-3 text-sm text-slate-600">{passwordStatus}</p>{/if}</section>
           <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 class="text-base font-bold text-slate-900">Уведомления</h3>
+            <h3 class="text-base font-bold text-slate-900">{$t('account.notifications.title')}</h3>
             <div class="mt-4 space-y-4">
               <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">Новые комментарии к правкам</p>
-                  <p class="mt-1 text-sm text-slate-500">Письмо, когда администратор комментирует вашу правку.</p>
+                  <p class="text-sm font-semibold text-slate-900">{$t('account.notifications.commentsTitle')}</p>
+                  <p class="mt-1 text-sm text-slate-500">{$t('account.notifications.commentsText')}</p>
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
@@ -432,8 +437,8 @@
               </div>
               <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">Статус модерации</p>
-                  <p class="mt-1 text-sm text-slate-500">Уведомления об одобрении или отклонении изменений.</p>
+                  <p class="text-sm font-semibold text-slate-900">{$t('account.notifications.moderationTitle')}</p>
+                  <p class="mt-1 text-sm text-slate-500">{$t('account.notifications.moderationText')}</p>
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
@@ -442,8 +447,8 @@
               </div>
               <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">Еженедельная сводка</p>
-                  <p class="mt-1 text-sm text-slate-500">Подборка ваших активностей и новых объектов на карте.</p>
+                  <p class="text-sm font-semibold text-slate-900">{$t('account.notifications.weeklyTitle')}</p>
+                  <p class="mt-1 text-sm text-slate-500">{$t('account.notifications.weeklyText')}</p>
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
@@ -453,44 +458,44 @@
             </div>
           </section>
           <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 class="text-base font-bold text-slate-900">Правовая информация</h3>
-            <p class="mt-1 text-sm text-slate-600">Соглашения и политика конфиденциальности доступны в разделе информации.</p>
+            <h3 class="text-base font-bold text-slate-900">{$t('account.legal.title')}</h3>
+            <p class="mt-1 text-sm text-slate-600">{$t('account.legal.text')}</p>
             <div class="mt-4 space-y-2">
-              <a href="/info?tab=legal&doc=terms" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Пользовательское соглашение</a>
-              <a href="/info?tab=legal&doc=privacy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Политика конфиденциальности</a>
+              <a href="/info?tab=legal&doc=terms" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.terms')}</a>
+              <a href="/info?tab=legal&doc=privacy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.privacy')}</a>
             </div>
           </section>
         </div>
       {:else}
         <div class="mt-4 grid gap-4 overflow-x-hidden" class:lg:grid-cols-[1.1fr_1fr]={detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus)} class:lg:grid-cols-1={!(detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus))}>
           <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
-            <div class="grid gap-2 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]"><input class="ui-field" type="search" placeholder="Поиск по адресу или ID здания" bind:value={editsQuery} /><input class="ui-field" type="date" bind:value={editsDate} /><div class="flex gap-2"><select class="ui-field ui-field-xs" bind:value={editsFilter} on:change={loadEdits}><option value="all">Все</option><option value="pending">На рассмотрении</option><option value="accepted">Принятые</option><option value="partially_accepted">Частично принятые</option><option value="rejected">Отклоненные</option><option value="superseded">Замененные</option></select><select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select><button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>Обновить</button></div></div>
+            <div class="grid gap-2 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]"><input class="ui-field" type="search" placeholder={$t('account.edits.searchPlaceholder')} bind:value={editsQuery} /><input class="ui-field" type="date" bind:value={editsDate} /><div class="flex gap-2"><select class="ui-field ui-field-xs" bind:value={editsFilter} on:change={loadEdits}><option value="all">{$t('account.edits.filterAll')}</option><option value="pending">{$t('account.edits.filterPending')}</option><option value="accepted">{$t('account.edits.filterAccepted')}</option><option value="partially_accepted">{$t('account.edits.filterPartiallyAccepted')}</option><option value="rejected">{$t('account.edits.filterRejected')}</option><option value="superseded">{$t('account.edits.filterSuperseded')}</option></select><select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select><button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>{$t('common.refresh')}</button></div></div>
             <p class="text-sm text-slate-600">{editsStatus}</p>
             <div class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border border-slate-200" bind:this={mapEl}></div>
             <div class="overflow-x-auto rounded-xl border border-slate-200">
               <table class="min-w-full text-sm">
                 <thead>
                   <tr class="border-b border-slate-200 text-left text-slate-600">
-                    <th class="px-3 py-2">Объект</th>
-                    <th class="px-3 py-2">Автор</th>
-                    <th class="px-3 py-2">Статус</th>
-                    <th class="px-3 py-2">Изменения тегов</th>
+                    <th class="px-3 py-2">{$t('account.edits.tableObject')}</th>
+                    <th class="px-3 py-2">{$t('account.edits.tableAuthor')}</th>
+                    <th class="px-3 py-2">{$t('account.edits.tableStatus')}</th>
+                    <th class="px-3 py-2">{$t('account.edits.tableChanges')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {#if editsLoading}
-                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">Загрузка...</td></tr>
+                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('account.edits.loading')}</td></tr>
                   {:else if visibleEdits.length===0}
-                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">Пусто</td></tr>
+                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('account.edits.empty')}</td></tr>
                   {:else}
                     {#each visibleEdits as it (`${it.id || it.editId}`)}
                       {@const statusMeta = statusBadgeMeta(it.status)}
                       {@const counters = getChangeCounters(it.changes)}
                       <tr class="cursor-pointer border-b border-slate-100 hover:bg-slate-50" on:click={() => openEdit(it.id || it.editId)}>
-                        <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">ID: {it.osmType}/{it.osmId}</p>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs text-rose-600">Комментарий: {String(it.adminComment).trim()}</p>{/if}</td>
+                        <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs text-rose-600">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
                         <td class="px-3 py-2">{it.updatedBy || '-'}</td>
                         <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
-                        <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} всего</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} создано</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~{counters.modified} изменено</span>{/if}</div></td>
+                        <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
                       </tr>
                     {/each}
                   {/if}
@@ -501,22 +506,22 @@
           {#if detailPaneVisible}
           <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-base font-bold text-slate-900">Детали правки</h3>
-              <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" aria-label="Закрыть панель правки" on:click={closeEditPanel}>×</button>
+              <h3 class="text-base font-bold text-slate-900">{$t('account.edits.detailTitle')}</h3>
+              <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" aria-label={$t('account.edits.closeDetail')} on:click={closeEditPanel}>×</button>
             </div>
             {#if detailLoading}
-              <p class="text-sm text-slate-500">Загрузка...</p>
+              <p class="text-sm text-slate-500">{$t('account.edits.loading')}</p>
             {:else if !selectedEdit}
-              <p class="text-sm text-slate-500">Выберите правку в таблице или на карте.</p>
+              <p class="text-sm text-slate-500">{$t('account.edits.selectHint')}</p>
             {:else}
               {@const selectedStatusMeta = statusBadgeMeta(selectedEdit.status)}
               <p class="flex flex-wrap items-center gap-2 text-sm text-slate-600"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
               <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border border-slate-200 p-2">
                 {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
-                  <p class="text-sm text-slate-500">Без изменений</p>
+                  <p class="text-sm text-slate-500">{$t('account.edits.noChanges')}</p>
                 {:else}
                   {#each selectedEdit.changes as ch (`${ch.field}`)}
-                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-2"><p class="text-sm font-semibold text-slate-900">{ch.label || ch.field}</p><p class="text-xs text-slate-600"><span class="line-through">{String(ch.osmValue ?? 'пусто')}</span> -> <strong>{String(ch.localValue ?? 'пусто')}</strong></p></div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-2"><p class="text-sm font-semibold text-slate-900">{ch.label || ch.field}</p><p class="text-xs text-slate-600"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
                   {/each}
                 {/if}
               </div>

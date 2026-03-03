@@ -6,6 +6,7 @@
   import { resetBuildingFilterRules, setBuildingFilterRules } from '$lib/stores/filters';
   import { openSearchModal, requestSearch, resetSearchState, setSearchQuery, searchState } from '$lib/stores/search';
   import { mapLabelsVisible, setMapLabelsVisible } from '$lib/stores/map';
+  import { availableLocales, locale, setLocale, t, translateNow } from '$lib/i18n/index';
 
   let loginEmail = '';
   let loginPassword = '';
@@ -36,38 +37,38 @@
   let handledRegisterToken = '';
   let handledResetToken = '';
 
-  const FILTER_TAG_LABELS_RU = Object.freeze({
-    architect: 'Архитектор',
-    'building:architecture': 'Архитектурный стиль',
-    style: 'Стиль',
-    year_built: 'Год постройки',
-    year_of_construction: 'Год строительства',
-    start_date: 'Дата постройки',
-    'building:start_date': 'Дата начала строительства',
-    'building:year': 'Год',
-    'building:levels': 'Этажность',
-    levels: 'Этажей',
-    'building:colour': 'Цвет здания',
-    'building:material': 'Материал здания',
-    'building:height': 'Высота здания',
-    'roof:colour': 'Цвет крыши',
-    'roof:shape': 'Форма крыши',
-    'roof:levels': 'Уровни крыши',
-    'roof:orientation': 'Ориентация крыши',
-    height: 'Высота',
-    colour: 'Цвет',
-    material: 'Материал',
-    name: 'Название',
-    'name:ru': 'Название (RU)',
-    'name:en': 'Название (EN)',
-    address: 'Адрес',
-    'addr:full': 'Полный адрес',
-    'addr:city': 'Город',
-    'addr:street': 'Улица',
-    'addr:housenumber': 'Номер дома',
-    'addr:postcode': 'Индекс',
-    amenity: 'Тип объекта',
-    building: 'Тип здания'
+  const FILTER_TAG_LABEL_KEYS = Object.freeze({
+    architect: 'header.filterLabels.architect',
+    'building:architecture': 'header.filterLabels.building_architecture',
+    style: 'header.filterLabels.style',
+    year_built: 'header.filterLabels.year_built',
+    year_of_construction: 'header.filterLabels.year_of_construction',
+    start_date: 'header.filterLabels.start_date',
+    'building:start_date': 'header.filterLabels.building_start_date',
+    'building:year': 'header.filterLabels.building_year',
+    'building:levels': 'header.filterLabels.building_levels',
+    levels: 'header.filterLabels.levels',
+    'building:colour': 'header.filterLabels.building_colour',
+    'building:material': 'header.filterLabels.building_material',
+    'building:height': 'header.filterLabels.building_height',
+    'roof:colour': 'header.filterLabels.roof_colour',
+    'roof:shape': 'header.filterLabels.roof_shape',
+    'roof:levels': 'header.filterLabels.roof_levels',
+    'roof:orientation': 'header.filterLabels.roof_orientation',
+    height: 'header.filterLabels.height',
+    colour: 'header.filterLabels.colour',
+    material: 'header.filterLabels.material',
+    name: 'header.filterLabels.name',
+    'name:ru': 'header.filterLabels.name_ru',
+    'name:en': 'header.filterLabels.name_en',
+    address: 'header.filterLabels.address',
+    'addr:full': 'header.filterLabels.addr_full',
+    'addr:city': 'header.filterLabels.addr_city',
+    'addr:street': 'header.filterLabels.addr_street',
+    'addr:housenumber': 'header.filterLabels.addr_housenumber',
+    'addr:postcode': 'header.filterLabels.addr_postcode',
+    amenity: 'header.filterLabels.amenity',
+    building: 'header.filterLabels.building'
   });
 
   const PRIORITY_FILTER_TAG_KEYS = Object.freeze([
@@ -174,7 +175,9 @@
   function getFilterTagDisplayName(tagKey) {
     const key = String(tagKey || '').trim();
     if (!key) return '';
-    return FILTER_TAG_LABELS_RU[key] || key;
+    const labelKey = FILTER_TAG_LABEL_KEYS[key];
+    if (!labelKey) return key;
+    return translateNow(labelKey);
   }
 
   function getFilterTagGroupRank(tagKey) {
@@ -235,7 +238,7 @@
     searchText = text;
     setSearchQuery(text);
     if (String(text).trim().length === 0) {
-      resetSearchState('Введите минимум 2 символа.');
+      resetSearchState(translateNow('search.minChars'));
     }
   }
 
@@ -250,7 +253,7 @@
 
   async function submitLogin(event) {
     event.preventDefault();
-    status = 'Выполняем вход...';
+    status = translateNow('header.status.loginInProgress');
     try {
       const data = await apiJson('/api/login', {
         method: 'POST',
@@ -258,11 +261,11 @@
         body: JSON.stringify({ email: loginEmail, password: loginPassword })
       });
       setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
-      status = 'Вход выполнен';
+      status = translateNow('header.status.loginDone');
       loginPassword = '';
       closeAuth();
     } catch (error) {
-      status = String(error.message || 'Не удалось войти');
+      status = String(error.message || translateNow('header.status.loginFailed'));
     }
   }
 
@@ -273,23 +276,23 @@
     const passwordConfirm = String(regPasswordConfirm || '');
 
     if (!email) {
-      status = 'Укажите email';
+      status = translateNow('header.status.registerNeedEmail');
       return;
     }
     if (password.length < 8) {
-      status = 'Пароль должен содержать минимум 8 символов';
+      status = translateNow('header.status.registerPasswordMin');
       return;
     }
     if (password !== passwordConfirm) {
-      status = 'Пароли не совпадают';
+      status = translateNow('header.status.registerPasswordMismatch');
       return;
     }
     if (!regAcceptTerms || !regAcceptPrivacy) {
-      status = 'Для регистрации необходимо принять пользовательское соглашение и политику конфиденциальности';
+      status = translateNow('header.status.registerNeedConsents');
       return;
     }
 
-    status = 'Отправляем код...';
+    status = translateNow('header.status.registerCodeSending');
     try {
       const data = await apiJson('/api/register/start', {
         method: 'POST',
@@ -305,20 +308,20 @@
       });
       if (data?.directSignup) {
         setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
-        status = 'Регистрация завершена';
+        status = translateNow('header.status.registerDone');
         closeAuth();
         return;
       }
       registerPendingEmail = regEmail;
-      status = 'Код отправлен на email';
+      status = translateNow('header.status.registerCodeSent');
     } catch (error) {
-      status = String(error.message || 'Не удалось запустить регистрацию');
+      status = String(error.message || translateNow('header.status.registerStartFailed'));
     }
   }
 
   async function submitRegisterConfirm(event) {
     event.preventDefault();
-    status = 'Подтверждаем код...';
+    status = translateNow('header.status.confirmingCode');
     try {
       const data = await apiJson('/api/register/confirm-code', {
         method: 'POST',
@@ -326,44 +329,44 @@
         body: JSON.stringify({ email: registerPendingEmail, code: regCode })
       });
       setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
-      status = 'Регистрация подтверждена';
+      status = translateNow('header.status.registerConfirmed');
       closeAuth();
     } catch (error) {
-      status = String(error.message || 'Не удалось подтвердить код');
+      status = String(error.message || translateNow('header.status.confirmCodeFailed'));
     }
   }
 
   async function submitResetRequest(event) {
     event.preventDefault();
-    status = 'Отправляем письмо для сброса...';
+    status = translateNow('header.status.resetSending');
     try {
       await apiJson('/api/password-reset/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail })
       });
-      status = 'Если email существует, письмо отправлено';
+      status = translateNow('header.status.resetRequested');
     } catch (error) {
-      status = String(error.message || 'Не удалось отправить запрос');
+      status = String(error.message || translateNow('header.status.resetRequestFailed'));
     }
   }
 
   async function submitResetConfirm(event) {
     event.preventDefault();
-    status = 'Сбрасываем пароль...';
+    status = translateNow('header.status.resetConfirming');
     try {
       await apiJson('/api/password-reset/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: resetToken, newPassword: resetNewPassword })
       });
-      status = 'Пароль изменен';
+      status = translateNow('header.status.resetDone');
       resetToken = '';
       resetNewPassword = '';
       resetMode = false;
       authTab = 'login';
     } catch (error) {
-      status = String(error.message || 'Не удалось изменить пароль');
+      status = String(error.message || translateNow('header.status.resetFailed'));
     }
   }
 
@@ -387,7 +390,7 @@
     const token = String(rawToken || '').trim();
     if (!token || token === handledRegisterToken) return;
     handledRegisterToken = token;
-    status = 'Подтверждаем регистрацию...';
+    status = translateNow('header.status.registerLinkConfirming');
     try {
       const data = await apiJson('/api/register/confirm-link', {
         method: 'POST',
@@ -395,10 +398,10 @@
         body: JSON.stringify({ token })
       });
       setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
-      status = 'Регистрация подтверждена';
+      status = translateNow('header.status.registerConfirmed');
       authOpen = false;
     } catch (error) {
-      status = String(error.message || 'Не удалось подтвердить регистрацию');
+      status = String(error.message || translateNow('header.status.registerLinkFailed'));
       openAuth('register');
     } finally {
       stripAuthQueryParams(['registerToken']);
@@ -488,36 +491,36 @@
 <header class="nav-shell">
   <div class="nav">
     <div class="left">
-      <a href={navHref('/')} class="logo">archimap</a>
-      <button type="button" class="icon-btn" aria-label="Открыть фильтры" on:click={() => (filterOpen = !filterOpen)}>
+      <a href={navHref('/')} class="logo">{$t('common.appName')}</a>
+      <button type="button" class="icon-btn" aria-label={$t('header.openFilters')} on:click={() => (filterOpen = !filterOpen)}>
         <svg viewBox="0 0 512 512" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
       </button>
     </div>
 
     <form class="search" on:submit={submitSearch}>
       <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
-      <input type="search" placeholder="Поиск: название, адрес, стиль, архитектор" bind:value={searchText} on:input={onSearchInput} />
+      <input type="search" placeholder={$t('header.searchPlaceholder')} bind:value={searchText} on:input={onSearchInput} />
     </form>
 
     <div class="right-controls">
-      <button type="button" class="icon-btn search-mobile-btn" aria-label="Открыть поиск" on:click={openMobileSearch}>
+      <button type="button" class="icon-btn search-mobile-btn" aria-label={$t('header.openSearch')} on:click={openMobileSearch}>
         <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
       </button>
-      <button type="button" class="icon-btn menu-btn-trigger" aria-label="Открыть меню" aria-expanded={menuOpen} on:click={() => (menuOpen = !menuOpen)}>
+      <button type="button" class="icon-btn menu-btn-trigger" aria-label={$t('header.openMenu')} aria-expanded={menuOpen} on:click={() => (menuOpen = !menuOpen)}>
         <svg viewBox="0 0 640 640" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"/></svg>
       </button>
     </div>
   </div>
 
   {#if menuOpen || filterOpen}
-    <button type="button" class="nav-backdrop" aria-label="Закрыть выпадающие панели" on:click={closeFloatingPanels}></button>
+    <button type="button" class="nav-backdrop" aria-label={$t('header.closePanels')} on:click={closeFloatingPanels}></button>
   {/if}
 
   {#if filterOpen}
     <div class="filter-panel">
       <div class="filter-head">
-        <h4>Фильтр OSM тегов</h4>
-        <button type="button" class="icon-btn icon-btn-sm" aria-label="Закрыть фильтр" on:click={() => (filterOpen = false)}>×</button>
+        <h4>{$t('header.filterTitle')}</h4>
+        <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('header.closeFilter')} on:click={() => (filterOpen = false)}>×</button>
       </div>
       <div class="rows">
         {#each filterRows as row (row.id)}
@@ -525,7 +528,7 @@
             <input
               class="ui-field ui-field-xs"
               list="filter-tag-keys"
-              placeholder="Ключ тега"
+              placeholder={$t('header.tagKey')}
               value={row.key}
               on:input={(e) => updateFilterRow(row.id, { key: e.currentTarget.value })}
             />
@@ -534,28 +537,28 @@
               value={row.op}
               on:change={(e) => updateFilterRow(row.id, { op: e.currentTarget.value })}
             >
-              <option value="contains">содержит</option>
-              <option value="equals">равно</option>
-              <option value="not_equals">не равно</option>
-              <option value="starts_with">начинается с</option>
-              <option value="exists">существует</option>
-              <option value="not_exists">отсутствует</option>
+              <option value="contains">{$t('header.op.contains')}</option>
+              <option value="equals">{$t('header.op.equals')}</option>
+              <option value="not_equals">{$t('header.op.not_equals')}</option>
+              <option value="starts_with">{$t('header.op.starts_with')}</option>
+              <option value="exists">{$t('header.op.exists')}</option>
+              <option value="not_exists">{$t('header.op.not_exists')}</option>
             </select>
             <input
               class="ui-field ui-field-xs"
-              placeholder="Значение"
+              placeholder={$t('header.tagValue')}
               value={row.value}
               on:input={(e) => updateFilterRow(row.id, { value: e.currentTarget.value })}
               disabled={row.op === 'exists' || row.op === 'not_exists'}
             />
-            <button type="button" class="icon-btn icon-btn-sm" aria-label="Удалить строку" on:click={() => removeFilterRow(row.id)}>−</button>
+            <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('common.close')} on:click={() => removeFilterRow(row.id)}>−</button>
           </div>
         {/each}
       </div>
       <div class="filter-actions">
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={addFilterRow}>+ Критерий</button>
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={resetFilters}>Сброс</button>
-        <button type="button" class="ui-btn ui-btn-primary ui-btn-xs" on:click={applyFilters}>Применить</button>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={addFilterRow}>{$t('header.addRule')}</button>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={resetFilters}>{$t('header.resetRules')}</button>
+        <button type="button" class="ui-btn ui-btn-primary ui-btn-xs" on:click={applyFilters}>{$t('header.applyRules')}</button>
       </div>
       <datalist id="filter-tag-keys">
         {#each filterTagKeys as key (key)}
@@ -568,18 +571,26 @@
   {#if menuOpen}
     <div class="menu">
       {#if !$session.authenticated}
-        <button type="button" class="ui-btn ui-btn-primary menu-btn" on:click={() => openAuth('login')}>Войти</button>
-        <button type="button" class="ui-btn ui-btn-secondary menu-btn" on:click={() => openAuth('register')}>Регистрация</button>
+        <button type="button" class="ui-btn ui-btn-primary menu-btn" on:click={() => openAuth('login')}>{$t('header.login')}</button>
+        <button type="button" class="ui-btn ui-btn-secondary menu-btn" on:click={() => openAuth('register')}>{$t('header.register')}</button>
       {:else}
-        <a href={navHref('/account')} class:active={isActive(normalizedPathname, '/account')} on:click={() => (menuOpen = false)}>Профиль</a>
+        <a href={navHref('/account')} class:active={isActive(normalizedPathname, '/account')} on:click={() => (menuOpen = false)}>{$t('header.profile')}</a>
       {/if}
-      <a href={navHref('/info')} class:active={isActive(normalizedPathname, '/info')} on:click={() => (menuOpen = false)}>Информация</a>
+      <a href={navHref('/info')} class:active={isActive(normalizedPathname, '/info')} on:click={() => (menuOpen = false)}>{$t('header.info')}</a>
       {#if $session.user?.isAdmin}
-        <a href={navHref('/admin')} class:active={isActive(normalizedPathname, '/admin')} on:click={() => (menuOpen = false)}>Админ-панель</a>
+        <a href={navHref('/admin')} class:active={isActive(normalizedPathname, '/admin')} on:click={() => (menuOpen = false)}>{$t('header.admin')}</a>
       {/if}
       <div class="theme-row">
-        <span>Обозначения</span>
-        <label class="switch switch-icons switch-labels" aria-label={$mapLabelsVisible ? 'Скрыть обозначения карты' : 'Показывать обозначения карты'}>
+        <span>{$t('locale.label')}</span>
+        <select class="ui-field ui-field-xs locale-select" bind:value={$locale} on:change={(event) => setLocale(event.currentTarget.value)}>
+          {#each availableLocales as item}
+            <option value={item}>{$t(`locale.${item}`)}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="theme-row">
+        <span>{$t('header.labels')}</span>
+        <label class="switch switch-icons switch-labels" aria-label={$mapLabelsVisible ? $t('header.labelsHide') : $t('header.labelsShow')}>
           <input type="checkbox" checked={$mapLabelsVisible} on:change={(e) => applyLabelsVisibility(e.currentTarget.checked)} />
           <span class="icon-center" aria-hidden="true">
             <svg viewBox="0 0 640 640" width="12" height="12"><path fill="currentColor" d="M349.1 114.7C343.9 103.3 332.5 96 320 96C307.5 96 296.1 103.3 290.9 114.7L123.5 480L112 480C94.3 480 80 494.3 80 512C80 529.7 94.3 544 112 544L200 544C217.7 544 232 529.7 232 512C232 494.3 217.7 480 200 480L193.9 480L215.9 432L424.2 432L446.2 480L440.1 480C422.4 480 408.1 494.3 408.1 512C408.1 529.7 422.4 544 440.1 544L528.1 544C545.8 544 560.1 529.7 560.1 512C560.1 494.3 545.8 480 528.1 480L516.6 480L349.2 114.7zM394.8 368L245.2 368L320 204.8L394.8 368z"/></svg>
@@ -588,8 +599,8 @@
         </label>
       </div>
       <div class="theme-row">
-        <span>Тема</span>
-        <label class="switch switch-icons" aria-label="Переключить тему">
+        <span>{$t('header.theme')}</span>
+        <label class="switch switch-icons" aria-label={$t('header.toggleTheme')}>
           <input type="checkbox" checked={darkTheme} on:change={(e) => applyTheme(e.currentTarget.checked ? 'dark' : 'light')} />
           <span class="icon-on" aria-hidden="true">
             <svg viewBox="0 0 640 640" width="14" height="14"><path fill="currentColor" d="M320 32C328.4 32 336.3 36.4 340.6 43.7L396.1 136.3L500.9 110C509.1 108 517.8 110.4 523.7 116.3C529.6 122.2 532 131 530 139.1L503.7 243.8L596.4 299.3C603.6 303.6 608.1 311.5 608.1 319.9C608.1 328.3 603.7 336.2 596.4 340.5L503.7 396.1L530 500.8C532 509 529.6 517.7 523.7 523.6C517.8 529.5 509 532 500.9 530L396.2 503.7L340.7 596.4C336.4 603.6 328.5 608.1 320.1 608.1C311.7 608.1 303.8 603.7 299.5 596.4L243.9 503.7L139.2 530C131 532 122.4 529.6 116.4 523.7C110.4 517.8 108 509 110 500.8L136.2 396.1L43.6 340.6C36.4 336.2 32 328.4 32 320C32 311.6 36.4 303.7 43.7 299.4L136.3 243.9L110 139.1C108 130.9 110.3 122.3 116.3 116.3C122.3 110.3 131 108 139.2 110L243.9 136.2L299.4 43.6L301.2 41C305.7 35.3 312.6 31.9 320 31.9zM320 176C240.5 176 176 240.5 176 320C176 399.5 240.5 464 320 464C399.5 464 464 399.5 464 320C464 240.5 399.5 176 320 176zM320 416C267 416 224 373 224 320C224 267 267 224 320 224C373 224 416 267 416 320C416 373 373 416 320 416z"/></svg>
@@ -601,7 +612,7 @@
         </label>
       </div>
       {#if $session.authenticated}
-        <button type="button" class="ui-btn ui-btn-danger menu-btn" on:click={logout}>Выйти</button>
+        <button type="button" class="ui-btn ui-btn-danger menu-btn" on:click={logout}>{$t('header.logout')}</button>
       {/if}
     </div>
   {/if}
@@ -611,56 +622,56 @@
   <div class="auth-backdrop" role="button" tabindex="0" on:click={(e) => e.target === e.currentTarget && closeAuth()} on:keydown={(e) => e.key === 'Escape' && closeAuth()}>
     <section class="auth-modal">
       <div class="auth-head">
-        <h3>Вход в archimap</h3>
-        <button type="button" class="icon-btn" on:click={closeAuth} aria-label="Закрыть">×</button>
+        <h3>{$t('header.authTitle')}</h3>
+        <button type="button" class="icon-btn" on:click={closeAuth} aria-label={$t('common.close')}>×</button>
       </div>
 
       {#if registerPendingEmail}
         <form class="stack" on:submit={submitRegisterConfirm}>
-          <p class="hint">Подтверждение регистрации</p>
+          <p class="hint">{$t('header.confirmRegistration')}</p>
           <input class="ui-field" value={registerPendingEmail} readonly />
           <input class="ui-field" bind:value={regCode} inputmode="numeric" maxlength="6" placeholder="123456" required />
-          <button class="ui-btn ui-btn-secondary" type="submit">Подтвердить кодом</button>
+          <button class="ui-btn ui-btn-secondary" type="submit">{$t('header.confirmCode')}</button>
         </form>
       {:else if resetMode}
         <form class="stack" on:submit={submitResetRequest}>
-          <input class="ui-field" bind:value={resetEmail} type="email" placeholder="Email аккаунта" required />
-          <button class="ui-btn ui-btn-secondary" type="submit">Отправить ссылку для сброса</button>
+          <input class="ui-field" bind:value={resetEmail} type="email" placeholder={$t('header.emailAccount')} required />
+          <button class="ui-btn ui-btn-secondary" type="submit">{$t('header.sendResetLink')}</button>
         </form>
         <form class="stack" on:submit={submitResetConfirm}>
-          <input class="ui-field" bind:value={resetToken} placeholder="Reset token" required />
-          <input class="ui-field" bind:value={resetNewPassword} type="password" placeholder="Новый пароль" required />
-          <button class="ui-btn ui-btn-primary" type="submit">Сменить пароль</button>
+          <input class="ui-field" bind:value={resetToken} placeholder={$t('header.resetToken')} required />
+          <input class="ui-field" bind:value={resetNewPassword} type="password" placeholder={$t('header.newPassword')} required />
+          <button class="ui-btn ui-btn-primary" type="submit">{$t('header.changePassword')}</button>
         </form>
       {:else}
         <div class="tabs ui-tab-shell">
-          <button type="button" class="ui-tab-btn" class:ui-tab-btn-active={authTab === 'login'} on:click={() => (authTab = 'login')}>Вход</button>
-          <button type="button" class="ui-tab-btn" class:ui-tab-btn-active={authTab === 'register'} on:click={() => (authTab = 'register')}>Регистрация</button>
+          <button type="button" class="ui-tab-btn" class:ui-tab-btn-active={authTab === 'login'} on:click={() => (authTab = 'login')}>{$t('header.tabLogin')}</button>
+          <button type="button" class="ui-tab-btn" class:ui-tab-btn-active={authTab === 'register'} on:click={() => (authTab = 'register')}>{$t('header.tabRegister')}</button>
         </div>
 
         {#if authTab === 'login'}
           <form class="stack" on:submit={submitLogin}>
-            <input class="ui-field" bind:value={loginEmail} type="email" placeholder="Email" required />
-            <input class="ui-field" bind:value={loginPassword} type="password" placeholder="Пароль" required />
-            <button type="button" class="forgot-btn" on:click={() => (resetMode = true)}>Забыли пароль?</button>
-            <button class="ui-btn ui-btn-primary" type="submit">Войти</button>
+            <input class="ui-field" bind:value={loginEmail} type="email" placeholder={$t('header.email')} required />
+            <input class="ui-field" bind:value={loginPassword} type="password" placeholder={$t('header.password')} required />
+            <button type="button" class="forgot-btn" on:click={() => (resetMode = true)}>{$t('header.forgotPassword')}</button>
+            <button class="ui-btn ui-btn-primary" type="submit">{$t('header.login')}</button>
           </form>
         {:else}
           <form class="stack" on:submit={submitRegisterStart}>
-            <input class="ui-field" bind:value={regFirstName} placeholder="Имя (необязательно)" />
-            <input class="ui-field" bind:value={regLastName} placeholder="Фамилия (необязательно)" />
-            <input class="ui-field" bind:value={regEmail} type="email" placeholder="Email (обязательно)" required aria-required="true" />
-            <input class="ui-field" bind:value={regPassword} type="password" placeholder="Пароль (обязательно)" required aria-required="true" />
-            <input class="ui-field" bind:value={regPasswordConfirm} type="password" placeholder="Повторите пароль" required />
+            <input class="ui-field" bind:value={regFirstName} placeholder={$t('header.firstName')} />
+            <input class="ui-field" bind:value={regLastName} placeholder={$t('header.lastName')} />
+            <input class="ui-field" bind:value={regEmail} type="email" placeholder={$t('header.emailRequired')} required aria-required="true" />
+            <input class="ui-field" bind:value={regPassword} type="password" placeholder={$t('header.passwordRequired')} required aria-required="true" />
+            <input class="ui-field" bind:value={regPasswordConfirm} type="password" placeholder={$t('header.repeatPassword')} required />
             <label class="consent">
               <input type="checkbox" bind:checked={regAcceptTerms} required aria-required="true" />
-              <span>Принимаю (обязательно) <a href={navHref('/info?tab=legal&doc=terms')} on:click={() => (menuOpen = false)}>пользовательское соглашение</a></span>
+              <span>{$t('header.acceptTerms')} <a href={navHref('/info?tab=legal&doc=terms')} on:click={() => (menuOpen = false)}>{$t('header.termsLink')}</a></span>
             </label>
             <label class="consent">
               <input type="checkbox" bind:checked={regAcceptPrivacy} required aria-required="true" />
-              <span>Принимаю (обязательно) <a href={navHref('/info?tab=legal&doc=privacy')} on:click={() => (menuOpen = false)}>политику конфиденциальности</a></span>
+              <span>{$t('header.acceptPrivacy')} <a href={navHref('/info?tab=legal&doc=privacy')} on:click={() => (menuOpen = false)}>{$t('header.privacyLink')}</a></span>
             </label>
-            <button class="ui-btn ui-btn-primary" type="submit">Создать аккаунт</button>
+            <button class="ui-btn ui-btn-primary" type="submit">{$t('header.createAccount')}</button>
           </form>
         {/if}
       {/if}

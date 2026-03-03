@@ -29,6 +29,13 @@
 - PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.js`.
 - In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search and bbox hot-paths).
 
+## i18n
+- Core runtime: `frontend/src/lib/i18n/index.js`.
+- Locale config: `frontend/src/lib/i18n/config.js`.
+- Locales: `frontend/src/lib/i18n/locales/en.json`, `frontend/src/lib/i18n/locales/ru.json`.
+- Locale storage: cookie `archimap_locale`.
+- Fallback policy: missing key in active locale falls back to `en`; in dev missing keys are logged.
+
 ## ASCII diagram
 ```text
 Browser (SvelteKit UI)

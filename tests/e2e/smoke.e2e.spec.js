@@ -99,6 +99,13 @@ test('opens legal info deep link on terms tab', async ({ page }) => {
   await expect(page.locator('.legal-markdown')).toBeVisible({ timeout: 15000 });
 });
 
+test('language switch updates visible UI content', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'networkidle' });
+  await page.locator('.menu-btn-trigger').click();
+  await page.locator('.locale-select').selectOption('en');
+  await expect(page.locator('.menu .menu-btn', { hasText: 'Sign in' })).toBeVisible({ timeout: 10000 });
+});
+
 test('keeps map deep link params and renders map', async ({ page }) => {
   await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'networkidle' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
