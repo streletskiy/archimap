@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { sendCachedJson } = require('../infra/http-cache.infra');
 
 function registerAdminRoutes(deps) {
   const {
@@ -123,13 +124,15 @@ function registerAdminRoutes(deps) {
       })
     };
 
-    return res.json({
+    return sendCachedJson(req, res, {
       appDisplayName: currentAppDisplayName,
       generatedAt: new Date().toISOString(),
       templates: {
         registration,
         passwordReset
       }
+    }, {
+      cacheControl: 'private, no-cache'
     });
   });
 
@@ -137,9 +140,11 @@ function registerAdminRoutes(deps) {
     if (!appSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
-    return res.json({
+    return sendCachedJson(req, res, {
       ok: true,
       item: appSettingsService.getSmtpSettingsForAdmin()
+    }, {
+      cacheControl: 'private, no-cache'
     });
   });
 
@@ -147,9 +152,11 @@ function registerAdminRoutes(deps) {
     if (!appSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
-    return res.json({
+    return sendCachedJson(req, res, {
       ok: true,
       item: appSettingsService.getGeneralSettingsForAdmin()
+    }, {
+      cacheControl: 'private, no-cache'
     });
   });
 
@@ -256,9 +263,11 @@ function registerAdminRoutes(deps) {
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const limit = parseLimit(req.query?.limit, 200, 1, 1000);
     const out = getUserEditsList({ status, limit, summary: false });
-    return res.json({
+    return sendCachedJson(req, res, {
       total: out.length,
       items: out
+    }, {
+      cacheControl: 'private, no-cache'
     });
   });
 
@@ -271,7 +280,10 @@ function registerAdminRoutes(deps) {
     if (!item) {
       return res.status(404).json({ error: 'Правка не найдена' });
     }
-    return res.json({ item });
+    return sendCachedJson(req, res, { item }, {
+      cacheControl: 'private, no-cache',
+      lastModified: item.updatedAt || undefined
+    });
   });
 
   app.get('/api/admin/users/:email', requireAuth, requireAdmin, (req, res) => {
@@ -306,7 +318,7 @@ function registerAdminRoutes(deps) {
     if (!row) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
-    return res.json({
+    return sendCachedJson(req, res, {
       item: {
         email: String(row.email || ''),
         firstName: row.first_name == null ? null : String(row.first_name),
@@ -318,6 +330,9 @@ function registerAdminRoutes(deps) {
         editsCount: Number(row.edits_count || 0),
         lastEditAt: row.last_edit_at ? String(row.last_edit_at) : null
       }
+    }, {
+      cacheControl: 'private, no-cache',
+      lastModified: row.last_edit_at || row.created_at || undefined
     });
   });
 
@@ -328,7 +343,9 @@ function registerAdminRoutes(deps) {
     }
     const limit = parseLimit(req.query?.limit, 200, 1, 1000);
     const items = getUserEditsList({ createdBy: email, limit, summary: true });
-    return res.json({ total: items.length, items });
+    return sendCachedJson(req, res, { total: items.length, items }, {
+      cacheControl: 'private, no-cache'
+    });
   });
 
   app.post('/api/admin/building-edits/:editId/reject', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {

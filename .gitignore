@@ -9,6 +9,8 @@ node_modules/
 # Runtime data
 data/*
 !data/.gitkeep
+!data/sample/
+!data/sample/**
 
 # Logs
 *.log
@@ -32,5 +34,7 @@ frontend/.svelte-kit/
 frontend/build/
 public/app/
 tmp/
+playwright-report/
+test-results/
 scripts/release-docker.ps1
 LOCAL_CONTEXT.md

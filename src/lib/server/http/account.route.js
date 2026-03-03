@@ -1,3 +1,5 @@
+const { sendCachedJson } = require('../infra/http-cache.infra');
+
 function registerAccountRoutes({
   app,
   accountReadRateLimiter,
@@ -23,7 +25,9 @@ function registerAccountRoutes({
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const limit = parseLimit(req.query?.limit, 200, 1, 500);
     const items = getUserEditsList({ createdBy: actorKey, status, limit, summary: false });
-    return res.json({ total: items.length, items });
+    return sendCachedJson(req, res, { total: items.length, items }, {
+      cacheControl: 'private, no-cache'
+    });
   });
 
   app.get('/api/account/edits/:editId', accountReadRateLimiter, requireAuth, (req, res) => {
@@ -42,7 +46,10 @@ function registerAccountRoutes({
     if (String(item.updatedBy || '').trim().toLowerCase() !== actorKey) {
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
-    return res.json({ item });
+    return sendCachedJson(req, res, { item }, {
+      cacheControl: 'private, no-cache',
+      lastModified: item.updatedAt || undefined
+    });
   });
 }
 

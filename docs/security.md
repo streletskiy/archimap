@@ -1,60 +1,45 @@
-# Security Guide
+# Security
 
 ## CSP
-
-- CSP is generated in [`src/lib/server/infra/csp.infra.js`](/e:/Projects/Self/archimap/src/lib/server/infra/csp.infra.js) and applied centrally by [`src/lib/server/infra/security-headers.infra.js`](/e:/Projects/Self/archimap/src/lib/server/infra/security-headers.infra.js).
-- Profiles:
-  - `production`: strict, no `unsafe-inline` in `script-src` and `style-src`.
-  - `development`/`test`: keeps `style-src 'self'`, allows `unsafe-eval` only for tooling compatibility.
-- Current baseline directives:
+- Implemented in `src/lib/server/infra/csp.infra.js`, applied via `security-headers.infra.js`.
+- Prod profile:
   - `default-src 'self'`
-  - `script-src 'self'` (prod)
-  - `style-src 'self'`
-  - `style-src-attr 'unsafe-inline'` (required for MapLibre runtime style attributes)
-  - `img-src 'self' data: blob: ...extraOrigins`
-  - `font-src 'self' data: ...extraOrigins`
-  - `connect-src 'self' ...extraOrigins`
-  - `worker-src 'self' blob:`
+  - `script-src 'self'` (no `unsafe-inline`)
+  - `style-src 'self'` (no `unsafe-inline`)
+  - `img-src 'self' data:`
+  - `font-src 'self'`
   - `object-src 'none'`
   - `base-uri 'self'`
   - `frame-ancestors 'none'`
   - `form-action 'self'`
-- Optional external origins are passed via `CSP_CONNECT_SRC_EXTRA` (comma-separated), defaulting to Carto basemap origin.
+  - `worker-src 'self' blob:` (required for MapLibre worker compatibility)
+- Dev profile allows local tooling/HMR websocket origins.
 
-## Security Headers
-
-Centralized in `src/lib/server/infra/security-headers.infra.js`:
-
-- `Content-Security-Policy`
+## Security headers
 - `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
 - `Referrer-Policy: strict-origin-when-cross-origin`
-- `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`
-- `Strict-Transport-Security` only in production over secure transport.
+- `X-Frame-Options: DENY`
+- `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+- `Strict-Transport-Security` enabled for HTTPS production deployments.
 
-## Logging Redaction
+## Cookies/session
+- `httpOnly=true`
+- `sameSite=lax`
+- `secure=true` in production by default (override only for local HTTP via `SESSION_COOKIE_SECURE=false`).
 
-- URL logging strips query string via [`sanitizeUrl`](/e:/Projects/Self/archimap/src/lib/shared/log-sanitizer.js).
-- Sensitive fields are masked by [`maskSensitive`](/e:/Projects/Self/archimap/src/lib/shared/log-sanitizer.js):
-  - `token`, `password`, `secret`, `email`, `session`, `csrf`, `authorization`, `cookie`, `set-cookie`.
-- Request logs are emitted in `src/lib/server/infra/observability.infra.js`; logger-level redaction is enforced in `src/lib/server/services/logger.service.js`.
+## CSRF
+- Mutating routes require `x-csrf-token`.
+- Token is session-bound and validated by `requireCsrfSession`.
+- Integration coverage includes negative path (`mutation without CSRF -> 403`).
 
-## Bootstrap Admin Hardening
+## Logging and redaction
+- Logger: `src/lib/server/services/logger.service.js`.
+- URL sanitization: query values stripped (`sanitizeUrl`).
+- Sensitive fields masked (`maskSensitive`): tokens, passwords, csrf, cookies, auth headers.
 
-- First-admin bootstrap path (`/api/register/start` when DB has zero users) is controlled by:
-  - `BOOTSTRAP_ADMIN_ENABLED`
+## Bootstrap admin
+- Production default: `BOOTSTRAP_ADMIN_ENABLED=false`.
+- Optional hardening:
   - `BOOTSTRAP_ADMIN_SECRET`
   - `BOOTSTRAP_ADMIN_ALLOWED_IPS`
-- In production:
-  - bootstrap must stay disabled by default;
-  - if enabled explicitly, a secret is mandatory and IP allowlist should be restricted.
-
-## Verification
-
-- Unit tests:
-  - `tests/services/csp.infra.test.js`
-  - `tests/services/log-sanitizer.service.test.js`
-  - `tests/services/env.infra.test.js`
-- Integration checks:
-  - `tests/integration/api.integration.test.js`
-  - `scripts/check-csp-security.js` (`npm run test:security`)
+- Runbook procedure documented in `docs/runbook.md`.

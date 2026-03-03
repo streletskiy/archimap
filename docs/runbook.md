@@ -1,69 +1,42 @@
 # Runbook
 
-## Local Dev
+## Production deploy
+1. Set required secrets/env (`SESSION_SECRET`, `APP_BASE_URL`, DB paths, SMTP if used).
+2. Build frontend: `npm run build`.
+3. Start service: `npm run start`.
+4. Validate:
+   - `/readyz`
+   - `/healthz`
+   - `/api/contours-status`
 
-1. Install dependencies:
-```bash
-npm install
-```
-2. Copy `.env.example` to `.env` and set at least:
-```bash
-SESSION_SECRET=...
-APP_BASE_URL=http://localhost:3252
-SESSION_ALLOW_MEMORY_FALLBACK=true
-BOOTSTRAP_ADMIN_ENABLED=true
-```
-3. Start app:
-```bash
-npm start
-```
+## Data refresh
+1. Update OSM source settings.
+2. Run `npm run tiles:build`.
+3. Verify PMTiles:
+   - `curl -I -H "Range: bytes=0-1023" http://host/api/buildings.pmtiles`
+   - Expect `206`, `Accept-Ranges`, `Content-Range`.
 
-## Docker
+## Safe first admin bootstrap
+1. In production keep `BOOTSTRAP_ADMIN_ENABLED=false` by default.
+2. For one-time bootstrap:
+   - set `BOOTSTRAP_ADMIN_ENABLED=true`
+   - set `BOOTSTRAP_ADMIN_SECRET=<one-time-secret>`
+   - set restrictive `BOOTSTRAP_ADMIN_ALLOWED_IPS`
+3. Complete first registration.
+4. Revert `BOOTSTRAP_ADMIN_ENABLED=false` and rotate bootstrap secret.
 
-1. Prepare `.env`.
-2. Start:
-```bash
-docker compose up -d
-```
-3. Check readiness:
-```bash
-curl http://localhost:3252/readyz
-```
+## Common incidents
 
-## Safe First Admin Creation
+### Map tiles not loading
+- Check PMTiles file exists in `data/`.
+- Check `/api/buildings.pmtiles` returns `200` or `206`.
+- Check CSP `connect-src`/`worker-src` and browser console.
 
-Recommended production sequence:
+### Search degraded
+- Validate FTS source/index integrity.
+- Re-run sync/rebuild flow.
+- Check `/metrics` and request logs for high latency spikes.
 
-1. Keep `BOOTSTRAP_ADMIN_ENABLED=false` by default.
-2. For one-time bootstrap, temporarily set:
-```bash
-BOOTSTRAP_ADMIN_ENABLED=true
-BOOTSTRAP_ADMIN_SECRET=<one-time-secret>
-BOOTSTRAP_ADMIN_ALLOWED_IPS=<admin-ip-only>
-```
-3. Call registration endpoint with header `x-bootstrap-admin-secret`.
-4. Verify admin user exists.
-5. Immediately set `BOOTSTRAP_ADMIN_ENABLED=false` and restart.
-
-## Common Issues
-
-### CSP blocks map resources
-
-- Inspect browser CSP violation logs.
-- Add only required origins via `CSP_CONNECT_SRC_EXTRA`.
-- Re-run:
-```bash
-npm run test:security
-```
-
-### Sessions do not persist locally
-
-- For local HTTP, set:
-```bash
-SESSION_COOKIE_SECURE=false
-```
-
-### Redis unavailable in production
-
-- Keep `SESSION_ALLOW_MEMORY_FALLBACK=false`.
-- Restore Redis; do not switch to memory sessions in production.
+### Auth appears broken in local docker
+- Usually cookie dropped on non-HTTPS:
+  - set `SESSION_COOKIE_SECURE=false` for local HTTP only.

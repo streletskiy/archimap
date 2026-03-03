@@ -1,3 +1,6 @@
+const { sendCachedJson } = require('../infra/http-cache.infra');
+const { createLruCache } = require('../infra/lru-cache.infra');
+
 function parseOsmKey(value) {
   const text = String(value || '').trim();
   const match = text.match(/^(way|relation)\/(\d+)$/);
@@ -82,6 +85,50 @@ function registerBuildingsRoutes(deps) {
     sanitizeArchiPayload,
     supersedePendingUserEdits
   } = deps;
+  const bboxCache = createLruCache({ max: 100, ttlMs: 10 * 1000 });
+
+  const selectFilterDataBboxRtree = db.prepare(`
+    SELECT
+      bc.osm_type,
+      bc.osm_id,
+      bc.tags_json,
+      ai.osm_id AS info_osm_id,
+      ai.name,
+      ai.style,
+      ai.levels,
+      ai.year_built,
+      ai.architect,
+      ai.address,
+      ai.description,
+      ai.archimap_description,
+      ai.updated_by,
+      ai.updated_at
+    FROM osm.building_contours_rtree br
+    JOIN osm.building_contours bc
+      ON bc.rowid = br.contour_rowid
+    LEFT JOIN local.architectural_info ai
+      ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+    WHERE br.max_lon >= ?
+      AND br.min_lon <= ?
+      AND br.max_lat >= ?
+      AND br.min_lat <= ?
+    LIMIT ?
+  `);
+
+  const selectFilterDataBboxPlain = db.prepare(`
+    ${FILTER_DATA_SELECT_FIELDS_SQL}
+    WHERE bc.max_lon >= ?
+      AND bc.min_lon <= ?
+      AND bc.max_lat >= ?
+      AND bc.min_lat <= ?
+    LIMIT ?
+  `);
+
+  const selectBuildingById = db.prepare(`
+    SELECT osm_type, osm_id, tags_json, geometry_json
+    FROM osm.building_contours
+    WHERE osm_type = ? AND osm_id = ?
+  `);
 
   app.post('/api/buildings/filter-data', filterDataRateLimiter, (req, res) => {
     const rawKeys = req.body?.keys;
@@ -143,47 +190,25 @@ function registerBuildingsRoutes(deps) {
       return res.status(400).json({ error: 'Некорректные границы bbox' });
     }
 
-    const rows = rtreeState.ready
-      ? db.prepare(`
-        SELECT
-          bc.osm_type,
-          bc.osm_id,
-          bc.tags_json,
-          ai.osm_id AS info_osm_id,
-          ai.name,
-          ai.style,
-          ai.levels,
-          ai.year_built,
-          ai.architect,
-          ai.address,
-          ai.description,
-          ai.archimap_description,
-          ai.updated_by,
-          ai.updated_at
-        FROM osm.building_contours_rtree br
-        JOIN osm.building_contours bc
-          ON bc.rowid = br.contour_rowid
-        LEFT JOIN local.architectural_info ai
-          ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
-        WHERE br.max_lon >= ?
-          AND br.min_lon <= ?
-          AND br.max_lat >= ?
-          AND br.min_lat <= ?
-        LIMIT ?
-      `).all(minLon, maxLon, minLat, maxLat, limit)
-      : db.prepare(`
-        ${FILTER_DATA_SELECT_FIELDS_SQL}
-        WHERE bc.max_lon >= ?
-          AND bc.min_lon <= ?
-          AND bc.max_lat >= ?
-          AND bc.min_lat <= ?
-        LIMIT ?
-      `).all(minLon, maxLon, minLat, maxLat, limit);
-
     const actorKey = getSessionEditActorKey(req);
+    const cacheKey = `${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${rtreeState.ready ? 'rtree' : 'plain'}`;
+    const cached = bboxCache.get(cacheKey);
+    if (cached) {
+      return sendCachedJson(req, res, cached, {
+        cacheControl: 'public, max-age=10'
+      });
+    }
+
+    const rows = rtreeState.ready
+      ? selectFilterDataBboxRtree.all(minLon, maxLon, minLat, maxLat, limit)
+      : selectFilterDataBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
+
     const items = applyPersonalEditsToFilterItems(rows.map(mapFilterDataRow), actorKey);
-    res.setHeader('Cache-Control', 'public, max-age=60');
-    return res.json({ items, truncated: rows.length >= limit });
+    const payload = { items, truncated: rows.length >= limit };
+    bboxCache.set(cacheKey, payload);
+    return sendCachedJson(req, res, payload, {
+      cacheControl: 'public, max-age=10'
+    });
   });
 
   app.get('/api/building-info/:osmType/:osmId', buildingsReadRateLimiter, (req, res) => {
@@ -201,7 +226,7 @@ function registerBuildingsRoutes(deps) {
       return res.status(404).json({ error: 'Информация не найдена' });
     }
 
-    return res.json({
+    return sendCachedJson(req, res, {
       osm_type: osmType,
       osm_id: osmId,
       name: row.name ?? null,
@@ -217,6 +242,9 @@ function registerBuildingsRoutes(deps) {
       review_status: personal ? normalizeUserEditStatus(personal.status) : 'accepted',
       admin_comment: personal?.admin_comment ?? null,
       user_edit_id: personal ? Number(personal.id || 0) : null
+    }, {
+      cacheControl: 'private, no-cache',
+      lastModified: row.updated_at || undefined
     });
   });
 
@@ -301,11 +329,7 @@ function registerBuildingsRoutes(deps) {
       return res.status(400).json({ error: 'Некорректный идентификатор здания' });
     }
 
-    const row = db.prepare(`
-      SELECT osm_type, osm_id, tags_json, geometry_json
-      FROM osm.building_contours
-      WHERE osm_type = ? AND osm_id = ?
-    `).get(osmType, osmId);
+    const row = selectBuildingById.get(osmType, osmId);
 
     if (!row) {
       return res.status(404).json({ error: 'Здание не найдено в локальной базе контуров' });
@@ -313,7 +337,9 @@ function registerBuildingsRoutes(deps) {
 
     const feature = rowToFeature(row);
     attachInfoToFeatures([feature], { actorKey: getSessionEditActorKey(req) });
-    return res.json(feature);
+    return sendCachedJson(req, res, feature, {
+      cacheControl: 'public, max-age=30'
+    });
   });
 }
 

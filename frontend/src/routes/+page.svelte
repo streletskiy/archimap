@@ -1,9 +1,9 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
   import SearchModal from '$lib/components/shell/SearchModal.svelte';
-  import { apiJson } from '$lib/services/http';
+  import { apiJson, apiJsonCached } from '$lib/services/http';
   import { session } from '$lib/stores/auth';
   import { mapCenter, requestMapFocus, setSelectedBuilding } from '$lib/stores/map';
   import { openBuildingModal } from '$lib/stores/ui';
@@ -31,10 +31,18 @@
   let saveBuildingStatus = '';
   let lastSearchCommandId = null;
   let activeSearchRequestToken = 0;
+  let activeSearchAbortController = null;
 
   onMount(async () => {
     const module = await import('$lib/components/map/MapCanvas.svelte');
     MapCanvasComponent = module.default;
+  });
+
+  onDestroy(() => {
+    if (activeSearchAbortController) {
+      activeSearchAbortController.abort();
+      activeSearchAbortController = null;
+    }
   });
 
   function normalizeArchiInfo(payload) {
@@ -204,6 +212,11 @@
     const center = get(mapCenter);
     const cursor = append ? Number(current.nextCursor || 0) : 0;
     const token = ++activeSearchRequestToken;
+    if (activeSearchAbortController) {
+      activeSearchAbortController.abort();
+    }
+    activeSearchAbortController = new AbortController();
+    const signal = activeSearchAbortController.signal;
     const hasStyleDictionaryMatch = styleSearchKeys.length > 0;
 
     if (hasStyleDictionaryMatch) {
@@ -220,7 +233,11 @@
             params.set('lon', String(center.lng));
             params.set('lat', String(center.lat));
           }
-          const data = await apiJson(`/api/search-buildings?${params.toString()}`);
+          const url = `/api/search-buildings?${params.toString()}`;
+          const data = await apiJsonCached(url, {
+            ttlMs: 10_000,
+            signal
+          });
           return Array.isArray(data?.items) ? data.items : [];
         }));
         if (token !== activeSearchRequestToken) return;
@@ -243,6 +260,7 @@
           append: false
         });
       } catch (error) {
+        if (String(error?.name || '').toLowerCase() === 'aborterror') return;
         if (token !== activeSearchRequestToken) return;
         setSearchError(error?.message || 'Не удалось выполнить поиск.', { append: false });
       }
@@ -263,7 +281,11 @@
     }
 
     try {
-      const data = await apiJson(`/api/search-buildings?${params.toString()}`);
+      const url = `/api/search-buildings?${params.toString()}`;
+      const data = await apiJsonCached(url, {
+        ttlMs: 10_000,
+        signal
+      });
       if (token !== activeSearchRequestToken) return;
       const itemsRaw = Array.isArray(data?.items) ? data.items : [];
       const items = filterSearchItemsByStyleKey(itemsRaw, styleSearchKey);
@@ -275,8 +297,13 @@
         append
       });
     } catch (error) {
+      if (String(error?.name || '').toLowerCase() === 'aborterror') return;
       if (token !== activeSearchRequestToken) return;
       setSearchError(error?.message || 'Не удалось выполнить поиск.', { append });
+    } finally {
+      if (activeSearchAbortController?.signal === signal) {
+        activeSearchAbortController = null;
+      }
     }
   }
 

@@ -179,6 +179,16 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(shortQuery.status, 400);
       const searchBody = await shortQuery.json();
       assert.match(String(searchBody.error || ''), /Минимальная длина/);
+
+      const searchOk = await callApi('/api/search-buildings?q=test&limit=5');
+      assert.equal(searchOk.status, 200);
+      const searchEtag = String(searchOk.headers.get('etag') || '');
+      assert.ok(searchEtag.length > 0);
+
+      const searchNotModified = await callApi('/api/search-buildings?q=test&limit=5', {
+        headers: { 'if-none-match': searchEtag }
+      });
+      assert.equal(searchNotModified.status, 304);
     });
 
     await t.test('pmtiles supports range requests', async () => {
@@ -192,6 +202,17 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
       const payload = new Uint8Array(await response.arrayBuffer());
       assert.equal(payload.length, 1024);
+
+      const full = await callApi('/api/buildings.pmtiles');
+      assert.equal(full.status, 200);
+      const pmtilesEtag = String(full.headers.get('etag') || '');
+      assert.ok(pmtilesEtag.length > 0);
+      assert.ok(String(full.headers.get('last-modified') || '').length > 0);
+
+      const notModified = await callApi('/api/buildings.pmtiles', {
+        headers: { 'if-none-match': pmtilesEtag }
+      });
+      assert.equal(notModified.status, 304);
     });
   } finally {
     if (server.exitCode == null) {

@@ -1,6 +1,8 @@
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
+const { sendCachedJson } = require('../infra/http-cache.infra');
+const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
 
 function registerAppRoutes(deps) {
   const {
@@ -81,11 +83,13 @@ function registerAppRoutes(deps) {
       const doc = target.fromRoot
         ? { title: target.title, markdown: fs.readFileSync(path.join(rootDir, target.fileName), 'utf8') }
         : readLegalDoc(target.fileName, target.title);
-      return res.json({
+      return sendCachedJson(req, res, {
         ok: true,
         slug,
         title: doc.title,
         markdown: doc.markdown
+      }, {
+        cacheControl: 'public, max-age=120'
       });
     } catch {
       return res.status(404).json({ error: 'Документ не найден' });
@@ -93,30 +97,22 @@ function registerAppRoutes(deps) {
   });
 
   app.get('/api/buildings.pmtiles', (req, res) => {
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    return res.sendFile(buildingsPmtilesPath, (error) => {
-      if (!error) return;
-      if (error.code === 'ENOENT') {
-        if (!res.headersSent) {
-          res.status(404).json({ error: 'Файл PMTiles не найден. Выполните sync для генерации tileset.' });
-        }
-        return;
-      }
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Не удалось отдать PMTiles файл' });
-      }
+    return sendPmtiles(req, res, buildingsPmtilesPath, {
+      cacheControl: 'public, max-age=300, stale-while-revalidate=120'
     });
   });
 
   app.get('/api/filter-tag-keys', publicApiRateLimiter, (req, res) => {
     try {
       const keys = getFilterTagKeysCached();
-      res.json({
+      return sendCachedJson(req, res, {
         keys,
         warmingUp: isFilterTagKeysRebuildInProgress() || keys.length === 0
+      }, {
+        cacheControl: 'public, max-age=300'
       });
     } catch {
-      res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
+      return res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
     }
   });
 

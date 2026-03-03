@@ -7,6 +7,7 @@ const {
   passwordResetHtmlTemplate,
   passwordResetTextTemplate
 } = require('../email-templates');
+const { sendCachedJson } = require('../infra/http-cache.infra');
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
@@ -381,7 +382,9 @@ function registerAuthRoutes({
     const user = resolveSessionUser(req);
     const authenticated = Boolean(user);
     const csrfToken = user ? ensureCsrfToken(req) : null;
-    res.json({ authenticated, user, csrfToken });
+    return sendCachedJson(req, res, { authenticated, user, csrfToken }, {
+      cacheControl: 'private, no-cache'
+    });
   });
 
   app.post('/api/login', loginRateLimiter, async (req, res) => {
@@ -925,7 +928,7 @@ function registerAuthRoutes({
       LIMIT 500
     `).all(...params);
 
-    return res.json({
+    return sendCachedJson(req, res, {
       items: rows.map((row) => ({
         email: String(row.email || ''),
         firstName: normalizeProfileName(row.first_name),
@@ -938,6 +941,8 @@ function registerAuthRoutes({
         lastEditAt: row.last_edit_at ? String(row.last_edit_at) : null,
         hasEdits: Number(row.edits_count || 0) > 0
       }))
+    }, {
+      cacheControl: 'private, no-cache'
     });
   });
 

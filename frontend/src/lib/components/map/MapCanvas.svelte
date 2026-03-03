@@ -1,8 +1,7 @@
 <script>
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-  import maplibregl from 'maplibre-gl';
-  import { Protocol } from 'pmtiles';
   import { getRuntimeConfig } from '$lib/services/config';
+  import { apiJsonCached } from '$lib/services/http';
   import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady } from '$lib/stores/map';
   import { buildingFilterRules } from '$lib/stores/filters';
   import { searchState } from '$lib/stores/search';
@@ -20,6 +19,7 @@
   const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
   const SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID = 'search-results-clusters-count-layer';
   const STYLE_OVERLAY_FADE_MS = 260;
+  const FILTER_REQUEST_DEBOUNCE_MS = 180;
   const BUILDING_THEME = {
     light: {
       fillColor: '#a3a3a3',
@@ -37,8 +37,11 @@
 
   let container;
   let map = null;
+  let maplibregl = null;
   let protocol = null;
   let themeObserver = null;
+  let mapMoveDebounceTimer = null;
+  let activeFilterAbortController = null;
   let latestFilterToken = 0;
   let lastSelectedKey = null;
   let lastSearchFitSeq = 0;
@@ -526,6 +529,17 @@
     applyLabelLayerVisibility($mapLabelsVisible);
   }
 
+  function scheduleFilterRefresh() {
+    if (mapMoveDebounceTimer) {
+      clearTimeout(mapMoveDebounceTimer);
+      mapMoveDebounceTimer = null;
+    }
+    mapMoveDebounceTimer = setTimeout(() => {
+      mapMoveDebounceTimer = null;
+      applyBuildingFilters($buildingFilterRules);
+    }, FILTER_REQUEST_DEBOUNCE_MS);
+  }
+
   function restoreCustomLayersAfterStyleChange() {
     if (!map || !runtimeConfig) return;
     const tryRestore = () => {
@@ -610,12 +624,25 @@
     });
 
     let items = [];
+    if (activeFilterAbortController) {
+      activeFilterAbortController.abort();
+    }
+    activeFilterAbortController = new AbortController();
+    const signal = activeFilterAbortController.signal;
+
     try {
-      const resp = await fetch(`/api/buildings/filter-data-bbox?${params.toString()}`);
-      const payload = await resp.json().catch(() => ({}));
+      const payload = await apiJsonCached(`/api/buildings/filter-data-bbox?${params.toString()}`, {
+        ttlMs: 10_000,
+        signal
+      });
       items = Array.isArray(payload?.items) ? payload.items : [];
-    } catch {
+    } catch (error) {
+      if (String(error?.name || '').toLowerCase() === 'aborterror') return;
       return;
+    } finally {
+      if (activeFilterAbortController?.signal === signal) {
+        activeFilterAbortController = null;
+      }
     }
     if (token !== latestFilterToken) return;
 
@@ -685,41 +712,60 @@
   }
 
   onMount(() => {
-    const config = getRuntimeConfig();
-    runtimeConfig = config;
-    protocol = new Protocol();
-    maplibregl.addProtocol('pmtiles', protocol.tile);
-    currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
+    let mountAlive = true;
 
-    map = new maplibregl.Map({
-      container,
-      style: currentMapStyleUrl,
-      center: [config.mapDefault.lon, config.mapDefault.lat],
-      zoom: config.mapDefault.zoom,
-      attributionControl: true
-    });
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.on('moveend', () => setMapCenter(map.getCenter()));
-    map.on('moveend', () => applyBuildingFilters($buildingFilterRules));
-    map.on('zoomend', () => applyBuildingFilters($buildingFilterRules));
+    async function initMap() {
+      const [{ default: maplibreModule }, { Protocol: ProtocolCtor }] = await Promise.all([
+        import('maplibre-gl'),
+        import('pmtiles')
+      ]);
+      if (!mountAlive) return;
+      maplibregl = maplibreModule;
 
-    map.on('style.load', () => {
-      ensureMapSourcesAndLayers(config);
-      applyBuildingFilters($buildingFilterRules);
+      const config = getRuntimeConfig();
+      runtimeConfig = config;
+      protocol = new ProtocolCtor();
+      maplibregl.addProtocol('pmtiles', protocol.tile);
+      currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
+
+      map = new maplibregl.Map({
+        container,
+        style: currentMapStyleUrl,
+        center: [config.mapDefault.lon, config.mapDefault.lat],
+        zoom: config.mapDefault.zoom,
+        attributionControl: true
+      });
+      map.addControl(new maplibregl.NavigationControl(), 'top-right');
+      map.on('moveend', () => setMapCenter(map.getCenter()));
+      map.on('moveend', scheduleFilterRefresh);
+      map.on('zoomend', scheduleFilterRefresh);
+
+      map.on('style.load', () => {
+        ensureMapSourcesAndLayers(config);
+        scheduleFilterRefresh();
+      });
+
+      map.on('load', () => {
+        setMapCenter(map.getCenter());
+        setMapReady(true);
+      });
+
+      themeObserver = new MutationObserver(() => {
+        applyThemeToMap(getCurrentTheme());
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+      });
+    }
+
+    initMap().catch(() => {
+      // Keep empty fallback state if map runtime cannot initialize.
     });
 
-    map.on('load', () => {
-      setMapCenter(map.getCenter());
-      setMapReady(true);
-    });
-
-    themeObserver = new MutationObserver(() => {
-      applyThemeToMap(getCurrentTheme());
-    });
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme']
-    });
+    return () => {
+      mountAlive = false;
+    };
   });
 
   onDestroy(() => {
@@ -732,6 +778,14 @@
     if (styleTransitionTimer) {
       clearTimeout(styleTransitionTimer);
       styleTransitionTimer = null;
+    }
+    if (mapMoveDebounceTimer) {
+      clearTimeout(mapMoveDebounceTimer);
+      mapMoveDebounceTimer = null;
+    }
+    if (activeFilterAbortController) {
+      activeFilterAbortController.abort();
+      activeFilterAbortController = null;
     }
     if (map) {
       map.remove();

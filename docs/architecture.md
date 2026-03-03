@@ -1,0 +1,46 @@
+# Architecture
+
+## Runtime components
+- `server.js`: main HTTP runtime (Express 5), session/auth bootstrap, route registration, workers.
+- `frontend/` (SvelteKit static build): UI bundles and routes (`/`, `/app`, `/admin`, `/account`, `/info`).
+- SQLite:
+  - `data/archimap.db` (main app DB)
+  - `data/osm.db` (OSM contours/search source)
+  - `data/local-edits.db` (accepted local edits)
+  - `data/user-edits.db` (moderation queue)
+  - `data/users.db` (auth/users)
+- Redis (optional): session store backend.
+- PMTiles: local vector tiles file served as `/api/buildings.pmtiles`.
+
+## Execution boundaries
+- Client-only code: `frontend/src/lib/**` and Svelte routes/components.
+- Server-only code: `src/lib/server/**` and `src/routes/**`.
+- Shared utilities: `src/lib/shared/**`.
+
+## Security and auth points
+- Security headers/CSP: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`.
+- Auth/session routes: `src/lib/server/auth/index.js`.
+- CSRF enforcement: `src/lib/server/services/csrf.service.js`.
+- Error normalization: `src/lib/server/infra/error-handling.infra.js`.
+
+## Caching points
+- HTTP cache helpers (ETag/Last-Modified/304 + JSON compression): `src/lib/server/infra/http-cache.infra.js`.
+- PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.js`.
+- In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search and bbox hot-paths).
+
+## ASCII diagram
+```text
+Browser (SvelteKit UI)
+  |  GET/POST /api/*
+  v
+Express (server.js)
+  |- security headers + CSP + request-id + logging
+  |- auth/session + CSRF
+  |- route handlers (src/lib/server/http/*)
+  |    |- cached JSON (ETag/Last-Modified/br|gzip)
+  |    |- PMTiles byte-range streaming
+  |
+  +--> SQLite (main + osm + local/user edits + auth)
+  +--> Redis session store (optional, prod)
+  +--> workers/scripts (sync, search index rebuild, tag cache rebuild)
+```

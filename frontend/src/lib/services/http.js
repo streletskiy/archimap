@@ -31,3 +31,34 @@ export async function apiJson(input, init = {}) {
   }
   return data;
 }
+
+const getCache = new Map();
+
+function normalizeCacheKey(input, init) {
+  const method = String(init?.method || 'GET').toUpperCase();
+  const url = typeof input === 'string' ? input : String(input?.url || '');
+  return `${method}:${url}`;
+}
+
+export async function apiJsonCached(input, options = {}) {
+  const ttlMs = Math.max(0, Number(options.ttlMs || 0));
+  const cacheKey = options.cacheKey || normalizeCacheKey(input, options);
+  const now = Date.now();
+  const cached = getCache.get(cacheKey);
+  if (cached && (now - cached.ts) <= ttlMs) {
+    return cached.data;
+  }
+
+  const init = { ...options };
+  delete init.ttlMs;
+  delete init.cacheKey;
+  const data = await apiJson(input, init);
+  if (ttlMs > 0) {
+    getCache.set(cacheKey, { ts: now, data });
+    if (getCache.size > 200) {
+      const oldestKey = getCache.keys().next().value;
+      getCache.delete(oldestKey);
+    }
+  }
+  return data;
+}

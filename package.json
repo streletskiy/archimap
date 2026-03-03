@@ -16,6 +16,8 @@
     "test:security": "node scripts/check-csp-security.js",
     "test:e2e": "playwright test",
     "test:smoke": "node scripts/smoke-test.js",
+    "perf:smoke": "node scripts/perf-smoke.js",
+    "analyze": "npm --prefix frontend run analyze",
     "depcheck": "depcheck --ignores=\"@eslint/js,globals,eslint-config-prettier,eslint-plugin-svelte,svelte\"",
     "dev": "npm run frontend:build && node server.js",
     "frontend:dev": "npm --prefix frontend run dev",
@@ -24,6 +26,8 @@
     "frontend:check": "npm --prefix frontend run check",
     "frontend:lint": "npm --prefix frontend run lint",
     "start": "node server.js",
+    "db:seed": "node scripts/db-seed.js",
+    "tiles:build": "node scripts/tiles-build.js",
     "sync:city": "node scripts/sync-osm-buildings.js",
     "migrate": "node scripts/migrate.js"
   },
