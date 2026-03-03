@@ -654,11 +654,11 @@
             <input class="ui-field" bind:value={regPasswordConfirm} type="password" placeholder="Повторите пароль" required />
             <label class="consent">
               <input type="checkbox" bind:checked={regAcceptTerms} required aria-required="true" />
-              <span>Принимаю (обязательно) <a href={navHref('/info')} on:click={() => (menuOpen = false)}>пользовательское соглашение</a></span>
+              <span>Принимаю (обязательно) <a href={navHref('/info?tab=legal&doc=terms')} on:click={() => (menuOpen = false)}>пользовательское соглашение</a></span>
             </label>
             <label class="consent">
               <input type="checkbox" bind:checked={regAcceptPrivacy} required aria-required="true" />
-              <span>Принимаю (обязательно) <a href={navHref('/info')} on:click={() => (menuOpen = false)}>политику конфиденциальности</a></span>
+              <span>Принимаю (обязательно) <a href={navHref('/info?tab=legal&doc=privacy')} on:click={() => (menuOpen = false)}>политику конфиденциальности</a></span>
             </label>
             <button class="ui-btn ui-btn-primary" type="submit">Создать аккаунт</button>
           </form>

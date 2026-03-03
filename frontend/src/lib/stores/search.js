@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { UI_STRINGS } from '$lib/i18n/ui-strings';
 
 const initialState = {
   modalOpen: false,
@@ -8,7 +9,7 @@ const initialState = {
   nextCursor: null,
   loading: false,
   loadingMore: false,
-  status: 'Введите минимум 2 символа.',
+  status: UI_STRINGS.search.minChars,
   error: '',
   fitSeq: 0
 };
@@ -40,7 +41,7 @@ export function closeSearchModal() {
   }));
 }
 
-export function resetSearchState(message = 'Введите минимум 2 символа.') {
+export function resetSearchState(message = UI_STRINGS.search.minChars) {
   searchState.update((state) => ({
     ...state,
     items: [],
@@ -48,7 +49,7 @@ export function resetSearchState(message = 'Введите минимум 2 си
     nextCursor: null,
     loading: false,
     loadingMore: false,
-    status: String(message || 'Введите минимум 2 символа.'),
+    status: String(message || UI_STRINGS.search.minChars),
     error: ''
   }));
 }
@@ -59,7 +60,7 @@ export function setSearchLoading({ append = false } = {}) {
     loading: !append,
     loadingMore: Boolean(append),
     error: '',
-    status: append ? `Найдено: ${state.items.length}` : 'Ищем по базе...'
+    status: append ? UI_STRINGS.search.found(state.items.length) : UI_STRINGS.search.searching
   }));
 }
 
@@ -76,14 +77,14 @@ export function applySearchResults({ query, items, hasMore, nextCursor, append =
       loading: false,
       loadingMore: false,
       error: '',
-      status: nextItems.length > 0 ? `Найдено: ${nextItems.length}` : 'Ничего не найдено.',
+      status: nextItems.length > 0 ? UI_STRINGS.search.found(nextItems.length) : UI_STRINGS.search.notFound,
       fitSeq: append ? state.fitSeq : state.fitSeq + 1
     };
   });
 }
 
 export function setSearchError(message, { append = false } = {}) {
-  const text = String(message || 'Не удалось выполнить поиск.');
+  const text = String(message || UI_STRINGS.search.failed);
   searchState.update((state) => ({
     ...state,
     loading: false,

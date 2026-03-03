@@ -73,6 +73,18 @@ Full list -> `docs/dev/env.md`
 - Performance -> `docs/performance/`
 - Runbook -> `docs/runbook.md`
 
+## Deep Links (URL state)
+- Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
+- Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
+- Open admin edit details: `?edit=<id>` (legacy `adminEdit=<id>` is still supported)
+- Open legal docs directly:
+  - `?tab=legal&doc=terms`
+  - `?tab=legal&doc=privacy`
+
+Notes:
+- Camera updates use history replace (no history spam while panning/zooming).
+- Legacy legal params remain compatible (`tab=user-agreement`, `tab=privacy-policy`).
+
 ## License
 Apache-2.0. See `LICENSE`.
 

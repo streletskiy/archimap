@@ -1,8 +1,11 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { fade } from 'svelte/transition';
   import maplibregl from 'maplibre-gl';
   import { Protocol } from 'pmtiles';
+  import { parseUrlState, patchUrlState } from '$lib/client/urlState';
   import { session } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
   import { getRuntimeConfig } from '$lib/services/config';
@@ -46,6 +49,9 @@
   let fieldValues = {};
   let moderationComment = '';
   let moderationBusy = false;
+  let pendingUrlEditId = null;
+  let adminUrlSyncBusy = false;
+  let lastAppliedUrlEditId = null;
 
   let general = { appDisplayName: 'archimap', appBaseUrl: '', registrationEnabled: true, userEditRequiresPermission: true };
   let generalLoading = false;
@@ -246,6 +252,25 @@
     if (map.getLayer('edited-line')) map.setFilter('edited-line', ['in', ['id'], ['literal', ids]]);
   }
 
+  async function replaceAdminUrlState(patch) {
+    if (typeof window === 'undefined') return;
+    const current = new URL(window.location.href);
+    const next = patchUrlState(current, patch);
+    if (next.toString() === current.toString()) return;
+    adminUrlSyncBusy = true;
+    try {
+      await goto(`${next.pathname}${next.search}${next.hash}`, {
+        replaceState: true,
+        keepFocus: true,
+        noScroll: true
+      });
+    } finally {
+      queueMicrotask(() => {
+        adminUrlSyncBusy = false;
+      });
+    }
+  }
+
   async function loadCenters(items) {
     for (const item of items) {
       const key = keyOf(item);
@@ -331,6 +356,7 @@
       applyMapData();
       fitAllEdited();
       editsStatus = visibleEdits.length ? `Показано: ${visibleEdits.length} из ${edits.length}` : 'Пусто';
+      await maybeOpenPendingUrlEdit();
     } catch (e) {
       edits = [];
       visibleEdits = [];
@@ -343,6 +369,7 @@
   async function openEdit(editId) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) return;
+    pendingUrlEditId = null;
     const requestToken = ++detailRequestToken;
     detailPaneVisible = true;
     selectedEdit = null;
@@ -355,6 +382,8 @@
       const data = await apiJson(`/api/admin/building-edits/${id}`);
       if (requestToken !== detailRequestToken) return;
       selectedEdit = data?.item || null;
+      lastAppliedUrlEditId = id;
+      replaceAdminUrlState({ editId: id });
       const nextD = {};
       const nextV = {};
       for (const ch of Array.isArray(selectedEdit?.changes) ? selectedEdit.changes : []) {
@@ -384,6 +413,7 @@
   function closeEditPanel() {
     detailRequestToken += 1;
     detailPaneVisible = false;
+    replaceAdminUrlState({ editId: null });
   }
 
   function onDetailPaneOutroEnd() {
@@ -559,6 +589,19 @@
     }
   }
 
+  async function maybeOpenPendingUrlEdit() {
+    if (!$session.authenticated || !$session.user?.isAdmin) return;
+    if (adminUrlSyncBusy || editsLoading || !pendingUrlEditId) return;
+    const currentId = Number(selectedEdit?.editId || selectedEdit?.id || 0);
+    if (currentId === pendingUrlEditId && detailPaneVisible) return;
+    if (lastAppliedUrlEditId === pendingUrlEditId && currentId === pendingUrlEditId) return;
+    if (activeTab !== 'edits') {
+      await switchTab('edits');
+      return;
+    }
+    await openEdit(pendingUrlEditId);
+  }
+
   $: {
     const q = String(editsQuery || '').trim().toLowerCase();
     const date = String(editsDate || '').trim();
@@ -588,6 +631,15 @@
   }
 
   onMount(() => {
+    const unsubscribePage = page.subscribe(($pageState) => {
+      const state = parseUrlState($pageState.url);
+      const editId = Number(state?.editId || 0);
+      pendingUrlEditId = Number.isInteger(editId) && editId > 0 ? editId : null;
+      if (!adminUrlSyncBusy) {
+        maybeOpenPendingUrlEdit();
+      }
+    });
+
     if ($session.authenticated && $session.user?.isAdmin) {
       loadEdits();
       loadUsers();
@@ -595,6 +647,7 @@
     const obs = new MutationObserver(() => { if (map) map.setStyle(styleByTheme()); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => {
+      unsubscribePage();
       obs.disconnect();
       destroyMap();
     };

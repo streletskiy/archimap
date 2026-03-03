@@ -3,6 +3,7 @@ import { writable } from 'svelte/store';
 export const selectedBuilding = writable(null);
 export const mapReady = writable(false);
 export const mapCenter = writable(null);
+export const mapZoom = writable(null);
 export const mapFocusRequest = writable(null);
 export const mapLabelsVisible = writable(true);
 
@@ -23,6 +24,15 @@ export function setMapCenter(center) {
     lng: Number(center.lng),
     lat: Number(center.lat)
   });
+}
+
+export function setMapZoom(zoom) {
+  const value = Number(zoom);
+  if (!Number.isFinite(value)) {
+    mapZoom.set(null);
+    return;
+  }
+  mapZoom.set(value);
 }
 
 export function requestMapFocus(payload = {}) {

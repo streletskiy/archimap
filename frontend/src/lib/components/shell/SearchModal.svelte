@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import { searchState, closeSearchModal, requestSearch, resetSearchState, setSearchQuery } from '$lib/stores/search';
+  import { UI_STRINGS } from '$lib/i18n/ui-strings';
   import { toHumanArchitectureStyle } from '$lib/utils/architecture-style';
 
   const dispatch = createEventDispatcher();
@@ -31,7 +32,7 @@
     debounceTimer = setTimeout(() => {
       const normalized = String(text || '').trim();
       if (normalized.length === 0) {
-        resetSearchState('Введите минимум 2 символа.');
+        resetSearchState(UI_STRINGS.search.minChars);
         return;
       }
       requestSearch({ query: normalized, append: false });
@@ -49,10 +50,10 @@
 
 {#if $searchState.modalOpen}
   <div id="search-modal" class="search-backdrop" role="button" tabindex="0" on:click={onBackdropClick} on:keydown={onBackdropKeydown}>
-    <div class="search-modal" role="dialog" aria-modal="true" aria-label="Поиск зданий">
+    <div class="search-modal" role="dialog" aria-modal="true" aria-label={UI_STRINGS.search.modalAriaLabel}>
       <header class="search-head">
-        <h3>Поиск зданий</h3>
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={closeSearchModal}>Закрыть</button>
+        <h3>{UI_STRINGS.search.modalTitle}</h3>
+        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={closeSearchModal}>{UI_STRINGS.search.close}</button>
       </header>
 
       <form class="search-form" on:submit={onSearchSubmit}>
@@ -60,7 +61,7 @@
           id="search-modal-input"
           class="ui-field"
           type="search"
-          placeholder="Название, адрес, стиль, архитектор"
+          placeholder={UI_STRINGS.search.inputPlaceholder}
           value={$searchState.query}
           on:input={onSearchInput}
         />
@@ -70,24 +71,24 @@
 
       <div id="search-results-list" class="search-results-list">
         {#if $searchState.loading}
-          <div class="search-skeleton">Ищем...</div>
+          <div class="search-skeleton">{UI_STRINGS.search.loading}</div>
         {:else if $searchState.items.length === 0}
-          <div class="search-empty">Ничего не найдено.</div>
+          <div class="search-empty">{UI_STRINGS.search.notFound}</div>
         {:else}
           {#each $searchState.items as item (`${item.osmType}/${item.osmId}`)}
             <article class="search-item">
-              <div class="search-item-title">{item.name || 'Без названия'}</div>
+              <div class="search-item-title">{item.name || UI_STRINGS.search.untitled}</div>
               <div class="search-item-line">
-                {#if item.address}Адрес: {item.address}{/if}
+                {#if item.address}{UI_STRINGS.search.address}: {item.address}{/if}
                 {#if item.address && item.style} • {/if}
-                {#if item.style}Стиль: {toHumanArchitectureStyle(item.style) || item.style}{/if}
+                {#if item.style}{UI_STRINGS.search.style}: {toHumanArchitectureStyle(item.style) || item.style}{/if}
               </div>
               {#if item.architect}
-                <div class="search-item-line">Архитектор: {item.architect}</div>
+                <div class="search-item-line">{UI_STRINGS.search.architect}: {item.architect}</div>
               {/if}
               <div class="search-item-actions">
                 <span class="search-item-key">{item.osmType}/{item.osmId}</span>
-                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => selectResult(item)}>К зданию</button>
+                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => selectResult(item)}>{UI_STRINGS.search.toBuilding}</button>
               </div>
             </article>
           {/each}
@@ -102,7 +103,7 @@
           on:click={loadMore}
           disabled={$searchState.loadingMore}
         >
-          {$searchState.loadingMore ? 'Загрузка...' : 'Показать еще'}
+          {$searchState.loadingMore ? UI_STRINGS.search.loadingMore : UI_STRINGS.search.loadMore}
         </button>
       {/if}
     </div>

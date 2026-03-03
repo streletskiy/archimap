@@ -456,8 +456,8 @@
             <h3 class="text-base font-bold text-slate-900">Правовая информация</h3>
             <p class="mt-1 text-sm text-slate-600">Соглашения и политика конфиденциальности доступны в разделе информации.</p>
             <div class="mt-4 space-y-2">
-              <a href="/info/?tab=user-agreement" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Пользовательское соглашение</a>
-              <a href="/info/?tab=privacy-policy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Политика конфиденциальности</a>
+              <a href="/info?tab=legal&doc=terms" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Пользовательское соглашение</a>
+              <a href="/info?tab=legal&doc=privacy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">Политика конфиденциальности</a>
             </div>
           </section>
         </div>

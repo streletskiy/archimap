@@ -35,4 +35,11 @@
 - `AUTO_SYNC_ON_START`
 - `AUTO_SYNC_INTERVAL_HOURS`
 
+## Map defaults
+- `MAP_DEFAULT_LON`
+- `MAP_DEFAULT_LAT`
+- `MAP_DEFAULT_ZOOM`
+
+These values are used as initial camera only when URL does not provide `lat/lng/z`.
+
 Reference template: `.env.example`.

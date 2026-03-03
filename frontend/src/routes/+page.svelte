@@ -1,12 +1,16 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { get } from 'svelte/store';
   import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
   import SearchModal from '$lib/components/shell/SearchModal.svelte';
+  import { parseUrlState, patchUrlState } from '$lib/client/urlState';
+  import { UI_STRINGS } from '$lib/i18n/ui-strings';
   import { apiJson, apiJsonCached } from '$lib/services/http';
   import { session } from '$lib/stores/auth';
-  import { mapCenter, requestMapFocus, setSelectedBuilding } from '$lib/stores/map';
-  import { openBuildingModal } from '$lib/stores/ui';
+  import { mapCenter, mapReady, mapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
+  import { buildingModalOpen, openBuildingModal } from '$lib/stores/ui';
   import { normalizeArchitectureStyleKey, toHumanArchitectureStyle } from '$lib/utils/architecture-style';
   import {
     filterSearchItemsByStyleKey,
@@ -32,6 +36,12 @@
   let lastSearchCommandId = null;
   let activeSearchRequestToken = 0;
   let activeSearchAbortController = null;
+  let urlUpdateInFlight = false;
+  let cameraApplyInFlight = false;
+  let buildingApplyInFlight = false;
+  let lastAppliedCameraKey = '';
+  let lastAppliedBuildingKey = '';
+  let handledUrlSignature = '';
 
   onMount(async () => {
     const module = await import('$lib/components/map/MapCanvas.svelte');
@@ -44,6 +54,82 @@
       activeSearchAbortController = null;
     }
   });
+
+  function toBuildingUrlParam(selection) {
+    const osmType = String(selection?.osmType || '').trim();
+    const osmId = Number(selection?.osmId);
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return null;
+    return { osmType, osmId };
+  }
+
+  async function replaceUrlState(patch) {
+    if (typeof window === 'undefined') return;
+    const current = new URL(window.location.href);
+    const next = patchUrlState(current, patch);
+    if (next.toString() === current.toString()) return;
+    urlUpdateInFlight = true;
+    try {
+      await goto(`${next.pathname}${next.search}${next.hash}`, {
+        replaceState: true,
+        keepFocus: true,
+        noScroll: true
+      });
+    } finally {
+      queueMicrotask(() => {
+        urlUpdateInFlight = false;
+      });
+    }
+  }
+
+  async function applyBuildingFromUrl(building) {
+    const osmType = String(building?.osmType || '').trim();
+    const osmId = Number(building?.osmId);
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return;
+    const buildingKey = `${osmType}/${osmId}`;
+    if (buildingKey === lastAppliedBuildingKey && $buildingModalOpen) return;
+    buildingApplyInFlight = true;
+    try {
+      await onBuildingClick({ detail: { osmType, osmId } });
+      lastAppliedBuildingKey = buildingKey;
+    } finally {
+      buildingApplyInFlight = false;
+    }
+  }
+
+  async function applyUrlStateToUi() {
+    if (typeof window === 'undefined') return;
+    if (urlUpdateInFlight) return;
+
+    const state = parseUrlState($page.url);
+    const signature = `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}|${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`;
+    if (signature === handledUrlSignature) return;
+    handledUrlSignature = signature;
+
+    if (state.camera && $mapReady) {
+      const cameraKey = `${state.camera.lat}:${state.camera.lng}:${state.camera.z ?? ''}`;
+      if (cameraKey !== lastAppliedCameraKey) {
+        cameraApplyInFlight = true;
+        requestMapFocus({
+          lon: state.camera.lng,
+          lat: state.camera.lat,
+          zoom: Number.isFinite(Number(state.camera.z)) ? Number(state.camera.z) : undefined,
+          duration: 0
+        });
+        lastAppliedCameraKey = cameraKey;
+        queueMicrotask(() => {
+          cameraApplyInFlight = false;
+        });
+      }
+    }
+
+    if (state.building) {
+      await applyBuildingFromUrl(state.building);
+    } else if ($buildingModalOpen || $selectedBuilding) {
+      if (!buildingApplyInFlight) {
+        setSelectedBuilding(null);
+      }
+    }
+  }
 
   function normalizeArchiInfo(payload) {
     const info = payload || {};
@@ -153,11 +239,11 @@
     const detail = event?.detail || {};
     if (!detail?.osmType || !detail?.osmId) return;
     if (!$session.authenticated) {
-      saveBuildingStatus = 'Нужна авторизация';
+      saveBuildingStatus = UI_STRINGS.mapPage.authRequired;
       return;
     }
     saveBuildingPending = true;
-    saveBuildingStatus = 'Сохраняем...';
+    saveBuildingStatus = UI_STRINGS.mapPage.saving;
     const payload = {
       osmType: detail.osmType,
       osmId: Number(detail.osmId),
@@ -187,9 +273,9 @@
           }
         };
       }
-      saveBuildingStatus = 'Отправлено на рассмотрение';
+      saveBuildingStatus = UI_STRINGS.mapPage.submitted;
     } catch (error) {
-      saveBuildingStatus = String(error?.message || 'Не удалось сохранить');
+      saveBuildingStatus = String(error?.message || UI_STRINGS.mapPage.saveFailed);
     } finally {
       saveBuildingPending = false;
     }
@@ -202,7 +288,7 @@
     const styleSearchKeys = resolveArchitectureStyleSearchKeys(text);
     const searchQuery = String(styleSearchKey || text).slice(0, 120);
     if (text.length < 2) {
-      resetSearchState('Введите минимум 2 символа.');
+      resetSearchState(UI_STRINGS.mapPage.minChars);
       return;
     }
 
@@ -262,7 +348,7 @@
       } catch (error) {
         if (String(error?.name || '').toLowerCase() === 'aborterror') return;
         if (token !== activeSearchRequestToken) return;
-        setSearchError(error?.message || 'Не удалось выполнить поиск.', { append: false });
+        setSearchError(error?.message || UI_STRINGS.mapPage.searchFailed, { append: false });
       }
       return;
     }
@@ -299,7 +385,7 @@
     } catch (error) {
       if (String(error?.name || '').toLowerCase() === 'aborterror') return;
       if (token !== activeSearchRequestToken) return;
-      setSearchError(error?.message || 'Не удалось выполнить поиск.', { append });
+      setSearchError(error?.message || UI_STRINGS.mapPage.searchFailed, { append });
     } finally {
       if (activeSearchAbortController?.signal === signal) {
         activeSearchAbortController = null;
@@ -335,12 +421,35 @@
     lastSearchCommandId = $searchCommand.id;
     runSearchRequest($searchCommand);
   }
+
+  $: if ($mapReady) {
+    applyUrlStateToUi();
+  }
+
+  $: if ($mapReady && !$buildingModalOpen && !$selectedBuilding) {
+    replaceUrlState({ building: null });
+  }
+
+  $: if ($mapReady && $buildingModalOpen && $selectedBuilding && !buildingApplyInFlight) {
+    const building = toBuildingUrlParam($selectedBuilding);
+    replaceUrlState({ building });
+  }
+
+  $: if ($mapReady && $mapCenter && Number.isFinite(Number($mapZoom)) && !cameraApplyInFlight) {
+    replaceUrlState({
+      camera: {
+        lat: $mapCenter.lat,
+        lng: $mapCenter.lng,
+        z: $mapZoom
+      }
+    });
+  }
 </script>
 
 {#if MapCanvasComponent}
   <svelte:component this={MapCanvasComponent} on:buildingClick={onBuildingClick} />
 {:else}
-  <div class="map-loading">Loading map...</div>
+  <div class="map-loading">{UI_STRINGS.mapPage.mapLoading}</div>
 {/if}
 <BuildingModal
   {buildingDetails}

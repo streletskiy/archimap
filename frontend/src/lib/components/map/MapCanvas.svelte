@@ -2,7 +2,7 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJsonCached } from '$lib/services/http';
-  import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady } from '$lib/stores/map';
+  import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady, setMapZoom } from '$lib/stores/map';
   import { buildingFilterRules } from '$lib/stores/filters';
   import { searchState } from '$lib/stores/search';
 
@@ -18,8 +18,11 @@
   const SEARCH_RESULTS_LAYER_ID = 'search-results-points-layer';
   const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
   const SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID = 'search-results-clusters-count-layer';
+  const CARTO_BUILDING_LAYER_IDS = ['building', 'building-top'];
   const STYLE_OVERLAY_FADE_MS = 260;
   const FILTER_REQUEST_DEBOUNCE_MS = 180;
+  const CARTO_SHOW_DELAY_MS = 160;
+  const COVERAGE_CACHE_LIMIT = 800;
   const BUILDING_THEME = {
     light: {
       fillColor: '#a3a3a3',
@@ -39,9 +42,15 @@
   let map = null;
   let maplibregl = null;
   let protocol = null;
+  let pmtilesArchive = null;
   let themeObserver = null;
   let mapMoveDebounceTimer = null;
+  let coverageDebounceTimer = null;
+  let cartoShowTimer = null;
   let activeFilterAbortController = null;
+  let coverageEvalToken = 0;
+  let coverageVisibleState = 'visible';
+  let coverageCache = new Map();
   let latestFilterToken = 0;
   let lastSelectedKey = null;
   let lastSearchFitSeq = 0;
@@ -390,6 +399,144 @@
     }
   }
 
+  function setCartoBuildingsVisibility(nextVisibility) {
+    if (!map || !map.isStyleLoaded()) return;
+    if (coverageVisibleState === nextVisibility) return;
+    for (const layerId of CARTO_BUILDING_LAYER_IDS) {
+      if (!map.getLayer(layerId)) continue;
+      map.setLayoutProperty(layerId, 'visibility', nextVisibility);
+    }
+    coverageVisibleState = nextVisibility;
+  }
+
+  function queueCartoBuildingsVisibility(nextVisibility) {
+    if (nextVisibility === 'none') {
+      if (cartoShowTimer) {
+        clearTimeout(cartoShowTimer);
+        cartoShowTimer = null;
+      }
+      setCartoBuildingsVisibility('none');
+      return;
+    }
+    if (cartoShowTimer) {
+      clearTimeout(cartoShowTimer);
+    }
+    cartoShowTimer = setTimeout(() => {
+      cartoShowTimer = null;
+      setCartoBuildingsVisibility('visible');
+    }, CARTO_SHOW_DELAY_MS);
+  }
+
+  function normalizeLon(lon) {
+    let next = Number(lon);
+    while (next < -180) next += 360;
+    while (next > 180) next -= 360;
+    return next;
+  }
+
+  function lonLatToTile(lon, lat, z) {
+    const zoom = Math.max(0, Math.floor(Number(z)));
+    const latClamped = Math.max(-85.05112878, Math.min(85.05112878, Number(lat)));
+    const lngWrapped = normalizeLon(lon);
+    const world = 2 ** zoom;
+    const xRaw = Math.floor(((lngWrapped + 180) / 360) * world);
+    const latRad = (latClamped * Math.PI) / 180;
+    const yRaw = Math.floor(((1 - (Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI)) / 2) * world);
+    return {
+      z: zoom,
+      x: Math.max(0, Math.min(world - 1, xRaw)),
+      y: Math.max(0, Math.min(world - 1, yRaw))
+    };
+  }
+
+  function getViewportSamplePoints() {
+    if (!map) return [];
+    const bounds = map.getBounds();
+    if (!bounds) return [];
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+    const center = map.getCenter();
+    const midLon = (west + east) / 2;
+    const midLat = (north + south) / 2;
+    return [
+      [center.lng, center.lat],
+      [west, north],
+      [east, north],
+      [east, south],
+      [west, south],
+      [midLon, north],
+      [midLon, south],
+      [west, midLat],
+      [east, midLat]
+    ];
+  }
+
+  function readCoverageCache(key) {
+    if (!coverageCache.has(key)) return null;
+    const value = coverageCache.get(key);
+    coverageCache.delete(key);
+    coverageCache.set(key, value);
+    return value;
+  }
+
+  function writeCoverageCache(key, value) {
+    if (coverageCache.has(key)) {
+      coverageCache.delete(key);
+    }
+    coverageCache.set(key, value);
+    if (coverageCache.size <= COVERAGE_CACHE_LIMIT) return;
+    const oldest = coverageCache.keys().next().value;
+    if (oldest != null) coverageCache.delete(oldest);
+  }
+
+  async function hasPmtilesTile(tile) {
+    if (!pmtilesArchive) return false;
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    const cached = readCoverageCache(key);
+    if (cached != null) return cached;
+    let exists = false;
+    try {
+      const entry = await pmtilesArchive.getZxy(tile.z, tile.x, tile.y);
+      exists = Boolean(entry?.data || entry);
+    } catch {
+      exists = false;
+    }
+    writeCoverageCache(key, exists);
+    return exists;
+  }
+
+  async function evaluatePmtilesCoverage() {
+    if (!map || !map.isStyleLoaded() || !pmtilesArchive) return;
+    const token = ++coverageEvalToken;
+    const zoom = Math.floor(map.getZoom());
+    const points = getViewportSamplePoints();
+    if (points.length === 0) return;
+
+    for (const [lon, lat] of points) {
+      const tile = lonLatToTile(lon, lat, zoom);
+      const exists = await hasPmtilesTile(tile);
+      if (token !== coverageEvalToken) return;
+      if (!exists) {
+        queueCartoBuildingsVisibility('visible');
+        return;
+      }
+    }
+    queueCartoBuildingsVisibility('none');
+  }
+
+  function scheduleCoverageCheck() {
+    if (coverageDebounceTimer) {
+      clearTimeout(coverageDebounceTimer);
+      coverageDebounceTimer = null;
+    }
+    coverageDebounceTimer = setTimeout(() => {
+      coverageDebounceTimer = null;
+      evaluatePmtilesCoverage();
+    }, 80);
+  }
+
   function ensureMapSourcesAndLayers(config) {
     if (!map) return;
     const buildingPaint = getBuildingThemePaint(getCurrentTheme());
@@ -527,6 +674,7 @@
     updateSearchMarkers($searchState.items);
     applyBuildingThemePaint(getCurrentTheme());
     applyLabelLayerVisibility($mapLabelsVisible);
+    scheduleCoverageCheck();
   }
 
   function scheduleFilterRefresh() {
@@ -715,7 +863,7 @@
     let mountAlive = true;
 
     async function initMap() {
-      const [{ default: maplibreModule }, { Protocol: ProtocolCtor }] = await Promise.all([
+      const [{ default: maplibreModule }, { PMTiles: PMTilesCtor, Protocol: ProtocolCtor }] = await Promise.all([
         import('maplibre-gl'),
         import('pmtiles')
       ]);
@@ -727,6 +875,13 @@
       protocol = new ProtocolCtor();
       maplibregl.addProtocol('pmtiles', protocol.tile);
       currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
+      coverageCache = new Map();
+      coverageVisibleState = 'visible';
+
+      const pmtilesUrl = config.buildingsPmtiles.url.startsWith('http')
+        ? config.buildingsPmtiles.url
+        : `${window.location.origin}${config.buildingsPmtiles.url.startsWith('/') ? '' : '/'}${config.buildingsPmtiles.url}`;
+      pmtilesArchive = new PMTilesCtor(pmtilesUrl);
 
       map = new maplibregl.Map({
         container,
@@ -736,9 +891,15 @@
         attributionControl: true
       });
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
-      map.on('moveend', () => setMapCenter(map.getCenter()));
+      map.on('moveend', () => {
+        setMapCenter(map.getCenter());
+        setMapZoom(map.getZoom());
+      });
       map.on('moveend', scheduleFilterRefresh);
+      map.on('moveend', scheduleCoverageCheck);
       map.on('zoomend', scheduleFilterRefresh);
+      map.on('zoomend', () => setMapZoom(map.getZoom()));
+      map.on('zoomend', scheduleCoverageCheck);
 
       map.on('style.load', () => {
         ensureMapSourcesAndLayers(config);
@@ -747,6 +908,7 @@
 
       map.on('load', () => {
         setMapCenter(map.getCenter());
+        setMapZoom(map.getZoom());
         setMapReady(true);
       });
 
@@ -771,6 +933,7 @@
   onDestroy(() => {
     setMapReady(false);
     setMapCenter(null);
+    setMapZoom(null);
     if (themeObserver) {
       themeObserver.disconnect();
       themeObserver = null;
@@ -782,6 +945,14 @@
     if (mapMoveDebounceTimer) {
       clearTimeout(mapMoveDebounceTimer);
       mapMoveDebounceTimer = null;
+    }
+    if (coverageDebounceTimer) {
+      clearTimeout(coverageDebounceTimer);
+      coverageDebounceTimer = null;
+    }
+    if (cartoShowTimer) {
+      clearTimeout(cartoShowTimer);
+      cartoShowTimer = null;
     }
     if (activeFilterAbortController) {
       activeFilterAbortController.abort();
@@ -796,6 +967,8 @@
       protocol?.destroy?.();
       protocol = null;
     }
+    pmtilesArchive = null;
+    coverageCache = new Map();
   });
 </script>
 

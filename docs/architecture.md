@@ -16,6 +16,7 @@
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
 - Server-only code: `src/lib/server/**` and `src/routes/**`.
 - Shared utilities: `src/lib/shared/**`.
+- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`.
 
 ## Security and auth points
 - Security headers/CSP: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`.

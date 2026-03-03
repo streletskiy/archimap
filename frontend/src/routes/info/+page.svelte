@@ -1,13 +1,17 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { parseUrlState, patchUrlState } from '$lib/client/urlState';
+  import { UI_STRINGS } from '$lib/i18n/ui-strings';
   import { marked } from 'marked';
   import { apiJson } from '$lib/services/http';
 
   let activeTab = 'about';
+  let infoUrlSyncBusy = false;
   let agreementLoading = true;
   let privacyLoading = true;
-  let agreementTitle = 'Пользовательское соглашение';
-  let privacyTitle = 'Политика конфиденциальности';
+  let agreementTitle = UI_STRINGS.info.agreementFallback;
+  let privacyTitle = UI_STRINGS.info.privacyFallback;
   let agreementText = '';
   let privacyText = '';
   let agreementError = '';
@@ -33,11 +37,11 @@
     agreementError = '';
     try {
       const payload = await loadLegalDoc('user-agreement');
-      agreementTitle = String(payload?.title || 'Пользовательское соглашение');
+      agreementTitle = String(payload?.title || UI_STRINGS.info.agreementFallback);
       agreementText = String(payload?.markdown || '');
       agreementHtml = markdownToHtml(agreementText);
     } catch (error) {
-      agreementError = String(error?.message || 'Не удалось загрузить пользовательское соглашение');
+      agreementError = String(error?.message || UI_STRINGS.info.agreementLoadError);
       agreementText = '';
       agreementHtml = '';
     } finally {
@@ -50,11 +54,11 @@
     privacyError = '';
     try {
       const payload = await loadLegalDoc('privacy-policy');
-      privacyTitle = String(payload?.title || 'Политика конфиденциальности');
+      privacyTitle = String(payload?.title || UI_STRINGS.info.privacyFallback);
       privacyText = String(payload?.markdown || '');
       privacyHtml = markdownToHtml(privacyText);
     } catch (error) {
-      privacyError = String(error?.message || 'Не удалось загрузить политику конфиденциальности');
+      privacyError = String(error?.message || UI_STRINGS.info.privacyLoadError);
       privacyText = '';
       privacyHtml = '';
     } finally {
@@ -62,39 +66,89 @@
     }
   }
 
+  function resolveActiveTabFromInfoState(info) {
+    if (info?.tab === 'legal' && info?.doc === 'privacy') return 'privacy';
+    if (info?.tab === 'legal') return 'agreement';
+    return 'about';
+  }
+
+  function toInfoStateFromActiveTab(tab) {
+    if (tab === 'privacy') return { tab: 'legal', doc: 'privacy' };
+    if (tab === 'agreement') return { tab: 'legal', doc: 'terms' };
+    return { tab: 'about', doc: null };
+  }
+
+  function setTab(nextTab) {
+    if (activeTab === nextTab) return;
+    activeTab = nextTab;
+    replaceInfoUrlFromState(nextTab);
+  }
+
+  async function replaceInfoUrlFromState(tab) {
+    if (typeof window === 'undefined') return;
+    const current = new URL(window.location.href);
+    const next = patchUrlState(current, { info: toInfoStateFromActiveTab(tab) });
+    if (next.toString() === current.toString()) return;
+    infoUrlSyncBusy = true;
+    try {
+      await goto(`${next.pathname}${next.search}${next.hash}`, {
+        replaceState: true,
+        keepFocus: true,
+        noScroll: true
+      });
+    } finally {
+      queueMicrotask(() => {
+        infoUrlSyncBusy = false;
+      });
+    }
+  }
+
   onMount(() => {
+    const syncFromLocation = () => {
+      if (infoUrlSyncBusy || typeof window === 'undefined') return;
+      const state = parseUrlState(window.location.href);
+      const nextTab = resolveActiveTabFromInfoState(state.info);
+      if (nextTab !== activeTab) activeTab = nextTab;
+    };
+    syncFromLocation();
+    window.addEventListener('popstate', syncFromLocation);
+
     loadAgreement();
     loadPrivacy();
+
+    return () => {
+      window.removeEventListener('popstate', syncFromLocation);
+    };
   });
 </script>
 
 <main class="w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
   <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
     <div class="border-b border-slate-200 pb-4">
-      <h1 class="text-2xl font-extrabold text-slate-900">Информация</h1>
-      <p class="mt-1 text-sm text-slate-600">О сервисе, техническая информация и юридические документы.</p>
+      <h1 class="text-2xl font-extrabold text-slate-900">{UI_STRINGS.info.title}</h1>
+      <p class="mt-1 text-sm text-slate-600">{UI_STRINGS.info.subtitle}</p>
     </div>
 
     <div class="mt-4">
       <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => (activeTab = 'about')}>О сервисе</button></li>
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => (activeTab = 'agreement')}>Пользовательское соглашение</button></li>
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => (activeTab = 'privacy')}>Политика конфиденциальности</button></li>
+        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => setTab('about')}>{UI_STRINGS.info.tabAbout}</button></li>
+        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => setTab('agreement')}>{UI_STRINGS.info.tabAgreement}</button></li>
+        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => setTab('privacy')}>{UI_STRINGS.info.tabPrivacy}</button></li>
       </ul>
     </div>
 
     {#if activeTab === 'about'}
       <section class="mt-4 space-y-4">
         <div class="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 class="text-lg font-bold text-slate-900">О сервисе</h2>
-          <p class="mt-2 text-sm leading-7 text-slate-700">archimap помогает собирать и модератировать архитектурные данные зданий на карте.</p>
+          <h2 class="text-lg font-bold text-slate-900">{UI_STRINGS.info.aboutTitle}</h2>
+          <p class="mt-2 text-sm leading-7 text-slate-700">{UI_STRINGS.info.aboutText}</p>
         </div>
 
         <div class="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 class="text-lg font-bold text-slate-900">Техническая информация</h2>
+          <h2 class="text-lg font-bold text-slate-900">{UI_STRINGS.info.techTitle}</h2>
           <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">Версия</span><span class="font-semibold text-slate-900">-</span></div>
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">Коммит</span><span class="font-semibold text-slate-900">-</span></div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{UI_STRINGS.info.version}</span><span class="font-semibold text-slate-900">-</span></div>
+            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{UI_STRINGS.info.commit}</span><span class="font-semibold text-slate-900">-</span></div>
           </div>
         </div>
       </section>
@@ -102,7 +156,7 @@
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 class="text-lg font-bold text-slate-900">{agreementTitle}</h2>
         {#if agreementLoading}
-          <p class="mt-3 text-sm leading-7 text-slate-700">Загрузка документа...</p>
+          <p class="mt-3 text-sm leading-7 text-slate-700">{UI_STRINGS.info.loadingDoc}</p>
         {:else if agreementError}
           <p class="mt-3 text-sm leading-7 text-rose-600">{agreementError}</p>
         {:else}
@@ -113,7 +167,7 @@
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 class="text-lg font-bold text-slate-900">{privacyTitle}</h2>
         {#if privacyLoading}
-          <p class="mt-3 text-sm leading-7 text-slate-700">Загрузка документа...</p>
+          <p class="mt-3 text-sm leading-7 text-slate-700">{UI_STRINGS.info.loadingDoc}</p>
         {:else if privacyError}
           <p class="mt-3 text-sm leading-7 text-rose-600">{privacyError}</p>
         {:else}

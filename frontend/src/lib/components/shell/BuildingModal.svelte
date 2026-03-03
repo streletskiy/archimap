@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { buildingModalOpen, closeBuildingModal } from '$lib/stores/ui';
   import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
+  import { UI_STRINGS } from '$lib/i18n/ui-strings';
   import {
     ARCHITECTURE_STYLE_OPTIONS_RU,
     normalizeArchitectureStyleKey,
@@ -174,79 +175,79 @@
   >
     <section id="building-modal" class="modal">
       <header>
-        <h3>Информация о здании</h3>
+        <h3>{UI_STRINGS.buildingModal.title}</h3>
         <button type="button" class="close ui-btn ui-btn-secondary ui-btn-xs" on:click={closeModal}>×</button>
       </header>
       {#if buildingDetails}
         {#if canEditBuildings}
           <form class="edit-form" on:submit={submitEdit}>
             <div class="row">
-              <label for="building-name">Название</label>
+              <label for="building-name">{UI_STRINGS.buildingModal.name}</label>
               <input id="building-name" class="ui-field" type="text" bind:value={form.name} />
             </div>
             <div class="grid2">
               <div class="row">
-                <label for="building-levels">Этажей</label>
+                <label for="building-levels">{UI_STRINGS.buildingModal.levels}</label>
                 <input id="building-levels" class="ui-field" type="number" min="0" max="300" bind:value={form.levels} />
               </div>
               <div class="row">
-                <label for="building-year">Год постройки</label>
+                <label for="building-year">{UI_STRINGS.buildingModal.yearBuilt}</label>
                 <input id="building-year" class="ui-field" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
               </div>
             </div>
             <div class="row">
-              <label for="building-architect">Архитектор</label>
+              <label for="building-architect">{UI_STRINGS.buildingModal.architect}</label>
               <input id="building-architect" class="ui-field" type="text" bind:value={form.architect} />
             </div>
             <div class="row">
-              <label for="building-style-select">Архитектурный стиль</label>
+              <label for="building-style-select">{UI_STRINGS.buildingModal.style}</label>
               <select id="building-style-select" class="ui-field" bind:value={form.style}>
-                <option value="">Не указан</option>
+                <option value="">{UI_STRINGS.buildingModal.notSpecified}</option>
                 {#each ARCHITECTURE_STYLE_OPTIONS_RU as option}
                   <option value={option.value}>{option.label}</option>
                 {/each}
               </select>
             </div>
             <div class="row">
-              <label for="building-archimap-description">Доп. информация</label>
+              <label for="building-archimap-description">{UI_STRINGS.buildingModal.extraInfo}</label>
               <textarea id="building-archimap-description" class="ui-field" rows="3" bind:value={form.archimapDescription}></textarea>
             </div>
             <div class="row">
-              <label for="building-addr-full">Адрес (addr:full)</label>
+              <label for="building-addr-full">{UI_STRINGS.buildingModal.addressFull}</label>
               <input id="building-addr-full" class="ui-field" type="text" bind:value={form.addressFull} />
             </div>
             <div class="grid2">
               <div class="row">
-                <label for="building-addr-postcode">Индекс (addr:postcode)</label>
+                <label for="building-addr-postcode">{UI_STRINGS.buildingModal.postcode}</label>
                 <input id="building-addr-postcode" class="ui-field" type="text" bind:value={form.addressPostcode} />
               </div>
               <div class="row">
-                <label for="building-addr-city">Город (addr:city)</label>
+                <label for="building-addr-city">{UI_STRINGS.buildingModal.city}</label>
                 <input id="building-addr-city" class="ui-field" type="text" bind:value={form.addressCity} />
               </div>
               <div class="row">
-                <label for="building-addr-place">Место (addr:place)</label>
+                <label for="building-addr-place">{UI_STRINGS.buildingModal.place}</label>
                 <input id="building-addr-place" class="ui-field" type="text" bind:value={form.addressPlace} />
               </div>
               <div class="row">
-                <label for="building-addr-street">Улица (addr:street)</label>
+                <label for="building-addr-street">{UI_STRINGS.buildingModal.street}</label>
                 <input id="building-addr-street" class="ui-field" type="text" bind:value={form.addressStreet} />
               </div>
             </div>
             <div class="row">
-              <label for="building-addr-housenumber">Номер дома (addr:housenumber)</label>
+              <label for="building-addr-housenumber">{UI_STRINGS.buildingModal.houseNumber}</label>
               <input id="building-addr-housenumber" class="ui-field" type="text" bind:value={form.addressHouseNumber} />
             </div>
             <div class="form-footer">
               <p class="status">{saveStatus || ''}</p>
               <button type="submit" class="ui-btn ui-btn-primary" disabled={savePending}>
-                {savePending ? 'Сохраняем...' : 'Сохранить'}
+                {savePending ? UI_STRINGS.buildingModal.saving : UI_STRINGS.buildingModal.save}
               </button>
             </div>
           </form>
         {:else}
           {#if isAuthenticated}
-            <p class="warning">Редактирование доступно только пользователям с разрешением администратора.</p>
+            <p class="warning">{UI_STRINGS.buildingModal.editDenied}</p>
           {/if}
           <dl>
             <div>
@@ -254,37 +255,37 @@
               <dd>{$selectedBuilding?.osmType}/{$selectedBuilding?.osmId}</dd>
             </div>
             <div>
-              <dt>Название</dt>
+              <dt>{UI_STRINGS.buildingModal.name}</dt>
               <dd>{buildingDetails?.properties?.archiInfo?.name || '-'}</dd>
             </div>
             <div>
-              <dt>Этажей</dt>
+              <dt>{UI_STRINGS.buildingModal.levels}</dt>
               <dd>{buildingDetails?.properties?.archiInfo?.levels || '-'}</dd>
             </div>
             <div>
-              <dt>Год постройки</dt>
+              <dt>{UI_STRINGS.buildingModal.yearBuilt}</dt>
               <dd>{buildingDetails?.properties?.archiInfo?.year_built || '-'}</dd>
             </div>
             <div>
-              <dt>Стиль</dt>
+              <dt>{UI_STRINGS.buildingModal.style}</dt>
               <dd>{toHumanArchitectureStyle(buildingDetails?.properties?.archiInfo?.styleRaw || buildingDetails?.properties?.archiInfo?.style) || buildingDetails?.properties?.archiInfo?.style || '-'}</dd>
             </div>
             <div>
-              <dt>Архитектор</dt>
+              <dt>{UI_STRINGS.buildingModal.architect}</dt>
               <dd>{buildingDetails?.properties?.archiInfo?.architect || '-'}</dd>
             </div>
             <div>
-              <dt>Адрес</dt>
+              <dt>{UI_STRINGS.search.address}</dt>
               <dd>{buildingDetails?.properties?.archiInfo?.address || '-'}</dd>
             </div>
             <div>
-              <dt>Описание</dt>
+              <dt>{UI_STRINGS.buildingModal.description}</dt>
               <dd>{buildingDetails?.properties?.archiInfo?.archimap_description || buildingDetails?.properties?.archiInfo?.description || '-'}</dd>
             </div>
           </dl>
         {/if}
       {:else}
-        <p class="status">Загрузка данных...</p>
+        <p class="status">{UI_STRINGS.buildingModal.loading}</p>
       {/if}
     </section>
   </div>

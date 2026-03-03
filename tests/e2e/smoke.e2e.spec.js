@@ -92,3 +92,17 @@ test('opens home page and initializes map without runtime JS errors', async ({ p
 
   expect(runtimeErrors).toEqual([]);
 });
+
+test('opens legal info deep link on terms tab', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app/info?tab=legal&doc=terms`, { waitUntil: 'networkidle' });
+  await expect(page.locator('h2', { hasText: 'Пользовательское соглашение' })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.legal-markdown')).toBeVisible({ timeout: 15000 });
+});
+
+test('keeps map deep link params and renders map', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'networkidle' });
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect(page).toHaveURL(/lat=40\.7128/);
+  await expect(page).toHaveURL(/lng=-74\.006/);
+  await expect(page).toHaveURL(/z=13\.25/);
+});
