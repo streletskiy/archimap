@@ -735,12 +735,13 @@
     gap: 0.5rem;
   }
   .logo {
-    font-size: 1.7rem;
+    font-size: 1.5rem;
     font-weight: 800;
     line-height: 1;
     color: #000;
     text-decoration: none;
     padding-inline: 0.25rem;
+    transform: translateY(-2px);
   }
   .search {
     display: flex;
