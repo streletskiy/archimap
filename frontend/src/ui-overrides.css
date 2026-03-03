@@ -156,6 +156,26 @@ body {
   line-height: 1rem;
 }
 
+.ui-btn-close {
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border-radius: 0.65rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+  line-height: 0;
+}
+
+.ui-close-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+}
+
 .ui-btn-square-sm {
   border-radius: 0.375rem;
   width: 1.75rem;

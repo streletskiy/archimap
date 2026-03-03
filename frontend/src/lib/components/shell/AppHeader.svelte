@@ -542,7 +542,7 @@
     <div class="filter-panel" in:fly={{ x: -10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: -10, y: -8, duration: 170, opacity: 0.2 }}>
       <div class="filter-head">
         <h4>{$t('header.filterTitle')}</h4>
-        <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('header.closeFilter')} on:click={() => (filterOpen = false)}>×</button>
+        <button type="button" class="icon-btn ui-close-x" aria-label={$t('header.closeFilter')} on:click={() => (filterOpen = false)}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
       </div>
       <div class="rows">
         {#each filterRows as row (row.id)}
@@ -645,7 +645,7 @@
     <section class="auth-modal">
       <div class="auth-head">
         <h3>{$t('header.authTitle')}</h3>
-        <button type="button" class="icon-btn" on:click={closeAuth} aria-label={$t('common.close')}>×</button>
+        <button type="button" class="icon-btn ui-close-x" on:click={closeAuth} aria-label={$t('common.close')}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
       </div>
 
       {#if registerPendingEmail}
@@ -849,6 +849,15 @@
     width: 1.9rem;
     height: 1.9rem;
     border-radius: 0.5rem;
+  }
+  .ui-close-x {
+    width: 2.25rem;
+    height: 2.25rem;
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0;
+    font-size: 0;
+    line-height: 0;
   }
   .menu a {
     text-decoration: none;
@@ -1194,3 +1203,4 @@
     }
   }
 </style>
+

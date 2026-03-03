@@ -779,7 +779,7 @@
           <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
             <div class="flex items-center justify-between gap-2">
               <h3 class="text-base font-bold text-slate-900">{$t('admin.edits.detailTitle')}</h3>
-              <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" aria-label={$t('admin.edits.closeDetail')} on:click={closeEditPanel}>×</button>
+              <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close" aria-label={$t('admin.edits.closeDetail')} on:click={closeEditPanel}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
             </div>
             {#if detailLoading}
               <p class="text-sm text-slate-500">{$t('admin.loading')}</p>
@@ -800,3 +800,4 @@
     </section>
   </section>
 {/if}
+

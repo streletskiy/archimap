@@ -179,7 +179,12 @@
     <section id="building-modal" class="modal" in:fly={{ x: 18, y: -6, duration: 210, opacity: 0.2 }} out:fly={{ x: 18, y: -6, duration: 180, opacity: 0.2 }}>
       <header>
         <h3>{$t('buildingModal.title')}</h3>
-        <button type="button" class="close ui-btn ui-btn-secondary ui-btn-xs" on:click={closeModal}>×</button>
+        <button type="button" class="close ui-btn ui-btn-secondary ui-btn-xs ui-btn-close" on:click={closeModal} aria-label={$t('common.close')}>
+          <svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
+            <path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
+          </svg>
+        </button>
       </header>
       {#if buildingDetails}
         {#if canEditBuildings}
