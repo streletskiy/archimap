@@ -1,0 +1,96 @@
+@import 'maplibre-gl/dist/maplibre-gl.css';
+@import './ui-overrides.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f1f5f9;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --panel: #ffffff;
+  --panel-border: #e2e8f0;
+  --accent: #5b62f0;
+  --accent-strong: #4b53e0;
+  --danger: #f43f5e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  overflow-x: hidden;
+}
+
+#svelte-root {
+  display: contents;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.page-container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 1rem 0.75rem 1.75rem;
+}
+
+.surface-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 1rem;
+  background: var(--panel);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.surface-card.padded {
+  padding: 0.875rem;
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ui-table th,
+.ui-table td {
+  text-align: left;
+  border-top: 1px solid var(--panel-border);
+  padding: 0.5rem 0.375rem;
+  font-size: 0.875rem;
+  vertical-align: top;
+}
+
+.ui-muted {
+  color: var(--muted);
+}
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  line-height: 1.1;
+  border-radius: 9999px;
+}

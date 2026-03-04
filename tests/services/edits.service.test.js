@@ -7,7 +7,7 @@ const {
   sanitizeYearBuilt,
   sanitizeLevels,
   sanitizeArchiPayload
-} = require('../../services/edits.service');
+} = require('../../src/lib/server/services/edits.service');
 
 test('normalizeUserEditStatus returns pending for unknown values', () => {
   assert.equal(normalizeUserEditStatus('unknown'), 'pending');

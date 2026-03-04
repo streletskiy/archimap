@@ -2,9 +2,6 @@
 
 User-side:
 
-- Bootstrap rule:
-  - first registered user is created immediately as `is_admin=1` and `is_master_admin=1` (no email confirmation required).
-  - this bootstrap registration is available even when `REGISTRATION_ENABLED=false` and SMTP is not configured.
 - User submits building changes via `POST /api/building-info`.
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;

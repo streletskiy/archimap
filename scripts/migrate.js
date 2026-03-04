@@ -2,8 +2,8 @@ require('dotenv').config({ quiet: true });
 
 const path = require('path');
 const Database = require('better-sqlite3');
-const { runPendingMigrations } = require('../infra/migrations.infra');
-const { createLogger } = require('../services/logger.service');
+const { runPendingMigrations } = require('../src/lib/server/infra/migrations.infra');
+const { createLogger } = require('../src/lib/server/services/logger.service');
 
 const logger = createLogger({
   level: process.env.LOG_LEVEL || 'info',

@@ -9,6 +9,8 @@ node_modules/
 # Runtime data
 data/*
 !data/.gitkeep
+!data/sample/
+!data/sample/**
 
 # Logs
 *.log
@@ -28,5 +30,12 @@ coverage/
 .cache/
 __pycache__/
 *.pyc
-scripts/release-docker.ps1
+frontend/.svelte-kit/
+frontend/build/
+public/app/
+tmp/
+playwright-report/
+test-results/
 LOCAL_CONTEXT.md
+src/lib/version.generated.json
+frontend/src/lib/version.generated.json

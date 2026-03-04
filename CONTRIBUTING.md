@@ -5,7 +5,7 @@
 1. Install dependencies:
    - `npm install`
 2. Copy env template:
-   - `.env.example` -> `.env`
+   - [`.env.example`](.env.example) -> `.env`
 3. Run locally:
    - `npm start`
 
@@ -17,17 +17,15 @@ Before opening a PR, run:
 - `npm run lint`
 - `npm test`
 
-## UI Kit Reuse (Required)
+## Frontend Guidelines (Required)
 
-When changing or adding frontend UI, reuse shared UI primitives from `public/shared/ui.js`.
+Frontend is implemented in `frontend/` with SvelteKit.
 
-- Use `ArchiMapUI.tabButtonClass(active)` for tabs.
-- Use `ArchiMapUI.fieldClass(kind, size?)` for inputs/selects/textarea.
-- Use `ArchiMapUI.buttonClass(variant, size?)` for buttons.
-- Use shared classes from `public/styles.css` (`ui-*`) instead of creating one-off utility combinations.
-- If a needed visual pattern does not exist, extend UI kit first (`ui.js` + `styles.css`) and then consume it in pages/modules.
-- Avoid duplicating similar Tailwind class strings across pages (this is treated as UI “ai slop” and should be refactored).
-- PRs that introduce new manual UI patterns without UI kit reuse should be considered incomplete.
+- Use reusable Svelte components from `frontend/src/lib/components`.
+- Keep client state in Svelte stores (`frontend/src/lib/stores`), not in imperative DOM mutation code.
+- Put API interaction logic in `frontend/src/lib/services`.
+- Avoid duplicated markup/styles across routes; extract shared components.
+- PRs that reintroduce legacy imperative page scripts in `public/` should be considered incomplete.
 
 ## Commit Convention
 
@@ -45,5 +43,5 @@ Conventional commit style is recommended:
 
 - Scope is focused and clearly described.
 - Tests added/updated for behavioral changes.
-- Docs updated (`README`, env docs, API docs, `legal/*.md`) when needed.
+- Docs updated ([README](README.md), [env docs](docs/dev/env.md), [API docs](docs/api.md), [legal docs](legal/)) when needed.
 - No secrets or credentials in code or logs.

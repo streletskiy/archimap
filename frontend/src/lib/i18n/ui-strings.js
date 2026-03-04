@@ -1,0 +1,70 @@
+import { translateNow } from './index';
+
+export const UI_STRINGS = {
+  search: {
+    get minChars() { return translateNow('search.minChars'); },
+    get searching() { return translateNow('search.searching'); },
+    found(count) { return translateNow('search.found', { count }); },
+    get notFound() { return translateNow('search.notFound'); },
+    get failed() { return translateNow('search.failed'); },
+    get modalAriaLabel() { return translateNow('search.modalAriaLabel'); },
+    get modalTitle() { return translateNow('search.modalTitle'); },
+    get close() { return translateNow('common.close'); },
+    get inputPlaceholder() { return translateNow('search.inputPlaceholder'); },
+    get loading() { return translateNow('search.loading'); },
+    get untitled() { return translateNow('search.untitled'); },
+    get address() { return translateNow('search.address'); },
+    get style() { return translateNow('search.style'); },
+    get architect() { return translateNow('search.architect'); },
+    get toBuilding() { return translateNow('search.toBuilding'); },
+    get loadMore() { return translateNow('search.loadMore'); },
+    get loadingMore() { return translateNow('search.loadingMore'); }
+  },
+  buildingModal: {
+    get title() { return translateNow('buildingModal.title'); },
+    get name() { return translateNow('buildingModal.name'); },
+    get levels() { return translateNow('buildingModal.levels'); },
+    get yearBuilt() { return translateNow('buildingModal.yearBuilt'); },
+    get architect() { return translateNow('buildingModal.architect'); },
+    get style() { return translateNow('buildingModal.style'); },
+    get notSpecified() { return translateNow('buildingModal.notSpecified'); },
+    get extraInfo() { return translateNow('buildingModal.extraInfo'); },
+    get addressFull() { return translateNow('buildingModal.addressFull'); },
+    get postcode() { return translateNow('buildingModal.postcode'); },
+    get city() { return translateNow('buildingModal.city'); },
+    get place() { return translateNow('buildingModal.place'); },
+    get street() { return translateNow('buildingModal.street'); },
+    get houseNumber() { return translateNow('buildingModal.houseNumber'); },
+    get save() { return translateNow('buildingModal.save'); },
+    get saving() { return translateNow('buildingModal.saving'); },
+    get editDenied() { return translateNow('buildingModal.editDenied'); },
+    get description() { return translateNow('buildingModal.description'); },
+    get loading() { return translateNow('buildingModal.loading'); }
+  },
+  mapPage: {
+    get authRequired() { return translateNow('mapPage.authRequired'); },
+    get saving() { return translateNow('mapPage.saving'); },
+    get submitted() { return translateNow('mapPage.submitted'); },
+    get saveFailed() { return translateNow('mapPage.saveFailed'); },
+    get minChars() { return translateNow('search.minChars'); },
+    get searchFailed() { return translateNow('mapPage.searchFailed'); },
+    get mapLoading() { return translateNow('mapPage.mapLoading'); }
+  },
+  info: {
+    get title() { return translateNow('info.title'); },
+    get subtitle() { return translateNow('info.subtitle'); },
+    get tabAbout() { return translateNow('info.tabAbout'); },
+    get tabAgreement() { return translateNow('info.tabAgreement'); },
+    get tabPrivacy() { return translateNow('info.tabPrivacy'); },
+    get aboutTitle() { return translateNow('info.aboutTitle'); },
+    get aboutText() { return translateNow('info.aboutText'); },
+    get techTitle() { return translateNow('info.techTitle'); },
+    get version() { return translateNow('info.version'); },
+    get commit() { return translateNow('info.commit'); },
+    get loadingDoc() { return translateNow('info.loadingDoc'); },
+    get agreementFallback() { return translateNow('info.agreementFallback'); },
+    get privacyFallback() { return translateNow('info.privacyFallback'); },
+    get agreementLoadError() { return translateNow('info.agreementLoadError'); },
+    get privacyLoadError() { return translateNow('info.privacyLoadError'); }
+  }
+};

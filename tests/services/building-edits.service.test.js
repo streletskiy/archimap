@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 
-const { createBuildingEditsService } = require('../../services/building-edits.service');
-const { normalizeUserEditStatus } = require('../../services/edits.service');
+const { createBuildingEditsService } = require('../../src/lib/server/services/building-edits.service');
+const { normalizeUserEditStatus } = require('../../src/lib/server/services/edits.service');
 
 function createTestDb() {
   const db = new Database(':memory:');
