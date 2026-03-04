@@ -34,6 +34,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-it-'));
   const port = 3600 + Math.floor(Math.random() * 400);
   const baseUrl = `http://127.0.0.1:${port}`;
+  const pmtilesFileName = `test-buildings-${Date.now()}.pmtiles`;
+  const repoDataDir = path.join(__dirname, '..', '..', 'data');
+  const pmtilesPath = path.join(repoDataDir, pmtilesFileName);
+  fs.mkdirSync(repoDataDir, { recursive: true });
+  fs.writeFileSync(pmtilesPath, Buffer.alloc(4096, 7));
 
   const server = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..', '..'),
@@ -54,7 +59,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       LOCAL_EDITS_DB_PATH: path.join(tempRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tempRoot, 'user-edits.db'),
       USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: 'test-buildings.pmtiles'
+      BUILDINGS_PMTILES_FILE: pmtilesFileName
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -99,6 +104,16 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(health.status, 200);
       const healthBody = await health.json();
       assert.equal(healthBody.ok, true);
+      assert.equal(typeof healthBody.version?.version, 'string');
+      assert.equal(typeof healthBody.version?.git?.commit, 'string');
+
+      const version = await callApi('/api/version');
+      assert.equal(version.status, 200);
+      const versionBody = await version.json();
+      assert.equal(typeof versionBody.version, 'string');
+      assert.equal(typeof versionBody.git?.describe, 'string');
+      assert.equal(typeof versionBody.git?.commit, 'string');
+      assert.equal(typeof versionBody.buildTime, 'string');
 
       const ready = await callApi('/readyz');
       assert.equal(ready.status, 200);
@@ -109,6 +124,16 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(metrics.status, 200);
       const metricsText = await metrics.text();
       assert.match(metricsText, /archimap_http_requests_total/);
+
+      const mainPage = await callApi('/');
+      assert.equal(mainPage.status, 200);
+      const csp = String(mainPage.headers.get('content-security-policy') || '');
+      assert.ok(csp.length > 0);
+      assert.equal(/\bscript-src\s[^;]*unsafe-inline/.test(csp), false);
+      assert.equal(/\bstyle-src\s[^;]*unsafe-inline/.test(csp), false);
+      assert.equal(mainPage.headers.get('x-content-type-options'), 'nosniff');
+      const html = await mainPage.text();
+      assert.equal(/cdn|unpkg|cdnjs|fonts\.googleapis/i.test(html), false);
     });
 
     let csrfToken = '';
@@ -164,6 +189,40 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(shortQuery.status, 400);
       const searchBody = await shortQuery.json();
       assert.match(String(searchBody.error || ''), /Минимальная длина/);
+
+      const searchOk = await callApi('/api/search-buildings?q=test&limit=5');
+      assert.equal(searchOk.status, 200);
+      const searchEtag = String(searchOk.headers.get('etag') || '');
+      assert.ok(searchEtag.length > 0);
+
+      const searchNotModified = await callApi('/api/search-buildings?q=test&limit=5', {
+        headers: { 'if-none-match': searchEtag }
+      });
+      assert.equal(searchNotModified.status, 304);
+    });
+
+    await t.test('pmtiles supports range requests', async () => {
+      const response = await callApi('/api/buildings.pmtiles', {
+        headers: {
+          range: 'bytes=0-1023'
+        }
+      });
+      assert.equal(response.status, 206);
+      assert.equal(response.headers.get('accept-ranges'), 'bytes');
+      assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
+      const payload = new Uint8Array(await response.arrayBuffer());
+      assert.equal(payload.length, 1024);
+
+      const full = await callApi('/api/buildings.pmtiles');
+      assert.equal(full.status, 200);
+      const pmtilesEtag = String(full.headers.get('etag') || '');
+      assert.ok(pmtilesEtag.length > 0);
+      assert.ok(String(full.headers.get('last-modified') || '').length > 0);
+
+      const notModified = await callApi('/api/buildings.pmtiles', {
+        headers: { 'if-none-match': pmtilesEtag }
+      });
+      assert.equal(notModified.status, 304);
     });
   } finally {
     if (server.exitCode == null) {
@@ -171,6 +230,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       await new Promise((resolve) => server.once('exit', resolve));
     }
     fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(pmtilesPath, { force: true });
   }
 
   if (server.exitCode && server.exitCode !== 0) {

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createSearchService } = require('../../services/search.service');
+const { createSearchService } = require('../../src/lib/server/services/search.service');
 
 function createNoopDb() {
   return {

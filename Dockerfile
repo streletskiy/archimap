@@ -55,14 +55,13 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
   && /opt/pyosm/bin/pip install "quackosm==${QUACKOSM_VERSION}" "duckdb==${DUCKDB_VERSION}"
 
 COPY . .
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+  node scripts/generate-version.js \
+  && npm --prefix frontend ci \
+  && npm --prefix frontend run build \
+  && rm -rf /app/frontend/node_modules \
+  && rm -rf /app/.git
 RUN mkdir -p /app/data/quackosm
-RUN set -eux; \
-  SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"; \
-  VER="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"; \
-  if [ -z "$SHA" ]; then SHA="unknown"; fi; \
-  if [ -z "$VER" ]; then VER="dev"; fi; \
-  printf '{"shortSha":"%s","version":"%s"}\n' "$SHA" "$VER" > /app/build-info.json; \
-  rm -rf /app/.git
 
 ENV NODE_ENV=production
 ENV PYTHON_BIN=/opt/pyosm/bin/python

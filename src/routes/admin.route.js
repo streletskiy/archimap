@@ -1,0 +1,1 @@
+module.exports = require('../lib/server/http/admin.route.js');

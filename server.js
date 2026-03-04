@@ -4,51 +4,56 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const Database = require('better-sqlite3');
-const { ensureAuthSchema, registerAuthRoutes } = require('./auth');
-const { createSimpleRateLimiter } = require('./services/rate-limiter.service');
-const { createSearchService } = require('./services/search.service');
-const { createBuildingEditsService } = require('./services/building-edits.service');
-const { createAppSettingsService } = require('./services/app-settings.service');
-const { requireCsrfSession } = require('./services/csrf.service');
-const { createLogger } = require('./services/logger.service');
+const { ensureAuthSchema, registerAuthRoutes } = require('./src/lib/server/auth');
+const { createSimpleRateLimiter } = require('./src/lib/server/services/rate-limiter.service');
+const { createSearchService } = require('./src/lib/server/services/search.service');
+const { createBuildingEditsService } = require('./src/lib/server/services/building-edits.service');
+const { createAppSettingsService } = require('./src/lib/server/services/app-settings.service');
+const { requireCsrfSession } = require('./src/lib/server/services/csrf.service');
+const { createLogger } = require('./src/lib/server/services/logger.service');
 const {
   normalizeUserEditStatus,
   sanitizeFieldText,
   sanitizeYearBuilt,
   sanitizeLevels,
   sanitizeArchiPayload
-} = require('./services/edits.service');
-const { validateSecurityConfig } = require('./infra/security-config.infra');
-const { applySecurityHeadersMiddleware } = require('./infra/security-headers.infra');
-const { initSessionStore } = require('./infra/session-store.infra');
-const { initSyncWorkersInfra } = require('./infra/sync-workers.infra');
-const { initDbBootstrapInfra } = require('./infra/db-bootstrap.infra');
-const { initObservabilityInfra } = require('./infra/observability.infra');
-const { registerContoursStatusRoute } = require('./routes/contours-status.route');
-const { registerAppRoutes, registerPublicStaticRoute } = require('./routes/app.route');
-const { registerAdminRoutes } = require('./routes/admin.route');
-const { registerBuildingsRoutes } = require('./routes/buildings.route');
-const { registerSearchRoutes } = require('./routes/search.route');
-const { registerAccountRoutes } = require('./routes/account.route');
+} = require('./src/lib/server/services/edits.service');
+const { validateSecurityConfig } = require('./src/lib/server/infra/security-config.infra');
+const { collectInlineScriptHashesFromFile } = require('./src/lib/server/infra/csp.infra');
+const { parseRuntimeEnv } = require('./src/lib/server/infra/env.infra');
+const { applySecurityHeadersMiddleware } = require('./src/lib/server/infra/security-headers.infra');
+const { registerErrorHandlers } = require('./src/lib/server/infra/error-handling.infra');
+const { initSessionStore } = require('./src/lib/server/infra/session-store.infra');
+const { initSyncWorkersInfra } = require('./src/lib/server/infra/sync-workers.infra');
+const { initDbBootstrapInfra } = require('./src/lib/server/infra/db-bootstrap.infra');
+const { initObservabilityInfra } = require('./src/lib/server/infra/observability.infra');
+const { registerContoursStatusRoute } = require('./src/routes/contours-status.route');
+const { registerAppRoutes, registerFrontendStaticRoute } = require('./src/routes/app.route');
+const { registerAdminRoutes } = require('./src/routes/admin.route');
+const { registerBuildingsRoutes } = require('./src/routes/buildings.route');
+const { registerSearchRoutes } = require('./src/routes/search.route');
+const { registerAccountRoutes } = require('./src/routes/account.route');
+const { getAppVersion, getBuildInfo } = require('./src/lib/server/version');
 const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
   passwordResetHtmlTemplate,
   passwordResetTextTemplate
-} = require('./email-templates');
-const { spawn, execSync } = require('child_process');
+} = require('./src/lib/server/email-templates');
+const { spawn } = require('child_process');
 
 const app = express();
 app.disable('x-powered-by');
 
-const PORT = Number(process.env.PORT || 3252);
-const HOST = process.env.HOST || '0.0.0.0';
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const runtimeEnv = parseRuntimeEnv(process.env);
+const PORT = runtimeEnv.port;
+const HOST = runtimeEnv.host;
+const NODE_ENV = runtimeEnv.nodeEnv;
 const TRUST_PROXY = String(process.env.TRUST_PROXY ?? 'false').toLowerCase() === 'true';
 if (TRUST_PROXY) {
   app.set('trust proxy', 1);
 }
-const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
+const SESSION_SECRET = runtimeEnv.sessionSecret;
 const SESSION_ALLOW_MEMORY_FALLBACK = String(process.env.SESSION_ALLOW_MEMORY_FALLBACK ?? (NODE_ENV === 'production' ? 'false' : 'true')).toLowerCase() === 'true';
 const SESSION_COOKIE_SECURE_RAW = String(process.env.SESSION_COOKIE_SECURE || '').trim().toLowerCase();
 const SESSION_COOKIE_SECURE = SESSION_COOKIE_SECURE_RAW === 'true'
@@ -65,8 +70,6 @@ const MAP_DEFAULT_LAT = Number(process.env.MAP_DEFAULT_LAT ?? 56.3269);
 const MAP_DEFAULT_ZOOM = Number(process.env.MAP_DEFAULT_ZOOM ?? 15);
 const BUILDINGS_PMTILES_FILE = path.basename(String(process.env.BUILDINGS_PMTILES_FILE || 'buildings.pmtiles').trim() || 'buildings.pmtiles');
 const BUILDINGS_PMTILES_SOURCE_LAYER = String(process.env.BUILDINGS_PMTILES_SOURCE_LAYER || 'buildings').trim() || 'buildings';
-const BUILD_SHA = String(process.env.BUILD_SHA || '').trim();
-const BUILD_VERSION = String(process.env.BUILD_VERSION || '').trim();
 const SMTP_URL = String(process.env.SMTP_URL || '').trim();
 const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -75,7 +78,7 @@ const SMTP_USER = String(process.env.SMTP_USER || '').trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
 const EMAIL_FROM = String(process.env.EMAIL_FROM || SMTP_USER || '').trim();
 const APP_SETTINGS_SECRET = String(process.env.APP_SETTINGS_SECRET || SESSION_SECRET).trim() || SESSION_SECRET;
-const APP_BASE_URL = String(process.env.APP_BASE_URL || '').trim();
+const APP_BASE_URL = runtimeEnv.appBaseUrl;
 const USER_EDIT_REQUIRES_PERMISSION = String(process.env.USER_EDIT_REQUIRES_PERMISSION ?? 'true').toLowerCase() === 'true';
 const REGISTRATION_ENABLED = String(process.env.REGISTRATION_ENABLED ?? 'true').toLowerCase() === 'true';
 const REGISTRATION_CODE_TTL_MINUTES = Math.max(2, Math.min(60, Number(process.env.REGISTRATION_CODE_TTL_MINUTES || 15)));
@@ -86,11 +89,11 @@ const PASSWORD_RESET_TTL_MINUTES = Math.max(5, Math.min(180, Number(process.env.
 const APP_DISPLAY_NAME = String(process.env.APP_DISPLAY_NAME || 'archimap').trim() || 'archimap';
 const LOG_LEVEL = String(process.env.LOG_LEVEL || 'info').trim().toLowerCase() || 'info';
 const METRICS_ENABLED = String(process.env.METRICS_ENABLED ?? 'true').toLowerCase() === 'true';
-const REPO_URL = 'https://github.com/streletskiy/archimap';
-const BUILD_INFO_PATH = path.join(__dirname, 'build-info.json');
+const FRONTEND_INDEX_PATH = path.join(__dirname, 'frontend', 'build', 'index.html');
+const CSP_SCRIPT_HASHES = collectInlineScriptHashesFromFile(FRONTEND_INDEX_PATH);
 
 const dataDir = path.join(__dirname, 'data');
-const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
+const dbPath = String(process.env.DATABASE_PATH || process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
 const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
@@ -121,43 +124,6 @@ function normalizeMapConfig() {
   const lat = Number.isFinite(MAP_DEFAULT_LAT) ? Math.min(90, Math.max(-90, MAP_DEFAULT_LAT)) : 56.3269;
   const zoom = Number.isFinite(MAP_DEFAULT_ZOOM) ? Math.min(22, Math.max(0, MAP_DEFAULT_ZOOM)) : 15;
   return { lon, lat, zoom };
-}
-
-function readGitValue(command) {
-  try {
-    return String(execSync(command, {
-      cwd: __dirname,
-      stdio: ['ignore', 'pipe', 'ignore']
-    }) || '').trim();
-  } catch {
-    return '';
-  }
-}
-
-function readBuildInfoFromFile() {
-  try {
-    const raw = fs.readFileSync(BUILD_INFO_PATH, 'utf8');
-    const parsed = JSON.parse(String(raw || '{}'));
-    const shortSha = String(parsed?.shortSha || '').trim();
-    const version = String(parsed?.version || '').trim();
-    return {
-      shortSha: shortSha || '',
-      version: version || ''
-    };
-  } catch {
-    return { shortSha: '', version: '' };
-  }
-}
-
-function getBuildInfo() {
-  const fileInfo = readBuildInfoFromFile();
-  const shortSha = fileInfo.shortSha || BUILD_SHA || readGitValue('git rev-parse --short HEAD') || 'unknown';
-  const exactTag = fileInfo.version || BUILD_VERSION || readGitValue('git describe --tags --exact-match HEAD');
-  return {
-    shortSha,
-    version: exactTag || 'dev',
-    repoUrl: REPO_URL
-  };
 }
 
 const searchRateLimiter = createSimpleRateLimiter({
@@ -360,11 +326,16 @@ function getFilterTagKeysCached() {
   return [];
 }
 
-applySecurityHeadersMiddleware(app, { nodeEnv: NODE_ENV });
+applySecurityHeadersMiddleware(app, {
+  nodeEnv: NODE_ENV,
+  cspConnectOrigins: runtimeEnv.cspConnectSrcExtra,
+  cspScriptHashes: CSP_SCRIPT_HASHES
+});
 initObservabilityInfra(app, {
   logger,
   requestIdFactory: () => logger.requestId(),
   metricsEnabled: METRICS_ENABLED,
+  getVersionInfo: getAppVersion,
   getReadinessChecks: () => ({
     sessionStoreReady: Boolean(sessionMiddleware),
     dbReady: Boolean(db)
@@ -765,6 +736,7 @@ registerAuthRoutes({
   app,
   db,
   createSimpleRateLimiter,
+  logger,
   sessionSecret: SESSION_SECRET,
   userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION,
   getUserEditRequiresPermission,
@@ -779,7 +751,10 @@ registerAuthRoutes({
   getAppBaseUrl,
   appDisplayName: APP_DISPLAY_NAME,
   getAppDisplayName,
-  getSmtpConfig: () => appSettingsService.getEffectiveSmtpConfig().config
+  getSmtpConfig: () => appSettingsService.getEffectiveSmtpConfig().config,
+  bootstrapAdminEnabled: runtimeEnv.bootstrapAdminEnabled,
+  bootstrapAdminSecret: runtimeEnv.bootstrapAdminSecret,
+  bootstrapAdminAllowedIps: runtimeEnv.bootstrapAdminAllowedIps
 });
 
 registerAppRoutes({
@@ -790,6 +765,7 @@ registerAppRoutes({
   buildingsPmtilesPath,
   normalizeMapConfig,
   getBuildInfo,
+  getAppVersion,
   registrationEnabled: REGISTRATION_ENABLED,
   getRegistrationEnabled,
   buildingsPmtilesSourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER,
@@ -866,7 +842,8 @@ registerAccountRoutes({
 });
 
 registerContoursStatusRoute(app, db, contoursStatusRateLimiter);
-registerPublicStaticRoute({ app, rootDir: __dirname });
+registerFrontendStaticRoute({ app, rootDir: __dirname });
+registerErrorHandlers(app, { logger, nodeEnv: NODE_ENV });
 syncWorkers = initSyncWorkersInfra({
   spawn,
   processExecPath: process.execPath,
@@ -946,7 +923,8 @@ initSessionStore({
       nodeEnv: NODE_ENV,
       sessionSecret: SESSION_SECRET,
       appBaseUrl: APP_BASE_URL,
-      sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK
+      sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
+      bootstrapAdminEnabled: runtimeEnv.bootstrapAdminEnabled
     });
     httpServer = app.listen(PORT, HOST, () => {
       logger.info('server_started', {
