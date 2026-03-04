@@ -8,6 +8,10 @@
 - `GET /api/buildings/filter-data-bbox?minLon=&minLat=&maxLon=&maxLat=&limit=`
   - Returns tag/info set for current bbox.
   - Cache: `Cache-Control: public, max-age=10`, `ETag`.
+- `POST /api/buildings/filter-matches`
+  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, rules[], rulesHash?, maxResults? }`.
+  - Returns `{ matchedKeys[], matchedFeatureIds[], meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
+  - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket`), per-request `meta.cacheHit`.
 - `GET /api/building/:osmType/:osmId`
   - Returns GeoJSON feature.
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.

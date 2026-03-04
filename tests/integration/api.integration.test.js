@@ -271,6 +271,65 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(searchNotModified.status, 304);
     });
 
+    await t.test('filter-matches endpoint validates input, returns meta and uses cache', async () => {
+      const invalid = await callApi('/api/buildings/filter-matches', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          bbox: { west: 'x', south: 0, east: 1, north: 1 },
+          rules: []
+        })
+      });
+      assert.equal(invalid.status, 400);
+
+      const emptyRules = await callApi('/api/buildings/filter-matches', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          bbox: { west: 44, south: 56, east: 44.02, north: 56.02 },
+          zoomBucket: 14,
+          rules: []
+        })
+      });
+      assert.equal(emptyRules.status, 200);
+      const emptyBody = await emptyRules.json();
+      assert.deepEqual(emptyBody.matchedKeys, []);
+      assert.equal(Boolean(emptyBody?.meta?.cacheHit), false);
+      assert.equal(typeof emptyBody?.meta?.elapsedMs, 'number');
+      assert.equal(typeof emptyBody?.meta?.rulesHash, 'string');
+      assert.equal(typeof emptyBody?.meta?.bboxHash, 'string');
+
+      const payload = {
+        bbox: { west: 44, south: 56, east: 44.02, north: 56.02 },
+        zoomBucket: 14,
+        rules: [{ key: 'name', op: 'contains', value: 'test' }],
+        maxResults: 15
+      };
+
+      const first = await callApi('/api/buildings/filter-matches', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(first.status, 200);
+      const firstBody = await first.json();
+      assert.ok(Array.isArray(firstBody?.matchedKeys));
+      assert.ok(Array.isArray(firstBody?.matchedFeatureIds));
+      assert.equal(typeof firstBody?.meta?.truncated, 'boolean');
+      assert.equal(Boolean(firstBody?.meta?.cacheHit), false);
+
+      const second = await callApi('/api/buildings/filter-matches', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(second.status, 200);
+      const secondBody = await second.json();
+      assert.equal(Boolean(secondBody?.meta?.cacheHit), true);
+      assert.equal(secondBody?.meta?.rulesHash, firstBody?.meta?.rulesHash);
+      assert.equal(secondBody?.meta?.bboxHash, firstBody?.meta?.bboxHash);
+    });
+
     await t.test('pmtiles supports range requests', async () => {
       const response = await callApi('/api/buildings.pmtiles', {
         headers: {

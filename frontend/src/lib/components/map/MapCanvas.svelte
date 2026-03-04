@@ -6,6 +6,7 @@
   import { buildingFilterRules } from '$lib/stores/filters';
   import { searchState } from '$lib/stores/search';
   import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter, parseOsmKey } from './selection-utils';
+  import { buildBboxHash, buildBboxSnapshot } from './filter-pipeline-utils';
   import { EMPTY_LAYER_FILTER, hashFilterExpression } from './filter-highlight-utils';
 
   const dispatch = createEventDispatcher();
@@ -26,9 +27,15 @@
   const CARTO_BUILDING_LAYER_IDS = ['building', 'building-top'];
   const STYLE_OVERLAY_FADE_MS = 260;
   const FILTER_REQUEST_DEBOUNCE_MS = 180;
+  const FILTER_HEAVY_RULE_DEBOUNCE_MS = 500;
+  const FILTER_RULE_CHANGE_DEBOUNCE_MS = 90;
   const CARTO_SHOW_DELAY_MS = 160;
   const COVERAGE_CACHE_LIMIT = 800;
   const FILTER_RULE_OPS = new Set(['contains', 'equals', 'not_equals', 'starts_with', 'exists', 'not_exists']);
+  const FILTER_MATCH_CACHE_TTL_MS = 8_000;
+  const FILTER_MATCH_CACHE_MAX_ITEMS = 90;
+  const FILTER_MATCH_DEGRADE_LIMIT = 20_000;
+  const FILTER_MATCH_DEFAULT_LIMIT = 12_000;
   const FILTER_DATA_CACHE_TTL_MS = 45_000;
   const FILTER_DATA_CACHE_MAX_ITEMS = 25_000;
   const FILTER_DATA_REQUEST_CHUNK_SIZE = 5_000;
@@ -62,6 +69,10 @@
   let coverageEvalToken = 0;
   let coverageVisibleState = 'visible';
   let coverageCache = new Map();
+  let filterMatchesCache = new Map();
+  let filterWorker = null;
+  let filterWorkerReqSeq = 0;
+  let filterWorkerPending = new Map();
   let latestFilterToken = 0;
   let lastSelectedKey = null;
   let lastSearchFitSeq = 0;
@@ -73,12 +84,19 @@
   let styleTransitionTimer = null;
   let lastHandledBuildingClickSig = null;
   let filterRulesDebounceTimer = null;
-  let filterRetryTimer = null;
-  let filterRetryAttempts = 0;
+  let filterAuthoritativeTimer = null;
   let filterErrorMessage = '';
+  let filterStatusMessage = '';
+  let filterPhase = 'idle';
+  let filterLastElapsedMs = 0;
+  let filterLastCount = 0;
+  let filterLastCacheHit = false;
+  let currentFilterRulesHash = 'fnv1a-0';
+  let lastViewportHash = '';
+  let lastAuthoritativeRequestKey = '';
   let filterDebugActive = false;
   let filterDebugExprHash = hashFilterExpression(EMPTY_LAYER_FILTER);
-  let filteredFeatureStateKeys = new Set();
+  let filteredFeatureStateFeatureIds = new Set();
   let filterDataByOsmKeyCache = new Map();
 
   function isSelectionDebugEnabled() {
@@ -106,7 +124,15 @@
     });
   }
 
-  function updateFilterDebugHook({ active = false, expr = EMPTY_LAYER_FILTER, mode = FILTER_HIGHLIGHT_MODE } = {}) {
+  function updateFilterDebugHook({
+    active = false,
+    expr = EMPTY_LAYER_FILTER,
+    mode = FILTER_HIGHLIGHT_MODE,
+    phase = filterPhase,
+    lastElapsedMs = filterLastElapsedMs,
+    lastCount = filterLastCount,
+    cacheHit = filterLastCacheHit
+  } = {}) {
     if (typeof document === 'undefined') return;
     const exprHash = hashFilterExpression(expr);
     filterDebugActive = Boolean(active);
@@ -114,12 +140,24 @@
     document.body.dataset.filterActive = active ? 'true' : 'false';
     document.body.dataset.filterHighlightMode = String(mode);
     document.body.dataset.filterExprHash = exprHash;
+    document.body.dataset.filterPhase = String(phase || 'idle');
+    document.body.dataset.filterLastElapsedMs = String(Number(lastElapsedMs) || 0);
+    document.body.dataset.filterLastCount = String(Number(lastCount) || 0);
+    document.body.dataset.filterCacheHit = cacheHit ? 'true' : 'false';
     window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
     window.__MAP_DEBUG__.filter = {
       active: Boolean(active),
       mode: String(mode),
-      exprHash
+      exprHash,
+      phase: String(phase || 'idle'),
+      elapsedMs: Number(lastElapsedMs) || 0,
+      count: Number(lastCount) || 0,
+      cacheHit: Boolean(cacheHit)
     };
+    const phaseHistory = Array.isArray(window.__MAP_DEBUG__.filterPhaseHistory)
+      ? window.__MAP_DEBUG__.filterPhaseHistory
+      : [];
+    window.__MAP_DEBUG__.filterPhaseHistory = [...phaseHistory, String(phase || 'idle')].slice(-120);
     if (map) {
       const fillLayerVisible = map.getLayer(FILTER_HIGHLIGHT_FILL_LAYER_ID)
         ? (map.getLayoutProperty(FILTER_HIGHLIGHT_FILL_LAYER_ID, 'visibility') || 'visible')
@@ -138,6 +176,54 @@
     }
   }
 
+  function setFilterPhase(phase) {
+    filterPhase = phase;
+    updateFilterDebugHook({
+      active: filteredFeatureStateFeatureIds.size > 0,
+      expr: ['literal', currentFilterRulesHash],
+      mode: FILTER_HIGHLIGHT_MODE,
+      phase,
+      lastElapsedMs: filterLastElapsedMs,
+      lastCount: filterLastCount,
+      cacheHit: filterLastCacheHit
+    });
+  }
+
+  function ensureFilterWorker() {
+    if (filterWorker || typeof Worker === 'undefined') return;
+    filterWorker = new Worker(new URL('../../workers/building-filter.worker.js', import.meta.url), { type: 'module' });
+    filterWorker.onmessage = (event) => {
+      const data = event?.data || {};
+      const requestId = String(data?.requestId || '');
+      const handlers = filterWorkerPending.get(requestId);
+      if (!handlers) return;
+      filterWorkerPending.delete(requestId);
+      handlers.resolve(data);
+    };
+    filterWorker.onerror = () => {
+      for (const [requestId, handlers] of filterWorkerPending.entries()) {
+        filterWorkerPending.delete(requestId);
+        handlers.reject(new Error('Filter worker crashed'));
+      }
+    };
+  }
+
+  function requestFilterWorker(type, payload = {}) {
+    ensureFilterWorker();
+    if (!filterWorker) {
+      return Promise.reject(new Error('Filter worker is unavailable'));
+    }
+    const requestId = `w-${Date.now()}-${++filterWorkerReqSeq}`;
+    return new Promise((resolve, reject) => {
+      filterWorkerPending.set(requestId, { resolve, reject });
+      filterWorker.postMessage({
+        type,
+        requestId,
+        ...payload
+      });
+    });
+  }
+
   function recordDebugSetFilter(layerId) {
     if (typeof window === 'undefined') return;
     window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
@@ -148,11 +234,18 @@
     window.__MAP_DEBUG__.setFilterLayers = next;
   }
 
-  function setLocalBuildingFeatureStateByOsmKey(osmKey, state) {
+  function recordFilterRequestDebugEvent(eventName) {
+    if (typeof window === 'undefined') return;
+    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
+    const stats = window.__MAP_DEBUG__.filterRequests || { start: 0, abort: 0, finish: 0 };
+    if (eventName === 'start') stats.start += 1;
+    if (eventName === 'abort') stats.abort += 1;
+    if (eventName === 'finish') stats.finish += 1;
+    window.__MAP_DEBUG__.filterRequests = stats;
+  }
+
+  function setLocalBuildingFeatureStateById(id, state) {
     if (!map) return;
-    const parsed = parseOsmKey(osmKey);
-    if (!parsed) return;
-    const id = encodeOsmFeatureId(parsed.osmType, parsed.osmId);
     if (!Number.isInteger(id) || id <= 0) return;
     const sourceLayer = runtimeConfig?.buildingsPmtiles?.sourceLayer;
     if (!sourceLayer) return;
@@ -170,32 +263,104 @@
     }
   }
 
-  function applyFilteredFeatureState(nextMatchedKeys) {
-    const next = new Set((Array.isArray(nextMatchedKeys) ? nextMatchedKeys : []).map((key) => String(key || '').trim()).filter(Boolean));
-    for (const key of filteredFeatureStateKeys) {
-      if (next.has(key)) continue;
-      setLocalBuildingFeatureStateByOsmKey(key, { isFiltered: false });
+  function pruneFilterMatchesCache() {
+    while (filterMatchesCache.size > FILTER_MATCH_CACHE_MAX_ITEMS) {
+      const oldest = filterMatchesCache.keys().next().value;
+      if (!oldest) break;
+      filterMatchesCache.delete(oldest);
     }
-    for (const key of next) {
-      if (filteredFeatureStateKeys.has(key)) continue;
-      setLocalBuildingFeatureStateByOsmKey(key, { isFiltered: true });
+  }
+
+  function getCachedFilterMatches(cacheKey) {
+    const cached = filterMatchesCache.get(cacheKey);
+    if (!cached) return null;
+    if ((Date.now() - Number(cached.cachedAt || 0)) > FILTER_MATCH_CACHE_TTL_MS) {
+      filterMatchesCache.delete(cacheKey);
+      return null;
     }
-    filteredFeatureStateKeys = next;
+    return cached.payload;
+  }
+
+  function putCachedFilterMatches(cacheKey, payload) {
+    filterMatchesCache.set(cacheKey, {
+      cachedAt: Date.now(),
+      payload
+    });
+    pruneFilterMatchesCache();
+  }
+
+  async function applyFilteredFeatureStateMatches(matches, token, meta = {}) {
+    const prevFeatureIds = [...filteredFeatureStateFeatureIds];
+    let plan;
+    try {
+      const workerResponse = await requestFilterWorker('build-apply-plan', {
+        prevFeatureIds,
+        matches
+      });
+      plan = {
+        toEnable: Array.isArray(workerResponse?.toEnable) ? workerResponse.toEnable : [],
+        toDisable: Array.isArray(workerResponse?.toDisable) ? workerResponse.toDisable : [],
+        nextFeatureIds: Array.isArray(workerResponse?.nextFeatureIds) ? workerResponse.nextFeatureIds : [],
+        total: Number(workerResponse?.total || 0)
+      };
+    } catch {
+      const nextFeatureIds = new Set(Array.isArray(matches?.matchedFeatureIds) ? matches.matchedFeatureIds : []);
+      for (const key of Array.isArray(matches?.matchedKeys) ? matches.matchedKeys : []) {
+        const parsed = parseOsmKey(key);
+        if (!parsed) continue;
+        nextFeatureIds.add(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+      }
+      const toDisable = [];
+      const toEnable = [];
+      for (const id of prevFeatureIds) {
+        if (!nextFeatureIds.has(id)) toDisable.push(id);
+      }
+      for (const id of nextFeatureIds) {
+        if (!filteredFeatureStateFeatureIds.has(id)) toEnable.push(id);
+      }
+      plan = {
+        toEnable,
+        toDisable,
+        nextFeatureIds: [...nextFeatureIds],
+        total: nextFeatureIds.size
+      };
+    }
+    if (token !== latestFilterToken) return;
+
+    for (const id of plan.toDisable) {
+      setLocalBuildingFeatureStateById(id, { isFiltered: false });
+    }
+    for (const id of plan.toEnable) {
+      setLocalBuildingFeatureStateById(id, { isFiltered: true });
+    }
+    filteredFeatureStateFeatureIds = new Set(plan.nextFeatureIds);
+    filterLastCount = plan.total;
+    debugFilterLog('apply diff enable/disable', {
+      enable: plan.toEnable.length,
+      disable: plan.toDisable.length,
+      total: plan.total,
+      phase: meta.phase || filterPhase
+    });
   }
 
   function clearFilteredFeatureState() {
-    applyFilteredFeatureState([]);
+    for (const id of filteredFeatureStateFeatureIds) {
+      setLocalBuildingFeatureStateById(id, { isFiltered: false });
+    }
+    filteredFeatureStateFeatureIds = new Set();
+    filterLastCount = 0;
     updateFilterDebugHook({
       active: false,
       expr: EMPTY_LAYER_FILTER,
-      mode: FILTER_HIGHLIGHT_MODE
+      mode: FILTER_HIGHLIGHT_MODE,
+      phase: filterPhase
     });
   }
 
   function reapplyFilteredFeatureState() {
-    if (filteredFeatureStateKeys.size === 0) return;
-    for (const key of filteredFeatureStateKeys) {
-      setLocalBuildingFeatureStateByOsmKey(key, { isFiltered: true });
+    if (filteredFeatureStateFeatureIds.size === 0) return;
+    for (const id of filteredFeatureStateFeatureIds) {
+      setLocalBuildingFeatureStateById(id, { isFiltered: true });
     }
   }
 
@@ -875,7 +1040,7 @@
     scheduleCoverageCheck();
     updateFilterDebugHook({
       active: Array.isArray($buildingFilterRules) && $buildingFilterRules.length > 0,
-      expr: ['literal', [...filteredFeatureStateKeys].sort()],
+      expr: ['literal', currentFilterRulesHash],
       mode: FILTER_HIGHLIGHT_MODE
     });
     reapplyFilteredFeatureState();
@@ -892,7 +1057,7 @@
     }
     mapMoveDebounceTimer = setTimeout(() => {
       mapMoveDebounceTimer = null;
-      applyBuildingFilters($buildingFilterRules);
+      applyBuildingFilters($buildingFilterRules, { reason: 'viewport' });
     }, FILTER_REQUEST_DEBOUNCE_MS);
   }
 
@@ -901,26 +1066,7 @@
       clearTimeout(filterRulesDebounceTimer);
       filterRulesDebounceTimer = null;
     }
-    filterRulesDebounceTimer = setTimeout(() => {
-      filterRulesDebounceTimer = null;
-      applyBuildingFilters(rules);
-    }, 110);
-  }
-
-  function scheduleFilterRetry() {
-    if (filterRetryAttempts >= 6) {
-      clearFilterHighlight();
-      return;
-    }
-    if (filterRetryTimer) {
-      clearTimeout(filterRetryTimer);
-      filterRetryTimer = null;
-    }
-    filterRetryAttempts += 1;
-    filterRetryTimer = setTimeout(() => {
-      filterRetryTimer = null;
-      applyBuildingFilters($buildingFilterRules);
-    }, 140);
+    applyBuildingFilters(rules, { reason: 'rules' });
   }
 
   function restoreCustomLayersAfterStyleChange() {
@@ -930,7 +1076,7 @@
       if (!map.isStyleLoaded()) return;
       ensureMapSourcesAndLayers(runtimeConfig);
       applyBuildingThemePaint(getCurrentTheme());
-      applyBuildingFilters($buildingFilterRules);
+      applyBuildingFilters($buildingFilterRules, { reason: 'style' });
       clearStyleTransitionOverlaySoon();
     };
     map.once('styledata', tryRestore);
@@ -969,6 +1115,52 @@
     return left.includes(right);
   }
 
+  function getCurrentFilterBbox() {
+    if (!map) return null;
+    const bounds = map.getBounds?.();
+    return buildBboxSnapshot(bounds);
+  }
+
+  async function prepareRulesForFiltering(rules) {
+    try {
+      const workerResult = await requestFilterWorker('prepare-rules', {
+        rules
+      });
+      if (workerResult?.ok) {
+        return {
+          ok: true,
+          rules: Array.isArray(workerResult.rules) ? workerResult.rules : [],
+          rulesHash: String(workerResult.rulesHash || 'fnv1a-0'),
+          heavy: Boolean(workerResult.heavy)
+        };
+      }
+      return {
+        ok: false,
+        error: String(workerResult?.invalidReason || 'Invalid filter rules')
+      };
+    } catch {
+      const activeRules = Array.isArray(rules) ? rules.filter((r) => r?.key) : [];
+      const invalidRule = activeRules.find((rule) => !FILTER_RULE_OPS.has(String(rule?.op || 'contains')));
+      if (invalidRule) {
+        return {
+          ok: false,
+          error: `Invalid filter operator: ${String(invalidRule.op || '')}`
+        };
+      }
+      const normalized = activeRules.map((rule) => ({
+        key: String(rule.key || '').trim(),
+        op: String(rule.op || 'contains').trim(),
+        value: String(rule.value || '').trim()
+      }));
+      return {
+        ok: true,
+        rules: normalized,
+        rulesHash: hashFilterExpression(['literal', normalized]),
+        heavy: normalized.some((rule) => rule.op === 'contains')
+      };
+    }
+  }
+
   function getVisibleBuildingOsmKeys() {
     if (!map) return [];
     const features = map.queryRenderedFeatures({ layers: [BUILDINGS_FILL_LAYER_ID, BUILDINGS_LINE_LAYER_ID] });
@@ -999,6 +1191,21 @@
     const renderedKeys = getVisibleBuildingOsmKeys();
     if (renderedKeys.length > 0) return renderedKeys;
     return getLoadedSourceBuildingOsmKeys();
+  }
+
+  async function fetchFilterMatchesPrimary({ bbox, zoomBucket, rules, rulesHash, signal }) {
+    return apiJson('/api/buildings/filter-matches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bbox,
+        zoomBucket,
+        rules,
+        rulesHash,
+        maxResults: FILTER_MATCH_DEFAULT_LIMIT
+      }),
+      signal
+    });
   }
 
   async function fetchFilterDataByOsmKeys(keys, signal) {
@@ -1048,79 +1255,235 @@
     return out;
   }
 
-  function clearFilterHighlight() {
-    if (!map) return;
-    clearFilteredFeatureState();
-  }
-
-  async function applyBuildingFilters(rules) {
-    if (!map) return;
-    const activeRules = Array.isArray(rules) ? rules.filter((r) => r?.key) : [];
-    debugFilterLog('filter criteria changed', { rules: activeRules });
-    const invalidRule = activeRules.find((rule) => !FILTER_RULE_OPS.has(String(rule?.op || 'contains')));
-    if (invalidRule) {
-      filterErrorMessage = `Invalid filter operator: ${String(invalidRule.op || '')}`;
-      filterRetryAttempts = 0;
-      clearFilterHighlight();
-      return;
-    }
-    filterErrorMessage = '';
-    if (activeRules.length === 0) {
-      filterRetryAttempts = 0;
-      clearFilterHighlight();
-      return;
-    }
-
-    const token = ++latestFilterToken;
+  async function fetchFilterMatchesFallback({ rules, signal }) {
     const visibleKeys = getFilterCandidateOsmKeys();
     if (visibleKeys.length === 0) {
-      if (map.getZoom() >= 13) {
-        scheduleFilterRetry();
-      } else {
-        clearFilterHighlight();
-      }
-      return;
+      return {
+        matchedKeys: [],
+        matchedFeatureIds: [],
+        meta: {
+          rulesHash: currentFilterRulesHash,
+          bboxHash: lastViewportHash,
+          truncated: false,
+          elapsedMs: 0,
+          cacheHit: false
+        }
+      };
     }
-    filterRetryAttempts = 0;
-
-    let byKey = new Map();
-    if (activeFilterAbortController) {
-      activeFilterAbortController.abort();
-    }
-    activeFilterAbortController = new AbortController();
-    const signal = activeFilterAbortController.signal;
-
-    try {
-      byKey = await fetchFilterDataByOsmKeys(visibleKeys, signal);
-    } catch (error) {
-      if (String(error?.name || '').toLowerCase() === 'aborterror') return;
-      filterRetryAttempts = 0;
-      clearFilterHighlight();
-      return;
-    } finally {
-      if (activeFilterAbortController?.signal === signal) {
-        activeFilterAbortController = null;
-      }
-    }
-    if (token !== latestFilterToken) return;
-
-    const matchedOsmKeys = [];
+    const byKey = await fetchFilterDataByOsmKeys(visibleKeys, signal);
+    const matchedKeys = [];
+    const matchedFeatureIds = [];
     for (const key of visibleKeys) {
       const item = byKey.get(key);
       if (!item) continue;
       const tags = item?.sourceTags || {};
-      const ok = activeRules.every((rule) => matchesRule(tags, rule));
+      const ok = rules.every((rule) => matchesRule(tags, rule));
       if (!ok) continue;
-      matchedOsmKeys.push(key);
+      matchedKeys.push(key);
+      const parsed = parseOsmKey(key);
+      if (parsed) {
+        matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+      }
+      if (matchedKeys.length >= FILTER_MATCH_DEFAULT_LIMIT) break;
+    }
+    return {
+      matchedKeys,
+      matchedFeatureIds,
+      meta: {
+        rulesHash: currentFilterRulesHash,
+        bboxHash: lastViewportHash,
+        truncated: matchedKeys.length >= FILTER_MATCH_DEFAULT_LIMIT,
+        elapsedMs: 0,
+        cacheHit: false
+      }
+    };
+  }
+
+  function scheduleAuthoritativeRequest(context, token, debounceMs) {
+    if (filterAuthoritativeTimer) {
+      clearTimeout(filterAuthoritativeTimer);
+      filterAuthoritativeTimer = null;
+    }
+    filterAuthoritativeTimer = setTimeout(async () => {
+      filterAuthoritativeTimer = null;
+      if (token !== latestFilterToken || !map) return;
+      const requestKey = `${context.rulesHash}:${context.bboxHash}:${context.zoomBucket}`;
+      if (requestKey === lastAuthoritativeRequestKey && context.reason === 'viewport') {
+        return;
+      }
+      lastAuthoritativeRequestKey = requestKey;
+
+      if (activeFilterAbortController) {
+        debugFilterLog('filter request abort', { requestKey });
+        recordFilterRequestDebugEvent('abort');
+        activeFilterAbortController.abort();
+      }
+      activeFilterAbortController = new AbortController();
+      const signal = activeFilterAbortController.signal;
+      debugFilterLog('filter request start', {
+        requestKey,
+        phase: 'authoritative',
+        heavy: context.heavy
+      });
+      recordFilterRequestDebugEvent('start');
+      filterStatusMessage = 'Refining...';
+
+      let payload;
+      let usedFallback = false;
+      try {
+        payload = await fetchFilterMatchesPrimary({
+          bbox: context.bbox,
+          zoomBucket: context.zoomBucket,
+          rules: context.rules,
+          rulesHash: context.rulesHash,
+          signal
+        });
+      } catch (error) {
+        if (String(error?.name || '').toLowerCase() === 'aborterror') return;
+        usedFallback = true;
+        payload = await fetchFilterMatchesFallback({
+          rules: context.rules,
+          signal
+        });
+      } finally {
+        if (activeFilterAbortController?.signal === signal) {
+          activeFilterAbortController = null;
+        }
+      }
+      if (token !== latestFilterToken) return;
+
+      const matchedSize = Math.max(
+        Array.isArray(payload?.matchedFeatureIds) ? payload.matchedFeatureIds.length : 0,
+        Array.isArray(payload?.matchedKeys) ? payload.matchedKeys.length : 0
+      );
+      if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
+        filterStatusMessage = 'Too many matches. Zoom in or refine the filter.';
+        clearFilteredFeatureState();
+        setFilterPhase('authoritative');
+        return;
+      }
+
+      await applyFilteredFeatureStateMatches(payload, token, { phase: 'authoritative' });
+      putCachedFilterMatches(context.cacheKey, payload);
+
+      filterLastElapsedMs = Number(payload?.meta?.elapsedMs || 0);
+      filterLastCacheHit = Boolean(payload?.meta?.cacheHit);
+      filterLastCount = matchedSize;
+      filterStatusMessage = payload?.meta?.truncated
+        ? 'Results truncated. Zoom in or refine filter.'
+        : '';
+      filterErrorMessage = '';
+      setFilterPhase('authoritative');
+      debugFilterLog('filter request finish', {
+        requestKey,
+        count: matchedSize,
+        elapsedMs: filterLastElapsedMs,
+        cacheHit: filterLastCacheHit,
+        truncated: Boolean(payload?.meta?.truncated),
+        fallback: usedFallback
+      });
+      recordFilterRequestDebugEvent('finish');
+      updateFilterDebugHook({
+        active: matchedSize > 0,
+        expr: ['literal', context.rulesHash],
+        mode: FILTER_HIGHLIGHT_MODE,
+        phase: filterPhase,
+        lastElapsedMs: filterLastElapsedMs,
+        lastCount: filterLastCount,
+        cacheHit: filterLastCacheHit
+      });
+    }, Math.max(0, Number(debounceMs) || 0));
+  }
+
+  function clearFilterHighlight() {
+    if (!map) return;
+    if (activeFilterAbortController) {
+      activeFilterAbortController.abort();
+      activeFilterAbortController = null;
+    }
+    if (filterAuthoritativeTimer) {
+      clearTimeout(filterAuthoritativeTimer);
+      filterAuthoritativeTimer = null;
+    }
+    clearFilteredFeatureState();
+    filterStatusMessage = '';
+    filterLastElapsedMs = 0;
+    filterLastCacheHit = false;
+    currentFilterRulesHash = 'fnv1a-0';
+    setFilterPhase('idle');
+  }
+
+  async function applyBuildingFilters(rules, { reason = 'rules' } = {}) {
+    if (!map) return;
+    const token = ++latestFilterToken;
+    const prepared = await prepareRulesForFiltering(rules);
+    if (token !== latestFilterToken) return;
+
+    if (!prepared.ok) {
+      filterErrorMessage = prepared.error || 'Invalid filter';
+      filterStatusMessage = '';
+      clearFilteredFeatureState();
+      setFilterPhase('idle');
+      return;
+    }
+    const activeRules = prepared.rules;
+    debugFilterLog('filter rules changed', { reason, rules: activeRules });
+    currentFilterRulesHash = prepared.rulesHash;
+    if (activeRules.length === 0) {
+      filterErrorMessage = '';
+      clearFilterHighlight();
+      return;
     }
 
-    applyFilteredFeatureState(matchedOsmKeys);
-    debugFilterLog('highlight filter updated for N ids', { count: matchedOsmKeys.length });
-    updateFilterDebugHook({
-      active: matchedOsmKeys.length > 0,
-      expr: ['literal', [...new Set(matchedOsmKeys)].sort()],
-      mode: FILTER_HIGHLIGHT_MODE
-    });
+    const bbox = getCurrentFilterBbox();
+    if (!bbox) {
+      filterStatusMessage = '';
+      return;
+    }
+    const bboxHash = buildBboxHash(bbox, 4);
+    const zoomBucket = Math.round(map.getZoom() * 2) / 2;
+    const cacheKey = `${prepared.rulesHash}:${bboxHash}:${zoomBucket}`;
+    lastViewportHash = bboxHash;
+
+    filterErrorMessage = '';
+    filterLastCacheHit = false;
+    setFilterPhase('optimistic');
+
+    const cached = getCachedFilterMatches(cacheKey);
+    if (cached) {
+      await applyFilteredFeatureStateMatches(cached, token, { phase: 'optimistic' });
+      filterLastElapsedMs = Number(cached?.meta?.elapsedMs || 0);
+      filterLastCacheHit = Boolean(cached?.meta?.cacheHit);
+      filterLastCount = Math.max(
+        Array.isArray(cached?.matchedFeatureIds) ? cached.matchedFeatureIds.length : 0,
+        Array.isArray(cached?.matchedKeys) ? cached.matchedKeys.length : 0
+      );
+      updateFilterDebugHook({
+        active: filterLastCount > 0,
+        expr: ['literal', prepared.rulesHash],
+        mode: FILTER_HIGHLIGHT_MODE,
+        phase: filterPhase,
+        lastElapsedMs: filterLastElapsedMs,
+        lastCount: filterLastCount,
+        cacheHit: filterLastCacheHit
+      });
+    }
+
+    filterStatusMessage = 'Refining...';
+    const debounceMs = prepared.heavy
+      ? FILTER_HEAVY_RULE_DEBOUNCE_MS
+      : (reason === 'rules' ? FILTER_RULE_CHANGE_DEBOUNCE_MS : FILTER_REQUEST_DEBOUNCE_MS);
+
+    scheduleAuthoritativeRequest({
+      reason,
+      heavy: prepared.heavy,
+      rules: activeRules,
+      rulesHash: prepared.rulesHash,
+      bbox,
+      bboxHash,
+      zoomBucket,
+      cacheKey
+    }, token, debounceMs);
   }
 
   $: if (map && !$selectedBuilding) {
@@ -1273,11 +1636,10 @@
       clearTimeout(filterRulesDebounceTimer);
       filterRulesDebounceTimer = null;
     }
-    if (filterRetryTimer) {
-      clearTimeout(filterRetryTimer);
-      filterRetryTimer = null;
+    if (filterAuthoritativeTimer) {
+      clearTimeout(filterAuthoritativeTimer);
+      filterAuthoritativeTimer = null;
     }
-    filterRetryAttempts = 0;
     if (coverageDebounceTimer) {
       clearTimeout(coverageDebounceTimer);
       coverageDebounceTimer = null;
@@ -1306,8 +1668,14 @@
     pmtilesMinZoom = null;
     pmtilesMaxZoom = null;
     coverageCache = new Map();
+    filterMatchesCache = new Map();
     filterDataByOsmKeyCache = new Map();
-    filteredFeatureStateKeys = new Set();
+    filteredFeatureStateFeatureIds = new Set();
+    if (filterWorker) {
+      filterWorker.terminate();
+      filterWorker = null;
+    }
+    filterWorkerPending = new Map();
     updateFilterDebugHook({
       active: false,
       expr: EMPTY_LAYER_FILTER
@@ -1321,7 +1689,14 @@
   data-filter-active={filterDebugActive ? 'true' : 'false'}
   data-filter-highlight-mode={FILTER_HIGHLIGHT_MODE}
   data-filter-expr-hash={filterDebugExprHash}
+  data-filter-phase={filterPhase}
+  data-filter-last-elapsed-ms={String(filterLastElapsedMs)}
+  data-filter-last-count={String(filterLastCount)}
+  data-filter-cache-hit={filterLastCacheHit ? 'true' : 'false'}
 ></div>
+{#if filterStatusMessage}
+  <div class="map-filter-status" role="status" aria-live="polite">{filterStatusMessage}</div>
+{/if}
 {#if filterErrorMessage}
   <div class="map-filter-error" role="status" aria-live="polite">{filterErrorMessage}</div>
 {/if}
@@ -1369,6 +1744,21 @@
     font-size: 12px;
     line-height: 1.3;
     max-width: min(78vw, 440px);
+    pointer-events: none;
+  }
+
+  .map-filter-status {
+    position: fixed;
+    left: 12px;
+    bottom: 58px;
+    z-index: 10;
+    padding: 7px 10px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #f8fafc;
+    font-size: 12px;
+    line-height: 1.3;
+    max-width: min(78vw, 460px);
     pointer-events: none;
   }
 </style>

@@ -15,6 +15,7 @@
   - bbox filter payloads
 - Rate limiting:
   - `POST /api/buildings/filter-data` has a dedicated limiter tuned for interactive map filtering (`server.js`, `filterDataRateLimiter`).
+  - `POST /api/buildings/filter-matches` has its own limiter for bbox+rules interactive workloads (`server.js`, `filterMatchesRateLimiter`).
 
 ## DB and indexes
 

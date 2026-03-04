@@ -47,8 +47,11 @@
 - Custom building filter now renders through dedicated highlight layers:
   - `buildings-filter-highlight-fill`
   - `buildings-filter-highlight-outline`
-- Filter matching is computed from visible/loaded map features by requesting `/api/buildings/filter-data` for current `osmKey` batches.
+- Filtering uses a two-phase pipeline:
+  - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
+  - Authoritative phase: client calls `POST /api/buildings/filter-matches` with bbox + rules and applies server result by diff.
 - Matched buildings are marked with `setFeatureState({ isFiltered: true })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- Feature-state updates are diff-based (`toEnable` / `toDisable`) via a worker apply-plan, no full reset on each refresh.
 - Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.
 
 ## ASCII diagram

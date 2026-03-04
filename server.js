@@ -156,6 +156,11 @@ const filterDataBboxRateLimiter = createSimpleRateLimiter({
   maxRequests: 60,
   message: 'Слишком много запросов bbox, попробуйте позже'
 });
+const filterMatchesRateLimiter = createSimpleRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 90,
+  message: 'Слишком много запросов фильтрации, попробуйте позже'
+});
 const buildingsReadRateLimiter = createSimpleRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 120,
@@ -807,6 +812,7 @@ registerBuildingsRoutes({
   buildingsWriteRateLimiter,
   filterDataRateLimiter,
   filterDataBboxRateLimiter,
+  filterMatchesRateLimiter,
   requireCsrfSession,
   requireAuth,
   requireBuildingEditPermission,

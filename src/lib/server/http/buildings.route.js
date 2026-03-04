@@ -1,6 +1,15 @@
 const { sendCachedJson } = require('../infra/http-cache.infra');
 const { createLruCache } = require('../infra/lru-cache.infra');
 
+const FILTER_RULE_OPS = new Set(['contains', 'equals', 'not_equals', 'starts_with', 'exists', 'not_exists']);
+const FILTER_MATCH_MAX_RULES = 30;
+const FILTER_MATCH_MAX_KEY_LEN = 80;
+const FILTER_MATCH_MAX_VALUE_LEN = 240;
+const FILTER_MATCH_MAX_RESULTS = 20000;
+const FILTER_MATCH_DEFAULT_RESULTS = 12000;
+const FILTER_MATCH_CANDIDATE_CAP = 50000;
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+
 function parseOsmKey(value) {
   const text = String(value || '').trim();
   const match = text.match(/^(way|relation)\/(\d+)$/);
@@ -8,6 +17,78 @@ function parseOsmKey(value) {
   const osmId = Number(match[2]);
   if (!Number.isInteger(osmId)) return null;
   return { osmType: match[1], osmId };
+}
+
+function encodeOsmFeatureId(osmType, osmId) {
+  const typeBit = osmType === 'relation' ? 1 : 0;
+  return (Number(osmId) * 2) + typeBit;
+}
+
+function normalizeFilterRule(rule) {
+  const key = String(rule?.key || '').trim();
+  const op = String(rule?.op || 'contains').trim();
+  const value = String(rule?.value || '').trim();
+  if (!key) return { error: 'Rule key is required' };
+  if (key.length > FILTER_MATCH_MAX_KEY_LEN) return { error: 'Rule key is too long' };
+  if (!FILTER_RULE_OPS.has(op)) return { error: `Invalid rule operator: ${op}` };
+  if (value.length > FILTER_MATCH_MAX_VALUE_LEN) return { error: 'Rule value is too long' };
+  return {
+    value: {
+      key,
+      op,
+      value,
+      valueNormalized: value.toLowerCase()
+    }
+  };
+}
+
+function normalizeTagValue(value) {
+  if (value == null) return null;
+  if (Array.isArray(value)) return value.join(';');
+  return String(value);
+}
+
+function getRuleValue(item, key) {
+  const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
+  if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
+  const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
+  if (key.startsWith('archi.')) {
+    return archiInfo[key.slice(6)];
+  }
+  if (ARCHI_RULE_KEYS.has(key)) {
+    return archiInfo[key];
+  }
+  return undefined;
+}
+
+function matchesFilterRule(item, rule) {
+  if (!rule?.key) return true;
+  const actualRaw = getRuleValue(item, rule.key);
+  const actual = normalizeTagValue(actualRaw);
+  const hasValue = actual != null && String(actual).trim().length > 0;
+  if (rule.op === 'exists') return hasValue;
+  if (rule.op === 'not_exists') return !hasValue;
+  if (actual == null) return false;
+
+  const left = String(actual).toLowerCase();
+  if (rule.op === 'equals') return left === rule.valueNormalized;
+  if (rule.op === 'not_equals') return left !== rule.valueNormalized;
+  if (rule.op === 'starts_with') return left.startsWith(rule.valueNormalized);
+  return left.includes(rule.valueNormalized);
+}
+
+function stableRulesHash(rules) {
+  const raw = JSON.stringify(Array.isArray(rules) ? rules : []);
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
+}
+
+function buildBboxHash(minLon, minLat, maxLon, maxLat) {
+  return `${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}`;
 }
 
 function mapFilterDataRow(row) {
@@ -72,6 +153,7 @@ function registerBuildingsRoutes(deps) {
     buildingsWriteRateLimiter,
     filterDataRateLimiter,
     filterDataBboxRateLimiter,
+    filterMatchesRateLimiter,
     requireCsrfSession,
     requireAuth,
     requireBuildingEditPermission,
@@ -86,6 +168,7 @@ function registerBuildingsRoutes(deps) {
     supersedePendingUserEdits
   } = deps;
   const bboxCache = createLruCache({ max: 100, ttlMs: 10 * 1000 });
+  const filterMatchesCache = createLruCache({ max: 220, ttlMs: 4000 });
 
   const selectFilterDataBboxRtree = db.prepare(`
     SELECT
@@ -116,6 +199,43 @@ function registerBuildingsRoutes(deps) {
   `);
 
   const selectFilterDataBboxPlain = db.prepare(`
+    ${FILTER_DATA_SELECT_FIELDS_SQL}
+    WHERE bc.max_lon >= ?
+      AND bc.min_lon <= ?
+      AND bc.max_lat >= ?
+      AND bc.min_lat <= ?
+    LIMIT ?
+  `);
+
+  const selectFilterMatchCandidatesRtree = db.prepare(`
+    SELECT
+      bc.osm_type,
+      bc.osm_id,
+      bc.tags_json,
+      ai.osm_id AS info_osm_id,
+      ai.name,
+      ai.style,
+      ai.levels,
+      ai.year_built,
+      ai.architect,
+      ai.address,
+      ai.description,
+      ai.archimap_description,
+      ai.updated_by,
+      ai.updated_at
+    FROM osm.building_contours_rtree br
+    JOIN osm.building_contours bc
+      ON bc.rowid = br.contour_rowid
+    LEFT JOIN local.architectural_info ai
+      ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+    WHERE br.max_lon >= ?
+      AND br.min_lon <= ?
+      AND br.max_lat >= ?
+      AND br.min_lat <= ?
+    LIMIT ?
+  `);
+
+  const selectFilterMatchCandidatesPlain = db.prepare(`
     ${FILTER_DATA_SELECT_FIELDS_SQL}
     WHERE bc.max_lon >= ?
       AND bc.min_lon <= ?
@@ -209,6 +329,128 @@ function registerBuildingsRoutes(deps) {
     return sendCachedJson(req, res, payload, {
       cacheControl: 'public, max-age=10'
     });
+  });
+
+  app.post('/api/buildings/filter-matches', filterMatchesRateLimiter, (req, res) => {
+    const startedAt = Date.now();
+    const body = req.body || {};
+    const bbox = body?.bbox && typeof body.bbox === 'object' ? body.bbox : body;
+    const minLon = Number(bbox?.west);
+    const minLat = Number(bbox?.south);
+    const maxLon = Number(bbox?.east);
+    const maxLat = Number(bbox?.north);
+    if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
+      return res.status(400).json({ error: 'Некорректные координаты bbox' });
+    }
+    if (minLon > maxLon || minLat > maxLat) {
+      return res.status(400).json({ error: 'Некорректные границы bbox' });
+    }
+
+    const rulesRaw = body?.rules;
+    if (!Array.isArray(rulesRaw)) {
+      return res.status(400).json({ error: 'Ожидается массив rules' });
+    }
+    if (rulesRaw.length > FILTER_MATCH_MAX_RULES) {
+      return res.status(400).json({ error: `Слишком много правил (максимум ${FILTER_MATCH_MAX_RULES})` });
+    }
+
+    const normalizedRules = [];
+    for (const entry of rulesRaw) {
+      const parsed = normalizeFilterRule(entry);
+      if (parsed.error) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      normalizedRules.push(parsed.value);
+    }
+
+    const zoom = Number(body?.zoom);
+    const zoomBucket = Number.isFinite(Number(body?.zoomBucket))
+      ? Number(body.zoomBucket)
+      : (Number.isFinite(zoom) ? Math.round(zoom * 2) / 2 : 0);
+    const maxResultsRaw = Number(body?.maxResults ?? body?.limit);
+    const maxResults = Math.max(
+      1,
+      Math.min(FILTER_MATCH_MAX_RESULTS, Number.isFinite(maxResultsRaw) ? maxResultsRaw : FILTER_MATCH_DEFAULT_RESULTS)
+    );
+    const rulesHash = String(body?.rulesHash || '').trim() || stableRulesHash(normalizedRules);
+    const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
+    const actorKeyRaw = getSessionEditActorKey(req);
+    const actorKey = String(actorKeyRaw || '').trim().toLowerCase() || 'anon';
+    const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${maxResults}:${rtreeState.ready ? 'rtree' : 'plain'}`;
+    const cached = filterMatchesCache.get(cacheKey);
+    if (cached) {
+      return res.json({
+        ...cached,
+        meta: {
+          ...cached.meta,
+          cacheHit: true,
+          elapsedMs: Date.now() - startedAt
+        }
+      });
+    }
+
+    if (normalizedRules.length === 0) {
+      const payload = {
+        matchedKeys: [],
+        matchedFeatureIds: [],
+        meta: {
+          rulesHash,
+          bboxHash,
+          truncated: false,
+          elapsedMs: Date.now() - startedAt,
+          cacheHit: false
+        }
+      };
+      filterMatchesCache.set(cacheKey, payload);
+      return res.json(payload);
+    }
+
+    const isHeavy = normalizedRules.some((rule) => rule.op === 'contains');
+    const candidateLimit = Math.max(
+      maxResults,
+      Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
+    );
+
+    const candidateRows = rtreeState.ready
+      ? selectFilterMatchCandidatesRtree.all(minLon, maxLon, minLat, maxLat, candidateLimit)
+      : selectFilterMatchCandidatesPlain.all(minLon, maxLon, minLat, maxLat, candidateLimit);
+
+    const candidateItems = applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
+    const matchedKeys = [];
+    const matchedFeatureIds = [];
+    let truncated = false;
+
+    for (let i = 0; i < candidateItems.length; i += 1) {
+      const item = candidateItems[i];
+      const ok = normalizedRules.every((rule) => matchesFilterRule(item, rule));
+      if (!ok) continue;
+      matchedKeys.push(item.osmKey);
+      const parsed = parseOsmKey(item.osmKey);
+      if (parsed) {
+        matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+      }
+      if (matchedKeys.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+    }
+    if (!truncated && candidateRows.length >= candidateLimit) {
+      truncated = true;
+    }
+
+    const payload = {
+      matchedKeys,
+      matchedFeatureIds,
+      meta: {
+        rulesHash,
+        bboxHash,
+        truncated,
+        elapsedMs: Date.now() - startedAt,
+        cacheHit: false
+      }
+    };
+    filterMatchesCache.set(cacheKey, payload);
+    return res.json(payload);
   });
 
   app.get('/api/building-info/:osmType/:osmId', buildingsReadRateLimiter, (req, res) => {
