@@ -43,6 +43,7 @@
   let maplibregl = null;
   let protocol = null;
   let pmtilesArchive = null;
+  let pmtilesMinZoom = null;
   let pmtilesMaxZoom = null;
   let themeObserver = null;
   let mapMoveDebounceTimer = null;
@@ -497,15 +498,26 @@
     const key = `${tile.z}/${tile.x}/${tile.y}`;
     const cached = readCoverageCache(key);
     if (cached != null) return cached;
-    let exists = false;
     try {
       const entry = await pmtilesArchive.getZxy(tile.z, tile.x, tile.y);
-      exists = Boolean(entry?.data || entry);
+      const exists = Boolean(entry?.data || entry);
+      writeCoverageCache(key, exists);
+      return exists;
     } catch {
-      exists = false;
+      // Treat transport/runtime errors as unknown to avoid false-positive base-layer flicker.
+      return null;
     }
-    writeCoverageCache(key, exists);
-    return exists;
+  }
+
+  async function hasPmtilesCoverageAtPoint(lon, lat, startZoom) {
+    const minZoom = Number.isInteger(pmtilesMinZoom) ? pmtilesMinZoom : 0;
+    for (let z = startZoom; z >= minZoom; z -= 1) {
+      const tile = lonLatToTile(lon, lat, z);
+      const exists = await hasPmtilesTile(tile);
+      if (exists === true) return true;
+      if (exists == null) return null;
+    }
+    return false;
   }
 
   async function evaluatePmtilesCoverage() {
@@ -517,16 +529,21 @@
       : rawZoom;
     const points = getViewportSamplePoints();
     if (points.length === 0) return;
+    let hasUnknownCoverage = false;
 
     for (const [lon, lat] of points) {
-      const tile = lonLatToTile(lon, lat, zoom);
-      const exists = await hasPmtilesTile(tile);
+      const exists = await hasPmtilesCoverageAtPoint(lon, lat, zoom);
       if (token !== coverageEvalToken) return;
+      if (exists == null) {
+        hasUnknownCoverage = true;
+        continue;
+      }
       if (!exists) {
         queueCartoBuildingsVisibility('visible');
         return;
       }
     }
+    if (hasUnknownCoverage) return;
     queueCartoBuildingsVisibility('none');
   }
 
@@ -888,11 +905,14 @@
       pmtilesArchive = new PMTilesCtor(pmtilesUrl);
       pmtilesArchive.getHeader()
         .then((header) => {
+          const headerMinZoom = Number(header?.minZoom);
           const headerMaxZoom = Number(header?.maxZoom);
+          pmtilesMinZoom = Number.isInteger(headerMinZoom) ? headerMinZoom : null;
           pmtilesMaxZoom = Number.isInteger(headerMaxZoom) ? headerMaxZoom : null;
           scheduleCoverageCheck();
         })
         .catch(() => {
+          pmtilesMinZoom = null;
           pmtilesMaxZoom = null;
         });
 
@@ -910,9 +930,11 @@
       });
       map.on('moveend', scheduleFilterRefresh);
       map.on('moveend', scheduleCoverageCheck);
+      map.on('move', scheduleCoverageCheck);
       map.on('zoomend', scheduleFilterRefresh);
       map.on('zoomend', () => setMapZoom(map.getZoom()));
       map.on('zoomend', scheduleCoverageCheck);
+      map.on('resize', scheduleCoverageCheck);
 
       map.on('style.load', () => {
         ensureMapSourcesAndLayers(config);
@@ -981,6 +1003,7 @@
       protocol = null;
     }
     pmtilesArchive = null;
+    pmtilesMinZoom = null;
     pmtilesMaxZoom = null;
     coverageCache = new Map();
   });
