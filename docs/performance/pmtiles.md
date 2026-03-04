@@ -1,11 +1,13 @@
 # PMTiles Performance
 
 ## HTTP behavior
+
 - Endpoint: `GET /api/buildings.pmtiles`.
 - Implementation: `src/lib/server/infra/pmtiles-stream.infra.js`.
 - Uses `fs.createReadStream` with explicit byte window.
 
 ## Supported features
+
 - `Range: bytes=start-end` -> `206 Partial Content`.
 - `Accept-Ranges: bytes` always returned.
 - `Content-Range` and `Content-Length` are set for partial responses.
@@ -14,5 +16,6 @@
 - `Cache-Control: public, max-age=300, stale-while-revalidate=120`.
 
 ## CDN compatibility notes
+
 - Byte-range and validators are CDN-friendly.
 - Keep URL stable (`/api/buildings.pmtiles`) and prefer immutable file name changes via `BUILDINGS_PMTILES_FILE` during tile updates.

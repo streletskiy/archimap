@@ -1,6 +1,7 @@
 # Baseline and Result
 
 ## Test environment
+
 - Date: 2026-03-03
 - Host: local Windows dev machine
 - Node: v20.17.0
@@ -8,6 +9,7 @@
 - Server mode: `NODE_ENV=test`, autosync disabled, temporary DB files
 
 ## Before (Stage 3 start)
+
 - Endpoint latency (ms):
   - `/readyz`: p50 `1.14`, p95 `2.62`
   - `/api/contours-status`: p50 `257.82`, p95 `286.56`
@@ -19,6 +21,7 @@
   - Historical value was not captured before this stage (gap from earlier instrumentation).
 
 ## After (Stage 3 changes)
+
 - Endpoint latency (ms):
   - `/readyz`: p50 `1.10`, p95 `1.63`
   - `/api/contours-status`: p50 `199.12`, p95 `218.95`
@@ -33,6 +36,7 @@
   - `first-contentful-paint`: `384.0 ms`
 
 ## Delta summary
+
 - Search improved (p50 ~56% faster).
 - BBox filter improved (p50 ~54% faster, p95 ~49% faster).
 - Contours status improved (~23% faster p50) but remains DB aggregate sensitive.

@@ -1,6 +1,7 @@
 # Client Performance
 
 ## Implemented
+
 - Lazy map runtime:
   - Map component is dynamically imported in `frontend/src/routes/+page.svelte`.
   - MapLibre + PMTiles libraries are dynamically imported inside `MapCanvas.svelte`.
@@ -17,5 +18,6 @@
   - Theme switching keeps custom PMTiles layers and applies style repaint instead of layer drop.
 
 ## Optional lite mode (next)
+
 - Disable clustering and detailed bbox filtering on low-end devices.
 - Lower `limit` for filter bbox and map label density under performance budget flags.

@@ -1,6 +1,7 @@
 # ArchiMap
 
 ## What It Is
+
 ArchiMap is a self-hosted platform for an interactive architectural map.
 Building data is based on OpenStreetMap and enriched locally in SQLite.
 The map is rendered with MapLibre and vector PMTiles.
@@ -9,6 +10,7 @@ The project is designed for private deployments with full control over data, til
 The UI is multilingual (`en` + `ru`) with runtime locale switching.
 
 ## How It Works
+
 - Architectural data is sourced from OpenStreetMap.
 - Data is imported, normalized, and stored in SQLite.
 - A PMTiles file is generated from building contours for efficient map delivery.
@@ -17,11 +19,13 @@ The UI is multilingual (`en` + `ru`) with runtime locale switching.
 - Administrators moderate and merge approved changes into the local layer.
 
 References:
+
 - https://www.openstreetmap.org/
 - https://maplibre.org/
 - https://github.com/protomaps/PMTiles
 
 ## Architecture (Short)
+
 - SvelteKit (UI)
 - API layer (Express)
 - SQLite
@@ -31,24 +35,29 @@ References:
 Details -> `docs/architecture.md`
 
 ## Quick Start
+
 ```bash
 npm ci
 npm run dev
 ```
 
 Production:
+
 ```bash
 npm run build
 npm run start
 ```
 
 Docker:
+
 ```bash
 docker-compose up
 ```
 
 ## Environment Variables
+
 Required for production:
+
 - `DATABASE_PATH` (or `ARCHIMAP_DB_PATH`)
 - `REDIS_URL`
 - `SESSION_SECRET`
@@ -57,6 +66,7 @@ Required for production:
 Full list -> `docs/dev/env.md`
 
 ## Scripts
+
 - `dev`
 - `build`
 - `start`
@@ -72,6 +82,7 @@ Full list -> `docs/dev/env.md`
 - `version:print`
 
 ## Build Version
+
 - Runtime build version is generated from Git metadata by `scripts/generate-version.js`.
 - UI build info is shown on `/info`.
 - API build info is available at `/api/version` and included in `/healthz`.
@@ -79,6 +90,7 @@ Full list -> `docs/dev/env.md`
 - If `.git` is unavailable (for example source tarball builds), version falls back to `package.json` version.
 
 ## Documentation
+
 - Architecture -> `docs/architecture.md`
 - API -> `docs/api.md`
 - Security -> `docs/security.md`
@@ -87,6 +99,7 @@ Full list -> `docs/dev/env.md`
 - Release guide -> `docs/dev/release.md`
 
 ## Deep Links (URL state)
+
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
 - Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
 - Open admin edit details: `?edit=<id>` (legacy `adminEdit=<id>` is still supported)
@@ -95,12 +108,15 @@ Full list -> `docs/dev/env.md`
   - `?tab=legal&doc=privacy`
 
 Notes:
+
 - Camera updates use history replace (no history spam while panning/zooming).
 - Legacy legal params remain compatible (`tab=user-agreement`, `tab=privacy-policy`).
 
 ## License
+
 Apache-2.0. See `LICENSE`.
 
 ## Status
+
 Stages 1-3 are complete: SvelteKit migration, security hardening, and performance/DX improvements are in place.
 The repository is now in a production-ready state for open-source maintenance.

@@ -1,6 +1,7 @@
 # API
 
 ## Core endpoints
+
 - `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...`
   - Returns paginated building search results.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
@@ -22,6 +23,7 @@
   - Cache: `Cache-Control: public, max-age=60`, `ETag`, `Last-Modified` (if available).
 
 ## Auth/admin/account
+
 - `GET /api/me`
 - `POST /api/login`, `POST /api/logout`
 - `POST /api/register/*`, `POST /api/password-reset/*`
@@ -29,6 +31,7 @@
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
 
 ## Cache semantics
+
 - Conditional GET:
   - `If-None-Match` -> `304` when ETag matches.
   - `If-Modified-Since` -> `304` when resource not newer.
@@ -36,6 +39,7 @@
   - `Content-Encoding: br|gzip` when `Accept-Encoding` allows and payload is large enough.
 
 ## Error model
+
 - Validation errors: `400`.
 - Unauthorized/forbidden: `401` / `403`.
 - Not found: `404`.
