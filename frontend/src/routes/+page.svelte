@@ -520,8 +520,6 @@
     $mapReady;
     $buildingModalOpen;
     $selectedBuilding;
-    $mapCenter;
-    $mapZoom;
     applyUrlStateToUi();
   }
 
