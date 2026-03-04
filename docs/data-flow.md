@@ -2,7 +2,7 @@
 
 ## Primary ingest pipeline
 
-1. OSM source (`OSM_EXTRACT_QUERY|OSM_EXTRACT_QUERIES|OSM_PBF_PATH`) is processed by `scripts/sync-osm-buildings.js`.
+1. OSM source (`OSM_EXTRACT_QUERY|OSM_EXTRACT_QUERIES|OSM_PBF_PATH`) is processed by [`scripts/sync-osm-buildings.js`](../scripts/sync-osm-buildings.js).
 2. Geometry/metadata are upserted into `osm.building_contours` (+ RTree mirrors).
 3. Tippecanoe builds `data/buildings.pmtiles` (or `BUILDINGS_PMTILES_FILE`).
 4. Search index rebuild worker materializes FTS source/index for `/api/search-buildings`.

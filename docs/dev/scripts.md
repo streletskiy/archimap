@@ -7,7 +7,7 @@
 - `npm run start`: run server.
 - `npm run lint`: backend + frontend lint.
 - `npm run test`: full CI-like local suite.
-- `node scripts/generate-version.js`: generate backend/frontend build version files.
+- [`node scripts/generate-version.js`](../../scripts/generate-version.js): generate backend/frontend build version files.
 - `npm run version:print`: print generated version payload.
 
 ## Testing
@@ -28,5 +28,5 @@
 - `npm run migrate`: DB migrations.
 - `npm run db:seed`: seed demo admin user into auth DB.
 - `npm run admin:create-master -- --email=<email> --password=<password>`: create or promote master admin.
-- `npm run tiles:build`: run PMTiles build pipeline (`sync-osm-buildings.js`).
+- `npm run tiles:build`: run PMTiles build pipeline ([`scripts/sync-osm-buildings.js`](../../scripts/sync-osm-buildings.js)).
 - `npm run sync:city`: OSM sync/import pipeline.

@@ -45,4 +45,4 @@
 
 These values are used as initial camera only when URL does not provide `lat/lng/z`.
 
-Reference template: `.env.example`.
+Reference template: [`.env.example`](../../.env.example).

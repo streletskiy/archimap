@@ -26,7 +26,7 @@
 
 ## Filter tech note
 
-- See `docs/performance/filter-coverage-window.md` for full filter pipeline details, tunable parameters and telemetry fields.
+- See [docs/performance/filter-coverage-window.md](filter-coverage-window.md) for full filter pipeline details, tunable parameters and telemetry fields.
 
 ## Optional lite mode (next)
 

@@ -32,7 +32,7 @@ References:
 - PMTiles
 - Redis (optional, for sessions)
 
-Details -> `docs/architecture.md`
+Details -> [docs/architecture.md](docs/architecture.md)
 
 ## Quick Start
 
@@ -97,7 +97,7 @@ Required for production:
 - `SESSION_SECRET`
 - `APP_BASE_URL`
 
-Full list -> `docs/dev/env.md`
+Full list -> [docs/dev/env.md](docs/dev/env.md)
 
 ## Scripts
 
@@ -126,13 +126,14 @@ Full list -> `docs/dev/env.md`
 
 ## Documentation
 
-- Architecture -> `docs/architecture.md`
-- API -> `docs/api.md`
-- Security -> `docs/security.md`
-- Performance -> `docs/performance/`
-- Runbook -> `docs/runbook.md`
-- Release guide -> `docs/dev/release.md`
-- Docker guide -> `docs/dev/docker.md`
+- Docs index -> [docs/README.md](docs/README.md)
+- Architecture -> [docs/architecture.md](docs/architecture.md)
+- API -> [docs/api.md](docs/api.md)
+- Security -> [docs/security.md](docs/security.md)
+- Performance -> [docs/performance/](docs/performance/)
+- Runbook -> [docs/runbook.md](docs/runbook.md)
+- Release guide -> [docs/dev/release.md](docs/dev/release.md)
+- Docker guide -> [docs/dev/docker.md](docs/dev/docker.md)
 
 ## Deep Links (URL state)
 

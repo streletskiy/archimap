@@ -5,7 +5,7 @@
 1. Install dependencies:
    - `npm install`
 2. Copy env template:
-   - `.env.example` -> `.env`
+   - [`.env.example`](.env.example) -> `.env`
 3. Run locally:
    - `npm start`
 
@@ -43,5 +43,5 @@ Conventional commit style is recommended:
 
 - Scope is focused and clearly described.
 - Tests added/updated for behavioral changes.
-- Docs updated (`README`, env docs, API docs, `legal/*.md`) when needed.
+- Docs updated ([README](README.md), [env docs](docs/dev/env.md), [API docs](docs/api.md), [legal docs](legal/)) when needed.
 - No secrets or credentials in code or logs.

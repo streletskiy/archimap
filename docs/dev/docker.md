@@ -8,6 +8,8 @@
 
 ## Dockerfile Stages
 
+Reference: [`Dockerfile`](../../Dockerfile)
+
 1. `tippecanoe-builder`
 
 - Builds `tippecanoe` and `tile-join` once from pinned ref.
@@ -59,6 +61,9 @@
 ## Release Pipeline
 
 Use release scripts:
+
+- [`scripts/release-docker.ps1`](../../scripts/release-docker.ps1)
+- [`scripts/release-docker.sh`](../../scripts/release-docker.sh)
 
 ```powershell
 ./scripts/release-docker.ps1 -Version 1.2.3

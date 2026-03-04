@@ -50,4 +50,4 @@
 - Recommended command:
   - `npm run admin:create-master -- --email=admin@example.com --password=<strong-password>`
 - The command can also promote an existing user to `is_admin=1` and `is_master_admin=1`.
-- Operational procedure is documented in `docs/runbook.md`.
+- Operational procedure is documented in [docs/runbook.md](runbook.md).

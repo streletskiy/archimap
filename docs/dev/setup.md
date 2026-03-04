@@ -6,7 +6,7 @@
    - `npm ci`
    - `npm --prefix frontend ci`
 2. Prepare env:
-   - copy `.env.example` -> `.env`
+   - copy [`.env.example`](../../.env.example) -> `.env`
 3. Build frontend:
    - `npm run build`
 4. Start server:
