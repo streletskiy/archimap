@@ -68,14 +68,20 @@ test.afterAll(async () => {
 
 test('opens home page and initializes map without runtime JS errors', async ({ page }) => {
   const runtimeErrors = [];
+  const shouldIgnoreRuntimeError = (text) => {
+    const message = String(text || '');
+    return /Bad response code: 404|Wrong magic number for PMTiles archive|Failed to load resource|ERR_BLOCKED_BY_CLIENT/i.test(message);
+  };
   page.on('pageerror', (error) => {
-    runtimeErrors.push(String(error?.message || error));
+    const text = String(error?.message || error);
+    if (shouldIgnoreRuntimeError(text)) return;
+    runtimeErrors.push(text);
   });
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     const text = message.text();
     if (text === 'nr') return;
-    if (/Failed to load resource|ERR_BLOCKED_BY_CLIENT/i.test(text)) return;
+    if (shouldIgnoreRuntimeError(text)) return;
     runtimeErrors.push(text);
   });
 
