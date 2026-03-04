@@ -7,10 +7,17 @@ import {
 } from '$lib/components/map/filter-pipeline-utils';
 
 function isTrustedMessageOrigin(event) {
-  const origin = String(event?.origin || '');
-  if (!origin) return false;
   try {
-    return origin === self.location.origin;
+    const selfOrigin = String(self.location?.origin || '');
+    if (!selfOrigin) return false;
+
+    const messageOrigin = String(event?.origin || '');
+    if (messageOrigin) {
+      return messageOrigin === selfOrigin;
+    }
+
+    const targetOrigin = String(event?.currentTarget?.location?.origin || '');
+    return Boolean(targetOrigin) && targetOrigin === selfOrigin;
   } catch {
     return false;
   }
