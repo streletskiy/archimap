@@ -184,6 +184,17 @@
       "amenity": "Amenity type",
       "building": "Building type"
     },
+    "filterStatus": {
+      "label": "Status",
+      "idle": "Idle",
+      "applied": "Applied",
+      "refining": "Refining",
+      "tooMany": "Too many matches. Zoom in or refine.",
+      "truncated": "Results truncated. Zoom in or refine.",
+      "invalid": "Invalid filter",
+      "count": "Count",
+      "elapsed": "Elapsed"
+    },
     "status": {
       "loginInProgress": "Signing in...",
       "loginDone": "Signed in",

@@ -49,10 +49,12 @@
   - `buildings-filter-highlight-outline`
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
-  - Authoritative phase: client calls `POST /api/buildings/filter-matches` with bbox + rules and applies server result by diff.
+  - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
+- Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
 - Matched buildings are marked with `setFeatureState({ isFiltered: true })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
-- Feature-state updates are diff-based (`toEnable` / `toDisable`) via a worker apply-plan, no full reset on each refresh.
+- Feature-state updates are diff-based (`toEnable` / `toDisable`) via worker apply-plan and are chunked per frame for smoothness.
 - Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.
+- Filter prefetch (optional) warms neighbor windows in background with strict throttling and cancellation.
 
 ## ASCII diagram
 

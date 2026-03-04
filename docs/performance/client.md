@@ -18,8 +18,15 @@
 - Reduced unnecessary redraws:
   - Filter updates guarded by request token, abort semantics, and worker-built diff plans.
   - Filter highlight updates dedicated highlight layers via feature-state; base building layers are not re-filtered/hid.
+  - Feature-state diff apply is chunked per animation frame to smooth map interactions under large diffs.
   - Primary filter path is bbox server-matching (not rendered-feature enumeration), reducing request fan-out.
+  - Authoritative fetch uses adaptive coverage-window and skips refetch while viewport stays inside active window.
+  - Optional low-priority directional prefetch warms cache without competing with main requests.
   - Theme switching keeps custom PMTiles layers and applies style repaint instead of layer drop.
+
+## Filter tech note
+
+- See `docs/performance/filter-coverage-window.md` for full filter pipeline details, tunable parameters and telemetry fields.
 
 ## Optional lite mode (next)
 

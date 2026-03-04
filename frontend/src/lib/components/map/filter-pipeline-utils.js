@@ -105,3 +105,66 @@ export function buildBboxHash(bbox, precision = 4) {
     Number(bbox.north).toFixed(precision)
   ].join(':');
 }
+
+export function clampNumber(value, min, max) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return Number(min);
+  return Math.max(Number(min), Math.min(Number(max), num));
+}
+
+export function expandBboxWithMargin(bbox, marginRatio = 0.25) {
+  if (!bbox) return null;
+  const west = Number(bbox.west);
+  const south = Number(bbox.south);
+  const east = Number(bbox.east);
+  const north = Number(bbox.north);
+  if (![west, south, east, north].every(Number.isFinite)) return null;
+
+  const width = Math.max(1e-6, east - west);
+  const height = Math.max(1e-6, north - south);
+  const ratio = clampNumber(marginRatio, 0, 2);
+  const growX = width * ratio;
+  const growY = height * ratio;
+  return {
+    west: west - growX,
+    south: clampNumber(south - growY, -90, 90),
+    east: east + growX,
+    north: clampNumber(north + growY, -90, 90)
+  };
+}
+
+export function isViewportInsideBbox(viewport, containerBbox, epsilon = 1e-7) {
+  if (!viewport || !containerBbox) return false;
+  const viewportWest = Number(viewport.west);
+  const viewportSouth = Number(viewport.south);
+  const viewportEast = Number(viewport.east);
+  const viewportNorth = Number(viewport.north);
+  const boxWest = Number(containerBbox.west);
+  const boxSouth = Number(containerBbox.south);
+  const boxEast = Number(containerBbox.east);
+  const boxNorth = Number(containerBbox.north);
+  if (![viewportWest, viewportSouth, viewportEast, viewportNorth, boxWest, boxSouth, boxEast, boxNorth].every(Number.isFinite)) {
+    return false;
+  }
+  return (
+    viewportWest >= (boxWest - epsilon) &&
+    viewportSouth >= (boxSouth - epsilon) &&
+    viewportEast <= (boxEast + epsilon) &&
+    viewportNorth <= (boxNorth + epsilon)
+  );
+}
+
+export function getAdaptiveCoverageMarginRatio({
+  lastCount = 0,
+  defaultLimit = 12_000,
+  min = 0.2,
+  max = 0.35
+} = {}) {
+  const minRatio = clampNumber(min, 0, 1);
+  const maxRatio = clampNumber(max, minRatio, 1);
+  const count = Math.max(0, Number(lastCount) || 0);
+  const limit = Math.max(1, Number(defaultLimit) || 1);
+  const saturation = clampNumber(count / limit, 0, 1);
+  const ratio = maxRatio - ((maxRatio - minRatio) * saturation);
+  return clampNumber(ratio, minRatio, maxRatio);
+}

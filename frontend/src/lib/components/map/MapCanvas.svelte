@@ -3,10 +3,16 @@
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
   import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady, setMapZoom } from '$lib/stores/map';
-  import { buildingFilterRules } from '$lib/stores/filters';
+  import { buildingFilterRules, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchState } from '$lib/stores/search';
   import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter, parseOsmKey } from './selection-utils';
-  import { buildBboxHash, buildBboxSnapshot } from './filter-pipeline-utils';
+  import {
+    buildBboxHash,
+    buildBboxSnapshot,
+    expandBboxWithMargin,
+    getAdaptiveCoverageMarginRatio,
+    isViewportInsideBbox
+  } from './filter-pipeline-utils';
   import { EMPTY_LAYER_FILTER, hashFilterExpression } from './filter-highlight-utils';
 
   const dispatch = createEventDispatcher();
@@ -39,6 +45,16 @@
   const FILTER_DATA_CACHE_TTL_MS = 45_000;
   const FILTER_DATA_CACHE_MAX_ITEMS = 25_000;
   const FILTER_DATA_REQUEST_CHUNK_SIZE = 5_000;
+  const FILTER_FEATURE_STATE_CHUNK_SIZE = 540;
+  const FILTER_DENSE_DIFF_THRESHOLD = 1_200;
+  const FILTER_APPLY_FRAME_BUDGET_MS = 4.5;
+  const FILTER_APPLY_DENSE_FRAME_BUDGET_MS = 8.5;
+  const FILTER_APPLY_DENSE_MAX_OPS_PER_FRAME = 2_800;
+  const FILTER_COVERAGE_MARGIN_MIN = 0.2;
+  const FILTER_COVERAGE_MARGIN_MAX = 0.35;
+  const FILTER_PREFETCH_ENABLED = true;
+  const FILTER_PREFETCH_MIN_INTERVAL_MS = 900;
+  const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
   const BUILDING_THEME = {
     light: {
       fillColor: '#a3a3a3',
@@ -66,6 +82,7 @@
   let coverageDebounceTimer = null;
   let cartoShowTimer = null;
   let activeFilterAbortController = null;
+  let prefetchFilterAbortController = null;
   let coverageEvalToken = 0;
   let coverageVisibleState = 'visible';
   let coverageCache = new Map();
@@ -85,6 +102,7 @@
   let lastHandledBuildingClickSig = null;
   let filterRulesDebounceTimer = null;
   let filterAuthoritativeTimer = null;
+  let filterPrefetchTimer = null;
   let filterErrorMessage = '';
   let filterStatusMessage = '';
   let filterPhase = 'idle';
@@ -94,6 +112,15 @@
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
   let lastAuthoritativeRequestKey = '';
+  let activeFilterCoverageWindow = null;
+  let activeFilterCoverageKey = '';
+  let filterLastPrefetchAt = 0;
+  let filterLastMoveEndAt = 0;
+  let filterLastMapCenter = null;
+  let filterLastMoveVector = { dx: 0, dy: 0 };
+  let filterSetFeatureStateCallsLast = 0;
+  let filterLastApplyDiffMs = 0;
+  let filterDenseBurstEnabled = true;
   let filterDebugActive = false;
   let filterDebugExprHash = hashFilterExpression(EMPTY_LAYER_FILTER);
   let filteredFeatureStateFeatureIds = new Set();
@@ -131,7 +158,8 @@
     phase = filterPhase,
     lastElapsedMs = filterLastElapsedMs,
     lastCount = filterLastCount,
-    cacheHit = filterLastCacheHit
+    cacheHit = filterLastCacheHit,
+    setFeatureStateCalls = filterSetFeatureStateCallsLast
   } = {}) {
     if (typeof document === 'undefined') return;
     const exprHash = hashFilterExpression(expr);
@@ -144,6 +172,7 @@
     document.body.dataset.filterLastElapsedMs = String(Number(lastElapsedMs) || 0);
     document.body.dataset.filterLastCount = String(Number(lastCount) || 0);
     document.body.dataset.filterCacheHit = cacheHit ? 'true' : 'false';
+    document.body.dataset.filterSetFeatureStateCalls = String(Number(setFeatureStateCalls) || 0);
     window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
     window.__MAP_DEBUG__.filter = {
       active: Boolean(active),
@@ -152,7 +181,8 @@
       phase: String(phase || 'idle'),
       elapsedMs: Number(lastElapsedMs) || 0,
       count: Number(lastCount) || 0,
-      cacheHit: Boolean(cacheHit)
+      cacheHit: Boolean(cacheHit),
+      setFeatureStateCalls: Number(setFeatureStateCalls) || 0
     };
     const phaseHistory = Array.isArray(window.__MAP_DEBUG__.filterPhaseHistory)
       ? window.__MAP_DEBUG__.filterPhaseHistory
@@ -178,6 +208,10 @@
 
   function setFilterPhase(phase) {
     filterPhase = phase;
+    updateFilterRuntimeStatus({
+      phase,
+      statusCode: phase === 'idle' ? 'idle' : undefined
+    });
     updateFilterDebugHook({
       active: filteredFeatureStateFeatureIds.size > 0,
       expr: ['literal', currentFilterRulesHash],
@@ -237,18 +271,78 @@
   function recordFilterRequestDebugEvent(eventName) {
     if (typeof window === 'undefined') return;
     window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
-    const stats = window.__MAP_DEBUG__.filterRequests || { start: 0, abort: 0, finish: 0 };
+    const stats = window.__MAP_DEBUG__.filterRequests || {
+      start: 0,
+      abort: 0,
+      finish: 0,
+      prefetchStart: 0,
+      prefetchAbort: 0,
+      prefetchFinish: 0
+    };
     if (eventName === 'start') stats.start += 1;
     if (eventName === 'abort') stats.abort += 1;
     if (eventName === 'finish') stats.finish += 1;
+    if (eventName === 'prefetch-start') stats.prefetchStart += 1;
+    if (eventName === 'prefetch-abort') stats.prefetchAbort += 1;
+    if (eventName === 'prefetch-finish') stats.prefetchFinish += 1;
     window.__MAP_DEBUG__.filterRequests = stats;
   }
 
+  function recordFilterTelemetry(eventName, payload = {}) {
+    if (!FILTER_TELEMETRY_ENABLED || typeof window === 'undefined') return;
+    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
+    const telemetry = window.__MAP_DEBUG__.filterTelemetry || {
+      counters: {},
+      recentEvents: []
+    };
+    telemetry.counters[eventName] = Number(telemetry.counters[eventName] || 0) + 1;
+    telemetry.recentEvents = [
+      ...telemetry.recentEvents,
+      {
+        event: eventName,
+        at: Date.now(),
+        ...payload
+      }
+    ].slice(-140);
+    window.__MAP_DEBUG__.filterTelemetry = telemetry;
+  }
+
+  function updateFilterRuntimeStatus(status = {}) {
+    setBuildingFilterRuntimeStatus({
+      phase: filterPhase,
+      statusCode: String(status.statusCode || 'idle'),
+      message: String(status.message || filterStatusMessage || ''),
+      count: Number(status.count ?? filterLastCount ?? 0) || 0,
+      elapsedMs: Number(status.elapsedMs ?? filterLastElapsedMs ?? 0) || 0,
+      cacheHit: Boolean(status.cacheHit ?? filterLastCacheHit),
+      setFeatureStateCalls: Number(status.setFeatureStateCalls ?? filterSetFeatureStateCallsLast ?? 0) || 0,
+      updatedAt: Date.now()
+    });
+  }
+
+  function nextAnimationFrame() {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  }
+
+  function resolveFilterDenseBurstEnabled() {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = String(new URL(window.location.href).searchParams.get('filterDenseBurst') || '').trim().toLowerCase();
+      if (raw === '0' || raw === 'false' || raw === 'off') return false;
+    } catch {
+      // ignore
+    }
+    return true;
+  }
+
   function setLocalBuildingFeatureStateById(id, state) {
-    if (!map) return;
-    if (!Number.isInteger(id) || id <= 0) return;
+    if (!map) return false;
+    if (!Number.isInteger(id) || id <= 0) return false;
     const sourceLayer = runtimeConfig?.buildingsPmtiles?.sourceLayer;
-    if (!sourceLayer) return;
+    if (!sourceLayer) return false;
     try {
       map.setFeatureState(
         {
@@ -258,9 +352,118 @@
         },
         state
       );
+      return true;
     } catch {
       // Source/style might be reloading.
+      return false;
     }
+  }
+
+  function cancelPrefetchRequest() {
+    if (prefetchFilterAbortController) {
+      prefetchFilterAbortController.abort();
+      prefetchFilterAbortController = null;
+      recordFilterRequestDebugEvent('prefetch-abort');
+      recordFilterTelemetry('prefetch_abort');
+    }
+    if (filterPrefetchTimer) {
+      clearTimeout(filterPrefetchTimer);
+      filterPrefetchTimer = null;
+    }
+  }
+
+  function getCoverageWindowForViewport(viewportBbox) {
+    const marginRatio = getAdaptiveCoverageMarginRatio({
+      lastCount: filterLastCount,
+      defaultLimit: FILTER_MATCH_DEFAULT_LIMIT,
+      min: FILTER_COVERAGE_MARGIN_MIN,
+      max: FILTER_COVERAGE_MARGIN_MAX
+    });
+    const windowBbox = expandBboxWithMargin(viewportBbox, marginRatio);
+    if (!windowBbox) return null;
+    return {
+      ...windowBbox,
+      marginRatio
+    };
+  }
+
+  async function applyFeatureStatePlanInChunks(plan, token, meta = {}) {
+    const workingSet = new Set(filteredFeatureStateFeatureIds);
+    const toDisable = Array.isArray(plan?.toDisable) ? plan.toDisable : [];
+    const toEnable = Array.isArray(plan?.toEnable) ? plan.toEnable : [];
+    const chunkSize = Math.max(120, Number(meta.chunkSize || FILTER_FEATURE_STATE_CHUNK_SIZE) || FILTER_FEATURE_STATE_CHUNK_SIZE);
+    const totalOps = toDisable.length + toEnable.length;
+    const denseMode = filterDenseBurstEnabled && totalOps >= FILTER_DENSE_DIFF_THRESHOLD;
+    let disableIndex = 0;
+    let enableIndex = 0;
+    let setCalls = 0;
+    const applyStartedAt = performance.now();
+    recordFilterTelemetry('apply_plan_start', {
+      token,
+      toDisable: toDisable.length,
+      toEnable: toEnable.length,
+      delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
+    });
+
+    while (disableIndex < toDisable.length || enableIndex < toEnable.length) {
+      if (token !== latestFilterToken) {
+        filteredFeatureStateFeatureIds = workingSet;
+        recordFilterTelemetry('apply_plan_cancelled', {
+          token,
+          setCalls,
+          partialSize: workingSet.size
+        });
+        return { cancelled: true, setCalls, elapsedMs: Math.round(performance.now() - applyStartedAt) };
+      }
+      const frameStartedAt = performance.now();
+      const frameBudgetMs = denseMode ? FILTER_APPLY_DENSE_FRAME_BUDGET_MS : FILTER_APPLY_FRAME_BUDGET_MS;
+      const maxOpsPerFrame = denseMode
+        ? FILTER_APPLY_DENSE_MAX_OPS_PER_FRAME
+        : chunkSize;
+      let frameOps = 0;
+      while (
+        frameOps < maxOpsPerFrame &&
+        disableIndex < toDisable.length &&
+        (performance.now() - frameStartedAt) <= frameBudgetMs
+      ) {
+        const id = toDisable[disableIndex++];
+        if (setLocalBuildingFeatureStateById(id, { isFiltered: false })) {
+          workingSet.delete(id);
+          setCalls += 1;
+        }
+        frameOps += 1;
+      }
+      while (
+        frameOps < maxOpsPerFrame &&
+        enableIndex < toEnable.length &&
+        (performance.now() - frameStartedAt) <= frameBudgetMs
+      ) {
+        const id = toEnable[enableIndex++];
+        if (setLocalBuildingFeatureStateById(id, { isFiltered: true })) {
+          workingSet.add(id);
+          setCalls += 1;
+        }
+        frameOps += 1;
+      }
+      if (disableIndex < toDisable.length || enableIndex < toEnable.length) {
+        await nextAnimationFrame();
+      }
+    }
+
+    filteredFeatureStateFeatureIds = new Set(Array.isArray(plan?.nextFeatureIds) ? plan.nextFeatureIds : [...workingSet]);
+    filterSetFeatureStateCallsLast = setCalls;
+    const elapsedMs = Math.round(performance.now() - applyStartedAt);
+    filterLastApplyDiffMs = elapsedMs;
+    recordFilterTelemetry('apply_plan_finish', {
+      token,
+      toDisable: toDisable.length,
+      toEnable: toEnable.length,
+      setCalls,
+      elapsedMs,
+      denseMode,
+      delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
+    });
+    return { cancelled: false, setCalls, elapsedMs };
   }
 
   function pruneFilterMatchesCache() {
@@ -327,28 +530,38 @@
     }
     if (token !== latestFilterToken) return;
 
-    for (const id of plan.toDisable) {
-      setLocalBuildingFeatureStateById(id, { isFiltered: false });
-    }
-    for (const id of plan.toEnable) {
-      setLocalBuildingFeatureStateById(id, { isFiltered: true });
-    }
-    filteredFeatureStateFeatureIds = new Set(plan.nextFeatureIds);
+    const applyResult = await applyFeatureStatePlanInChunks(plan, token, meta);
+    if (applyResult?.cancelled) return;
     filterLastCount = plan.total;
+    filterSetFeatureStateCallsLast = Number(applyResult?.setCalls || 0);
     debugFilterLog('apply diff enable/disable', {
       enable: plan.toEnable.length,
       disable: plan.toDisable.length,
       total: plan.total,
+      setFeatureStateCalls: filterSetFeatureStateCallsLast,
       phase: meta.phase || filterPhase
+    });
+    updateFilterRuntimeStatus({
+      count: plan.total,
+      setFeatureStateCalls: filterSetFeatureStateCallsLast
     });
   }
 
   function clearFilteredFeatureState() {
+    let setCalls = 0;
     for (const id of filteredFeatureStateFeatureIds) {
-      setLocalBuildingFeatureStateById(id, { isFiltered: false });
+      if (setLocalBuildingFeatureStateById(id, { isFiltered: false })) {
+        setCalls += 1;
+      }
     }
     filteredFeatureStateFeatureIds = new Set();
     filterLastCount = 0;
+    filterSetFeatureStateCallsLast = setCalls;
+    recordFilterTelemetry('filter_state_cleared', { setCalls });
+    updateFilterRuntimeStatus({
+      count: 0,
+      setFeatureStateCalls: setCalls
+    });
     updateFilterDebugHook({
       active: false,
       expr: EMPTY_LAYER_FILTER,
@@ -359,9 +572,16 @@
 
   function reapplyFilteredFeatureState() {
     if (filteredFeatureStateFeatureIds.size === 0) return;
+    let setCalls = 0;
     for (const id of filteredFeatureStateFeatureIds) {
-      setLocalBuildingFeatureStateById(id, { isFiltered: true });
+      if (setLocalBuildingFeatureStateById(id, { isFiltered: true })) {
+        setCalls += 1;
+      }
     }
+    filterSetFeatureStateCallsLast = setCalls;
+    updateFilterRuntimeStatus({
+      setFeatureStateCalls: setCalls
+    });
   }
 
   function getPrimaryBuildingFeature(event) {
@@ -1061,6 +1281,27 @@
     }, FILTER_REQUEST_DEBOUNCE_MS);
   }
 
+  function registerFilterMoveEnd() {
+    if (!map) return;
+    const center = map.getCenter();
+    const nextCenter = {
+      lng: Number(center?.lng || 0),
+      lat: Number(center?.lat || 0)
+    };
+    if (filterLastMapCenter) {
+      filterLastMoveVector = {
+        dx: nextCenter.lng - filterLastMapCenter.lng,
+        dy: nextCenter.lat - filterLastMapCenter.lat
+      };
+    }
+    filterLastMapCenter = nextCenter;
+    filterLastMoveEndAt = Date.now();
+    recordFilterTelemetry('moveend', {
+      center: nextCenter,
+      zoom: Number(map.getZoom() || 0)
+    });
+  }
+
   function scheduleFilterRulesRefresh(rules = $buildingFilterRules) {
     if (filterRulesDebounceTimer) {
       clearTimeout(filterRulesDebounceTimer);
@@ -1119,6 +1360,31 @@
     if (!map) return null;
     const bounds = map.getBounds?.();
     return buildBboxSnapshot(bounds);
+  }
+
+  function canReuseActiveCoverageWindow({ viewportBbox, rulesHash, zoomBucket, reason }) {
+    if (reason !== 'viewport') return false;
+    if (!activeFilterCoverageWindow) return false;
+    if (String(activeFilterCoverageWindow.rulesHash || '') !== String(rulesHash || '')) return false;
+    if (Number(activeFilterCoverageWindow.zoomBucket || 0) !== Number(zoomBucket || 0)) return false;
+    return isViewportInsideBbox(viewportBbox, activeFilterCoverageWindow);
+  }
+
+  function buildPrefetchCoverageWindow(coverageWindow) {
+    if (!coverageWindow) return null;
+    const width = Number(coverageWindow.east) - Number(coverageWindow.west);
+    const height = Number(coverageWindow.north) - Number(coverageWindow.south);
+    if (!(width > 0) || !(height > 0)) return null;
+    const directionX = filterLastMoveVector.dx > 0 ? 1 : (filterLastMoveVector.dx < 0 ? -1 : 0);
+    const directionY = filterLastMoveVector.dy > 0 ? 1 : (filterLastMoveVector.dy < 0 ? -1 : 0);
+    const shiftX = width * (directionX === 0 ? 0.7 : 1.02 * directionX);
+    const shiftY = height * (directionY === 0 ? 0.7 : 1.02 * directionY);
+    return {
+      west: Number(coverageWindow.west) + shiftX,
+      east: Number(coverageWindow.east) + shiftX,
+      south: Number(coverageWindow.south) + shiftY,
+      north: Number(coverageWindow.north) + shiftY
+    };
   }
 
   async function prepareRulesForFiltering(rules) {
@@ -1299,23 +1565,82 @@
     };
   }
 
+  function scheduleFilterPrefetch(context, token) {
+    if (!FILTER_PREFETCH_ENABLED || !context?.coverageWindow || !context?.rulesHash || !context?.rules?.length) return;
+    const now = Date.now();
+    if ((now - filterLastPrefetchAt) < FILTER_PREFETCH_MIN_INTERVAL_MS) return;
+    const prefetchBbox = buildPrefetchCoverageWindow(context.coverageWindow);
+    if (!prefetchBbox) return;
+    const prefetchHash = buildBboxHash(prefetchBbox, 4);
+    const prefetchCacheKey = `${context.rulesHash}:${prefetchHash}:${context.zoomBucket}`;
+    if (getCachedFilterMatches(prefetchCacheKey)) return;
+
+    cancelPrefetchRequest();
+    filterPrefetchTimer = setTimeout(async () => {
+      filterPrefetchTimer = null;
+      if (token !== latestFilterToken || !map) return;
+
+      prefetchFilterAbortController = new AbortController();
+      const signal = prefetchFilterAbortController.signal;
+      filterLastPrefetchAt = Date.now();
+      recordFilterRequestDebugEvent('prefetch-start');
+      recordFilterTelemetry('prefetch_start', {
+        prefetchHash
+      });
+
+      try {
+        const payload = await fetchFilterMatchesPrimary({
+          bbox: prefetchBbox,
+          zoomBucket: context.zoomBucket,
+          rules: context.rules,
+          rulesHash: context.rulesHash,
+          signal
+        });
+        if (token !== latestFilterToken) return;
+        putCachedFilterMatches(prefetchCacheKey, payload);
+        recordFilterRequestDebugEvent('prefetch-finish');
+        recordFilterTelemetry('prefetch_finish', {
+          prefetchHash,
+          count: Math.max(
+            Array.isArray(payload?.matchedFeatureIds) ? payload.matchedFeatureIds.length : 0,
+            Array.isArray(payload?.matchedKeys) ? payload.matchedKeys.length : 0
+          )
+        });
+      } catch (error) {
+        if (String(error?.name || '').toLowerCase() === 'aborterror') {
+          recordFilterRequestDebugEvent('prefetch-abort');
+          recordFilterTelemetry('prefetch_abort', { prefetchHash });
+        }
+      } finally {
+        if (prefetchFilterAbortController?.signal === signal) {
+          prefetchFilterAbortController = null;
+        }
+      }
+    }, 60);
+  }
+
   function scheduleAuthoritativeRequest(context, token, debounceMs) {
     if (filterAuthoritativeTimer) {
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
     }
+    if (filterPrefetchTimer) {
+      clearTimeout(filterPrefetchTimer);
+      filterPrefetchTimer = null;
+    }
     filterAuthoritativeTimer = setTimeout(async () => {
       filterAuthoritativeTimer = null;
       if (token !== latestFilterToken || !map) return;
-      const requestKey = `${context.rulesHash}:${context.bboxHash}:${context.zoomBucket}`;
+      const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}`;
       if (requestKey === lastAuthoritativeRequestKey && context.reason === 'viewport') {
         return;
       }
       lastAuthoritativeRequestKey = requestKey;
-
+      cancelPrefetchRequest();
       if (activeFilterAbortController) {
         debugFilterLog('filter request abort', { requestKey });
         recordFilterRequestDebugEvent('abort');
+        recordFilterTelemetry('request_abort', { requestKey });
         activeFilterAbortController.abort();
       }
       activeFilterAbortController = new AbortController();
@@ -1323,16 +1648,25 @@
       debugFilterLog('filter request start', {
         requestKey,
         phase: 'authoritative',
-        heavy: context.heavy
+        heavy: context.heavy,
+        coverageHash: context.coverageHash
       });
       recordFilterRequestDebugEvent('start');
+      recordFilterTelemetry('request_start', {
+        requestKey,
+        delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
+      });
       filterStatusMessage = 'Refining...';
+      updateFilterRuntimeStatus({
+        statusCode: 'refining',
+        message: filterStatusMessage
+      });
 
       let payload;
       let usedFallback = false;
       try {
         payload = await fetchFilterMatchesPrimary({
-          bbox: context.bbox,
+          bbox: context.coverageWindow,
           zoomBucket: context.zoomBucket,
           rules: context.rules,
           rulesHash: context.rulesHash,
@@ -1358,20 +1692,35 @@
       );
       if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
         filterStatusMessage = 'Too many matches. Zoom in or refine the filter.';
-        clearFilteredFeatureState();
+        updateFilterRuntimeStatus({
+          statusCode: 'too_many_matches',
+          message: filterStatusMessage,
+          count: matchedSize
+        });
         setFilterPhase('authoritative');
+        recordFilterTelemetry('request_degraded', {
+          requestKey,
+          count: matchedSize
+        });
         return;
       }
 
       await applyFilteredFeatureStateMatches(payload, token, { phase: 'authoritative' });
+      if (token !== latestFilterToken) return;
       putCachedFilterMatches(context.cacheKey, payload);
+      activeFilterCoverageWindow = {
+        ...context.coverageWindow,
+        rulesHash: context.rulesHash,
+        zoomBucket: context.zoomBucket
+      };
+      activeFilterCoverageKey = context.coverageHash;
 
       filterLastElapsedMs = Number(payload?.meta?.elapsedMs || 0);
       filterLastCacheHit = Boolean(payload?.meta?.cacheHit);
       filterLastCount = matchedSize;
       filterStatusMessage = payload?.meta?.truncated
         ? 'Results truncated. Zoom in or refine filter.'
-        : '';
+        : 'Applied';
       filterErrorMessage = '';
       setFilterPhase('authoritative');
       debugFilterLog('filter request finish', {
@@ -1383,6 +1732,22 @@
         fallback: usedFallback
       });
       recordFilterRequestDebugEvent('finish');
+      recordFilterTelemetry('request_finish', {
+        requestKey,
+        count: matchedSize,
+        elapsedMs: filterLastElapsedMs,
+        applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
+        setFeatureStateCalls: filterSetFeatureStateCallsLast,
+        toEnable: filteredFeatureStateFeatureIds.size
+      });
+      updateFilterRuntimeStatus({
+        statusCode: payload?.meta?.truncated ? 'truncated' : 'applied',
+        message: filterStatusMessage,
+        count: filterLastCount,
+        elapsedMs: filterLastElapsedMs,
+        cacheHit: filterLastCacheHit,
+        setFeatureStateCalls: filterSetFeatureStateCallsLast
+      });
       updateFilterDebugHook({
         active: matchedSize > 0,
         expr: ['literal', context.rulesHash],
@@ -1392,6 +1757,7 @@
         lastCount: filterLastCount,
         cacheHit: filterLastCacheHit
       });
+      scheduleFilterPrefetch(context, token);
     }, Math.max(0, Number(debounceMs) || 0));
   }
 
@@ -1401,6 +1767,11 @@
       activeFilterAbortController.abort();
       activeFilterAbortController = null;
     }
+    if (prefetchFilterAbortController) {
+      prefetchFilterAbortController.abort();
+      prefetchFilterAbortController = null;
+    }
+    cancelPrefetchRequest();
     if (filterAuthoritativeTimer) {
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
@@ -1410,7 +1781,17 @@
     filterLastElapsedMs = 0;
     filterLastCacheHit = false;
     currentFilterRulesHash = 'fnv1a-0';
+    activeFilterCoverageWindow = null;
+    activeFilterCoverageKey = '';
     setFilterPhase('idle');
+    updateFilterRuntimeStatus({
+      statusCode: 'idle',
+      message: '',
+      count: 0,
+      elapsedMs: 0,
+      cacheHit: false,
+      setFeatureStateCalls: 0
+    });
   }
 
   async function applyBuildingFilters(rules, { reason = 'rules' } = {}) {
@@ -1424,6 +1805,11 @@
       filterStatusMessage = '';
       clearFilteredFeatureState();
       setFilterPhase('idle');
+      updateFilterRuntimeStatus({
+        statusCode: 'invalid',
+        message: filterErrorMessage,
+        count: 0
+      });
       return;
     }
     const activeRules = prepared.rules;
@@ -1438,26 +1824,67 @@
     const bbox = getCurrentFilterBbox();
     if (!bbox) {
       filterStatusMessage = '';
+      updateFilterRuntimeStatus({
+        statusCode: 'idle',
+        message: ''
+      });
       return;
     }
     const bboxHash = buildBboxHash(bbox, 4);
     const zoomBucket = Math.round(map.getZoom() * 2) / 2;
-    const cacheKey = `${prepared.rulesHash}:${bboxHash}:${zoomBucket}`;
+    const coverageWindow = getCoverageWindowForViewport(bbox) || bbox;
+    const coverageHash = buildBboxHash(coverageWindow, 4);
+    const cacheKey = `${prepared.rulesHash}:${coverageHash}:${zoomBucket}`;
     lastViewportHash = bboxHash;
 
     filterErrorMessage = '';
     filterLastCacheHit = false;
     setFilterPhase('optimistic');
 
+    if (canReuseActiveCoverageWindow({
+      viewportBbox: bbox,
+      rulesHash: prepared.rulesHash,
+      zoomBucket,
+      reason
+    })) {
+      filterStatusMessage = 'Applied';
+      setFilterPhase('authoritative');
+      recordFilterTelemetry('coverage_window_hit', {
+        bboxHash,
+        coverageHash: activeFilterCoverageKey
+      });
+      updateFilterRuntimeStatus({
+        statusCode: 'applied',
+        message: filterStatusMessage
+      });
+      return;
+    }
+
     const cached = getCachedFilterMatches(cacheKey);
     if (cached) {
       await applyFilteredFeatureStateMatches(cached, token, { phase: 'optimistic' });
+      if (token !== latestFilterToken) return;
       filterLastElapsedMs = Number(cached?.meta?.elapsedMs || 0);
       filterLastCacheHit = Boolean(cached?.meta?.cacheHit);
       filterLastCount = Math.max(
         Array.isArray(cached?.matchedFeatureIds) ? cached.matchedFeatureIds.length : 0,
         Array.isArray(cached?.matchedKeys) ? cached.matchedKeys.length : 0
       );
+      activeFilterCoverageWindow = {
+        ...coverageWindow,
+        rulesHash: prepared.rulesHash,
+        zoomBucket
+      };
+      activeFilterCoverageKey = coverageHash;
+      filterStatusMessage = 'Applied';
+      updateFilterRuntimeStatus({
+        statusCode: 'applied',
+        message: filterStatusMessage,
+        count: filterLastCount,
+        elapsedMs: filterLastElapsedMs,
+        cacheHit: filterLastCacheHit,
+        setFeatureStateCalls: filterSetFeatureStateCallsLast
+      });
       updateFilterDebugHook({
         active: filterLastCount > 0,
         expr: ['literal', prepared.rulesHash],
@@ -1470,6 +1897,10 @@
     }
 
     filterStatusMessage = 'Refining...';
+    updateFilterRuntimeStatus({
+      statusCode: 'refining',
+      message: filterStatusMessage
+    });
     const debounceMs = prepared.heavy
       ? FILTER_HEAVY_RULE_DEBOUNCE_MS
       : (reason === 'rules' ? FILTER_RULE_CHANGE_DEBOUNCE_MS : FILTER_REQUEST_DEBOUNCE_MS);
@@ -1479,7 +1910,8 @@
       heavy: prepared.heavy,
       rules: activeRules,
       rulesHash: prepared.rulesHash,
-      bbox,
+      coverageWindow,
+      coverageHash,
       bboxHash,
       zoomBucket,
       cacheKey
@@ -1533,6 +1965,7 @@
 
   onMount(() => {
     let mountAlive = true;
+    filterDenseBurstEnabled = resolveFilterDenseBurstEnabled();
 
     async function initMap() {
       const [{ default: maplibreModule }, { PMTiles: PMTilesCtor, Protocol: ProtocolCtor }] = await Promise.all([
@@ -1576,6 +2009,7 @@
       });
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
       map.on('moveend', () => {
+        registerFilterMoveEnd();
         setMapCenter(map.getCenter());
         setMapZoom(map.getZoom());
       });
@@ -1593,6 +2027,7 @@
       });
 
       map.on('load', () => {
+        registerFilterMoveEnd();
         setMapCenter(map.getCenter());
         setMapZoom(map.getZoom());
         setMapReady(true);
@@ -1671,6 +2106,16 @@
     filterMatchesCache = new Map();
     filterDataByOsmKeyCache = new Map();
     filteredFeatureStateFeatureIds = new Set();
+    setBuildingFilterRuntimeStatus({
+      phase: 'idle',
+      statusCode: 'idle',
+      message: '',
+      count: 0,
+      elapsedMs: 0,
+      cacheHit: false,
+      setFeatureStateCalls: 0,
+      updatedAt: Date.now()
+    });
     if (filterWorker) {
       filterWorker.terminate();
       filterWorker = null;
@@ -1693,8 +2138,10 @@
   data-filter-last-elapsed-ms={String(filterLastElapsedMs)}
   data-filter-last-count={String(filterLastCount)}
   data-filter-cache-hit={filterLastCacheHit ? 'true' : 'false'}
+  data-filter-set-feature-state-calls={String(filterSetFeatureStateCallsLast)}
+  data-filter-last-apply-diff-ms={String(filterLastApplyDiffMs)}
 ></div>
-{#if filterStatusMessage}
+{#if filterStatusMessage && filterStatusMessage !== 'Applied'}
   <div class="map-filter-status" role="status" aria-live="polite">{filterStatusMessage}</div>
 {/if}
 {#if filterErrorMessage}

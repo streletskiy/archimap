@@ -186,14 +186,59 @@ test('pan/zoom updates filter without request spam', async ({ page }) => {
   await page.locator('.filter-panel .row input[list="filter-tag-keys"]').first().fill('name');
   await page.locator('.filter-panel .row input.ui-field.ui-field-xs').nth(1).fill('a');
   await page.locator('.filter-panel .filter-actions .ui-btn-primary').click();
+  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
+
+  const baseline = await page.evaluate(() => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const req = debug.filterRequests || {};
+    const telemetry = debug.filterTelemetry || {};
+    return {
+      start: Number(req.start || 0),
+      cleared: Number((telemetry.counters || {}).filter_state_cleared || 0)
+    };
+  });
+
+  const canvas = page.locator('.maplibregl-canvas');
+  await canvas.hover({ position: { x: 420, y: 320 } });
+  await page.mouse.down();
+  await page.mouse.move(280, 320, { steps: 8 });
+  await page.mouse.move(520, 310, { steps: 8 });
+  await page.mouse.move(360, 300, { steps: 8 });
+  await page.mouse.up();
 
   await page.mouse.wheel(0, -1200);
   await page.mouse.wheel(0, 1200);
   await page.keyboard.press('=');
   await page.keyboard.press('-');
 
+  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).not.toBe('idle');
   await expect.poll(async () => page.evaluate(() => {
-    const stats = (globalThis.window.__MAP_DEBUG__ || {}).filterRequests || {};
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const stats = debug.filterRequests || {};
     return Number(stats.start || 0);
-  })).toBeLessThan(16);
+  })).toBeLessThan(14);
+
+  await expect.poll(async () => page.evaluate((snapshot) => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const req = debug.filterRequests || {};
+    return Number(req.start || 0) - Number(snapshot.start || 0);
+  }, baseline)).toBeLessThan(7);
+
+  await expect.poll(async () => page.evaluate((snapshot) => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const telemetry = debug.filterTelemetry || {};
+    return Number((telemetry.counters || {}).filter_state_cleared || 0) - Number(snapshot.cleared || 0);
+  }, baseline)).toBeLessThan(1);
+
+  await expect.poll(async () => page.evaluate(() => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const events = Array.isArray((debug.filterTelemetry || {}).recentEvents) ? debug.filterTelemetry.recentEvents : [];
+    const delays = events
+      .filter((item) => item?.event === 'apply_plan_finish' && Number.isFinite(Number(item?.delayFromMoveEndMs)))
+      .map((item) => Number(item.delayFromMoveEndMs))
+      .sort((a, b) => a - b);
+    if (delays.length === 0) return 0;
+    const idx = Math.min(delays.length - 1, Math.floor(delays.length * 0.95));
+    return delays[idx];
+  })).toBeLessThan(2200);
 });

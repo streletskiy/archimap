@@ -4,7 +4,7 @@
   import { page } from '$app/stores';
   import { clearSession, session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
-  import { resetBuildingFilterRules, setBuildingFilterRules } from '$lib/stores/filters';
+  import { buildingFilterRuntime, resetBuildingFilterRules, setBuildingFilterRules } from '$lib/stores/filters';
   import { openSearchModal, requestSearch, resetSearchState, setSearchQuery, searchState } from '$lib/stores/search';
   import { mapLabelsVisible, setMapLabelsVisible } from '$lib/stores/map';
   import { availableLocales, locale, setLocale, t, translateNow } from '$lib/i18n/index';
@@ -173,6 +173,22 @@
   function resetFilters() {
     filterRows = [{ id: 1, key: '', op: 'contains', value: '' }];
     resetBuildingFilterRules();
+  }
+
+  function getFilterRuntimeLabel(runtime) {
+    const statusCode = String(runtime?.statusCode || 'idle');
+    if (statusCode === 'refining') return $t('header.filterStatus.refining');
+    if (statusCode === 'too_many_matches') return $t('header.filterStatus.tooMany');
+    if (statusCode === 'truncated') return $t('header.filterStatus.truncated');
+    if (statusCode === 'invalid') return $t('header.filterStatus.invalid');
+    if (statusCode === 'applied') return $t('header.filterStatus.applied');
+    return $t('header.filterStatus.idle');
+  }
+
+  function getFilterRuntimeStats(runtime) {
+    const count = Number(runtime?.count || 0);
+    const elapsedMs = Number(runtime?.elapsedMs || 0);
+    return `${$t('header.filterStatus.count')}: ${count}  ${$t('header.filterStatus.elapsed')}: ${elapsedMs}ms`;
   }
 
   function closeAuth() {
@@ -553,6 +569,10 @@
         <h4>{$t('header.filterTitle')}</h4>
         <button type="button" class="icon-btn ui-close-x" aria-label={$t('header.closeFilter')} on:click={() => (filterOpen = false)}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
       </div>
+      <div class="filter-runtime" data-filter-runtime-status={$buildingFilterRuntime.statusCode}>
+        <strong>{$t('header.filterStatus.label')}: {getFilterRuntimeLabel($buildingFilterRuntime)}</strong>
+        <span>{getFilterRuntimeStats($buildingFilterRuntime)}</span>
+      </div>
       <div class="rows">
         {#each filterRows as row (row.id)}
           <div class="row">
@@ -844,6 +864,31 @@
     display: grid;
     gap: 0.35rem;
   }
+  .filter-runtime {
+    display: grid;
+    gap: 0.15rem;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    padding: 0.42rem 0.55rem;
+    border-radius: 0.6rem;
+    border: 1px solid #dbeafe;
+    background: #eff6ff;
+    color: #1e3a8a;
+  }
+  .filter-runtime strong {
+    font-size: 0.79rem;
+  }
+  .filter-runtime[data-filter-runtime-status='too_many_matches'],
+  .filter-runtime[data-filter-runtime-status='truncated'] {
+    border-color: #fdba74;
+    background: #fff7ed;
+    color: #9a3412;
+  }
+  .filter-runtime[data-filter-runtime-status='invalid'] {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #991b1b;
+  }
   .row {
     display: grid;
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
@@ -1125,6 +1170,22 @@
 
   :global(html[data-theme='dark']) .filter-head h4 {
     color: #e2e8f0;
+  }
+  :global(html[data-theme='dark']) .filter-runtime {
+    border-color: #1d4ed8;
+    background: rgba(30, 58, 138, 0.24);
+    color: #bfdbfe;
+  }
+  :global(html[data-theme='dark']) .filter-runtime[data-filter-runtime-status='too_many_matches'],
+  :global(html[data-theme='dark']) .filter-runtime[data-filter-runtime-status='truncated'] {
+    border-color: #92400e;
+    background: rgba(154, 52, 18, 0.24);
+    color: #fed7aa;
+  }
+  :global(html[data-theme='dark']) .filter-runtime[data-filter-runtime-status='invalid'] {
+    border-color: #991b1b;
+    background: rgba(127, 29, 29, 0.3);
+    color: #fecaca;
   }
 
   :global(html[data-theme='dark']) .menu a {
