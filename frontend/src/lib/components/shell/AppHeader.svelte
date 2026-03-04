@@ -933,6 +933,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.65rem;
     border: 1px solid #e2e8f0;
     border-radius: 0.6rem;
     background: #f8fafc;
@@ -940,6 +941,11 @@
     font-size: 0.9rem;
     font-weight: 600;
     color: #334155;
+  }
+
+  .locale-select {
+    margin-left: auto;
+    min-width: 6.5rem;
   }
   .switch {
     position: relative;

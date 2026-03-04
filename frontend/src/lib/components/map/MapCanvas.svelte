@@ -2,6 +2,7 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
+  import { t, translateNow } from '$lib/i18n/index';
   import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady, setMapZoom } from '$lib/stores/map';
   import { buildingFilterRules, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchState } from '$lib/stores/search';
@@ -105,6 +106,7 @@
   let filterPrefetchTimer = null;
   let filterErrorMessage = '';
   let filterStatusMessage = '';
+  let filterStatusCode = 'idle';
   let filterPhase = 'idle';
   let filterLastElapsedMs = 0;
   let filterLastCount = 0;
@@ -125,6 +127,18 @@
   let filterDebugExprHash = hashFilterExpression(EMPTY_LAYER_FILTER);
   let filteredFeatureStateFeatureIds = new Set();
   let filterDataByOsmKeyCache = new Map();
+  let filterStatusOverlayText = '';
+
+  function getFilterStatusOverlayText(statusCode) {
+    const code = String(statusCode || 'idle');
+    if (code === 'refining') return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
+    if (code === 'too_many_matches') return $t('mapPage.filterStatus.tooMany') || $t('header.filterStatus.tooMany');
+    if (code === 'truncated') return $t('mapPage.filterStatus.truncated') || $t('header.filterStatus.truncated');
+    if (code === 'invalid') return $t('mapPage.filterStatus.invalid') || $t('header.filterStatus.invalid');
+    return '';
+  }
+
+  $: filterStatusOverlayText = getFilterStatusOverlayText(filterStatusCode);
 
   function isSelectionDebugEnabled() {
     const fromRuntimeConfig = Boolean(runtimeConfig?.mapSelection?.debug);
@@ -308,10 +322,18 @@
   }
 
   function updateFilterRuntimeStatus(status = {}) {
+    const nextStatusCode = status.statusCode != null
+      ? String(status.statusCode)
+      : String(filterStatusCode || 'idle');
+    const nextMessage = status.message != null
+      ? String(status.message)
+      : String(filterStatusMessage || '');
+    filterStatusCode = nextStatusCode;
+    filterStatusMessage = nextMessage;
     setBuildingFilterRuntimeStatus({
       phase: filterPhase,
-      statusCode: String(status.statusCode || 'idle'),
-      message: String(status.message || filterStatusMessage || ''),
+      statusCode: nextStatusCode,
+      message: nextMessage,
       count: Number(status.count ?? filterLastCount ?? 0) || 0,
       elapsedMs: Number(status.elapsedMs ?? filterLastElapsedMs ?? 0) || 0,
       cacheHit: Boolean(status.cacheHit ?? filterLastCacheHit),
@@ -1656,10 +1678,8 @@
         requestKey,
         delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
       });
-      filterStatusMessage = 'Refining...';
       updateFilterRuntimeStatus({
-        statusCode: 'refining',
-        message: filterStatusMessage
+        statusCode: 'refining'
       });
 
       let payload;
@@ -1691,10 +1711,8 @@
         Array.isArray(payload?.matchedKeys) ? payload.matchedKeys.length : 0
       );
       if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
-        filterStatusMessage = 'Too many matches. Zoom in or refine the filter.';
         updateFilterRuntimeStatus({
           statusCode: 'too_many_matches',
-          message: filterStatusMessage,
           count: matchedSize
         });
         setFilterPhase('authoritative');
@@ -1718,9 +1736,6 @@
       filterLastElapsedMs = Number(payload?.meta?.elapsedMs || 0);
       filterLastCacheHit = Boolean(payload?.meta?.cacheHit);
       filterLastCount = matchedSize;
-      filterStatusMessage = payload?.meta?.truncated
-        ? 'Results truncated. Zoom in or refine filter.'
-        : 'Applied';
       filterErrorMessage = '';
       setFilterPhase('authoritative');
       debugFilterLog('filter request finish', {
@@ -1742,7 +1757,6 @@
       });
       updateFilterRuntimeStatus({
         statusCode: payload?.meta?.truncated ? 'truncated' : 'applied',
-        message: filterStatusMessage,
         count: filterLastCount,
         elapsedMs: filterLastElapsedMs,
         cacheHit: filterLastCacheHit,
@@ -1801,7 +1815,7 @@
     if (token !== latestFilterToken) return;
 
     if (!prepared.ok) {
-      filterErrorMessage = prepared.error || 'Invalid filter';
+      filterErrorMessage = prepared.error || translateNow('mapPage.filterStatus.invalid');
       filterStatusMessage = '';
       clearFilteredFeatureState();
       setFilterPhase('idle');
@@ -1847,7 +1861,6 @@
       zoomBucket,
       reason
     })) {
-      filterStatusMessage = 'Applied';
       setFilterPhase('authoritative');
       recordFilterTelemetry('coverage_window_hit', {
         bboxHash,
@@ -1876,10 +1889,8 @@
         zoomBucket
       };
       activeFilterCoverageKey = coverageHash;
-      filterStatusMessage = 'Applied';
       updateFilterRuntimeStatus({
         statusCode: 'applied',
-        message: filterStatusMessage,
         count: filterLastCount,
         elapsedMs: filterLastElapsedMs,
         cacheHit: filterLastCacheHit,
@@ -1896,10 +1907,8 @@
       });
     }
 
-    filterStatusMessage = 'Refining...';
     updateFilterRuntimeStatus({
-      statusCode: 'refining',
-      message: filterStatusMessage
+      statusCode: 'refining'
     });
     const debounceMs = prepared.heavy
       ? FILTER_HEAVY_RULE_DEBOUNCE_MS
@@ -2024,6 +2033,7 @@
       map.on('style.load', () => {
         ensureMapSourcesAndLayers(config);
         scheduleFilterRefresh();
+        scheduleCoverageCheck();
       });
 
       map.on('load', () => {
@@ -2031,6 +2041,7 @@
         setMapCenter(map.getCenter());
         setMapZoom(map.getZoom());
         setMapReady(true);
+        scheduleCoverageCheck();
       });
 
       themeObserver = new MutationObserver(() => {
@@ -2141,8 +2152,8 @@
   data-filter-set-feature-state-calls={String(filterSetFeatureStateCallsLast)}
   data-filter-last-apply-diff-ms={String(filterLastApplyDiffMs)}
 ></div>
-{#if filterStatusMessage && filterStatusMessage !== 'Applied'}
-  <div class="map-filter-status" role="status" aria-live="polite">{filterStatusMessage}</div>
+{#if filterStatusOverlayText}
+  <div class="map-filter-status" data-filter-status-code={filterStatusCode} role="status" aria-live="polite">{filterStatusOverlayText}</div>
 {/if}
 {#if filterErrorMessage}
   <div class="map-filter-error" role="status" aria-live="polite">{filterErrorMessage}</div>
@@ -2181,8 +2192,8 @@
 
   .map-filter-error {
     position: fixed;
-    left: 12px;
-    bottom: 12px;
+    left: 0.75rem;
+    bottom: 3.9rem;
     z-index: 10;
     padding: 8px 10px;
     border-radius: 10px;
@@ -2194,18 +2205,4 @@
     pointer-events: none;
   }
 
-  .map-filter-status {
-    position: fixed;
-    left: 12px;
-    bottom: 58px;
-    z-index: 10;
-    padding: 7px 10px;
-    border-radius: 10px;
-    background: rgba(15, 23, 42, 0.85);
-    color: #f8fafc;
-    font-size: 12px;
-    line-height: 1.3;
-    max-width: min(78vw, 460px);
-    pointer-events: none;
-  }
 </style>

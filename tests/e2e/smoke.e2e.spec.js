@@ -86,7 +86,7 @@ test('opens home page and initializes map without runtime JS errors', async ({ p
     runtimeErrors.push(text);
   });
 
-  await page.goto(`${BASE_URL}/app`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
 
@@ -101,20 +101,20 @@ test('opens home page and initializes map without runtime JS errors', async ({ p
 });
 
 test('opens legal info deep link on terms tab', async ({ page }) => {
-  await page.goto(`${BASE_URL}/app/info?tab=legal&doc=terms`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app/info?tab=legal&doc=terms`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.legal-markdown h1', { hasText: 'Пользовательское соглашение archimap' })).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.legal-markdown')).toBeVisible({ timeout: 15000 });
 });
 
 test('language switch updates visible UI content', async ({ page }) => {
-  await page.goto(`${BASE_URL}/app`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await page.locator('.menu-btn-trigger').click();
   await page.locator('.locale-select').selectOption('en');
   await expect(page.locator('.menu .menu-btn', { hasText: 'Sign in' })).toBeVisible({ timeout: 10000 });
 });
 
 test('keeps map deep link params and renders map', async ({ page }) => {
-  await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
   await expect(page).toHaveURL(/[?&]lat=/);
   await expect(page).toHaveURL(/[?&]lng=/);
@@ -122,7 +122,7 @@ test('keeps map deep link params and renders map', async ({ page }) => {
 });
 
 test('building filter uses highlight layers and does not apply setFilter to base building layers', async ({ page }) => {
-  await page.goto(`${BASE_URL}/app?building=way/1`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app?building=way/1`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await expect.poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || '')).toBe('way/1');
 
@@ -151,7 +151,7 @@ test('building filter uses highlight layers and does not apply setFilter to base
 });
 
 test('building filter handles fast rule updates and reaches authoritative state', async ({ page }) => {
-  await page.goto(`${BASE_URL}/app`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await page.locator('header .left .icon-btn').first().click();
   await expect(page.locator('.filter-panel')).toBeVisible({ timeout: 5000 });
@@ -179,7 +179,7 @@ test('building filter handles fast rule updates and reaches authoritative state'
 });
 
 test('pan/zoom updates filter without request spam', async ({ page }) => {
-  await page.goto(`${BASE_URL}/app`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await page.locator('header .left .icon-btn').first().click();
   await expect(page.locator('.filter-panel')).toBeVisible({ timeout: 5000 });

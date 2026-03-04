@@ -55,7 +55,13 @@
     "submitted": "Submitted for review",
     "saveFailed": "Save failed",
     "searchFailed": "Search failed",
-    "mapLoading": "Loading map..."
+    "mapLoading": "Loading map...",
+    "filterStatus": {
+      "refining": "Refining",
+      "tooMany": "Too many matches. Zoom in or refine.",
+      "truncated": "Results truncated. Zoom in or refine.",
+      "invalid": "Invalid filter"
+    }
   },
   "buildingModal": {
     "title": "Building details",
@@ -77,7 +83,9 @@
     "editDenied": "Editing is available only for users with building edit permission.",
     "description": "Description",
     "loading": "Loading data...",
-    "osmKey": "OSM key"
+    "osmKey": "OSM key",
+    "osmTagsTitle": "All OSM tags",
+    "osmTagsEmpty": "No OSM tags available."
   },
   "info": {
     "title": "Information",

@@ -20,6 +20,8 @@
 
   let lastBuildingKey = null;
   let form = createEmptyForm();
+  let sourceTags = {};
+  let osmTagEntries = [];
 
   function createEmptyForm() {
     return {
@@ -76,7 +78,7 @@
 
   function hydrateForm(details) {
     const info = details?.properties?.archiInfo || {};
-    const sourceTags = info?._sourceTags || {};
+    sourceTags = info?._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {};
     const addressFields = parseAddressToFields(
       info.address ?? sourceTags?.['addr:full'] ?? sourceTags?.addr_full,
       sourceTags
@@ -95,6 +97,15 @@
       addressStreet: addressFields.street,
       addressHouseNumber: addressFields.housenumber
     };
+    osmTagEntries = Object.entries(sourceTags)
+      .map(([key, value]) => ({
+        key: String(key || '').trim(),
+        value: value == null
+          ? ''
+          : (typeof value === 'object' ? JSON.stringify(value) : String(value))
+      }))
+      .filter((item) => item.key.length > 0)
+      .sort((a, b) => a.key.localeCompare(b.key, 'en'));
   }
 
   function buildAddressFromForm() {
@@ -292,6 +303,21 @@
             </div>
           </dl>
         {/if}
+        <details class="osm-tags">
+          <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
+          {#if osmTagEntries.length > 0}
+            <div class="osm-tags-list">
+              {#each osmTagEntries as item (item.key)}
+                <div class="osm-tag-row">
+                  <code class="osm-tag-key">{item.key}</code>
+                  <code class="osm-tag-value">{item.value || '-'}</code>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
+          {/if}
+        </details>
       {:else}
         <p class="status">{$t('buildingModal.loading')}</p>
       {/if}
@@ -403,6 +429,64 @@
     padding: 8px 0 0 0;
   }
 
+  .osm-tags {
+    margin-top: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #f8fafc;
+    padding: 0.5rem 0.6rem;
+  }
+
+  .osm-tags > summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+    user-select: none;
+  }
+
+  .osm-tags-list {
+    margin-top: 10px;
+    display: grid;
+    gap: 6px;
+    max-height: 240px;
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .osm-tag-row {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 8px;
+    align-items: start;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.6rem;
+    background: #ffffff;
+    padding: 6px 8px;
+  }
+
+  .osm-tag-key,
+  .osm-tag-value {
+    font-size: 11px;
+    line-height: 1.3;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .osm-tag-key {
+    color: #334155;
+  }
+
+  .osm-tag-value {
+    color: #0f172a;
+  }
+
+  .osm-tags-empty {
+    margin: 10px 0 0 0;
+    color: #64748b;
+    font-size: 12px;
+  }
+
   :global(html[data-theme='dark']) .modal {
     border-color: #334155;
     background: #111a2d;
@@ -431,6 +515,32 @@
   }
 
   :global(html[data-theme='dark']) .row > label {
+    color: #94a3b8;
+  }
+
+  :global(html[data-theme='dark']) .osm-tags {
+    border-color: #334155;
+    background: #0f172a;
+  }
+
+  :global(html[data-theme='dark']) .osm-tags > summary {
+    color: #cbd5e1;
+  }
+
+  :global(html[data-theme='dark']) .osm-tag-row {
+    border-color: #334155;
+    background: #111a2d;
+  }
+
+  :global(html[data-theme='dark']) .osm-tag-key {
+    color: #93c5fd;
+  }
+
+  :global(html[data-theme='dark']) .osm-tag-value {
+    color: #e2e8f0;
+  }
+
+  :global(html[data-theme='dark']) .osm-tags-empty {
     color: #94a3b8;
   }
 
