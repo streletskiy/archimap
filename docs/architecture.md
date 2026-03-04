@@ -41,6 +41,16 @@
 - Locale storage: cookie `archimap_locale`.
 - Fallback policy: missing key in active locale falls back to `en`; in dev missing keys are logged.
 
+## Map filter highlight
+
+- Building base layers (`local-buildings-fill`, `local-buildings-line`) are always visible and are no longer filtered out by custom rules.
+- Custom building filter now renders through dedicated highlight layers:
+  - `buildings-filter-highlight-fill`
+  - `buildings-filter-highlight-outline`
+- Filter matching is computed from visible/loaded map features by requesting `/api/buildings/filter-data` for current `osmKey` batches.
+- Matched buildings are marked with `setFeatureState({ isFiltered: true })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.
+
 ## ASCII diagram
 
 ```text

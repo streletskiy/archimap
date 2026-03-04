@@ -120,3 +120,26 @@ test('keeps map deep link params and renders map', async ({ page }) => {
   await expect(page).toHaveURL(/lng=-74\.006/);
   await expect(page).toHaveURL(/z=13\.25/);
 });
+
+test('building filter uses highlight layers and does not apply setFilter to base building layers', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app?building=way/1`, { waitUntil: 'networkidle' });
+  await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
+  await expect.poll(async () => page.evaluate(() => document.body.dataset.selectedBuildingId || '')).toBe('way/1');
+
+  await page.locator('header .left .icon-btn').first().click();
+  await expect(page.locator('.filter-panel')).toBeVisible({ timeout: 5000 });
+
+  await page.locator('.filter-panel .row input[list="filter-tag-keys"]').first().fill('name');
+  await page.locator('.filter-panel .row input.ui-field.ui-field-xs').nth(1).fill('test');
+  await page.locator('.filter-panel .filter-actions .ui-btn-primary').click();
+
+  await expect.poll(async () => page.evaluate(() => document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('feature-state');
+  await expect.poll(async () => page.evaluate(() => document.body.dataset.selectedBuildingId || '')).toBe('way/1');
+
+  const setFilterLayers = await page.evaluate(() => {
+    const debug = window.__MAP_DEBUG__ || {};
+    return Array.isArray(debug.setFilterLayers) ? debug.setFilterLayers : [];
+  });
+  expect(setFilterLayers).not.toContain('local-buildings-fill');
+  expect(setFilterLayers).not.toContain('local-buildings-line');
+});

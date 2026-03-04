@@ -13,6 +13,8 @@
 - In-process LRU (`src/lib/server/infra/lru-cache.infra.js`):
   - search results
   - bbox filter payloads
+- Rate limiting:
+  - `POST /api/buildings/filter-data` has a dedicated limiter tuned for interactive map filtering (`server.js`, `filterDataRateLimiter`).
 
 ## DB and indexes
 

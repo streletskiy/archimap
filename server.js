@@ -148,7 +148,7 @@ const adminApiRateLimiter = createSimpleRateLimiter({
 });
 const filterDataRateLimiter = createSimpleRateLimiter({
   windowMs: 60 * 1000,
-  maxRequests: 90,
+  maxRequests: 240,
   message: 'Слишком много запросов данных по зданиям, попробуйте позже'
 });
 const filterDataBboxRateLimiter = createSimpleRateLimiter({
