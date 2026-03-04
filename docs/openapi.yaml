@@ -48,7 +48,7 @@ paths:
           description: Invalid credentials
   /api/register/start:
     post:
-      summary: Start registration (or bootstrap first admin)
+      summary: Start registration
       requestBody:
         required: true
         content:

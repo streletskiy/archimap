@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseRuntimeEnv } = require('../../src/lib/server/infra/env.infra');
 
-test('parseRuntimeEnv applies secure bootstrap defaults in production', () => {
+test('parseRuntimeEnv parses production environment without bootstrap flags', () => {
   const env = parseRuntimeEnv({
     NODE_ENV: 'production',
     HOST: '0.0.0.0',
@@ -10,7 +10,9 @@ test('parseRuntimeEnv applies secure bootstrap defaults in production', () => {
     SESSION_SECRET: 'very-strong-production-secret',
     APP_BASE_URL: 'https://example.test'
   });
-  assert.equal(env.bootstrapAdminEnabled, false);
+  assert.equal(env.nodeEnv, 'production');
+  assert.equal(env.host, '0.0.0.0');
+  assert.equal(env.port, 3252);
 });
 
 test('parseRuntimeEnv rejects weak production session secret', () => {

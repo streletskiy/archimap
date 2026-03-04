@@ -55,6 +55,13 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       REDIS_URL: 'redis://127.0.0.1:6399',
       SESSION_SECRET: 'integration-test-secret',
       APP_BASE_URL: baseUrl,
+      SMTP_URL: '',
+      SMTP_HOST: '',
+      SMTP_PORT: '587',
+      SMTP_SECURE: 'false',
+      SMTP_USER: '',
+      SMTP_PASS: '',
+      EMAIL_FROM: '',
       ARCHIMAP_DB_PATH: path.join(tempRoot, 'archimap.db'),
       LOCAL_EDITS_DB_PATH: path.join(tempRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tempRoot, 'user-edits.db'),
@@ -80,6 +87,41 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       await sleep(250);
     }
     throw new Error(`Server did not become ready in ${timeoutMs}ms`);
+  }
+
+  async function createMasterAdmin({
+    email,
+    password,
+    firstName,
+    lastName
+  }) {
+    const args = [
+      'scripts/create-master-admin.js',
+      `--email=${email}`,
+      `--password=${password}`
+    ];
+    if (firstName) args.push(`--first-name=${firstName}`);
+    if (lastName) args.push(`--last-name=${lastName}`);
+
+    await new Promise((resolve, reject) => {
+      const script = spawn(process.execPath, args, {
+        cwd: path.join(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      let output = '';
+      script.stdout.on('data', (chunk) => { output += chunk.toString(); });
+      script.stderr.on('data', (chunk) => { output += chunk.toString(); });
+      script.on('error', reject);
+      script.on('exit', (code) => {
+        if (code === 0) return resolve();
+        return reject(new Error(`create-master-admin failed (code=${code})\n${output}`));
+      });
+    });
   }
 
   const cookieJar = new Map();
@@ -136,26 +178,48 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(/cdn|unpkg|cdnjs|fonts\.googleapis/i.test(html), false);
     });
 
-    let csrfToken = '';
-    await t.test('bootstrap registration + csrf-protected profile update', async () => {
+    await t.test('registration does not depend on bootstrap first admin', async () => {
       const registerStart = await callApi('/api/register/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          email: 'admin@example.com',
+          email: 'user-no-admin@example.com',
           password: '12345678',
-          firstName: 'Admin',
+          firstName: 'Regular',
           lastName: 'User',
           acceptTerms: true,
           acceptPrivacy: true
         })
       });
-      assert.equal(registerStart.status, 200);
+
+      // Registration is enabled, but SMTP is not configured in this test.
+      // The key expectation: no "bootstrap admin disabled" style block (403).
+      assert.equal(registerStart.status, 503);
       const registerBody = await registerStart.json();
-      assert.equal(registerBody.ok, true);
-      assert.equal(registerBody.directSignup, true);
-      assert.equal(registerBody.bootstrapAdmin, true);
-      csrfToken = String(registerBody.csrfToken || '');
+      assert.match(String(registerBody.error || ''), /Отправка писем не настроена/);
+    });
+
+    let csrfToken = '';
+    await t.test('create master admin via CLI + login + csrf-protected profile update', async () => {
+      await createMasterAdmin({
+        email: 'admin@example.com',
+        password: '12345678',
+        firstName: 'Admin',
+        lastName: 'User'
+      });
+
+      const login = await callApi('/api/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: '12345678'
+        })
+      });
+      assert.equal(login.status, 200);
+      const loginBody = await login.json();
+      assert.equal(loginBody.ok, true);
+      csrfToken = String(loginBody.csrfToken || '');
       assert.ok(csrfToken.length > 10);
 
       const profileNoCsrf = await callApi('/api/account/profile', {

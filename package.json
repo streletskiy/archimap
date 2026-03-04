@@ -34,6 +34,7 @@
     "i18n:check": "node scripts/i18n-check.js",
     "start": "node server.js",
     "db:seed": "node scripts/db-seed.js",
+    "admin:create-master": "node scripts/create-master-admin.js",
     "tiles:build": "node scripts/tiles-build.js",
     "sync:city": "node scripts/sync-osm-buildings.js",
     "migrate": "node scripts/migrate.js",

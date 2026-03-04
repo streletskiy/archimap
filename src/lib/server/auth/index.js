@@ -147,9 +147,6 @@ function registerAuthRoutes({
   getAppBaseUrl,
   appDisplayName,
   getAppDisplayName,
-  bootstrapAdminEnabled = true,
-  bootstrapAdminSecret = '',
-  bootstrapAdminAllowedIps = ['127.0.0.1', '::1'],
   smtp,
   getSmtpConfig
 }) {
@@ -381,28 +378,6 @@ function registerAuthRoutes({
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   });
 
-  function isFirstUserBootstrapAvailable() {
-    const row = db.prepare('SELECT COUNT(*) AS total FROM auth.users').get();
-    return Number(row?.total || 0) === 0;
-  }
-
-  function normalizeIp(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    if (raw.startsWith('::ffff:')) return raw.slice('::ffff:'.length);
-    return raw;
-  }
-
-  function isBootstrapIpAllowed(req) {
-    const allowed = new Set((Array.isArray(bootstrapAdminAllowedIps) ? bootstrapAdminAllowedIps : [])
-      .map((item) => normalizeIp(item))
-      .filter(Boolean));
-    if (allowed.size === 0) return true;
-    const requestIp = normalizeIp(req?.ip || req?.socket?.remoteAddress || '');
-    if (!requestIp) return false;
-    return allowed.has(requestIp);
-  }
-
   function completeRegistration(req, row, options = {}) {
     const email = normalizeEmail(row?.email);
     const passwordHash = String(row?.password_hash || '');
@@ -447,8 +422,7 @@ function registerAuthRoutes({
   }
 
   app.post('/api/register/start', registrationCodeRequestRateLimiter, async (req, res) => {
-    const bootstrapFirstAdmin = isFirstUserBootstrapAvailable();
-    if (!resolveRegistrationEnabled() && !bootstrapFirstAdmin) {
+    if (!resolveRegistrationEnabled()) {
       return res.status(403).json({ error: 'Регистрация отключена' });
     }
 
@@ -466,65 +440,6 @@ function registerAuthRoutes({
     }
     if (!acceptTerms || !acceptPrivacy) {
       return res.status(400).json({ error: 'Для регистрации необходимо принять пользовательское соглашение и политику конфиденциальности' });
-    }
-
-    if (bootstrapFirstAdmin) {
-      if (!bootstrapAdminEnabled) {
-        logger.warn('bootstrap_admin_blocked', {
-          reason: 'disabled',
-          ip: normalizeIp(req?.ip || req?.socket?.remoteAddress || '')
-        });
-        return res.status(403).json({ error: 'Bootstrap admin registration is disabled' });
-      }
-      if (!isBootstrapIpAllowed(req)) {
-        logger.warn('bootstrap_admin_blocked', {
-          reason: 'ip_not_allowed',
-          ip: normalizeIp(req?.ip || req?.socket?.remoteAddress || '')
-        });
-        return res.status(403).json({ error: 'Bootstrap admin registration is not allowed from this IP' });
-      }
-      if (bootstrapAdminSecret) {
-        const providedSecret = String(req.get('x-bootstrap-admin-secret') || '').trim();
-        if (!providedSecret || providedSecret !== bootstrapAdminSecret) {
-          logger.warn('bootstrap_admin_blocked', {
-            reason: 'secret_mismatch',
-            ip: normalizeIp(req?.ip || req?.socket?.remoteAddress || '')
-          });
-          return res.status(403).json({ error: 'Bootstrap admin secret is required' });
-        }
-      }
-      const existingUser = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
-      if (existingUser) {
-        return res.status(409).json({ error: 'Пользователь с таким email уже зарегистрирован' });
-      }
-      const done = completeRegistration(req, {
-        email,
-        password_hash: hashPassword(password),
-        first_name: firstName,
-        last_name: lastName
-      }, {
-        makeAdmin: true,
-        makeMasterAdmin: true,
-        allowEdit: true,
-        deleteRegistrationCode: false
-      });
-      if (!done.ok) {
-        return res.status(done.status).json({ error: done.error });
-      }
-      let authSession;
-      try {
-        authSession = await establishAuthenticatedSession(req, done.user);
-      } catch (error) {
-        logger.error('auth_bootstrap_session_failed', { error: String(error.message || error) });
-        return res.status(500).json({ error: 'Не удалось создать сессию' });
-      }
-      return res.json({
-        ok: true,
-        user: authSession.user,
-        csrfToken: authSession.csrfToken,
-        directSignup: true,
-        bootstrapAdmin: true
-      });
     }
 
     if (!isEmailDeliveryConfigured()) {

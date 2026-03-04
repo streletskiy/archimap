@@ -54,6 +54,12 @@ Docker:
 docker-compose up
 ```
 
+Create first master admin (after start):
+
+```bash
+docker compose exec archimap npm run admin:create-master -- --email=admin@example.com --password=change-me
+```
+
 ## Environment Variables
 
 Required for production:
@@ -61,7 +67,7 @@ Required for production:
 - `DATABASE_PATH` (or `ARCHIMAP_DB_PATH`)
 - `REDIS_URL`
 - `SESSION_SECRET`
-- `BOOTSTRAP_ADMIN_ENABLED`
+- `APP_BASE_URL`
 
 Full list -> `docs/dev/env.md`
 
@@ -75,6 +81,7 @@ Full list -> `docs/dev/env.md`
 - `perf:smoke`
 - `analyze`
 - `db:seed`
+- `admin:create-master`
 - `tiles:build`
 - `i18n:extract`
 - `i18n:validate`

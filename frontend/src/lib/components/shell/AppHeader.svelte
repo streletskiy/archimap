@@ -326,14 +326,6 @@
           acceptPrivacy: regAcceptPrivacy
         })
       });
-      if (data?.directSignup) {
-        setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
-        status = translateNow('header.status.registerDone');
-        registerStartInFlight = false;
-        registerCodeReady = false;
-        closeAuth();
-        return;
-      }
       registerCodeReady = true;
       status = translateNow('header.status.registerCodeSent');
     } catch (error) {

@@ -7,7 +7,6 @@ const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
 function registerAppRoutes(deps) {
   const {
     app,
-    db,
     publicApiRateLimiter,
     rootDir,
     buildingsPmtilesPath,
@@ -40,13 +39,11 @@ function registerAppRoutes(deps) {
       sourceLayer: buildingsPmtilesSourceLayer
     };
     const buildInfo = getBuildInfo();
-    const bootstrapFirstAdminAvailable = Number(db.prepare('SELECT COUNT(*) AS total FROM auth.users').get()?.total || 0) === 0;
     const effectiveRegistrationEnabled = typeof getRegistrationEnabled === 'function'
       ? Boolean(getRegistrationEnabled())
       : Boolean(registrationEnabled);
     const auth = {
-      registrationEnabled: effectiveRegistrationEnabled,
-      bootstrapFirstAdminAvailable
+      registrationEnabled: effectiveRegistrationEnabled
     };
     res.type('application/javascript').send(
       `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth })};`

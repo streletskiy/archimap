@@ -118,38 +118,37 @@ async function checkEndpoints(session) {
   }
 }
 
-async function checkAuthFlow(session) {
+async function checkAuthFlow(session, userAuthDbPath) {
   const email = `smoke-admin-${Date.now()}@example.test`;
   const password = 'SmokePass12345';
 
-  const registerResp = await session.request('/api/register/start', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      email,
-      password,
-      firstName: 'Smoke',
-      lastName: 'Admin',
-      acceptTerms: true,
-      acceptPrivacy: true
-    })
+  const createAdmin = spawn(process.execPath, [
+    'scripts/create-master-admin.js',
+    `--email=${email}`,
+    `--password=${password}`,
+    '--first-name=Smoke',
+    '--last-name=Admin'
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      USER_AUTH_DB_PATH: userAuthDbPath
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
   });
-  if (!registerResp.ok) {
-    const payload = await registerResp.json().catch(() => ({}));
-    throw new Error(`/api/register/start failed: HTTP ${registerResp.status} ${String(payload?.error || '')}`);
-  }
-  const registerPayload = await registerResp.json().catch(() => null);
-  if (!registerPayload?.directSignup || !registerPayload?.csrfToken) {
-    throw new Error('/api/register/start must bootstrap first admin and return csrfToken in smoke environment');
-  }
-  const csrfToken = String(registerPayload.csrfToken || '').trim();
 
-  const logoutResp = await session.request('/api/logout', {
-    method: 'POST',
-    headers: { 'x-csrf-token': csrfToken }
+  const createAdminOutput = await new Promise((resolve, reject) => {
+    let output = '';
+    createAdmin.stdout.on('data', (chunk) => { output += chunk.toString(); });
+    createAdmin.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    createAdmin.on('error', reject);
+    createAdmin.on('exit', (code) => {
+      if (code === 0) return resolve(output);
+      return reject(new Error(`create-master-admin failed with code ${code}\n${output}`));
+    });
   });
-  if (!logoutResp.ok) {
-    throw new Error(`/api/logout failed: HTTP ${logoutResp.status}`);
+  if (!/master admin/i.test(createAdminOutput) && !/promoted to master admin/i.test(createAdminOutput)) {
+    throw new Error('create-master-admin returned unexpected output');
   }
 
   const loginResp = await session.request('/api/login', {
@@ -165,10 +164,28 @@ async function checkAuthFlow(session) {
     throw new Error('/api/login must return admin user payload and csrfToken');
   }
 
+  const csrfToken = String(loginPayload.csrfToken || '').trim();
+  const logoutResp = await session.request('/api/logout', {
+    method: 'POST',
+    headers: { 'x-csrf-token': csrfToken }
+  });
+  if (!logoutResp.ok) {
+    throw new Error(`/api/logout failed: HTTP ${logoutResp.status}`);
+  }
+
   const meResp = await session.request('/api/me');
   const mePayload = await meResp.json().catch(() => null);
-  if (!meResp.ok || !mePayload?.authenticated) {
-    throw new Error('/api/me must indicate authenticated=true after login');
+  if (!meResp.ok || mePayload?.authenticated !== false) {
+    throw new Error('/api/me must indicate authenticated=false after logout');
+  }
+
+  const secondLoginResp = await session.request('/api/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  if (!secondLoginResp.ok) {
+    throw new Error(`/second /api/login failed: HTTP ${secondLoginResp.status}`);
   }
 
   const adminResp = await session.request('/api/admin/users');
@@ -180,6 +197,7 @@ async function checkAuthFlow(session) {
 async function main() {
   const smokeDataDir = path.join(process.cwd(), 'tmp', `smoke-${Date.now()}`);
   fs.mkdirSync(smokeDataDir, { recursive: true });
+  const userAuthDbPath = path.join(smokeDataDir, 'users.db');
 
   const child = spawn(process.execPath, ['server.js'], {
     env: {
@@ -190,7 +208,7 @@ async function main() {
       OSM_DB_PATH: path.join(smokeDataDir, 'osm.db'),
       LOCAL_EDITS_DB_PATH: path.join(smokeDataDir, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(smokeDataDir, 'user-edits.db'),
-      USER_AUTH_DB_PATH: path.join(smokeDataDir, 'users.db'),
+      USER_AUTH_DB_PATH: userAuthDbPath,
       AUTO_SYNC_ENABLED: 'false',
       AUTO_SYNC_ON_START: 'false',
       SESSION_ALLOW_MEMORY_FALLBACK: 'true'
@@ -210,7 +228,7 @@ async function main() {
     await waitForServerReady();
     const session = new HttpSession(BASE_URL);
     await checkEndpoints(session);
-    await checkAuthFlow(session);
+    await checkAuthFlow(session, userAuthDbPath);
     console.log('Smoke checks passed');
   } catch (error) {
     console.error('Smoke checks failed:', error.message);

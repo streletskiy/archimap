@@ -44,10 +44,10 @@
 - URL sanitization: query values stripped (`sanitizeUrl`).
 - Sensitive fields masked (`maskSensitive`): tokens, passwords, csrf, cookies, auth headers.
 
-## Bootstrap admin
+## Master admin provisioning
 
-- Production default: `BOOTSTRAP_ADMIN_ENABLED=false`.
-- Optional hardening:
-  - `BOOTSTRAP_ADMIN_SECRET`
-  - `BOOTSTRAP_ADMIN_ALLOWED_IPS`
-- Runbook procedure documented in `docs/runbook.md`.
+- First master admin is created by explicit CLI command.
+- Recommended command:
+  - `npm run admin:create-master -- --email=admin@example.com --password=<strong-password>`
+- The command can also promote an existing user to `is_admin=1` and `is_master_admin=1`.
+- Operational procedure is documented in `docs/runbook.md`.

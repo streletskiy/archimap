@@ -752,14 +752,10 @@ registerAuthRoutes({
   appDisplayName: APP_DISPLAY_NAME,
   getAppDisplayName,
   getSmtpConfig: () => appSettingsService.getEffectiveSmtpConfig().config,
-  bootstrapAdminEnabled: runtimeEnv.bootstrapAdminEnabled,
-  bootstrapAdminSecret: runtimeEnv.bootstrapAdminSecret,
-  bootstrapAdminAllowedIps: runtimeEnv.bootstrapAdminAllowedIps
 });
 
 registerAppRoutes({
   app,
-  db,
   publicApiRateLimiter,
   rootDir: __dirname,
   buildingsPmtilesPath,
@@ -923,8 +919,7 @@ initSessionStore({
       nodeEnv: NODE_ENV,
       sessionSecret: SESSION_SECRET,
       appBaseUrl: APP_BASE_URL,
-      sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
-      bootstrapAdminEnabled: runtimeEnv.bootstrapAdminEnabled
+      sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK
     });
     httpServer = app.listen(PORT, HOST, () => {
       logger.info('server_started', {

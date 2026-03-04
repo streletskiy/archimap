@@ -18,15 +18,13 @@
    - `curl -I -H "Range: bytes=0-1023" http://host/api/buildings.pmtiles`
    - Expect `206`, `Accept-Ranges`, `Content-Range`.
 
-## Safe first admin bootstrap
+## First master admin setup
 
-1. In production keep `BOOTSTRAP_ADMIN_ENABLED=false` by default.
-2. For one-time bootstrap:
-   - set `BOOTSTRAP_ADMIN_ENABLED=true`
-   - set `BOOTSTRAP_ADMIN_SECRET=<one-time-secret>`
-   - set restrictive `BOOTSTRAP_ADMIN_ALLOWED_IPS`
-3. Complete first registration.
-4. Revert `BOOTSTRAP_ADMIN_ENABLED=false` and rotate bootstrap secret.
+1. Start the service in normal production mode (`NODE_ENV=production`).
+2. Run one-time command in the app container:
+   - `docker compose exec archimap npm run admin:create-master -- --email=admin@example.com --password=<strong-password>`
+3. Sign in with created account and verify admin access to `/admin`.
+4. Optionally rotate password immediately after first login.
 
 ## Common incidents
 
