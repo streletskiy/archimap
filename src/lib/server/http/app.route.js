@@ -19,18 +19,8 @@ function registerAppRoutes(deps) {
     getFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress
   } = deps;
-  const legalDir = path.join(rootDir, 'legal');
   const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
   const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
-
-  function readLegalDoc(fileName, pageTitle) {
-    const filePath = path.join(legalDir, fileName);
-    const markdown = fs.readFileSync(filePath, 'utf8');
-    return {
-      title: pageTitle,
-      markdown
-    };
-  }
 
   app.get('/app-config.js', publicApiRateLimiter, (req, res) => {
     const mapDefault = normalizeMapConfig();
@@ -84,34 +74,6 @@ function registerAppRoutes(deps) {
       return res.status(503).type('text/plain').send('Svelte frontend is not built yet. Run: npm run frontend:build');
     }
     return res.sendFile(frontendIndexPath);
-  });
-
-  app.get('/api/legal-docs/:slug', publicApiRateLimiter, (req, res) => {
-    const slug = String(req.params?.slug || '').trim().toLowerCase();
-    const bySlug = {
-      'user-agreement': { fileName: 'user-agreement.ru.md', title: 'Пользовательское соглашение' },
-      'privacy-policy': { fileName: 'privacy-policy.ru.md', title: 'Политика конфиденциальности' },
-      'edits-workflow': { fileName: path.join('docs', 'EDITS_WORKFLOW.md'), title: 'Регламент правок', fromRoot: true }
-    };
-    const target = bySlug[slug];
-    if (!target) {
-      return res.status(404).json({ error: 'Документ не найден' });
-    }
-    try {
-      const doc = target.fromRoot
-        ? { title: target.title, markdown: fs.readFileSync(path.join(rootDir, target.fileName), 'utf8') }
-        : readLegalDoc(target.fileName, target.title);
-      return sendCachedJson(req, res, {
-        ok: true,
-        slug,
-        title: doc.title,
-        markdown: doc.markdown
-      }, {
-        cacheControl: 'public, max-age=120'
-      });
-    } catch {
-      return res.status(404).json({ error: 'Документ не найден' });
-    }
   });
 
   app.get('/api/buildings.pmtiles', (req, res) => {

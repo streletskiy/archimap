@@ -2,21 +2,14 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
-  import { t, translateNow } from '$lib/i18n/index';
+  import { t } from '$lib/i18n/index';
   import { marked } from 'marked';
-  import { apiJson } from '$lib/services/http';
   import { APP_REPO_URL, APP_VERSION, APP_VERSION_DISPLAY } from '$lib/version';
+  import agreementMarkdownSource from '../../../../legal/user-agreement.ru.md?raw';
+  import privacyMarkdownSource from '../../../../legal/privacy-policy.ru.md?raw';
 
   let activeTab = 'about';
   let infoUrlSyncBusy = false;
-  let agreementLoading = true;
-  let privacyLoading = true;
-  let agreementTitle = translateNow('info.agreementFallback');
-  let privacyTitle = translateNow('info.privacyFallback');
-  let agreementText = '';
-  let privacyText = '';
-  let agreementError = '';
-  let privacyError = '';
   let agreementHtml = '';
   let privacyHtml = '';
 
@@ -28,44 +21,8 @@
   function markdownToHtml(markdown) {
     return marked.parse(String(markdown || ''));
   }
-
-  async function loadLegalDoc(slug) {
-    return apiJson(`/api/legal-docs/${slug}`);
-  }
-
-  async function loadAgreement() {
-    agreementLoading = true;
-    agreementError = '';
-    try {
-      const payload = await loadLegalDoc('user-agreement');
-      agreementTitle = String(payload?.title || translateNow('info.agreementFallback'));
-      agreementText = String(payload?.markdown || '');
-      agreementHtml = markdownToHtml(agreementText);
-    } catch (error) {
-      agreementError = String(error?.message || translateNow('info.agreementLoadError'));
-      agreementText = '';
-      agreementHtml = '';
-    } finally {
-      agreementLoading = false;
-    }
-  }
-
-  async function loadPrivacy() {
-    privacyLoading = true;
-    privacyError = '';
-    try {
-      const payload = await loadLegalDoc('privacy-policy');
-      privacyTitle = String(payload?.title || translateNow('info.privacyFallback'));
-      privacyText = String(payload?.markdown || '');
-      privacyHtml = markdownToHtml(privacyText);
-    } catch (error) {
-      privacyError = String(error?.message || translateNow('info.privacyLoadError'));
-      privacyText = '';
-      privacyHtml = '';
-    } finally {
-      privacyLoading = false;
-    }
-  }
+  agreementHtml = markdownToHtml(agreementMarkdownSource);
+  privacyHtml = markdownToHtml(privacyMarkdownSource);
 
   function resolveActiveTabFromInfoState(info) {
     if (info?.tab === 'legal' && info?.doc === 'privacy') return 'privacy';
@@ -114,9 +71,6 @@
     syncFromLocation();
     window.addEventListener('popstate', syncFromLocation);
 
-    loadAgreement();
-    loadPrivacy();
-
     return () => {
       window.removeEventListener('popstate', syncFromLocation);
     };
@@ -156,25 +110,11 @@
       </section>
     {:else if activeTab === 'agreement'}
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 class="text-lg font-bold text-slate-900">{agreementTitle}</h2>
-        {#if agreementLoading}
-          <p class="mt-3 text-sm leading-7 text-slate-700">{$t('info.loadingDoc')}</p>
-        {:else if agreementError}
-          <p class="mt-3 text-sm leading-7 text-rose-600">{agreementError}</p>
-        {:else}
-          <div class="legal-markdown mt-3 text-sm leading-7 text-slate-700">{@html agreementHtml}</div>
-        {/if}
+        <div class="legal-markdown text-sm leading-7 text-slate-700">{@html agreementHtml}</div>
       </section>
     {:else}
       <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 class="text-lg font-bold text-slate-900">{privacyTitle}</h2>
-        {#if privacyLoading}
-          <p class="mt-3 text-sm leading-7 text-slate-700">{$t('info.loadingDoc')}</p>
-        {:else if privacyError}
-          <p class="mt-3 text-sm leading-7 text-rose-600">{privacyError}</p>
-        {:else}
-          <div class="legal-markdown mt-3 text-sm leading-7 text-slate-700">{@html privacyHtml}</div>
-        {/if}
+        <div class="legal-markdown text-sm leading-7 text-slate-700">{@html privacyHtml}</div>
       </section>
     {/if}
   </section>

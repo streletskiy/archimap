@@ -101,7 +101,7 @@ test('opens home page and initializes map without runtime JS errors', async ({ p
 
 test('opens legal info deep link on terms tab', async ({ page }) => {
   await page.goto(`${BASE_URL}/app/info?tab=legal&doc=terms`, { waitUntil: 'networkidle' });
-  await expect(page.locator('h2', { hasText: 'Пользовательское соглашение' })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.legal-markdown h1', { hasText: 'Пользовательское соглашение archimap' })).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.legal-markdown')).toBeVisible({ timeout: 15000 });
 });
 
