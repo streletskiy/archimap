@@ -43,6 +43,7 @@
   let maplibregl = null;
   let protocol = null;
   let pmtilesArchive = null;
+  let pmtilesMaxZoom = null;
   let themeObserver = null;
   let mapMoveDebounceTimer = null;
   let coverageDebounceTimer = null;
@@ -510,7 +511,10 @@
   async function evaluatePmtilesCoverage() {
     if (!map || !map.isStyleLoaded() || !pmtilesArchive) return;
     const token = ++coverageEvalToken;
-    const zoom = Math.floor(map.getZoom());
+    const rawZoom = Math.floor(map.getZoom());
+    const zoom = Number.isInteger(pmtilesMaxZoom)
+      ? Math.min(rawZoom, pmtilesMaxZoom)
+      : rawZoom;
     const points = getViewportSamplePoints();
     if (points.length === 0) return;
 
@@ -882,6 +886,15 @@
         ? config.buildingsPmtiles.url
         : `${window.location.origin}${config.buildingsPmtiles.url.startsWith('/') ? '' : '/'}${config.buildingsPmtiles.url}`;
       pmtilesArchive = new PMTilesCtor(pmtilesUrl);
+      pmtilesArchive.getHeader()
+        .then((header) => {
+          const headerMaxZoom = Number(header?.maxZoom);
+          pmtilesMaxZoom = Number.isInteger(headerMaxZoom) ? headerMaxZoom : null;
+          scheduleCoverageCheck();
+        })
+        .catch(() => {
+          pmtilesMaxZoom = null;
+        });
 
       map = new maplibregl.Map({
         container,
@@ -968,6 +981,7 @@
       protocol = null;
     }
     pmtilesArchive = null;
+    pmtilesMaxZoom = null;
     coverageCache = new Map();
   });
 </script>

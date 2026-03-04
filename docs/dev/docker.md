@@ -9,21 +9,26 @@
 ## Dockerfile Stages
 
 1. `tippecanoe-builder`
+
 - Builds `tippecanoe` and `tile-join` once from pinned ref.
 
 2. `deps`
+
 - Installs backend production dependencies from `package-lock.json`.
 - Changes only when backend dependency manifests change.
 
 3. `frontend-deps`
+
 - Installs frontend dependencies from `frontend/package-lock.json`.
 - Isolated from backend source changes.
 
 4. `frontend-build`
+
 - Generates version metadata and builds frontend bundle.
 - Depends on frontend sources, not on backend dependency install layer.
 
 5. `runtime`
+
 - Uses pinned `node:20-bookworm-slim`.
 - Contains only runtime assets:
   - backend runtime code (`server.js`, `src/`, `scripts/`, `workers/`)
