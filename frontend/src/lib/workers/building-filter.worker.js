@@ -8,7 +8,7 @@ import {
 
 function isTrustedMessageOrigin(event) {
   const origin = String(event?.origin || '');
-  if (!origin) return true;
+  if (!origin) return false;
   try {
     return origin === self.location.origin;
   } catch {
