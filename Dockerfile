@@ -44,12 +44,15 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 FROM frontend-deps AS frontend-build
 
 WORKDIR /app
+ARG BUILD_SHA
+ARG BUILD_DESCRIBE
 
 COPY package.json ./
 COPY scripts ./scripts
 COPY src/lib ./src/lib
+COPY legal ./legal
 COPY frontend ./frontend
-RUN node scripts/generate-version.js \
+RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" node scripts/generate-version.js \
   && npm --prefix frontend run build
 
 FROM ${NODE_IMAGE} AS runtime
@@ -86,6 +89,7 @@ COPY src ./src
 COPY scripts ./scripts
 COPY workers ./workers
 COPY --from=frontend-build /app/frontend/build ./frontend/build
+COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version.generated.json
 
 RUN mkdir -p /app/data/quackosm
 

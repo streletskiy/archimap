@@ -60,6 +60,21 @@ Release image (multi-arch, registry push):
 ./scripts/release-docker.ps1 -Version 1.2.3
 ```
 
+```bash
+chmod +x ./scripts/release-docker.sh
+./scripts/release-docker.sh --version 1.2.3
+```
+
+Push to another Docker account:
+
+```powershell
+./scripts/release-docker.ps1 -Version 1.2.3 -Image yourname/archimap
+```
+
+```bash
+./scripts/release-docker.sh --version 1.2.3 --image yourname/archimap
+```
+
 Deploy on server (layer-based):
 
 ```bash

@@ -58,10 +58,15 @@
 
 ## Release Pipeline
 
-Use `scripts/release-docker.ps1`:
+Use release scripts:
 
 ```powershell
 ./scripts/release-docker.ps1 -Version 1.2.3
+```
+
+```bash
+chmod +x ./scripts/release-docker.sh
+./scripts/release-docker.sh --version 1.2.3
 ```
 
 What it does:
@@ -70,6 +75,22 @@ What it does:
 - Builds multi-arch image with `docker buildx`
 - Pushes image tags to registry
 - Publishes build cache (`type=registry`)
+
+Push to another Docker account/repository:
+
+```powershell
+./scripts/release-docker.ps1 -Version 1.2.3 -Image yourname/archimap
+```
+
+```bash
+./scripts/release-docker.sh --version 1.2.3 --image yourname/archimap
+```
+
+Before push, authenticate:
+
+```bash
+docker login
+```
 
 Server deploy (layer-based):
 
