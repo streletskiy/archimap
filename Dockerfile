@@ -33,7 +33,7 @@ COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
   npm ci --omit=dev
 
-FROM ${NODE_IMAGE} AS frontend-deps
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend-deps
 
 WORKDIR /app/frontend
 
@@ -41,7 +41,7 @@ COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
   npm ci
 
-FROM frontend-deps AS frontend-build
+FROM --platform=$BUILDPLATFORM frontend-deps AS frontend-build
 
 WORKDIR /app
 ARG BUILD_SHA
