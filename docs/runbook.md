@@ -45,3 +45,11 @@
 
 - Usually cookie dropped on non-HTTPS:
   - set `SESSION_COOKIE_SECURE=false` for local HTTP only.
+
+### Building selection in map UI
+
+- Selection is atomic on first click: highlight + focus + modal open.
+- Closing the building modal clears selection and highlight (`selectedBuilding=null`).
+- Optional debug mode: set `MAP_SELECTION_ATOMIC_DEBUG=true`.
+  - enables `[map-selection]` logs in browser console (dev/test),
+  - exposes debug hook `document.body.dataset.selectedBuildingId`.

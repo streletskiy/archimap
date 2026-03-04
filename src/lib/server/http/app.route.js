@@ -29,6 +29,9 @@ function registerAppRoutes(deps) {
       sourceLayer: buildingsPmtilesSourceLayer
     };
     const buildInfo = getBuildInfo();
+    const mapSelection = {
+      debug: String(process.env.MAP_SELECTION_ATOMIC_DEBUG || '').trim() === 'true'
+    };
     const effectiveRegistrationEnabled = typeof getRegistrationEnabled === 'function'
       ? Boolean(getRegistrationEnabled())
       : Boolean(registrationEnabled);
@@ -36,7 +39,7 @@ function registerAppRoutes(deps) {
       registrationEnabled: effectiveRegistrationEnabled
     };
     res.type('application/javascript').send(
-      `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth })};`
+      `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth, mapSelection })};`
     );
   });
 

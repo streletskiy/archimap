@@ -5,6 +5,7 @@
   import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady, setMapZoom } from '$lib/stores/map';
   import { buildingFilterRules } from '$lib/stores/filters';
   import { searchState } from '$lib/stores/search';
+  import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter, parseOsmKey } from './selection-utils';
 
   const dispatch = createEventDispatcher();
   const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
@@ -62,99 +63,102 @@
   let styleTransitionOverlaySrc = null;
   let styleTransitionOverlayVisible = false;
   let styleTransitionTimer = null;
+  let lastHandledBuildingClickSig = null;
 
-  function parseOsmKey(raw) {
-    const text = String(raw || '').trim();
-    if (!text || !text.includes('/')) return null;
-    const [osmType, osmIdRaw] = text.split('/');
-    const osmId = Number(osmIdRaw);
-    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
-      return null;
-    }
-    return { osmType, osmId };
+  function isSelectionDebugEnabled() {
+    const fromRuntimeConfig = Boolean(runtimeConfig?.mapSelection?.debug);
+    return Boolean(fromRuntimeConfig || import.meta.env.DEV);
   }
 
-  function decodeOsmFeatureId(featureId) {
-    const n = Number(featureId);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
-    const osmType = (n % 2) === 1 ? 'relation' : 'way';
-    const osmId = Math.floor(n / 2);
-    if (!Number.isInteger(osmId) || osmId <= 0) return null;
-    return { osmType, osmId };
-  }
-
-  function encodeOsmFeatureId(osmType, osmId) {
-    const typeBit = osmType === 'relation' ? 1 : 0;
-    return (Number(osmId) * 2) + typeBit;
-  }
-
-  function getFeatureIdentity(feature) {
-    const fromOsmKey = parseOsmKey(feature?.properties?.osm_key);
-    if (fromOsmKey) return fromOsmKey;
-
-    const osmType = String(feature?.properties?.osm_type || '').trim();
-    const osmId = Number(feature?.properties?.osm_id);
-    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-      const fromEncodedId = decodeOsmFeatureId(feature?.id);
-      if (fromEncodedId) return fromEncodedId;
-      return null;
-    }
-    return { osmType, osmId };
-  }
-
-  function onBuildingClick(event) {
-    const feature = event?.features?.[0];
-    if (!feature) return;
-    const identity = getFeatureIdentity(feature);
-    if (!identity) return;
-    focusSelectedFeature({ feature, identity, lngLat: event?.lngLat });
-    dispatch('buildingClick', { ...identity, feature });
-  }
-
-  function onMapClickFallback(event) {
-    if (!map) return;
-    const features = map.queryRenderedFeatures(event.point, {
-      layers: [BUILDINGS_FILL_LAYER_ID, BUILDINGS_LINE_LAYER_ID]
+  function debugSelectionLog(eventName, payload = {}) {
+    if (!isSelectionDebugEnabled()) return;
+    console.debug('[map-selection]', eventName, {
+      ts: new Date().toISOString(),
+      ...payload
     });
-    const feature = features?.[0];
+  }
+
+  function getPrimaryBuildingFeature(event) {
+    if (!map) return null;
+    const searchFeatures = map.queryRenderedFeatures(event.point, {
+      layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
+    });
+    if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
+      return null;
+    }
+    const features = map.queryRenderedFeatures(event.point, {
+      layers: [BUILDINGS_LINE_LAYER_ID, BUILDINGS_FILL_LAYER_ID]
+    });
+    return features?.[0] || null;
+  }
+
+  function handleMapBuildingClick(event) {
+    const feature = getPrimaryBuildingFeature(event);
     if (!feature) return;
     const identity = getFeatureIdentity(feature);
     if (!identity) return;
-    focusSelectedFeature({ feature, identity, lngLat: event?.lngLat });
-    dispatch('buildingClick', { ...identity, feature });
-  }
-
-  function getSelectionFilter(feature, identity) {
-    const byFeatureId = feature?.id;
-    if (byFeatureId != null) {
-      return ['==', ['id'], byFeatureId];
-    }
-    if (identity?.osmType && Number.isInteger(identity?.osmId)) {
-      return ['all',
-        ['==', ['get', 'osm_type'], identity.osmType],
-        ['==', ['to-number', ['get', 'osm_id']], identity.osmId]
-      ];
-    }
-    return ['==', ['id'], -1];
+    const clickSig = `${event?.originalEvent?.timeStamp || ''}:${event?.point?.x || ''}:${event?.point?.y || ''}:${identity.osmType}/${identity.osmId}`;
+    if (clickSig === lastHandledBuildingClickSig) return;
+    lastHandledBuildingClickSig = clickSig;
+    selectBuildingOnMap({
+      source: 'map-click',
+      feature,
+      identity,
+      lngLat: event?.lngLat
+    });
   }
 
   function focusSelectedFeature({ feature, identity, lngLat }) {
     if (!map) return;
     const filter = getSelectionFilter(feature, identity);
+    const selectionKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
     if (map.getLayer(SELECTED_FILL_LAYER_ID)) {
       map.setFilter(SELECTED_FILL_LAYER_ID, filter);
     }
     if (map.getLayer(SELECTED_LINE_LAYER_ID)) {
       map.setFilter(SELECTED_LINE_LAYER_ID, filter);
     }
+    debugSelectionLog('highlight-applied', {
+      method: 'setFilter',
+      selectionKey,
+      encodedId: identity?.osmType && Number.isInteger(identity?.osmId)
+        ? encodeOsmFeatureId(identity.osmType, identity.osmId)
+        : null
+    });
 
     if (!lngLat) return;
     const desktopOffsetX = window.innerWidth >= 1024 ? -Math.round(window.innerWidth * 0.18) : 0;
+    debugSelectionLog('zoom-start', {
+      selectionKey,
+      center: { lon: Number(lngLat.lng), lat: Number(lngLat.lat) }
+    });
     map.easeTo({
       center: lngLat,
       offset: [desktopOffsetX, 0],
       duration: 420,
       essential: true
+    });
+    map.once('moveend', () => {
+      debugSelectionLog('zoom-end', {
+        selectionKey
+      });
+    });
+  }
+
+  function selectBuildingOnMap({ source, feature, identity, lngLat, lon = null, lat = null }) {
+    focusSelectedFeature({ feature, identity, lngLat });
+    debugSelectionLog('building-click', {
+      source,
+      layerId: feature?.layer?.id || null,
+      featureId: feature?.id ?? null,
+      properties: feature?.properties || null,
+      selectionKey: `${identity.osmType}/${identity.osmId}`
+    });
+    dispatch('buildingClick', {
+      ...identity,
+      lon: Number.isFinite(Number(lon)) ? Number(lon) : null,
+      lat: Number.isFinite(Number(lat)) ? Number(lat) : null,
+      feature
     });
   }
 
@@ -286,12 +290,14 @@
     const lng = Number(feature?.geometry?.coordinates?.[0]);
     const lat = Number(feature?.geometry?.coordinates?.[1]);
     const lngLat = (Number.isFinite(lng) && Number.isFinite(lat)) ? { lng, lat } : event?.lngLat;
-    focusSelectedFeature({
+    selectBuildingOnMap({
+      source: 'search-result',
       feature: null,
       identity: { osmType, osmId },
-      lngLat
+      lngLat,
+      lon: lng,
+      lat
     });
-    dispatch('buildingClick', { osmType, osmId, lon: lng, lat });
   }
 
   function getCurrentTheme() {
@@ -356,25 +362,25 @@
 
   function bindStyleInteractionHandlers() {
     if (!map) return;
-    map.off('click', BUILDINGS_FILL_LAYER_ID, onBuildingClick);
-    map.off('click', BUILDINGS_LINE_LAYER_ID, onBuildingClick);
-    map.off('click', onMapClickFallback);
+    map.off('click', handleMapBuildingClick);
     map.off('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
     map.off('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
     map.off('mouseenter', BUILDINGS_FILL_LAYER_ID, onPointerEnter);
     map.off('mouseleave', BUILDINGS_FILL_LAYER_ID, onPointerLeave);
+    map.off('mouseenter', BUILDINGS_LINE_LAYER_ID, onPointerEnter);
+    map.off('mouseleave', BUILDINGS_LINE_LAYER_ID, onPointerLeave);
     map.off('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
     map.off('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
     map.off('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
     map.off('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
 
-    map.on('click', BUILDINGS_FILL_LAYER_ID, onBuildingClick);
-    map.on('click', BUILDINGS_LINE_LAYER_ID, onBuildingClick);
-    map.on('click', onMapClickFallback);
+    map.on('click', handleMapBuildingClick);
     map.on('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
     map.on('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
     map.on('mouseenter', BUILDINGS_FILL_LAYER_ID, onPointerEnter);
     map.on('mouseleave', BUILDINGS_FILL_LAYER_ID, onPointerLeave);
+    map.on('mouseenter', BUILDINGS_LINE_LAYER_ID, onPointerEnter);
+    map.on('mouseleave', BUILDINGS_LINE_LAYER_ID, onPointerLeave);
     map.on('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
     map.on('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
     map.on('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);

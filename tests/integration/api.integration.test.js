@@ -176,6 +176,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(mainPage.headers.get('x-content-type-options'), 'nosniff');
       const html = await mainPage.text();
       assert.equal(/cdn|unpkg|cdnjs|fonts\.googleapis/i.test(html), false);
+
+      const appConfig = await callApi('/app-config.js');
+      assert.equal(appConfig.status, 200);
+      const appConfigText = await appConfig.text();
+      assert.match(appConfigText, /window\.__ARCHIMAP_CONFIG/);
+      assert.match(appConfigText, /"mapSelection":\{"debug":false\}/);
     });
 
     await t.test('registration does not depend on bootstrap first admin', async () => {

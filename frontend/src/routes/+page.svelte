@@ -7,6 +7,7 @@
   import SearchModal from '$lib/components/shell/SearchModal.svelte';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
   import { t, translateNow } from '$lib/i18n/index';
+  import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson, apiJsonCached } from '$lib/services/http';
   import { session } from '$lib/stores/auth';
   import { mapCenter, mapReady, mapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
@@ -39,9 +40,18 @@
   let urlUpdateInFlight = false;
   let cameraApplyInFlight = false;
   let buildingApplyInFlight = false;
+  let activeBuildingDetailsAbortController = null;
+  let activeBuildingDetailsToken = 0;
   let lastAppliedCameraKey = '';
   let lastAppliedBuildingKey = '';
   let handledUrlSignature = '';
+
+  function isSelectionDebugEnabled() {
+    const cfg = getRuntimeConfig();
+    const isLocalRuntime = typeof window !== 'undefined'
+      && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    return Boolean(cfg?.mapSelection?.debug || import.meta.env.DEV || isLocalRuntime);
+  }
 
   onMount(async () => {
     const module = await import('$lib/components/map/MapCanvas.svelte');
@@ -53,7 +63,33 @@
       activeSearchAbortController.abort();
       activeSearchAbortController = null;
     }
+    if (activeBuildingDetailsAbortController) {
+      activeBuildingDetailsAbortController.abort();
+      activeBuildingDetailsAbortController = null;
+    }
   });
+
+  function debugSelectionLog(eventName, payload = {}) {
+    if (!isSelectionDebugEnabled()) return;
+    console.debug('[map-selection]', eventName, {
+      ts: new Date().toISOString(),
+      ...payload
+    });
+  }
+
+  function updateSelectionDebugHook(selection) {
+    if (!isSelectionDebugEnabled() || typeof document === 'undefined') return;
+    const key = selection?.osmType && selection?.osmId
+      ? `${selection.osmType}/${selection.osmId}`
+      : '';
+    document.body.dataset.selectedBuildingId = key;
+    window.__APP_STATE__ = window.__APP_STATE__ || {};
+    window.__APP_STATE__.selectedBuildingId = key || null;
+  }
+
+  function isAbortError(error) {
+    return String(error?.name || '').toLowerCase() === 'aborterror';
+  }
 
   function toBuildingUrlParam(selection) {
     const osmType = String(selection?.osmType || '').trim();
@@ -89,7 +125,13 @@
     if (buildingKey === lastAppliedBuildingKey && $buildingModalOpen) return;
     buildingApplyInFlight = true;
     try {
-      await onBuildingClick({ detail: { osmType, osmId } });
+      selectBuilding({
+        osmType,
+        osmId,
+        lon: null,
+        lat: null,
+        feature: null
+      });
       lastAppliedBuildingKey = buildingKey;
     } finally {
       buildingApplyInFlight = false;
@@ -150,31 +192,31 @@
     };
   }
 
-  async function onBuildingClick(event) {
-    const detail = event?.detail;
-    if (!detail?.osmType || !detail?.osmId) return;
-    setSelectedBuilding({
-      osmType: detail.osmType,
-      osmId: detail.osmId,
-      lon: Number.isFinite(Number(detail?.lon)) ? Number(detail.lon) : null,
-      lat: Number.isFinite(Number(detail?.lat)) ? Number(detail.lat) : null
+  async function loadBuildingDetails(detail) {
+    const token = ++activeBuildingDetailsToken;
+    if (activeBuildingDetailsAbortController) {
+      activeBuildingDetailsAbortController.abort();
+    }
+    activeBuildingDetailsAbortController = new AbortController();
+    const signal = activeBuildingDetailsAbortController.signal;
+    debugSelectionLog('details-load-start', {
+      selectionKey: `${detail.osmType}/${detail.osmId}`
     });
-    selectedBuildingIdentity = {
-      osmType: detail.osmType,
-      osmId: Number(detail.osmId)
-    };
-    saveBuildingStatus = '';
-    openBuildingModal();
-    buildingDetails = null;
+
     try {
-      const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`);
+      const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
       let sourceTags = {};
       try {
-        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`);
+        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         sourceTags = feature?.properties?.source_tags || {};
-      } catch {
-        sourceTags = detail?.feature?.properties?.source_tags || {};
+      } catch (featureError) {
+        if (!isAbortError(featureError)) {
+          sourceTags = detail?.feature?.properties?.source_tags || {};
+        } else {
+          throw featureError;
+        }
       }
+      if (token !== activeBuildingDetailsToken) return;
       buildingDetails = {
         properties: {
           archiInfo: normalizeArchiInfo({
@@ -183,10 +225,16 @@
           })
         }
       };
-    } catch {
+      debugSelectionLog('details-load-success', {
+        selectionKey: `${detail.osmType}/${detail.osmId}`
+      });
+      return;
+    } catch (primaryError) {
+      if (isAbortError(primaryError)) return;
       try {
-        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`);
+        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         const archiInfo = feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
+        if (token !== activeBuildingDetailsToken) return;
         buildingDetails = {
           properties: {
             archiInfo: normalizeArchiInfo({
@@ -195,7 +243,9 @@
             })
           }
         };
-      } catch {
+      } catch (fallbackError) {
+        if (isAbortError(fallbackError)) return;
+        if (token !== activeBuildingDetailsToken) return;
         buildingDetails = {
           properties: {
             archiInfo: {
@@ -211,7 +261,46 @@
           }
         };
       }
+    } finally {
+      if (activeBuildingDetailsAbortController?.signal === signal) {
+        activeBuildingDetailsAbortController = null;
+      }
     }
+  }
+
+  function selectBuilding(detail) {
+    if (!detail?.osmType || !detail?.osmId) return;
+    const normalized = {
+      osmType: detail.osmType,
+      osmId: Number(detail.osmId),
+      lon: Number.isFinite(Number(detail?.lon)) ? Number(detail.lon) : null,
+      lat: Number.isFinite(Number(detail?.lat)) ? Number(detail.lat) : null,
+      feature: detail?.feature || null
+    };
+    setSelectedBuilding({
+      osmType: normalized.osmType,
+      osmId: normalized.osmId,
+      lon: normalized.lon,
+      lat: normalized.lat
+    });
+    updateSelectionDebugHook(normalized);
+    selectedBuildingIdentity = {
+      osmType: normalized.osmType,
+      osmId: normalized.osmId
+    };
+    saveBuildingStatus = '';
+    debugSelectionLog('panel-open', {
+      selectionKey: `${normalized.osmType}/${normalized.osmId}`
+    });
+    openBuildingModal();
+    buildingDetails = null;
+    void loadBuildingDetails(normalized);
+  }
+
+  async function onBuildingClick(event) {
+    const detail = event?.detail;
+    if (!detail?.osmType || !detail?.osmId) return;
+    selectBuilding(detail);
   }
 
   function coerceNullableText(value) {
@@ -422,7 +511,11 @@
     runSearchRequest($searchCommand);
   }
 
-  $: if ($mapReady) {
+  $: if (isSelectionDebugEnabled()) {
+    updateSelectionDebugHook($selectedBuilding);
+  }
+
+  $: {
     applyUrlStateToUi();
   }
 
