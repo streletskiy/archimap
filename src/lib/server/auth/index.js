@@ -1,6 +1,6 @@
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const { requireCsrfSession } = require('../services/csrf.service');
+const { sendMailWithFallback } = require('../services/smtp-transport.service');
 const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
@@ -153,9 +153,6 @@ function registerAuthRoutes({
   smtp,
   getSmtpConfig
 }) {
-  let smtpTransporter = null;
-  let smtpTransportFingerprint = '';
-
   function resolveSmtpConfig() {
     const raw = typeof getSmtpConfig === 'function' ? (getSmtpConfig() || {}) : (smtp || {});
     return {
@@ -277,40 +274,9 @@ function registerAuthRoutes({
     return Boolean(smtpConfig.host && smtpConfig.port && smtpConfig.user && smtpConfig.pass && smtpConfig.from);
   }
 
-  function getSmtpTransporter() {
-    const smtpConfig = resolveSmtpConfig();
-    const fingerprint = JSON.stringify({
-      url: smtpConfig.url,
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.secure,
-      user: smtpConfig.user,
-      pass: smtpConfig.pass
-    });
-    if (smtpTransporter && smtpTransportFingerprint === fingerprint) return smtpTransporter;
-
-    if (smtpConfig.url) {
-      smtpTransporter = nodemailer.createTransport(smtpConfig.url);
-      smtpTransportFingerprint = fingerprint;
-      return smtpTransporter;
-    }
-    if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.user || !smtpConfig.pass) {
-      throw new Error('SMTP configuration is incomplete');
-    }
-    smtpTransporter = nodemailer.createTransport({
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.secure,
-      auth: { user: smtpConfig.user, pass: smtpConfig.pass }
-    });
-    smtpTransportFingerprint = fingerprint;
-    return smtpTransporter;
-  }
-
   async function sendRegistrationCodeEmail({ to, code, expiresInMinutes, confirmUrl }) {
     const effectiveAppDisplayName = resolveAppDisplayName();
     const smtpConfig = resolveSmtpConfig();
-    const transporter = getSmtpTransporter();
     const mailOptions = {
       from: smtpConfig.from,
       to,
@@ -318,13 +284,15 @@ function registerAuthRoutes({
       text: registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName: effectiveAppDisplayName, confirmUrl }),
       html: registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName: effectiveAppDisplayName, confirmUrl })
     };
-    return transporter.sendMail(mailOptions);
+    return sendMailWithFallback(smtpConfig, mailOptions, {
+      logger,
+      logContext: { flow: 'registration', to: '[REDACTED]' }
+    });
   }
 
   async function sendPasswordResetEmail({ to, resetUrl, expiresInMinutes }) {
     const effectiveAppDisplayName = resolveAppDisplayName();
     const smtpConfig = resolveSmtpConfig();
-    const transporter = getSmtpTransporter();
     const mailOptions = {
       from: smtpConfig.from,
       to,
@@ -332,7 +300,10 @@ function registerAuthRoutes({
       text: passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName: effectiveAppDisplayName }),
       html: passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName: effectiveAppDisplayName })
     };
-    return transporter.sendMail(mailOptions);
+    return sendMailWithFallback(smtpConfig, mailOptions, {
+      logger,
+      logContext: { flow: 'password_reset', to: '[REDACTED]' }
+    });
   }
 
   function resolveAppBaseUrl(_req) {

@@ -1,5 +1,5 @@
-const nodemailer = require('nodemailer');
 const { sendCachedJson } = require('../infra/http-cache.infra');
+const { sendMailWithFallback } = require('../services/smtp-transport.service');
 
 function registerAdminRoutes(deps) {
   const {
@@ -213,40 +213,18 @@ function registerAdminRoutes(deps) {
       `Secure: ${candidate.secure ? 'true' : 'false'}`
     ].join('\n');
 
-    if (candidate.url) {
-      try {
-        const transporter = nodemailer.createTransport(candidate.url);
-        await transporter.sendMail({
-          from: candidate.from,
-          to: testEmail,
-          subject,
-          text
-        });
-      } catch (error) {
-        return res.status(400).json({ error: `SMTP test send failed: ${String(error?.message || error)}` });
-      }
-      return res.json({ ok: true, message: `Тестовое письмо отправлено на ${testEmail}` });
-    }
-
-    if (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from) {
+    if (!candidate.url && (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from)) {
       return res.status(400).json({ error: 'Для тестовой отправки нужны host/port/user/password/from или smtp url' });
     }
 
     try {
-      const transporter = nodemailer.createTransport({
-        host: candidate.host,
-        port: candidate.port,
-        secure: candidate.secure,
-        auth: {
-          user: candidate.user,
-          pass: candidate.pass
-        }
-      });
-      await transporter.sendMail({
+      await sendMailWithFallback(candidate, {
         from: candidate.from,
         to: testEmail,
         subject,
         text
+      }, {
+        logContext: { flow: 'admin_smtp_test', to: '[REDACTED]' }
       });
       return res.json({ ok: true, message: `Тестовое письмо отправлено на ${testEmail}` });
     } catch (error) {

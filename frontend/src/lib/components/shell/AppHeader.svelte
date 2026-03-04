@@ -20,6 +20,8 @@
   let regAcceptTerms = false;
   let regAcceptPrivacy = false;
   let registerPendingEmail = '';
+  let registerStartInFlight = false;
+  let registerCodeReady = false;
   let resetEmail = '';
   let resetToken = '';
   let resetNewPassword = '';
@@ -285,6 +287,7 @@
 
   async function submitRegisterStart(event) {
     event.preventDefault();
+    if (registerStartInFlight) return;
     const email = String(regEmail || '').trim();
     const password = String(regPassword || '');
     const passwordConfirm = String(regPasswordConfirm || '');
@@ -306,6 +309,9 @@
       return;
     }
 
+    registerPendingEmail = email;
+    registerCodeReady = false;
+    registerStartInFlight = true;
     status = translateNow('header.status.registerCodeSending');
     try {
       const data = await apiJson('/api/register/start', {
@@ -323,18 +329,29 @@
       if (data?.directSignup) {
         setSession({ authenticated: true, user: data.user, csrfToken: data.csrfToken });
         status = translateNow('header.status.registerDone');
+        registerStartInFlight = false;
+        registerCodeReady = false;
         closeAuth();
         return;
       }
-      registerPendingEmail = regEmail;
+      registerCodeReady = true;
       status = translateNow('header.status.registerCodeSent');
     } catch (error) {
+      registerPendingEmail = '';
+      registerCodeReady = false;
+      regCode = '';
       status = String(error.message || translateNow('header.status.registerStartFailed'));
+    } finally {
+      registerStartInFlight = false;
     }
   }
 
   async function submitRegisterConfirm(event) {
     event.preventDefault();
+    if (!registerCodeReady) {
+      status = translateNow('header.status.registerCodeSending');
+      return;
+    }
     status = translateNow('header.status.confirmingCode');
     try {
       const data = await apiJson('/api/register/confirm-code', {
@@ -653,7 +670,7 @@
           <p class="hint">{$t('header.confirmRegistration')}</p>
           <input class="ui-field" value={registerPendingEmail} readonly />
           <input class="ui-field" bind:value={regCode} inputmode="numeric" maxlength="6" placeholder="123456" required />
-          <button class="ui-btn ui-btn-secondary" type="submit">{$t('header.confirmCode')}</button>
+          <button class="ui-btn ui-btn-secondary" type="submit" disabled={!registerCodeReady}>{$t('header.confirmCode')}</button>
         </form>
       {:else if resetMode}
         <form class="stack" on:submit={submitResetRequest}>
@@ -693,7 +710,7 @@
               <input type="checkbox" bind:checked={regAcceptPrivacy} required aria-required="true" />
               <span>{$t('header.acceptPrivacy')} <a href={navHref('/info?tab=legal&doc=privacy')} on:click={() => (menuOpen = false)}>{$t('header.privacyLink')}</a></span>
             </label>
-            <button class="ui-btn ui-btn-primary" type="submit">{$t('header.createAccount')}</button>
+            <button class="ui-btn ui-btn-primary" type="submit" disabled={registerStartInFlight}>{$t('header.createAccount')}</button>
           </form>
         {/if}
       {/if}
