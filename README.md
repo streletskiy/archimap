@@ -54,6 +54,19 @@ Docker:
 docker-compose up
 ```
 
+Release image (multi-arch, registry push):
+
+```powershell
+./scripts/release-docker.ps1 -Version 1.2.3
+```
+
+Deploy on server (layer-based):
+
+```bash
+docker pull streletskiy/archimap:1.2.3
+docker compose up -d
+```
+
 Create first master admin (after start):
 
 ```bash
@@ -104,6 +117,7 @@ Full list -> `docs/dev/env.md`
 - Performance -> `docs/performance/`
 - Runbook -> `docs/runbook.md`
 - Release guide -> `docs/dev/release.md`
+- Docker guide -> `docs/dev/docker.md`
 
 ## Deep Links (URL state)
 

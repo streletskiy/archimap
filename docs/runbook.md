@@ -3,9 +3,10 @@
 ## Production deploy
 
 1. Set required secrets/env (`SESSION_SECRET`, `APP_BASE_URL`, DB paths, SMTP if used).
-2. Build frontend: `npm run build`.
-3. Start service: `npm run start`.
-4. Validate:
+2. Pull release image: `docker pull streletskiy/archimap:<version>`.
+3. Set `ARCHIMAP_IMAGE=streletskiy/archimap:<version>` in environment (or `.env` used by Compose).
+4. Start/update service: `docker compose up -d`.
+5. Validate:
    - `/readyz`
    - `/healthz`
    - `/api/contours-status`

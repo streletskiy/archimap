@@ -1,8 +1,7 @@
 services:
   archimap:
-    image: streletskiy/archimap:latest
-    build:
-      context: .
+    image: ${ARCHIMAP_IMAGE:-streletskiy/archimap:latest}
+    pull_policy: always
     container_name: archimap
     restart: unless-stopped
     ports:
