@@ -6,7 +6,19 @@ import {
   toFeatureIdSetFromMatches
 } from '$lib/components/map/filter-pipeline-utils';
 
+function isTrustedMessageOrigin(event) {
+  const origin = String(event?.origin || '');
+  if (!origin) return true;
+  try {
+    return origin === self.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 self.onmessage = (event) => {
+  if (!isTrustedMessageOrigin(event)) return;
+
   const payload = event?.data || {};
   const type = String(payload?.type || '');
   const requestId = String(payload?.requestId || '');
