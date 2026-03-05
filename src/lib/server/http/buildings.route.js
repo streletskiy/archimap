@@ -9,6 +9,246 @@ const FILTER_MATCH_MAX_RESULTS = 20000;
 const FILTER_MATCH_DEFAULT_RESULTS = 12000;
 const FILTER_MATCH_CANDIDATE_CAP = 50000;
 const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+
+function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
+  const alias = String(rowAlias || 'src').trim() || 'src';
+  if (key === 'name') return `${alias}.name`;
+  if (key === 'style') return `${alias}.style`;
+  if (key === 'levels') return `${alias}.levels::text`;
+  if (key === 'year_built') return `${alias}.year_built::text`;
+  if (key === 'architect') return `${alias}.architect`;
+  if (key === 'address') return `${alias}.address`;
+  if (key === 'description') return `${alias}.description`;
+  if (key === 'archimap_description') return `COALESCE(${alias}.archimap_description, ${alias}.description)`;
+  return 'NULL::text';
+}
+
+function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${rowAlias}.tags_jsonb` } = {}) {
+  const key = String(ruleKey || '');
+  let fallbackKey = null;
+  if (key.startsWith('archi.')) {
+    fallbackKey = key.slice(6);
+  } else if (ARCHI_RULE_KEYS.has(key)) {
+    fallbackKey = key;
+  }
+  const fallbackSql = fallbackKey ? getPostgresArchiFallbackSql(fallbackKey, rowAlias) : 'NULL::text';
+  return {
+    sql: `CASE WHEN jsonb_exists(${tagsAlias}, ?) THEN jsonb_extract_path_text(${tagsAlias}, ?) ELSE ${fallbackSql} END`,
+    params: [key, key]
+  };
+}
+
+function usesArchiFallbackRuleKey(ruleKey) {
+  const key = String(ruleKey || '');
+  if (!key) return false;
+  return key.startsWith('archi.') || ARCHI_RULE_KEYS.has(key);
+}
+
+function splitPostgresPushdownRules(rules) {
+  const tagOnlyRules = [];
+  const fallbackRules = [];
+  for (const rule of Array.isArray(rules) ? rules : []) {
+    if (usesArchiFallbackRuleKey(rule?.key)) {
+      fallbackRules.push(rule);
+    } else {
+      tagOnlyRules.push(rule);
+    }
+  }
+  return { tagOnlyRules, fallbackRules };
+}
+
+function collectRequiredArchiColumns(rules) {
+  const required = new Set();
+  for (const rule of Array.isArray(rules) ? rules : []) {
+    const key = String(rule?.key || '');
+    let fallbackKey = null;
+    if (key.startsWith('archi.')) {
+      fallbackKey = key.slice(6);
+    } else if (ARCHI_RULE_KEYS.has(key)) {
+      fallbackKey = key;
+    }
+
+    if (!ARCHI_RULE_KEYS.has(fallbackKey)) continue;
+    required.add(fallbackKey);
+    if (fallbackKey === 'archimap_description') {
+      required.add('description');
+    }
+  }
+  return ARCHI_RULE_COLUMN_ORDER.filter((column) => required.has(column));
+}
+
+function compilePostgresFilterRulePredicate(rule, options = {}) {
+  if (!rule?.key) return { sql: 'TRUE', params: [] };
+  const op = String(rule.op || '').trim();
+  if (!FILTER_RULE_OPS.has(op)) {
+    throw new Error(`Unsupported filter rule operator: ${op}`);
+  }
+
+  const valueExpr = buildPostgresRuleValueSql(rule.key, options);
+  const params = [...valueExpr.params];
+
+  if (op === 'exists') {
+    return {
+      sql: `COALESCE(length(btrim(${valueExpr.sql})), 0) > 0`,
+      params
+    };
+  }
+  if (op === 'not_exists') {
+    return {
+      sql: `COALESCE(length(btrim(${valueExpr.sql})), 0) = 0`,
+      params
+    };
+  }
+
+  const right = String(rule.valueNormalized || '').toLowerCase();
+  params.push(right);
+
+  if (op === 'equals') {
+    return {
+      sql: `lower(${valueExpr.sql}) = ?`,
+      params
+    };
+  }
+  if (op === 'not_equals') {
+    return {
+      sql: `lower(${valueExpr.sql}) <> ?`,
+      params
+    };
+  }
+  if (op === 'starts_with') {
+    return {
+      sql: `lower(${valueExpr.sql}) LIKE (? || '%')`,
+      params
+    };
+  }
+  return {
+    sql: `strpos(lower(${valueExpr.sql}), ?) > 0`,
+    params
+  };
+}
+
+function compilePostgresFilterRulesPredicate(rules, options = {}) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return { sql: 'TRUE', params: [] };
+  }
+
+  const parts = [];
+  const params = [];
+  for (const rule of rules) {
+    const compiled = compilePostgresFilterRulePredicate(rule, options);
+    parts.push(`(${compiled.sql})`);
+    params.push(...compiled.params);
+  }
+  return {
+    sql: parts.join(' AND '),
+    params
+  };
+}
+
+function compilePostgresFilterRuleGuardPredicate(rule, options = {}) {
+  if (!rule?.key) return { sql: 'TRUE', params: [] };
+  const op = String(rule.op || '').trim();
+  if (!FILTER_RULE_OPS.has(op)) {
+    throw new Error(`Unsupported filter rule operator: ${op}`);
+  }
+
+  const tagsAlias = String(options.tagsAlias || `${String(options.rowAlias || 'base')}.tags_jsonb`).trim();
+  const key = String(rule.key || '');
+  const right = String(rule.valueNormalized || '').toLowerCase();
+  const tagExistsSql = `jsonb_exists(${tagsAlias}, ?)`;
+  const tagValueSql = `jsonb_extract_path_text(${tagsAlias}, ?)`;
+
+  if (!usesArchiFallbackRuleKey(key)) {
+    if (op === 'exists') {
+      return {
+        sql: `COALESCE(length(btrim(${tagValueSql})), 0) > 0`,
+        params: [key]
+      };
+    }
+    if (op === 'not_exists') {
+      return {
+        sql: `COALESCE(length(btrim(${tagValueSql})), 0) = 0`,
+        params: [key]
+      };
+    }
+    if (op === 'equals') {
+      return {
+        sql: `lower(${tagValueSql}) = ?`,
+        params: [key, right]
+      };
+    }
+    if (op === 'not_equals') {
+      return {
+        sql: `lower(${tagValueSql}) <> ?`,
+        params: [key, right]
+      };
+    }
+    if (op === 'starts_with') {
+      return {
+        sql: `lower(${tagValueSql}) LIKE (? || '%')`,
+        params: [key, right]
+      };
+    }
+    return {
+      sql: `strpos(lower(${tagValueSql}), ?) > 0`,
+      params: [key, right]
+    };
+  }
+
+  if (op === 'exists') {
+    return {
+      sql: `NOT (${tagExistsSql} AND COALESCE(length(btrim(${tagValueSql})), 0) = 0)`,
+      params: [key, key]
+    };
+  }
+  if (op === 'not_exists') {
+    return {
+      sql: `NOT (${tagExistsSql} AND COALESCE(length(btrim(${tagValueSql})), 0) > 0)`,
+      params: [key, key]
+    };
+  }
+  if (op === 'equals') {
+    return {
+      sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) <> ?))`,
+      params: [key, key, key, right]
+    };
+  }
+  if (op === 'not_equals') {
+    return {
+      sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) = ?))`,
+      params: [key, key, key, right]
+    };
+  }
+  if (op === 'starts_with') {
+    return {
+      sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) NOT LIKE (? || '%')))`,
+      params: [key, key, key, right]
+    };
+  }
+  return {
+    sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR strpos(lower(${tagValueSql}), ?) = 0))`,
+    params: [key, key, key, right]
+  };
+}
+
+function compilePostgresFilterRulesGuardPredicate(rules, options = {}) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return { sql: 'TRUE', params: [] };
+  }
+
+  const parts = [];
+  const params = [];
+  for (const rule of rules) {
+    const compiled = compilePostgresFilterRuleGuardPredicate(rule, options);
+    parts.push(`(${compiled.sql})`);
+    params.push(...compiled.params);
+  }
+  return {
+    sql: parts.join(' AND '),
+    params
+  };
+}
 
 function parseOsmKey(value) {
   const text = String(value || '').trim();
@@ -144,6 +384,16 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
 `;
 
+const FILTER_DATA_POSTGIS_BBOX_SQL = `
+  WITH env AS (
+    SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom
+  )
+  ${FILTER_DATA_SELECT_FIELDS_SQL}
+  JOIN env ON bc.geom && env.geom
+  WHERE ST_Intersects(bc.geom, env.geom)
+  LIMIT ?
+`;
+
 function registerBuildingsRoutes(deps) {
   const {
     app,
@@ -208,12 +458,7 @@ function registerBuildingsRoutes(deps) {
     LIMIT ?
   `) : null;
 
-  const selectFilterDataBboxPostgis = isPostgres ? db.prepare(`
-    ${FILTER_DATA_SELECT_FIELDS_SQL}
-    WHERE bc.geom && ST_MakeEnvelope(?, ?, ?, ?, 4326)
-      AND ST_Intersects(bc.geom, ST_MakeEnvelope(?, ?, ?, ?, 4326))
-    LIMIT ?
-  `) : null;
+  const selectFilterDataBboxPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
 
   const selectFilterMatchCandidatesRtree = !isPostgres ? db.prepare(`
     SELECT
@@ -252,12 +497,7 @@ function registerBuildingsRoutes(deps) {
     LIMIT ?
   `) : null;
 
-  const selectFilterMatchCandidatesPostgis = isPostgres ? db.prepare(`
-    ${FILTER_DATA_SELECT_FIELDS_SQL}
-    WHERE bc.geom && ST_MakeEnvelope(?, ?, ?, ?, 4326)
-      AND ST_Intersects(bc.geom, ST_MakeEnvelope(?, ?, ?, ?, 4326))
-    LIMIT ?
-  `) : null;
+  const selectFilterMatchCandidatesPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
 
   const selectBuildingById = db.prepare(`
     SELECT osm_type, osm_id, tags_json, geometry_json
@@ -291,15 +531,33 @@ function registerBuildingsRoutes(deps) {
     const CHUNK_SIZE = 300;
     for (let i = 0; i < unique.length; i += CHUNK_SIZE) {
       const chunk = unique.slice(i, i + CHUNK_SIZE);
-      const clauses = chunk.map(() => '(bc.osm_type = ? AND bc.osm_id = ?)').join(' OR ');
-      const params = [];
-      for (const item of chunk) {
-        params.push(item.osmType, item.osmId);
-      }
-      const rows = await db.prepare(`
-        ${FILTER_DATA_SELECT_FIELDS_SQL}
-        WHERE ${clauses}
-      `).all(...params);
+      const rows = isPostgres
+        ? await (() => {
+          const valuesSql = chunk.map(() => '(?, ?)').join(', ');
+          const params = [];
+          for (const item of chunk) {
+            params.push(item.osmType, item.osmId);
+          }
+          return db.prepare(`
+            WITH requested(osm_type, osm_id) AS (
+              VALUES ${valuesSql}
+            )
+            ${FILTER_DATA_SELECT_FIELDS_SQL}
+            JOIN requested req
+              ON bc.osm_type = req.osm_type AND bc.osm_id = req.osm_id
+          `).all(...params);
+        })()
+        : await (() => {
+          const clauses = chunk.map(() => '(bc.osm_type = ? AND bc.osm_id = ?)').join(' OR ');
+          const params = [];
+          for (const item of chunk) {
+            params.push(item.osmType, item.osmId);
+          }
+          return db.prepare(`
+            ${FILTER_DATA_SELECT_FIELDS_SQL}
+            WHERE ${clauses}
+          `).all(...params);
+        })();
 
       for (const row of rows) {
         const item = mapFilterDataRow(row);
@@ -337,7 +595,6 @@ function registerBuildingsRoutes(deps) {
 
     const rows = isPostgres
       ? await selectFilterDataBboxPostgis.all(
-        minLon, minLat, maxLon, maxLat,
         minLon, minLat, maxLon, maxLat,
         limit
       )
@@ -428,43 +685,173 @@ function registerBuildingsRoutes(deps) {
       return res.json(payload);
     }
 
-    const isHeavy = normalizedRules.some((rule) => rule.op === 'contains');
-    const candidateLimit = Math.max(
-      maxResults,
-      Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
-    );
-
-    const candidateRows = isPostgres
-      ? await selectFilterMatchCandidatesPostgis.all(
-        minLon, minLat, maxLon, maxLat,
-        minLon, minLat, maxLon, maxLat,
-        candidateLimit
-      )
-      : (rtreeState.ready
-        ? await selectFilterMatchCandidatesRtree.all(minLon, maxLon, minLat, maxLat, candidateLimit)
-        : await selectFilterMatchCandidatesPlain.all(minLon, maxLon, minLat, maxLat, candidateLimit));
-
-    const candidateItems = await applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
     const matchedKeys = [];
     const matchedFeatureIds = [];
     let truncated = false;
 
-    for (let i = 0; i < candidateItems.length; i += 1) {
-      const item = candidateItems[i];
-      const ok = normalizedRules.every((rule) => matchesFilterRule(item, rule));
-      if (!ok) continue;
-      matchedKeys.push(item.osmKey);
-      const parsed = parseOsmKey(item.osmKey);
-      if (parsed) {
-        matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+    if (isPostgres && actorKey === 'anon') {
+      const splitRules = splitPostgresPushdownRules(normalizedRules);
+      const rows = splitRules.fallbackRules.length === 0
+        ? await (() => {
+          const compiledTagRules = compilePostgresFilterRulesPredicate(splitRules.tagOnlyRules, {
+            rowAlias: 'base',
+            tagsAlias: 'base.tags_jsonb'
+          });
+          const selectTagOnlyRowsSql = `
+            WITH env AS (
+              SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom
+            ),
+            base AS MATERIALIZED (
+              SELECT
+                bc.osm_type,
+                bc.osm_id,
+                CASE
+                  WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
+                  ELSE '{}'::jsonb
+                END AS tags_jsonb
+              FROM osm.building_contours bc
+              JOIN env
+                ON bc.geom && env.geom
+              WHERE ST_Intersects(bc.geom, env.geom)
+            )
+            SELECT base.osm_type, base.osm_id
+            FROM base
+            WHERE ${compiledTagRules.sql}
+            LIMIT ?
+          `;
+          return db.prepare(selectTagOnlyRowsSql).all(
+            minLon, minLat, maxLon, maxLat,
+            ...compiledTagRules.params,
+            maxResults + 1
+          );
+        })()
+        : null;
+
+      if (rows) {
+        const limitedRows = rows.length > maxResults ? rows.slice(0, maxResults) : rows;
+        truncated = rows.length > maxResults;
+        for (const row of limitedRows) {
+          const osmType = String(row.osm_type || '');
+          const osmId = Number(row.osm_id);
+          if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) continue;
+          matchedKeys.push(`${osmType}/${osmId}`);
+          matchedFeatureIds.push(encodeOsmFeatureId(osmType, osmId));
+        }
+      } else {
+        const isHeavy = normalizedRules.some((rule) => rule.op === 'contains');
+        const candidateLimit = Math.max(
+          maxResults,
+          Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
+        );
+        const requiredArchiColumns = collectRequiredArchiColumns(splitRules.fallbackRules);
+        const aiJoinSql = requiredArchiColumns.length > 0
+          ? `
+          LEFT JOIN local.architectural_info ai
+            ON ai.osm_type = guarded.osm_type AND ai.osm_id = guarded.osm_id
+          `
+          : '';
+        const aiSelectSql = requiredArchiColumns.length > 0
+          ? `ai.osm_id AS info_osm_id,
+            ${requiredArchiColumns.map((column) => `ai.${column}`).join(',\n            ')}`
+          : 'NULL::bigint AS info_osm_id';
+        const compiledGuardRules = compilePostgresFilterRulesGuardPredicate(normalizedRules, {
+          rowAlias: 'base',
+          tagsAlias: 'base.tags_jsonb'
+        });
+        const selectGuardedCandidateRowsSql = `
+          WITH env AS (
+            SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom
+          ),
+          base AS MATERIALIZED (
+            SELECT
+              bc.osm_type,
+              bc.osm_id,
+              bc.tags_json,
+              CASE
+                WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
+                ELSE '{}'::jsonb
+              END AS tags_jsonb
+            FROM osm.building_contours bc
+            JOIN env
+              ON bc.geom && env.geom
+            WHERE ST_Intersects(bc.geom, env.geom)
+          ),
+          guarded AS MATERIALIZED (
+            SELECT
+              base.osm_type,
+              base.osm_id,
+              base.tags_json
+            FROM base
+            WHERE ${compiledGuardRules.sql}
+            LIMIT ?
+          )
+          SELECT
+            guarded.osm_type,
+            guarded.osm_id,
+            guarded.tags_json,
+            ${aiSelectSql}
+          FROM guarded
+          ${aiJoinSql}
+        `;
+        const candidateRows = await db.prepare(selectGuardedCandidateRowsSql).all(
+          minLon, minLat, maxLon, maxLat,
+          ...compiledGuardRules.params,
+          candidateLimit
+        );
+
+        const candidateItems = candidateRows.map(mapFilterDataRow);
+        for (let i = 0; i < candidateItems.length; i += 1) {
+          const item = candidateItems[i];
+          const ok = normalizedRules.every((rule) => matchesFilterRule(item, rule));
+          if (!ok) continue;
+          matchedKeys.push(item.osmKey);
+          const parsed = parseOsmKey(item.osmKey);
+          if (parsed) {
+            matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+          }
+          if (matchedKeys.length >= maxResults) {
+            truncated = true;
+            break;
+          }
+        }
+        if (!truncated && candidateRows.length >= candidateLimit) {
+          truncated = true;
+        }
       }
-      if (matchedKeys.length >= maxResults) {
+    } else {
+      const isHeavy = normalizedRules.some((rule) => rule.op === 'contains');
+      const candidateLimit = Math.max(
+        maxResults,
+        Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
+      );
+
+      const candidateRows = isPostgres
+        ? await selectFilterMatchCandidatesPostgis.all(
+          minLon, minLat, maxLon, maxLat,
+          candidateLimit
+        )
+        : (rtreeState.ready
+          ? await selectFilterMatchCandidatesRtree.all(minLon, maxLon, minLat, maxLat, candidateLimit)
+          : await selectFilterMatchCandidatesPlain.all(minLon, maxLon, minLat, maxLat, candidateLimit));
+
+      const candidateItems = await applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
+      for (let i = 0; i < candidateItems.length; i += 1) {
+        const item = candidateItems[i];
+        const ok = normalizedRules.every((rule) => matchesFilterRule(item, rule));
+        if (!ok) continue;
+        matchedKeys.push(item.osmKey);
+        const parsed = parseOsmKey(item.osmKey);
+        if (parsed) {
+          matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+        }
+        if (matchedKeys.length >= maxResults) {
+          truncated = true;
+          break;
+        }
+      }
+      if (!truncated && candidateRows.length >= candidateLimit) {
         truncated = true;
-        break;
       }
-    }
-    if (!truncated && candidateRows.length >= candidateLimit) {
-      truncated = true;
     }
 
     const payload = {
@@ -637,5 +1024,9 @@ function registerBuildingsRoutes(deps) {
 }
 
 module.exports = {
-  registerBuildingsRoutes
+  registerBuildingsRoutes,
+  compilePostgresFilterRulePredicate,
+  compilePostgresFilterRulesPredicate,
+  compilePostgresFilterRuleGuardPredicate,
+  compilePostgresFilterRulesGuardPredicate
 };

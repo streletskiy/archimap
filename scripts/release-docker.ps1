@@ -16,9 +16,15 @@ param(
 
   [string]$DuckdbVersion = "1.4.4",
 
+  [string]$PipVersion = "26.0.1",
+
+  [string]$RuntimeBaseTag = "",
+
   [string]$Builder = "archimap-multiarch",
 
-  [switch]$SkipBinfmtRepair
+  [switch]$SkipBinfmtRepair,
+
+  [switch]$SkipRuntimeBase
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +42,12 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 if ([string]::IsNullOrWhiteSpace($CacheRef)) {
   $CacheRef = "${Image}:buildcache"
 }
+
+if ([string]::IsNullOrWhiteSpace($RuntimeBaseTag)) {
+  $rawRuntimeBaseTag = "runtime-base-t$TippecanoeRef-q$QuackosmVersion-d$DuckdbVersion-p$PipVersion"
+  $RuntimeBaseTag = ($rawRuntimeBaseTag -replace '[^A-Za-z0-9._-]', '-')
+}
+$RuntimeBaseImage = "${Image}:$RuntimeBaseTag"
 
 function Invoke-Docker {
   param([string[]]$CommandArgs)
@@ -267,6 +279,8 @@ $args = @(
   "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
   "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
   "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
+  "--build-arg", "PIP_VERSION=$PipVersion",
+  "--build-arg", "RUNTIME_BASE_IMAGE=$RuntimeBaseImage",
   "--build-arg", "BUILD_SHA=$($gitBuild.Sha)",
   "--build-arg", "BUILD_DESCRIBE=$($gitBuild.Describe)",
   "--build-arg", "BUILD_LATEST_TAG=$($gitBuild.LatestTag)"
@@ -281,13 +295,51 @@ if ($NoCache) {
 
 $args += "."
 
-Write-Host "Publishing image..." -ForegroundColor Cyan
+if (-not $SkipRuntimeBase) {
+  $baseArgs = @(
+    "buildx", "build",
+    "--builder", $Builder,
+    "--platform", $Platforms,
+    "--target", "runtime-base",
+    "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
+    "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
+    "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
+    "--build-arg", "PIP_VERSION=$PipVersion",
+    "-t", $RuntimeBaseImage,
+    "--push"
+  )
+  if ($NoCache) {
+    $baseArgs += "--no-cache"
+  } else {
+    $baseArgs += @("--cache-from", "type=registry,ref=$CacheRef")
+    $baseArgs += @("--cache-to", "type=registry,ref=$CacheRef,mode=max")
+  }
+  $baseArgs += "."
+
+  Write-Host "Publishing runtime-base image..." -ForegroundColor Cyan
+  Write-Host "Runtime base tag: $RuntimeBaseImage" -ForegroundColor Gray
+  $previousBase = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & docker @baseArgs
+    $baseExitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousBase
+  }
+  if ($baseExitCode -ne 0) {
+    throw "docker buildx build (runtime-base) failed with exit code $baseExitCode"
+  }
+}
+
+Write-Host "Publishing app image..." -ForegroundColor Cyan
 Write-Host "Image: $Image" -ForegroundColor Gray
 Write-Host "Version tag: $Version" -ForegroundColor Gray
+Write-Host "Runtime base image: $RuntimeBaseImage" -ForegroundColor Gray
 Write-Host "Platforms: $Platforms" -ForegroundColor Gray
 Write-Host "Tippecanoe ref: $TippecanoeRef" -ForegroundColor Gray
 Write-Host "QuackOSM version: $QuackosmVersion" -ForegroundColor Gray
 Write-Host "DuckDB version: $DuckdbVersion" -ForegroundColor Gray
+Write-Host "pip version: $PipVersion" -ForegroundColor Gray
 Write-Host "Build SHA: $($gitBuild.Sha)" -ForegroundColor Gray
 Write-Host "Build describe: $($gitBuild.Describe)" -ForegroundColor Gray
 if (-not [string]::IsNullOrWhiteSpace($gitBuild.LatestTag)) {
@@ -318,6 +370,7 @@ Write-Host "  ${Image}:${Version}" -ForegroundColor Green
 if ($publishLatest) {
   Write-Host "  ${Image}:latest" -ForegroundColor Green
 }
+Write-Host "  $RuntimeBaseImage" -ForegroundColor Green
 Write-Host "Server deploy (layer-based):" -ForegroundColor Cyan
 Write-Host "  docker pull ${Image}:${Version}" -ForegroundColor Gray
 Write-Host "  docker compose up -d" -ForegroundColor Gray

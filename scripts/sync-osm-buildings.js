@@ -447,6 +447,16 @@ async function ingestNdjsonIntoPostgres(ndjsonPath) {
       deleted = Number(del.rowCount || 0);
     }
 
+    await client.query(`
+      INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
+      SELECT 1, COUNT(*)::bigint, MAX(updated_at), NOW()
+      FROM osm.building_contours
+      ON CONFLICT (singleton_id) DO UPDATE SET
+        total = EXCLUDED.total,
+        last_updated = EXCLUDED.last_updated,
+        refreshed_at = EXCLUDED.refreshed_at
+    `);
+
     await client.query('COMMIT');
     const total = await client.query('SELECT COUNT(*)::bigint AS total, MAX(updated_at) AS last_updated FROM osm.building_contours');
     console.log(

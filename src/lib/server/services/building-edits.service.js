@@ -1,4 +1,6 @@
 function createBuildingEditsService({ db, normalizeUserEditStatus }) {
+  const isPostgres = db.provider === 'postgres';
+
   function normalizeInfoForDiff(value) {
     if (value == null) return null;
     if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -399,32 +401,68 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
     for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
       const chunk = keys.slice(i, i + CHUNK_SIZE);
-      const clauses = chunk.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
-      const params = [actor];
+      const pairs = [];
+
       for (const key of chunk) {
         const [osmType, osmIdRaw] = String(key).split('/');
         const osmId = Number(osmIdRaw);
         if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) continue;
-        params.push(osmType, osmId);
+        pairs.push({ osmType, osmId });
       }
-      if (params.length === 1) continue;
+      if (pairs.length === 0) continue;
 
       const statusPlaceholders = normalizedStatuses.map(() => '?').join(',');
-      params.push(...normalizedStatuses);
 
-      const rows = await db.prepare(`
-        SELECT ue.*
-        FROM user_edits.building_user_edits ue
-        JOIN (
-          SELECT osm_type, osm_id, MAX(id) AS max_id
-          FROM user_edits.building_user_edits
-          WHERE lower(trim(created_by)) = ?
-            AND (${clauses})
-            AND status IN (${statusPlaceholders})
-          GROUP BY osm_type, osm_id
-        ) latest
-          ON latest.max_id = ue.id
-      `).all(...params);
+      const rows = isPostgres
+        ? await (() => {
+          const valuesSql = pairs.map(() => '(?, ?)').join(', ');
+          const params = [];
+          for (const pair of pairs) {
+            params.push(pair.osmType, pair.osmId);
+          }
+          params.push(actor, ...normalizedStatuses);
+
+          return db.prepare(`
+            WITH requested(osm_type, osm_id) AS (
+              VALUES ${valuesSql}
+            ),
+            latest AS (
+              SELECT ue.osm_type, ue.osm_id, MAX(ue.id) AS max_id
+              FROM user_edits.building_user_edits ue
+              JOIN requested req
+                ON req.osm_type = ue.osm_type AND req.osm_id = ue.osm_id
+              WHERE lower(trim(ue.created_by)) = ?
+                AND ue.status IN (${statusPlaceholders})
+              GROUP BY ue.osm_type, ue.osm_id
+            )
+            SELECT ue.*
+            FROM user_edits.building_user_edits ue
+            JOIN latest
+              ON latest.max_id = ue.id
+          `).all(...params);
+        })()
+        : await (() => {
+          const clauses = pairs.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
+          const params = [actor];
+          for (const pair of pairs) {
+            params.push(pair.osmType, pair.osmId);
+          }
+          params.push(...normalizedStatuses);
+
+          return db.prepare(`
+            SELECT ue.*
+            FROM user_edits.building_user_edits ue
+            JOIN (
+              SELECT osm_type, osm_id, MAX(id) AS max_id
+              FROM user_edits.building_user_edits
+              WHERE lower(trim(created_by)) = ?
+                AND (${clauses})
+                AND status IN (${statusPlaceholders})
+              GROUP BY osm_type, osm_id
+            ) latest
+              ON latest.max_id = ue.id
+          `).all(...params);
+        })();
 
       for (const row of rows) {
         out.set(`${row.osm_type}/${row.osm_id}`, row);

@@ -3,9 +3,12 @@
 ARG TIPPECANOE_REF=2.79.0
 ARG QUACKOSM_VERSION=0.17.0
 ARG DUCKDB_VERSION=1.4.4
-ARG NODE_IMAGE=node:20-bookworm-slim
+ARG NODE_IMAGE=node:20-bookworm-slim@sha256:d8a35d586fad3af7abb6fdb9ba972388395405f4d462da9e4a4ddcde67b5e0fb
+ARG DEBIAN_IMAGE=debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
+ARG PIP_VERSION=26.0.1
+ARG RUNTIME_BASE_IMAGE=runtime-base
 
-FROM debian:bookworm-slim AS tippecanoe-builder
+FROM ${DEBIAN_IMAGE} AS tippecanoe-builder
 ARG TIPPECANOE_REF
 
 WORKDIR /tmp/tippecanoe
@@ -62,9 +65,10 @@ RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG
   && npm --prefix frontend run build \
   && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\\n')"
 
-FROM ${NODE_IMAGE} AS runtime
+FROM ${NODE_IMAGE} AS runtime-base
 ARG QUACKOSM_VERSION
 ARG DUCKDB_VERSION
+ARG PIP_VERSION
 
 WORKDIR /app
 
@@ -85,8 +89,18 @@ COPY --from=tippecanoe-builder /tmp/tippecanoe/tile-join /usr/local/bin/tile-joi
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
   python3 -m venv /opt/pyosm \
-  && /opt/pyosm/bin/pip install --upgrade pip \
+  && /opt/pyosm/bin/pip install "pip==${PIP_VERSION}" \
   && /opt/pyosm/bin/pip install "quackosm==${QUACKOSM_VERSION}" "duckdb==${DUCKDB_VERSION}"
+
+RUN mkdir -p /app/data/quackosm
+
+ENV PYTHON_BIN=/opt/pyosm/bin/python
+
+FROM ${RUNTIME_BASE_IMAGE} AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PYTHON_BIN=/opt/pyosm/bin/python
 
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
@@ -97,14 +111,10 @@ COPY src ./src
 COPY db ./db
 COPY scripts ./scripts
 COPY workers ./workers
-COPY --from=frontend-build /app/frontend/build ./frontend/build
 COPY --from=frontend-runtime-deps /app/frontend/node_modules ./frontend/node_modules
+COPY --from=frontend-build /app/frontend/build ./frontend/build
 COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version.generated.json
 
-RUN mkdir -p /app/data/quackosm
-
-ENV NODE_ENV=production
-ENV PYTHON_BIN=/opt/pyosm/bin/python
 EXPOSE 3252
 
 CMD ["node", "server.sveltekit.js"]

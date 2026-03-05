@@ -20,7 +20,9 @@ async function runPostgres() {
     console.log(`[filter-tags] rebuild started (${reason}), provider=postgres`);
     await client.query('BEGIN');
     try {
-      const keysRows = await client.query(`
+      await client.query('DELETE FROM filter_tag_keys_cache;');
+      const inserted = await client.query(`
+        INSERT INTO filter_tag_keys_cache (tag_key, updated_at)
         WITH distinct_keys AS (
           SELECT DISTINCT trim(je.key) AS tag_key
           FROM osm.building_contours bc
@@ -32,20 +34,12 @@ async function runPostgres() {
           ) AS je(key, value)
           WHERE trim(je.key) <> ''
         )
-        SELECT tag_key
+        SELECT tag_key, NOW()
         FROM distinct_keys
         ORDER BY lower(tag_key), tag_key
       `);
-
-      await client.query('DELETE FROM filter_tag_keys_cache;');
-      for (const row of keysRows.rows) {
-        await client.query(
-          'INSERT INTO filter_tag_keys_cache (tag_key, updated_at) VALUES ($1, NOW())',
-          [String(row.tag_key || '').trim()]
-        );
-      }
       await client.query('COMMIT');
-      console.log(`[filter-tags] rebuild completed: ${keysRows.rows.length} keys in ${Date.now() - startedAt}ms`);
+      console.log(`[filter-tags] rebuild completed: ${Number(inserted.rowCount || 0)} keys in ${Date.now() - startedAt}ms`);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

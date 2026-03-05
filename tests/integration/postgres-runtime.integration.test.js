@@ -4,6 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { Client } = require('pg');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,7 +31,270 @@ function setCookiesFromHeaders(cookieJar, headers) {
   if (parsed) cookieJar.set(parsed.name, parsed.value);
 }
 
-test('postgres runtime: auth/admin flow and no sqlite file creation', async () => {
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const FILTER_MATCH_CANDIDATE_CAP = 50000;
+
+function encodeOsmFeatureId(osmType, osmId) {
+  const typeBit = osmType === 'relation' ? 1 : 0;
+  return (Number(osmId) * 2) + typeBit;
+}
+
+function parseOsmKey(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(way|relation)\/(\d+)$/);
+  if (!match) return null;
+  const osmId = Number(match[2]);
+  if (!Number.isInteger(osmId)) return null;
+  return { osmType: match[1], osmId };
+}
+
+function normalizeTagValue(value) {
+  if (value == null) return null;
+  if (Array.isArray(value)) return value.join(';');
+  return String(value);
+}
+
+function getRuleValue(item, key) {
+  const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
+  if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
+  const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
+  if (key.startsWith('archi.')) return archiInfo[key.slice(6)];
+  if (ARCHI_RULE_KEYS.has(key)) return archiInfo[key];
+  return undefined;
+}
+
+function matchesFilterRule(item, rule) {
+  const actualRaw = getRuleValue(item, rule.key);
+  const actual = normalizeTagValue(actualRaw);
+  const hasValue = actual != null && String(actual).trim().length > 0;
+  if (rule.op === 'exists') return hasValue;
+  if (rule.op === 'not_exists') return !hasValue;
+  if (actual == null) return false;
+
+  const left = String(actual).toLowerCase();
+  const right = String(rule.value || '').trim().toLowerCase();
+  if (rule.op === 'equals') return left === right;
+  if (rule.op === 'not_equals') return left !== right;
+  if (rule.op === 'starts_with') return left.startsWith(right);
+  return left.includes(right);
+}
+
+function mapFilterDataRow(row) {
+  let sourceTags = {};
+  try {
+    sourceTags = row.tags_json ? JSON.parse(row.tags_json) : {};
+  } catch {
+    sourceTags = {};
+  }
+  const hasExtraInfo = row.info_osm_id != null;
+  return {
+    osmKey: `${row.osm_type}/${row.osm_id}`,
+    sourceTags,
+    archiInfo: hasExtraInfo
+      ? {
+        name: row.name,
+        style: row.style,
+        levels: row.levels,
+        year_built: row.year_built,
+        architect: row.architect,
+        address: row.address,
+        description: row.description,
+        archimap_description: row.archimap_description || row.description || null
+      }
+      : null
+  };
+}
+
+async function upsertFilterFixtures(connectionString, fixtures) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    for (const fixture of fixtures) {
+      await client.query(`
+        INSERT INTO osm.building_contours (
+          osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        ON CONFLICT (osm_type, osm_id) DO UPDATE SET
+          tags_json = EXCLUDED.tags_json,
+          geometry_json = EXCLUDED.geometry_json,
+          min_lon = EXCLUDED.min_lon,
+          min_lat = EXCLUDED.min_lat,
+          max_lon = EXCLUDED.max_lon,
+          max_lat = EXCLUDED.max_lat,
+          updated_at = NOW()
+      `, [
+        fixture.osmType,
+        fixture.osmId,
+        JSON.stringify(fixture.tags || {}),
+        fixture.geometryJson,
+        fixture.minLon,
+        fixture.minLat,
+        fixture.maxLon,
+        fixture.maxLat
+      ]);
+
+      if (fixture.archiInfo) {
+        await client.query(`
+          INSERT INTO local.architectural_info (
+            osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'postgres-runtime-test', NOW())
+          ON CONFLICT (osm_type, osm_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            style = EXCLUDED.style,
+            levels = EXCLUDED.levels,
+            year_built = EXCLUDED.year_built,
+            architect = EXCLUDED.architect,
+            address = EXCLUDED.address,
+            description = EXCLUDED.description,
+            archimap_description = EXCLUDED.archimap_description,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = NOW()
+        `, [
+          fixture.osmType,
+          fixture.osmId,
+          fixture.archiInfo.name ?? null,
+          fixture.archiInfo.style ?? null,
+          fixture.archiInfo.levels ?? null,
+          fixture.archiInfo.year_built ?? null,
+          fixture.archiInfo.architect ?? null,
+          fixture.archiInfo.address ?? null,
+          fixture.archiInfo.description ?? null,
+          fixture.archiInfo.archimap_description ?? null
+        ]);
+      } else {
+        await client.query(
+          'DELETE FROM local.architectural_info WHERE osm_type = $1 AND osm_id = $2',
+          [fixture.osmType, fixture.osmId]
+        );
+      }
+    }
+    await client.query(`
+      INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
+      SELECT 1, COUNT(*)::bigint, MAX(updated_at), NOW()
+      FROM osm.building_contours
+      ON CONFLICT (singleton_id) DO UPDATE SET
+        total = EXCLUDED.total,
+        last_updated = EXCLUDED.last_updated,
+        refreshed_at = EXCLUDED.refreshed_at
+    `);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+async function cleanupFilterFixtures(connectionString, fixtures) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    for (const fixture of fixtures) {
+      await client.query(
+        'DELETE FROM local.architectural_info WHERE osm_type = $1 AND osm_id = $2',
+        [fixture.osmType, fixture.osmId]
+      );
+      await client.query(
+        'DELETE FROM osm.building_contours WHERE osm_type = $1 AND osm_id = $2',
+        [fixture.osmType, fixture.osmId]
+      );
+    }
+    await client.query(`
+      INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
+      SELECT 1, COUNT(*)::bigint, MAX(updated_at), NOW()
+      FROM osm.building_contours
+      ON CONFLICT (singleton_id) DO UPDATE SET
+        total = EXCLUDED.total,
+        last_updated = EXCLUDED.last_updated,
+        refreshed_at = EXCLUDED.refreshed_at
+    `);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+async function buildExpectedAnonMatches(connectionString, payload) {
+  const bbox = payload.bbox || {};
+  const maxResults = Number(payload.maxResults || 12000);
+  const rules = Array.isArray(payload.rules) ? payload.rules : [];
+  const isHeavy = rules.some((rule) => String(rule?.op || '') === 'contains');
+  const candidateLimit = Math.max(
+    maxResults,
+    Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
+  );
+
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const rows = await client.query(`
+      WITH env AS (
+        SELECT ST_MakeEnvelope($1, $2, $3, $4, 4326) AS geom
+      )
+      SELECT
+        bc.osm_type,
+        bc.osm_id,
+        bc.tags_json,
+        ai.osm_id AS info_osm_id,
+        ai.name,
+        ai.style,
+        ai.levels,
+        ai.year_built,
+        ai.architect,
+        ai.address,
+        ai.description,
+        ai.archimap_description,
+        ai.updated_by,
+        ai.updated_at
+      FROM osm.building_contours bc
+      LEFT JOIN local.architectural_info ai
+        ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+      JOIN env
+        ON bc.geom && env.geom
+      WHERE ST_Intersects(bc.geom, env.geom)
+      LIMIT $5
+    `, [
+      Number(bbox.west),
+      Number(bbox.south),
+      Number(bbox.east),
+      Number(bbox.north),
+      candidateLimit
+    ]);
+
+    const items = rows.rows.map(mapFilterDataRow);
+    const matchedKeys = [];
+    const matchedFeatureIds = [];
+    let truncated = false;
+
+    for (const item of items) {
+      const ok = rules.every((rule) => matchesFilterRule(item, rule));
+      if (!ok) continue;
+      matchedKeys.push(item.osmKey);
+      const parsed = parseOsmKey(item.osmKey);
+      if (parsed) matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+      if (matchedKeys.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+    }
+    if (!truncated && rows.rows.length >= candidateLimit) {
+      truncated = true;
+    }
+    return { matchedKeys, matchedFeatureIds, truncated };
+  } finally {
+    await client.end();
+  }
+}
+
+test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) => {
   const databaseUrl = String(process.env.DATABASE_URL || '').trim();
   if (!databaseUrl) {
     console.warn('[postgres.runtime.integration] skipped: DATABASE_URL is not set');
@@ -135,6 +399,13 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async () =
     return response;
   }
 
+  async function callAnonApi(pathname, options = {}) {
+    return fetch(`${baseUrl}${pathname}`, {
+      ...options,
+      headers: { ...(options.headers || {}) }
+    });
+  }
+
   try {
     await waitUntilReady();
     const adminEmail = `admin-pg-${Date.now()}@example.test`;
@@ -165,6 +436,139 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async () =
     assert.equal(contours.status, 200);
     const contoursBody = await contours.json();
     assert.equal(typeof contoursBody.total, 'number');
+
+    await t.test('filter-matches anon in postgres matches legacy JS semantics', async () => {
+      const baseId = Number(`97${String(Date.now()).slice(-8)}`);
+      const fixtures = [
+        {
+          osmType: 'way',
+          osmId: baseId + 1,
+          tags: { name: 'Alpha House', foo: 'bar', prefix: 'sample-one' },
+          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9990,10.0010],[-169.9970,10.0010],[-169.9970,10.0030],[-169.9990,10.0030],[-169.9990,10.0010]]]}',
+          minLon: -169.9990,
+          minLat: 10.0010,
+          maxLon: -169.9970,
+          maxLat: 10.0030,
+          archiInfo: { name: 'Info Alpha', style: 'Modern', architect: 'Architect A' }
+        },
+        {
+          osmType: 'relation',
+          osmId: baseId + 2,
+          tags: { name: 'Beta Hall', foo: 'baz', style: 'TagStyle', prefix: 'start-here' },
+          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9960,10.0040],[-169.9940,10.0040],[-169.9940,10.0060],[-169.9960,10.0060],[-169.9960,10.0040]]]}',
+          minLon: -169.9960,
+          minLat: 10.0040,
+          maxLon: -169.9940,
+          maxLat: 10.0060,
+          archiInfo: { name: 'Info Beta', style: 'Classic' }
+        },
+        {
+          osmType: 'way',
+          osmId: baseId + 3,
+          tags: { 'archi.style': 'Neo', name: null },
+          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9950,10.0070],[-169.9930,10.0070],[-169.9930,10.0090],[-169.9950,10.0090],[-169.9950,10.0070]]]}',
+          minLon: -169.9950,
+          minLat: 10.0070,
+          maxLon: -169.9930,
+          maxLat: 10.0090,
+          archiInfo: { name: 'Gamma Tower', style: 'Brutalist', levels: 5 }
+        },
+        {
+          osmType: 'way',
+          osmId: baseId + 4,
+          tags: { prefix: 'none' },
+          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9920,10.0020],[-169.9900,10.0020],[-169.9900,10.0040],[-169.9920,10.0040],[-169.9920,10.0020]]]}',
+          minLon: -169.9920,
+          minLat: 10.0020,
+          maxLon: -169.9900,
+          maxLat: 10.0040,
+          archiInfo: null
+        }
+      ];
+
+      const payloads = [
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'name', op: 'contains', value: 'alpha' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'archi.style', op: 'equals', value: 'neo' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'foo', op: 'not_equals', value: 'bar' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'prefix', op: 'starts_with', value: 'start' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'style', op: 'exists', value: '' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'name', op: 'not_exists', value: '' }]
+        }
+      ];
+
+      try {
+        await upsertFilterFixtures(databaseUrl, fixtures);
+
+        for (let i = 0; i < payloads.length; i += 1) {
+          const payload = payloads[i];
+          const expected = await buildExpectedAnonMatches(databaseUrl, payload);
+
+          const response = await callAnonApi('/api/buildings/filter-matches', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          assert.equal(response.status, 200);
+          const body = await response.json();
+
+          const actualKeys = [...(body.matchedKeys || [])].sort();
+          const expectedKeys = [...expected.matchedKeys].sort();
+          assert.deepEqual(actualKeys, expectedKeys);
+
+          const actualFeatureIds = [...(body.matchedFeatureIds || [])].map((value) => Number(value)).sort((a, b) => a - b);
+          const expectedFeatureIds = [...expected.matchedFeatureIds].map((value) => Number(value)).sort((a, b) => a - b);
+          assert.deepEqual(actualFeatureIds, expectedFeatureIds);
+
+          assert.equal(Boolean(body?.meta?.truncated), expected.truncated);
+          assert.equal(Boolean(body?.meta?.cacheHit), false);
+          assert.equal(typeof body?.meta?.rulesHash, 'string');
+          assert.equal(typeof body?.meta?.bboxHash, 'string');
+
+          if (i === 0) {
+            const cached = await callAnonApi('/api/buildings/filter-matches', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            assert.equal(cached.status, 200);
+            const cachedBody = await cached.json();
+            assert.equal(Boolean(cachedBody?.meta?.cacheHit), true);
+            assert.deepEqual([...(cachedBody.matchedKeys || [])].sort(), expectedKeys);
+          }
+        }
+      } finally {
+        await cleanupFilterFixtures(databaseUrl, fixtures);
+      }
+    });
 
     for (const sqlitePath of Object.values(sqlitePaths)) {
       assert.equal(fs.existsSync(sqlitePath), false, `SQLite file should not be created in postgres mode: ${sqlitePath}`);
