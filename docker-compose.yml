@@ -40,7 +40,7 @@ services:
       - redis-data:/data
 
   db-postgres:
-    image: postgis/postgis:16-3.4
+    image: imresamu/postgis:16-3.4-bookworm
     container_name: archimap-postgres
     restart: unless-stopped
     environment:
