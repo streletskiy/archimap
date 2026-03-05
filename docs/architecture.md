@@ -23,7 +23,9 @@
 
 ## Security and auth points
 
-- Security headers/CSP: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`.
+- Security headers/CSP:
+  - internal app runtime: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`
+  - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
 - Auth/session routes: `src/lib/server/auth/index.js`.
 - CSRF enforcement: `src/lib/server/services/csrf.service.js`.
 - Error normalization: `src/lib/server/infra/error-handling.infra.js`.

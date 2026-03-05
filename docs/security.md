@@ -2,7 +2,9 @@
 
 ## CSP
 
-- Implemented in `src/lib/server/infra/csp.infra.js`, applied via `security-headers.infra.js`.
+- Implemented in two runtime layers:
+  - internal app/API runtime: `src/lib/server/infra/csp.infra.js`, applied via `security-headers.infra.js`
+  - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
 - Prod profile:
   - `default-src 'self'`
   - `script-src 'self'` (no `unsafe-inline`)
@@ -20,6 +22,7 @@
 
 ## Security headers
 
+- Applied by both the internal app runtime and the SvelteKit hook.
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `X-Frame-Options: DENY`
@@ -34,8 +37,13 @@
 
 ## CSRF
 
-- Mutating routes require `x-csrf-token`.
+- CSRF is enforced on session-authenticated mutating routes such as:
+  - `POST /api/logout`
+  - `POST /api/account/*`
+  - `POST /api/building-info`
+  - `POST /api/admin/**`
 - Token is session-bound and validated by `requireCsrfSession`.
+- Login/registration/password-reset flows do not require CSRF; they rely on rate limits, session rotation, and one-time email tokens.
 - Integration coverage includes negative path (`mutation without CSRF -> 403`).
 
 ## Logging and redaction

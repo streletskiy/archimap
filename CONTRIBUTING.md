@@ -3,11 +3,12 @@
 ## Development Setup
 
 1. Install dependencies:
-   - `npm install`
+   - `npm ci`
+   - `npm --prefix frontend ci`
 2. Copy env template:
    - [`.env.example`](.env.example) -> `.env`
 3. Run locally:
-   - `npm start`
+   - `npm run dev`
 
 ## Quality Gates
 
@@ -15,7 +16,7 @@ Before opening a PR, run:
 
 - `npm run format:check`
 - `npm run lint`
-- `npm test`
+- `npm run test`
 
 ## Frontend Guidelines (Required)
 

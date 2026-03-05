@@ -39,6 +39,8 @@ Details -> [docs/architecture.md](docs/architecture.md)
 
 ```bash
 npm ci
+npm --prefix frontend ci
+cp .env.example .env
 npm run dev
 ```
 
@@ -52,7 +54,7 @@ npm run start
 Docker:
 
 ```bash
-docker-compose up
+docker compose up --build
 ```
 
 PostgreSQL + PostGIS is enabled in Docker Compose by default.
@@ -88,6 +90,7 @@ Push to another Docker account:
 Deploy on server (layer-based):
 
 ```bash
+export ARCHIMAP_IMAGE=streletskiy/archimap:1.2.3
 docker pull streletskiy/archimap:1.2.3
 docker compose up -d
 ```
@@ -108,6 +111,7 @@ Required for production:
 - `DATABASE_URL` or `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` for `DB_PROVIDER=postgres`
 - `DATABASE_PATH` / `ARCHIMAP_DB_PATH` only for `DB_PROVIDER=sqlite`
 - `REDIS_URL` (recommended for production sessions)
+- `SESSION_ALLOW_MEMORY_FALLBACK=false` when Redis is required in production
 
 Full list -> [docs/dev/env.md](docs/dev/env.md)
 
@@ -171,6 +175,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - Runbook -> [docs/runbook.md](docs/runbook.md)
 - Release guide -> [docs/dev/release.md](docs/dev/release.md)
 - Docker guide -> [docs/dev/docker.md](docs/dev/docker.md)
+- OpenAPI -> [docs/openapi.yaml](docs/openapi.yaml)
 
 ## Deep Links (URL state)
 

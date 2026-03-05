@@ -100,11 +100,17 @@ docker login
 Server deploy (layer-based):
 
 ```bash
+export ARCHIMAP_IMAGE=streletskiy/archimap:1.2.3
 docker pull streletskiy/archimap:1.2.3
 docker compose up -d
 ```
 
 Docker downloads only changed layers during pull.
+
+`docker-compose.yml` reads `ARCHIMAP_IMAGE`, so the same compose file can be used for:
+
+- local source builds (`docker compose up --build`, default image tag `streletskiy/archimap:dev`)
+- registry deploys (`ARCHIMAP_IMAGE=streletskiy/archimap:<version> docker compose up -d`)
 
 ## PostgreSQL + PostGIS (default in Compose)
 

@@ -15,6 +15,8 @@
 - `DATABASE_PATH` / `ARCHIMAP_DB_PATH` when `DB_PROVIDER=sqlite`
 - `REDIS_URL` (recommended; or enable explicit memory fallback)
 
+The exhaustive template with current defaults and comments is [`.env.example`](../../.env.example).
+
 ## Database provider toggle
 
 - `DB_PROVIDER` - `sqlite` or `postgres`.
@@ -44,7 +46,15 @@
 - `APP_BASE_URL`
 - `TRUST_PROXY`
 - `SESSION_COOKIE_SECURE`
+- `SESSION_ALLOW_MEMORY_FALLBACK`
+- `APP_SETTINGS_SECRET`
 - `CSP_CONNECT_SRC_EXTRA`
+
+## Observability and app identity
+
+- `LOG_LEVEL`
+- `METRICS_ENABLED`
+- `APP_DISPLAY_NAME`
 
 ## PMTiles / sync
 

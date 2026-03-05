@@ -2,14 +2,22 @@
 
 ## Production deploy
 
-1. Set required secrets/env (`SESSION_SECRET`, `APP_BASE_URL`, DB paths, SMTP if used).
+1. Set required secrets/env:
+   - `SESSION_SECRET`
+   - `APP_BASE_URL`
+   - `DB_PROVIDER`
+   - PostgreSQL connection via `DATABASE_URL` or full `POSTGRES_*`
+   - `REDIS_URL` for Redis-backed sessions, or explicit `SESSION_ALLOW_MEMORY_FALLBACK=false|true`
+   - `SMTP_*` / `EMAIL_FROM` if registration or password reset is enabled
 2. Pull release image: `docker pull streletskiy/archimap:<version>`.
 3. Set `ARCHIMAP_IMAGE=streletskiy/archimap:<version>` in environment (or `.env` used by Compose).
 4. Start/update service: `docker compose up -d`.
 5. Validate:
    - `/readyz`
    - `/healthz`
+   - `/api/version`
    - `/api/contours-status`
+   - `/metrics` only when `METRICS_ENABLED=true`
 
 ## Data refresh
 
@@ -39,12 +47,14 @@
 
 - Validate FTS source/index integrity.
 - Re-run sync/rebuild flow.
-- Check `/metrics` and request logs for high latency spikes.
+- Check `/metrics` when enabled and request logs for high latency spikes.
 
 ### Auth appears broken in local docker
 
 - Usually cookie dropped on non-HTTPS:
   - set `SESSION_COOKIE_SECURE=false` for local HTTP only.
+- If Redis is intentionally absent in local Docker:
+  - set `SESSION_ALLOW_MEMORY_FALLBACK=true`.
 
 ### Runtime mode and entrypoint
 
