@@ -19,6 +19,41 @@
    - `/api/contours-status`
    - `/metrics` only when `METRICS_ENABLED=true`
 
+## Docker release script behavior
+
+- Runtime base tag is derived from dependency versions (`tippecanoe`, `quackosm`, `duckdb`, `pip`).
+- `scripts/release-docker.sh` and `scripts/release-docker.ps1` now skip rebuilding `runtime-base` if that tag already exists in registry.
+- Force rebuild only when needed:
+  - Bash: `--force-runtime-base`
+  - PowerShell: `-ForceRuntimeBase`
+
+### How to run the Docker release scripts
+
+1. Prerequisites:
+   - `docker` is installed and running.
+   - `docker buildx` is available.
+   - Logged in to target registry (`docker login`).
+2. Linux/macOS (Bash):
+   - Minimal release:
+     - `./scripts/release-docker.sh --version 1.2.3`
+   - Custom image/platforms:
+     - `./scripts/release-docker.sh --version 1.2.3 --image yourorg/archimap --platforms linux/amd64,linux/arm64`
+   - Force runtime-base rebuild:
+     - `./scripts/release-docker.sh --version 1.2.3 --force-runtime-base`
+3. Windows (PowerShell):
+   - Minimal release:
+     - `./scripts/release-docker.ps1 -Version 1.2.3`
+   - Custom image/platforms:
+     - `./scripts/release-docker.ps1 -Version 1.2.3 -Image yourorg/archimap -Platforms linux/amd64,linux/arm64`
+   - Force runtime-base rebuild:
+     - `./scripts/release-docker.ps1 -Version 1.2.3 -ForceRuntimeBase`
+4. Optional cache control:
+   - Bash: `--no-cache` or `--cache-ref yourorg/archimap:buildcache`
+   - PowerShell: `-NoCache` or `-CacheRef yourorg/archimap:buildcache`
+5. Deploy published version:
+   - `docker pull <image>:<version>`
+   - `docker compose up -d`
+
 ## Data refresh
 
 1. Update OSM source settings.

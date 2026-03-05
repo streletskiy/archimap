@@ -14,6 +14,7 @@ RUNTIME_BASE_TAG=""
 BUILDER="archimap-multiarch"
 SKIP_BINFMT_REPAIR=0
 SKIP_RUNTIME_BASE=0
+FORCE_RUNTIME_BASE=0
 
 usage() {
   cat <<'EOF'
@@ -34,6 +35,7 @@ Options:
   --builder <value>           Buildx builder name (default: archimap-multiarch)
   --skip-binfmt-repair        Skip binfmt auto-install
   --skip-runtime-base         Skip runtime-base build/push (use existing tag)
+  --force-runtime-base        Force runtime-base rebuild/push even if tag exists
   -h, --help                  Show help
 EOF
 }
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --builder) BUILDER="${2:-}"; shift 2 ;;
     --skip-binfmt-repair) SKIP_BINFMT_REPAIR=1; shift ;;
     --skip-runtime-base) SKIP_RUNTIME_BASE=1; shift ;;
+    --force-runtime-base) FORCE_RUNTIME_BASE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -184,28 +187,43 @@ fi
 args+=( --push . )
 
 if [[ "${SKIP_RUNTIME_BASE}" -eq 0 ]]; then
-  base_args=(
-    buildx build
-    --builder "${BUILDER}"
-    --platform "${PLATFORMS}"
-    --target runtime-base
-    --build-arg "TIPPECANOE_REF=${TIPPECANOE_REF}"
-    --build-arg "QUACKOSM_VERSION=${QUACKOSM_VERSION}"
-    --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
-    --build-arg "PIP_VERSION=${PIP_VERSION}"
-    -t "${RUNTIME_BASE_IMAGE}"
-  )
-  if [[ "${NO_CACHE}" -eq 1 ]]; then
-    base_args+=( --no-cache )
-  else
-    base_args+=( --cache-from "type=registry,ref=${CACHE_REF}" )
-    base_args+=( --cache-to "type=registry,ref=${CACHE_REF},mode=max" )
+  runtime_base_exists=0
+  if docker buildx imagetools inspect "${RUNTIME_BASE_IMAGE}" >/dev/null 2>&1; then
+    runtime_base_exists=1
   fi
-  base_args+=( --push . )
 
-  log "Publishing runtime-base image..."
-  log "Runtime base tag: ${RUNTIME_BASE_IMAGE}"
-  docker "${base_args[@]}"
+  if [[ "${FORCE_RUNTIME_BASE}" -eq 1 || "${runtime_base_exists}" -eq 0 ]]; then
+    base_args=(
+      buildx build
+      --builder "${BUILDER}"
+      --platform "${PLATFORMS}"
+      --target runtime-base
+      --build-arg "TIPPECANOE_REF=${TIPPECANOE_REF}"
+      --build-arg "QUACKOSM_VERSION=${QUACKOSM_VERSION}"
+      --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
+      --build-arg "PIP_VERSION=${PIP_VERSION}"
+      -t "${RUNTIME_BASE_IMAGE}"
+    )
+    if [[ "${NO_CACHE}" -eq 1 ]]; then
+      base_args+=( --no-cache )
+    else
+      base_args+=( --cache-from "type=registry,ref=${CACHE_REF}" )
+      base_args+=( --cache-to "type=registry,ref=${CACHE_REF},mode=max" )
+    fi
+    base_args+=( --push . )
+
+    if [[ "${FORCE_RUNTIME_BASE}" -eq 1 ]]; then
+      log "Force-publishing runtime-base image..."
+    else
+      log "Publishing runtime-base image (not found in registry)..."
+    fi
+    log "Runtime base tag: ${RUNTIME_BASE_IMAGE}"
+    docker "${base_args[@]}"
+  else
+    log "Runtime-base image already exists. Skipping rebuild:"
+    log "  ${RUNTIME_BASE_IMAGE}"
+    log "Use --force-runtime-base to rebuild it explicitly."
+  fi
 fi
 
 log "Publishing app image..."

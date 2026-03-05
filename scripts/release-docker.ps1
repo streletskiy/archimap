@@ -24,7 +24,9 @@ param(
 
   [switch]$SkipBinfmtRepair,
 
-  [switch]$SkipRuntimeBase
+  [switch]$SkipRuntimeBase,
+
+  [switch]$ForceRuntimeBase
 )
 
 $ErrorActionPreference = "Stop"
@@ -296,38 +298,51 @@ if ($NoCache) {
 $args += "."
 
 if (-not $SkipRuntimeBase) {
-  $baseArgs = @(
-    "buildx", "build",
-    "--builder", $Builder,
-    "--platform", $Platforms,
-    "--target", "runtime-base",
-    "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
-    "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
-    "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
-    "--build-arg", "PIP_VERSION=$PipVersion",
-    "-t", $RuntimeBaseImage,
-    "--push"
-  )
-  if ($NoCache) {
-    $baseArgs += "--no-cache"
-  } else {
-    $baseArgs += @("--cache-from", "type=registry,ref=$CacheRef")
-    $baseArgs += @("--cache-to", "type=registry,ref=$CacheRef,mode=max")
-  }
-  $baseArgs += "."
+  $inspectRuntimeBase = Invoke-DockerCapture -CommandArgs @("buildx", "imagetools", "inspect", $RuntimeBaseImage)
+  $runtimeBaseExists = ($inspectRuntimeBase.ExitCode -eq 0)
 
-  Write-Host "Publishing runtime-base image..." -ForegroundColor Cyan
-  Write-Host "Runtime base tag: $RuntimeBaseImage" -ForegroundColor Gray
-  $previousBase = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & docker @baseArgs
-    $baseExitCode = $LASTEXITCODE
-  } finally {
-    $ErrorActionPreference = $previousBase
-  }
-  if ($baseExitCode -ne 0) {
-    throw "docker buildx build (runtime-base) failed with exit code $baseExitCode"
+  if ($ForceRuntimeBase -or -not $runtimeBaseExists) {
+    $baseArgs = @(
+      "buildx", "build",
+      "--builder", $Builder,
+      "--platform", $Platforms,
+      "--target", "runtime-base",
+      "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
+      "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
+      "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
+      "--build-arg", "PIP_VERSION=$PipVersion",
+      "-t", $RuntimeBaseImage,
+      "--push"
+    )
+    if ($NoCache) {
+      $baseArgs += "--no-cache"
+    } else {
+      $baseArgs += @("--cache-from", "type=registry,ref=$CacheRef")
+      $baseArgs += @("--cache-to", "type=registry,ref=$CacheRef,mode=max")
+    }
+    $baseArgs += "."
+
+    if ($ForceRuntimeBase) {
+      Write-Host "Force-publishing runtime-base image..." -ForegroundColor Cyan
+    } else {
+      Write-Host "Publishing runtime-base image (not found in registry)..." -ForegroundColor Cyan
+    }
+    Write-Host "Runtime base tag: $RuntimeBaseImage" -ForegroundColor Gray
+    $previousBase = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      & docker @baseArgs
+      $baseExitCode = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previousBase
+    }
+    if ($baseExitCode -ne 0) {
+      throw "docker buildx build (runtime-base) failed with exit code $baseExitCode"
+    }
+  } else {
+    Write-Host "Runtime-base image already exists. Skipping rebuild:" -ForegroundColor Green
+    Write-Host "  $RuntimeBaseImage" -ForegroundColor Gray
+    Write-Host "Use -ForceRuntimeBase to rebuild it explicitly." -ForegroundColor Gray
   }
 }
 
