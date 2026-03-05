@@ -415,7 +415,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
       const rows = isPostgres
         ? await (() => {
-          const valuesSql = pairs.map(() => '(?, ?)').join(', ');
+          const valuesSql = pairs.map(() => '(?::text, ?::bigint)').join(', ');
           const params = [];
           for (const pair of pairs) {
             params.push(pair.osmType, pair.osmId);

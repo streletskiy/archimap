@@ -533,7 +533,7 @@ function registerBuildingsRoutes(deps) {
       const chunk = unique.slice(i, i + CHUNK_SIZE);
       const rows = isPostgres
         ? await (() => {
-          const valuesSql = chunk.map(() => '(?, ?)').join(', ');
+          const valuesSql = chunk.map(() => '(?::text, ?::bigint)').join(', ');
           const params = [];
           for (const item of chunk) {
             params.push(item.osmType, item.osmId);

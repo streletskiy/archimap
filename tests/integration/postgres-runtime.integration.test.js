@@ -222,6 +222,61 @@ async function cleanupFilterFixtures(connectionString, fixtures) {
   }
 }
 
+async function insertUserEditFixtures(connectionString, fixtures) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    for (const fixture of fixtures) {
+      await client.query(`
+        INSERT INTO user_edits.building_user_edits (
+          osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, admin_comment, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+      `, [
+        fixture.osmType,
+        fixture.osmId,
+        fixture.createdBy,
+        fixture.name ?? null,
+        fixture.style ?? null,
+        fixture.levels ?? null,
+        fixture.yearBuilt ?? null,
+        fixture.architect ?? null,
+        fixture.address ?? null,
+        fixture.archimapDescription ?? null,
+        fixture.status ?? 'pending',
+        fixture.adminComment ?? null
+      ]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+async function cleanupUserEditFixtures(connectionString, fixtures) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    for (const fixture of fixtures) {
+      await client.query(
+        'DELETE FROM user_edits.building_user_edits WHERE osm_type = $1 AND osm_id = $2 AND lower(trim(created_by)) = lower(trim($3))',
+        [fixture.osmType, fixture.osmId, fixture.createdBy]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 async function buildExpectedAnonMatches(connectionString, payload) {
   const bbox = payload.bbox || {};
   const maxResults = Number(payload.maxResults || 12000);
@@ -566,6 +621,65 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
           }
         }
       } finally {
+        await cleanupFilterFixtures(databaseUrl, fixtures);
+      }
+    });
+
+    await t.test('building endpoints return personal edits in postgres', async () => {
+      const baseId = Number(`98${String(Date.now()).slice(-8)}`);
+      const fixtures = [
+        {
+          osmType: 'way',
+          osmId: baseId + 1,
+          tags: { name: 'Draft Overlay House' },
+          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9890,10.0010],[-169.9870,10.0010],[-169.9870,10.0030],[-169.9890,10.0030],[-169.9890,10.0010]]]}',
+          minLon: -169.9890,
+          minLat: 10.0010,
+          maxLon: -169.9870,
+          maxLat: 10.0030,
+          archiInfo: null
+        }
+      ];
+      const editFixtures = [
+        {
+          osmType: 'way',
+          osmId: baseId + 1,
+          createdBy: adminEmail,
+          name: 'Черновик пользователя',
+          style: 'Constructivism',
+          address: 'Тестовый адрес, 1',
+          archimapDescription: 'Локальное описание',
+          status: 'pending'
+        }
+      ];
+
+      try {
+        await upsertFilterFixtures(databaseUrl, fixtures);
+        await insertUserEditFixtures(databaseUrl, editFixtures);
+
+        const buildingResponse = await callApi(`/api/building/way/${baseId + 1}`);
+        assert.equal(buildingResponse.status, 200);
+        const buildingBody = await buildingResponse.json();
+        assert.equal(buildingBody?.properties?.osm_key, `way/${baseId + 1}`);
+        assert.equal(buildingBody?.properties?.archiInfo?.name, 'Черновик пользователя');
+        assert.equal(buildingBody?.properties?.archiInfo?.review_status, 'pending');
+        assert.equal(buildingBody?.properties?.archiInfo?.updated_by, adminEmail);
+
+        const filterDataResponse = await callApi('/api/buildings/filter-data', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ keys: [`way/${baseId + 1}`] })
+        });
+        assert.equal(filterDataResponse.status, 200);
+        const filterDataBody = await filterDataResponse.json();
+        assert.equal(Array.isArray(filterDataBody.items), true);
+        assert.equal(filterDataBody.items.length, 1);
+        assert.equal(filterDataBody.items[0]?.osmKey, `way/${baseId + 1}`);
+        assert.equal(filterDataBody.items[0]?.archiInfo?.name, 'Черновик пользователя');
+        assert.equal(filterDataBody.items[0]?.archiInfo?.review_status, 'pending');
+        assert.equal(filterDataBody.items[0]?.archiInfo?.updated_by, adminEmail);
+      } finally {
+        await cleanupUserEditFixtures(databaseUrl, editFixtures);
         await cleanupFilterFixtures(databaseUrl, fixtures);
       }
     });
