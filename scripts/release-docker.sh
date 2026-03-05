@@ -80,6 +80,13 @@ export DOCKER_BUILDKIT=1
 
 BUILD_SHA="$(git rev-parse --short HEAD 2>/dev/null | tr '[:upper:]' '[:lower:]')"
 BUILD_DESCRIBE="$(git describe --tags --always --dirty 2>/dev/null)"
+BUILD_LATEST_TAG=""
+while IFS= read -r tag; do
+  if [[ "${tag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+    BUILD_LATEST_TAG="${tag}"
+    break
+  fi
+done < <(git tag --list --sort=-v:refname 2>/dev/null)
 if [[ -z "${BUILD_SHA}" || -z "${BUILD_DESCRIBE}" ]]; then
   echo "Failed to resolve git metadata (BUILD_SHA/BUILD_DESCRIBE)." >&2
   exit 1
@@ -142,6 +149,7 @@ args=(
   --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
   --build-arg "BUILD_SHA=${BUILD_SHA}"
   --build-arg "BUILD_DESCRIBE=${BUILD_DESCRIBE}"
+  --build-arg "BUILD_LATEST_TAG=${BUILD_LATEST_TAG}"
   -t "${IMAGE}:${VERSION}"
 )
 
@@ -167,6 +175,9 @@ log "QuackOSM version: ${QUACKOSM_VERSION}"
 log "DuckDB version: ${DUCKDB_VERSION}"
 log "Build SHA: ${BUILD_SHA}"
 log "Build describe: ${BUILD_DESCRIBE}"
+if [[ -n "${BUILD_LATEST_TAG}" ]]; then
+  log "Build latest tag: ${BUILD_LATEST_TAG}"
+fi
 if [[ "${NO_CACHE}" -eq 1 ]]; then
   log "Build cache: disabled (--no-cache)"
 else

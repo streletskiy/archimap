@@ -217,6 +217,7 @@ function Get-GitBuildMetadata {
   try {
     $sha = (& git rev-parse --short HEAD 2>$null | Out-String).Trim().ToLowerInvariant()
     $describe = (& git describe --tags --always --dirty 2>$null | Out-String).Trim()
+    $allTags = (& git tag --list --sort=-v:refname 2>$null)
   } finally {
     $ErrorActionPreference = $previous
   }
@@ -225,9 +226,19 @@ function Get-GitBuildMetadata {
     throw "Failed to resolve git metadata (BUILD_SHA/BUILD_DESCRIBE). Ensure this is a git checkout with at least one commit."
   }
 
+  $latestTag = ""
+  foreach ($tag in @($allTags)) {
+    $candidate = [string]$tag
+    if ($candidate -match '^v?\d+\.\d+\.\d+(?:[-+\.][0-9A-Za-z.-]+)?$') {
+      $latestTag = $candidate.Trim()
+      break
+    }
+  }
+
   return @{
     Sha = $sha
     Describe = $describe
+    LatestTag = $latestTag
   }
 }
 
@@ -257,7 +268,8 @@ $args = @(
   "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
   "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
   "--build-arg", "BUILD_SHA=$($gitBuild.Sha)",
-  "--build-arg", "BUILD_DESCRIBE=$($gitBuild.Describe)"
+  "--build-arg", "BUILD_DESCRIBE=$($gitBuild.Describe)",
+  "--build-arg", "BUILD_LATEST_TAG=$($gitBuild.LatestTag)"
 ) + $tags + @("--push")
 
 if ($NoCache) {
@@ -278,6 +290,9 @@ Write-Host "QuackOSM version: $QuackosmVersion" -ForegroundColor Gray
 Write-Host "DuckDB version: $DuckdbVersion" -ForegroundColor Gray
 Write-Host "Build SHA: $($gitBuild.Sha)" -ForegroundColor Gray
 Write-Host "Build describe: $($gitBuild.Describe)" -ForegroundColor Gray
+if (-not [string]::IsNullOrWhiteSpace($gitBuild.LatestTag)) {
+  Write-Host "Build latest tag: $($gitBuild.LatestTag)" -ForegroundColor Gray
+}
 if ($NoCache) {
   Write-Host "Build cache: disabled (--no-cache)" -ForegroundColor Yellow
 } else {

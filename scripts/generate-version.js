@@ -32,6 +32,17 @@ function runGit(command) {
   }
 }
 
+function resolveLatestSemverTagFromGit() {
+  const raw = runGit('git tag --list --sort=-v:refname');
+  if (!raw) return '';
+  const lines = raw.split(/\r?\n/);
+  for (const line of lines) {
+    const normalized = normalizeVersion(line);
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
 function writeJsonFile(filePath, payload) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
@@ -42,11 +53,13 @@ function main() {
   const buildTime = new Date().toISOString();
   const describe = String(process.env.BUILD_DESCRIBE || '').trim() || runGit('git describe --tags --always --dirty');
   const commit = String(process.env.BUILD_SHA || '').trim().toLowerCase() || runGit('git rev-parse --short HEAD');
+  const latestTag = normalizeVersion(process.env.BUILD_LATEST_TAG) || resolveLatestSemverTagFromGit();
   const gitAvailable = Boolean(describe || commit);
   const payload = createVersionPayload({
     packageVersion,
     describe,
     commit,
+    latestTag,
     buildTime,
     appName: 'archimap',
     gitAvailable

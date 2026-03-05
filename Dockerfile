@@ -51,13 +51,14 @@ FROM --platform=$BUILDPLATFORM frontend-deps AS frontend-build
 WORKDIR /app
 ARG BUILD_SHA
 ARG BUILD_DESCRIBE
+ARG BUILD_LATEST_TAG
 
 COPY package.json ./
 COPY scripts ./scripts
 COPY src/lib ./src/lib
 COPY legal ./legal
 COPY frontend ./frontend
-RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" node scripts/generate-version.js \
+RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG="${BUILD_LATEST_TAG}" node scripts/generate-version.js \
   && npm --prefix frontend run build \
   && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\\n')"
 

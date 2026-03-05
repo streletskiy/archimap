@@ -30,6 +30,92 @@ function parseCommitFromDescribe(describe) {
   return '';
 }
 
+function parseSemverParts(version) {
+  const normalized = normalizeVersion(version);
+  if (!normalized) return null;
+  const withoutBuild = normalized.split('+', 1)[0];
+  const [core, prereleaseRaw = ''] = withoutBuild.split('-', 2);
+  const [majorRaw, minorRaw, patchRaw] = core.split('.');
+  const major = Number(majorRaw);
+  const minor = Number(minorRaw);
+  const patch = Number(patchRaw);
+
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || !Number.isInteger(patch)) {
+    return null;
+  }
+
+  const prerelease = prereleaseRaw
+    ? prereleaseRaw.split('.').filter((item) => item.length > 0)
+    : [];
+
+  return { major, minor, patch, prerelease };
+}
+
+function comparePrereleaseIdentifier(left, right) {
+  const leftIsNumeric = /^\d+$/.test(left);
+  const rightIsNumeric = /^\d+$/.test(right);
+
+  if (leftIsNumeric && rightIsNumeric) {
+    const leftNum = Number(left);
+    const rightNum = Number(right);
+    if (leftNum < rightNum) return -1;
+    if (leftNum > rightNum) return 1;
+    return 0;
+  }
+
+  if (leftIsNumeric && !rightIsNumeric) return -1;
+  if (!leftIsNumeric && rightIsNumeric) return 1;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function compareSemver(leftVersion, rightVersion) {
+  const left = parseSemverParts(leftVersion);
+  const right = parseSemverParts(rightVersion);
+
+  if (!left && !right) return 0;
+  if (!left) return -1;
+  if (!right) return 1;
+
+  if (left.major !== right.major) return left.major < right.major ? -1 : 1;
+  if (left.minor !== right.minor) return left.minor < right.minor ? -1 : 1;
+  if (left.patch !== right.patch) return left.patch < right.patch ? -1 : 1;
+
+  const leftPre = left.prerelease;
+  const rightPre = right.prerelease;
+  const leftHasPre = leftPre.length > 0;
+  const rightHasPre = rightPre.length > 0;
+
+  if (!leftHasPre && !rightHasPre) return 0;
+  if (!leftHasPre) return 1;
+  if (!rightHasPre) return -1;
+
+  const maxLen = Math.max(leftPre.length, rightPre.length);
+  for (let i = 0; i < maxLen; i += 1) {
+    const leftId = leftPre[i];
+    const rightId = rightPre[i];
+    if (leftId == null) return -1;
+    if (rightId == null) return 1;
+    const idCompare = comparePrereleaseIdentifier(leftId, rightId);
+    if (idCompare !== 0) return idCompare;
+  }
+
+  return 0;
+}
+
+function pickHighestSemver(candidates = []) {
+  let selected = '';
+  for (const candidate of candidates) {
+    const normalized = normalizeVersion(candidate);
+    if (!normalized) continue;
+    if (!selected || compareSemver(normalized, selected) > 0) {
+      selected = normalized;
+    }
+  }
+  return selected;
+}
+
 function createVersionPayload(input = {}) {
   const packageVersion = normalizeVersion(input.packageVersion) || '0.0.0';
   const describe = String(input.describe || '').trim();
@@ -39,12 +125,14 @@ function createVersionPayload(input = {}) {
   const appName = String(input.appName || 'archimap').trim() || 'archimap';
   const gitAvailable = Boolean(input.gitAvailable);
   const semverFromGit = parseSemverFromDescribe(describe);
+  const latestTag = normalizeVersion(input.latestTag);
+  const versionFromTags = pickHighestSemver([semverFromGit, latestTag]);
   const safeDescribe = describe || (gitAvailable ? 'unknown' : 'git-unavailable');
   const safeCommit = commit || parseCommitFromDescribe(describe) || 'unknown';
-  const isTaggedRelease = EXACT_SEMVER_TAG_RE.test(describe.replace(/-dirty$/i, '')) && !dirty;
-  const version = gitAvailable
-    ? (semverFromGit || '0.0.0')
-    : packageVersion;
+  const describeWithoutDirty = describe.replace(/-dirty$/i, '');
+  const isDescribeCommitAhead = /-\d+-g[0-9a-f]+$/i.test(describeWithoutDirty);
+  const isTaggedRelease = EXACT_SEMVER_TAG_RE.test(describeWithoutDirty) && !isDescribeCommitAhead && !dirty;
+  const version = versionFromTags || (gitAvailable ? '0.0.0' : packageVersion);
 
   return {
     version,
@@ -61,8 +149,10 @@ function createVersionPayload(input = {}) {
 }
 
 module.exports = {
+  compareSemver,
   createVersionPayload,
   normalizeVersion,
   parseCommitFromDescribe,
-  parseSemverFromDescribe
+  parseSemverFromDescribe,
+  pickHighestSemver
 };
