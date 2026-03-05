@@ -11,7 +11,7 @@
   import { apiJson, apiJsonCached } from '$lib/services/http';
   import { session } from '$lib/stores/auth';
   import { mapCenter, mapReady, mapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
-  import { buildingModalOpen, openBuildingModal } from '$lib/stores/ui';
+  import { buildingModalOpen, closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
   import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
   import {
     filterSearchItemsByStyleKey,
@@ -40,10 +40,12 @@
   let urlUpdateInFlight = false;
   let cameraApplyInFlight = false;
   let buildingApplyInFlight = false;
+  let buildingCloseInFlight = false;
   let activeBuildingDetailsAbortController = null;
   let activeBuildingDetailsToken = 0;
   let lastAppliedCameraKey = '';
   let lastAppliedBuildingKey = '';
+  let lastUrlBuildingKey = '';
   let handledUrlSignature = '';
 
   function isSelectionDebugEnabled() {
@@ -146,6 +148,12 @@
     const signature = `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}|${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`;
     if (signature === handledUrlSignature) return;
     handledUrlSignature = signature;
+    if (buildingCloseInFlight) return;
+    const nextUrlBuildingKey = state.building
+      ? `${state.building.osmType}/${state.building.osmId}`
+      : '';
+    const hadUrlBuildingKey = lastUrlBuildingKey;
+    lastUrlBuildingKey = nextUrlBuildingKey;
 
     if (state.camera && $mapReady) {
       const cameraKey = `${state.camera.lat}:${state.camera.lng}:${state.camera.z ?? ''}`;
@@ -166,9 +174,15 @@
 
     if (state.building) {
       await applyBuildingFromUrl(state.building);
-    } else if ($buildingModalOpen || $selectedBuilding) {
+    } else if (hadUrlBuildingKey && ($buildingModalOpen || $selectedBuilding)) {
       if (!buildingApplyInFlight) {
+        if (activeBuildingDetailsAbortController) {
+          activeBuildingDetailsAbortController.abort();
+          activeBuildingDetailsAbortController = null;
+        }
+        buildingDetails = null;
         setSelectedBuilding(null);
+        closeBuildingModal();
       }
     }
   }
@@ -288,6 +302,7 @@
       osmType: normalized.osmType,
       osmId: normalized.osmId
     };
+    lastAppliedBuildingKey = `${normalized.osmType}/${normalized.osmId}`;
     saveBuildingStatus = '';
     debugSelectionLog('panel-open', {
       selectionKey: `${normalized.osmType}/${normalized.osmId}`
@@ -295,6 +310,25 @@
     openBuildingModal();
     buildingDetails = null;
     void loadBuildingDetails(normalized);
+  }
+
+  function closeBuildingSelection() {
+    buildingCloseInFlight = true;
+    if (activeBuildingDetailsAbortController) {
+      activeBuildingDetailsAbortController.abort();
+      activeBuildingDetailsAbortController = null;
+    }
+    buildingDetails = null;
+    setSelectedBuilding(null);
+    closeBuildingModal();
+    const clearUrl = $mapReady
+      ? replaceUrlState({ building: null })
+      : Promise.resolve();
+    void clearUrl.finally(() => {
+      queueMicrotask(() => {
+        buildingCloseInFlight = false;
+      });
+    });
   }
 
   async function onBuildingClick(event) {
@@ -555,6 +589,7 @@
   savePending={saveBuildingPending}
   saveStatus={saveBuildingStatus}
   on:save={onSaveBuildingEdit}
+  on:close={closeBuildingSelection}
 />
 <SearchModal on:selectResult={onSelectSearchResult} />
 

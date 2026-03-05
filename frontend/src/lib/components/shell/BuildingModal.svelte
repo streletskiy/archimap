@@ -1,8 +1,8 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { buildingModalOpen, closeBuildingModal } from '$lib/stores/ui';
-  import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
+  import { buildingModalOpen } from '$lib/stores/ui';
+  import { selectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
   import {
     getArchitectureStyleOptions,
@@ -147,21 +147,18 @@
 
   function closeOnBackdrop(event) {
     if (event.target === event.currentTarget) {
-      setSelectedBuilding(null);
-      closeBuildingModal();
+      dispatch('close');
     }
   }
 
   function closeOnKeydown(event) {
     if (event.key === 'Escape') {
-      setSelectedBuilding(null);
-      closeBuildingModal();
+      dispatch('close');
     }
   }
 
   function closeModal() {
-    setSelectedBuilding(null);
-    closeBuildingModal();
+    dispatch('close');
   }
 
   $: if ($buildingModalOpen && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
