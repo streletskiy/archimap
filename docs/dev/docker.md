@@ -33,7 +33,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 - Uses pinned `node:20-bookworm-slim`.
 - Contains only runtime assets:
-  - backend runtime code (`server.js`, `src/`, `scripts/`, `workers/`)
+  - backend runtime code (`server.sveltekit.js`, `server.js`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`
   - production `node_modules`
   - python venv with `quackosm`/`duckdb`

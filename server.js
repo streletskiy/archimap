@@ -2,7 +2,6 @@ require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
-const express = require('express');
 const { ensureAuthSchema, registerAuthRoutes } = require('./src/lib/server/auth');
 const { createSimpleRateLimiter } = require('./src/lib/server/services/rate-limiter.service');
 const { createSearchService } = require('./src/lib/server/services/search.service');
@@ -27,11 +26,12 @@ const { initSyncWorkersInfra } = require('./src/lib/server/infra/sync-workers.in
 const { createDbRuntime } = require('./src/lib/server/infra/db-runtime.infra');
 const { initObservabilityInfra } = require('./src/lib/server/infra/observability.infra');
 const { registerContoursStatusRoute } = require('./src/routes/contours-status.route');
-const { registerAppRoutes, registerFrontendStaticRoute } = require('./src/routes/app.route');
+const { registerAppRoutes } = require('./src/routes/app.route');
 const { registerAdminRoutes } = require('./src/routes/admin.route');
 const { registerBuildingsRoutes } = require('./src/routes/buildings.route');
 const { registerSearchRoutes } = require('./src/routes/search.route');
 const { registerAccountRoutes } = require('./src/routes/account.route');
+const { createMiniApp, jsonMiddleware } = require('./src/lib/server/infra/mini-app.infra');
 const { getAppVersion, getBuildInfo } = require('./src/lib/server/version');
 const {
   registrationCodeHtmlTemplate,
@@ -41,7 +41,7 @@ const {
 } = require('./src/lib/server/email-templates');
 const { spawn } = require('child_process');
 
-const app = express();
+const app = createMiniApp();
 app.disable('x-powered-by');
 
 const runtimeEnv = parseRuntimeEnv(process.env);
@@ -403,7 +403,7 @@ function applySmtpSettingsSnapshot(saved) {
   };
 }
 
-app.use(express.json());
+app.use(jsonMiddleware());
 
 const selectFilterTagKeysFromCache = db.prepare(`
   SELECT tag_key
@@ -1064,7 +1064,6 @@ registerAccountRoutes({
 });
 
 registerContoursStatusRoute(app, db, contoursStatusRateLimiter);
-registerFrontendStaticRoute({ app, rootDir: __dirname });
 registerErrorHandlers(app, { logger, nodeEnv: NODE_ENV });
 syncWorkers = initSyncWorkersInfra({
   spawn,
@@ -1092,43 +1091,140 @@ syncWorkers = initSyncWorkersInfra({
   }
 });
 
-function shutdown(signal) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logger.info('server_shutdown_started', { signal });
+let runtimeInitPromise = null;
+let startupTasksScheduled = false;
+let stopRuntimePromise = null;
 
-  if (syncWorkers) {
-    syncWorkers.stop();
-  }
-  if (currentSearchRebuildChild && !currentSearchRebuildChild.killed) {
-    try {
-      currentSearchRebuildChild.kill('SIGTERM');
-    } catch {
-      // ignore
-    }
-  }
-  if (currentFilterTagKeysRebuildChild && !currentFilterTagKeysRebuildChild.killed) {
-    try {
-      currentFilterTagKeysRebuildChild.kill('SIGTERM');
-    } catch {
-      // ignore
-    }
-  }
-
-  if (httpServer) {
-    httpServer.close(() => {
-      logger.info('server_shutdown_complete');
-      closeDbRuntime()
-        .finally(() => {
-          process.exit(0);
-        });
-    });
-  } else {
-    closeDbRuntime()
-      .finally(() => {
-        process.exit(0);
+function runStartupTasksOnce() {
+  if (startupTasksScheduled) return;
+  startupTasksScheduled = true;
+  Promise.resolve(dbRuntimePromise)
+    .then(() => {
+      scheduleGeneralConfigRefresh();
+      scheduleSmtpConfigRefresh();
+      rebuildSearchIndex('startup').catch((error) => {
+        logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
       });
-  }
+      scheduleFilterTagKeysCacheRebuild('startup');
+      if (syncWorkers) {
+        Promise.resolve(syncWorkers.initAutoSync()).catch((error) => {
+          logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
+        });
+      }
+      if (!rtreeState.ready) {
+        scheduleBuildingContoursRtreeRebuild('startup');
+      }
+    })
+    .catch((error) => {
+      logger.error('startup_tasks_wait_db_failed', { error: String(error?.message || error) });
+    });
+}
+
+function initializeRuntime() {
+  if (runtimeInitPromise) return runtimeInitPromise;
+  runtimeInitPromise = initSessionStore({
+    sessionSecret: SESSION_SECRET,
+    nodeEnv: NODE_ENV,
+    sessionCookieSecure: SESSION_COOKIE_SECURE,
+    redisUrl: REDIS_URL,
+    sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
+    maxAgeMs: 1000 * 60 * 60 * 24 * 30,
+    logger
+  })
+    .then((middleware) => {
+      sessionMiddleware = middleware;
+      validateSecurityConfig({
+        nodeEnv: NODE_ENV,
+        sessionSecret: SESSION_SECRET,
+        appBaseUrl: APP_BASE_URL,
+        sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK
+      });
+      return middleware;
+    })
+    .catch((error) => {
+      runtimeInitPromise = null;
+      throw error;
+    });
+  return runtimeInitPromise;
+}
+
+async function startHttpServer() {
+  await initializeRuntime();
+  if (httpServer) return httpServer;
+
+  await new Promise((resolve, reject) => {
+    const server = app.listen(PORT, HOST, () => {
+      httpServer = server;
+      logger.info('server_started', {
+        localUrl: `http://localhost:${PORT}`,
+        networkUrl: `http://${HOST}:${PORT}`,
+        nodeEnv: NODE_ENV
+      });
+      resolve();
+    });
+    server.once('error', reject);
+  });
+
+  runStartupTasksOnce();
+  return httpServer;
+}
+
+async function prepareRuntime() {
+  await initializeRuntime();
+  runStartupTasksOnce();
+  return app;
+}
+
+function stopRuntime(signal = 'manual') {
+  if (stopRuntimePromise) return stopRuntimePromise;
+  stopRuntimePromise = (async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('server_shutdown_started', { signal });
+
+    if (syncWorkers) {
+      syncWorkers.stop();
+    }
+    if (currentSearchRebuildChild && !currentSearchRebuildChild.killed) {
+      try {
+        currentSearchRebuildChild.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+    if (currentFilterTagKeysRebuildChild && !currentFilterTagKeysRebuildChild.killed) {
+      try {
+        currentFilterTagKeysRebuildChild.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+
+    if (httpServer) {
+      await new Promise((resolve) => {
+        httpServer.close(() => {
+          logger.info('server_shutdown_complete');
+          resolve();
+        });
+      });
+      httpServer = null;
+    }
+    await closeDbRuntime();
+  })().finally(() => {
+    stopRuntimePromise = null;
+  });
+  return stopRuntimePromise;
+}
+
+function shutdown(signal) {
+  stopRuntime(signal)
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((error) => {
+      logger.error('server_shutdown_failed', { error: String(error?.message || error) });
+      process.exit(1);
+    });
 
   setTimeout(() => {
     logger.error('server_shutdown_forced_timeout');
@@ -1136,58 +1232,24 @@ function shutdown(signal) {
   }, 10000).unref();
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+if (require.main === module) {
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 
-initSessionStore({
-  sessionSecret: SESSION_SECRET,
-  nodeEnv: NODE_ENV,
-  sessionCookieSecure: SESSION_COOKIE_SECURE,
-  redisUrl: REDIS_URL,
-  sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
-  maxAgeMs: 1000 * 60 * 60 * 24 * 30,
-  logger
-})
-  .then((middleware) => {
-    sessionMiddleware = middleware;
-    validateSecurityConfig({
-      nodeEnv: NODE_ENV,
-      sessionSecret: SESSION_SECRET,
-      appBaseUrl: APP_BASE_URL,
-      sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK
+  startHttpServer()
+    .catch((error) => {
+      logger.error('server_session_store_init_failed', { error: String(error.message || error) });
+      process.exit(1);
     });
-    httpServer = app.listen(PORT, HOST, () => {
-      logger.info('server_started', {
-        localUrl: `http://localhost:${PORT}`,
-        networkUrl: `http://${HOST}:${PORT}`,
-        nodeEnv: NODE_ENV
-      });
-      Promise.resolve(dbRuntimePromise)
-        .then(() => {
-          scheduleGeneralConfigRefresh();
-          scheduleSmtpConfigRefresh();
-          rebuildSearchIndex('startup').catch((error) => {
-            logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
-          });
-          scheduleFilterTagKeysCacheRebuild('startup');
-          if (syncWorkers) {
-            Promise.resolve(syncWorkers.initAutoSync()).catch((error) => {
-              logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
-            });
-          }
-          if (!rtreeState.ready) {
-            scheduleBuildingContoursRtreeRebuild('startup');
-          }
-        })
-        .catch((error) => {
-          logger.error('startup_tasks_wait_db_failed', { error: String(error?.message || error) });
-        });
-    });
-  })
-  .catch((error) => {
-    logger.error('server_session_store_init_failed', { error: String(error.message || error) });
-    process.exit(1);
-  });
+}
+
+module.exports = {
+  app,
+  initializeRuntime,
+  prepareRuntime,
+  startHttpServer,
+  stopRuntime
+};
 
 
 

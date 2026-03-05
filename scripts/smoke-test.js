@@ -201,7 +201,7 @@ async function main() {
   fs.mkdirSync(smokeDataDir, { recursive: true });
   const userAuthDbPath = path.join(smokeDataDir, 'users.db');
 
-  const child = spawn(process.execPath, ['server.js'], {
+  const child = spawn(process.execPath, ['server.sveltekit.js'], {
     env: {
       ...process.env,
       DB_PROVIDER: SMOKE_DB_PROVIDER,

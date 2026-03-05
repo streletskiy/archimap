@@ -31,7 +31,7 @@ async function waitReady(url, timeoutMs = 20000) {
 test.beforeAll(async () => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-e2e-'));
 
-  server = spawn(process.execPath, ['server.js'], {
+  server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: path.join(__dirname, '..', '..'),
     env: {
       ...process.env,

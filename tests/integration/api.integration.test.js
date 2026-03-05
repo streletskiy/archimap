@@ -40,7 +40,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   fs.mkdirSync(repoDataDir, { recursive: true });
   fs.writeFileSync(pmtilesPath, Buffer.alloc(4096, 7));
 
-  const server = spawn(process.execPath, ['server.js'], {
+  const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: path.join(__dirname, '..', '..'),
     env: {
       ...process.env,

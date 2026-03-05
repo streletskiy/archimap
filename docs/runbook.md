@@ -46,6 +46,11 @@
 - Usually cookie dropped on non-HTTPS:
   - set `SESSION_COOKIE_SECURE=false` for local HTTP only.
 
+### Runtime mode and entrypoint
+
+- Public HTTP runtime entrypoint is `server.sveltekit.js`.
+- API/system routes are dispatched by `server.sveltekit.js` directly to internal app runtime (`server.js`).
+
 ### Building selection in map UI
 
 - Selection is atomic on first click: highlight + focus + modal open.

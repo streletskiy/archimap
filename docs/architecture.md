@@ -2,8 +2,9 @@
 
 ## Runtime components
 
-- `server.js`: main HTTP runtime (Express 5), session/auth bootstrap, route registration, workers.
-- `frontend/` (SvelteKit static build): UI bundles and routes (`/`, `/app`, `/admin`, `/account`, `/info`).
+- `server.sveltekit.js`: main public HTTP runtime (SvelteKit Node handler + internal app dispatch for API/system paths).
+- `server.js`: internal app runtime module (`prepareRuntime`, `app`, `stopRuntime`) without Express dependency.
+- `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
 - SQLite:
   - `data/archimap.db` (main app DB)
   - `data/osm.db` (OSM contours/search source)
@@ -62,12 +63,17 @@
 Browser (SvelteKit UI)
   |  GET/POST /api/*
   v
-Express (server.js)
-  |- security headers + CSP + request-id + logging
-  |- auth/session + CSRF
-  |- route handlers (src/lib/server/http/*)
-  |    |- cached JSON (ETag/Last-Modified/br|gzip)
-  |    |- PMTiles byte-range streaming
+SvelteKit Node runtime (server.sveltekit.js)
+  |- Svelte pages/assets
+  |- route dispatch:
+      * /api/**, /healthz, /readyz, /metrics, /app-config.js, /favicon.ico, /.well-known/*, /ui/** -> internal app
+      * everything else -> Svelte handler/pages
+       v
+    Internal app runtime (server.js)
+      |- security headers + CSP + request-id + logging
+      |- auth/session + CSRF
+      |- route handlers (src/lib/server/http/*, auth/*)
+      |- cached JSON + PMTiles streaming
   |
   +--> SQLite (main + osm + local/user edits + auth)
   +--> Redis session store (optional, prod)

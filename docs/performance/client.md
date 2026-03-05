@@ -14,7 +14,7 @@
 - Client cache:
   - `apiJsonCached` in `frontend/src/lib/services/http.js`.
   - Search and bbox responses reuse short-lived in-memory cache.
-  - Map filter keeps a short-lived in-memory match cache for `/api/buildings/filter-matches` (`rulesHash+bboxHash+zoomBucket`), and legacy per-building cache for fallback `/api/buildings/filter-data`.
+  - Map filter keeps a short-lived in-memory match cache for `/api/buildings/filter-matches` (`rulesHash+bboxHash+zoomBucket`), and per-building cache for fallback `/api/buildings/filter-data`.
 - Reduced unnecessary redraws:
   - Filter updates guarded by request token, abort semantics, and worker-built diff plans.
   - Filter highlight updates dedicated highlight layers via feature-state; base building layers are not re-filtered/hid.

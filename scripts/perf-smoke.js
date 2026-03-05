@@ -47,7 +47,9 @@ async function benchmark(pathname, samples = 25) {
 }
 
 function collectBundleStats() {
-  const clientDir = path.join(process.cwd(), 'frontend', 'build', '_app', 'immutable');
+  const nodeClientDir = path.join(process.cwd(), 'frontend', 'build', 'client', '_app', 'immutable');
+  const staticClientDir = path.join(process.cwd(), 'frontend', 'build', '_app', 'immutable');
+  const clientDir = fs.existsSync(nodeClientDir) ? nodeClientDir : staticClientDir;
   const result = {
     chunksTotalKb: 0,
     assetsTotalKb: 0,
@@ -84,7 +86,7 @@ function collectBundleStats() {
 
 async function main() {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-perf-'));
-  const server = spawn(process.execPath, ['server.js'], {
+  const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: process.cwd(),
     env: {
       ...process.env,

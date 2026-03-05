@@ -1,8 +1,32 @@
 const path = require('path');
 const fs = require('fs');
-const express = require('express');
+const { pathToFileURL } = require('url');
 const { sendCachedJson } = require('../infra/http-cache.infra');
 const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
+
+function createSvelteNodeHandlerInvoker(rootDir) {
+  const handlerPath = path.join(rootDir, 'frontend', 'build', 'handler.js');
+  let handlerPromise = null;
+
+  async function resolveHandler() {
+    if (!fs.existsSync(handlerPath)) return null;
+    if (!handlerPromise) {
+      handlerPromise = import(pathToFileURL(handlerPath).href)
+        .then((module) => (typeof module?.handler === 'function' ? module.handler : null))
+        .catch(() => null);
+    }
+    return handlerPromise;
+  }
+
+  return async (req, res, next) => {
+    const handler = await resolveHandler();
+    if (typeof handler !== 'function') {
+      if (typeof next === 'function') return next();
+      return res.status(503).type('text/plain').send('Svelte frontend is not built yet. Run: npm run frontend:build');
+    }
+    return handler(req, res);
+  };
+}
 
 function registerAppRoutes(deps) {
   const {
@@ -21,6 +45,7 @@ function registerAppRoutes(deps) {
   } = deps;
   const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
   const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
+  const invokeSvelteNodeHandler = createSvelteNodeHandlerInvoker(rootDir);
 
   app.get('/app-config.js', publicApiRateLimiter, (req, res) => {
     const mapDefault = normalizeMapConfig();
@@ -72,9 +97,9 @@ function registerAppRoutes(deps) {
     return res.status(204).end();
   });
 
-  app.get(['/', /^\/(?:admin|account|info|app)(?:\/.*)?$/], (req, res) => {
+  app.get(['/', /^\/(?:admin|account|info|app)(?:\/.*)?$/], async (req, res, next) => {
     if (!fs.existsSync(frontendIndexPath)) {
-      return res.status(503).type('text/plain').send('Svelte frontend is not built yet. Run: npm run frontend:build');
+      return invokeSvelteNodeHandler(req, res, next);
     }
     return res.sendFile(frontendIndexPath);
   });
@@ -103,8 +128,5 @@ function registerAppRoutes(deps) {
 
 module.exports = {
   registerAppRoutes,
-  registerFrontendStaticRoute({ app, rootDir }) {
-    const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
-    app.use(express.static(frontendBuildDir, { index: false }));
-  }
+  registerFrontendStaticRoute() {}
 };

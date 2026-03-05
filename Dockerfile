@@ -41,6 +41,11 @@ COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
   npm ci
 
+FROM --platform=$BUILDPLATFORM frontend-deps AS frontend-runtime-deps
+
+WORKDIR /app/frontend
+RUN npm prune --omit=dev
+
 FROM --platform=$BUILDPLATFORM frontend-deps AS frontend-build
 
 WORKDIR /app
@@ -53,7 +58,8 @@ COPY src/lib ./src/lib
 COPY legal ./legal
 COPY frontend ./frontend
 RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" node scripts/generate-version.js \
-  && npm --prefix frontend run build
+  && npm --prefix frontend run build \
+  && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\\n')"
 
 FROM ${NODE_IMAGE} AS runtime
 ARG QUACKOSM_VERSION
@@ -85,11 +91,13 @@ COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
 RUN npm prune --omit=dev
 COPY server.js ./server.js
+COPY server.sveltekit.js ./server.sveltekit.js
 COPY src ./src
 COPY db ./db
 COPY scripts ./scripts
 COPY workers ./workers
 COPY --from=frontend-build /app/frontend/build ./frontend/build
+COPY --from=frontend-runtime-deps /app/frontend/node_modules ./frontend/node_modules
 COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version.generated.json
 
 RUN mkdir -p /app/data/quackosm
@@ -98,5 +106,5 @@ ENV NODE_ENV=production
 ENV PYTHON_BIN=/opt/pyosm/bin/python
 EXPOSE 3252
 
-CMD ["node", "server.js"]
+CMD ["node", "server.sveltekit.js"]
 

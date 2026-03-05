@@ -48,7 +48,7 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async () =
   const port = 3900 + Math.floor(Math.random() * 300);
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  const server = spawn(process.execPath, ['server.js'], {
+  const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: path.join(__dirname, '..', '..'),
     env: {
       ...process.env,

@@ -40,7 +40,7 @@ async function main() {
   fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
   fs.writeFileSync(pmtilesPath, Buffer.alloc(2048, 1));
 
-  const server = spawn(process.execPath, ['server.js'], {
+  const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: process.cwd(),
     env: {
       ...process.env,

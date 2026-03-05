@@ -1,5 +1,13 @@
 # API
 
+## Runtime routing
+
+- Public HTTP runtime is `server.sveltekit.js`.
+- API/system endpoints are dispatched directly to the internal app runtime in `server.js` for:
+  - `/api/**`
+  - `/healthz`, `/readyz`, `/metrics`
+  - `/app-config.js`, `/favicon.ico`, `/.well-known/appspecific/com.chrome.devtools.json`, `/ui/**`
+
 ## Core endpoints
 
 - `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...`

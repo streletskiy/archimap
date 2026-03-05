@@ -6,7 +6,7 @@ ArchiMap is a self-hosted platform for an interactive architectural map.
 Building data is based on OpenStreetMap and enriched in the selected runtime DB provider:
 PostgreSQL + PostGIS (production default) or SQLite (dev/fallback).
 The map is rendered with MapLibre and vector PMTiles.
-The backend runs on Node.js + Express, and the UI is built with SvelteKit.
+The public backend runtime is SvelteKit Node (`server.sveltekit.js`).
 The project is designed for private deployments with full control over data, tiles, and sessions.
 The UI is multilingual (`en` + `ru`) with runtime locale switching.
 
@@ -28,7 +28,7 @@ References:
 ## Architecture (Short)
 
 - SvelteKit (UI)
-- API layer (Express)
+- API layer (`server.js` internal app dispatched by `server.sveltekit.js` for `/api` and system endpoints)
 - PostgreSQL + PostGIS / SQLite (switchable runtime)
 - PMTiles
 - Redis (optional, for sessions)
@@ -176,7 +176,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
 - Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
-- Open admin edit details: `?edit=<id>` (legacy `adminEdit=<id>` is still supported)
+- Open admin edit details: `?edit=<id>` (`adminEdit=<id>` is still supported for backward compatibility)
 - Open legal docs directly:
   - `?tab=legal&doc=terms`
   - `?tab=legal&doc=privacy`
