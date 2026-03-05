@@ -66,6 +66,8 @@ Run default stack:
 docker compose up -d
 ```
 
+Pending PostgreSQL migrations are applied automatically on app startup.
+
 Release image (multi-arch, registry push):
 
 ```powershell
@@ -94,6 +96,8 @@ export ARCHIMAP_IMAGE=streletskiy/archimap:1.2.3
 docker pull streletskiy/archimap:1.2.3
 docker compose up -d
 ```
+
+Do not bind-mount local `./db` into `/app/db` on remote hosts. The image already contains the migration files, and masking that path can leave PostgreSQL running with an empty schema.
 
 Create first master admin (after start):
 
@@ -127,6 +131,8 @@ PostgreSQL/PostGIS migration and smoke:
 npm run db:pg:migrate
 npm run db:pg:smoke
 ```
+
+In Docker Compose, `db:pg:migrate` is mainly a manual recovery/verification command because startup already applies pending PostgreSQL migrations.
 
 Run by provider:
 

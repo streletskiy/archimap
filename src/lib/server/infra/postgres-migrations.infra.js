@@ -26,6 +26,9 @@ async function runPendingPostgresMigrations({
   if (!connectionString) {
     throw new Error('DATABASE_URL is required for PostgreSQL migrations');
   }
+  if (!fs.existsSync(migrationsDir)) {
+    throw new Error(`PostgreSQL migrations directory does not exist: ${migrationsDir}`);
+  }
 
   const client = new Client({ connectionString });
   await client.connect();
@@ -34,6 +37,12 @@ async function runPendingPostgresMigrations({
     const appliedRows = await client.query('SELECT id FROM public.schema_migrations ORDER BY id');
     const applied = new Set(appliedRows.rows.map((row) => String(row?.id || '')));
     const files = listPostgresMigrationFiles(migrationsDir);
+    if (files.length === 0) {
+      throw new Error(
+        `No PostgreSQL migration files found in ${migrationsDir}. ` +
+        'Check that container image contents are not masked by a bind mount over /app/db.'
+      );
+    }
 
     for (const file of files) {
       if (applied.has(file)) continue;

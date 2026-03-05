@@ -12,6 +12,8 @@
 2. Pull release image: `docker pull streletskiy/archimap:<version>`.
 3. Set `ARCHIMAP_IMAGE=streletskiy/archimap:<version>` in environment (or `.env` used by Compose).
 4. Start/update service: `docker compose up -d`.
+   - Pending PostgreSQL migrations are applied automatically by the app container during startup.
+   - Do not bind-mount local `./db` over `/app/db`; the image already contains the migration SQL.
 5. Validate:
    - `/readyz`
    - `/healthz`

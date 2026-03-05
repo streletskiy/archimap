@@ -24,7 +24,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
     volumes:
       - ./data:/app/data
-      - ./db:/app/db:ro
     depends_on:
       redis:
         condition: service_started
@@ -49,7 +48,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./db/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-archimap} -d ${POSTGRES_DB:-archimap}']
       interval: 5s

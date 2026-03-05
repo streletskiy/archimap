@@ -120,12 +120,14 @@ Docker downloads only changed layers during pull.
 docker compose up -d
 ```
 
-Run migrations/smoke against Postgres in compose network:
+Pending PostgreSQL migrations are applied automatically on app startup. Manual migrations/smoke remain available in the compose network for recovery or verification:
 
 ```bash
 docker compose exec archimap npm run db:pg:migrate
 docker compose exec archimap npm run db:pg:smoke
 ```
+
+Avoid bind-mounting local `./db` into `/app/db` on deployment hosts. The runtime image already contains `db/postgres/migrations`, and masking that path can make the app start against an empty schema.
 
 ## Validate Layer Sizes
 
