@@ -35,6 +35,7 @@ test.beforeAll(async () => {
     cwd: path.join(__dirname, '..', '..'),
     env: {
       ...process.env,
+      DB_PROVIDER: 'sqlite',
       PORT: String(PORT),
       NODE_ENV: 'test',
       LOG_LEVEL: 'error',
@@ -42,6 +43,7 @@ test.beforeAll(async () => {
       AUTO_SYNC_ENABLED: 'false',
       AUTO_SYNC_ON_START: 'false',
       SESSION_ALLOW_MEMORY_FALLBACK: 'true',
+      SESSION_COOKIE_SECURE: 'false',
       SESSION_SECRET: 'e2e-secret-value',
       APP_BASE_URL: BASE_URL,
       ARCHIMAP_DB_PATH: path.join(tmpRoot, 'archimap.db'),

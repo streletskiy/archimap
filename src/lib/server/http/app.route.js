@@ -85,9 +85,9 @@ function registerAppRoutes(deps) {
     });
   });
 
-  app.get('/api/filter-tag-keys', publicApiRateLimiter, (req, res) => {
+  app.get('/api/filter-tag-keys', publicApiRateLimiter, async (req, res) => {
     try {
-      const keys = getFilterTagKeysCached();
+      const keys = await getFilterTagKeysCached();
       return sendCachedJson(req, res, {
         keys,
         warmingUp: isFilterTagKeysRebuildInProgress() || keys.length === 0

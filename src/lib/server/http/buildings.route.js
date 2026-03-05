@@ -167,10 +167,11 @@ function registerBuildingsRoutes(deps) {
     sanitizeArchiPayload,
     supersedePendingUserEdits
   } = deps;
+  const isPostgres = db.provider === 'postgres';
   const bboxCache = createLruCache({ max: 100, ttlMs: 10 * 1000 });
   const filterMatchesCache = createLruCache({ max: 220, ttlMs: 4000 });
 
-  const selectFilterDataBboxRtree = db.prepare(`
+  const selectFilterDataBboxRtree = !isPostgres ? db.prepare(`
     SELECT
       bc.osm_type,
       bc.osm_id,
@@ -196,18 +197,25 @@ function registerBuildingsRoutes(deps) {
       AND br.max_lat >= ?
       AND br.min_lat <= ?
     LIMIT ?
-  `);
+  `) : null;
 
-  const selectFilterDataBboxPlain = db.prepare(`
+  const selectFilterDataBboxPlain = !isPostgres ? db.prepare(`
     ${FILTER_DATA_SELECT_FIELDS_SQL}
     WHERE bc.max_lon >= ?
       AND bc.min_lon <= ?
       AND bc.max_lat >= ?
       AND bc.min_lat <= ?
     LIMIT ?
-  `);
+  `) : null;
 
-  const selectFilterMatchCandidatesRtree = db.prepare(`
+  const selectFilterDataBboxPostgis = isPostgres ? db.prepare(`
+    ${FILTER_DATA_SELECT_FIELDS_SQL}
+    WHERE bc.geom && ST_MakeEnvelope(?, ?, ?, ?, 4326)
+      AND ST_Intersects(bc.geom, ST_MakeEnvelope(?, ?, ?, ?, 4326))
+    LIMIT ?
+  `) : null;
+
+  const selectFilterMatchCandidatesRtree = !isPostgres ? db.prepare(`
     SELECT
       bc.osm_type,
       bc.osm_id,
@@ -233,16 +241,23 @@ function registerBuildingsRoutes(deps) {
       AND br.max_lat >= ?
       AND br.min_lat <= ?
     LIMIT ?
-  `);
+  `) : null;
 
-  const selectFilterMatchCandidatesPlain = db.prepare(`
+  const selectFilterMatchCandidatesPlain = !isPostgres ? db.prepare(`
     ${FILTER_DATA_SELECT_FIELDS_SQL}
     WHERE bc.max_lon >= ?
       AND bc.min_lon <= ?
       AND bc.max_lat >= ?
       AND bc.min_lat <= ?
     LIMIT ?
-  `);
+  `) : null;
+
+  const selectFilterMatchCandidatesPostgis = isPostgres ? db.prepare(`
+    ${FILTER_DATA_SELECT_FIELDS_SQL}
+    WHERE bc.geom && ST_MakeEnvelope(?, ?, ?, ?, 4326)
+      AND ST_Intersects(bc.geom, ST_MakeEnvelope(?, ?, ?, ?, 4326))
+    LIMIT ?
+  `) : null;
 
   const selectBuildingById = db.prepare(`
     SELECT osm_type, osm_id, tags_json, geometry_json
@@ -250,7 +265,7 @@ function registerBuildingsRoutes(deps) {
     WHERE osm_type = ? AND osm_id = ?
   `);
 
-  app.post('/api/buildings/filter-data', filterDataRateLimiter, (req, res) => {
+  app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
     const rawKeys = req.body?.keys;
     if (!Array.isArray(rawKeys)) {
       return res.status(400).json({ error: 'Ожидается массив keys' });
@@ -281,7 +296,7 @@ function registerBuildingsRoutes(deps) {
       for (const item of chunk) {
         params.push(item.osmType, item.osmId);
       }
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
         ${FILTER_DATA_SELECT_FIELDS_SQL}
         WHERE ${clauses}
       `).all(...params);
@@ -293,11 +308,11 @@ function registerBuildingsRoutes(deps) {
     }
 
     const actorKey = getSessionEditActorKey(req);
-    const items = applyPersonalEditsToFilterItems([...outByKey.values()], actorKey);
+    const items = await applyPersonalEditsToFilterItems([...outByKey.values()], actorKey);
     return res.json({ items });
   });
 
-  app.get('/api/buildings/filter-data-bbox', filterDataBboxRateLimiter, (req, res) => {
+  app.get('/api/buildings/filter-data-bbox', filterDataBboxRateLimiter, async (req, res) => {
     const minLon = Number(req.query.minLon);
     const minLat = Number(req.query.minLat);
     const maxLon = Number(req.query.maxLon);
@@ -311,7 +326,8 @@ function registerBuildingsRoutes(deps) {
     }
 
     const actorKey = getSessionEditActorKey(req);
-    const cacheKey = `${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${rtreeState.ready ? 'rtree' : 'plain'}`;
+    const queryMode = isPostgres ? 'postgis' : (rtreeState.ready ? 'rtree' : 'plain');
+    const cacheKey = `${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${queryMode}`;
     const cached = bboxCache.get(cacheKey);
     if (cached) {
       return sendCachedJson(req, res, cached, {
@@ -319,11 +335,17 @@ function registerBuildingsRoutes(deps) {
       });
     }
 
-    const rows = rtreeState.ready
-      ? selectFilterDataBboxRtree.all(minLon, maxLon, minLat, maxLat, limit)
-      : selectFilterDataBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
+    const rows = isPostgres
+      ? await selectFilterDataBboxPostgis.all(
+        minLon, minLat, maxLon, maxLat,
+        minLon, minLat, maxLon, maxLat,
+        limit
+      )
+      : (rtreeState.ready
+        ? await selectFilterDataBboxRtree.all(minLon, maxLon, minLat, maxLat, limit)
+        : await selectFilterDataBboxPlain.all(minLon, maxLon, minLat, maxLat, limit));
 
-    const items = applyPersonalEditsToFilterItems(rows.map(mapFilterDataRow), actorKey);
+    const items = await applyPersonalEditsToFilterItems(rows.map(mapFilterDataRow), actorKey);
     const payload = { items, truncated: rows.length >= limit };
     bboxCache.set(cacheKey, payload);
     return sendCachedJson(req, res, payload, {
@@ -331,7 +353,7 @@ function registerBuildingsRoutes(deps) {
     });
   });
 
-  app.post('/api/buildings/filter-matches', filterMatchesRateLimiter, (req, res) => {
+  app.post('/api/buildings/filter-matches', filterMatchesRateLimiter, async (req, res) => {
     const startedAt = Date.now();
     const body = req.body || {};
     const bbox = body?.bbox && typeof body.bbox === 'object' ? body.bbox : body;
@@ -376,7 +398,8 @@ function registerBuildingsRoutes(deps) {
     const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
     const actorKeyRaw = getSessionEditActorKey(req);
     const actorKey = String(actorKeyRaw || '').trim().toLowerCase() || 'anon';
-    const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${maxResults}:${rtreeState.ready ? 'rtree' : 'plain'}`;
+    const queryMode = isPostgres ? 'postgis' : (rtreeState.ready ? 'rtree' : 'plain');
+    const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${maxResults}:${queryMode}`;
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
       return res.json({
@@ -411,11 +434,17 @@ function registerBuildingsRoutes(deps) {
       Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
     );
 
-    const candidateRows = rtreeState.ready
-      ? selectFilterMatchCandidatesRtree.all(minLon, maxLon, minLat, maxLat, candidateLimit)
-      : selectFilterMatchCandidatesPlain.all(minLon, maxLon, minLat, maxLat, candidateLimit);
+    const candidateRows = isPostgres
+      ? await selectFilterMatchCandidatesPostgis.all(
+        minLon, minLat, maxLon, maxLat,
+        minLon, minLat, maxLon, maxLat,
+        candidateLimit
+      )
+      : (rtreeState.ready
+        ? await selectFilterMatchCandidatesRtree.all(minLon, maxLon, minLat, maxLat, candidateLimit)
+        : await selectFilterMatchCandidatesPlain.all(minLon, maxLon, minLat, maxLat, candidateLimit));
 
-    const candidateItems = applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
+    const candidateItems = await applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
     const matchedKeys = [];
     const matchedFeatureIds = [];
     let truncated = false;
@@ -453,16 +482,16 @@ function registerBuildingsRoutes(deps) {
     return res.json(payload);
   });
 
-  app.get('/api/building-info/:osmType/:osmId', buildingsReadRateLimiter, (req, res) => {
+  app.get('/api/building-info/:osmType/:osmId', buildingsReadRateLimiter, async (req, res) => {
     const osmType = req.params.osmType;
     const osmId = Number(req.params.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
       return res.status(400).json({ error: 'Некорректный идентификатор здания' });
     }
 
-    const merged = getMergedInfoRow(osmType, osmId);
+    const merged = await getMergedInfoRow(osmType, osmId);
     const actorKey = getSessionEditActorKey(req);
-    const personal = actorKey ? getLatestUserEditRow(osmType, osmId, actorKey, ['pending', 'rejected']) : null;
+    const personal = actorKey ? await getLatestUserEditRow(osmType, osmId, actorKey, ['pending', 'rejected']) : null;
     const row = personal || merged;
     if (!row) {
       return res.status(404).json({ error: 'Информация не найдена' });
@@ -490,7 +519,7 @@ function registerBuildingsRoutes(deps) {
     });
   });
 
-  app.post('/api/building-info', buildingsWriteRateLimiter, requireCsrfSession, requireAuth, requireBuildingEditPermission, (req, res) => {
+  app.post('/api/building-info', buildingsWriteRateLimiter, requireCsrfSession, requireAuth, requireBuildingEditPermission, async (req, res) => {
     const body = req.body || {};
     const osmType = body.osmType;
     const osmId = Number(body.osmId);
@@ -509,10 +538,10 @@ function registerBuildingsRoutes(deps) {
     }
     const payload = validated.value;
 
-    const tx = db.transaction(() => {
-      const latest = getLatestUserEditRow(osmType, osmId, actorKey, ['pending']);
+    const tx = db.transaction(async () => {
+      const latest = await getLatestUserEditRow(osmType, osmId, actorKey, ['pending']);
       if (latest && Number.isInteger(Number(latest.id)) && Number(latest.id) > 0) {
-        db.prepare(`
+        await db.prepare(`
           UPDATE user_edits.building_user_edits
           SET
             name = @name,
@@ -535,12 +564,34 @@ function registerBuildingsRoutes(deps) {
           id: latest.id,
           ...payload
         });
-        supersedePendingUserEdits(osmType, osmId, actorKey, Number(latest.id));
+        await supersedePendingUserEdits(osmType, osmId, actorKey, Number(latest.id));
         return Number(latest.id || 0);
       }
 
-      supersedePendingUserEdits(osmType, osmId, actorKey, null);
-      const inserted = db.prepare(`
+      await supersedePendingUserEdits(osmType, osmId, actorKey, null);
+      if (isPostgres) {
+        const inserted = await db.prepare(`
+          INSERT INTO user_edits.building_user_edits (
+            osm_type, osm_id, created_by,
+            name, style, levels, year_built, architect, address, archimap_description,
+            status, created_at, updated_at
+          )
+          VALUES (
+            @osm_type, @osm_id, @created_by,
+            @name, @style, @levels, @year_built, @architect, @address, @archimap_description,
+            'pending', datetime('now'), datetime('now')
+          )
+          RETURNING id
+        `).get({
+          osm_type: osmType,
+          osm_id: osmId,
+          created_by: actorKey,
+          ...payload
+        });
+        return Number(inserted?.id || 0);
+      }
+
+      const inserted = await db.prepare(`
         INSERT INTO user_edits.building_user_edits (
           osm_type, osm_id, created_by,
           name, style, levels, year_built, architect, address, archimap_description,
@@ -560,25 +611,25 @@ function registerBuildingsRoutes(deps) {
       return Number(inserted?.lastInsertRowid || 0);
     });
 
-    const editId = tx();
+    const editId = await tx();
     return res.json({ ok: true, editId, status: 'pending' });
   });
 
-  app.get('/api/building/:osmType/:osmId', buildingsReadRateLimiter, (req, res) => {
+  app.get('/api/building/:osmType/:osmId', buildingsReadRateLimiter, async (req, res) => {
     const osmType = req.params.osmType;
     const osmId = Number(req.params.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
       return res.status(400).json({ error: 'Некорректный идентификатор здания' });
     }
 
-    const row = selectBuildingById.get(osmType, osmId);
+    const row = await selectBuildingById.get(osmType, osmId);
 
     if (!row) {
       return res.status(404).json({ error: 'Здание не найдено в локальной базе контуров' });
     }
 
     const feature = rowToFeature(row);
-    attachInfoToFeatures([feature], { actorKey: getSessionEditActorKey(req) });
+    await attachInfoToFeatures([feature], { actorKey: getSessionEditActorKey(req) });
     return sendCachedJson(req, res, feature, {
       cacheControl: 'public, max-age=30'
     });

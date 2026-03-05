@@ -106,6 +106,21 @@ docker compose up -d
 
 Docker downloads only changed layers during pull.
 
+## PostgreSQL + PostGIS (default in Compose)
+
+`docker-compose.yml` now starts `db-postgres` by default.
+
+```bash
+docker compose up -d
+```
+
+Run migrations/smoke against Postgres in compose network:
+
+```bash
+docker compose exec archimap npm run db:pg:migrate
+docker compose exec archimap npm run db:pg:smoke
+```
+
 ## Validate Layer Sizes
 
 ```bash

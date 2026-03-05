@@ -1,17 +1,31 @@
 services:
   archimap:
-    image: ${ARCHIMAP_IMAGE:-streletskiy/archimap:latest}
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: streletskiy/archimap:dev
     container_name: archimap
     restart: unless-stopped
     ports:
       - '${PORT:-3252}:${PORT:-3252}'
     env_file:
       - .env
+    environment:
+      DB_PROVIDER: ${DB_PROVIDER:-postgres}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://archimap:archimap@db-postgres:5432/archimap}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-archimap}
+      POSTGRES_USER: ${POSTGRES_USER:-archimap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
     volumes:
       - ./data:/app/data
+      - ./db:/app/db:ro
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      db-postgres:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
@@ -21,5 +35,24 @@ services:
     volumes:
       - redis-data:/data
 
+  db-postgres:
+    image: postgis/postgis:16-3.4
+    container_name: archimap-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-archimap}
+      POSTGRES_USER: ${POSTGRES_USER:-archimap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-archimap} -d ${POSTGRES_DB:-archimap}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
 volumes:
   redis-data:
+  postgres-data:

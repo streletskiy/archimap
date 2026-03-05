@@ -74,6 +74,10 @@ function generateCsrfToken() {
 }
 
 function ensureAuthSchema(db) {
+  if (db?.provider === 'postgres') {
+    return;
+  }
+
   db.exec(`
 CREATE TABLE IF NOT EXISTS auth.users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,6 +220,12 @@ function registerAuthRoutes({
 
     req.session.user = nextUser;
     const csrfToken = ensureCsrfToken(req);
+    await new Promise((resolve, reject) => {
+      req.session.save((error) => {
+        if (error) return reject(error);
+        return resolve();
+      });
+    });
     return { user: req.session.user, csrfToken };
   }
 
@@ -236,29 +246,29 @@ function registerAuthRoutes({
     };
   }
 
-  function resolveSessionUser(req) {
+  async function resolveSessionUser(req) {
     const sessionUser = req?.session?.user;
     if (!sessionUser) return null;
 
     const email = normalizeEmail(sessionUser.email);
     if (!isValidEmail(email)) return null;
-    const row = db.prepare('SELECT email, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
+    const row = await db.prepare('SELECT email, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
     if (!row) return null;
     const user = buildSessionUserFromRow(row);
     req.session.user = user;
     return user;
   }
 
-  function requireAdminSession(req, res, next) {
-    const user = resolveSessionUser(req);
+  async function requireAdminSession(req, res, next) {
+    const user = await resolveSessionUser(req);
     if (!user || !user.isAdmin) {
       return res.status(403).json({ error: 'Требуются права администратора' });
     }
     return next();
   }
 
-  function requireMasterAdminSession(req, res, next) {
-    const user = resolveSessionUser(req);
+  async function requireMasterAdminSession(req, res, next) {
+    const user = await resolveSessionUser(req);
     if (!user || !user.isMasterAdmin) {
       return res.status(403).json({ error: 'Требуются права master admin' });
     }
@@ -346,8 +356,8 @@ function registerAuthRoutes({
     message: 'Слишком много попыток сброса пароля, попробуйте позже'
   });
 
-  app.get('/api/me', (req, res) => {
-    const user = resolveSessionUser(req);
+  app.get('/api/me', async (req, res) => {
+    const user = await resolveSessionUser(req);
     const authenticated = Boolean(user);
     const csrfToken = user ? ensureCsrfToken(req) : null;
     return sendCachedJson(req, res, { authenticated, user, csrfToken }, {
@@ -362,7 +372,7 @@ function registerAuthRoutes({
 
     const email = normalizeEmail(username);
     if (isValidEmail(email)) {
-      const user = db.prepare('SELECT email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
+      const user = await db.prepare('SELECT email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
       if (user && verifyPassword(password, user.password_hash)) {
         let authSession;
         try {
@@ -378,7 +388,7 @@ function registerAuthRoutes({
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   });
 
-  function completeRegistration(req, row, options = {}) {
+  async function completeRegistration(req, row, options = {}) {
     const email = normalizeEmail(row?.email);
     const passwordHash = String(row?.password_hash || '');
     const firstName = normalizeProfileName(row?.first_name);
@@ -391,18 +401,18 @@ function registerAuthRoutes({
       return { ok: false, status: 400, error: 'Данные регистрации повреждены, начните заново' };
     }
 
-    const tx = db.transaction((nextEmail, nextPasswordHash, nextFirstName, nextLastName, nextCanEdit, nextIsAdmin, nextIsMasterAdmin) => {
-      db.prepare('INSERT INTO auth.users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    const tx = db.transaction(async (nextEmail, nextPasswordHash, nextFirstName, nextLastName, nextCanEdit, nextIsAdmin, nextIsMasterAdmin) => {
+      await db.prepare('INSERT INTO auth.users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(nextEmail, nextPasswordHash, nextFirstName, nextLastName, nextCanEdit ? 1 : 0, nextIsAdmin ? 1 : 0, nextIsMasterAdmin ? 1 : 0);
       if (deleteRegistrationCode) {
-        db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(nextEmail);
+        await db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(nextEmail);
       }
     });
 
     try {
-      tx(email, passwordHash, firstName, lastName, allowEdit, makeAdmin, makeMasterAdmin);
+      await tx(email, passwordHash, firstName, lastName, allowEdit, makeAdmin, makeMasterAdmin);
     } catch (error) {
-      if (String(error?.message || '').includes('UNIQUE constraint failed: auth.users.email')) {
+      if (String(error?.code || '') === '23505' || String(error?.message || '').includes('UNIQUE constraint failed: auth.users.email')) {
         return { ok: false, status: 409, error: 'Пользователь с таким email уже зарегистрирован' };
       }
       throw error;
@@ -451,14 +461,14 @@ function registerAuthRoutes({
       return res.status(500).json({ error: 'Не удалось определить адрес приложения для ссылки подтверждения' });
     }
 
-    const existingUser = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
+    const existingUser = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
     if (existingUser) {
       return res.status(409).json({ error: 'Пользователь с таким email уже зарегистрирован' });
     }
 
     const now = Date.now();
-    db.prepare('DELETE FROM auth.email_registration_codes WHERE expires_at <= ?').run(now);
-    const existingCode = db.prepare('SELECT last_sent_at FROM auth.email_registration_codes WHERE email = ?').get(email);
+    await db.prepare('DELETE FROM auth.email_registration_codes WHERE expires_at <= ?').run(now);
+    const existingCode = await db.prepare('SELECT last_sent_at FROM auth.email_registration_codes WHERE email = ?').get(email);
     const resendCooldownMs = registrationCodeResendCooldownSec * 1000;
     if (existingCode && (now - Number(existingCode.last_sent_at || 0)) < resendCooldownMs) {
       const retryAfterMs = resendCooldownMs - (now - Number(existingCode.last_sent_at || 0));
@@ -474,7 +484,7 @@ function registerAuthRoutes({
     const codeHash = hashRegistrationCode(sessionSecret, email, code);
     const verifyTokenHash = hashRegistrationVerifyToken(sessionSecret, verifyToken);
     const passwordHash = hashPassword(password);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO auth.email_registration_codes (email, code_hash, expires_at, attempts, last_sent_at, created_at, password_hash, first_name, last_name, verify_token_hash)
       VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(email) DO UPDATE SET
@@ -513,12 +523,12 @@ function registerAuthRoutes({
       return res.status(400).json({ error: 'Код должен состоять из 6 цифр' });
     }
 
-    const existingUser = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
+    const existingUser = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
     if (existingUser) {
       return res.status(409).json({ error: 'Пользователь с таким email уже зарегистрирован' });
     }
 
-    const codeRow = db.prepare(`
+    const codeRow = await db.prepare(`
       SELECT email, code_hash, expires_at, attempts, password_hash, first_name, last_name
       FROM auth.email_registration_codes
       WHERE email = ?
@@ -530,7 +540,7 @@ function registerAuthRoutes({
 
     const now = Date.now();
     if (Number(codeRow.expires_at || 0) <= now) {
-      db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(email);
+      await db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(email);
       return res.status(400).json({ error: 'Срок действия кода истек, отправьте форму снова' });
     }
     if (Number(codeRow.attempts || 0) >= registrationCodeMaxAttempts) {
@@ -539,11 +549,11 @@ function registerAuthRoutes({
 
     const expectedHash = hashRegistrationCode(sessionSecret, email, code);
     if (expectedHash !== String(codeRow.code_hash || '')) {
-      db.prepare('UPDATE auth.email_registration_codes SET attempts = attempts + 1 WHERE email = ?').run(email);
+      await db.prepare('UPDATE auth.email_registration_codes SET attempts = attempts + 1 WHERE email = ?').run(email);
       return res.status(400).json({ error: 'Неверный код подтверждения' });
     }
 
-    const done = completeRegistration(req, codeRow);
+    const done = await completeRegistration(req, codeRow);
     if (!done.ok) {
       return res.status(done.status).json({ error: done.error });
     }
@@ -568,7 +578,7 @@ function registerAuthRoutes({
     }
 
     const tokenHash = hashRegistrationVerifyToken(sessionSecret, token);
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT email, password_hash, first_name, last_name, expires_at
       FROM auth.email_registration_codes
       WHERE verify_token_hash = ?
@@ -578,11 +588,11 @@ function registerAuthRoutes({
       return res.status(400).json({ error: 'Ссылка подтверждения недействительна или истекла' });
     }
     if (Number(row.expires_at || 0) <= Date.now()) {
-      db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(row.email);
+      await db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(row.email);
       return res.status(400).json({ error: 'Ссылка подтверждения недействительна или истекла' });
     }
 
-    const done = completeRegistration(req, row);
+    const done = await completeRegistration(req, row);
     if (!done.ok) {
       return res.status(done.status).json({ error: done.error });
     }
@@ -602,7 +612,7 @@ function registerAuthRoutes({
     });
   });
 
-  app.post('/api/account/change-password', requireCsrfSession, changePasswordRateLimiter, (req, res) => {
+  app.post('/api/account/change-password', requireCsrfSession, changePasswordRateLimiter, async (req, res) => {
     if (!req.session?.user) {
       return res.status(401).json({ error: 'Требуется авторизация' });
     }
@@ -624,7 +634,7 @@ function registerAuthRoutes({
       return res.status(400).json({ error: 'Новый пароль должен отличаться от текущего' });
     }
 
-    const user = db.prepare('SELECT id, password_hash FROM auth.users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT id, password_hash FROM auth.users WHERE email = ?').get(email);
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
@@ -633,7 +643,7 @@ function registerAuthRoutes({
     }
 
     const passwordHash = hashPassword(newPassword);
-    db.prepare('UPDATE auth.users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+    await db.prepare('UPDATE auth.users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
     return res.json({ ok: true });
   });
 
@@ -647,7 +657,7 @@ function registerAuthRoutes({
       return res.json({ ok: true });
     }
 
-    const user = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
     if (!user) {
       return res.json({ ok: true });
     }
@@ -658,13 +668,13 @@ function registerAuthRoutes({
     }
 
     const now = Date.now();
-    db.prepare('DELETE FROM auth.password_reset_tokens WHERE expires_at <= ? OR used_at IS NOT NULL').run(now);
-    db.prepare('DELETE FROM auth.password_reset_tokens WHERE email = ?').run(email);
+    await db.prepare('DELETE FROM auth.password_reset_tokens WHERE expires_at <= ? OR used_at IS NOT NULL').run(now);
+    await db.prepare('DELETE FROM auth.password_reset_tokens WHERE email = ?').run(email);
 
     const token = generatePasswordResetToken();
     const tokenHash = hashPasswordResetToken(sessionSecret, token);
     const expiresAt = now + (passwordResetTtlMinutes * 60 * 1000);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO auth.password_reset_tokens (token_hash, email, expires_at, created_at, used_at)
       VALUES (?, ?, ?, ?, NULL)
     `).run(tokenHash, email, expiresAt, now);
@@ -680,7 +690,7 @@ function registerAuthRoutes({
     return res.json({ ok: true });
   });
 
-  app.post('/api/password-reset/confirm', passwordResetConfirmRateLimiter, (req, res) => {
+  app.post('/api/password-reset/confirm', passwordResetConfirmRateLimiter, async (req, res) => {
     const token = String(req.body?.token || '').trim();
     const newPassword = String(req.body?.newPassword || '');
     if (token.length < 32) {
@@ -692,7 +702,7 @@ function registerAuthRoutes({
 
     const tokenHash = hashPasswordResetToken(sessionSecret, token);
     const now = Date.now();
-    const resetRow = db.prepare(`
+    const resetRow = await db.prepare(`
       SELECT token_hash, email, expires_at, used_at
       FROM auth.password_reset_tokens
       WHERE token_hash = ?
@@ -703,23 +713,23 @@ function registerAuthRoutes({
       return res.status(400).json({ error: 'Ссылка сброса недействительна или истекла' });
     }
 
-    const user = db.prepare('SELECT id FROM auth.users WHERE email = ?').get(resetRow.email);
+    const user = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(resetRow.email);
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
     const passwordHash = hashPassword(newPassword);
-    const tx = db.transaction(() => {
-      db.prepare('UPDATE auth.users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
-      db.prepare('UPDATE auth.password_reset_tokens SET used_at = ? WHERE token_hash = ?').run(now, tokenHash);
-      db.prepare('DELETE FROM auth.password_reset_tokens WHERE email = ? AND token_hash <> ?').run(resetRow.email, tokenHash);
+    const tx = db.transaction(async () => {
+      await db.prepare('UPDATE auth.users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+      await db.prepare('UPDATE auth.password_reset_tokens SET used_at = ? WHERE token_hash = ?').run(now, tokenHash);
+      await db.prepare('DELETE FROM auth.password_reset_tokens WHERE email = ? AND token_hash <> ?').run(resetRow.email, tokenHash);
     });
-    tx();
+    await tx();
 
     return res.json({ ok: true });
   });
 
-  app.post('/api/account/profile', requireCsrfSession, (req, res) => {
+  app.post('/api/account/profile', requireCsrfSession, async (req, res) => {
     if (!req.session?.user) {
       return res.status(401).json({ error: 'Требуется авторизация' });
     }
@@ -730,20 +740,20 @@ function registerAuthRoutes({
 
     const firstName = normalizeProfileName(req.body?.firstName);
     const lastName = normalizeProfileName(req.body?.lastName);
-    db.prepare('UPDATE auth.users SET first_name = ?, last_name = ? WHERE email = ?').run(firstName, lastName, email);
+    await db.prepare('UPDATE auth.users SET first_name = ?, last_name = ? WHERE email = ?').run(firstName, lastName, email);
     req.session.user.firstName = firstName;
     req.session.user.lastName = lastName;
     return res.json({ ok: true, user: { ...req.session.user } });
   });
 
-  app.post('/api/admin/users/edit-permission', requireCsrfSession, requireAdminSession, (req, res) => {
+  app.post('/api/admin/users/edit-permission', requireCsrfSession, requireAdminSession, async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const canEdit = Boolean(req.body?.canEdit);
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Укажите корректный email пользователя' });
     }
 
-    const result = db.prepare('UPDATE auth.users SET can_edit = ? WHERE email = ?').run(canEdit ? 1 : 0, email);
+    const result = await db.prepare('UPDATE auth.users SET can_edit = ? WHERE email = ?').run(canEdit ? 1 : 0, email);
     if (Number(result?.changes || 0) === 0) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
@@ -751,7 +761,7 @@ function registerAuthRoutes({
     return res.json({ ok: true, email, canEdit });
   });
 
-  app.get('/api/admin/users', requireAdminSession, (req, res) => {
+  app.get('/api/admin/users', requireAdminSession, async (req, res) => {
     const q = String(req.query?.q || '').trim().toLowerCase();
     const sortByRaw = String(req.query?.sortBy || '').trim();
     const sortDirRaw = String(req.query?.sortDir || '').trim().toLowerCase();
@@ -788,7 +798,7 @@ function registerAuthRoutes({
     if (hasEditsFilter === 'false') whereClauses.push('COALESCE(e.edit_count, 0) = 0');
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT
         u.email,
         u.first_name,
@@ -832,14 +842,14 @@ function registerAuthRoutes({
     });
   });
 
-  app.post('/api/admin/users/role', requireCsrfSession, requireMasterAdminSession, (req, res) => {
+  app.post('/api/admin/users/role', requireCsrfSession, requireMasterAdminSession, async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const isAdmin = Boolean(req.body?.isAdmin);
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Укажите корректный email пользователя' });
     }
 
-    const target = db.prepare('SELECT is_master_admin FROM auth.users WHERE email = ?').get(email);
+    const target = await db.prepare('SELECT is_master_admin FROM auth.users WHERE email = ?').get(email);
     if (!target) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
@@ -848,7 +858,7 @@ function registerAuthRoutes({
       return res.status(403).json({ error: 'Мастер-админ не может быть понижен до обычного пользователя' });
     }
 
-    db.prepare('UPDATE auth.users SET is_admin = ? WHERE email = ?').run(isAdmin ? 1 : 0, email);
+    await db.prepare('UPDATE auth.users SET is_admin = ? WHERE email = ?').run(isAdmin ? 1 : 0, email);
 
     return res.json({ ok: true, email, isAdmin });
   });

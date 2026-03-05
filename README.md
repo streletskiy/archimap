@@ -3,7 +3,8 @@
 ## What It Is
 
 ArchiMap is a self-hosted platform for an interactive architectural map.
-Building data is based on OpenStreetMap and enriched locally in SQLite.
+Building data is based on OpenStreetMap and enriched in the selected runtime DB provider:
+PostgreSQL + PostGIS (production default) or SQLite (dev/fallback).
 The map is rendered with MapLibre and vector PMTiles.
 The backend runs on Node.js + Express, and the UI is built with SvelteKit.
 The project is designed for private deployments with full control over data, tiles, and sessions.
@@ -12,7 +13,7 @@ The UI is multilingual (`en` + `ru`) with runtime locale switching.
 ## How It Works
 
 - Architectural data is sourced from OpenStreetMap.
-- Data is imported, normalized, and stored in SQLite.
+- Data is imported, normalized, and stored in PostgreSQL + PostGIS or SQLite (depending on `DB_PROVIDER`).
 - A PMTiles file is generated from building contours for efficient map delivery.
 - The SvelteKit UI loads tiles and renders them through MapLibre.
 - Users can submit building info edits.
@@ -28,7 +29,7 @@ References:
 
 - SvelteKit (UI)
 - API layer (Express)
-- SQLite
+- PostgreSQL + PostGIS / SQLite (switchable runtime)
 - PMTiles
 - Redis (optional, for sessions)
 
@@ -52,6 +53,15 @@ Docker:
 
 ```bash
 docker-compose up
+```
+
+PostgreSQL + PostGIS is enabled in Docker Compose by default.
+SQLite remains available for local development or explicit env override.
+
+Run default stack:
+
+```bash
+docker compose up -d
 ```
 
 Release image (multi-arch, registry push):
@@ -92,12 +102,39 @@ docker compose exec archimap npm run admin:create-master -- --email=admin@exampl
 
 Required for production:
 
-- `DATABASE_PATH` (or `ARCHIMAP_DB_PATH`)
-- `REDIS_URL`
 - `SESSION_SECRET`
 - `APP_BASE_URL`
+- `DB_PROVIDER`
+- `DATABASE_URL` or `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` for `DB_PROVIDER=postgres`
+- `DATABASE_PATH` / `ARCHIMAP_DB_PATH` only for `DB_PROVIDER=sqlite`
+- `REDIS_URL` (recommended for production sessions)
 
 Full list -> [docs/dev/env.md](docs/dev/env.md)
+
+Database provider switching:
+
+- `DB_PROVIDER=sqlite|postgres` (default: `postgres`, but `sqlite` in `NODE_ENV=development` if unset)
+- `DATABASE_URL=postgresql://...` for PostgreSQL mode
+- `SQLITE_URL` or existing `DATABASE_PATH` / `ARCHIMAP_DB_PATH` for SQLite mode
+
+PostgreSQL/PostGIS migration and smoke:
+
+```bash
+npm run db:pg:migrate
+npm run db:pg:smoke
+```
+
+Run by provider:
+
+```bash
+# SQLite mode
+DB_PROVIDER=sqlite npm run migrate
+DB_PROVIDER=sqlite npm run dev
+
+# PostgreSQL mode
+DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/archimap npm run db:pg:migrate
+DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/archimap npm run dev
+```
 
 ## Scripts
 
@@ -152,8 +189,3 @@ Notes:
 ## License
 
 Apache-2.0. See `LICENSE`.
-
-## Status
-
-Stages 1-3 are complete: SvelteKit migration, security hardening, and performance/DX improvements are in place.
-The repository is now in a production-ready state for open-source maintenance.

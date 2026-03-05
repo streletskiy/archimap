@@ -6,8 +6,8 @@ function registerContoursStatusRoute(app, db, contoursStatusRateLimiter) {
     FROM osm.building_contours
   `);
 
-  app.get('/api/contours-status', contoursStatusRateLimiter, (req, res) => {
-    const summary = selectSummary.get();
+  app.get('/api/contours-status', contoursStatusRateLimiter, async (req, res) => {
+    const summary = await selectSummary.get();
 
     return sendCachedJson(req, res, {
       total: Number(summary.total || 0),

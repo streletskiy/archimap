@@ -33,7 +33,7 @@ function createTestDb() {
   return db;
 }
 
-test('buildSmtpConfigFromInput keeps existing password when pass is empty and keepPassword=true', () => {
+test('buildSmtpConfigFromInput keeps existing password when pass is empty and keepPassword=true', async () => {
   const db = createTestDb();
   const service = createAppSettingsService({
     db,
@@ -41,7 +41,7 @@ test('buildSmtpConfigFromInput keeps existing password when pass is empty and ke
     fallbackSmtp: {}
   });
 
-  service.saveSmtpSettings({
+  await service.saveSmtpSettings({
     host: 'smtp-relay.brevo.com',
     port: 587,
     secure: false,
@@ -51,7 +51,7 @@ test('buildSmtpConfigFromInput keeps existing password when pass is empty and ke
     keepPassword: true
   }, 'admin@example.com');
 
-  const candidate = service.buildSmtpConfigFromInput({
+  const candidate = await service.buildSmtpConfigFromInput({
     host: 'smtp-relay.brevo.com',
     port: 587,
     secure: false,
@@ -63,7 +63,7 @@ test('buildSmtpConfigFromInput keeps existing password when pass is empty and ke
   assert.equal(candidate.pass, 'saved-pass');
 });
 
-test('buildSmtpConfigFromInput clears password when pass is empty and keepPassword=false', () => {
+test('buildSmtpConfigFromInput clears password when pass is empty and keepPassword=false', async () => {
   const db = createTestDb();
   const service = createAppSettingsService({
     db,
@@ -71,7 +71,7 @@ test('buildSmtpConfigFromInput clears password when pass is empty and keepPasswo
     fallbackSmtp: {}
   });
 
-  service.saveSmtpSettings({
+  await service.saveSmtpSettings({
     host: 'smtp-relay.brevo.com',
     port: 587,
     secure: false,
@@ -81,7 +81,7 @@ test('buildSmtpConfigFromInput clears password when pass is empty and keepPasswo
     keepPassword: true
   }, 'admin@example.com');
 
-  const candidate = service.buildSmtpConfigFromInput({
+  const candidate = await service.buildSmtpConfigFromInput({
     host: 'smtp-relay.brevo.com',
     port: 587,
     secure: false,

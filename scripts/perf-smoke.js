@@ -88,6 +88,7 @@ async function main() {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      DB_PROVIDER: 'sqlite',
       PORT: String(PORT),
       NODE_ENV: 'test',
       LOG_LEVEL: 'error',
@@ -95,6 +96,7 @@ async function main() {
       AUTO_SYNC_ENABLED: 'false',
       AUTO_SYNC_ON_START: 'false',
       SESSION_ALLOW_MEMORY_FALLBACK: 'true',
+      SESSION_COOKIE_SECURE: 'false',
       SESSION_SECRET: 'perf-smoke-secret',
       APP_BASE_URL: BASE_URL,
       ARCHIMAP_DB_PATH: path.join(tmpRoot, 'archimap.db'),

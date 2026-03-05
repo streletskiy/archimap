@@ -1,26 +1,131 @@
 require('dotenv').config({ quiet: true });
 
 const path = require('path');
-const Database = require('better-sqlite3');
+const { Client } = require('pg');
+const { getDbProvider, getPostgresConnectionString } = require('../scripts/lib/postgres-config');
 
-const dataDir = path.join(__dirname, '..', 'data');
-const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
-const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
-const localEditsDbPath = String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() || path.join(dataDir, 'local-edits.db');
-const db = new Database(dbPath);
-
+const DB_PROVIDER = getDbProvider(process.env);
 const REASON = String(process.env.SEARCH_REBUILD_REASON || 'manual');
 const BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
 
-db.pragma('journal_mode = WAL');
-db.pragma('busy_timeout = 5000');
-db.prepare(`ATTACH DATABASE ? AS osm`).run(osmDbPath);
-db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
-db.exec(`PRAGMA osm.journal_mode = WAL;`);
-db.exec(`PRAGMA osm.synchronous = NORMAL;`);
-db.exec(`PRAGMA local.journal_mode = WAL;`);
-db.exec(`PRAGMA local.synchronous = NORMAL;`);
-db.exec(`
+async function runPostgres() {
+  const connectionString = getPostgresConnectionString(process.env);
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required for DB_PROVIDER=postgres');
+  }
+  const client = new Client({ connectionString });
+  await client.connect();
+
+  const startedAt = Date.now();
+  console.log(`[search-worker] rebuild started (${REASON}), provider=postgres`);
+
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM building_search_fts;');
+    await client.query('DELETE FROM building_search_source;');
+
+    await client.query(`
+      INSERT INTO building_search_source (
+        osm_key, osm_type, osm_id, name, address, style, architect, local_priority, center_lon, center_lat, updated_at
+      )
+      SELECT
+        bc.osm_type || '/' || bc.osm_id AS osm_key,
+        bc.osm_type,
+        bc.osm_id,
+        NULLIF(trim(coalesce(
+          ai.name,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'name' ELSE NULL END,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'name:ru' ELSE NULL END,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'official_name' ELSE NULL END,
+          ''
+        )), '') AS name,
+        NULLIF(trim(coalesce(
+          ai.address,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:full' ELSE NULL END,
+          trim(
+            coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:postcode' ELSE NULL END || ', ', '') ||
+            coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:city' ELSE NULL END || ', ', '') ||
+            coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:place' ELSE NULL END || ', ', '') ||
+            coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:street' ELSE NULL END, '') ||
+            CASE
+              WHEN nullif(trim(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:housenumber' ELSE NULL END), '') IS NOT NULL
+              THEN ', ' || (CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:housenumber' ELSE NULL END)
+              ELSE ''
+            END
+          )
+        )), '') AS address,
+        NULLIF(trim(coalesce(
+          ai.style,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'building:architecture' ELSE NULL END,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'architecture' ELSE NULL END,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'style' ELSE NULL END,
+          ''
+        )), '') AS style,
+        NULLIF(trim(coalesce(
+          ai.architect,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'architect' ELSE NULL END,
+          CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'architect_name' ELSE NULL END,
+          ''
+        )), '') AS architect,
+        CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
+        (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
+        (bc.min_lat + bc.max_lat) / 2.0 AS center_lat,
+        NOW()
+      FROM osm.building_contours bc
+      LEFT JOIN local.architectural_info ai
+        ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+    `);
+
+    await client.query(`
+      INSERT INTO building_search_fts (osm_key, name, address, style, architect)
+      SELECT
+        osm_key,
+        coalesce(name, ''),
+        coalesce(address, ''),
+        coalesce(style, ''),
+        coalesce(architect, '')
+      FROM building_search_source
+    `);
+    await client.query('COMMIT');
+
+    const totals = await client.query(`
+      SELECT
+        (SELECT COUNT(*)::bigint FROM osm.building_contours) AS contours_total,
+        (SELECT COUNT(*)::bigint FROM building_search_source) AS source_total,
+        (SELECT COUNT(*)::bigint FROM building_search_fts) AS fts_total
+    `);
+    const row = totals.rows[0] || {};
+    console.log(`[search-worker] contours=${Number(row.contours_total || 0)} source=${Number(row.source_total || 0)} fts=${Number(row.fts_total || 0)}`);
+    console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore rollback failures
+    }
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+async function runSqlite() {
+  const Database = require('better-sqlite3');
+  const dataDir = path.join(__dirname, '..', 'data');
+  const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
+  const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
+  const localEditsDbPath = String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() || path.join(dataDir, 'local-edits.db');
+  const db = new Database(dbPath);
+
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
+  db.prepare(`ATTACH DATABASE ? AS osm`).run(osmDbPath);
+  db.prepare(`ATTACH DATABASE ? AS local`).run(localEditsDbPath);
+  db.exec(`PRAGMA osm.journal_mode = WAL;`);
+  db.exec(`PRAGMA osm.synchronous = NORMAL;`);
+  db.exec(`PRAGMA local.journal_mode = WAL;`);
+  db.exec(`PRAGMA local.synchronous = NORMAL;`);
+  db.exec(`
 CREATE TABLE IF NOT EXISTS local.architectural_info (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   osm_type TEXT NOT NULL,
@@ -40,49 +145,49 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
 );
 `);
 
-const localInfoColumns = new Set(
-  db.prepare('PRAGMA local.table_info(architectural_info)').all().map((column) => String(column?.name || '').trim())
-);
-if (!localInfoColumns.has('description')) {
-  db.exec('ALTER TABLE local.architectural_info ADD COLUMN description TEXT;');
-}
-if (!localInfoColumns.has('archimap_description')) {
-  db.exec('ALTER TABLE local.architectural_info ADD COLUMN archimap_description TEXT;');
-}
+  const localInfoColumns = new Set(
+    db.prepare('PRAGMA local.table_info(architectural_info)').all().map((column) => String(column?.name || '').trim())
+  );
+  if (!localInfoColumns.has('description')) {
+    db.exec('ALTER TABLE local.architectural_info ADD COLUMN description TEXT;');
+  }
+  if (!localInfoColumns.has('archimap_description')) {
+    db.exec('ALTER TABLE local.architectural_info ADD COLUMN archimap_description TEXT;');
+  }
 
-const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
-const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
-if (!searchSourceColumnNames.has('local_priority')) {
-  db.exec(`ALTER TABLE building_search_source ADD COLUMN local_priority INTEGER NOT NULL DEFAULT 0;`);
-}
+  const searchSourceColumns = db.prepare(`PRAGMA table_info(building_search_source)`).all();
+  const searchSourceColumnNames = new Set(searchSourceColumns.map((c) => c.name));
+  if (!searchSourceColumnNames.has('local_priority')) {
+    db.exec(`ALTER TABLE building_search_source ADD COLUMN local_priority INTEGER NOT NULL DEFAULT 0;`);
+  }
 
-function delayImmediate() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
+  function delayImmediate() {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
 
-async function run() {
   const startedAt = Date.now();
   console.log(`[search-worker] rebuild started (${REASON}), batch size: ${BATCH_SIZE}`);
 
-  const totalContours = Number(db.prepare(`SELECT COUNT(*) AS total FROM osm.building_contours`).get()?.total || 0);
-
-  db.exec('BEGIN');
   try {
-    db.exec('DELETE FROM building_search_source;');
-    db.exec('DELETE FROM building_search_fts;');
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+    const totalContours = Number(db.prepare(`SELECT COUNT(*) AS total FROM osm.building_contours`).get()?.total || 0);
 
-  if (totalContours === 0) {
-    console.log('[search-worker] rebuild finished: source is empty');
-    console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
-    return;
-  }
+    db.exec('BEGIN');
+    try {
+      db.exec('DELETE FROM building_search_source;');
+      db.exec('DELETE FROM building_search_fts;');
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
 
-const selectSourceBatch = db.prepare(`
+    if (totalContours === 0) {
+      console.log('[search-worker] rebuild finished: source is empty');
+      console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
+      return;
+    }
+
+    const selectSourceBatch = db.prepare(`
     SELECT
       bc.rowid AS contour_rowid,
       bc.osm_type || '/' || bc.osm_id AS osm_key,
@@ -131,97 +236,108 @@ const selectSourceBatch = db.prepare(`
     LIMIT ?
   `);
 
-  const insertSource = db.prepare(`
+    const insertSource = db.prepare(`
     INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, local_priority, center_lon, center_lat, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
 
-  let sourceProcessed = 0;
-  let sourceCursor = 0;
-  let lastLogTs = 0;
+    let sourceProcessed = 0;
+    let sourceCursor = 0;
+    let lastLogTs = 0;
 
-  while (true) {
-    const rows = selectSourceBatch.all(sourceCursor, BATCH_SIZE);
-    if (rows.length === 0) break;
+    while (true) {
+      const rows = selectSourceBatch.all(sourceCursor, BATCH_SIZE);
+      if (rows.length === 0) break;
 
-    db.exec('BEGIN');
-    try {
-      for (const row of rows) {
-        insertSource.run(
-          row.osm_key,
-          row.osm_type,
-          row.osm_id,
-          row.name || null,
-          row.address || null,
-          row.style || null,
-          row.architect || null,
-          row.local_priority,
-          row.center_lon,
-          row.center_lat
-        );
+      db.exec('BEGIN');
+      try {
+        for (const row of rows) {
+          insertSource.run(
+            row.osm_key,
+            row.osm_type,
+            row.osm_id,
+            row.name || null,
+            row.address || null,
+            row.style || null,
+            row.architect || null,
+            row.local_priority,
+            row.center_lon,
+            row.center_lat
+          );
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
       }
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
+
+      sourceCursor = Number(rows[rows.length - 1].contour_rowid);
+      sourceProcessed += rows.length;
+
+      const now = Date.now();
+      if (sourceProcessed === totalContours || now - lastLogTs >= 1200) {
+        const percent = ((sourceProcessed / totalContours) * 100).toFixed(1);
+        console.log(`[search-worker] source phase: ${sourceProcessed}/${totalContours} (${percent}%)`);
+        lastLogTs = now;
+      }
+      await delayImmediate();
     }
 
-    sourceCursor = Number(rows[rows.length - 1].contour_rowid);
-    sourceProcessed += rows.length;
-
-    const now = Date.now();
-    if (sourceProcessed === totalContours || now - lastLogTs >= 1200) {
-      const percent = ((sourceProcessed / totalContours) * 100).toFixed(1);
-      console.log(`[search-worker] source phase: ${sourceProcessed}/${totalContours} (${percent}%)`);
-      lastLogTs = now;
-    }
-    await delayImmediate();
-  }
-
-  const totalSource = Number(db.prepare(`SELECT COUNT(*) AS total FROM building_search_source`).get()?.total || 0);
-  const selectFtsBatch = db.prepare(`
+    const totalSource = Number(db.prepare(`SELECT COUNT(*) AS total FROM building_search_source`).get()?.total || 0);
+    const selectFtsBatch = db.prepare(`
     SELECT rowid AS row_id, osm_key, coalesce(name, '') AS name, coalesce(address, '') AS address, coalesce(style, '') AS style, coalesce(architect, '') AS architect
     FROM building_search_source
     WHERE rowid > ?
     ORDER BY rowid
     LIMIT ?
   `);
-  const insertFts = db.prepare(`
+    const insertFts = db.prepare(`
     INSERT INTO building_search_fts (osm_key, name, address, style, architect)
     VALUES (?, ?, ?, ?, ?)
   `);
 
-  let ftsProcessed = 0;
-  let ftsCursor = 0;
+    let ftsProcessed = 0;
+    let ftsCursor = 0;
 
-  while (true) {
-    const rows = selectFtsBatch.all(ftsCursor, BATCH_SIZE);
-    if (rows.length === 0) break;
+    while (true) {
+      const rows = selectFtsBatch.all(ftsCursor, BATCH_SIZE);
+      if (rows.length === 0) break;
 
-    db.exec('BEGIN');
-    try {
-      for (const row of rows) {
-        insertFts.run(row.osm_key, row.name, row.address, row.style, row.architect);
+      db.exec('BEGIN');
+      try {
+        for (const row of rows) {
+          insertFts.run(row.osm_key, row.name, row.address, row.style, row.architect);
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
       }
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
+
+      ftsCursor = Number(rows[rows.length - 1].row_id);
+      ftsProcessed += rows.length;
+
+      const now = Date.now();
+      if (ftsProcessed === totalSource || now - lastLogTs >= 1200) {
+        const percent = totalSource > 0 ? ((ftsProcessed / totalSource) * 100).toFixed(1) : '100.0';
+        console.log(`[search-worker] fts phase: ${ftsProcessed}/${totalSource} (${percent}%)`);
+        lastLogTs = now;
+      }
+      await delayImmediate();
     }
 
-    ftsCursor = Number(rows[rows.length - 1].row_id);
-    ftsProcessed += rows.length;
-
-    const now = Date.now();
-    if (ftsProcessed === totalSource || now - lastLogTs >= 1200) {
-      const percent = totalSource > 0 ? ((ftsProcessed / totalSource) * 100).toFixed(1) : '100.0';
-      console.log(`[search-worker] fts phase: ${ftsProcessed}/${totalSource} (${percent}%)`);
-      lastLogTs = now;
-    }
-    await delayImmediate();
+    console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
+  } finally {
+    db.close();
   }
+}
 
-  console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
+async function run() {
+  if (DB_PROVIDER === 'postgres') {
+    await runPostgres();
+    return;
+  }
+  await runSqlite();
 }
 
 run()

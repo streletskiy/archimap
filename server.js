@@ -3,7 +3,6 @@ require('dotenv').config({ quiet: true });
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const Database = require('better-sqlite3');
 const { ensureAuthSchema, registerAuthRoutes } = require('./src/lib/server/auth');
 const { createSimpleRateLimiter } = require('./src/lib/server/services/rate-limiter.service');
 const { createSearchService } = require('./src/lib/server/services/search.service');
@@ -25,7 +24,7 @@ const { applySecurityHeadersMiddleware } = require('./src/lib/server/infra/secur
 const { registerErrorHandlers } = require('./src/lib/server/infra/error-handling.infra');
 const { initSessionStore } = require('./src/lib/server/infra/session-store.infra');
 const { initSyncWorkersInfra } = require('./src/lib/server/infra/sync-workers.infra');
-const { initDbBootstrapInfra } = require('./src/lib/server/infra/db-bootstrap.infra');
+const { createDbRuntime } = require('./src/lib/server/infra/db-runtime.infra');
 const { initObservabilityInfra } = require('./src/lib/server/infra/observability.infra');
 const { registerContoursStatusRoute } = require('./src/routes/contours-status.route');
 const { registerAppRoutes, registerFrontendStaticRoute } = require('./src/routes/app.route');
@@ -49,6 +48,7 @@ const runtimeEnv = parseRuntimeEnv(process.env);
 const PORT = runtimeEnv.port;
 const HOST = runtimeEnv.host;
 const NODE_ENV = runtimeEnv.nodeEnv;
+const DB_PROVIDER = runtimeEnv.dbProvider;
 const TRUST_PROXY = String(process.env.TRUST_PROXY ?? 'false').toLowerCase() === 'true';
 if (TRUST_PROXY) {
   app.set('trust proxy', 1);
@@ -93,7 +93,12 @@ const FRONTEND_INDEX_PATH = path.join(__dirname, 'frontend', 'build', 'index.htm
 const CSP_SCRIPT_HASHES = collectInlineScriptHashesFromFile(FRONTEND_INDEX_PATH);
 
 const dataDir = path.join(__dirname, 'data');
-const dbPath = String(process.env.DATABASE_PATH || process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
+const dbPath = String(
+  process.env.DATABASE_PATH
+  || process.env.ARCHIMAP_DB_PATH
+  || runtimeEnv.sqliteUrl
+  || path.join(dataDir, 'archimap.db')
+).trim() || path.join(dataDir, 'archimap.db');
 const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
 const buildingsPmtilesPath = path.join(dataDir, BUILDINGS_PMTILES_FILE);
 const localEditsDbPath = process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
@@ -118,6 +123,7 @@ let filterTagKeysRebuildInProgress = false;
 let queuedFilterTagKeysRebuildReason = null;
 let searchService = null;
 let syncWorkers = null;
+let dbRuntimeReady = false;
 
 function normalizeMapConfig() {
   const lon = Number.isFinite(MAP_DEFAULT_LON) ? Math.min(180, Math.max(-180, MAP_DEFAULT_LON)) : 44.0059;
@@ -180,24 +186,86 @@ const contoursStatusRateLimiter = createSimpleRateLimiter({
 const RTREE_REBUILD_BATCH_SIZE = Math.max(500, Math.min(20000, Number(process.env.RTREE_REBUILD_BATCH_SIZE || 4000)));
 const RTREE_REBUILD_PAUSE_MS = Math.max(0, Math.min(200, Number(process.env.RTREE_REBUILD_PAUSE_MS || 8)));
 
-const {
-  db,
-  rtreeState,
-  scheduleBuildingContoursRtreeRebuild
-} = initDbBootstrapInfra({
-  Database,
-  dbPath,
-  osmDbPath,
-  localEditsDbPath,
-  userEditsDbPath,
-  userAuthDbPath,
-  buildingsPmtilesPath,
-  ensureAuthSchema,
-  rtreeRebuildBatchSize: RTREE_REBUILD_BATCH_SIZE,
-  rtreeRebuildPauseMs: RTREE_REBUILD_PAUSE_MS,
-  isSyncInProgress: () => syncWorkers?.isSyncInProgress?.() || false,
+function createDeferredDb(runtimePromise, provider) {
+  return {
+    provider,
+    prepare(sql) {
+      return {
+        get: async (...args) => {
+          const runtime = await runtimePromise;
+          return runtime.db.prepare(sql).get(...args);
+        },
+        all: async (...args) => {
+          const runtime = await runtimePromise;
+          return runtime.db.prepare(sql).all(...args);
+        },
+        run: async (...args) => {
+          const runtime = await runtimePromise;
+          return runtime.db.prepare(sql).run(...args);
+        }
+      };
+    },
+    exec: async (sql) => {
+      const runtime = await runtimePromise;
+      return runtime.db.exec(sql);
+    },
+    transaction(fn) {
+      return async (...args) => {
+        const runtime = await runtimePromise;
+        const tx = runtime.db.transaction(fn);
+        return tx(...args);
+      };
+    }
+  };
+}
+
+const rtreeState = { supported: false, ready: false, rebuilding: false };
+let scheduleBuildingContoursRtreeRebuild = () => {};
+const dbRuntimePromise = createDbRuntime({
+  runtimeEnv,
+  rawEnv: process.env,
+  sqlite: {
+    dbPath,
+    osmDbPath,
+    localEditsDbPath,
+    userEditsDbPath,
+    userAuthDbPath,
+    buildingsPmtilesPath,
+    ensureAuthSchema,
+    rtreeRebuildBatchSize: RTREE_REBUILD_BATCH_SIZE,
+    rtreeRebuildPauseMs: RTREE_REBUILD_PAUSE_MS,
+    isSyncInProgress: () => syncWorkers?.isSyncInProgress?.() || false
+  },
+  postgres: {},
   logger
 });
+const db = createDeferredDb(dbRuntimePromise, DB_PROVIDER);
+
+dbRuntimePromise.then((runtime) => {
+  dbRuntimeReady = true;
+  if (runtime?.rtreeState && typeof runtime.rtreeState === 'object') {
+    rtreeState.supported = Boolean(runtime.rtreeState.supported);
+    rtreeState.ready = Boolean(runtime.rtreeState.ready);
+    rtreeState.rebuilding = Boolean(runtime.rtreeState.rebuilding);
+  }
+  scheduleBuildingContoursRtreeRebuild = typeof runtime?.scheduleBuildingContoursRtreeRebuild === 'function'
+    ? runtime.scheduleBuildingContoursRtreeRebuild
+    : (() => {});
+}).catch((error) => {
+  logger.error('db_runtime_init_failed', { error: String(error?.message || error) });
+  process.exit(1);
+});
+
+async function closeDbRuntime() {
+  try {
+    const runtime = await dbRuntimePromise;
+    if (runtime && typeof runtime.close === 'function') {
+      await runtime.close();
+    }
+  } catch {
+    // ignore shutdown cleanup errors
+  }
+}
 
 const appSettingsService = createAppSettingsService({
   db,
@@ -219,17 +287,74 @@ const appSettingsService = createAppSettingsService({
   }
 });
 
+const generalConfigFallback = {
+  appDisplayName: APP_DISPLAY_NAME,
+  appBaseUrl: APP_BASE_URL,
+  registrationEnabled: REGISTRATION_ENABLED,
+  userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION
+};
+let generalConfigCache = { ...generalConfigFallback };
+let generalConfigRefreshPromise = null;
+const smtpConfigFallback = {
+  url: SMTP_URL,
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_SECURE,
+  user: SMTP_USER,
+  pass: SMTP_PASS,
+  from: EMAIL_FROM
+};
+let smtpConfigCache = { ...smtpConfigFallback };
+let smtpConfigRefreshPromise = null;
+
+function scheduleGeneralConfigRefresh() {
+  if (generalConfigRefreshPromise) return;
+  generalConfigRefreshPromise = appSettingsService.getEffectiveGeneralConfig()
+    .then((result) => {
+      if (result?.config && typeof result.config === 'object') {
+        generalConfigCache = {
+          appDisplayName: String(result.config.appDisplayName || APP_DISPLAY_NAME).trim() || APP_DISPLAY_NAME,
+          appBaseUrl: String(result.config.appBaseUrl || '').trim(),
+          registrationEnabled: Boolean(result.config.registrationEnabled),
+          userEditRequiresPermission: Boolean(result.config.userEditRequiresPermission)
+        };
+      }
+    })
+    .catch(() => {
+      // keep fallback cache on read failures
+    })
+    .finally(() => {
+      generalConfigRefreshPromise = null;
+    });
+}
+
+function scheduleSmtpConfigRefresh() {
+  if (smtpConfigRefreshPromise) return;
+  smtpConfigRefreshPromise = appSettingsService.getEffectiveSmtpConfig()
+    .then((result) => {
+      if (result?.config && typeof result.config === 'object') {
+        smtpConfigCache = {
+          url: String(result.config.url || '').trim(),
+          host: String(result.config.host || '').trim(),
+          port: Number(result.config.port || SMTP_PORT),
+          secure: Boolean(result.config.secure),
+          user: String(result.config.user || '').trim(),
+          pass: String(result.config.pass || '').trim(),
+          from: String(result.config.from || '').trim()
+        };
+      }
+    })
+    .catch(() => {
+      // keep fallback cache on read failures
+    })
+    .finally(() => {
+      smtpConfigRefreshPromise = null;
+    });
+}
+
 function getEffectiveGeneralConfig() {
-  try {
-    return appSettingsService.getEffectiveGeneralConfig().config;
-  } catch {
-    return {
-      appDisplayName: APP_DISPLAY_NAME,
-      appBaseUrl: APP_BASE_URL,
-      registrationEnabled: REGISTRATION_ENABLED,
-      userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION
-    };
-  }
+  scheduleGeneralConfigRefresh();
+  return generalConfigCache;
 }
 
 function getUserEditRequiresPermission() {
@@ -248,12 +373,42 @@ function getAppDisplayName() {
   return String(getEffectiveGeneralConfig().appDisplayName || 'archimap').trim() || 'archimap';
 }
 
+function getEffectiveSmtpConfig() {
+  scheduleSmtpConfigRefresh();
+  return smtpConfigCache;
+}
+
+function applyGeneralSettingsSnapshot(saved) {
+  const general = saved?.general;
+  if (!general || typeof general !== 'object') return;
+  generalConfigCache = {
+    appDisplayName: String(general.appDisplayName || APP_DISPLAY_NAME).trim() || APP_DISPLAY_NAME,
+    appBaseUrl: String(general.appBaseUrl || '').trim(),
+    registrationEnabled: Boolean(general.registrationEnabled),
+    userEditRequiresPermission: Boolean(general.userEditRequiresPermission)
+  };
+}
+
+function applySmtpSettingsSnapshot(saved) {
+  const smtp = saved?.smtp;
+  if (!smtp || typeof smtp !== 'object') return;
+  smtpConfigCache = {
+    url: String(smtp.url || '').trim(),
+    host: String(smtp.host || '').trim(),
+    port: Number(smtp.port || SMTP_PORT),
+    secure: Boolean(smtp.secure),
+    user: String(smtp.user || '').trim(),
+    pass: smtp.keepPassword === false ? '' : String(smtp.pass || smtpConfigCache.pass || '').trim(),
+    from: String(smtp.from || '').trim()
+  };
+}
+
 app.use(express.json());
 
 const selectFilterTagKeysFromCache = db.prepare(`
   SELECT tag_key
   FROM filter_tag_keys_cache
-  ORDER BY tag_key COLLATE NOCASE
+  ORDER BY ${DB_PROVIDER === 'postgres' ? 'lower(tag_key), tag_key' : 'tag_key COLLATE NOCASE'}
 `);
 
 function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
@@ -268,9 +423,14 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
     cwd: __dirname,
     env: {
       ...process.env,
-      ARCHIMAP_DB_PATH: dbPath,
-      OSM_DB_PATH: osmDbPath,
-      FILTER_TAG_KEYS_REBUILD_REASON: reason
+      DB_PROVIDER,
+      FILTER_TAG_KEYS_REBUILD_REASON: reason,
+      ...(DB_PROVIDER === 'sqlite'
+        ? {
+          ARCHIMAP_DB_PATH: dbPath,
+          OSM_DB_PATH: osmDbPath
+        }
+        : {})
     },
     stdio: 'inherit'
   });
@@ -308,14 +468,13 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
   });
 }
 
-function getFilterTagKeysCached() {
+async function getFilterTagKeysCached() {
   const now = Date.now();
   const ttlMs = 5 * 60 * 1000;
   if (Array.isArray(filterTagKeysCache.keys) && (now - filterTagKeysCache.loadedAt) < ttlMs) {
     return filterTagKeysCache.keys;
   }
-  const cachedKeys = selectFilterTagKeysFromCache
-    .all()
+  const cachedKeys = (await selectFilterTagKeysFromCache.all())
     .map((row) => String(row?.tag_key || '').trim())
     .filter(Boolean);
 
@@ -343,11 +502,14 @@ initObservabilityInfra(app, {
   getVersionInfo: getAppVersion,
   getReadinessChecks: () => ({
     sessionStoreReady: Boolean(sessionMiddleware),
-    dbReady: Boolean(db)
+    dbReady: dbRuntimeReady
   })
 });
 
 app.use((req, res, next) => {
+  if (!dbRuntimeReady) {
+    return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
+  }
   if (!sessionMiddleware) {
     return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
   }
@@ -401,7 +563,7 @@ function rowToFeature(row) {
   };
 }
 
-function attachInfoToFeatures(features, options = {}) {
+async function attachInfoToFeatures(features, options = {}) {
   const keys = features
     .map((f) => String(f.id || ''))
     .filter((id) => /^(way|relation)\/\d+$/.test(id));
@@ -418,7 +580,7 @@ function attachInfoToFeatures(features, options = {}) {
       const [type, id] = key.split('/');
       params.push(type, Number(id));
     }
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE ${clauses}
@@ -445,13 +607,13 @@ function attachInfoToFeatures(features, options = {}) {
 
   const actorKey = String(options.actorKey || '').trim().toLowerCase();
   if (actorKey) {
-    mergePersonalEditsIntoFeatureInfo(features, actorKey);
+    await mergePersonalEditsIntoFeatureInfo(features, actorKey);
   }
 
   return features;
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
@@ -459,7 +621,7 @@ function requireAuth(req, res, next) {
   if (!email) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
-  const row = db.prepare('SELECT email, can_edit, is_admin, is_master_admin, first_name, last_name FROM auth.users WHERE email = ?').get(email);
+  const row = await db.prepare('SELECT email, can_edit, is_admin, is_master_admin, first_name, last_name FROM auth.users WHERE email = ?').get(email);
   if (!row) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
@@ -477,7 +639,7 @@ function requireAuth(req, res, next) {
     firstName: row.first_name == null ? null : String(row.first_name),
     lastName: row.last_name == null ? null : String(row.last_name)
   };
-  next();
+  return next();
 }
 
 function isAdminRequest(req) {
@@ -494,7 +656,7 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
-function requireBuildingEditPermission(req, res, next) {
+async function requireBuildingEditPermission(req, res, next) {
   if (!req.session?.user) {
     return res.status(401).json({ error: 'Требуется авторизация' });
   }
@@ -507,7 +669,7 @@ function requireBuildingEditPermission(req, res, next) {
     return res.status(403).json({ error: 'Редактирование недоступно для этой учетной записи' });
   }
 
-  const row = db.prepare('SELECT can_edit, is_admin FROM auth.users WHERE email = ?').get(email);
+  const row = await db.prepare('SELECT can_edit, is_admin FROM auth.users WHERE email = ?').get(email);
   if (!row) {
     return res.status(403).json({ error: 'Редактирование недоступно для этой учетной записи' });
   }
@@ -526,8 +688,8 @@ searchService = createSearchService({
   isRebuildInProgress: () => searchIndexRebuildInProgress
 });
 
-function getSearchIndexCountsSnapshot() {
-  return db.prepare(`
+async function getSearchIndexCountsSnapshot() {
+  return await db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM osm.building_contours) AS contours_count,
       (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
@@ -535,8 +697,8 @@ function getSearchIndexCountsSnapshot() {
   `).get();
 }
 
-function getSearchRebuildDecision() {
-  const countsSnapshot = getSearchIndexCountsSnapshot();
+async function getSearchRebuildDecision() {
+  const countsSnapshot = await getSearchIndexCountsSnapshot();
   const expectedSourceRows = Number(countsSnapshot?.contours_count || 0);
   const actualSourceRows = Number(countsSnapshot?.search_source_count || 0);
   const actualFtsRows = Number(countsSnapshot?.search_fts_count || 0);
@@ -560,7 +722,7 @@ function getSearchRebuildDecision() {
   };
 }
 
-function flushDeferredSearchRefreshes() {
+async function flushDeferredSearchRefreshes() {
   if (pendingSearchIndexRefreshes.size === 0) return;
   const pending = Array.from(pendingSearchIndexRefreshes);
   pendingSearchIndexRefreshes.clear();
@@ -569,7 +731,7 @@ function flushDeferredSearchRefreshes() {
     const [osmType, osmIdRaw] = String(key).split('/');
     const osmId = Number(osmIdRaw);
     if (['way', 'relation'].includes(osmType) && Number.isInteger(osmId)) {
-      refreshSearchIndexForBuilding(osmType, osmId, { force: true });
+      await refreshSearchIndexForBuilding(osmType, osmId, { force: true });
     }
   }
 }
@@ -578,20 +740,22 @@ function maybeRunQueuedSearchRebuild() {
   if (!queuedSearchIndexRebuildReason) return;
   const nextReason = queuedSearchIndexRebuildReason;
   queuedSearchIndexRebuildReason = null;
-  rebuildSearchIndex(nextReason);
+  rebuildSearchIndex(nextReason).catch((error) => {
+    logger.error('search_rebuild_run_failed', { reason: nextReason, error: String(error?.message || error) });
+  });
 }
 
 function enqueueSearchIndexRefresh(osmType, osmId) {
-  setImmediate(() => {
+  setImmediate(async () => {
     try {
-      refreshSearchIndexForBuilding(osmType, osmId);
+      await refreshSearchIndexForBuilding(osmType, osmId);
     } catch (error) {
       logger.error('search_incremental_refresh_failed', { osmType, osmId, error: String(error.message || error) });
     }
   });
 }
 
-function rebuildSearchIndex(reason = 'manual', options = {}) {
+async function rebuildSearchIndex(reason = 'manual', options = {}) {
   const force = Boolean(options.force);
   if (searchIndexRebuildInProgress) {
     queuedSearchIndexRebuildReason = reason;
@@ -600,7 +764,7 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
   }
 
   if (!force) {
-    const decision = getSearchRebuildDecision();
+    const decision = await getSearchRebuildDecision();
     if (!decision.shouldRebuild) {
       logger.info('search_rebuild_skipped', { reason, details: decision.reason });
       return;
@@ -616,11 +780,16 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
     cwd: __dirname,
     env: {
       ...process.env,
-      ARCHIMAP_DB_PATH: dbPath,
-      OSM_DB_PATH: osmDbPath,
+      DB_PROVIDER,
       SEARCH_REBUILD_REASON: reason,
       SEARCH_INDEX_BATCH_SIZE: String(SEARCH_INDEX_BATCH_SIZE),
-      LOCAL_EDITS_DB_PATH: localEditsDbPath
+      ...(DB_PROVIDER === 'sqlite'
+        ? {
+          ARCHIMAP_DB_PATH: dbPath,
+          OSM_DB_PATH: osmDbPath,
+          LOCAL_EDITS_DB_PATH: localEditsDbPath
+        }
+        : {})
     },
     stdio: 'inherit'
   });
@@ -630,7 +799,7 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
     currentSearchRebuildChild = null;
     searchIndexRebuildInProgress = false;
     logger.error('search_rebuild_start_failed', { reason, error: String(error.message || error) });
-    flushDeferredSearchRefreshes();
+    flushDeferredSearchRefreshes().catch(() => {});
     maybeRunQueuedSearchRebuild();
   });
 
@@ -648,18 +817,67 @@ function rebuildSearchIndex(reason = 'manual', options = {}) {
       logger.error('search_rebuild_failed', { reason, code });
     }
 
-    flushDeferredSearchRefreshes();
+    flushDeferredSearchRefreshes().catch(() => {});
     maybeRunQueuedSearchRebuild();
   });
 }
 
-function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
+async function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
   const force = Boolean(options.force);
   if (!force && searchIndexRebuildInProgress) {
     pendingSearchIndexRefreshes.add(`${osmType}/${osmId}`);
     return;
   }
-  const row = db.prepare(`
+  const row = db.provider === 'postgres'
+    ? await db.prepare(`
+    SELECT
+      bc.osm_type || '/' || bc.osm_id AS osm_key,
+      bc.osm_type AS osm_type,
+      bc.osm_id AS osm_id,
+      NULLIF(trim(coalesce(
+        ai.name,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'name' ELSE NULL END,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'name:ru' ELSE NULL END,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'official_name' ELSE NULL END,
+        ''
+      )), '') AS name,
+      NULLIF(trim(coalesce(
+        ai.address,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:full' ELSE NULL END,
+        trim(
+          coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:postcode' ELSE NULL END || ', ', '') ||
+          coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:city' ELSE NULL END || ', ', '') ||
+          coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:place' ELSE NULL END || ', ', '') ||
+          coalesce(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:street' ELSE NULL END, '') ||
+          CASE
+            WHEN nullif(trim(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:housenumber' ELSE NULL END), '') IS NOT NULL
+            THEN ', ' || (CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'addr:housenumber' ELSE NULL END)
+            ELSE ''
+          END
+        )
+      )), '') AS address,
+      NULLIF(trim(coalesce(
+        ai.style,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'building:architecture' ELSE NULL END,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'architecture' ELSE NULL END,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'style' ELSE NULL END,
+        ''
+      )), '') AS style,
+      NULLIF(trim(coalesce(
+        ai.architect,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'architect' ELSE NULL END,
+        CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb->>'architect_name' ELSE NULL END,
+        ''
+      )), '') AS architect,
+      CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
+      (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
+      (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
+    FROM osm.building_contours bc
+    LEFT JOIN local.architectural_info ai
+      ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
+    WHERE bc.osm_type = ? AND bc.osm_id = ?
+  `).get(osmType, osmId)
+    : await db.prepare(`
     SELECT
       bc.osm_type || '/' || bc.osm_id AS osm_key,
       bc.osm_type AS osm_type,
@@ -707,12 +925,12 @@ function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
 
   const osmKey = `${osmType}/${osmId}`;
   if (!row) {
-    db.prepare(`DELETE FROM building_search_source WHERE osm_key = ?`).run(osmKey);
-    db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(osmKey);
+    await db.prepare(`DELETE FROM building_search_source WHERE osm_key = ?`).run(osmKey);
+    await db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(osmKey);
     return;
   }
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO building_search_source (osm_key, osm_type, osm_id, name, address, style, architect, local_priority, center_lon, center_lat, updated_at)
     VALUES (@osm_key, @osm_type, @osm_id, @name, @address, @style, @architect, @local_priority, @center_lon, @center_lat, datetime('now'))
     ON CONFLICT(osm_key) DO UPDATE SET
@@ -726,14 +944,14 @@ function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
       updated_at = datetime('now')
   `).run(row);
 
-  db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(row.osm_key);
-  db.prepare(`
+  await db.prepare(`DELETE FROM building_search_fts WHERE osm_key = ?`).run(row.osm_key);
+  await db.prepare(`
     INSERT INTO building_search_fts (osm_key, name, address, style, architect)
     VALUES (?, ?, ?, ?, ?)
   `).run(row.osm_key, row.name || '', row.address || '', row.style || '', row.architect || '');
 }
 
-function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
+async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
   return searchService.getBuildingSearchResults(queryText, centerLon, centerLat, limit, cursor);
 }
 
@@ -756,7 +974,7 @@ registerAuthRoutes({
   getAppBaseUrl,
   appDisplayName: APP_DISPLAY_NAME,
   getAppDisplayName,
-  getSmtpConfig: () => appSettingsService.getEffectiveSmtpConfig().config,
+  getSmtpConfig: getEffectiveSmtpConfig,
 });
 
 registerAppRoutes({
@@ -796,6 +1014,8 @@ registerAdminRoutes({
   passwordResetHtmlTemplate,
   passwordResetTextTemplate,
   appSettingsService,
+  onGeneralSettingsSaved: applyGeneralSettingsSnapshot,
+  onSmtpSettingsSaved: applySmtpSettingsSnapshot,
   appDisplayName: APP_DISPLAY_NAME,
   getAppDisplayName,
   appBaseUrl: APP_BASE_URL,
@@ -851,19 +1071,22 @@ syncWorkers = initSyncWorkersInfra({
   processExecPath: process.execPath,
   syncScriptPath,
   cwd: __dirname,
-  env: process.env,
+  env: {
+    ...process.env,
+    DB_PROVIDER
+  },
   autoSyncEnabled: AUTO_SYNC_ENABLED,
   autoSyncOnStart: AUTO_SYNC_ON_START,
   autoSyncIntervalHours: AUTO_SYNC_INTERVAL_HOURS,
   buildingsPmtilesPath,
   isShuttingDown: () => shuttingDown,
-  getContoursTotal: () => Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0),
-  onSyncSuccess: () => {
+  getContoursTotal: async () => Number((await db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
+  onSyncSuccess: async () => {
     if (!fs.existsSync(buildingsPmtilesPath)) {
       logger.warn('pmtiles_missing_after_sync', { path: buildingsPmtilesPath });
       syncWorkers?.runPmtilesBuild?.('post-sync-missing');
     }
-    rebuildSearchIndex('auto-sync');
+    await rebuildSearchIndex('auto-sync');
     filterTagKeysCache = { keys: null, loadedAt: 0 };
     scheduleFilterTagKeysCacheRebuild('auto-sync');
   }
@@ -895,10 +1118,16 @@ function shutdown(signal) {
   if (httpServer) {
     httpServer.close(() => {
       logger.info('server_shutdown_complete');
-      process.exit(0);
+      closeDbRuntime()
+        .finally(() => {
+          process.exit(0);
+        });
     });
   } else {
-    process.exit(0);
+    closeDbRuntime()
+      .finally(() => {
+        process.exit(0);
+      });
   }
 
   setTimeout(() => {
@@ -933,12 +1162,26 @@ initSessionStore({
         networkUrl: `http://${HOST}:${PORT}`,
         nodeEnv: NODE_ENV
       });
-      rebuildSearchIndex('startup');
-      scheduleFilterTagKeysCacheRebuild('startup');
-      if (syncWorkers) syncWorkers.initAutoSync();
-      if (!rtreeState.ready) {
-        scheduleBuildingContoursRtreeRebuild('startup');
-      }
+      Promise.resolve(dbRuntimePromise)
+        .then(() => {
+          scheduleGeneralConfigRefresh();
+          scheduleSmtpConfigRefresh();
+          rebuildSearchIndex('startup').catch((error) => {
+            logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
+          });
+          scheduleFilterTagKeysCacheRebuild('startup');
+          if (syncWorkers) {
+            Promise.resolve(syncWorkers.initAutoSync()).catch((error) => {
+              logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
+            });
+          }
+          if (!rtreeState.ready) {
+            scheduleBuildingContoursRtreeRebuild('startup');
+          }
+        })
+        .catch((error) => {
+          logger.error('startup_tasks_wait_db_failed', { error: String(error?.message || error) });
+        });
     });
   })
   .catch((error) => {

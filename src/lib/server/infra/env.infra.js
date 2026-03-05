@@ -6,7 +6,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3252),
   SESSION_SECRET: z.string().min(1).default('dev-secret-change-me'),
   APP_BASE_URL: z.string().default(''),
-  CSP_CONNECT_SRC_EXTRA: z.string().default('https://tiles.basemaps.cartocdn.com,https://*.basemaps.cartocdn.com')
+  CSP_CONNECT_SRC_EXTRA: z.string().default('https://tiles.basemaps.cartocdn.com,https://*.basemaps.cartocdn.com'),
+  DB_PROVIDER: z.string().default(''),
+  DATABASE_URL: z.string().default(''),
+  SQLITE_URL: z.string().default('')
 });
 
 function parseRuntimeEnv(rawEnv = process.env) {
@@ -19,13 +22,23 @@ function parseRuntimeEnv(rawEnv = process.env) {
     }
   }
 
+  const rawDbProvider = String(parsed.DB_PROVIDER || '').trim().toLowerCase();
+  const dbProviderDefault = parsed.NODE_ENV === 'development' ? 'sqlite' : 'postgres';
+  const dbProvider = rawDbProvider || dbProviderDefault;
+  if (!['sqlite', 'postgres'].includes(dbProvider)) {
+    throw new Error('[env] DB_PROVIDER must be either "sqlite" or "postgres"');
+  }
+
   return {
     nodeEnv: parsed.NODE_ENV,
     host: parsed.HOST,
     port: parsed.PORT,
     sessionSecret: parsed.SESSION_SECRET,
     appBaseUrl: String(parsed.APP_BASE_URL || '').trim(),
-    cspConnectSrcExtra: String(parsed.CSP_CONNECT_SRC_EXTRA || '')
+    cspConnectSrcExtra: String(parsed.CSP_CONNECT_SRC_EXTRA || ''),
+    dbProvider,
+    databaseUrl: String(parsed.DATABASE_URL || '').trim(),
+    sqliteUrl: String(parsed.SQLITE_URL || '').trim()
   };
 }
 

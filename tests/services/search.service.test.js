@@ -5,6 +5,7 @@ const { createSearchService } = require('../../src/lib/server/services/search.se
 
 function createNoopDb() {
   return {
+    provider: 'sqlite',
     prepare() {
       return {
         all() {
@@ -27,8 +28,8 @@ test('buildFtsMatchQuery escapes quotes', () => {
   assert.equal(query, '"abc"* AND "d""e"*');
 });
 
-test('getBuildingSearchResults returns empty for short/empty tokens', () => {
+test('getBuildingSearchResults returns empty for short/empty tokens', async () => {
   const service = createSearchService({ db: createNoopDb() });
-  const result = service.getBuildingSearchResults('   ', 0, 0, 30, 0);
+  const result = await service.getBuildingSearchResults('   ', 0, 0, 30, 0);
   assert.deepEqual(result, { items: [], nextCursor: null, hasMore: false });
 });

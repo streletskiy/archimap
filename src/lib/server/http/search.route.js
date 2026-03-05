@@ -4,7 +4,7 @@ const { createLruCache } = require('../infra/lru-cache.infra');
 function registerSearchRoutes({ app, searchRateLimiter, getBuildingSearchResults }) {
   const searchCache = createLruCache({ max: 300, ttlMs: 15 * 1000 });
 
-  app.get('/api/search-buildings', searchRateLimiter, (req, res) => {
+  app.get('/api/search-buildings', searchRateLimiter, async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) {
       return res.status(400).json({ error: 'Минимальная длина запроса: 2 символа' });
@@ -29,7 +29,7 @@ function registerSearchRoutes({ app, searchRateLimiter, getBuildingSearchResults
       });
     }
 
-    const result = getBuildingSearchResults(q, lon, lat, limit, cursor);
+    const result = await getBuildingSearchResults(q, lon, lat, limit, cursor);
     const payload = {
       items: result.items,
       hasMore: result.hasMore,

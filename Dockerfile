@@ -86,6 +86,7 @@ COPY --from=deps /app/node_modules ./node_modules
 RUN npm prune --omit=dev
 COPY server.js ./server.js
 COPY src ./src
+COPY db ./db
 COPY scripts ./scripts
 COPY workers ./workers
 COPY --from=frontend-build /app/frontend/build ./frontend/build

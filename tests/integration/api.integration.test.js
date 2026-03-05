@@ -52,9 +52,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       AUTO_SYNC_ON_START: 'false',
       AUTO_SYNC_INTERVAL_HOURS: '0',
       SESSION_ALLOW_MEMORY_FALLBACK: 'true',
+      SESSION_COOKIE_SECURE: 'false',
       REDIS_URL: 'redis://127.0.0.1:6399',
       SESSION_SECRET: 'integration-test-secret',
       APP_BASE_URL: baseUrl,
+      DB_PROVIDER: 'sqlite',
       SMTP_URL: '',
       SMTP_HOST: '',
       SMTP_PORT: '587',
@@ -108,6 +110,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         cwd: path.join(__dirname, '..', '..'),
         env: {
           ...process.env,
+          DB_PROVIDER: 'sqlite',
           USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
         },
         stdio: ['ignore', 'pipe', 'pipe']

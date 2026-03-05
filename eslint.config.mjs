@@ -20,6 +20,8 @@ export default [
       'scripts/**/*.js',
       'workers/**/*.js',
       'db/migrations/**/*.js',
+      'db/drizzle/**/*.js',
+      'drizzle.config.js',
       'tests/**/*.js'
     ],
     languageOptions: {

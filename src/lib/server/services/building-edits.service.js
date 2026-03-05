@@ -63,15 +63,15 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
   const ARCHI_FIELD_SET = new Set(ARCHI_EDIT_FIELDS.map((f) => f.key));
 
-  function getMergedInfoRow(osmType, osmId) {
-    return db.prepare(`
+  async function getMergedInfoRow(osmType, osmId) {
+    return await db.prepare(`
       SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
   }
 
-  function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
+  async function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
     const author = String(createdBy || '').trim().toLowerCase();
     if (!author) return null;
 
@@ -86,7 +86,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     const params = [osmType, osmId, author];
     if (statusClause) params.push(...normalizedStatuses);
 
-    return db.prepare(`
+    return await db.prepare(`
       SELECT *
       FROM user_edits.building_user_edits
       WHERE osm_type = ?
@@ -98,12 +98,12 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     `).get(...params) || null;
   }
 
-  function supersedePendingUserEdits(osmType, osmId, createdBy, keepId = null) {
+  async function supersedePendingUserEdits(osmType, osmId, createdBy, keepId = null) {
     const author = String(createdBy || '').trim().toLowerCase();
     if (!author) return;
 
     if (Number.isInteger(keepId) && keepId > 0) {
-      db.prepare(`
+      await db.prepare(`
         UPDATE user_edits.building_user_edits
         SET status = 'superseded', updated_at = datetime('now')
         WHERE osm_type = ?
@@ -115,7 +115,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       return;
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE user_edits.building_user_edits
       SET status = 'superseded', updated_at = datetime('now')
       WHERE osm_type = ?
@@ -227,7 +227,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function getUserEditsList({ createdBy = null, status = null, limit = 2000, summary = false }) {
+  async function getUserEditsList({ createdBy = null, status = null, limit = 2000, summary = false }) {
     const cap = Math.max(1, Math.min(5000, Number(limit) || 2000));
     const clauses = [];
     const params = [];
@@ -246,7 +246,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
 
     if (summary) {
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
       SELECT
         ue.id,
         ue.osm_type,
@@ -273,7 +273,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       }));
     }
 
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT
         ue.*,
         bc.tags_json,
@@ -320,11 +320,11 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return out;
   }
 
-  function getUserEditDetailsById(editId) {
+  async function getUserEditDetailsById(editId) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) return null;
 
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT
         ue.*,
         bc.tags_json,
@@ -384,7 +384,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return mapped;
   }
 
-  function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
+  async function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
     const actor = String(actorKey || '').trim().toLowerCase();
     if (!actor || !Array.isArray(keys) || keys.length === 0) return new Map();
 
@@ -412,7 +412,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       const statusPlaceholders = normalizedStatuses.map(() => '?').join(',');
       params.push(...normalizedStatuses);
 
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
         SELECT ue.*
         FROM user_edits.building_user_edits ue
         JOIN (
@@ -433,13 +433,13 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return out;
   }
 
-  function mergePersonalEditsIntoFeatureInfo(features, actorKey) {
+  async function mergePersonalEditsIntoFeatureInfo(features, actorKey) {
     const keys = features
       .map((f) => String(f?.id || f?.properties?.osm_key || ''))
       .filter((id) => /^(way|relation)\/\d+$/.test(id));
     if (keys.length === 0) return features;
 
-    const personalByKey = getUserPersonalEditsByKeys(actorKey, keys, ['pending', 'rejected']);
+    const personalByKey = await getUserPersonalEditsByKeys(actorKey, keys, ['pending', 'rejected']);
     if (personalByKey.size === 0) return features;
 
     for (const feature of features) {
@@ -469,12 +469,12 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return features;
   }
 
-  function applyPersonalEditsToFilterItems(items, actorKey) {
+  async function applyPersonalEditsToFilterItems(items, actorKey) {
     const actor = String(actorKey || '').trim().toLowerCase();
     if (!actor || !Array.isArray(items) || items.length === 0) return items;
 
     const keys = items.map((item) => String(item?.osmKey || '')).filter((id) => /^(way|relation)\/\d+$/.test(id));
-    const personalByKey = getUserPersonalEditsByKeys(actor, keys, ['pending', 'rejected']);
+    const personalByKey = await getUserPersonalEditsByKeys(actor, keys, ['pending', 'rejected']);
     if (personalByKey.size === 0) return items;
 
     return items.map((item) => {

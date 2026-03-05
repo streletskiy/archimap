@@ -25,7 +25,7 @@ function createSearchService(options = {}) {
       .join(' AND ');
   }
 
-  function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cursor = 0) {
+  async function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cursor = 0) {
     const cappedLimit = Math.max(1, Math.min(60, Number(limit) || 30));
     const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
@@ -45,7 +45,7 @@ function createSearchService(options = {}) {
     }
 
     const whereSql = whereTokenClauses.length > 0 ? whereTokenClauses.join(' AND ') : '1=1';
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       WITH src AS (
         SELECT
           ai.osm_type,
@@ -97,7 +97,7 @@ function createSearchService(options = {}) {
     };
   }
 
-  function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
+  async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
     const tokens = normalizeSearchTokens(queryText);
     if (tokens.length === 0) {
       return { items: [], nextCursor: null, hasMore: false };
@@ -107,35 +107,60 @@ function createSearchService(options = {}) {
       return getLocalEditsSearchResults(tokens, centerLon, centerLat, limit, cursor);
     }
 
-    const matchQuery = buildFtsMatchQuery(tokens);
     const cappedLimit = Math.max(1, Math.min(60, Number(limit) || 30));
     const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
     const lat = Number.isFinite(centerLat) ? centerLat : defaultLat;
 
-    const rows = db.prepare(`
-      WITH matched AS (
-        SELECT osm_key, bm25(building_search_fts) AS rank
-        FROM building_search_fts
-        WHERE building_search_fts MATCH ?
-      )
-      SELECT
-        s.osm_type,
-        s.osm_id,
-        s.name,
-        s.address,
-        s.style,
-        s.architect,
-        s.center_lon,
-        s.center_lat,
-        s.local_priority,
-        m.rank,
-        ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
-      FROM matched m
-      JOIN building_search_source s ON s.osm_key = m.osm_key
-      ORDER BY s.local_priority DESC, m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
-      LIMIT ? OFFSET ?
-    `).all(matchQuery, lon, lon, lat, lat, cappedLimit + 1, offset);
+    const rows = db.provider === 'postgres'
+      ? await db.prepare(`
+        WITH matched AS (
+          SELECT
+            osm_key,
+            ts_rank(search_tsv, plainto_tsquery('simple', ?)) AS rank
+          FROM building_search_fts
+          WHERE search_tsv @@ plainto_tsquery('simple', ?)
+        )
+        SELECT
+          s.osm_type,
+          s.osm_id,
+          s.name,
+          s.address,
+          s.style,
+          s.architect,
+          s.center_lon,
+          s.center_lat,
+          s.local_priority,
+          m.rank,
+          ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
+        FROM matched m
+        JOIN building_search_source s ON s.osm_key = m.osm_key
+        ORDER BY s.local_priority DESC, m.rank DESC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
+        LIMIT ? OFFSET ?
+      `).all(tokens.join(' '), tokens.join(' '), lon, lon, lat, lat, cappedLimit + 1, offset)
+      : await db.prepare(`
+        WITH matched AS (
+          SELECT osm_key, bm25(building_search_fts) AS rank
+          FROM building_search_fts
+          WHERE building_search_fts MATCH ?
+        )
+        SELECT
+          s.osm_type,
+          s.osm_id,
+          s.name,
+          s.address,
+          s.style,
+          s.architect,
+          s.center_lon,
+          s.center_lat,
+          s.local_priority,
+          m.rank,
+          ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
+        FROM matched m
+        JOIN building_search_source s ON s.osm_key = m.osm_key
+        ORDER BY s.local_priority DESC, m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
+        LIMIT ? OFFSET ?
+      `).all(buildFtsMatchQuery(tokens), lon, lon, lat, lat, cappedLimit + 1, offset);
 
     const hasMore = rows.length > cappedLimit;
     const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
