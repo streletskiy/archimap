@@ -1,14 +1,32 @@
 <script>
-  import { createEventDispatcher, onDestroy, tick } from 'svelte';
-  import { searchState, closeSearchModal, requestSearch, resetSearchState, setSearchQuery } from '$lib/stores/search';
+  import { browser } from '$app/environment';
+  import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
+  import {
+    closeSearchModal,
+    requestSearch,
+    resetSearchState,
+    searchMapState,
+    searchState,
+    setSearchQuery
+  } from '$lib/stores/search';
   import { locale, t } from '$lib/i18n/index';
   import { toHumanArchitectureStyle } from '$lib/utils/architecture-style';
 
   const dispatch = createEventDispatcher();
+  const DESKTOP_INTERACTIVE_MEDIA_QUERY = '(min-width: 768px)';
+  const SEARCH_VISIBLE_PRIORITY_LIMIT = 120;
+  const SEARCH_RENDER_LIMIT = 200;
 
   let debounceTimer = null;
   let searchInputEl = null;
   let hadOpenState = false;
+  let isDesktopInteractive = false;
+  let removeDesktopMediaListener = null;
+  let displayedResults = [];
+  let visibleResultsTotal = 0;
+  let queryIsActive = false;
+  let showVisibleMapStatus = false;
+  let visibleListLimited = false;
 
   function onDialogKeydown(event) {
     if (event.key === 'Escape') {
@@ -44,11 +62,81 @@
     dispatch('selectResult', item);
   }
 
+  function getItemKey(item) {
+    const osmType = String(item?.osmType || '').trim();
+    const osmId = Number(item?.osmId);
+    if (!osmType || !Number.isInteger(osmId) || osmId <= 0) return '';
+    return `${osmType}/${osmId}`;
+  }
+
+  function buildDisplayedResults(visibleItems, searchItems) {
+    const entries = [];
+    const seen = new Set();
+    let visibleCount = 0;
+
+    for (const item of Array.isArray(visibleItems) ? visibleItems : []) {
+      const key = getItemKey(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      entries.push({
+        key,
+        item,
+        visibleOnMap: true
+      });
+      visibleCount += 1;
+      if (visibleCount >= SEARCH_VISIBLE_PRIORITY_LIMIT || entries.length >= SEARCH_RENDER_LIMIT) {
+        break;
+      }
+    }
+
+    for (const item of Array.isArray(searchItems) ? searchItems : []) {
+      if (entries.length >= SEARCH_RENDER_LIMIT) break;
+      const key = getItemKey(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      entries.push({
+        key,
+        item,
+        visibleOnMap: false
+      });
+    }
+
+    return entries;
+  }
+
+  function updateDesktopInteractiveState(matches = false) {
+    isDesktopInteractive = Boolean(matches);
+  }
+
+  onMount(() => {
+    if (!browser || typeof window.matchMedia !== 'function') return undefined;
+    const mediaQuery = window.matchMedia(DESKTOP_INTERACTIVE_MEDIA_QUERY);
+    const handleChange = (event) => {
+      updateDesktopInteractiveState(event.matches);
+    };
+    updateDesktopInteractiveState(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange);
+      removeDesktopMediaListener = () => mediaQuery.removeEventListener('change', handleChange);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(handleChange);
+      removeDesktopMediaListener = () => mediaQuery.removeListener(handleChange);
+    }
+
+    return () => {
+      removeDesktopMediaListener?.();
+      removeDesktopMediaListener = null;
+    };
+  });
+
   onDestroy(() => {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
+    removeDesktopMediaListener?.();
+    removeDesktopMediaListener = null;
   });
 
   $: if ($searchState.modalOpen && !hadOpenState) {
@@ -57,23 +145,31 @@
   } else if (!$searchState.modalOpen && hadOpenState) {
     hadOpenState = false;
   }
+
+  $: displayedResults = buildDisplayedResults($searchMapState.items, $searchState.items);
+  $: visibleResultsTotal = Math.max(0, Number($searchMapState.total || 0));
+  $: queryIsActive = String($searchState.query || '').trim().length >= 2;
+  $: visibleListLimited = Boolean($searchMapState.truncated || visibleResultsTotal > SEARCH_VISIBLE_PRIORITY_LIMIT);
+  $: showVisibleMapStatus = queryIsActive && ($searchMapState.loading || visibleResultsTotal > 0 || $searchMapState.truncated);
 </script>
 
 {#if $searchState.modalOpen}
   <div id="search-modal" class="search-backdrop">
-    <button
-      type="button"
-      class="search-dismiss-layer"
-      tabindex="-1"
-      aria-label={$t('common.close')}
-      on:click={closeSearchModal}
-    ></button>
+    {#if !isDesktopInteractive}
+      <button
+        type="button"
+        class="search-dismiss-layer"
+        tabindex="-1"
+        aria-label={$t('common.close')}
+        on:click={closeSearchModal}
+      ></button>
+    {/if}
 
     <div
       class="search-modal"
       role="dialog"
       tabindex="-1"
-      aria-modal="true"
+      aria-modal={isDesktopInteractive ? 'false' : 'true'}
       aria-label={$t('search.modalAriaLabel')}
       on:keydown={onDialogKeydown}
     >
@@ -115,7 +211,21 @@
       </form>
 
       <div class="search-meta">
-        <p id="search-results-status" class="search-status">{$searchState.status}</p>
+        <div class="search-meta-copy">
+          <p id="search-results-status" class="search-status">{$searchState.status}</p>
+          {#if showVisibleMapStatus}
+            <p class="search-viewport-status" data-loading={$searchMapState.loading ? 'true' : 'false'}>
+              {#if $searchMapState.loading}
+                {$t('search.visibleLoading')}
+              {:else}
+                {$t('search.visibleNow', { count: visibleResultsTotal })}
+                {#if visibleListLimited}
+                  <span class="search-viewport-status-note">{$t('search.visibleTruncated')}</span>
+                {/if}
+              {/if}
+            </p>
+          {/if}
+        </div>
         {#if $searchState.total > 0}
           <span class="search-total">{$searchState.total}</span>
         {/if}
@@ -124,39 +234,45 @@
       <div id="search-results-list" class="search-results-list">
         {#if $searchState.loading}
           <div class="search-empty search-empty-loading">{$t('search.loading')}</div>
-        {:else if $searchState.items.length === 0}
+        {:else if displayedResults.length === 0}
           <div class="search-empty">{$t('search.notFound')}</div>
         {:else}
-          {#each $searchState.items as item (`${item.osmType}/${item.osmId}`)}
-            <button type="button" class="search-item" on:click={() => selectResult(item)}>
+          {#each displayedResults as entry (entry.key)}
+            <button type="button" class="search-item" on:click={() => selectResult(entry.item)}>
               <div class="search-item-head">
                 <div>
-                  <div class="search-item-title">{item.name || $t('search.untitled')}</div>
-                  <div class="search-item-key">{item.osmType}/{item.osmId}</div>
+                  <div class="search-item-title">{entry.item.name || $t('search.untitled')}</div>
+                  <div class="search-item-key">{entry.item.osmType}/{entry.item.osmId}</div>
                 </div>
                 <span class="search-item-cta">{$t('search.toBuilding')}</span>
               </div>
 
               <div class="search-item-body">
-                {#if item.address}
+                {#if entry.item.address}
                   <div class="search-item-line">
                     <span class="search-item-label">{$t('search.address')}</span>
-                    <span>{item.address}</span>
+                    <span>{entry.item.address}</span>
                   </div>
                 {/if}
 
                 <div class="search-badges">
-                  {#if item.style}
-                    <span class="search-badge">
-                      <strong>{$t('search.style')}</strong>
-                      {toHumanArchitectureStyle(item.style, $locale) || item.style}
+                  {#if entry.visibleOnMap}
+                    <span class="search-badge search-badge-map-visible">
+                      <strong>{$t('search.visibleOnMap')}</strong>
                     </span>
                   {/if}
 
-                  {#if item.architect}
+                  {#if entry.item.style}
+                    <span class="search-badge">
+                      <strong>{$t('search.style')}</strong>
+                      {toHumanArchitectureStyle(entry.item.style, $locale) || entry.item.style}
+                    </span>
+                  {/if}
+
+                  {#if entry.item.architect}
                     <span class="search-badge">
                       <strong>{$t('search.architect')}</strong>
-                      {item.architect}
+                      {entry.item.architect}
                     </span>
                   {/if}
                 </div>
@@ -277,10 +393,32 @@
     min-height: 1.5rem;
   }
 
+  .search-meta-copy {
+    min-width: 0;
+    display: grid;
+    gap: 0.18rem;
+  }
+
   .search-status {
     margin: 0;
     color: var(--muted);
     font-size: 0.84rem;
+  }
+
+  .search-viewport-status {
+    margin: 0;
+    color: var(--accent-ink);
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+
+  .search-viewport-status[data-loading='true'] {
+    color: var(--muted);
+  }
+
+  .search-viewport-status-note {
+    color: var(--muted);
+    font-weight: 500;
   }
 
   .search-total {
@@ -396,6 +534,12 @@
     line-height: 1.25;
   }
 
+  .search-badge-map-visible {
+    border-color: color-mix(in srgb, var(--accent) 26%, var(--panel-border));
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+
   .search-badge strong {
     color: var(--fg-strong);
   }
@@ -424,10 +568,16 @@
       --search-modal-side-gap: 0.85rem;
       --search-modal-bottom-gap: 0.85rem;
       background: transparent;
+      pointer-events: none;
     }
 
     .search-modal {
       width: clamp(25rem, 32vw, 31rem);
+      pointer-events: auto;
+    }
+
+    .search-dismiss-layer {
+      display: none;
     }
   }
 

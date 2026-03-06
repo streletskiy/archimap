@@ -45,6 +45,10 @@
     "address": "Address",
     "style": "Style",
     "architect": "Architect",
+    "visibleOnMap": "Visible on map",
+    "visibleNow": "Currently on map: {count}",
+    "visibleLoading": "Refreshing map results...",
+    "visibleTruncated": "list limited",
     "toBuilding": "Open",
     "loadMore": "Load more",
     "loadingMore": "Loading..."

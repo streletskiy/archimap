@@ -45,6 +45,10 @@
     "address": "Адрес",
     "style": "Стиль",
     "architect": "Архитектор",
+    "visibleOnMap": "Видно на карте",
+    "visibleNow": "На карте сейчас: {count}",
+    "visibleLoading": "Обновляем результаты по карте...",
+    "visibleTruncated": "список ограничен",
     "toBuilding": "К зданию",
     "loadMore": "Показать еще",
     "loadingMore": "Загрузка..."
