@@ -12,7 +12,7 @@ function normalizeOrigins(input: string) {
 function extractInlineScriptHashesFromHtml(html: string) {
   const text = String(html || '');
   const hashes: string[] = [];
-  const scriptTagPattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  const scriptTagPattern = /<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi;
   let match: RegExpExecArray | null = null;
 
   while ((match = scriptTagPattern.exec(text)) !== null) {

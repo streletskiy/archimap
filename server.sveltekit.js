@@ -18,6 +18,10 @@ const {
 const runtimeEnv = parseRuntimeEnv(process.env);
 const PORT = runtimeEnv.port;
 const HOST = runtimeEnv.host;
+const INTERNAL_ERROR_PAYLOAD = JSON.stringify({
+  code: 'ERR_INTERNAL',
+  error: 'Internal server error'
+});
 
 let svelteHandlerPromise = null;
 let httpServer = null;
@@ -91,13 +95,10 @@ async function start() {
   await prepareRuntime();
   httpServer = http.createServer((req, res) => {
     Promise.resolve(requestHandler(req, res))
-      .catch((error) => {
+      .catch(() => {
         res.statusCode = 500;
         res.setHeader('content-type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({
-          code: 'ERR_INTERNAL',
-          error: String(error?.message || error || 'Unknown runtime error')
-        }));
+        res.end(INTERNAL_ERROR_PAYLOAD);
       });
   });
 

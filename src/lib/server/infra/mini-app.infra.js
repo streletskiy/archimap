@@ -4,6 +4,10 @@ const http = require('http');
 const { URL } = require('url');
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+const INTERNAL_ERROR_PAYLOAD = Object.freeze({
+  code: 'ERR_INTERNAL',
+  error: 'Internal server error'
+});
 const TEXT_MIME_BY_EXT = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -473,10 +477,7 @@ function createMiniApp() {
       if (!res.headersSent) {
         res.statusCode = 500;
         setDefaultContentType(res, 'application/json; charset=utf-8');
-        const payload = JSON.stringify({
-          code: 'ERR_INTERNAL',
-          error: String(currentError?.message || currentError || 'Internal server error')
-        });
+        const payload = JSON.stringify(INTERNAL_ERROR_PAYLOAD);
         writePayload(req, res, payload);
       }
       return;
@@ -491,14 +492,11 @@ function createMiniApp() {
   app.listen = (port, host, callback) => {
     const server = http.createServer((req, res) => {
       Promise.resolve(app.handle(req, res))
-        .catch((error) => {
+        .catch(() => {
           if (res.headersSent || res.writableEnded) return;
           res.statusCode = 500;
           setDefaultContentType(res, 'application/json; charset=utf-8');
-          writePayload(req, res, JSON.stringify({
-            code: 'ERR_INTERNAL',
-            error: String(error?.message || error || 'Unknown server error')
-          }));
+          writePayload(req, res, JSON.stringify(INTERNAL_ERROR_PAYLOAD));
         });
     });
     return server.listen(port, host, callback);
