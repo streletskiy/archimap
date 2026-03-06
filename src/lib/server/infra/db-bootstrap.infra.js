@@ -339,6 +339,7 @@ CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
   architect TEXT,
   address TEXT,
   archimap_description TEXT,
+  edited_fields_json TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   admin_comment TEXT,
   reviewed_by TEXT,

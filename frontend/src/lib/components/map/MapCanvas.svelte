@@ -2,6 +2,7 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
+  import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { t, translateNow } from '$lib/i18n/index';
   import {
     mapFocusRequest,
@@ -1992,10 +1993,7 @@
     filterDenseBurstEnabled = resolveFilterDenseBurstEnabled();
 
     async function initMap() {
-      const [{ default: maplibreModule }, { PMTiles: PMTilesCtor, Protocol: ProtocolCtor }] = await Promise.all([
-        import('maplibre-gl'),
-        import('pmtiles')
-      ]);
+      const { maplibregl: maplibreModule, PMTiles: PMTilesCtor, Protocol: ProtocolCtor } = await loadMapRuntime();
       if (!mountAlive) return;
       maplibregl = maplibreModule;
 
@@ -2007,9 +2005,7 @@
       coverageCache = new Map();
       coverageVisibleState = 'visible';
 
-      const pmtilesUrl = config.buildingsPmtiles.url.startsWith('http')
-        ? config.buildingsPmtiles.url
-        : `${window.location.origin}${config.buildingsPmtiles.url.startsWith('/') ? '' : '/'}${config.buildingsPmtiles.url}`;
+      const pmtilesUrl = resolvePmtilesUrl(config.buildingsPmtiles.url, window.location.origin);
       pmtilesArchive = new PMTilesCtor(pmtilesUrl);
       pmtilesArchive.getHeader()
         .then((header) => {

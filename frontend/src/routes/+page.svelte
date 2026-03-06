@@ -1,6 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { pushState, replaceState } from '$app/navigation';
   import { page } from '$app/stores';
   import { get } from 'svelte/store';
   import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
@@ -13,6 +13,7 @@
   import { mapCenter, mapReady, mapViewport, mapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
   import { buildingModalOpen, closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
   import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
+  import { resolveAddressText } from '$lib/utils/building-address';
   import {
     filterSearchItemsByStyleKey,
     filterSearchItemsByStyleKeys,
@@ -63,6 +64,7 @@
   const SEARCH_PAGE_SIZE = 120;
   const SEARCH_MAP_RESULTS_LIMIT = 5000;
   const SEARCH_VIEWPORT_REFRESH_DEBOUNCE_MS = 260;
+  const EMPTY_OPTIONAL_TEXT_TOKENS = new Set(['-', '--', '—', 'n/a', 'na', 'null']);
 
   function isSelectionDebugEnabled() {
     const cfg = getRuntimeConfig();
@@ -251,18 +253,32 @@
     return { osmType, osmId };
   }
 
-  async function replaceUrlState(patch) {
+  function getUrlStateSignature(state) {
+    return `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}|${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`;
+  }
+
+  function getUrlBuildingKey(state) {
+    return state.building
+      ? `${state.building.osmType}/${state.building.osmId}`
+      : '';
+  }
+
+  function updateUrlState(patch, { replaceState: shouldReplaceState = true } = {}) {
     if (typeof window === 'undefined') return;
     const current = new URL(window.location.href);
     const next = patchUrlState(current, patch);
     if (next.toString() === current.toString()) return;
+    const nextState = parseUrlState(next);
     urlUpdateInFlight = true;
     try {
-      await goto(`${next.pathname}${next.search}${next.hash}`, {
-        replaceState: true,
-        keepFocus: true,
-        noScroll: true
-      });
+      handledUrlSignature = getUrlStateSignature(nextState);
+      lastUrlBuildingKey = getUrlBuildingKey(nextState);
+      const target = `${next.pathname}${next.search}${next.hash}`;
+      if (shouldReplaceState) {
+        replaceState(target, $page.state);
+      } else {
+        pushState(target, $page.state);
+      }
     } finally {
       queueMicrotask(() => {
         urlUpdateInFlight = false;
@@ -296,13 +312,11 @@
     if (urlUpdateInFlight) return;
 
     const state = parseUrlState($page.url);
-    const signature = `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}|${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`;
+    const signature = getUrlStateSignature(state);
     if (signature === handledUrlSignature) return;
     handledUrlSignature = signature;
     if (buildingCloseInFlight) return;
-    const nextUrlBuildingKey = state.building
-      ? `${state.building.osmType}/${state.building.osmId}`
-      : '';
+    const nextUrlBuildingKey = getUrlBuildingKey(state);
     const hadUrlBuildingKey = lastUrlBuildingKey;
     lastUrlBuildingKey = nextUrlBuildingKey;
 
@@ -340,19 +354,26 @@
 
   function normalizeArchiInfo(payload) {
     const info = payload || {};
-    const rawStyle = info.style ?? info.architecture ?? info['building:style'] ?? info['building:architecture'] ?? null;
-    const styleRaw = rawStyle ? String(rawStyle) : null;
-    const style = styleRaw || '-';
+    const styleRaw = pickNullableText(
+      info.style,
+      info.architecture,
+      info['building:style'],
+      info['building:architecture']
+    );
     return {
-      name: info.name ?? info['name:ru'] ?? info['name:en'] ?? '-',
-      style,
-      styleRaw: styleRaw || null,
-      levels: info.levels ?? info['building:levels'] ?? '-',
-      year_built: info.year_built ?? info['building:year'] ?? info.start_date ?? '-',
-      architect: info.architect ?? info['building:architect'] ?? '-',
-      address: info.address ?? info['addr:full'] ?? info['addr:street'] ?? '-',
-      description: info.description ?? null,
-      archimap_description: info.archimap_description ?? info.description ?? null,
+      name: pickNullableText(info.name, info['name:ru'], info['name:en']),
+      style: styleRaw,
+      styleRaw,
+      levels: coerceNullableIntegerText(info.levels ?? info['building:levels'], 0, 300),
+      year_built: coerceNullableIntegerText(
+        info.year_built ?? info['building:year'] ?? info.start_date,
+        1000,
+        2100
+      ),
+      architect: pickNullableText(info.architect, info['building:architect']),
+      address: resolveAddressText(info, pickNullableText, info.address),
+      description: pickNullableText(info.description),
+      archimap_description: pickNullableText(info.archimap_description, info.description),
       _sourceTags: info._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {}
     };
   }
@@ -414,13 +435,13 @@
         buildingDetails = {
           properties: {
             archiInfo: {
-              name: '-',
-              style: '-',
+              name: null,
+              style: null,
               styleRaw: null,
-              levels: '-',
-              year_built: '-',
-              architect: '-',
-              address: '-',
+              levels: null,
+              year_built: null,
+              architect: null,
+              address: null,
               _sourceTags: {}
             }
           }
@@ -472,13 +493,11 @@
     buildingDetails = null;
     setSelectedBuilding(null);
     closeBuildingModal();
-    const clearUrl = $mapReady
-      ? replaceUrlState({ building: null })
-      : Promise.resolve();
-    void clearUrl.finally(() => {
-      queueMicrotask(() => {
-        buildingCloseInFlight = false;
-      });
+    if ($mapReady) {
+      updateUrlState({ building: null });
+    }
+    queueMicrotask(() => {
+      buildingCloseInFlight = false;
     });
   }
 
@@ -489,24 +508,67 @@
   }
 
   function coerceNullableText(value) {
+    if (value == null) return null;
     const text = String(value ?? '').trim();
-    return text || null;
+    if (!text) return null;
+    if (EMPTY_OPTIONAL_TEXT_TOKENS.has(text.toLowerCase())) return null;
+    return text;
   }
 
-  function toDisplayArchiInfoFromPayload(payload) {
+  function pickNullableText(...values) {
+    for (const value of values) {
+      const text = coerceNullableText(value);
+      if (text) return text;
+    }
+    return null;
+  }
+
+  function coerceNullableIntegerText(value, min, max) {
+    const text = coerceNullableText(value);
+    if (!text) return null;
+    const parsed = Number(text);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null;
+    return String(parsed);
+  }
+
+  function normalizeEditedBuildingFields(value) {
+    const allowed = new Set(['name', 'style', 'levels', 'yearBuilt', 'architect', 'address', 'archimapDescription']);
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const item of value) {
+      const key = String(item || '').trim();
+      if (!allowed.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    }
+    return out;
+  }
+
+  function toDisplayArchiInfoFromPayload(currentInfo, payload, editedFields = []) {
+    const next = currentInfo && typeof currentInfo === 'object'
+      ? { ...currentInfo }
+      : { _sourceTags: {} };
     const rawStyle = coerceNullableText(payload?.style);
-    return {
-      name: coerceNullableText(payload?.name) || '-',
-      styleRaw: rawStyle,
-      style: rawStyle || '-',
-      levels: coerceNullableText(payload?.levels) || '-',
-      year_built: coerceNullableText(payload?.yearBuilt) || '-',
-      architect: coerceNullableText(payload?.architect) || '-',
-      address: coerceNullableText(payload?.address) || '-',
-      archimap_description: coerceNullableText(payload?.archimapDescription),
-      description: coerceNullableText(payload?.archimapDescription),
-      _sourceTags: buildingDetails?.properties?.archiInfo?._sourceTags || {}
-    };
+    const editedFieldSet = new Set(normalizeEditedBuildingFields(editedFields));
+    const applyAll = editedFieldSet.size === 0;
+
+    if (applyAll || editedFieldSet.has('name')) next.name = coerceNullableText(payload?.name);
+    if (applyAll || editedFieldSet.has('style')) {
+      next.styleRaw = rawStyle;
+      next.style = rawStyle;
+    }
+    if (applyAll || editedFieldSet.has('levels')) next.levels = coerceNullableIntegerText(payload?.levels, 0, 300);
+    if (applyAll || editedFieldSet.has('yearBuilt')) next.year_built = coerceNullableIntegerText(payload?.yearBuilt, 1000, 2100);
+    if (applyAll || editedFieldSet.has('architect')) next.architect = coerceNullableText(payload?.architect);
+    if (applyAll || editedFieldSet.has('address')) next.address = coerceNullableText(payload?.address);
+    if (applyAll || editedFieldSet.has('archimapDescription')) {
+      next.archimap_description = coerceNullableText(payload?.archimapDescription);
+      next.description = coerceNullableText(payload?.archimapDescription);
+    }
+
+    next._sourceTags = currentInfo?._sourceTags || buildingDetails?.properties?.archiInfo?._sourceTags || {};
+    return next;
   }
 
   async function onSaveBuildingEdit(event) {
@@ -516,6 +578,11 @@
       saveBuildingStatus = translateNow('mapPage.authRequired');
       return;
     }
+    const editedFields = normalizeEditedBuildingFields(detail.editedFields);
+    if (editedFields.length === 0) {
+      saveBuildingStatus = translateNow('buildingModal.noChanges');
+      return;
+    }
     saveBuildingPending = true;
     saveBuildingStatus = translateNow('mapPage.saving');
     const payload = {
@@ -523,11 +590,12 @@
       osmId: Number(detail.osmId),
       name: coerceNullableText(detail.name),
       style: coerceNullableText(normalizeArchitectureStyleKey(detail.style)),
-      levels: coerceNullableText(detail.levels),
-      yearBuilt: coerceNullableText(detail.yearBuilt),
+      levels: coerceNullableIntegerText(detail.levels, 0, 300),
+      yearBuilt: coerceNullableIntegerText(detail.yearBuilt, 1000, 2100),
       architect: coerceNullableText(detail.architect),
       address: coerceNullableText(detail.address),
-      archimapDescription: coerceNullableText(detail.archimapDescription)
+      archimapDescription: coerceNullableText(detail.archimapDescription),
+      editedFields
     };
 
     try {
@@ -543,7 +611,7 @@
       ) {
         buildingDetails = {
           properties: {
-            archiInfo: toDisplayArchiInfoFromPayload(payload)
+            archiInfo: toDisplayArchiInfoFromPayload(buildingDetails?.properties?.archiInfo, payload, editedFields)
           }
         };
       }
@@ -854,16 +922,19 @@
   }
 
   $: if ($mapReady && !$buildingModalOpen && !$selectedBuilding) {
-    replaceUrlState({ building: null });
+    updateUrlState({ building: null });
   }
 
   $: if ($mapReady && $buildingModalOpen && $selectedBuilding && !buildingApplyInFlight) {
     const building = toBuildingUrlParam($selectedBuilding);
-    replaceUrlState({ building });
+    updateUrlState(
+      { building },
+      { replaceState: Boolean(lastUrlBuildingKey) }
+    );
   }
 
   $: if ($mapReady && $mapCenter && Number.isFinite(Number($mapZoom)) && !cameraApplyInFlight) {
-    replaceUrlState({
+    updateUrlState({
       camera: {
         lat: $mapCenter.lat,
         lng: $mapCenter.lng,

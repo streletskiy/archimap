@@ -411,10 +411,12 @@ function registerBuildingsRoutes(deps) {
     applyPersonalEditsToFilterItems,
     rowToFeature,
     attachInfoToFeatures,
+    applyUserEditRowToInfo,
     getMergedInfoRow,
     getLatestUserEditRow,
     normalizeUserEditStatus,
     sanitizeArchiPayload,
+    sanitizeEditedFields,
     supersedePendingUserEdits
   } = deps;
   const isPostgres = db.provider === 'postgres';
@@ -879,7 +881,7 @@ function registerBuildingsRoutes(deps) {
     const merged = await getMergedInfoRow(osmType, osmId);
     const actorKey = getSessionEditActorKey(req);
     const personal = actorKey ? await getLatestUserEditRow(osmType, osmId, actorKey, ['pending', 'rejected']) : null;
-    const row = personal || merged;
+    const row = personal ? applyUserEditRowToInfo(merged, personal) : merged;
     if (!row) {
       return res.status(404).json({ error: 'Информация не найдена' });
     }
@@ -895,7 +897,7 @@ function registerBuildingsRoutes(deps) {
       address: row.address ?? null,
       description: row.description ?? null,
       archimap_description: row.archimap_description ?? row.description ?? null,
-      updated_by: row.created_by ?? row.updated_by ?? null,
+      updated_by: row.updated_by ?? row.created_by ?? null,
       updated_at: row.updated_at ?? null,
       review_status: personal ? normalizeUserEditStatus(personal.status) : 'accepted',
       admin_comment: personal?.admin_comment ?? null,
@@ -923,10 +925,19 @@ function registerBuildingsRoutes(deps) {
     if (!actorKey) {
       return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
     }
-    const payload = validated.value;
+    const requestedEditedFields = sanitizeEditedFields(body.editedFields);
+    if (requestedEditedFields.length === 0) {
+      return res.status(409).json({ error: 'В правке нет отличий от текущих данных' });
+    }
 
     const tx = db.transaction(async () => {
       const latest = await getLatestUserEditRow(osmType, osmId, actorKey, ['pending']);
+      const previousEditedFields = sanitizeEditedFields(latest?.edited_fields_json);
+      const nextEditedFields = [...new Set([...previousEditedFields, ...requestedEditedFields])];
+      const payload = {
+        ...validated.value,
+        edited_fields_json: nextEditedFields.length > 0 ? JSON.stringify(nextEditedFields) : null
+      };
       if (latest && Number.isInteger(Number(latest.id)) && Number(latest.id) > 0) {
         await db.prepare(`
           UPDATE user_edits.building_user_edits
@@ -938,6 +949,7 @@ function registerBuildingsRoutes(deps) {
             architect = @architect,
             address = @address,
             archimap_description = @archimap_description,
+            edited_fields_json = @edited_fields_json,
             status = 'pending',
             admin_comment = NULL,
             reviewed_by = NULL,
@@ -960,12 +972,12 @@ function registerBuildingsRoutes(deps) {
         const inserted = await db.prepare(`
           INSERT INTO user_edits.building_user_edits (
             osm_type, osm_id, created_by,
-            name, style, levels, year_built, architect, address, archimap_description,
+            name, style, levels, year_built, architect, address, archimap_description, edited_fields_json,
             status, created_at, updated_at
           )
           VALUES (
             @osm_type, @osm_id, @created_by,
-            @name, @style, @levels, @year_built, @architect, @address, @archimap_description,
+            @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json,
             'pending', datetime('now'), datetime('now')
           )
           RETURNING id
@@ -981,12 +993,12 @@ function registerBuildingsRoutes(deps) {
       const inserted = await db.prepare(`
         INSERT INTO user_edits.building_user_edits (
           osm_type, osm_id, created_by,
-          name, style, levels, year_built, architect, address, archimap_description,
+          name, style, levels, year_built, architect, address, archimap_description, edited_fields_json,
           status, created_at, updated_at
         )
         VALUES (
           @osm_type, @osm_id, @created_by,
-          @name, @style, @levels, @year_built, @architect, @address, @archimap_description,
+          @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json,
           'pending', datetime('now'), datetime('now')
         )
       `).run({

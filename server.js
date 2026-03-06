@@ -14,7 +14,8 @@ const {
   sanitizeFieldText,
   sanitizeYearBuilt,
   sanitizeLevels,
-  sanitizeArchiPayload
+  sanitizeArchiPayload,
+  sanitizeEditedFields
 } = require('./src/lib/server/services/edits.service');
 const { validateSecurityConfig } = require('./src/lib/server/infra/security-config.infra');
 const { collectInlineScriptHashesFromFile } = require('./src/lib/server/infra/csp.infra');
@@ -526,6 +527,7 @@ const {
   getLatestUserEditRow,
   supersedePendingUserEdits,
   getSessionEditActorKey,
+  applyUserEditRowToInfo,
   getUserEditsList,
   getUserEditDetailsById,
   mergePersonalEditsIntoFeatureInfo,
@@ -1040,10 +1042,12 @@ registerBuildingsRoutes({
   applyPersonalEditsToFilterItems,
   rowToFeature,
   attachInfoToFeatures,
+  applyUserEditRowToInfo,
   getMergedInfoRow,
   getLatestUserEditRow,
   normalizeUserEditStatus,
   sanitizeArchiPayload,
+  sanitizeEditedFields,
   supersedePendingUserEdits
 });
 

@@ -1,3 +1,5 @@
+const { sanitizeEditedFields } = require('./edits.service');
+
 function createBuildingEditsService({ db, normalizeUserEditStatus }) {
   const isPostgres = db.provider === 'postgres';
 
@@ -64,6 +66,38 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
   ]);
 
   const ARCHI_FIELD_SET = new Set(ARCHI_EDIT_FIELDS.map((f) => f.key));
+
+  function getEditedFieldsFromRow(row) {
+    const fields = sanitizeEditedFields(row?.edited_fields_json);
+    return fields.length > 0 ? fields : null;
+  }
+
+  function applyUserEditRowToInfo(baseInfo, row) {
+    if (!row) return baseInfo || null;
+    const next = baseInfo && typeof baseInfo === 'object' ? { ...baseInfo } : {};
+    const editedFields = getEditedFieldsFromRow(row) || [...ARCHI_FIELD_SET];
+
+    next.osm_type = row.osm_type ?? next.osm_type ?? null;
+    next.osm_id = row.osm_id ?? next.osm_id ?? null;
+    next.updated_by = row.created_by ?? row.updated_by ?? next.updated_by ?? null;
+    next.updated_at = row.updated_at ?? next.updated_at ?? null;
+    next.review_status = normalizeUserEditStatus(row.status);
+    next.admin_comment = row.admin_comment ?? next.admin_comment ?? null;
+    next.user_edit_id = Number.isInteger(Number(row.id)) && Number(row.id) > 0
+      ? Number(row.id)
+      : (next.user_edit_id ?? null);
+
+    for (const field of editedFields) {
+      if (field === 'archimap_description') {
+        next.archimap_description = row.archimap_description ?? null;
+        next.description = row.archimap_description ?? null;
+        continue;
+      }
+      next[field] = row[field] ?? null;
+    }
+
+    return next;
+  }
 
   async function getMergedInfoRow(osmType, osmId) {
     return await db.prepare(`
@@ -150,8 +184,13 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       }
       : null;
 
+    const explicitEditedFields = getEditedFieldsFromRow(editRow);
+    const fieldsToCompare = explicitEditedFields
+      ? ARCHI_EDIT_FIELDS.filter((field) => explicitEditedFields.includes(field.key))
+      : ARCHI_EDIT_FIELDS;
+
     const changes = [];
-    for (const field of ARCHI_EDIT_FIELDS) {
+    for (const field of fieldsToCompare) {
       const baselineValue = mergedBaseline
         ? (mergedBaseline[field.key] ?? osmBaseline[field.key] ?? null)
         : (osmBaseline[field.key] ?? null);
@@ -190,6 +229,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
   function mapUserEditRow(row, tags, mergedInfoRow) {
     const changes = buildChangesFromRows(row, tags, mergedInfoRow);
+    const editedFields = getEditedFieldsFromRow(row);
     const mergedFields = row.merged_fields_json
       ? (() => {
         try {
@@ -215,6 +255,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       reviewedAt: row.reviewed_at ?? null,
       mergedBy: row.merged_by ?? null,
       mergedAt: row.merged_at ?? null,
+      editedFields,
       mergedFields,
       values: {
         name: row.name ?? null,
@@ -485,22 +526,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       const row = personalByKey.get(key);
       if (!row) continue;
       feature.properties = feature.properties || {};
-      feature.properties.archiInfo = {
-        osm_type: row.osm_type,
-        osm_id: row.osm_id,
-        name: row.name ?? null,
-        style: row.style ?? null,
-        levels: row.levels ?? null,
-        year_built: row.year_built ?? null,
-        architect: row.architect ?? null,
-        address: row.address ?? null,
-        archimap_description: row.archimap_description ?? null,
-        updated_by: row.created_by ?? null,
-        updated_at: row.updated_at ?? null,
-        review_status: normalizeUserEditStatus(row.status),
-        admin_comment: row.admin_comment ?? null,
-        user_edit_id: Number(row.id || 0)
-      };
+      feature.properties.archiInfo = applyUserEditRowToInfo(feature.properties.archiInfo, row);
       feature.properties.hasExtraInfo = true;
     }
 
@@ -521,22 +547,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       if (!row) return item;
       return {
         ...item,
-        archiInfo: {
-          osm_type: row.osm_type,
-          osm_id: row.osm_id,
-          name: row.name ?? null,
-          style: row.style ?? null,
-          levels: row.levels ?? null,
-          year_built: row.year_built ?? null,
-          architect: row.architect ?? null,
-          address: row.address ?? null,
-          archimap_description: row.archimap_description ?? null,
-          updated_by: row.created_by ?? null,
-          updated_at: row.updated_at ?? null,
-          review_status: normalizeUserEditStatus(row.status),
-          admin_comment: row.admin_comment ?? null,
-          user_edit_id: Number(row.id || 0)
-        },
+        archiInfo: applyUserEditRowToInfo(item.archiInfo, row),
         hasExtraInfo: true
       };
     });
@@ -549,6 +560,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     getLatestUserEditRow,
     supersedePendingUserEdits,
     getSessionEditActorKey,
+    applyUserEditRowToInfo,
     getUserEditsList,
     getUserEditDetailsById,
     getUserPersonalEditsByKeys,

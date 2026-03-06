@@ -1,4 +1,16 @@
 const USER_EDIT_STATUS_VALUES = new Set(['pending', 'accepted', 'rejected', 'partially_accepted', 'superseded']);
+const ARCHI_EDITED_FIELD_ALIASES = new Map([
+  ['name', 'name'],
+  ['style', 'style'],
+  ['levels', 'levels'],
+  ['yearbuilt', 'year_built'],
+  ['year_built', 'year_built'],
+  ['architect', 'architect'],
+  ['address', 'address'],
+  ['archimapdescription', 'archimap_description'],
+  ['archimap_description', 'archimap_description'],
+  ['description', 'archimap_description']
+]);
 
 function normalizeUserEditStatus(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -51,11 +63,42 @@ function sanitizeArchiPayload(body) {
   };
 }
 
+function normalizeEditedFieldKey(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return null;
+  return ARCHI_EDITED_FIELD_ALIASES.get(key) || null;
+}
+
+function sanitizeEditedFields(value) {
+  const input = Array.isArray(value)
+    ? value
+    : (() => {
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+
+  const out = [];
+  const seen = new Set();
+  for (const item of input) {
+    const normalized = normalizeEditedFieldKey(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
 module.exports = {
   normalizeUserEditStatus,
   sanitizeFieldText,
   sanitizeYearBuilt,
   sanitizeLevels,
   sanitizeArchiPayload,
+  sanitizeEditedFields,
   USER_EDIT_STATUS_VALUES
 };

@@ -3,10 +3,11 @@
   import { fade, fly } from 'svelte/transition';
   import { page } from '$app/stores';
   import { clearSession, session, setSession } from '$lib/stores/auth';
+  import { patchUrlState } from '$lib/client/urlState';
   import { apiJson } from '$lib/services/http';
-  import { buildingFilterRuntime, resetBuildingFilterRules, setBuildingFilterRules } from '$lib/stores/filters';
+  import { buildingFilterRules, buildingFilterRuntime, resetBuildingFilterRules, setBuildingFilterRules } from '$lib/stores/filters';
   import { openSearchModal, requestSearch, resetSearchState, setSearchQuery, searchState } from '$lib/stores/search';
-  import { mapLabelsVisible, setMapLabelsVisible } from '$lib/stores/map';
+  import { lastMapCamera, mapLabelsVisible, setMapLabelsVisible } from '$lib/stores/map';
   import { availableLocales, locale, setLocale, t, translateNow } from '$lib/i18n/index';
 
   let loginEmail = '';
@@ -115,10 +116,36 @@
   $: currentPathname = $page.url.pathname;
   $: basePrefix = currentPathname === '/app' || currentPathname.startsWith('/app/') ? '/app' : '';
   $: normalizedPathname = basePrefix ? (currentPathname.slice(basePrefix.length) || '/') : currentPathname;
+  $: isMapRoute = normalizedPathname === '/';
+  $: activeSearchText = String(searchText || '').trim();
+  $: searchReady = activeSearchText.length >= 2;
+  $: activeFilterCount = Array.isArray($buildingFilterRules) ? $buildingFilterRules.length : 0;
+  $: draftFilterCount = filterRows.filter((row) => String(row?.key || '').trim().length > 0).length;
+  $: visibleFilterCount = filterOpen ? draftFilterCount : activeFilterCount;
+  $: filterPreviewRules = Array.isArray($buildingFilterRules) ? $buildingFilterRules.slice(0, 3) : [];
+  $: primaryLinks = [
+    { href: navHref('/'), label: $t('header.map'), active: normalizedPathname === '/' },
+    { href: navHref('/info'), label: $t('header.info'), active: isActive(normalizedPathname, '/info') },
+    ...($session.authenticated ? [{ href: navHref('/account'), label: $t('header.profile'), active: isActive(normalizedPathname, '/account') }] : []),
+    ...($session.user?.isAdmin ? [{ href: navHref('/admin'), label: $t('header.admin'), active: isActive(normalizedPathname, '/admin') }] : [])
+  ];
+  $: userInitials = getUserInitials($session.user);
+  $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');
+  $: menuIdentityMeta = $session.authenticated ? String($session.user?.email || '').trim() : $t('header.authTitle');
+  $: if (!isMapRoute && filterOpen) {
+    filterOpen = false;
+  }
 
   function navHref(path) {
     const target = path === '/' ? '' : path;
-    return `${basePrefix}${target || '/'}`;
+    const pathname = `${basePrefix}${target || '/'}`;
+    if (path !== '/' || isMapRoute || !$lastMapCamera) {
+      return pathname;
+    }
+    const nextUrl = patchUrlState(new URL(pathname, 'http://localhost'), {
+      camera: $lastMapCamera
+    });
+    return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
   }
 
   function isActive(pathname, href) {
@@ -142,10 +169,12 @@
   }
 
   function toggleFilterPanel() {
+    menuOpen = false;
     filterOpen = !filterOpen;
   }
 
   function toggleMenuPanel() {
+    filterOpen = false;
     menuOpen = !menuOpen;
   }
 
@@ -189,6 +218,40 @@
     const count = Number(runtime?.count || 0);
     const elapsedMs = Number(runtime?.elapsedMs || 0);
     return `${$t('header.filterStatus.count')}: ${count}  ${$t('header.filterStatus.elapsed')}: ${elapsedMs}ms`;
+  }
+
+  function getFilterOpLabel(op) {
+    const normalized = String(op || 'contains');
+    if (normalized === 'equals') return translateNow('header.op.equals');
+    if (normalized === 'not_equals') return translateNow('header.op.not_equals');
+    if (normalized === 'starts_with') return translateNow('header.op.starts_with');
+    if (normalized === 'exists') return translateNow('header.op.exists');
+    if (normalized === 'not_exists') return translateNow('header.op.not_exists');
+    return translateNow('header.op.contains');
+  }
+
+  function describeRule(rule) {
+    const keyLabel = getFilterTagDisplayName(rule?.key) || translateNow('header.tagKey');
+    const opLabel = getFilterOpLabel(rule?.op);
+    const value = String(rule?.value || '').trim();
+    if (['exists', 'not_exists'].includes(String(rule?.op || ''))) {
+      return `${keyLabel} · ${opLabel}`;
+    }
+    return `${keyLabel} · ${opLabel}${value ? ` · ${value}` : ''}`;
+  }
+
+  function getUserInitials(user) {
+    const parts = [String(user?.firstName || '').trim(), String(user?.lastName || '').trim()].filter(Boolean);
+    if (parts.length > 0) {
+      return parts.map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+    }
+    const email = String(user?.email || '').trim();
+    return email ? email.slice(0, 2).toUpperCase() : 'AR';
+  }
+
+  function getUserLabel(user) {
+    const fullName = [String(user?.firstName || '').trim(), String(user?.lastName || '').trim()].filter(Boolean).join(' ');
+    return fullName || String(user?.email || '').trim() || translateNow('common.appName');
   }
 
   function closeAuth() {
@@ -536,46 +599,104 @@
 </script>
 
 <header class="nav-shell">
-  <div class="nav">
-    <div class="left">
-      <a href={navHref('/')} class="logo">{$t('common.appName')}</a>
-      <button type="button" class="icon-btn" aria-label={$t('header.openFilters')} on:click={toggleFilterPanel}>
-        <svg viewBox="0 0 512 512" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
-      </button>
+  <div class:map-route={isMapRoute} class="nav">
+    <div class="brand-cluster">
+      <a href={navHref('/')} class="logo" aria-label={$t('common.appName')}>
+        <span class="logo-copy">
+          <span class="logo-name">{$t('common.appName')}</span>
+        </span>
+      </a>
+
+      <nav class="nav-links" aria-label={$t('header.openMenu')}>
+        {#each primaryLinks as link}
+          <a href={link.href} class:active={link.active} on:click={() => (menuOpen = false)}>{link.label}</a>
+        {/each}
+      </nav>
     </div>
 
-    <form class="search" on:submit={submitSearch}>
-      <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
-      <input type="search" placeholder={$t('header.searchPlaceholder')} bind:value={searchText} on:input={onSearchInput} />
-    </form>
+    {#if isMapRoute}
+      <form class="search" on:submit={submitSearch}>
+        <svg viewBox="0 0 640 640" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
+        <input type="search" placeholder={$t('header.searchPlaceholder')} bind:value={searchText} on:input={onSearchInput} />
+        {#if searchReady}
+          <button type="submit" class="search-submit">{$t('common.search')}</button>
+        {/if}
+      </form>
+    {:else}
+      <div class="nav-center-spacer" aria-hidden="true"></div>
+    {/if}
 
     <div class="right-controls">
-      <button type="button" class="icon-btn search-mobile-btn" aria-label={$t('header.openSearch')} on:click={openMobileSearch}>
-        <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
-      </button>
-      <button type="button" class="icon-btn menu-btn-trigger" aria-label={$t('header.openMenu')} aria-expanded={menuOpen} on:click={toggleMenuPanel}>
-        <svg viewBox="0 0 640 640" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"/></svg>
+      {#if isMapRoute}
+        <button type="button" class:active={filterOpen} class:has-rules={visibleFilterCount > 0} class="filter-trigger" aria-label={$t('header.openFilters')} aria-expanded={filterOpen} on:click={toggleFilterPanel}>
+          <svg viewBox="0 0 512 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
+          <span class="filter-trigger-copy">
+            <span class="filter-trigger-title">{$t('header.filterTitle')}</span>
+          </span>
+          {#if visibleFilterCount > 0}
+            <span class="filter-trigger-badge">{visibleFilterCount}</span>
+          {/if}
+        </button>
+      {/if}
+
+      {#if isMapRoute}
+        <button type="button" class="icon-btn search-mobile-btn" aria-label={$t('header.openSearch')} on:click={openMobileSearch}>
+          <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
+        </button>
+      {/if}
+
+      <button type="button" class:guest={!$session.authenticated} class="menu-btn-trigger" aria-label={$t('header.openMenu')} aria-expanded={menuOpen} on:click={toggleMenuPanel}>
+        {#if $session.authenticated}
+          <span class="menu-avatar">{userInitials}</span>
+          <span class="menu-btn-label">{menuIdentityLabel}</span>
+        {:else}
+          <svg viewBox="0 0 640 640" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M96 160C96 142.3 110.3 128 128 128L512 128C529.7 128 544 142.3 544 160C544 177.7 529.7 192 512 192L128 192C110.3 192 96 177.7 96 160zM96 320C96 302.3 110.3 288 128 288L512 288C529.7 288 544 302.3 544 320C544 337.7 529.7 352 512 352L128 352C110.3 352 96 337.7 96 320zM544 480C544 497.7 529.7 512 512 512L128 512C110.3 512 96 497.7 96 480C96 462.3 110.3 448 128 448L512 448C529.7 448 544 462.3 544 480z"/></svg>
+        {/if}
       </button>
     </div>
   </div>
 
-  {#if menuOpen || filterOpen}
+  {#if menuOpen || (filterOpen && isMapRoute)}
     <button type="button" class="nav-backdrop" aria-label={$t('header.closePanels')} on:click={closeFloatingPanels} in:fade={{ duration: 140 }} out:fade={{ duration: 140 }}></button>
   {/if}
 
-  {#if filterOpen}
-    <div class="filter-panel" in:fly={{ x: -10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: -10, y: -8, duration: 170, opacity: 0.2 }}>
-      <div class="filter-head">
-        <h4>{$t('header.filterTitle')}</h4>
+  {#if filterOpen && isMapRoute}
+    <div id="filter-shell" class="filter-panel" in:fly={{ x: -10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: -10, y: -8, duration: 170, opacity: 0.2 }}>
+      <div class="panel-head">
+        <div>
+          <p class="ui-kicker">OSM</p>
+          <h4>{$t('header.filterTitle')}</h4>
+        </div>
         <button type="button" class="icon-btn ui-close-x" aria-label={$t('header.closeFilter')} on:click={() => (filterOpen = false)}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
       </div>
       <div class="filter-runtime" data-filter-runtime-status={$buildingFilterRuntime.statusCode}>
         <strong>{$t('header.filterStatus.label')}: {getFilterRuntimeLabel($buildingFilterRuntime)}</strong>
         <span>{getFilterRuntimeStats($buildingFilterRuntime)}</span>
+        {#if activeFilterCount > 0}
+          <div class="filter-preview-list">
+            {#each filterPreviewRules as rule (`${rule.key}:${rule.op}:${rule.value}`)}
+              <span class="ui-chip rule-pill">{describeRule(rule)}</span>
+            {/each}
+            {#if activeFilterCount > filterPreviewRules.length}
+              <span class="ui-chip rule-pill">+{activeFilterCount - filterPreviewRules.length}</span>
+            {/if}
+          </div>
+        {/if}
       </div>
       <div class="rows">
-        {#each filterRows as row (row.id)}
-          <div class="row">
+        {#each filterRows as row, index (row.id)}
+          <section class="rule-card">
+            <div class="rule-card-head">
+              <span class="rule-index">{String(index + 1).padStart(2, '0')}</span>
+              <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('common.close')} on:click={() => removeFilterRow(row.id)}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                  <path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
+                  <path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="rule-fields">
             <input
               class="ui-field ui-field-xs"
               list="filter-tag-keys"
@@ -602,8 +723,8 @@
               on:input={(e) => updateFilterRow(row.id, { value: e.currentTarget.value })}
               disabled={row.op === 'exists' || row.op === 'not_exists'}
             />
-            <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('common.close')} on:click={() => removeFilterRow(row.id)}>−</button>
-          </div>
+            </div>
+          </section>
         {/each}
       </div>
       <div class="filter-actions">
@@ -621,16 +742,27 @@
 
   {#if menuOpen}
     <div class="menu" in:fly={{ x: 10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: 10, y: -8, duration: 170, opacity: 0.2 }}>
+      <div class="menu-identity">
+        <span class="menu-avatar menu-avatar-large">{userInitials}</span>
+        <div class="menu-identity-copy">
+          <strong>{menuIdentityLabel}</strong>
+          <span>{menuIdentityMeta}</span>
+        </div>
+      </div>
+
       {#if !$session.authenticated}
-        <button type="button" class="ui-btn ui-btn-primary menu-btn" on:click={() => openAuth('login')}>{$t('header.login')}</button>
-        <button type="button" class="ui-btn ui-btn-secondary menu-btn" on:click={() => openAuth('register')}>{$t('header.register')}</button>
-      {:else}
-        <a href={navHref('/account')} class:active={isActive(normalizedPathname, '/account')} on:click={() => (menuOpen = false)}>{$t('header.profile')}</a>
+        <div class="menu-auth-actions">
+          <button type="button" class="ui-btn ui-btn-primary menu-btn" on:click={() => openAuth('login')}>{$t('header.login')}</button>
+          <button type="button" class="ui-btn ui-btn-secondary menu-btn" on:click={() => openAuth('register')}>{$t('header.register')}</button>
+        </div>
       {/if}
-      <a href={navHref('/info')} class:active={isActive(normalizedPathname, '/info')} on:click={() => (menuOpen = false)}>{$t('header.info')}</a>
-      {#if $session.user?.isAdmin}
-        <a href={navHref('/admin')} class:active={isActive(normalizedPathname, '/admin')} on:click={() => (menuOpen = false)}>{$t('header.admin')}</a>
-      {/if}
+
+      <div class="menu-links">
+        {#each primaryLinks as link}
+          <a href={link.href} class:active={link.active} on:click={() => (menuOpen = false)}>{link.label}</a>
+        {/each}
+      </div>
+
       <div class="theme-row">
         <span>{$t('locale.label')}</span>
         <select class="ui-field ui-field-xs locale-select" bind:value={$locale} on:change={(event) => setLocale(event.currentTarget.value)}>
@@ -653,11 +785,12 @@
         <span>{$t('header.theme')}</span>
         <label class="switch switch-icons" aria-label={$t('header.toggleTheme')}>
           <input type="checkbox" checked={darkTheme} on:change={(e) => applyTheme(e.currentTarget.checked ? 'dark' : 'light')} />
-          <span class="icon-on" aria-hidden="true">
-            <svg viewBox="0 0 640 640" width="14" height="14"><path fill="currentColor" d="M320 32C328.4 32 336.3 36.4 340.6 43.7L396.1 136.3L500.9 110C509.1 108 517.8 110.4 523.7 116.3C529.6 122.2 532 131 530 139.1L503.7 243.8L596.4 299.3C603.6 303.6 608.1 311.5 608.1 319.9C608.1 328.3 603.7 336.2 596.4 340.5L503.7 396.1L530 500.8C532 509 529.6 517.7 523.7 523.6C517.8 529.5 509 532 500.9 530L396.2 503.7L340.7 596.4C336.4 603.6 328.5 608.1 320.1 608.1C311.7 608.1 303.8 603.7 299.5 596.4L243.9 503.7L139.2 530C131 532 122.4 529.6 116.4 523.7C110.4 517.8 108 509 110 500.8L136.2 396.1L43.6 340.6C36.4 336.2 32 328.4 32 320C32 311.6 36.4 303.7 43.7 299.4L136.3 243.9L110 139.1C108 130.9 110.3 122.3 116.3 116.3C122.3 110.3 131 108 139.2 110L243.9 136.2L299.4 43.6L301.2 41C305.7 35.3 312.6 31.9 320 31.9zM320 176C240.5 176 176 240.5 176 320C176 399.5 240.5 464 320 464C399.5 464 464 399.5 464 320C464 240.5 399.5 176 320 176zM320 416C267 416 224 373 224 320C224 267 267 224 320 224C373 224 416 267 416 320C416 373 373 416 320 416z"/></svg>
-          </span>
-          <span class="icon-off" aria-hidden="true">
-            <svg viewBox="0 0 640 640" width="14" height="14"><path fill="currentColor" d="M320 64C178.6 64 64 178.6 64 320C64 461.4 178.6 576 320 576C388.8 576 451.3 548.8 497.3 504.6C504.6 497.6 506.7 486.7 502.6 477.5C498.5 468.3 488.9 462.6 478.8 463.4C473.9 463.8 469 464 464 464C362.4 464 280 381.6 280 280C280 207.9 321.5 145.4 382.1 115.2C391.2 110.7 396.4 100.9 395.2 90.8C394 80.7 386.6 72.5 376.7 70.3C358.4 66.2 339.4 64 320 64z"/></svg>
+          <span class="icon-center" aria-hidden="true">
+            {#if darkTheme}
+              <svg viewBox="0 0 640 640" width="14" height="14"><path fill="currentColor" d="M320 64C178.6 64 64 178.6 64 320C64 461.4 178.6 576 320 576C388.8 576 451.3 548.8 497.3 504.6C504.6 497.6 506.7 486.7 502.6 477.5C498.5 468.3 488.9 462.6 478.8 463.4C473.9 463.8 469 464 464 464C362.4 464 280 381.6 280 280C280 207.9 321.5 145.4 382.1 115.2C391.2 110.7 396.4 100.9 395.2 90.8C394 80.7 386.6 72.5 376.7 70.3C358.4 66.2 339.4 64 320 64z"/></svg>
+            {:else}
+              <svg viewBox="0 0 640 640" width="14" height="14"><path fill="currentColor" d="M320 32C328.4 32 336.3 36.4 340.6 43.7L396.1 136.3L500.9 110C509.1 108 517.8 110.4 523.7 116.3C529.6 122.2 532 131 530 139.1L503.7 243.8L596.4 299.3C603.6 303.6 608.1 311.5 608.1 319.9C608.1 328.3 603.7 336.2 596.4 340.5L503.7 396.1L530 500.8C532 509 529.6 517.7 523.7 523.6C517.8 529.5 509 532 500.9 530L396.2 503.7L340.7 596.4C336.4 603.6 328.5 608.1 320.1 608.1C311.7 608.1 303.8 603.7 299.5 596.4L243.9 503.7L139.2 530C131 532 122.4 529.6 116.4 523.7C110.4 517.8 108 509 110 500.8L136.2 396.1L43.6 340.6C36.4 336.2 32 328.4 32 320C32 311.6 36.4 303.7 43.7 299.4L136.3 243.9L110 139.1C108 130.9 110.3 122.3 116.3 116.3C122.3 110.3 131 108 139.2 110L243.9 136.2L299.4 43.6L301.2 41C305.7 35.3 312.6 31.9 320 31.9zM320 176C240.5 176 176 240.5 176 320C176 399.5 240.5 464 320 464C399.5 464 464 399.5 464 320C464 240.5 399.5 176 320 176zM320 416C267 416 224 373 224 320C224 267 267 224 320 224C373 224 416 267 416 320C416 373 373 416 320 416z"/></svg>
+            {/if}
           </span>
           <span class="slider"></span>
         </label>
@@ -673,7 +806,10 @@
   <div class="auth-backdrop" role="button" tabindex="0" on:click={(e) => e.target === e.currentTarget && closeAuth()} on:keydown={(e) => e.key === 'Escape' && closeAuth()}>
     <section class="auth-modal">
       <div class="auth-head">
-        <h3>{$t('header.authTitle')}</h3>
+        <div class="auth-head-copy">
+          <p class="ui-kicker">{$t('common.appName')}</p>
+          <h3>{$t('header.authTitle')}</h3>
+        </div>
         <button type="button" class="icon-btn ui-close-x" on:click={closeAuth} aria-label={$t('common.close')}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
       </div>
 
@@ -744,101 +880,276 @@
     pointer-events: none;
   }
   .nav {
-    border: 1px solid #cbd5e1;
-    border-radius: 1rem;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(6px);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-    padding: 0.5rem 0.65rem;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 0.5rem;
     align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0.75rem 0.65rem 1.1rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 1.35rem;
+    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    box-shadow: var(--shadow-panel);
+    backdrop-filter: blur(18px);
     pointer-events: auto;
     position: relative;
     z-index: 2;
   }
-  .left {
+
+  .brand-cluster {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 1.15rem;
+    min-width: 0;
+    max-width: max-content;
   }
+
   .logo {
-    font-size: 1.5rem;
-    font-weight: 800;
-    line-height: 1;
-    color: #000;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-width: 0;
     text-decoration: none;
-    padding-inline: 0.25rem;
-    transform: translateY(-2px);
   }
+
+  .logo-copy {
+    display: grid;
+    gap: 0;
+    min-width: 0;
+  }
+
+  .logo-name {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--fg-strong);
+    line-height: 1;
+  }
+
+  .nav-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .nav-links a {
+    padding: 0.48rem 0.78rem;
+    border-radius: 999px;
+    color: var(--muted-strong);
+    text-decoration: none;
+    font-size: 0.82rem;
+    font-weight: 700;
+    transition: background-color 0.18s ease, color 0.18s ease;
+  }
+
+  .nav-links a:hover {
+    background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+  }
+
+  .nav-links a.active {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
   .search {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    border: 1px solid #cbd5e1;
-    border-radius: 0.6rem;
-    background: #fff;
-    padding: 0 0.65rem;
-    height: 2.45rem;
+    gap: 0.65rem;
+    min-width: 0;
+    width: 100%;
+    height: 3rem;
+    padding: 0.25rem 0.35rem 0.25rem 0.95rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    color: var(--muted);
   }
+
   .search input {
+    min-width: 0;
     width: 100%;
     border: 0;
     outline: 0;
     background: transparent;
-    font-size: 0.9rem;
+    color: var(--fg-strong);
+    font-size: 0.92rem;
   }
+
+  .search input::placeholder {
+    color: var(--muted);
+  }
+
+  .search-submit {
+    border: 0;
+    padding: 0.62rem 0.95rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .nav-center-spacer {
+    min-width: 0;
+    width: 100%;
+    min-height: 3rem;
+  }
+
+  .icon-btn,
+  .menu-btn-trigger,
+  .filter-trigger {
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    color: var(--muted-strong);
+    cursor: pointer;
+    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .icon-btn:hover,
+  .menu-btn-trigger:hover,
+  .filter-trigger:hover {
+    transform: translateY(-1px);
+    border-color: var(--panel-border-strong);
+    background: var(--panel-solid);
+    color: var(--fg-strong);
+    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
+  }
+
   .icon-btn {
-    width: 2.45rem;
-    height: 2.45rem;
-    border: 1px solid #cbd5e1;
-    border-radius: 0.65rem;
-    background: #fff;
-    color: #334155;
+    width: 2.7rem;
+    height: 2.7rem;
+    border-radius: 0.9rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
   }
+
   .right-controls {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
     justify-self: end;
   }
+
+  .filter-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-height: 2.9rem;
+    padding: 0.45rem 0.55rem 0.45rem 0.9rem;
+    border-radius: 1rem;
+  }
+
+  .filter-trigger.active,
+  .filter-trigger.has-rules {
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-border));
+  }
+
+  .filter-trigger-copy {
+    display: grid;
+    gap: 0;
+    text-align: left;
+  }
+
+  .filter-trigger-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--fg-strong);
+  }
+
+  .filter-trigger-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.55rem;
+    height: 1.55rem;
+    padding: 0 0.38rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 0.73rem;
+    font-weight: 800;
+  }
+
+  .menu-btn-trigger {
+    min-height: 2.9rem;
+    max-width: 14rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.38rem 0.55rem;
+    border-radius: 1rem;
+  }
+
+  .menu-btn-trigger.guest {
+    width: 2.9rem;
+    justify-content: center;
+  }
+
+  .menu-avatar {
+    width: 1.95rem;
+    height: 1.95rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-size: 0.8rem;
+    font-weight: 800;
+    flex: none;
+  }
+
+  .menu-avatar-large {
+    width: 2.65rem;
+    height: 2.65rem;
+    border-radius: 0.95rem;
+    font-size: 0.95rem;
+  }
+
+  .menu-btn-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--fg-strong);
+  }
+
   .search-mobile-btn {
     display: none;
   }
-  .menu {
+
+  .menu,
+  .filter-panel {
     position: absolute;
-    top: calc(100% + 0.35rem);
-    right: 0.75rem;
-    width: min(17rem, calc(100vw - 1.5rem));
-    border: 1px solid #cbd5e1;
-    border-radius: 0.85rem;
-    background: rgba(255, 255, 255, 0.97);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-    padding: 0.5rem;
-    display: grid;
-    gap: 0.35rem;
+    top: calc(100% + 0.5rem);
+    border: 1px solid var(--panel-border);
+    border-radius: 1.2rem;
+    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+    box-shadow: var(--shadow-panel);
+    backdrop-filter: blur(18px);
     pointer-events: auto;
     z-index: 2;
   }
-  .filter-panel {
-    position: absolute;
-    top: calc(100% + 0.35rem);
-    left: 0.75rem;
-    width: min(30rem, calc(100vw - 1.5rem));
-    border: 1px solid #cbd5e1;
-    border-radius: 0.85rem;
-    background: rgba(255, 255, 255, 0.97);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-    padding: 0.6rem;
+
+  .menu {
+    right: 0.75rem;
+    width: min(21rem, calc(100vw - 1.5rem));
+    padding: 0.75rem;
     display: grid;
-    gap: 0.5rem;
-    pointer-events: auto;
-    z-index: 2;
+    gap: 0.75rem;
+  }
+
+  .filter-panel {
+    left: 0.75rem;
+    width: min(35rem, calc(100vw - 1.5rem));
+    max-height: min(40rem, calc(100vh - 7rem));
+    overflow: auto;
+    padding: 0.8rem;
+    display: grid;
+    gap: 0.8rem;
   }
   .nav-backdrop {
     position: fixed;
@@ -849,82 +1160,160 @@
     padding: 0;
     background: transparent;
   }
-  .filter-head {
+  .panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .panel-head h4 {
+    margin: 0.18rem 0 0;
+    color: var(--fg-strong);
+    font-size: 1rem;
+  }
+
+  .menu-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.25rem;
+  }
+
+  .menu-identity-copy {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .menu-identity-copy strong {
+    color: var(--fg-strong);
+    font-size: 0.96rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .menu-identity-copy span {
+    color: var(--muted);
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .menu-auth-actions,
+  .menu-links {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .menu-links a {
+    padding: 0.7rem 0.85rem;
+    border-radius: 0.95rem;
+    text-decoration: none;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--muted-strong);
+    background: color-mix(in srgb, var(--panel-solid) 72%, transparent);
+    border: 1px solid transparent;
+    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  }
+
+  .menu-links a:hover,
+  .menu-links a.active {
+    border-color: color-mix(in srgb, var(--accent) 22%, var(--panel-border));
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
+  .rows {
+    display: grid;
+    gap: 0.65rem;
+  }
+  .filter-runtime {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 1rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--panel-border));
+    background: color-mix(in srgb, var(--accent-soft) 76%, var(--panel-solid));
+    color: var(--accent-strong);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+  .filter-runtime strong {
+    font-size: 0.84rem;
+  }
+  .filter-runtime[data-filter-runtime-status='too_many_matches'],
+  .filter-runtime[data-filter-runtime-status='truncated'] {
+    border-color: rgba(245, 158, 11, 0.42);
+    background: rgba(245, 158, 11, 0.12);
+    color: #9a3412;
+  }
+  .filter-runtime[data-filter-runtime-status='invalid'] {
+    border-color: rgba(225, 29, 72, 0.3);
+    background: rgba(225, 29, 72, 0.1);
+    color: #9f1239;
+  }
+
+  .filter-preview-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.25rem;
+  }
+
+  .rule-pill {
+    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+  }
+
+  .rule-card {
+    padding: 0.85rem;
+    border-radius: 1rem;
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .rule-card-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
-  .filter-head h4 {
-    margin: 0;
-    font-size: 0.96rem;
+
+  .rule-index {
+    font-size: 0.72rem;
     font-weight: 800;
-    color: #0f172a;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
   }
-  .rows {
+
+  .rule-fields {
     display: grid;
-    gap: 0.35rem;
-  }
-  .filter-runtime {
-    display: grid;
-    gap: 0.15rem;
-    font-size: 0.78rem;
-    line-height: 1.25;
-    padding: 0.42rem 0.55rem;
-    border-radius: 0.6rem;
-    border: 1px solid #dbeafe;
-    background: #eff6ff;
-    color: #1e3a8a;
-  }
-  .filter-runtime strong {
-    font-size: 0.79rem;
-  }
-  .filter-runtime[data-filter-runtime-status='too_many_matches'],
-  .filter-runtime[data-filter-runtime-status='truncated'] {
-    border-color: #fdba74;
-    background: #fff7ed;
-    color: #9a3412;
-  }
-  .filter-runtime[data-filter-runtime-status='invalid'] {
-    border-color: #fecaca;
-    background: #fef2f2;
-    color: #991b1b;
-  }
-  .row {
-    display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
-    gap: 0.35rem;
-    align-items: center;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 0.5rem;
   }
   .filter-actions {
     display: flex;
-    gap: 0.4rem;
+    gap: 0.45rem;
     flex-wrap: wrap;
   }
   .icon-btn-sm {
-    width: 1.9rem;
-    height: 1.9rem;
-    border-radius: 0.5rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.7rem;
   }
   .ui-close-x {
-    width: 2.25rem;
-    height: 2.25rem;
-    min-width: 2.25rem;
-    min-height: 2.25rem;
+    width: 2.4rem;
+    height: 2.4rem;
+    min-width: 2.4rem;
+    min-height: 2.4rem;
     padding: 0;
     font-size: 0;
     line-height: 0;
-  }
-  .menu a {
-    text-decoration: none;
-    font-size: 0.92rem;
-    color: #334155;
-    padding: 0.5rem 0.6rem;
-    border-radius: 0.6rem;
-    font-weight: 600;
-  }
-  .menu a.active {
-    background: #f1f5f9;
-    color: #0f172a;
   }
   .menu-btn {
     width: 100%;
@@ -933,19 +1322,19 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.65rem;
-    border: 1px solid #e2e8f0;
-    border-radius: 0.6rem;
-    background: #f8fafc;
-    padding: 0.4rem 0.55rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: #334155;
+    gap: 0.75rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 1rem;
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--muted-strong);
   }
 
   .locale-select {
     margin-left: auto;
-    min-width: 6.5rem;
+    min-width: 6.8rem;
   }
   .switch {
     position: relative;
@@ -953,6 +1342,7 @@
     --switch-height: 1.5rem;
     --switch-pad: 0.12rem;
     --knob-size: 1.25rem;
+    --switch-knob-icon: #0f172a;
     width: var(--switch-width);
     height: var(--switch-height);
     display: inline-flex;
@@ -961,32 +1351,8 @@
     --switch-width: 3.15rem;
     width: var(--switch-width);
   }
-  .switch-icons .icon-on,
-  .switch-icons .icon-off {
-    position: absolute;
-    top: 50%;
-    z-index: 2;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--knob-size);
-    height: var(--knob-size);
-    transform: translateY(-50%);
-    color: #334155;
-    transition: color 0.2s, opacity 0.2s;
-    pointer-events: none;
-  }
-  .switch-icons .icon-on {
-    left: calc(var(--switch-pad) + 0.08rem);
-    color: #1f2937;
-  }
-  .switch-icons .icon-off {
-    right: calc(var(--switch-pad) + 0.08rem);
-    opacity: 0.9;
-  }
   .switch-icons .icon-center {
     position: absolute;
-    left: calc(var(--switch-pad) + 0.03rem);
     top: 50%;
     z-index: 2;
     display: inline-flex;
@@ -994,23 +1360,20 @@
     justify-content: center;
     width: var(--knob-size);
     height: var(--knob-size);
-    color: #334155;
     transform: translateY(-50%);
-    transition: transform 0.2s, color 0.2s;
+    color: var(--switch-knob-icon);
+    transition: color 0.2s, transform 0.2s;
     pointer-events: none;
   }
-  .switch-icons .icon-on svg,
-  .switch-icons .icon-off svg,
+  .switch-icons .icon-center {
+    left: calc(var(--switch-pad) + 0.03rem);
+  }
   .switch-icons .icon-center svg {
     width: 0.72rem;
     height: 0.72rem;
   }
-  .switch-labels input:checked ~ .icon-center {
-    transform: translate(
-      calc(var(--switch-width) - var(--knob-size) - (var(--switch-pad) * 2)),
-      -50%
-    );
-    color: #1f2937;
+  .switch-icons input:checked ~ .icon-center {
+    transform: translate(calc(var(--switch-width) - var(--knob-size) - (var(--switch-pad) * 2)), -50%);
   }
   .switch input {
     position: absolute;
@@ -1025,7 +1388,7 @@
     position: absolute;
     inset: 0;
     border-radius: 999px;
-    background: #cbd5e1;
+    background: color-mix(in srgb, var(--muted) 40%, transparent);
     transition: 0.2s;
   }
   .slider::before {
@@ -1039,232 +1402,126 @@
     background: #fff;
     transform: translateY(-50%);
     transition: 0.2s;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
   }
   .switch-icons input:checked ~ .slider {
-    background: #6366f1;
+    background: var(--accent);
   }
   .switch-icons input:checked ~ .slider::before {
-    transform: translate(
-      calc(var(--switch-width) - var(--knob-size) - (var(--switch-pad) * 2)),
-      -50%
-    );
-  }
-  .switch-icons input:checked ~ .icon-on {
-    color: #1f2937;
-  }
-  .switch-icons input:checked ~ .icon-off {
-    color: #1f2937;
+    transform: translate(calc(var(--switch-width) - var(--knob-size) - (var(--switch-pad) * 2)), -50%);
   }
   .auth-backdrop {
     position: fixed;
     inset: 0;
     z-index: 1200;
-    background: rgba(15, 23, 42, 0.35);
-    backdrop-filter: blur(2px);
     display: grid;
     place-items: center;
     padding: 1rem;
+    background: rgba(8, 17, 31, 0.44);
+    backdrop-filter: blur(8px);
   }
   .auth-modal {
     width: min(31rem, 100%);
-    border: 1px solid #e2e8f0;
-    border-radius: 1rem;
-    background: #fff;
-    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
     padding: 1rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 1.3rem;
+    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+    box-shadow: var(--shadow-panel);
+    backdrop-filter: blur(18px);
   }
   .auth-head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    margin-bottom: 0.75rem;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
   }
+
+  .auth-head-copy {
+    display: grid;
+    gap: 0.2rem;
+  }
+
   .auth-head h3 {
     margin: 0;
+    color: var(--fg-strong);
   }
   .tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.25rem;
-    margin-bottom: 0.6rem;
+    margin-bottom: 0.8rem;
   }
   .stack {
     display: grid;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: 0.6rem;
+    margin-bottom: 0.55rem;
   }
   .forgot-btn {
     border: 0;
     background: transparent;
     text-align: right;
-    color: #4f46e5;
-    font-weight: 600;
-    font-size: 0.78rem;
+    color: var(--accent-strong);
+    font-weight: 700;
+    font-size: 0.8rem;
     cursor: pointer;
     padding: 0;
   }
   .hint {
-    margin: 0 0 0.2rem;
-    color: #0f172a;
+    margin: 0 0 0.15rem;
+    color: var(--fg-strong);
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
   }
   .status {
-    margin: 0.25rem 0 0;
-    font-size: 0.8rem;
-    color: #64748b;
+    margin: 0.4rem 0 0;
+    padding: 0.75rem 0.85rem;
+    border-radius: 1rem;
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
   }
 
   .consent {
     display: flex;
     align-items: flex-start;
-    gap: 0.5rem;
-    font-size: 0.8rem;
-    color: #334155;
+    gap: 0.55rem;
+    font-size: 0.82rem;
+    color: var(--muted-strong);
   }
 
   .consent input {
-    margin-top: 0.1rem;
+    margin-top: 0.12rem;
   }
 
   .consent a {
-    color: #4f46e5;
+    color: var(--accent-strong);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
+  
+  @media (max-width: 1180px) {
+    .filter-trigger-copy {
+      display: none;
+    }
 
-  :global(html[data-theme='dark']) .nav {
-    border-color: #334155;
-    background: rgba(15, 23, 42, 0.92);
-    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.5);
-  }
-
-  :global(html[data-theme='dark']) .logo {
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .search {
-    border-color: #334155;
-    background: #111a2d;
+    .menu-btn-label {
+      max-width: 7rem;
+    }
   }
 
-  :global(html[data-theme='dark']) .search input {
-    color: #e2e8f0;
+  @media (max-width: 1024px) {
+    .nav-links {
+      display: none;
+    }
+
+    .nav {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
   }
 
-  :global(html[data-theme='dark']) .search input::placeholder {
-    color: #94a3b8;
-  }
-
-  :global(html[data-theme='dark']) .icon-btn {
-    border-color: #334155;
-    background: #111a2d;
-    color: #cbd5e1;
-  }
-
-  :global(html[data-theme='dark']) .icon-btn:hover {
-    background: #18233a;
-    color: #f1f5f9;
-  }
-
-  :global(html[data-theme='dark']) .menu,
-  :global(html[data-theme='dark']) .filter-panel {
-    border-color: #334155;
-    background: rgba(15, 23, 42, 0.96);
-    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.62);
-  }
-
-  :global(html[data-theme='dark']) .filter-head h4 {
-    color: #e2e8f0;
-  }
-  :global(html[data-theme='dark']) .filter-runtime {
-    border-color: #1d4ed8;
-    background: rgba(30, 58, 138, 0.24);
-    color: #bfdbfe;
-  }
-  :global(html[data-theme='dark']) .filter-runtime[data-filter-runtime-status='too_many_matches'],
-  :global(html[data-theme='dark']) .filter-runtime[data-filter-runtime-status='truncated'] {
-    border-color: #92400e;
-    background: rgba(154, 52, 18, 0.24);
-    color: #fed7aa;
-  }
-  :global(html[data-theme='dark']) .filter-runtime[data-filter-runtime-status='invalid'] {
-    border-color: #991b1b;
-    background: rgba(127, 29, 29, 0.3);
-    color: #fecaca;
-  }
-
-  :global(html[data-theme='dark']) .menu a {
-    color: #cbd5e1;
-  }
-
-  :global(html[data-theme='dark']) .menu a:hover {
-    background: #18233a;
-  }
-
-  :global(html[data-theme='dark']) .menu a.active {
-    background: #1e293b;
-    color: #f8fafc;
-  }
-
-  :global(html[data-theme='dark']) .theme-row {
-    border-color: #334155;
-    background: #0f172a;
-    color: #cbd5e1;
-  }
-
-  :global(html[data-theme='dark']) .slider {
-    background: #475569;
-  }
-
-  :global(html[data-theme='dark']) .switch-icons .icon-on,
-  :global(html[data-theme='dark']) .switch-icons .icon-off,
-  :global(html[data-theme='dark']) .switch-icons .icon-center {
-    color: #cbd5e1;
-  }
-  :global(html[data-theme='dark']) .switch-icons input:checked ~ .icon-off {
-    color: #1f2937;
-  }
-
-  :global(html[data-theme='dark']) .switch-labels .icon-center {
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .switch-labels input:checked ~ .icon-center {
-    color: #1f2937;
-  }
-
-  :global(html[data-theme='dark']) .auth-backdrop {
-    background: rgba(2, 6, 23, 0.72);
-  }
-
-  :global(html[data-theme='dark']) .auth-modal {
-    border-color: #334155;
-    background: #111a2d;
-    box-shadow: 0 20px 40px rgba(2, 6, 23, 0.62);
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .auth-head h3,
-  :global(html[data-theme='dark']) .hint {
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .status {
-    color: #94a3b8;
-  }
-
-  :global(html[data-theme='dark']) .forgot-btn {
-    color: #a5b4fc;
-  }
-
-  :global(html[data-theme='dark']) .consent {
-    color: #cbd5e1;
-  }
-
-  :global(html[data-theme='dark']) .consent a {
-    color: #a5b4fc;
-  }
   @media (max-width: 768px) {
     .search {
       display: none;
@@ -1273,10 +1530,37 @@
       display: inline-flex;
     }
     .nav {
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.55rem;
     }
-    .row {
+
+    .logo-name {
+      font-size: 1.1rem;
+    }
+
+    .filter-panel,
+    .menu {
+      left: 0.75rem;
+      right: 0.75rem;
+      width: auto;
+    }
+
+    .rule-fields {
       grid-template-columns: 1fr;
+    }
+
+    .theme-row {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .locale-select {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .menu-btn-label {
+      display: none;
     }
   }
 </style>
