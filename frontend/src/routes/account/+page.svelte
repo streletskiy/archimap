@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import { fade } from 'svelte/transition';
+  import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
@@ -108,8 +109,13 @@
       container: mapEl,
       style: styleByTheme(),
       center: [cfg.mapDefault.lon, cfg.mapDefault.lat],
-      zoom: Math.max(12, Number(cfg.mapDefault.zoom || 14))
+      zoom: Math.max(12, Number(cfg.mapDefault.zoom || 14)),
+      attributionControl: false
     });
+    map.addControl(new maplibregl.AttributionControl({
+      compact: true,
+      customAttribution: CUSTOM_MAP_ATTRIBUTION
+    }));
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.on('style.load', () => {
       if (!map.getSource('local-buildings')) map.addSource('local-buildings', { type: 'vector', url: `pmtiles://${pmtilesUrl}` });

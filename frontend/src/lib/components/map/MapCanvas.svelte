@@ -2,6 +2,7 @@
   import { beforeNavigate } from '$app/navigation';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
+  import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
@@ -2066,8 +2067,12 @@
         style: currentMapStyleUrl,
         center: [initialCamera.lng, initialCamera.lat],
         zoom: Number(initialCamera.z),
-        attributionControl: true
+        attributionControl: false
       });
+      map.addControl(new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution: CUSTOM_MAP_ATTRIBUTION
+      }));
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
       map.on('moveend', () => {
         registerFilterMoveEnd();
