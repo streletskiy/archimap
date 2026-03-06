@@ -7,7 +7,11 @@ export default [
       'node_modules/**',
       'data/**',
       '.git/**',
-      'frontend/.svelte-kit/**'
+      'frontend/.svelte-kit/**',
+      'frontend/build/**',
+      'playwright-report/**',
+      'test-results/**',
+      'tmp/**'
     ]
   },
   js.configs.recommended,

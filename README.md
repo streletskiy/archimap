@@ -29,6 +29,7 @@ References:
 
 - SvelteKit (UI)
 - API layer (`server.js` internal app dispatched by `server.sveltekit.js` for `/api` and system endpoints)
+  - HTTP route modules live in `src/lib/server/http/**`
 - PostgreSQL + PostGIS / SQLite (switchable runtime)
 - PMTiles
 - Redis (optional, for sessions)

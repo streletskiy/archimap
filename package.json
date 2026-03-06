@@ -18,6 +18,7 @@
     "test:integration": "node --test tests/integration",
     "test:syntax": "node --check server.js && node --check server.sveltekit.js && node --check src/lib/server/auth/index.js",
     "test:security": "node scripts/check-csp-security.js",
+    "pretest:e2e": "npm run frontend:build",
     "test:e2e": "playwright test",
     "test:smoke": "node scripts/smoke-test.js",
     "perf:smoke": "node scripts/perf-smoke.js",

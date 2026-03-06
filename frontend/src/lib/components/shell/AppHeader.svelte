@@ -628,7 +628,7 @@
 
     <div class="right-controls">
       {#if isMapRoute}
-        <button type="button" class:active={filterOpen} class:has-rules={visibleFilterCount > 0} class="filter-trigger" aria-label={$t('header.openFilters')} aria-expanded={filterOpen} on:click={toggleFilterPanel}>
+        <button type="button" data-testid="filter-trigger" class:active={filterOpen} class:has-rules={visibleFilterCount > 0} class="filter-trigger" aria-label={$t('header.openFilters')} aria-expanded={filterOpen} on:click={toggleFilterPanel}>
           <svg viewBox="0 0 512 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
           <span class="filter-trigger-copy">
             <span class="filter-trigger-title">{$t('header.filterTitle')}</span>
@@ -661,7 +661,7 @@
   {/if}
 
   {#if filterOpen && isMapRoute}
-    <div id="filter-shell" class="filter-panel" in:fly={{ x: -10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: -10, y: -8, duration: 170, opacity: 0.2 }}>
+    <div id="filter-shell" data-testid="filter-panel" class="filter-panel" in:fly={{ x: -10, y: -8, duration: 190, opacity: 0.2 }} out:fly={{ x: -10, y: -8, duration: 170, opacity: 0.2 }}>
       <div class="panel-head">
         <div>
           <p class="ui-kicker">OSM</p>
@@ -685,7 +685,7 @@
       </div>
       <div class="rows">
         {#each filterRows as row, index (row.id)}
-          <section class="rule-card">
+          <section data-testid="filter-rule-card" class="rule-card">
             <div class="rule-card-head">
               <span class="rule-index">{String(index + 1).padStart(2, '0')}</span>
               <button type="button" class="icon-btn icon-btn-sm" aria-label={$t('common.close')} on:click={() => removeFilterRow(row.id)}>
@@ -698,6 +698,7 @@
 
             <div class="rule-fields">
             <input
+              data-testid="filter-key-input"
               class="ui-field ui-field-xs"
               list="filter-tag-keys"
               placeholder={$t('header.tagKey')}
@@ -705,6 +706,7 @@
               on:input={(e) => updateFilterRow(row.id, { key: e.currentTarget.value })}
             />
             <select
+              data-testid="filter-op-select"
               class="ui-field ui-field-xs"
               value={row.op}
               on:change={(e) => updateFilterRow(row.id, { op: e.currentTarget.value })}
@@ -717,6 +719,7 @@
               <option value="not_exists">{$t('header.op.not_exists')}</option>
             </select>
             <input
+              data-testid="filter-value-input"
               class="ui-field ui-field-xs"
               placeholder={$t('header.tagValue')}
               value={row.value}
@@ -728,9 +731,9 @@
         {/each}
       </div>
       <div class="filter-actions">
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={addFilterRow}>{$t('header.addRule')}</button>
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={resetFilters}>{$t('header.resetRules')}</button>
-        <button type="button" class="ui-btn ui-btn-primary ui-btn-xs" on:click={applyFilters}>{$t('header.applyRules')}</button>
+        <button type="button" data-testid="filter-add-button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={addFilterRow}>{$t('header.addRule')}</button>
+        <button type="button" data-testid="filter-reset-button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={resetFilters}>{$t('header.resetRules')}</button>
+        <button type="button" data-testid="filter-apply-button" class="ui-btn ui-btn-primary ui-btn-xs" on:click={applyFilters}>{$t('header.applyRules')}</button>
       </div>
       <datalist id="filter-tag-keys">
         {#each filterTagKeys as key (key)}
@@ -875,7 +878,7 @@
     position: fixed;
     inset-inline: 0;
     top: 0;
-    z-index: 930;
+    z-index: 1005;
     padding: 0.75rem;
     pointer-events: none;
   }

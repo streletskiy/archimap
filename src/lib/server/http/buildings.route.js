@@ -331,6 +331,41 @@ function buildBboxHash(minLon, minLat, maxLon, maxLat) {
   return `${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}`;
 }
 
+function parseBboxInput(source, fields) {
+  const minLon = Number(source?.[fields.minLon]);
+  const minLat = Number(source?.[fields.minLat]);
+  const maxLon = Number(source?.[fields.maxLon]);
+  const maxLat = Number(source?.[fields.maxLat]);
+  if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
+    return { bbox: null, error: 'Некорректные координаты bbox' };
+  }
+  if (minLon > maxLon || minLat > maxLat) {
+    return { bbox: null, error: 'Некорректные границы bbox' };
+  }
+  return {
+    bbox: {
+      minLon,
+      minLat,
+      maxLon,
+      maxLat
+    },
+    error: ''
+  };
+}
+
+function resolveBboxQueryMode(isPostgres, rtreeState) {
+  if (isPostgres) return 'postgis';
+  return rtreeState.ready ? 'rtree' : 'plain';
+}
+
+function getFilterMatchCandidateLimit(rules, maxResults) {
+  const isHeavy = Array.isArray(rules) && rules.some((rule) => rule.op === 'contains');
+  return Math.max(
+    maxResults,
+    Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
+  );
+}
+
 function mapFilterDataRow(row) {
   const osmKey = `${row.osm_type}/${row.osm_id}`;
   let sourceTags = {};
@@ -423,7 +458,7 @@ function registerBuildingsRoutes(deps) {
   const bboxCache = createLruCache({ max: 100, ttlMs: 10 * 1000 });
   const filterMatchesCache = createLruCache({ max: 220, ttlMs: 4000 });
 
-  const selectFilterDataBboxRtree = !isPostgres ? db.prepare(`
+  const selectFilterRowsBboxRtree = !isPostgres ? db.prepare(`
     SELECT
       bc.osm_type,
       bc.osm_id,
@@ -451,7 +486,7 @@ function registerBuildingsRoutes(deps) {
     LIMIT ?
   `) : null;
 
-  const selectFilterDataBboxPlain = !isPostgres ? db.prepare(`
+  const selectFilterRowsBboxPlain = !isPostgres ? db.prepare(`
     ${FILTER_DATA_SELECT_FIELDS_SQL}
     WHERE bc.max_lon >= ?
       AND bc.min_lon <= ?
@@ -460,52 +495,28 @@ function registerBuildingsRoutes(deps) {
     LIMIT ?
   `) : null;
 
-  const selectFilterDataBboxPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
-
-  const selectFilterMatchCandidatesRtree = !isPostgres ? db.prepare(`
-    SELECT
-      bc.osm_type,
-      bc.osm_id,
-      bc.tags_json,
-      ai.osm_id AS info_osm_id,
-      ai.name,
-      ai.style,
-      ai.levels,
-      ai.year_built,
-      ai.architect,
-      ai.address,
-      ai.description,
-      ai.archimap_description,
-      ai.updated_by,
-      ai.updated_at
-    FROM osm.building_contours_rtree br
-    JOIN osm.building_contours bc
-      ON bc.rowid = br.contour_rowid
-    LEFT JOIN local.architectural_info ai
-      ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id
-    WHERE br.max_lon >= ?
-      AND br.min_lon <= ?
-      AND br.max_lat >= ?
-      AND br.min_lat <= ?
-    LIMIT ?
-  `) : null;
-
-  const selectFilterMatchCandidatesPlain = !isPostgres ? db.prepare(`
-    ${FILTER_DATA_SELECT_FIELDS_SQL}
-    WHERE bc.max_lon >= ?
-      AND bc.min_lon <= ?
-      AND bc.max_lat >= ?
-      AND bc.min_lat <= ?
-    LIMIT ?
-  `) : null;
-
-  const selectFilterMatchCandidatesPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
+  const selectFilterRowsBboxPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
 
   const selectBuildingById = db.prepare(`
     SELECT osm_type, osm_id, tags_json, geometry_json
     FROM osm.building_contours
     WHERE osm_type = ? AND osm_id = ?
   `);
+
+  function getBboxQueryMode() {
+    return resolveBboxQueryMode(isPostgres, rtreeState);
+  }
+
+  async function selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit) {
+    const queryMode = getBboxQueryMode();
+    if (queryMode === 'postgis') {
+      return selectFilterRowsBboxPostgis.all(minLon, minLat, maxLon, maxLat, limit);
+    }
+    if (queryMode === 'rtree') {
+      return selectFilterRowsBboxRtree.all(minLon, maxLon, minLat, maxLat, limit);
+    }
+    return selectFilterRowsBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
+  }
 
   app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
     const rawKeys = req.body?.keys;
@@ -573,20 +584,20 @@ function registerBuildingsRoutes(deps) {
   });
 
   app.get('/api/buildings/filter-data-bbox', filterDataBboxRateLimiter, async (req, res) => {
-    const minLon = Number(req.query.minLon);
-    const minLat = Number(req.query.minLat);
-    const maxLon = Number(req.query.maxLon);
-    const maxLat = Number(req.query.maxLat);
+    const { bbox, error } = parseBboxInput(req.query, {
+      minLon: 'minLon',
+      minLat: 'minLat',
+      maxLon: 'maxLon',
+      maxLat: 'maxLat'
+    });
     const limit = Math.max(1, Math.min(50000, Number(req.query.limit) || 12000));
-    if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
-      return res.status(400).json({ error: 'Некорректные координаты bbox' });
-    }
-    if (minLon > maxLon || minLat > maxLat) {
-      return res.status(400).json({ error: 'Некорректные границы bbox' });
+    if (error) {
+      return res.status(400).json({ error });
     }
 
+    const { minLon, minLat, maxLon, maxLat } = bbox;
     const actorKey = getSessionEditActorKey(req);
-    const queryMode = isPostgres ? 'postgis' : (rtreeState.ready ? 'rtree' : 'plain');
+    const queryMode = getBboxQueryMode();
     const cacheKey = `${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${queryMode}`;
     const cached = bboxCache.get(cacheKey);
     if (cached) {
@@ -595,15 +606,7 @@ function registerBuildingsRoutes(deps) {
       });
     }
 
-    const rows = isPostgres
-      ? await selectFilterDataBboxPostgis.all(
-        minLon, minLat, maxLon, maxLat,
-        limit
-      )
-      : (rtreeState.ready
-        ? await selectFilterDataBboxRtree.all(minLon, maxLon, minLat, maxLat, limit)
-        : await selectFilterDataBboxPlain.all(minLon, maxLon, minLat, maxLat, limit));
-
+    const rows = await selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit);
     const items = await applyPersonalEditsToFilterItems(rows.map(mapFilterDataRow), actorKey);
     const payload = { items, truncated: rows.length >= limit };
     bboxCache.set(cacheKey, payload);
@@ -615,17 +618,14 @@ function registerBuildingsRoutes(deps) {
   app.post('/api/buildings/filter-matches', filterMatchesRateLimiter, async (req, res) => {
     const startedAt = Date.now();
     const body = req.body || {};
-    const bbox = body?.bbox && typeof body.bbox === 'object' ? body.bbox : body;
-    const minLon = Number(bbox?.west);
-    const minLat = Number(bbox?.south);
-    const maxLon = Number(bbox?.east);
-    const maxLat = Number(bbox?.north);
-    if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
-      return res.status(400).json({ error: 'Некорректные координаты bbox' });
+    const { bbox, error } = parseBboxInput(
+      body?.bbox && typeof body.bbox === 'object' ? body.bbox : body,
+      { minLon: 'west', minLat: 'south', maxLon: 'east', maxLat: 'north' }
+    );
+    if (error) {
+      return res.status(400).json({ error });
     }
-    if (minLon > maxLon || minLat > maxLat) {
-      return res.status(400).json({ error: 'Некорректные границы bbox' });
-    }
+    const { minLon, minLat, maxLon, maxLat } = bbox;
 
     const rulesRaw = body?.rules;
     if (!Array.isArray(rulesRaw)) {
@@ -657,7 +657,7 @@ function registerBuildingsRoutes(deps) {
     const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
     const actorKeyRaw = getSessionEditActorKey(req);
     const actorKey = String(actorKeyRaw || '').trim().toLowerCase() || 'anon';
-    const queryMode = isPostgres ? 'postgis' : (rtreeState.ready ? 'rtree' : 'plain');
+    const queryMode = getBboxQueryMode();
     const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${maxResults}:${queryMode}`;
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
@@ -740,11 +740,7 @@ function registerBuildingsRoutes(deps) {
           matchedFeatureIds.push(encodeOsmFeatureId(osmType, osmId));
         }
       } else {
-        const isHeavy = normalizedRules.some((rule) => rule.op === 'contains');
-        const candidateLimit = Math.max(
-          maxResults,
-          Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
-        );
+        const candidateLimit = getFilterMatchCandidateLimit(normalizedRules, maxResults);
         const requiredArchiColumns = collectRequiredArchiColumns(splitRules.fallbackRules);
         const aiJoinSql = requiredArchiColumns.length > 0
           ? `
@@ -821,20 +817,8 @@ function registerBuildingsRoutes(deps) {
         }
       }
     } else {
-      const isHeavy = normalizedRules.some((rule) => rule.op === 'contains');
-      const candidateLimit = Math.max(
-        maxResults,
-        Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
-      );
-
-      const candidateRows = isPostgres
-        ? await selectFilterMatchCandidatesPostgis.all(
-          minLon, minLat, maxLon, maxLat,
-          candidateLimit
-        )
-        : (rtreeState.ready
-          ? await selectFilterMatchCandidatesRtree.all(minLon, maxLon, minLat, maxLat, candidateLimit)
-          : await selectFilterMatchCandidatesPlain.all(minLon, maxLon, minLat, maxLat, candidateLimit));
+      const candidateLimit = getFilterMatchCandidateLimit(normalizedRules, maxResults);
+      const candidateRows = await selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit);
 
       const candidateItems = await applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
       for (let i = 0; i < candidateItems.length; i += 1) {

@@ -127,6 +127,5 @@ function registerAppRoutes(deps) {
 }
 
 module.exports = {
-  registerAppRoutes,
-  registerFrontendStaticRoute() {}
+  registerAppRoutes
 };

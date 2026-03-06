@@ -1,1 +1,0 @@
-module.exports = require('../lib/server/http/account.route.js');

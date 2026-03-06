@@ -15,8 +15,6 @@
     "update": "Update",
     "yes": "Yes",
     "no": "No",
-    "ready": "Ready",
-    "panels": "Panels",
     "desc": "DESC",
     "asc": "ASC"
   },
@@ -24,12 +22,6 @@
     "label": "Language",
     "en": "English",
     "ru": "Russian"
-  },
-  "panel": {
-    "description": "Interface state and selected object are managed reactively without direct DOM manipulation.",
-    "selected": "Selected object",
-    "openCard": "Open card",
-    "pickBuilding": "Click a building on the map."
   },
   "search": {
     "minChars": "Enter at least 2 characters.",

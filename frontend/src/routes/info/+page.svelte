@@ -5,7 +5,7 @@
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { t } from '$lib/i18n/index';
   import { marked } from 'marked';
-  import { APP_REPO_URL, APP_VERSION, APP_VERSION_DISPLAY } from '$lib/version';
+  import { APP_REPO_URL, APP_VERSION_DISPLAY } from '$lib/version';
   import agreementMarkdownSource from '../../../../legal/user-agreement.ru.md?raw';
   import privacyMarkdownSource from '../../../../legal/privacy-policy.ru.md?raw';
 
@@ -81,8 +81,7 @@
 <PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
   <svelte:fragment slot="meta">
     <span class="ui-chip"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</span>
-    <span class="ui-chip"><strong>{$t('info.commit')}</strong>{APP_VERSION.git.describe}</span>
-    <a class="ui-btn ui-btn-secondary ui-btn-xs" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+    <a class="ui-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
   </svelte:fragment>
 
   <div>

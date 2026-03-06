@@ -17,7 +17,8 @@
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
-- Server-only code: `src/lib/server/**` and `src/routes/**`.
+- Server-only code: `src/lib/server/**`.
+- Internal HTTP route modules: `src/lib/server/http/**`.
 - Shared utilities: `src/lib/shared/**`.
 - Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`.
 

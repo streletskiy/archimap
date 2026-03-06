@@ -28,6 +28,19 @@ async function waitReady(url, timeoutMs = 20000) {
   throw new Error('Server did not become ready for e2e');
 }
 
+async function openFilterPanel(page) {
+  await page.getByTestId('filter-trigger').click();
+  await expect(page.getByTestId('filter-panel')).toBeVisible({ timeout: 5000 });
+}
+
+async function closeFilterPanel(page) {
+  const panel = page.getByTestId('filter-panel');
+  if (await panel.isVisible().catch(() => false)) {
+    await page.getByTestId('filter-trigger').click();
+    await expect(panel).toBeHidden({ timeout: 5000 });
+  }
+}
+
 test.beforeAll(async () => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-e2e-'));
 
@@ -128,12 +141,11 @@ test('building filter uses highlight layers and does not apply setFilter to base
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await expect.poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || '')).toBe('way/1');
 
-  await page.locator('header .left .icon-btn').first().click();
-  await expect(page.locator('.filter-panel')).toBeVisible({ timeout: 5000 });
+  await openFilterPanel(page);
 
-  await page.locator('.filter-panel .row input[list="filter-tag-keys"]').first().fill('name');
-  await page.locator('.filter-panel .row input.ui-field.ui-field-xs').nth(1).fill('test');
-  await page.locator('.filter-panel .filter-actions .ui-btn-primary').click();
+  await page.getByTestId('filter-key-input').first().fill('name');
+  await page.getByTestId('filter-value-input').first().fill('test');
+  await page.getByTestId('filter-apply-button').click();
 
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('feature-state');
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
@@ -155,12 +167,11 @@ test('building filter uses highlight layers and does not apply setFilter to base
 test('building filter handles fast rule updates and reaches authoritative state', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
-  await page.locator('header .left .icon-btn').first().click();
-  await expect(page.locator('.filter-panel')).toBeVisible({ timeout: 5000 });
+  await openFilterPanel(page);
 
-  const keyInput = page.locator('.filter-panel .row input[list="filter-tag-keys"]').first();
-  const valueInput = page.locator('.filter-panel .row input.ui-field.ui-field-xs').nth(1);
-  const applyBtn = page.locator('.filter-panel .filter-actions .ui-btn-primary');
+  const keyInput = page.getByTestId('filter-key-input').first();
+  const valueInput = page.getByTestId('filter-value-input').first();
+  const applyBtn = page.getByTestId('filter-apply-button');
 
   await keyInput.fill('name');
   await valueInput.fill('first');
@@ -183,12 +194,12 @@ test('building filter handles fast rule updates and reaches authoritative state'
 test('pan/zoom updates filter without request spam', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
-  await page.locator('header .left .icon-btn').first().click();
-  await expect(page.locator('.filter-panel')).toBeVisible({ timeout: 5000 });
-  await page.locator('.filter-panel .row input[list="filter-tag-keys"]').first().fill('name');
-  await page.locator('.filter-panel .row input.ui-field.ui-field-xs').nth(1).fill('a');
-  await page.locator('.filter-panel .filter-actions .ui-btn-primary').click();
+  await openFilterPanel(page);
+  await page.getByTestId('filter-key-input').first().fill('name');
+  await page.getByTestId('filter-value-input').first().fill('a');
+  await page.getByTestId('filter-apply-button').click();
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
+  await closeFilterPanel(page);
 
   const baseline = await page.evaluate(() => {
     const debug = globalThis.window.__MAP_DEBUG__ || {};

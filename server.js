@@ -7,6 +7,7 @@ const { createSimpleRateLimiter } = require('./src/lib/server/services/rate-limi
 const { createSearchService } = require('./src/lib/server/services/search.service');
 const { createBuildingEditsService } = require('./src/lib/server/services/building-edits.service');
 const { createAppSettingsService } = require('./src/lib/server/services/app-settings.service');
+const { createRuntimeSettingsCache } = require('./src/lib/server/services/runtime-settings-cache.service');
 const { requireCsrfSession } = require('./src/lib/server/services/csrf.service');
 const { createLogger } = require('./src/lib/server/services/logger.service');
 const {
@@ -26,12 +27,12 @@ const { initSessionStore } = require('./src/lib/server/infra/session-store.infra
 const { initSyncWorkersInfra } = require('./src/lib/server/infra/sync-workers.infra');
 const { createDbRuntime } = require('./src/lib/server/infra/db-runtime.infra');
 const { initObservabilityInfra } = require('./src/lib/server/infra/observability.infra');
-const { registerContoursStatusRoute } = require('./src/routes/contours-status.route');
-const { registerAppRoutes } = require('./src/routes/app.route');
-const { registerAdminRoutes } = require('./src/routes/admin.route');
-const { registerBuildingsRoutes } = require('./src/routes/buildings.route');
-const { registerSearchRoutes } = require('./src/routes/search.route');
-const { registerAccountRoutes } = require('./src/routes/account.route');
+const { registerContoursStatusRoute } = require('./src/lib/server/http/contours-status.route');
+const { registerAppRoutes } = require('./src/lib/server/http/app.route');
+const { registerAdminRoutes } = require('./src/lib/server/http/admin.route');
+const { registerBuildingsRoutes } = require('./src/lib/server/http/buildings.route');
+const { registerSearchRoutes } = require('./src/lib/server/http/search.route');
+const { registerAccountRoutes } = require('./src/lib/server/http/account.route');
 const { createMiniApp, jsonMiddleware } = require('./src/lib/server/infra/mini-app.infra');
 const { getAppVersion, getBuildInfo } = require('./src/lib/server/version');
 const {
@@ -294,8 +295,6 @@ const generalConfigFallback = {
   registrationEnabled: REGISTRATION_ENABLED,
   userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION
 };
-let generalConfigCache = { ...generalConfigFallback };
-let generalConfigRefreshPromise = null;
 const smtpConfigFallback = {
   url: SMTP_URL,
   host: SMTP_HOST,
@@ -305,57 +304,34 @@ const smtpConfigFallback = {
   pass: SMTP_PASS,
   from: EMAIL_FROM
 };
-let smtpConfigCache = { ...smtpConfigFallback };
-let smtpConfigRefreshPromise = null;
-
-function scheduleGeneralConfigRefresh() {
-  if (generalConfigRefreshPromise) return;
-  generalConfigRefreshPromise = appSettingsService.getEffectiveGeneralConfig()
-    .then((result) => {
-      if (result?.config && typeof result.config === 'object') {
-        generalConfigCache = {
-          appDisplayName: String(result.config.appDisplayName || APP_DISPLAY_NAME).trim() || APP_DISPLAY_NAME,
-          appBaseUrl: String(result.config.appBaseUrl || '').trim(),
-          registrationEnabled: Boolean(result.config.registrationEnabled),
-          userEditRequiresPermission: Boolean(result.config.userEditRequiresPermission)
-        };
-      }
-    })
-    .catch(() => {
-      // keep fallback cache on read failures
-    })
-    .finally(() => {
-      generalConfigRefreshPromise = null;
-    });
-}
-
-function scheduleSmtpConfigRefresh() {
-  if (smtpConfigRefreshPromise) return;
-  smtpConfigRefreshPromise = appSettingsService.getEffectiveSmtpConfig()
-    .then((result) => {
-      if (result?.config && typeof result.config === 'object') {
-        smtpConfigCache = {
-          url: String(result.config.url || '').trim(),
-          host: String(result.config.host || '').trim(),
-          port: Number(result.config.port || SMTP_PORT),
-          secure: Boolean(result.config.secure),
-          user: String(result.config.user || '').trim(),
-          pass: String(result.config.pass || '').trim(),
-          from: String(result.config.from || '').trim()
-        };
-      }
-    })
-    .catch(() => {
-      // keep fallback cache on read failures
-    })
-    .finally(() => {
-      smtpConfigRefreshPromise = null;
-    });
-}
+const generalSettingsCache = createRuntimeSettingsCache({
+  fallback: generalConfigFallback,
+  load: () => appSettingsService.getEffectiveGeneralConfig(),
+  normalize: (config) => ({
+    appDisplayName: String(config.appDisplayName || APP_DISPLAY_NAME).trim() || APP_DISPLAY_NAME,
+    appBaseUrl: String(config.appBaseUrl || '').trim(),
+    registrationEnabled: Boolean(config.registrationEnabled),
+    userEditRequiresPermission: Boolean(config.userEditRequiresPermission)
+  })
+});
+const smtpSettingsCache = createRuntimeSettingsCache({
+  fallback: smtpConfigFallback,
+  load: () => appSettingsService.getEffectiveSmtpConfig(),
+  normalize: (config, previous) => ({
+    url: String(config.url || '').trim(),
+    host: String(config.host || '').trim(),
+    port: Number(config.port || SMTP_PORT),
+    secure: Boolean(config.secure),
+    user: String(config.user || '').trim(),
+    pass: config.keepPassword === false
+      ? ''
+      : String(config.pass || previous.pass || '').trim(),
+    from: String(config.from || '').trim()
+  })
+});
 
 function getEffectiveGeneralConfig() {
-  scheduleGeneralConfigRefresh();
-  return generalConfigCache;
+  return generalSettingsCache.getValue();
 }
 
 function getUserEditRequiresPermission() {
@@ -375,33 +351,15 @@ function getAppDisplayName() {
 }
 
 function getEffectiveSmtpConfig() {
-  scheduleSmtpConfigRefresh();
-  return smtpConfigCache;
+  return smtpSettingsCache.getValue();
 }
 
 function applyGeneralSettingsSnapshot(saved) {
-  const general = saved?.general;
-  if (!general || typeof general !== 'object') return;
-  generalConfigCache = {
-    appDisplayName: String(general.appDisplayName || APP_DISPLAY_NAME).trim() || APP_DISPLAY_NAME,
-    appBaseUrl: String(general.appBaseUrl || '').trim(),
-    registrationEnabled: Boolean(general.registrationEnabled),
-    userEditRequiresPermission: Boolean(general.userEditRequiresPermission)
-  };
+  generalSettingsCache.applySnapshot(saved?.general);
 }
 
 function applySmtpSettingsSnapshot(saved) {
-  const smtp = saved?.smtp;
-  if (!smtp || typeof smtp !== 'object') return;
-  smtpConfigCache = {
-    url: String(smtp.url || '').trim(),
-    host: String(smtp.host || '').trim(),
-    port: Number(smtp.port || SMTP_PORT),
-    secure: Boolean(smtp.secure),
-    user: String(smtp.user || '').trim(),
-    pass: smtp.keepPassword === false ? '' : String(smtp.pass || smtpConfigCache.pass || '').trim(),
-    from: String(smtp.from || '').trim()
-  };
+  smtpSettingsCache.applySnapshot(saved?.smtp);
 }
 
 app.use(jsonMiddleware());
@@ -1104,8 +1062,8 @@ function runStartupTasksOnce() {
   startupTasksScheduled = true;
   Promise.resolve(dbRuntimePromise)
     .then(() => {
-      scheduleGeneralConfigRefresh();
-      scheduleSmtpConfigRefresh();
+      generalSettingsCache.refresh();
+      smtpSettingsCache.refresh();
       rebuildSearchIndex('startup').catch((error) => {
         logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
       });
