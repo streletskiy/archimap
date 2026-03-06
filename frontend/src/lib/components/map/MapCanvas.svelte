@@ -3,9 +3,17 @@
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
   import { t, translateNow } from '$lib/i18n/index';
-  import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady, setMapZoom } from '$lib/stores/map';
+  import {
+    mapFocusRequest,
+    mapLabelsVisible,
+    selectedBuilding,
+    setMapCenter,
+    setMapReady,
+    setMapViewport,
+    setMapZoom
+  } from '$lib/stores/map';
   import { buildingFilterRules, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
-  import { searchState } from '$lib/stores/search';
+  import { searchMapState, searchState } from '$lib/stores/search';
   import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter, parseOsmKey } from './selection-utils';
   import {
     buildBboxHash,
@@ -838,6 +846,13 @@
     return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   }
 
+  function syncMapCameraStores() {
+    if (!map) return;
+    setMapCenter(map.getCenter());
+    setMapZoom(map.getZoom());
+    setMapViewport(buildBboxSnapshot(map.getBounds?.()));
+  }
+
   function getMapStyleForTheme(theme) {
     return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
   }
@@ -1116,7 +1131,7 @@
     if (!map.getSource(SEARCH_RESULTS_SOURCE_ID)) {
       map.addSource(SEARCH_RESULTS_SOURCE_ID, {
         type: 'geojson',
-        data: buildSearchMarkersGeojson($searchState.items),
+        data: buildSearchMarkersGeojson($searchMapState.items),
         cluster: true,
         clusterRadius: 48,
         clusterMaxZoom: 16
@@ -1276,7 +1291,7 @@
 
     bindStyleInteractionHandlers();
     applySelectionFromStore($selectedBuilding);
-    updateSearchMarkers($searchState.items);
+    updateSearchMarkers($searchMapState.items);
     applyBuildingThemePaint(getCurrentTheme());
     applyLabelLayerVisibility($mapLabelsVisible);
     scheduleCoverageCheck();
@@ -1946,7 +1961,7 @@
   }
 
   $: if (map) {
-    updateSearchMarkers($searchState.items);
+    updateSearchMarkers($searchMapState.items);
   }
 
   $: if (map && $searchState.fitSeq !== lastSearchFitSeq) {
@@ -2019,8 +2034,7 @@
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
       map.on('moveend', () => {
         registerFilterMoveEnd();
-        setMapCenter(map.getCenter());
-        setMapZoom(map.getZoom());
+        syncMapCameraStores();
       });
       map.on('moveend', scheduleFilterRefresh);
       map.on('moveend', scheduleCoverageCheck);
@@ -2038,8 +2052,7 @@
 
       map.on('load', () => {
         registerFilterMoveEnd();
-        setMapCenter(map.getCenter());
-        setMapZoom(map.getZoom());
+        syncMapCameraStores();
         setMapReady(true);
         scheduleCoverageCheck();
       });
@@ -2066,6 +2079,7 @@
     setMapReady(false);
     setMapCenter(null);
     setMapZoom(null);
+    setMapViewport(null);
     if (themeObserver) {
       themeObserver.disconnect();
       themeObserver = null;

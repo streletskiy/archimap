@@ -5,6 +5,7 @@ function createSearchService(options = {}) {
     : () => false;
   const defaultLon = Number.isFinite(options.defaultLon) ? Number(options.defaultLon) : 44.0059;
   const defaultLat = Number.isFinite(options.defaultLat) ? Number(options.defaultLat) : 56.3269;
+  const maxSearchLimit = Math.max(1, Number(options.maxSearchLimit) || 5000);
 
   function normalizeSearchTokens(queryText) {
     return [...new Set(
@@ -25,11 +26,22 @@ function createSearchService(options = {}) {
       .join(' AND ');
   }
 
-  async function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cursor = 0) {
-    const cappedLimit = Math.max(1, Math.min(60, Number(limit) || 30));
+  function normalizeSearchBbox(rawBbox) {
+    const west = Number(rawBbox?.west);
+    const south = Number(rawBbox?.south);
+    const east = Number(rawBbox?.east);
+    const north = Number(rawBbox?.north);
+    if (![west, south, east, north].every(Number.isFinite)) return null;
+    if (west >= east || south >= north) return null;
+    return { west, south, east, north };
+  }
+
+  async function getLocalEditsSearchResults(tokens, centerLon, centerLat, limit = 30, cursor = 0, searchBbox = null) {
+    const cappedLimit = Math.max(1, Math.min(maxSearchLimit, Number(limit) || 30));
     const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
     const lat = Number.isFinite(centerLat) ? centerLat : defaultLat;
+    const bbox = normalizeSearchBbox(searchBbox);
 
     const whereTokenClauses = [];
     const whereParams = [];
@@ -45,6 +57,14 @@ function createSearchService(options = {}) {
     }
 
     const whereSql = whereTokenClauses.length > 0 ? whereTokenClauses.join(' AND ') : '1=1';
+    const bboxSql = bbox
+      ? `
+      WHERE center_lon >= ?
+        AND center_lon <= ?
+        AND center_lat >= ?
+        AND center_lat <= ?`
+      : '';
+    const bboxParams = bbox ? [bbox.west, bbox.east, bbox.south, bbox.north] : [];
     const rows = await db.prepare(`
       WITH src AS (
         SELECT
@@ -71,14 +91,19 @@ function createSearchService(options = {}) {
         architect,
         center_lon,
         center_lat,
+        COUNT(*) OVER() AS total_count,
         ((center_lon - ?) * (center_lon - ?) + (center_lat - ?) * (center_lat - ?)) AS distance2
       FROM src
+      ${bboxSql}
       ORDER BY distance2 ASC, updated_at DESC
       LIMIT ? OFFSET ?
-    `).all(...whereParams, lon, lon, lat, lat, cappedLimit + 1, offset);
+    `).all(...whereParams, lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);
 
     const hasMore = rows.length > cappedLimit;
     const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
+    const total = sliced.length > 0
+      ? Math.max(sliced.length, Number(sliced[0].total_count) || 0)
+      : 0;
     const nextCursor = hasMore ? offset + cappedLimit : null;
     return {
       items: sliced.map((row) => ({
@@ -92,25 +117,35 @@ function createSearchService(options = {}) {
         lat: Number.isFinite(Number(row.center_lat)) ? Number(row.center_lat) : null,
         score: 0
       })),
+      total,
       nextCursor,
       hasMore
     };
   }
 
-  async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
+  async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0, searchBbox = null) {
     const tokens = normalizeSearchTokens(queryText);
     if (tokens.length === 0) {
-      return { items: [], nextCursor: null, hasMore: false };
+      return { items: [], total: 0, nextCursor: null, hasMore: false };
     }
 
     if (isRebuildInProgress()) {
-      return getLocalEditsSearchResults(tokens, centerLon, centerLat, limit, cursor);
+      return getLocalEditsSearchResults(tokens, centerLon, centerLat, limit, cursor, searchBbox);
     }
 
-    const cappedLimit = Math.max(1, Math.min(60, Number(limit) || 30));
+    const cappedLimit = Math.max(1, Math.min(maxSearchLimit, Number(limit) || 30));
     const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
     const lat = Number.isFinite(centerLat) ? centerLat : defaultLat;
+    const bbox = normalizeSearchBbox(searchBbox);
+    const bboxWhereSql = bbox
+      ? `
+        WHERE s.center_lon >= ?
+          AND s.center_lon <= ?
+          AND s.center_lat >= ?
+          AND s.center_lat <= ?`
+      : '';
+    const bboxParams = bbox ? [bbox.west, bbox.east, bbox.south, bbox.north] : [];
 
     const rows = db.provider === 'postgres'
       ? await db.prepare(`
@@ -132,12 +167,14 @@ function createSearchService(options = {}) {
           s.center_lat,
           s.local_priority,
           m.rank,
+          COUNT(*) OVER() AS total_count,
           ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
         FROM matched m
         JOIN building_search_source s ON s.osm_key = m.osm_key
+        ${bboxWhereSql}
         ORDER BY s.local_priority DESC, m.rank DESC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
         LIMIT ? OFFSET ?
-      `).all(tokens.join(' '), tokens.join(' '), lon, lon, lat, lat, cappedLimit + 1, offset)
+      `).all(tokens.join(' '), tokens.join(' '), lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset)
       : await db.prepare(`
         WITH matched AS (
           SELECT osm_key, bm25(building_search_fts) AS rank
@@ -155,15 +192,20 @@ function createSearchService(options = {}) {
           s.center_lat,
           s.local_priority,
           m.rank,
+          COUNT(*) OVER() AS total_count,
           ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
         FROM matched m
         JOIN building_search_source s ON s.osm_key = m.osm_key
+        ${bboxWhereSql}
         ORDER BY s.local_priority DESC, m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
         LIMIT ? OFFSET ?
-      `).all(buildFtsMatchQuery(tokens), lon, lon, lat, lat, cappedLimit + 1, offset);
+      `).all(buildFtsMatchQuery(tokens), lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);
 
     const hasMore = rows.length > cappedLimit;
     const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
+    const total = sliced.length > 0
+      ? Math.max(sliced.length, Number(sliced[0].total_count) || 0)
+      : 0;
     const nextCursor = hasMore ? offset + cappedLimit : null;
 
     return {
@@ -178,6 +220,7 @@ function createSearchService(options = {}) {
         lat: Number.isFinite(Number(row.center_lat)) ? Number(row.center_lat) : null,
         score: Number(row.rank || 0)
       })),
+      total,
       nextCursor,
       hasMore
     };
@@ -185,6 +228,7 @@ function createSearchService(options = {}) {
 
   return {
     normalizeSearchTokens,
+    normalizeSearchBbox,
     buildFtsMatchQuery,
     getLocalEditsSearchResults,
     getBuildingSearchResults

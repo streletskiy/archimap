@@ -7,13 +7,7 @@
   const dispatch = createEventDispatcher();
   let debounceTimer = null;
 
-  function onBackdropClick(event) {
-    if (event.target === event.currentTarget) {
-      closeSearchModal();
-    }
-  }
-
-  function onBackdropKeydown(event) {
+  function onDialogKeydown(event) {
     if (event.key === 'Escape') {
       closeSearchModal();
     }
@@ -49,8 +43,8 @@
 </script>
 
 {#if $searchState.modalOpen}
-  <div id="search-modal" class="search-backdrop" role="button" tabindex="0" on:click={onBackdropClick} on:keydown={onBackdropKeydown}>
-    <div class="search-modal" role="dialog" aria-modal="true" aria-label={$t('search.modalAriaLabel')}>
+  <div id="search-modal" class="search-backdrop">
+    <div class="search-modal" role="dialog" tabindex="-1" aria-label={$t('search.modalAriaLabel')} on:keydown={onDialogKeydown}>
       <header class="search-head">
         <h3>{$t('search.modalTitle')}</h3>
         <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={closeSearchModal}>{$t('common.close')}</button>
@@ -115,23 +109,32 @@
     position: fixed;
     inset: 0;
     z-index: 70;
-    background: rgba(15, 23, 42, 0.35);
-    display: grid;
-    place-items: center;
-    padding: 0.75rem;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.04) 0%, rgba(15, 23, 42, 0.12) 45%, rgba(15, 23, 42, 0.35) 100%);
+    display: flex;
+    align-items: flex-end;
+    justify-content: stretch;
+    padding-top: 50vh;
+    padding-top: 50dvh;
+    pointer-events: none;
   }
 
   .search-modal {
-    width: min(35rem, 100%);
-    max-height: calc(100vh - 6rem);
-    overflow: auto;
-    border-radius: 1rem;
+    width: 100%;
+    height: 50vh;
+    height: 50dvh;
+    max-height: 50vh;
+    max-height: 50dvh;
+    overflow: hidden;
+    border-radius: 1.15rem 1.15rem 0 0;
     border: 1px solid #e2e8f0;
     background: #ffffff;
     box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
-    padding: 0.85rem;
+    padding: 0.85rem 0.85rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
     display: grid;
     gap: 0.65rem;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    overscroll-behavior: contain;
+    pointer-events: auto;
   }
 
   .search-head {
@@ -158,8 +161,11 @@
   .search-results-list {
     display: grid;
     gap: 0.5rem;
-    min-height: 8rem;
+    min-height: 0;
+    overflow: auto;
     align-content: start;
+    padding-right: 0.15rem;
+    overscroll-behavior: contain;
   }
 
   .search-item {
@@ -206,20 +212,27 @@
 
   @media (min-width: 768px) {
     .search-backdrop {
-      place-items: end start;
-      padding: 5.15rem 0.75rem 0.75rem;
+      display: grid;
+      place-items: start start;
+      padding: 5.25rem 0.75rem 0.75rem;
       background: transparent;
       pointer-events: none;
     }
 
     .search-modal {
-      pointer-events: auto;
+      width: clamp(24rem, 32vw, 30rem);
+      max-width: 100%;
+      height: calc(100vh - 6rem);
+      height: calc(100dvh - 6rem);
       max-height: calc(100vh - 6rem);
+      max-height: calc(100dvh - 6rem);
+      overflow: hidden;
+      border-radius: 1rem;
     }
   }
 
   :global(html[data-theme='dark']) .search-backdrop {
-    background: rgba(2, 6, 23, 0.68);
+    background: linear-gradient(180deg, rgba(2, 6, 23, 0.08) 0%, rgba(2, 6, 23, 0.22) 45%, rgba(2, 6, 23, 0.72) 100%);
   }
 
   :global(html[data-theme='dark']) .search-modal {

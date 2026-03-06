@@ -16,6 +16,7 @@ export const selectedBuilding = writable(null);
 export const mapReady = writable(false);
 export const mapCenter = writable(null);
 export const mapZoom = writable(null);
+export const mapViewport = writable(null);
 export const mapFocusRequest = writable(null);
 export const mapLabelsVisible = writable(getInitialLabelsVisibility());
 
@@ -45,6 +46,23 @@ export function setMapZoom(zoom) {
     return;
   }
   mapZoom.set(value);
+}
+
+export function setMapViewport(viewport) {
+  const west = Number(viewport?.west);
+  const south = Number(viewport?.south);
+  const east = Number(viewport?.east);
+  const north = Number(viewport?.north);
+  if (![west, south, east, north].every(Number.isFinite) || west >= east || south >= north) {
+    mapViewport.set(null);
+    return;
+  }
+  mapViewport.set({
+    west,
+    south,
+    east,
+    north
+  });
 }
 
 export function requestMapFocus(payload = {}) {
