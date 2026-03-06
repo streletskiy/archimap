@@ -54,7 +54,7 @@ function buildCspDirectives({
 function extractInlineScriptHashesFromHtml(html) {
   const text = String(html || '');
   const hashes = [];
-  const scriptTagPattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  const scriptTagPattern = /<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi;
   let match;
   while ((match = scriptTagPattern.exec(text)) !== null) {
     const attrs = String(match[1] || '');

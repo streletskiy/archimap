@@ -16,7 +16,7 @@ function registerAccountRoutes({
     return Math.max(min, Math.min(max, v));
   }
 
-  app.get('/api/account/edits', accountReadRateLimiter, requireAuth, (req, res) => {
+  app.get('/api/account/edits', accountReadRateLimiter, requireAuth, async (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
       return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
@@ -24,13 +24,13 @@ function registerAccountRoutes({
     const statusRaw = String(req.query?.status || '').trim().toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const limit = parseLimit(req.query?.limit, 200, 1, 500);
-    const items = getUserEditsList({ createdBy: actorKey, status, limit, summary: false });
+    const items = await getUserEditsList({ createdBy: actorKey, status, limit, summary: false });
     return sendCachedJson(req, res, { total: items.length, items }, {
       cacheControl: 'private, no-cache'
     });
   });
 
-  app.get('/api/account/edits/:editId', accountReadRateLimiter, requireAuth, (req, res) => {
+  app.get('/api/account/edits/:editId', accountReadRateLimiter, requireAuth, async (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
       return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
@@ -39,7 +39,7 @@ function registerAccountRoutes({
     if (!Number.isInteger(editId) || editId <= 0) {
       return res.status(400).json({ error: 'Некорректный идентификатор правки' });
     }
-    const item = getUserEditDetailsById(editId);
+    const item = await getUserEditDetailsById(editId);
     if (!item) {
       return res.status(404).json({ error: 'Правка не найдена' });
     }

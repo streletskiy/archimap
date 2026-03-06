@@ -19,6 +19,10 @@
   - search endpoint
   - PMTiles range and cache validators
 
+- `npm run test:integration:postgres` (requires `DATABASE_URL`)
+- Verifies PostgreSQL schema migration + PostGIS smoke geometry checks.
+- Includes runtime auth/admin flow and assertion that sqlite files are not created in `DB_PROVIDER=postgres` mode.
+
 ## E2E
 
 - `npm run test:e2e`
@@ -38,3 +42,4 @@
 
 - `npm run test:security` (CSP/no-CDN/header checks)
 - `npm run test:smoke` (high-level API + auth flow sanity)
+- `npm run db:pg:smoke` (PostgreSQL/PostGIS direct smoke)

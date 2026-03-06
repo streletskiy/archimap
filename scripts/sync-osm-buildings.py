@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import re
 import sqlite3
@@ -368,6 +369,44 @@ FROM _import_rows_tmp;
         return processed, imported
 
 
+def export_rows_duckdb_ndjson(
+    duckdb_path: Path,
+    out_path: Path,
+    import_limit: int,
+    append: bool = False,
+) -> Tuple[int, int]:
+    select_sql = _import_select_sql(import_limit)
+    mode = 'a' if append else 'w'
+    processed = 0
+    imported = 0
+
+    with duckdb.connect(str(duckdb_path)) as con:
+        _load_duckdb_extensions(con)
+        cursor = con.execute(select_sql)
+        with out_path.open(mode, encoding='utf-8') as out:
+            while True:
+                chunk = cursor.fetchmany(BATCH_SIZE)
+                if not chunk:
+                    break
+                for row in chunk:
+                    payload = {
+                        'osm_type': row[0],
+                        'osm_id': int(row[1]),
+                        'tags_json': row[2],
+                        'geometry_json': row[3],
+                        'min_lon': float(row[4]),
+                        'min_lat': float(row[5]),
+                        'max_lon': float(row[6]),
+                        'max_lat': float(row[7]),
+                    }
+                    out.write(json.dumps(payload, ensure_ascii=False))
+                    out.write('\n')
+                    processed += 1
+                    imported += 1
+
+    return processed, imported
+
+
 def cleanup_stale(conn: sqlite3.Connection, import_limit: int, run_marker: str) -> int:
     if import_limit > 0:
         print('IMPORT_LIMIT active, deletion of stale buildings skipped.', flush=True)
@@ -385,6 +424,7 @@ def main() -> None:
     parser.add_argument('--pbf', required=False)
     parser.add_argument('--extract-query', action='append', default=[])
     parser.add_argument('--no-count-pass', action='store_true')
+    parser.add_argument('--out-ndjson', required=False)
     args = parser.parse_args()
     extract_queries = list(args.extract_query or [])
     extract_queries.extend(
@@ -415,11 +455,14 @@ def main() -> None:
     if args.no_count_pass:
         with_count_pass = False
 
-    db_path = str((Path(os.getenv('OSM_DB_PATH', '')).expanduser().resolve()) if os.getenv('OSM_DB_PATH') else (Path(os.path.dirname(__file__)) / '..' / 'data' / 'osm.db').resolve())
-    conn = sqlite3.connect(db_path)
-    ensure_sqlite_schema(conn)
-    migrate_sqlite_schema_for_duckdb(conn)
+    out_ndjson = str(args.out_ndjson or '').strip()
+    conn = None
     run_marker = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+    if not out_ndjson:
+        db_path = str((Path(os.getenv('OSM_DB_PATH', '')).expanduser().resolve()) if os.getenv('OSM_DB_PATH') else (Path(os.path.dirname(__file__)) / '..' / 'data' / 'osm.db').resolve())
+        conn = sqlite3.connect(db_path)
+        ensure_sqlite_schema(conn)
+        migrate_sqlite_schema_for_duckdb(conn)
 
     print(
         f'Progress settings: every={progress_every}, count_pass={with_count_pass} (count_pass ignored for QuackOSM)',
@@ -432,6 +475,12 @@ def main() -> None:
 
     processed = 0
     imported = 0
+    ndjson_path = Path(out_ndjson).expanduser().resolve() if out_ndjson else None
+    if ndjson_path is not None:
+        ndjson_path.parent.mkdir(parents=True, exist_ok=True)
+        if ndjson_path.exists():
+            ndjson_path.unlink()
+
     if extract_queries:
         print(f'Extract query import started (QuackOSM + DuckDB): {extract_queries}', flush=True)
         for idx, query in enumerate(extract_queries, start=1):
@@ -441,23 +490,46 @@ def main() -> None:
             print(f'[{idx}/{len(extract_queries)}] Resolving extract: {query}', flush=True)
             duckdb_path = run_quackosm_extract_to_duckdb(query, work_dir, idx)
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
-            p, i = import_rows_direct_duckdb_sqlite(
-                duckdb_path=duckdb_path,
-                sqlite_conn=conn,
-                import_limit=per_query_limit,
-                run_marker=run_marker,
-            )
+            if ndjson_path is not None:
+                p, i = export_rows_duckdb_ndjson(
+                    duckdb_path=duckdb_path,
+                    out_path=ndjson_path,
+                    import_limit=per_query_limit,
+                    append=(idx > 1),
+                )
+            else:
+                p, i = import_rows_direct_duckdb_sqlite(
+                    duckdb_path=duckdb_path,
+                    sqlite_conn=conn,
+                    import_limit=per_query_limit,
+                    run_marker=run_marker,
+                )
             processed += p
             imported += i
     else:
         print(f'PBF import started (QuackOSM + DuckDB): {pbf_path}', flush=True)
         duckdb_path = run_quackosm_to_duckdb(pbf_path, work_dir)
-        processed, imported = import_rows_direct_duckdb_sqlite(
-            duckdb_path=duckdb_path,
-            sqlite_conn=conn,
-            import_limit=import_limit,
-            run_marker=run_marker,
+        if ndjson_path is not None:
+            processed, imported = export_rows_duckdb_ndjson(
+                duckdb_path=duckdb_path,
+                out_path=ndjson_path,
+                import_limit=import_limit,
+                append=False,
+            )
+        else:
+            processed, imported = import_rows_direct_duckdb_sqlite(
+                duckdb_path=duckdb_path,
+                sqlite_conn=conn,
+                import_limit=import_limit,
+                run_marker=run_marker,
+            )
+
+    if ndjson_path is not None:
+        print(
+            f'Export done. processed={processed}, exported={imported}, ndjson={ndjson_path}',
+            flush=True,
         )
+        return
 
     deleted = cleanup_stale(conn, import_limit, run_marker)
     rebuild_sqlite_rtree_if_needed(conn)

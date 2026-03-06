@@ -33,7 +33,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 - Uses pinned `node:20-bookworm-slim`.
 - Contains only runtime assets:
-  - backend runtime code (`server.js`, `src/`, `scripts/`, `workers/`)
+  - backend runtime code (`server.sveltekit.js`, `server.js`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`
   - production `node_modules`
   - python venv with `quackosm`/`duckdb`
@@ -100,11 +100,34 @@ docker login
 Server deploy (layer-based):
 
 ```bash
+export ARCHIMAP_IMAGE=streletskiy/archimap:1.2.3
 docker pull streletskiy/archimap:1.2.3
 docker compose up -d
 ```
 
 Docker downloads only changed layers during pull.
+
+`docker-compose.yml` reads `ARCHIMAP_IMAGE`, so the same compose file can be used for:
+
+- local source builds (`docker compose up --build`, default image tag `streletskiy/archimap:dev`)
+- registry deploys (`ARCHIMAP_IMAGE=streletskiy/archimap:<version> docker compose up -d`)
+
+## PostgreSQL + PostGIS (default in Compose)
+
+`docker-compose.yml` now starts `db-postgres` by default.
+
+```bash
+docker compose up -d
+```
+
+Pending PostgreSQL migrations are applied automatically on app startup. Manual migrations/smoke remain available in the compose network for recovery or verification:
+
+```bash
+docker compose exec archimap npm run db:pg:migrate
+docker compose exec archimap npm run db:pg:smoke
+```
+
+Avoid bind-mounting local `./db` into `/app/db` on deployment hosts. The runtime image already contains `db/postgres/migrations`, and masking that path can make the app start against an empty schema.
 
 ## Validate Layer Sizes
 

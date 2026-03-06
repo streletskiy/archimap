@@ -4,6 +4,7 @@
 
 - [Architecture](architecture.md)
 - [API](api.md)
+- [OpenAPI](openapi.yaml)
 - [Data Flow](data-flow.md)
 - [Runbook](runbook.md)
 - [Security](security.md)

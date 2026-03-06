@@ -29,12 +29,18 @@ export function getFeatureIdentity(feature) {
 
   const osmType = String(feature?.properties?.osm_type || '').trim();
   const osmId = Number(feature?.properties?.osm_id);
-  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-    const fromEncodedId = decodeOsmFeatureId(feature?.id);
-    if (fromEncodedId) return fromEncodedId;
-    return null;
+  if (['way', 'relation'].includes(osmType) && Number.isInteger(osmId) && osmId > 0) {
+    return { osmType, osmId };
   }
-  return { osmType, osmId };
+
+  const geometryType = String(feature?.geometry?.type || '').trim();
+  if (Number.isInteger(osmId) && osmId > 0 && geometryType === 'MultiPolygon') {
+    return { osmType: 'relation', osmId };
+  }
+
+  const fromEncodedId = decodeOsmFeatureId(feature?.id);
+  if (fromEncodedId) return fromEncodedId;
+  return null;
 }
 
 export function getSelectionFilter(feature, identity) {

@@ -9,9 +9,20 @@
 ## Core required variables (production)
 
 - `SESSION_SECRET`
-- `REDIS_URL`
-- `DATABASE_PATH` (alias for `ARCHIMAP_DB_PATH`)
 - `APP_BASE_URL`
+- `DB_PROVIDER`
+- `DATABASE_URL` or `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` when `DB_PROVIDER=postgres`
+- `DATABASE_PATH` / `ARCHIMAP_DB_PATH` when `DB_PROVIDER=sqlite`
+- `REDIS_URL` (recommended; or enable explicit memory fallback)
+
+The exhaustive template with current defaults and comments is [`.env.example`](../../.env.example).
+
+## Database provider toggle
+
+- `DB_PROVIDER` - `sqlite` or `postgres`.
+- Default if unset: `postgres` for non-development environments, `sqlite` for `NODE_ENV=development`.
+- `DATABASE_URL` - required when `DB_PROVIDER=postgres`.
+- `SQLITE_URL` - optional SQLite URL/path; existing `DATABASE_PATH`/`ARCHIMAP_DB_PATH` remain supported.
 
 ## Data/database paths
 
@@ -22,12 +33,28 @@
 - `LOCAL_EDITS_DB_PATH`
 - `USER_EDITS_DB_PATH`
 
+## PostgreSQL/PostGIS settings
+
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+
 ## Security knobs
 
 - `APP_BASE_URL`
 - `TRUST_PROXY`
 - `SESSION_COOKIE_SECURE`
+- `SESSION_ALLOW_MEMORY_FALLBACK`
+- `APP_SETTINGS_SECRET`
 - `CSP_CONNECT_SRC_EXTRA`
+
+## Observability and app identity
+
+- `LOG_LEVEL`
+- `METRICS_ENABLED`
+- `APP_DISPLAY_NAME`
 
 ## PMTiles / sync
 
@@ -44,5 +71,14 @@
 - `MAP_DEFAULT_ZOOM`
 
 These values are used as initial camera only when URL does not provide `lat/lng/z`.
+
+## Troubleshooting
+
+- `DB_PROVIDER=postgres` and login looks stateless in local HTTP:
+  set `SESSION_COOKIE_SECURE=false` for non-HTTPS local runs.
+- `DB_PROVIDER=postgres` but startup fails:
+  verify `DATABASE_URL` (or full `POSTGRES_*`) and run `npm run db:pg:migrate`.
+- `sync-osm-buildings.js --pmtiles-only` fails:
+  install `tippecanoe` or set `TIPPECANOE_BIN`.
 
 Reference template: [`.env.example`](../../.env.example).

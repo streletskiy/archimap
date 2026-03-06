@@ -15,8 +15,6 @@
     "update": "Update",
     "yes": "Yes",
     "no": "No",
-    "ready": "Ready",
-    "panels": "Panels",
     "desc": "DESC",
     "asc": "ASC"
   },
@@ -24,12 +22,6 @@
     "label": "Language",
     "en": "English",
     "ru": "Russian"
-  },
-  "panel": {
-    "description": "Interface state and selected object are managed reactively without direct DOM manipulation.",
-    "selected": "Selected object",
-    "openCard": "Open card",
-    "pickBuilding": "Click a building on the map."
   },
   "search": {
     "minChars": "Enter at least 2 characters.",
@@ -45,6 +37,10 @@
     "address": "Address",
     "style": "Style",
     "architect": "Architect",
+    "visibleOnMap": "Visible on map",
+    "visibleNow": "Currently on map: {count}",
+    "visibleLoading": "Refreshing map results...",
+    "visibleTruncated": "list limited",
     "toBuilding": "Open",
     "loadMore": "Load more",
     "loadingMore": "Loading..."
@@ -65,6 +61,10 @@
   },
   "buildingModal": {
     "title": "Building details",
+    "overview": "Overview",
+    "primarySection": "Core details",
+    "addressSection": "Address details",
+    "sourceSection": "OSM source",
     "name": "Name",
     "levels": "Levels",
     "yearBuilt": "Built year",
@@ -73,6 +73,7 @@
     "notSpecified": "Not specified",
     "extraInfo": "Additional info",
     "addressFull": "Address (addr:full)",
+    "addressFullDerived": "The full address here is assembled automatically from individual addr:* tags. Edit the address parts below instead.",
     "postcode": "Postcode (addr:postcode)",
     "city": "City (addr:city)",
     "place": "Place (addr:place)",
@@ -80,6 +81,7 @@
     "houseNumber": "House number (addr:housenumber)",
     "save": "Save",
     "saving": "Saving...",
+    "noChanges": "No changes to save",
     "editDenied": "Editing is available only for users with building edit permission.",
     "description": "Description",
     "loading": "Loading data...",
@@ -94,7 +96,12 @@
     "tabAgreement": "User Agreement",
     "tabPrivacy": "Privacy Policy",
     "aboutTitle": "About",
-    "aboutText": "archimap helps collect and moderate architecture building data on a map.",
+    "aboutText": "archimap is a map of architectural objects and a workspace for collecting, validating, and refining building data. The service combines an interactive map, building card, search by name, address, style, and architect, plus OpenStreetMap tag editing in one interface.",
+    "aboutTextExtended": "Users can find buildings, compare the current data, suggest updates, and review their edit history in the account area. Moderators and administrators get tools for field-level review, partial acceptance of edits, comments, user role management, and platform configuration.",
+    "aboutFeaturesTitle": "What the service includes",
+    "aboutFeatureMap": "A map with search, OSM tag filters, and a detailed building card.",
+    "aboutFeatureEdits": "User-submitted edits with a transparent moderation flow and edit history.",
+    "aboutFeatureAdmin": "Account and admin sections for edit review, access control, and service operations.",
     "techTitle": "Technical information",
     "version": "Version",
     "commit": "Commit",
@@ -119,6 +126,7 @@
     "login": "Sign in",
     "register": "Register",
     "profile": "Profile",
+    "map": "Map",
     "info": "Information",
     "admin": "Admin panel",
     "labels": "Map labels",
@@ -307,6 +315,8 @@
     }
   },
   "admin": {
+    "title": "Administration",
+    "subtitle": "Moderate edits, manage users, and control system settings.",
     "authRequired": "Sign in required",
     "forbidden": "Access denied",
     "tabs": {

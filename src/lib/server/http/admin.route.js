@@ -24,6 +24,8 @@ function registerAdminRoutes(deps) {
     passwordResetHtmlTemplate,
     passwordResetTextTemplate,
     appSettingsService,
+    onGeneralSettingsSaved,
+    onSmtpSettingsSaved,
     appDisplayName,
     getAppDisplayName,
     appBaseUrl,
@@ -136,50 +138,56 @@ function registerAdminRoutes(deps) {
     });
   });
 
-  app.get('/api/admin/app-settings/smtp', requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+  app.get('/api/admin/app-settings/smtp', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
     if (!appSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
     return sendCachedJson(req, res, {
       ok: true,
-      item: appSettingsService.getSmtpSettingsForAdmin()
+      item: await appSettingsService.getSmtpSettingsForAdmin()
     }, {
       cacheControl: 'private, no-cache'
     });
   });
 
-  app.get('/api/admin/app-settings/general', requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+  app.get('/api/admin/app-settings/general', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
     if (!appSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
     return sendCachedJson(req, res, {
       ok: true,
-      item: appSettingsService.getGeneralSettingsForAdmin()
+      item: await appSettingsService.getGeneralSettingsForAdmin()
     }, {
       cacheControl: 'private, no-cache'
     });
   });
 
-  app.post('/api/admin/app-settings/general', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+  app.post('/api/admin/app-settings/general', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
     if (!appSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
     const general = req.body?.general && typeof req.body.general === 'object' ? req.body.general : {};
     const actor = getSessionEditActorKey(req) || 'admin';
-    const saved = appSettingsService.saveGeneralSettings(general, actor);
+    const saved = await appSettingsService.saveGeneralSettings(general, actor);
+    if (typeof onGeneralSettingsSaved === 'function') {
+      onGeneralSettingsSaved(saved);
+    }
     return res.json({
       ok: true,
       item: saved
     });
   });
 
-  app.post('/api/admin/app-settings/smtp', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, (req, res) => {
+  app.post('/api/admin/app-settings/smtp', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
     if (!appSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек недоступен' });
     }
     const smtp = req.body?.smtp && typeof req.body.smtp === 'object' ? req.body.smtp : {};
     const actor = getSessionEditActorKey(req) || 'admin';
-    const saved = appSettingsService.saveSmtpSettings(smtp, actor);
+    const saved = await appSettingsService.saveSmtpSettings(smtp, actor);
+    if (typeof onSmtpSettingsSaved === 'function') {
+      onSmtpSettingsSaved(saved);
+    }
     return res.json({
       ok: true,
       item: saved
@@ -196,7 +204,7 @@ function registerAdminRoutes(deps) {
       return res.status(400).json({ error: 'Укажите корректный email для тестового письма' });
     }
     const keepPassword = smtp.keepPassword !== false;
-    const candidate = appSettingsService.buildSmtpConfigFromInput(smtp, { keepPassword });
+    const candidate = await appSettingsService.buildSmtpConfigFromInput(smtp, { keepPassword });
     if (!candidate.from) {
       return res.status(400).json({ error: 'Для отправки тестового письма укажите поле From' });
     }
@@ -236,11 +244,11 @@ function registerAdminRoutes(deps) {
     return res.redirect('/admin');
   });
 
-  app.get('/api/admin/building-edits', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/admin/building-edits', requireAuth, requireAdmin, async (req, res) => {
     const statusRaw = String(req.query?.status || '').trim().toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const limit = parseLimit(req.query?.limit, 200, 1, 1000);
-    const out = getUserEditsList({ status, limit, summary: false });
+    const out = await getUserEditsList({ status, limit, summary: false });
     return sendCachedJson(req, res, {
       total: out.length,
       items: out
@@ -249,12 +257,12 @@ function registerAdminRoutes(deps) {
     });
   });
 
-  app.get('/api/admin/building-edits/:editId', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/admin/building-edits/:editId', requireAuth, requireAdmin, async (req, res) => {
     const editId = Number(req.params.editId);
     if (!Number.isInteger(editId) || editId <= 0) {
       return res.status(400).json({ error: 'Некорректный идентификатор правки' });
     }
-    const item = getUserEditDetailsById(editId);
+    const item = await getUserEditDetailsById(editId);
     if (!item) {
       return res.status(404).json({ error: 'Правка не найдена' });
     }
@@ -264,12 +272,12 @@ function registerAdminRoutes(deps) {
     });
   });
 
-  app.get('/api/admin/users/:email', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/admin/users/:email', requireAuth, requireAdmin, async (req, res) => {
     const email = String(req.params.email || '').trim().toLowerCase();
     if (!isLikelyEmail(email)) {
       return res.status(400).json({ error: 'Некорректный email' });
     }
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT
         u.email,
         u.first_name,
@@ -314,31 +322,31 @@ function registerAdminRoutes(deps) {
     });
   });
 
-  app.get('/api/admin/users/:email/edits', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/admin/users/:email/edits', requireAuth, requireAdmin, async (req, res) => {
     const email = String(req.params.email || '').trim().toLowerCase();
     if (!isLikelyEmail(email)) {
       return res.status(400).json({ error: 'Некорректный email' });
     }
     const limit = parseLimit(req.query?.limit, 200, 1, 1000);
-    const items = getUserEditsList({ createdBy: email, limit, summary: true });
+    const items = await getUserEditsList({ createdBy: email, limit, summary: true });
     return sendCachedJson(req, res, { total: items.length, items }, {
       cacheControl: 'private, no-cache'
     });
   });
 
-  app.post('/api/admin/building-edits/:editId/reject', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/building-edits/:editId/reject', requireCsrfSession, requireAuth, requireAdmin, async (req, res) => {
     const editId = Number(req.params.editId);
     if (!Number.isInteger(editId) || editId <= 0) {
       return res.status(400).json({ error: 'Некорректный идентификатор правки' });
     }
-    const row = getUserEditDetailsById(editId);
+    const row = await getUserEditDetailsById(editId);
     if (!row) return res.status(404).json({ error: 'Правка не найдена' });
     if (normalizeUserEditStatus(row.status) !== 'pending') {
       return res.status(409).json({ error: 'Правка уже обработана' });
     }
     const comment = sanitizeFieldText(req.body?.comment, 1200);
     const reviewer = getSessionEditActorKey(req) || 'admin';
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE user_edits.building_user_edits
       SET
         status = 'rejected',
@@ -357,12 +365,12 @@ function registerAdminRoutes(deps) {
     return res.json({ ok: true, editId, status: 'rejected' });
   });
 
-  app.post('/api/admin/building-edits/:editId/merge', requireCsrfSession, requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/building-edits/:editId/merge', requireCsrfSession, requireAuth, requireAdmin, async (req, res) => {
     const editId = Number(req.params.editId);
     if (!Number.isInteger(editId) || editId <= 0) {
       return res.status(400).json({ error: 'Некорректный идентификатор правки' });
     }
-    const item = getUserEditDetailsById(editId);
+    const item = await getUserEditDetailsById(editId);
     if (!item) {
       return res.status(404).json({ error: 'Правка не найдена' });
     }
@@ -404,7 +412,7 @@ function registerAdminRoutes(deps) {
       sanitizedValues[key] = sanitizeFieldText(valuesRaw[key], key === 'archimap_description' ? 1000 : 300);
     }
 
-    const currentMerged = getMergedInfoRow(item.osmType, item.osmId) || {};
+    const currentMerged = await getMergedInfoRow(item.osmType, item.osmId) || {};
     const editCreatedTs = item.createdAt ? Date.parse(String(item.createdAt)) : NaN;
     const currentMergedTs = currentMerged?.updated_at ? Date.parse(String(currentMerged.updated_at)) : NaN;
     if (!forceMerge && Number.isFinite(editCreatedTs) && Number.isFinite(currentMergedTs) && currentMergedTs > editCreatedTs) {
@@ -415,7 +423,7 @@ function registerAdminRoutes(deps) {
         editCreatedAt: item.createdAt || null
       });
     }
-    const editSource = db.prepare(`
+    const editSource = await db.prepare(`
       SELECT name, style, levels, year_built, architect, address, archimap_description
       FROM user_edits.building_user_edits
       WHERE id = ?
@@ -441,8 +449,8 @@ function registerAdminRoutes(deps) {
     const adminComment = sanitizeFieldText(req.body?.comment, 1200);
     const nextStatus = fieldsToMerge.length < allowedFields.size ? 'partially_accepted' : 'accepted';
 
-    const tx = db.transaction(() => {
-      db.prepare(`
+    const tx = db.transaction(async () => {
+      await db.prepare(`
         INSERT INTO local.architectural_info (
           osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
@@ -470,7 +478,7 @@ function registerAdminRoutes(deps) {
         reviewer
       );
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE user_edits.building_user_edits
         SET
           status = ?,
@@ -486,11 +494,11 @@ function registerAdminRoutes(deps) {
     });
 
     try {
-      tx();
+      await tx();
     } catch {
       return res.status(409).json({ error: 'Не удалось применить merge: правка была изменена параллельно' });
     }
-    const updated = db.prepare('SELECT status FROM user_edits.building_user_edits WHERE id = ?').get(editId);
+    const updated = await db.prepare('SELECT status FROM user_edits.building_user_edits WHERE id = ?').get(editId);
     if (!updated || (normalizeUserEditStatus(updated.status) !== 'accepted' && normalizeUserEditStatus(updated.status) !== 'partially_accepted')) {
       return res.status(409).json({ error: 'Правка уже обработана другим администратором' });
     }

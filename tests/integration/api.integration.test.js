@@ -40,7 +40,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   fs.mkdirSync(repoDataDir, { recursive: true });
   fs.writeFileSync(pmtilesPath, Buffer.alloc(4096, 7));
 
-  const server = spawn(process.execPath, ['server.js'], {
+  const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: path.join(__dirname, '..', '..'),
     env: {
       ...process.env,
@@ -52,9 +52,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       AUTO_SYNC_ON_START: 'false',
       AUTO_SYNC_INTERVAL_HOURS: '0',
       SESSION_ALLOW_MEMORY_FALLBACK: 'true',
+      SESSION_COOKIE_SECURE: 'false',
       REDIS_URL: 'redis://127.0.0.1:6399',
       SESSION_SECRET: 'integration-test-secret',
       APP_BASE_URL: baseUrl,
+      DB_PROVIDER: 'sqlite',
       SMTP_URL: '',
       SMTP_HOST: '',
       SMTP_PORT: '587',
@@ -108,6 +110,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         cwd: path.join(__dirname, '..', '..'),
         env: {
           ...process.env,
+          DB_PROVIDER: 'sqlite',
           USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
         },
         stdio: ['ignore', 'pipe', 'pipe']
@@ -260,8 +263,13 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const searchBody = await shortQuery.json();
       assert.match(String(searchBody.error || ''), /Минимальная длина/);
 
+      const invalidBbox = await callApi('/api/search-buildings?q=test&west=44&south=56&east=44.1');
+      assert.equal(invalidBbox.status, 400);
+
       const searchOk = await callApi('/api/search-buildings?q=test&limit=5');
       assert.equal(searchOk.status, 200);
+      const searchOkBody = await searchOk.json();
+      assert.equal(typeof searchOkBody.total, 'number');
       const searchEtag = String(searchOk.headers.get('etag') || '');
       assert.ok(searchEtag.length > 0);
 
@@ -269,6 +277,13 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         headers: { 'if-none-match': searchEtag }
       });
       assert.equal(searchNotModified.status, 304);
+
+      const mapSearch = await callApi('/api/search-buildings-map?q=test&west=44&south=56&east=44.1&north=56.1');
+      assert.equal(mapSearch.status, 200);
+      const mapSearchBody = await mapSearch.json();
+      assert.equal(typeof mapSearchBody.total, 'number');
+      assert.equal(typeof mapSearchBody.truncated, 'boolean');
+      assert.ok(Array.isArray(mapSearchBody.items));
     });
 
     await t.test('filter-matches endpoint validates input, returns meta and uses cache', async () => {

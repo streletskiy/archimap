@@ -59,7 +59,7 @@ function createTestDb() {
   return db;
 }
 
-test('buildChangesFromRows uses OSM fallback for empty merged name/address', () => {
+test('buildChangesFromRows uses OSM fallback for empty merged name/address', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
@@ -117,7 +117,7 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', () 
     'pending'
   );
 
-  const items = service.getUserEditsList({ status: 'pending', limit: 10 });
+  const items = await service.getUserEditsList({ status: 'pending', limit: 10 });
   assert.equal(items.length, 1);
 
   const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));
@@ -126,7 +126,7 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', () 
   assert.equal(fields.has('architect'), false);
 });
 
-test('buildChangesFromRows does not report levels diff for numeric-equivalent values', () => {
+test('buildChangesFromRows does not report levels diff for numeric-equivalent values', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
@@ -162,7 +162,7 @@ test('buildChangesFromRows does not report levels diff for numeric-equivalent va
     'pending'
   );
 
-  const items = service.getUserEditsList({ status: 'pending', limit: 10 });
+  const items = await service.getUserEditsList({ status: 'pending', limit: 10 });
   assert.equal(items.length, 1);
 
   const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));

@@ -11,6 +11,8 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      DB_PROVIDER: sqlite
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -24,6 +26,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
+            frontend/package-lock.json
             frontend/package-lock.json
 
       - name: Install dependencies
@@ -65,3 +68,52 @@ jobs:
             playwright-report
             test-results
           if-no-files-found: ignore
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      db-postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: archimap
+          POSTGRES_USER: archimap
+          POSTGRES_PASSWORD: archimap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U archimap -d archimap"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_PROVIDER: postgres
+      DATABASE_URL: postgresql://archimap:archimap@127.0.0.1:5432/archimap
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: PostgreSQL migrations
+        run: npm run db:pg:migrate
+
+      - name: PostgreSQL smoke
+        run: npm run db:pg:smoke
+
+      - name: PostgreSQL integration
+        run: npm run test:integration:postgres
+
+      - name: PostgreSQL smoke runtime
+        run: npm run test:smoke

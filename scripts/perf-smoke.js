@@ -47,7 +47,9 @@ async function benchmark(pathname, samples = 25) {
 }
 
 function collectBundleStats() {
-  const clientDir = path.join(process.cwd(), 'frontend', 'build', '_app', 'immutable');
+  const nodeClientDir = path.join(process.cwd(), 'frontend', 'build', 'client', '_app', 'immutable');
+  const staticClientDir = path.join(process.cwd(), 'frontend', 'build', '_app', 'immutable');
+  const clientDir = fs.existsSync(nodeClientDir) ? nodeClientDir : staticClientDir;
   const result = {
     chunksTotalKb: 0,
     assetsTotalKb: 0,
@@ -84,10 +86,11 @@ function collectBundleStats() {
 
 async function main() {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-perf-'));
-  const server = spawn(process.execPath, ['server.js'], {
+  const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      DB_PROVIDER: 'sqlite',
       PORT: String(PORT),
       NODE_ENV: 'test',
       LOG_LEVEL: 'error',
@@ -95,6 +98,7 @@ async function main() {
       AUTO_SYNC_ENABLED: 'false',
       AUTO_SYNC_ON_START: 'false',
       SESSION_ALLOW_MEMORY_FALLBACK: 'true',
+      SESSION_COOKIE_SECURE: 'false',
       SESSION_SECRET: 'perf-smoke-secret',
       APP_BASE_URL: BASE_URL,
       ARCHIMAP_DB_PATH: path.join(tmpRoot, 'archimap.db'),

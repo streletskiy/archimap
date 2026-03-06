@@ -1,4 +1,8 @@
+const { sanitizeEditedFields } = require('./edits.service');
+
 function createBuildingEditsService({ db, normalizeUserEditStatus }) {
+  const isPostgres = db.provider === 'postgres';
+
   function normalizeInfoForDiff(value) {
     if (value == null) return null;
     if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -63,15 +67,47 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
   const ARCHI_FIELD_SET = new Set(ARCHI_EDIT_FIELDS.map((f) => f.key));
 
-  function getMergedInfoRow(osmType, osmId) {
-    return db.prepare(`
+  function getEditedFieldsFromRow(row) {
+    const fields = sanitizeEditedFields(row?.edited_fields_json);
+    return fields.length > 0 ? fields : null;
+  }
+
+  function applyUserEditRowToInfo(baseInfo, row) {
+    if (!row) return baseInfo || null;
+    const next = baseInfo && typeof baseInfo === 'object' ? { ...baseInfo } : {};
+    const editedFields = getEditedFieldsFromRow(row) || [...ARCHI_FIELD_SET];
+
+    next.osm_type = row.osm_type ?? next.osm_type ?? null;
+    next.osm_id = row.osm_id ?? next.osm_id ?? null;
+    next.updated_by = row.created_by ?? row.updated_by ?? next.updated_by ?? null;
+    next.updated_at = row.updated_at ?? next.updated_at ?? null;
+    next.review_status = normalizeUserEditStatus(row.status);
+    next.admin_comment = row.admin_comment ?? next.admin_comment ?? null;
+    next.user_edit_id = Number.isInteger(Number(row.id)) && Number(row.id) > 0
+      ? Number(row.id)
+      : (next.user_edit_id ?? null);
+
+    for (const field of editedFields) {
+      if (field === 'archimap_description') {
+        next.archimap_description = row.archimap_description ?? null;
+        next.description = row.archimap_description ?? null;
+        continue;
+      }
+      next[field] = row[field] ?? null;
+    }
+
+    return next;
+  }
+
+  async function getMergedInfoRow(osmType, osmId) {
+    return await db.prepare(`
       SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
   }
 
-  function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
+  async function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
     const author = String(createdBy || '').trim().toLowerCase();
     if (!author) return null;
 
@@ -86,7 +122,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     const params = [osmType, osmId, author];
     if (statusClause) params.push(...normalizedStatuses);
 
-    return db.prepare(`
+    return await db.prepare(`
       SELECT *
       FROM user_edits.building_user_edits
       WHERE osm_type = ?
@@ -98,12 +134,12 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     `).get(...params) || null;
   }
 
-  function supersedePendingUserEdits(osmType, osmId, createdBy, keepId = null) {
+  async function supersedePendingUserEdits(osmType, osmId, createdBy, keepId = null) {
     const author = String(createdBy || '').trim().toLowerCase();
     if (!author) return;
 
     if (Number.isInteger(keepId) && keepId > 0) {
-      db.prepare(`
+      await db.prepare(`
         UPDATE user_edits.building_user_edits
         SET status = 'superseded', updated_at = datetime('now')
         WHERE osm_type = ?
@@ -115,7 +151,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       return;
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE user_edits.building_user_edits
       SET status = 'superseded', updated_at = datetime('now')
       WHERE osm_type = ?
@@ -148,8 +184,13 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       }
       : null;
 
+    const explicitEditedFields = getEditedFieldsFromRow(editRow);
+    const fieldsToCompare = explicitEditedFields
+      ? ARCHI_EDIT_FIELDS.filter((field) => explicitEditedFields.includes(field.key))
+      : ARCHI_EDIT_FIELDS;
+
     const changes = [];
-    for (const field of ARCHI_EDIT_FIELDS) {
+    for (const field of fieldsToCompare) {
       const baselineValue = mergedBaseline
         ? (mergedBaseline[field.key] ?? osmBaseline[field.key] ?? null)
         : (osmBaseline[field.key] ?? null);
@@ -188,6 +229,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
   function mapUserEditRow(row, tags, mergedInfoRow) {
     const changes = buildChangesFromRows(row, tags, mergedInfoRow);
+    const editedFields = getEditedFieldsFromRow(row);
     const mergedFields = row.merged_fields_json
       ? (() => {
         try {
@@ -213,6 +255,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       reviewedAt: row.reviewed_at ?? null,
       mergedBy: row.merged_by ?? null,
       mergedAt: row.merged_at ?? null,
+      editedFields,
       mergedFields,
       values: {
         name: row.name ?? null,
@@ -227,7 +270,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function getUserEditsList({ createdBy = null, status = null, limit = 2000, summary = false }) {
+  async function getUserEditsList({ createdBy = null, status = null, limit = 2000, summary = false }) {
     const cap = Math.max(1, Math.min(5000, Number(limit) || 2000));
     const clauses = [];
     const params = [];
@@ -246,7 +289,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
 
     if (summary) {
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
       SELECT
         ue.id,
         ue.osm_type,
@@ -273,7 +316,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       }));
     }
 
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT
         ue.*,
         bc.tags_json,
@@ -320,11 +363,11 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return out;
   }
 
-  function getUserEditDetailsById(editId) {
+  async function getUserEditDetailsById(editId) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) return null;
 
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT
         ue.*,
         bc.tags_json,
@@ -384,7 +427,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return mapped;
   }
 
-  function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
+  async function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
     const actor = String(actorKey || '').trim().toLowerCase();
     if (!actor || !Array.isArray(keys) || keys.length === 0) return new Map();
 
@@ -399,32 +442,68 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
     for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
       const chunk = keys.slice(i, i + CHUNK_SIZE);
-      const clauses = chunk.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
-      const params = [actor];
+      const pairs = [];
+
       for (const key of chunk) {
         const [osmType, osmIdRaw] = String(key).split('/');
         const osmId = Number(osmIdRaw);
         if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) continue;
-        params.push(osmType, osmId);
+        pairs.push({ osmType, osmId });
       }
-      if (params.length === 1) continue;
+      if (pairs.length === 0) continue;
 
       const statusPlaceholders = normalizedStatuses.map(() => '?').join(',');
-      params.push(...normalizedStatuses);
 
-      const rows = db.prepare(`
-        SELECT ue.*
-        FROM user_edits.building_user_edits ue
-        JOIN (
-          SELECT osm_type, osm_id, MAX(id) AS max_id
-          FROM user_edits.building_user_edits
-          WHERE lower(trim(created_by)) = ?
-            AND (${clauses})
-            AND status IN (${statusPlaceholders})
-          GROUP BY osm_type, osm_id
-        ) latest
-          ON latest.max_id = ue.id
-      `).all(...params);
+      const rows = isPostgres
+        ? await (() => {
+          const valuesSql = pairs.map(() => '(?::text, ?::bigint)').join(', ');
+          const params = [];
+          for (const pair of pairs) {
+            params.push(pair.osmType, pair.osmId);
+          }
+          params.push(actor, ...normalizedStatuses);
+
+          return db.prepare(`
+            WITH requested(osm_type, osm_id) AS (
+              VALUES ${valuesSql}
+            ),
+            latest AS (
+              SELECT ue.osm_type, ue.osm_id, MAX(ue.id) AS max_id
+              FROM user_edits.building_user_edits ue
+              JOIN requested req
+                ON req.osm_type = ue.osm_type AND req.osm_id = ue.osm_id
+              WHERE lower(trim(ue.created_by)) = ?
+                AND ue.status IN (${statusPlaceholders})
+              GROUP BY ue.osm_type, ue.osm_id
+            )
+            SELECT ue.*
+            FROM user_edits.building_user_edits ue
+            JOIN latest
+              ON latest.max_id = ue.id
+          `).all(...params);
+        })()
+        : await (() => {
+          const clauses = pairs.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
+          const params = [actor];
+          for (const pair of pairs) {
+            params.push(pair.osmType, pair.osmId);
+          }
+          params.push(...normalizedStatuses);
+
+          return db.prepare(`
+            SELECT ue.*
+            FROM user_edits.building_user_edits ue
+            JOIN (
+              SELECT osm_type, osm_id, MAX(id) AS max_id
+              FROM user_edits.building_user_edits
+              WHERE lower(trim(created_by)) = ?
+                AND (${clauses})
+                AND status IN (${statusPlaceholders})
+              GROUP BY osm_type, osm_id
+            ) latest
+              ON latest.max_id = ue.id
+          `).all(...params);
+        })();
 
       for (const row of rows) {
         out.set(`${row.osm_type}/${row.osm_id}`, row);
@@ -433,13 +512,13 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return out;
   }
 
-  function mergePersonalEditsIntoFeatureInfo(features, actorKey) {
+  async function mergePersonalEditsIntoFeatureInfo(features, actorKey) {
     const keys = features
       .map((f) => String(f?.id || f?.properties?.osm_key || ''))
       .filter((id) => /^(way|relation)\/\d+$/.test(id));
     if (keys.length === 0) return features;
 
-    const personalByKey = getUserPersonalEditsByKeys(actorKey, keys, ['pending', 'rejected']);
+    const personalByKey = await getUserPersonalEditsByKeys(actorKey, keys, ['pending', 'rejected']);
     if (personalByKey.size === 0) return features;
 
     for (const feature of features) {
@@ -447,34 +526,19 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       const row = personalByKey.get(key);
       if (!row) continue;
       feature.properties = feature.properties || {};
-      feature.properties.archiInfo = {
-        osm_type: row.osm_type,
-        osm_id: row.osm_id,
-        name: row.name ?? null,
-        style: row.style ?? null,
-        levels: row.levels ?? null,
-        year_built: row.year_built ?? null,
-        architect: row.architect ?? null,
-        address: row.address ?? null,
-        archimap_description: row.archimap_description ?? null,
-        updated_by: row.created_by ?? null,
-        updated_at: row.updated_at ?? null,
-        review_status: normalizeUserEditStatus(row.status),
-        admin_comment: row.admin_comment ?? null,
-        user_edit_id: Number(row.id || 0)
-      };
+      feature.properties.archiInfo = applyUserEditRowToInfo(feature.properties.archiInfo, row);
       feature.properties.hasExtraInfo = true;
     }
 
     return features;
   }
 
-  function applyPersonalEditsToFilterItems(items, actorKey) {
+  async function applyPersonalEditsToFilterItems(items, actorKey) {
     const actor = String(actorKey || '').trim().toLowerCase();
     if (!actor || !Array.isArray(items) || items.length === 0) return items;
 
     const keys = items.map((item) => String(item?.osmKey || '')).filter((id) => /^(way|relation)\/\d+$/.test(id));
-    const personalByKey = getUserPersonalEditsByKeys(actor, keys, ['pending', 'rejected']);
+    const personalByKey = await getUserPersonalEditsByKeys(actor, keys, ['pending', 'rejected']);
     if (personalByKey.size === 0) return items;
 
     return items.map((item) => {
@@ -483,22 +547,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       if (!row) return item;
       return {
         ...item,
-        archiInfo: {
-          osm_type: row.osm_type,
-          osm_id: row.osm_id,
-          name: row.name ?? null,
-          style: row.style ?? null,
-          levels: row.levels ?? null,
-          year_built: row.year_built ?? null,
-          architect: row.architect ?? null,
-          address: row.address ?? null,
-          archimap_description: row.archimap_description ?? null,
-          updated_by: row.created_by ?? null,
-          updated_at: row.updated_at ?? null,
-          review_status: normalizeUserEditStatus(row.status),
-          admin_comment: row.admin_comment ?? null,
-          user_edit_id: Number(row.id || 0)
-        },
+        archiInfo: applyUserEditRowToInfo(item.archiInfo, row),
         hasExtraInfo: true
       };
     });
@@ -511,6 +560,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     getLatestUserEditRow,
     supersedePendingUserEdits,
     getSessionEditActorKey,
+    applyUserEditRowToInfo,
     getUserEditsList,
     getUserEditDetailsById,
     getUserPersonalEditsByKeys,

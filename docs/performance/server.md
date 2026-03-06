@@ -16,6 +16,22 @@
 - Rate limiting:
   - `POST /api/buildings/filter-data` has a dedicated limiter tuned for interactive map filtering (`server.js`, `filterDataRateLimiter`).
   - `POST /api/buildings/filter-matches` has its own limiter for bbox+rules interactive workloads (`server.js`, `filterMatchesRateLimiter`).
+- `POST /api/buildings/filter-matches` uses adaptive PostgreSQL strategy for anonymous users:
+  - tag-only rules (`contains|equals|not_equals|starts_with|exists|not_exists`) are compiled to SQL predicates;
+  - spatial bbox is compiled once via `env` CTE (`ST_MakeEnvelope` + `ST_Intersects`);
+  - for tag-only rule sets, query returns only `(osm_type, osm_id)` and builds `matchedKeys/matchedFeatureIds` in Node;
+  - for rule sets that need `architectural_info` fallback (`archi.*` and known archi keys), route keeps legacy JS filtering path but prefilters candidates with SQL guard predicates to drop impossible rows before JS;
+  - fallback branch now selects only the `architectural_info` columns referenced by active rules (plus `osm_id`) to reduce join payload;
+  - authenticated users keep JS fallback path (personal edits merge semantics unchanged).
+- PostGIS bbox paths now use a single envelope CTE:
+  - `GET /api/buildings/filter-data-bbox`
+  - filter candidates for `POST /api/buildings/filter-matches` fallback path.
+- Long `(a=? AND b=?) OR ...` chains replaced with `VALUES + JOIN` in PostgreSQL paths:
+  - `POST /api/buildings/filter-data`
+  - `getUserPersonalEditsByKeys` (`building-edits.service`)
+- `/api/contours-status` fast path now reads from `osm.building_contours_summary` (1 row), with aggregate fallback if summary is empty/unavailable.
+- OSM sync for PostgreSQL updates `osm.building_contours_summary` in the same import transaction.
+- `rebuild-filter-tag-keys-cache.worker` (PostgreSQL) switched from row-by-row insert to set-based `INSERT ... SELECT DISTINCT`.
 
 ## DB and indexes
 
@@ -23,9 +39,12 @@
   - `src/lib/server/infra/db-bootstrap.infra.js`
 - Search query path already uses FTS and ordered ranking in:
   - `src/lib/server/services/search.service.js`
+- PostgreSQL migration `003_contours_summary.sql`:
+  - adds `osm.building_contours_summary` and initial backfill;
+  - drops redundant `local.idx_architectural_info_osm` (duplicated by `UNIQUE (osm_type, osm_id)`);
+  - keeps spatial GIST index unchanged (`idx_building_contours_geom_gist`).
 
 ## Remaining heavy query
 
-- `/api/contours-status` uses aggregate:
-  - `COUNT(*)`, `MAX(updated_at)` over `osm.building_contours`
-- This remains the main p95 outlier and candidate for precomputed summary table.
+- Full aggregate fallback in `/api/contours-status` (`COUNT(*)`, `MAX(updated_at)`) is still available for safety.
+- For very complex `contains` filters in huge bboxes, planner/index selectivity can still dominate p95 and should be monitored with `EXPLAIN ANALYZE`.

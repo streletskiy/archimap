@@ -6,14 +6,53 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f1f5f9;
-  --fg: #0f172a;
-  --muted: #64748b;
-  --panel: #ffffff;
-  --panel-border: #e2e8f0;
-  --accent: #5b62f0;
-  --accent-strong: #4b53e0;
-  --danger: #f43f5e;
+  color-scheme: light;
+  --font-body: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  --font-display: 'Bahnschrift', 'Aptos', 'Segoe UI', sans-serif;
+  --bg: #f1efea;
+  --bg-elevated: #fbfaf7;
+  --bg-muted: #f6f4ef;
+  --fg: #1d1b19;
+  --fg-strong: #11100f;
+  --muted: #6d6861;
+  --muted-strong: #433f39;
+  --panel: rgba(251, 250, 247, 0.8);
+  --panel-solid: #fbfaf7;
+  --panel-border: rgba(120, 113, 105, 0.22);
+  --panel-border-strong: rgba(67, 63, 57, 0.28);
+  --accent: #fdc82f;
+  --accent-soft: rgba(253, 200, 47, 0.16);
+  --accent-brass: #e2af14;
+  --accent-ink: #5b4300;
+  --accent-contrast: #342700;
+  --danger: #e11d48;
+  --shadow-soft: 0 10px 28px rgba(15, 23, 42, 0.08);
+  --shadow-panel: 0 18px 44px rgba(15, 23, 42, 0.12);
+  --radius-lg: 1.25rem;
+  --radius-md: 1rem;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #08111f;
+  --bg-elevated: #0f1a2b;
+  --bg-muted: #0c1525;
+  --fg: #dfe8f6;
+  --fg-strong: #f8fbff;
+  --muted: #92a4ba;
+  --muted-strong: #c4d3e6;
+  --panel: rgba(12, 21, 37, 0.78);
+  --panel-solid: #101b2d;
+  --panel-border: rgba(71, 85, 105, 0.72);
+  --panel-border-strong: rgba(148, 163, 184, 0.24);
+  --accent: #fdc82f;
+  --accent-soft: rgba(253, 200, 47, 0.16);
+  --accent-brass: #e2af14;
+  --accent-ink: #fdc82f;
+  --accent-contrast: #342700;
+  --danger: #fb7185;
+  --shadow-soft: 0 14px 32px rgba(2, 6, 23, 0.34);
+  --shadow-panel: 0 22px 54px rgba(2, 6, 23, 0.56);
 }
 
 * {
@@ -26,10 +65,22 @@ body {
   padding: 0;
   width: 100%;
   min-height: 100%;
-  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-body);
   color: var(--fg);
-  background: var(--bg);
+  background:
+    radial-gradient(circle at top left, rgba(253, 200, 47, 0.16), transparent 32%),
+    radial-gradient(circle at top right, rgba(79, 74, 67, 0.08), transparent 28%),
+    linear-gradient(180deg, var(--bg-muted) 0%, var(--bg) 48%, var(--bg) 100%);
   overflow-x: hidden;
+}
+
+body {
+  background-attachment: fixed;
+}
+
+::selection {
+  color: var(--accent-contrast);
+  background: var(--accent);
 }
 
 #svelte-root {
@@ -43,21 +94,26 @@ textarea {
   font: inherit;
 }
 
+a {
+  color: inherit;
+}
+
 .page-container {
-  max-width: 1120px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 1rem 0.75rem 1.75rem;
+  padding: 1.1rem 0.85rem 2rem;
 }
 
 .surface-card {
   border: 1px solid var(--panel-border);
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
   background: var(--panel);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-soft);
 }
 
 .surface-card.padded {
-  padding: 0.875rem;
+  padding: 1rem;
 }
 
 .ui-table {
@@ -78,6 +134,32 @@ textarea {
   color: var(--muted);
 }
 
+.ui-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+  color: var(--muted-strong);
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.ui-chip strong {
+  color: var(--fg-strong);
+}
+
 .ui-row {
   display: flex;
   align-items: center;
@@ -93,4 +175,141 @@ textarea {
   white-space: nowrap;
   line-height: 1.1;
   border-radius: 9999px;
+}
+
+.portal-page {
+  width: 100%;
+  padding: 5.4rem 0.85rem 2rem;
+}
+
+.portal-shell {
+  width: 100%;
+  max-width: none;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.portal-shell-compact {
+  max-width: 980px;
+}
+
+.portal-hero {
+  display: grid;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.portal-hero-main {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.portal-hero-main h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.85rem);
+  line-height: 0.98;
+  letter-spacing: -0.03em;
+  color: var(--fg-strong);
+}
+
+.portal-hero-main p:not(.ui-kicker) {
+  margin: 0;
+  max-width: 56rem;
+  color: var(--muted-strong);
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.portal-hero-meta,
+.portal-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.portal-hero-actions {
+  padding-top: 0.15rem;
+}
+
+.portal-lead {
+  padding-top: 1rem;
+}
+
+.portal-lead-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.portal-stat {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  padding: 0.95rem 1rem;
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.portal-stat span {
+  display: block;
+  margin-bottom: 0.28rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.portal-stat strong {
+  display: block;
+  color: var(--fg-strong);
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.portal-body {
+  padding-top: 1rem;
+}
+
+.portal-notice {
+  padding: 1.1rem 1.15rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+
+.portal-notice h2,
+.portal-notice h3 {
+  margin: 0;
+  color: var(--fg-strong);
+}
+
+.portal-notice p {
+  margin: 0.5rem 0 0;
+  color: var(--muted-strong);
+  line-height: 1.6;
+}
+
+@media (min-width: 768px) {
+  .portal-page {
+    padding-top: calc(var(--desktop-nav-clearance) + 0.95rem);
+  }
+
+  .portal-shell {
+    padding: 1.2rem;
+  }
+
+  .portal-hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
+
+@media (max-width: 900px) {
+  .portal-lead-grid {
+    grid-template-columns: 1fr;
+  }
 }

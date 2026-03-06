@@ -20,12 +20,84 @@ paths:
           description: Ready
         '503':
           description: Not ready
+  /metrics:
+    get:
+      summary: Prometheus-style metrics
+      responses:
+        '200':
+          description: Metrics payload
+        '404':
+          description: Metrics disabled
+  /api/version:
+    get:
+      summary: Runtime build/version payload
+      responses:
+        '200':
+          description: Version info
+  /api/filter-tag-keys:
+    get:
+      summary: Get cached OSM tag keys for filter UI
+      responses:
+        '200':
+          description: Tag key list
+        '500':
+          description: Failed to build tag key list
+  /api/contours-status:
+    get:
+      summary: Get total contour count and last update timestamp
+      responses:
+        '200':
+          description: Contour summary
   /api/me:
     get:
       summary: Get authenticated user profile
       responses:
         '200':
           description: Session state
+  /api/building/{osmType}/{osmId}:
+    get:
+      summary: Get building GeoJSON feature by OSM id
+      parameters:
+        - in: path
+          name: osmType
+          required: true
+          schema:
+            type: string
+            enum: [way, relation]
+        - in: path
+          name: osmId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Building feature
+        '400':
+          description: Invalid identifier
+        '404':
+          description: Building not found
+  /api/building-info/{osmType}/{osmId}:
+    get:
+      summary: Get merged building information by OSM id
+      parameters:
+        - in: path
+          name: osmType
+          required: true
+          schema:
+            type: string
+            enum: [way, relation]
+        - in: path
+          name: osmId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Building info
+        '400':
+          description: Invalid identifier
+        '404':
+          description: Building info not found
   /api/login:
     post:
       summary: Login with email and password
@@ -46,6 +118,20 @@ paths:
           description: Authenticated
         '401':
           description: Invalid credentials
+  /api/logout:
+    post:
+      summary: Logout current session (CSRF required)
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Logged out
+        '403':
+          description: CSRF failed
   /api/register/start:
     post:
       summary: Start registration
@@ -74,6 +160,98 @@ paths:
           description: Registration started
         '403':
           description: Registration disabled
+        '409':
+          description: User already exists
+        '429':
+          description: Retry later
+        '503':
+          description: SMTP is not configured
+  /api/register/confirm-code:
+    post:
+      summary: Confirm registration with email code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                code:
+                  type: string
+      responses:
+        '200':
+          description: Registration completed
+        '400':
+          description: Invalid or expired code
+        '403':
+          description: Registration disabled
+        '409':
+          description: User already exists
+        '429':
+          description: Retry later
+  /api/register/confirm-link:
+    post:
+      summary: Confirm registration with one-time token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Registration completed
+        '400':
+          description: Invalid or expired token
+        '403':
+          description: Registration disabled
+  /api/password-reset/request:
+    post:
+      summary: Request password reset email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+      responses:
+        '200':
+          description: Request accepted
+        '503':
+          description: SMTP is not configured
+  /api/password-reset/confirm:
+    post:
+      summary: Confirm password reset with one-time token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password changed
+        '400':
+          description: Invalid or expired token
+        '404':
+          description: User not found
   /api/building-info:
     post:
       summary: Submit building edit (CSRF required)
@@ -117,6 +295,85 @@ paths:
           description: Unauthorized
         '403':
           description: Forbidden or CSRF failed
+  /api/buildings/filter-data-bbox:
+    get:
+      summary: Get filter payload for visible bbox
+      parameters:
+        - in: query
+          name: minLon
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: minLat
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: maxLon
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: maxLat
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Filter payload
+        '400':
+          description: Invalid bbox
+  /api/buildings/filter-matches:
+    post:
+      summary: Match filter rules against bbox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bbox, rules]
+              properties:
+                bbox:
+                  type: object
+                  properties:
+                    west:
+                      type: number
+                    south:
+                      type: number
+                    east:
+                      type: number
+                    north:
+                      type: number
+                zoom:
+                  type: number
+                zoomBucket:
+                  type: number
+                maxResults:
+                  type: integer
+                rules:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                      op:
+                        type: string
+                      value:
+                        type: string
+      responses:
+        '200':
+          description: Match result
+        '400':
+          description: Invalid request
+        '429':
+          description: Rate limited
   /api/search-buildings:
     get:
       summary: Search buildings by text query
@@ -147,6 +404,38 @@ paths:
           description: Search result page
         '400':
           description: Invalid query
+  /api/account/profile:
+    post:
+      summary: Update current user profile (CSRF required)
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile updated
+        '401':
+          description: Unauthorized
+        '403':
+          description: CSRF failed
+  /api/account/change-password:
+    post:
+      summary: Change current user password (CSRF required)
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Password updated
+        '401':
+          description: Unauthorized
+        '403':
+          description: CSRF failed
   /api/admin/app-settings/general:
     get:
       summary: Get general app settings (master admin)

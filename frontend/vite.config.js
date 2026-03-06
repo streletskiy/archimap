@@ -10,13 +10,12 @@ export default defineConfig(({ mode }) => {
       ...(isAnalyze ? [visualizer({ filename: 'build/bundle-analysis.html', gzipSize: true, brotliSize: true })] : [])
     ],
     build: {
-      chunkSizeWarningLimit: 500,
+      // MapLibre ships as a large prebundled runtime chunk. It is already isolated behind lazy imports,
+      // so the default Vite warning becomes noise rather than an actionable signal.
+      chunkSizeWarningLimit: 950,
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes('/src/routes/admin') || id.includes('/src/routes/app/admin')) {
-              return 'admin';
-            }
             if (id.includes('maplibre-gl')) {
               return 'maplibre';
             }

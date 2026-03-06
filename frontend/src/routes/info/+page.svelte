@@ -2,9 +2,10 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
+  import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { t } from '$lib/i18n/index';
   import { marked } from 'marked';
-  import { APP_REPO_URL, APP_VERSION, APP_VERSION_DISPLAY } from '$lib/version';
+  import { APP_REPO_URL, APP_VERSION_DISPLAY } from '$lib/version';
   import agreementMarkdownSource from '../../../../legal/user-agreement.ru.md?raw';
   import privacyMarkdownSource from '../../../../legal/privacy-policy.ru.md?raw';
 
@@ -77,56 +78,98 @@
   });
 </script>
 
-<main class="w-full px-3 pb-5 pt-[5.5rem] sm:px-4 sm:pb-6 sm:pt-[5.25rem]">
-  <section class="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-soft backdrop-blur-sm sm:p-5">
-    <div class="border-b border-slate-200 pb-4">
-      <h1 class="text-2xl font-extrabold text-slate-900">{$t('info.title')}</h1>
-      <p class="mt-1 text-sm text-slate-600">{$t('info.subtitle')}</p>
-    </div>
+<PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
+  <svelte:fragment slot="meta">
+    <span class="ui-chip"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</span>
+    <a class="ui-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
+  </svelte:fragment>
 
-    <div class="mt-4">
-      <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => setTab('about')}>{$t('info.tabAbout')}</button></li>
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => setTab('agreement')}>{$t('info.tabAgreement')}</button></li>
-        <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => setTab('privacy')}>{$t('info.tabPrivacy')}</button></li>
-      </ul>
-    </div>
+  <div>
+    <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
+      <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => setTab('about')}>{$t('info.tabAbout')}</button></li>
+      <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => setTab('agreement')}>{$t('info.tabAgreement')}</button></li>
+      <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => setTab('privacy')}>{$t('info.tabPrivacy')}</button></li>
+    </ul>
+  </div>
 
-    {#if activeTab === 'about'}
-      <section class="mt-4 space-y-4">
-        <div class="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 class="text-lg font-bold text-slate-900">{$t('info.aboutTitle')}</h2>
-          <p class="mt-2 text-sm leading-7 text-slate-700">{$t('info.aboutText')}</p>
+  {#if activeTab === 'about'}
+    <section class="mt-4">
+      <div class="portal-notice about-copy">
+        <h2>{$t('info.aboutTitle')}</h2>
+        <p>{$t('info.aboutText')}</p>
+        <p>{$t('info.aboutTextExtended')}</p>
+
+        <div class="about-features">
+          <p class="ui-kicker">{$t('info.aboutFeaturesTitle')}</p>
+          <ul class="about-list">
+            <li>{$t('info.aboutFeatureMap')}</li>
+            <li>{$t('info.aboutFeatureEdits')}</li>
+            <li>{$t('info.aboutFeatureAdmin')}</li>
+          </ul>
         </div>
-
-        <div class="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 class="text-lg font-bold text-slate-900">{$t('info.techTitle')}</h2>
-          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.version')}</span><span class="font-semibold text-slate-900">{APP_VERSION_DISPLAY}</span></div>
-            <div class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"><span class="font-semibold uppercase tracking-wide text-slate-500">{$t('info.commit')}</span><span class="font-semibold text-slate-900">{APP_VERSION.git.describe}</span></div>
-            <a class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-100" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
-          </div>
-        </div>
-      </section>
-    {:else if activeTab === 'agreement'}
-      <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-        <div class="legal-markdown text-sm leading-7 text-slate-700">{@html agreementHtml}</div>
-      </section>
-    {:else}
-      <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-        <div class="legal-markdown text-sm leading-7 text-slate-700">{@html privacyHtml}</div>
-      </section>
-    {/if}
-  </section>
-</main>
+      </div>
+    </section>
+  {:else if activeTab === 'agreement'}
+    <section class="legal-shell mt-4">
+      <div class="legal-markdown text-sm leading-7 text-slate-700">{@html agreementHtml}</div>
+    </section>
+  {:else}
+    <section class="legal-shell mt-4">
+      <div class="legal-markdown text-sm leading-7 text-slate-700">{@html privacyHtml}</div>
+    </section>
+  {/if}
+</PortalFrame>
 
 <style>
+  .about-copy {
+    display: grid;
+    gap: 0.9rem;
+  }
+
+  .about-copy h2 {
+    margin: 0;
+    color: var(--fg-strong);
+    font-size: 1.125rem;
+    font-weight: 800;
+  }
+
+  .about-copy p {
+    margin: 0;
+    color: var(--muted-strong);
+    font-size: 0.98rem;
+    line-height: 1.75;
+    max-width: 78rem;
+  }
+
+  .about-features {
+    display: grid;
+    gap: 0.55rem;
+    padding-top: 0.35rem;
+  }
+
+  .about-list {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: var(--muted-strong);
+    display: grid;
+    gap: 0.45rem;
+    line-height: 1.65;
+  }
+
+  .legal-shell {
+    padding: 1.2rem 1.25rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 1.35rem;
+    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+  }
+
   .legal-markdown :global(h1),
   .legal-markdown :global(h2),
   .legal-markdown :global(h3),
   .legal-markdown :global(h4) {
     margin: 1rem 0 0.55rem;
-    color: #0f172a;
+    color: var(--fg-strong);
     line-height: 1.3;
   }
 
@@ -161,7 +204,7 @@
   }
 
   .legal-markdown :global(a) {
-    color: #3349d9;
+    color: var(--accent-ink);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
@@ -169,21 +212,21 @@
   .legal-markdown :global(blockquote) {
     margin: 0.7rem 0;
     padding: 0.55rem 0.7rem;
-    border-left: 3px solid #cbd5e1;
-    background: #f8fafc;
+    border-left: 3px solid var(--panel-border-strong);
+    background: color-mix(in srgb, var(--panel-solid) 80%, transparent);
     border-radius: 0.45rem;
   }
 
   .legal-markdown :global(code) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    background: #f1f5f9;
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
     padding: 0.08rem 0.3rem;
     border-radius: 0.35rem;
   }
 
   .legal-markdown :global(pre) {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: color-mix(in srgb, var(--panel-solid) 80%, transparent);
+    border: 1px solid var(--panel-border);
     border-radius: 0.7rem;
     padding: 0.7rem;
     overflow: auto;
@@ -202,7 +245,7 @@
 
   .legal-markdown :global(th),
   .legal-markdown :global(td) {
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--panel-border);
     padding: 0.45rem 0.55rem;
     text-align: left;
     vertical-align: top;
@@ -210,7 +253,7 @@
 
   .legal-markdown :global(hr) {
     border: 0;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--panel-border);
     margin: 0.85rem 0;
   }
 
@@ -218,37 +261,37 @@
   :global(html[data-theme='dark']) .legal-markdown :global(h2),
   :global(html[data-theme='dark']) .legal-markdown :global(h3),
   :global(html[data-theme='dark']) .legal-markdown :global(h4) {
-    color: #e2e8f0;
+    color: var(--fg-strong);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(a) {
-    color: #a5b4fc;
+    color: var(--accent-ink);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(blockquote) {
-    border-left-color: #475569;
-    background: #0f172a;
-    color: #cbd5e1;
+    border-left-color: var(--panel-border-strong);
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    color: var(--fg);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(code) {
-    background: #0f172a;
-    color: #e2e8f0;
+    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    color: var(--fg-strong);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(pre) {
-    background: #0f172a;
-    border-color: #334155;
-    color: #e2e8f0;
+    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    border-color: var(--panel-border);
+    color: var(--fg-strong);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(th),
   :global(html[data-theme='dark']) .legal-markdown :global(td) {
-    border-color: #334155;
-    color: #cbd5e1;
+    border-color: var(--panel-border);
+    color: var(--fg);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(hr) {
-    border-top-color: #334155;
+    border-top-color: var(--panel-border);
   }
 </style>

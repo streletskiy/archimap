@@ -2,10 +2,19 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
+  import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { t, translateNow } from '$lib/i18n/index';
-  import { mapFocusRequest, mapLabelsVisible, selectedBuilding, setMapCenter, setMapReady, setMapZoom } from '$lib/stores/map';
+  import {
+    mapFocusRequest,
+    mapLabelsVisible,
+    selectedBuilding,
+    setMapCenter,
+    setMapReady,
+    setMapViewport,
+    setMapZoom
+  } from '$lib/stores/map';
   import { buildingFilterRules, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
-  import { searchState } from '$lib/stores/search';
+  import { searchMapState, searchState } from '$lib/stores/search';
   import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter, parseOsmKey } from './selection-utils';
   import {
     buildBboxHash,
@@ -31,6 +40,8 @@
   const SEARCH_RESULTS_LAYER_ID = 'search-results-points-layer';
   const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
   const SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID = 'search-results-clusters-count-layer';
+  const MAP_PIN_COLOR = '#FDC82F';
+  const MAP_PIN_INK = '#342700';
   const CARTO_BUILDING_LAYER_IDS = ['building', 'building-top'];
   const STYLE_OVERLAY_FADE_MS = 260;
   const FILTER_REQUEST_DEBOUNCE_MS = 180;
@@ -838,6 +849,13 @@
     return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   }
 
+  function syncMapCameraStores() {
+    if (!map) return;
+    setMapCenter(map.getCenter());
+    setMapZoom(map.getZoom());
+    setMapViewport(buildBboxSnapshot(map.getBounds?.()));
+  }
+
   function getMapStyleForTheme(theme) {
     return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
   }
@@ -1116,7 +1134,7 @@
     if (!map.getSource(SEARCH_RESULTS_SOURCE_ID)) {
       map.addSource(SEARCH_RESULTS_SOURCE_ID, {
         type: 'geojson',
-        data: buildSearchMarkersGeojson($searchState.items),
+        data: buildSearchMarkersGeojson($searchMapState.items),
         cluster: true,
         clusterRadius: 48,
         clusterMaxZoom: 16
@@ -1204,7 +1222,7 @@
         minzoom: 13,
         filter: ['==', ['id'], -1],
         paint: {
-          'fill-color': '#12b4a6',
+          'fill-color': '#6d655b',
           'fill-opacity': 0.72
         }
       });
@@ -1219,7 +1237,7 @@
         minzoom: 13,
         filter: ['==', ['id'], -1],
         paint: {
-          'line-color': '#0b6d67',
+          'line-color': '#3d3832',
           'line-width': 2.2
         }
       });
@@ -1233,8 +1251,8 @@
         filter: ['has', 'point_count'],
         paint: {
           'circle-radius': ['step', ['get', 'point_count'], 16, 12, 19, 30, 22, 60, 26],
-          'circle-color': '#1d4ed8',
-          'circle-stroke-color': '#ffffff',
+          'circle-color': MAP_PIN_COLOR,
+          'circle-stroke-color': MAP_PIN_INK,
           'circle-stroke-width': 2,
           'circle-opacity': 0.92
         }
@@ -1253,7 +1271,7 @@
           'text-size': 12
         },
         paint: {
-          'text-color': '#ffffff'
+          'text-color': MAP_PIN_INK
         }
       });
     }
@@ -1266,8 +1284,8 @@
         filter: ['!', ['has', 'point_count']],
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 16, 7],
-          'circle-color': '#2563eb',
-          'circle-stroke-color': '#ffffff',
+          'circle-color': MAP_PIN_COLOR,
+          'circle-stroke-color': MAP_PIN_INK,
           'circle-stroke-width': 2,
           'circle-opacity': 0.9
         }
@@ -1276,7 +1294,7 @@
 
     bindStyleInteractionHandlers();
     applySelectionFromStore($selectedBuilding);
-    updateSearchMarkers($searchState.items);
+    updateSearchMarkers($searchMapState.items);
     applyBuildingThemePaint(getCurrentTheme());
     applyLabelLayerVisibility($mapLabelsVisible);
     scheduleCoverageCheck();
@@ -1946,7 +1964,7 @@
   }
 
   $: if (map) {
-    updateSearchMarkers($searchState.items);
+    updateSearchMarkers($searchMapState.items);
   }
 
   $: if (map && $searchState.fitSeq !== lastSearchFitSeq) {
@@ -1977,10 +1995,7 @@
     filterDenseBurstEnabled = resolveFilterDenseBurstEnabled();
 
     async function initMap() {
-      const [{ default: maplibreModule }, { PMTiles: PMTilesCtor, Protocol: ProtocolCtor }] = await Promise.all([
-        import('maplibre-gl'),
-        import('pmtiles')
-      ]);
+      const { maplibregl: maplibreModule, PMTiles: PMTilesCtor, Protocol: ProtocolCtor } = await loadMapRuntime();
       if (!mountAlive) return;
       maplibregl = maplibreModule;
 
@@ -1992,9 +2007,7 @@
       coverageCache = new Map();
       coverageVisibleState = 'visible';
 
-      const pmtilesUrl = config.buildingsPmtiles.url.startsWith('http')
-        ? config.buildingsPmtiles.url
-        : `${window.location.origin}${config.buildingsPmtiles.url.startsWith('/') ? '' : '/'}${config.buildingsPmtiles.url}`;
+      const pmtilesUrl = resolvePmtilesUrl(config.buildingsPmtiles.url, window.location.origin);
       pmtilesArchive = new PMTilesCtor(pmtilesUrl);
       pmtilesArchive.getHeader()
         .then((header) => {
@@ -2019,8 +2032,7 @@
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
       map.on('moveend', () => {
         registerFilterMoveEnd();
-        setMapCenter(map.getCenter());
-        setMapZoom(map.getZoom());
+        syncMapCameraStores();
       });
       map.on('moveend', scheduleFilterRefresh);
       map.on('moveend', scheduleCoverageCheck);
@@ -2038,8 +2050,7 @@
 
       map.on('load', () => {
         registerFilterMoveEnd();
-        setMapCenter(map.getCenter());
-        setMapZoom(map.getZoom());
+        syncMapCameraStores();
         setMapReady(true);
         scheduleCoverageCheck();
       });
@@ -2066,6 +2077,7 @@
     setMapReady(false);
     setMapCenter(null);
     setMapZoom(null);
+    setMapViewport(null);
     if (themeObserver) {
       themeObserver.disconnect();
       themeObserver = null;

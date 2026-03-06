@@ -54,6 +54,7 @@ const STYLE_KEYS = Object.freeze([
 ]);
 
 const STYLE_KEY_SET = new Set(STYLE_KEYS);
+const EMPTY_STYLE_TOKENS = new Set(['-', '--', '—', 'none', 'unknown', 'n/a', 'na', 'null']);
 
 const ARCHITECTURE_STYLE_ALIASES = Object.freeze({
   brutalism: 'brutalist',
@@ -103,10 +104,14 @@ export function toHumanArchitectureStyle(value, localeCode = null) {
   const currentLocale = resolveLocaleCode(localeCode);
   const translated = parts.map((part) => {
     const rawKey = part.toLowerCase();
+    if (EMPTY_STYLE_TOKENS.has(rawKey)) return null;
     const key = ARCHITECTURE_STYLE_ALIASES[rawKey] || rawKey;
-    return translateNow(styleLabelKey(key)) || getStyleLabelByLocale(key, currentLocale) || part;
-  });
-  return translated.join('; ');
+    if (STYLE_KEY_SET.has(key)) {
+      return getStyleLabelByLocale(key, currentLocale) || translateNow(styleLabelKey(key)) || part;
+    }
+    return part;
+  }).filter(Boolean);
+  return translated.length > 0 ? translated.join('; ') : null;
 }
 
 export function normalizeStyleSearchText(value) {
@@ -209,6 +214,7 @@ export function resolveArchitectureStyleSearchKeys(queryText) {
 export function normalizeArchitectureStyleKey(value) {
   const text = String(value || '').trim().toLowerCase();
   if (!text) return '';
+  if (EMPTY_STYLE_TOKENS.has(text)) return '';
   if (ARCHITECTURE_STYLE_ALIASES[text]) return ARCHITECTURE_STYLE_ALIASES[text];
   const byLabel = ARCHITECTURE_STYLE_KEY_BY_LABEL_NORMALIZED.get(normalizeStyleSearchText(text));
   if (byLabel) return byLabel;

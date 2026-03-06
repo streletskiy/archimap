@@ -10,7 +10,7 @@ module.exports = {
         brand: {
           ink: '#0F172A',
           mute: '#64748B',
-          purple: '#5B62F0',
+          accent: '#FDC82F',
           coral: '#FF6B7F'
         }
       },

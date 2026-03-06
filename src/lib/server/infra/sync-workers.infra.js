@@ -25,6 +25,14 @@ function initSyncWorkersInfra(options = {}) {
   let currentPmtilesBuildChild = null;
   let nextSyncTimer = null;
 
+  async function readContoursTotal() {
+    try {
+      return Number(await getContoursTotal()) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
   function runCitySync(reason = 'interval') {
     if (syncInProgress) {
       if (reason !== 'scheduled' || !scheduledSkipLogged) {
@@ -62,7 +70,11 @@ function initSyncWorkersInfra(options = {}) {
       }
       if (code === 0) {
         log.log('[auto-sync] finished successfully');
-        if (typeof onSyncSuccess === 'function') onSyncSuccess();
+        if (typeof onSyncSuccess === 'function') {
+          Promise.resolve(onSyncSuccess()).catch((error) => {
+            log.error(`[auto-sync] post-sync hook failed: ${String(error?.message || error)}`);
+          });
+        }
       } else {
         log.error(`[auto-sync] failed with code ${code}`);
       }
@@ -107,9 +119,9 @@ function initSyncWorkersInfra(options = {}) {
     });
   }
 
-  function shouldRunStartupSync() {
+  async function shouldRunStartupSync() {
     const hasPmtiles = fs.existsSync(buildingsPmtilesPath);
-    const hasContours = getContoursTotal() > 0;
+    const hasContours = (await readContoursTotal()) > 0;
     if (hasContours && hasPmtiles) {
       log.log('[auto-sync] startup skipped: contours and PMTiles already exist');
       return false;
@@ -117,13 +129,13 @@ function initSyncWorkersInfra(options = {}) {
     return true;
   }
 
-  function maybeGeneratePmtilesOnStartup() {
+  async function maybeGeneratePmtilesOnStartup() {
     if (autoSyncEnabled && autoSyncOnStart) return;
 
     const hasPmtiles = fs.existsSync(buildingsPmtilesPath);
     if (hasPmtiles) return;
 
-    if (getContoursTotal() <= 0) {
+    if ((await readContoursTotal()) <= 0) {
       log.log('[pmtiles] startup generation skipped: building_contours is empty');
       return;
     }
@@ -131,8 +143,8 @@ function initSyncWorkersInfra(options = {}) {
     runPmtilesBuild('startup-missing');
   }
 
-  function initAutoSync() {
-    const contoursTotal = getContoursTotal();
+  async function initAutoSync() {
+    const contoursTotal = await readContoursTotal();
     const needsBootstrapSync = contoursTotal <= 0;
 
     if (needsBootstrapSync) {
@@ -147,17 +159,17 @@ function initSyncWorkersInfra(options = {}) {
     if (!autoSyncEnabled) {
       log.log('[auto-sync] disabled by AUTO_SYNC_ENABLED=false');
       if (!needsBootstrapSync) {
-        maybeGeneratePmtilesOnStartup();
+        await maybeGeneratePmtilesOnStartup();
       }
       return;
     }
 
     if (!needsBootstrapSync && autoSyncOnStart) {
-      if (shouldRunStartupSync()) {
+      if (await shouldRunStartupSync()) {
         runCitySync('startup');
       }
     } else if (!needsBootstrapSync) {
-      maybeGeneratePmtilesOnStartup();
+      await maybeGeneratePmtilesOnStartup();
     }
 
     if (Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0) {

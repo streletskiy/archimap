@@ -79,9 +79,9 @@ function createAppSettingsService(options = {}) {
     }
   }
 
-  function readStoredSmtpRow() {
+  async function readStoredSmtpRow() {
     try {
-      return db.prepare(`
+      return await db.prepare(`
         SELECT
           smtp_url,
           smtp_host,
@@ -101,9 +101,9 @@ function createAppSettingsService(options = {}) {
     }
   }
 
-  function readStoredGeneralRow() {
+  async function readStoredGeneralRow() {
     try {
-      return db.prepare(`
+      return await db.prepare(`
         SELECT
           app_display_name,
           app_base_url,
@@ -151,8 +151,8 @@ function createAppSettingsService(options = {}) {
     };
   }
 
-  function getEffectiveSmtpConfig() {
-    const row = readStoredSmtpRow();
+  async function getEffectiveSmtpConfig() {
+    const row = await readStoredSmtpRow();
     return toEffectiveSmtpConfig(row);
   }
 
@@ -186,13 +186,13 @@ function createAppSettingsService(options = {}) {
     };
   }
 
-  function getEffectiveGeneralConfig() {
-    const row = readStoredGeneralRow();
+  async function getEffectiveGeneralConfig() {
+    const row = await readStoredGeneralRow();
     return toEffectiveGeneralConfig(row);
   }
 
-  function getSmtpSettingsForAdmin() {
-    const effective = getEffectiveSmtpConfig();
+  async function getSmtpSettingsForAdmin() {
+    const effective = await getEffectiveSmtpConfig();
     return {
       source: effective.source,
       smtp: {
@@ -209,8 +209,8 @@ function createAppSettingsService(options = {}) {
     };
   }
 
-  function getGeneralSettingsForAdmin() {
-    const effective = getEffectiveGeneralConfig();
+  async function getGeneralSettingsForAdmin() {
+    const effective = await getEffectiveGeneralConfig();
     return {
       source: effective.source,
       general: {
@@ -224,8 +224,8 @@ function createAppSettingsService(options = {}) {
     };
   }
 
-  function buildSmtpConfigFromInput(input = {}, options = {}) {
-    const existing = getEffectiveSmtpConfig().config;
+  async function buildSmtpConfigFromInput(input = {}, options = {}) {
+    const existing = (await getEffectiveSmtpConfig()).config;
     const keepPassword = options.keepPassword !== false;
     const normalized = normalizeSmtpShape({
       url: input.url,
@@ -249,14 +249,14 @@ function createAppSettingsService(options = {}) {
     };
   }
 
-  function saveSmtpSettings(input = {}, actor = null) {
-    const next = buildSmtpConfigFromInput(input, {
+  async function saveSmtpSettings(input = {}, actor = null) {
+    const next = await buildSmtpConfigFromInput(input, {
       keepPassword: Boolean(input.keepPassword !== false)
     });
     const encryptedPass = next.pass ? encryptSecret(next.pass) : '';
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO app_smtp_settings (
         id,
         smtp_url,
@@ -294,11 +294,11 @@ function createAppSettingsService(options = {}) {
     return getSmtpSettingsForAdmin();
   }
 
-  function saveGeneralSettings(input = {}, actor = null) {
+  async function saveGeneralSettings(input = {}, actor = null) {
     const next = normalizeGeneralShape(input);
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO app_general_settings (
         id,
         app_display_name,

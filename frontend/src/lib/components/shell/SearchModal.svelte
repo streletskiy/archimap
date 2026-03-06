@@ -1,19 +1,34 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
-  import { searchState, closeSearchModal, requestSearch, resetSearchState, setSearchQuery } from '$lib/stores/search';
+  import { browser } from '$app/environment';
+  import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
+  import {
+    closeSearchModal,
+    requestSearch,
+    resetSearchState,
+    searchMapState,
+    searchState,
+    setSearchQuery
+  } from '$lib/stores/search';
   import { locale, t } from '$lib/i18n/index';
   import { toHumanArchitectureStyle } from '$lib/utils/architecture-style';
 
   const dispatch = createEventDispatcher();
+  const DESKTOP_INTERACTIVE_MEDIA_QUERY = '(min-width: 768px)';
+  const SEARCH_VISIBLE_PRIORITY_LIMIT = 120;
+  const SEARCH_RENDER_LIMIT = 200;
+
   let debounceTimer = null;
+  let searchInputEl = null;
+  let hadOpenState = false;
+  let isDesktopInteractive = false;
+  let removeDesktopMediaListener = null;
+  let displayedResults = [];
+  let visibleResultsTotal = 0;
+  let queryIsActive = false;
+  let showVisibleMapStatus = false;
+  let visibleListLimited = false;
 
-  function onBackdropClick(event) {
-    if (event.target === event.currentTarget) {
-      closeSearchModal();
-    }
-  }
-
-  function onBackdropKeydown(event) {
+  function onDialogKeydown(event) {
     if (event.key === 'Escape') {
       closeSearchModal();
     }
@@ -46,51 +61,223 @@
   function selectResult(item) {
     dispatch('selectResult', item);
   }
+
+  function getItemKey(item) {
+    const osmType = String(item?.osmType || '').trim();
+    const osmId = Number(item?.osmId);
+    if (!osmType || !Number.isInteger(osmId) || osmId <= 0) return '';
+    return `${osmType}/${osmId}`;
+  }
+
+  function buildDisplayedResults(visibleItems, searchItems) {
+    const entries = [];
+    const seen = new Set();
+    let visibleCount = 0;
+
+    for (const item of Array.isArray(visibleItems) ? visibleItems : []) {
+      const key = getItemKey(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      entries.push({
+        key,
+        item,
+        visibleOnMap: true
+      });
+      visibleCount += 1;
+      if (visibleCount >= SEARCH_VISIBLE_PRIORITY_LIMIT || entries.length >= SEARCH_RENDER_LIMIT) {
+        break;
+      }
+    }
+
+    for (const item of Array.isArray(searchItems) ? searchItems : []) {
+      if (entries.length >= SEARCH_RENDER_LIMIT) break;
+      const key = getItemKey(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      entries.push({
+        key,
+        item,
+        visibleOnMap: false
+      });
+    }
+
+    return entries;
+  }
+
+  function updateDesktopInteractiveState(matches = false) {
+    isDesktopInteractive = Boolean(matches);
+  }
+
+  onMount(() => {
+    if (!browser || typeof window.matchMedia !== 'function') return undefined;
+    const mediaQuery = window.matchMedia(DESKTOP_INTERACTIVE_MEDIA_QUERY);
+    const handleChange = (event) => {
+      updateDesktopInteractiveState(event.matches);
+    };
+    updateDesktopInteractiveState(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange);
+      removeDesktopMediaListener = () => mediaQuery.removeEventListener('change', handleChange);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(handleChange);
+      removeDesktopMediaListener = () => mediaQuery.removeListener(handleChange);
+    }
+
+    return () => {
+      removeDesktopMediaListener?.();
+      removeDesktopMediaListener = null;
+    };
+  });
+
+  onDestroy(() => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    removeDesktopMediaListener?.();
+    removeDesktopMediaListener = null;
+  });
+
+  $: if ($searchState.modalOpen && !hadOpenState) {
+    hadOpenState = true;
+    tick().then(() => searchInputEl?.focus());
+  } else if (!$searchState.modalOpen && hadOpenState) {
+    hadOpenState = false;
+  }
+
+  $: displayedResults = buildDisplayedResults($searchMapState.items, $searchState.items);
+  $: visibleResultsTotal = Math.max(0, Number($searchMapState.total || 0));
+  $: queryIsActive = String($searchState.query || '').trim().length >= 2;
+  $: visibleListLimited = Boolean($searchMapState.truncated || visibleResultsTotal > SEARCH_VISIBLE_PRIORITY_LIMIT);
+  $: showVisibleMapStatus = queryIsActive && ($searchMapState.loading || visibleResultsTotal > 0 || $searchMapState.truncated);
 </script>
 
 {#if $searchState.modalOpen}
-  <div id="search-modal" class="search-backdrop" role="button" tabindex="0" on:click={onBackdropClick} on:keydown={onBackdropKeydown}>
-    <div class="search-modal" role="dialog" aria-modal="true" aria-label={$t('search.modalAriaLabel')}>
+  <div id="search-modal" class="search-backdrop">
+    {#if !isDesktopInteractive}
+      <button
+        type="button"
+        class="search-dismiss-layer"
+        tabindex="-1"
+        aria-label={$t('common.close')}
+        on:click={closeSearchModal}
+      ></button>
+    {/if}
+
+    <div
+      class="search-modal"
+      role="dialog"
+      tabindex="-1"
+      aria-modal={isDesktopInteractive ? 'false' : 'true'}
+      aria-label={$t('search.modalAriaLabel')}
+      on:keydown={onDialogKeydown}
+    >
+      <div class="search-handle" aria-hidden="true"></div>
+
       <header class="search-head">
-        <h3>{$t('search.modalTitle')}</h3>
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={closeSearchModal}>{$t('common.close')}</button>
+        <div class="search-head-copy">
+          <p class="ui-kicker">{$t('common.search')}</p>
+          <h3>{$t('search.modalTitle')}</h3>
+        </div>
+        <button
+          type="button"
+          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
+          on:click={closeSearchModal}
+          aria-label={$t('common.close')}
+        >
+          <svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
+            <path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
+          </svg>
+        </button>
       </header>
 
       <form class="search-form" on:submit={onSearchSubmit}>
-        <input
-          id="search-modal-input"
-          class="ui-field"
-          type="search"
-          placeholder={$t('search.inputPlaceholder')}
-          value={$searchState.query}
-          on:input={onSearchInput}
-        />
+        <div class="search-field-shell">
+          <svg viewBox="0 0 640 640" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/>
+          </svg>
+          <input
+            id="search-modal-input"
+            bind:this={searchInputEl}
+            class="ui-field"
+            type="search"
+            placeholder={$t('search.inputPlaceholder')}
+            value={$searchState.query}
+            on:input={onSearchInput}
+          />
+        </div>
       </form>
 
-      <p id="search-results-status" class="search-status">{$searchState.status}</p>
+      <div class="search-meta">
+        <div class="search-meta-copy">
+          <p id="search-results-status" class="search-status">{$searchState.status}</p>
+          {#if showVisibleMapStatus}
+            <p class="search-viewport-status" data-loading={$searchMapState.loading ? 'true' : 'false'}>
+              {#if $searchMapState.loading}
+                {$t('search.visibleLoading')}
+              {:else}
+                {$t('search.visibleNow', { count: visibleResultsTotal })}
+                {#if visibleListLimited}
+                  <span class="search-viewport-status-note">{$t('search.visibleTruncated')}</span>
+                {/if}
+              {/if}
+            </p>
+          {/if}
+        </div>
+        {#if $searchState.total > 0}
+          <span class="search-total">{$searchState.total}</span>
+        {/if}
+      </div>
 
       <div id="search-results-list" class="search-results-list">
         {#if $searchState.loading}
-          <div class="search-skeleton">{$t('search.loading')}</div>
-        {:else if $searchState.items.length === 0}
+          <div class="search-empty search-empty-loading">{$t('search.loading')}</div>
+        {:else if displayedResults.length === 0}
           <div class="search-empty">{$t('search.notFound')}</div>
         {:else}
-          {#each $searchState.items as item (`${item.osmType}/${item.osmId}`)}
-            <article class="search-item">
-              <div class="search-item-title">{item.name || $t('search.untitled')}</div>
-              <div class="search-item-line">
-                {#if item.address}{$t('search.address')}: {item.address}{/if}
-                {#if item.address && item.style} • {/if}
-                {#if item.style}{$t('search.style')}: {toHumanArchitectureStyle(item.style, $locale) || item.style}{/if}
+          {#each displayedResults as entry (entry.key)}
+            <button type="button" class="search-item" on:click={() => selectResult(entry.item)}>
+              <div class="search-item-head">
+                <div>
+                  <div class="search-item-title">{entry.item.name || $t('search.untitled')}</div>
+                  <div class="search-item-key">{entry.item.osmType}/{entry.item.osmId}</div>
+                </div>
+                <span class="search-item-cta">{$t('search.toBuilding')}</span>
               </div>
-              {#if item.architect}
-                <div class="search-item-line">{$t('search.architect')}: {item.architect}</div>
-              {/if}
-              <div class="search-item-actions">
-                <span class="search-item-key">{item.osmType}/{item.osmId}</span>
-                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => selectResult(item)}>{$t('search.toBuilding')}</button>
+
+              <div class="search-item-body">
+                {#if entry.item.address}
+                  <div class="search-item-line">
+                    <span class="search-item-label">{$t('search.address')}</span>
+                    <span>{entry.item.address}</span>
+                  </div>
+                {/if}
+
+                <div class="search-badges">
+                  {#if entry.visibleOnMap}
+                    <span class="search-badge search-badge-map-visible">
+                      <strong>{$t('search.visibleOnMap')}</strong>
+                    </span>
+                  {/if}
+
+                  {#if entry.item.style}
+                    <span class="search-badge">
+                      <strong>{$t('search.style')}</strong>
+                      {toHumanArchitectureStyle(entry.item.style, $locale) || entry.item.style}
+                    </span>
+                  {/if}
+
+                  {#if entry.item.architect}
+                    <span class="search-badge">
+                      <strong>{$t('search.architect')}</strong>
+                      {entry.item.architect}
+                    </span>
+                  {/if}
+                </div>
               </div>
-            </article>
+            </button>
           {/each}
         {/if}
       </div>
@@ -99,7 +286,7 @@
         <button
           id="search-load-more-btn"
           type="button"
-          class="ui-btn ui-btn-secondary"
+          class="ui-btn ui-btn-secondary search-load-more"
           on:click={loadMore}
           disabled={$searchState.loadingMore}
         >
@@ -112,159 +299,295 @@
 
 <style>
   .search-backdrop {
+    --search-modal-top-gap: calc(var(--desktop-nav-clearance) + 0.55rem);
+    --search-modal-side-gap: 0.75rem;
+    --search-modal-bottom-gap: calc(0.75rem + env(safe-area-inset-bottom, 0px));
     position: fixed;
     inset: 0;
-    z-index: 70;
-    background: rgba(15, 23, 42, 0.35);
-    display: grid;
-    place-items: center;
-    padding: 0.75rem;
+    z-index: 980;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: var(--search-modal-top-gap) var(--search-modal-side-gap) var(--search-modal-bottom-gap);
+    background: transparent;
+  }
+
+  .search-dismiss-layer {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    background: transparent;
   }
 
   .search-modal {
-    width: min(35rem, 100%);
-    max-height: calc(100vh - 6rem);
-    overflow: auto;
-    border-radius: 1rem;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
-    padding: 0.85rem;
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: calc(100vh - var(--search-modal-top-gap) - var(--search-modal-bottom-gap));
+    height: calc(100dvh - var(--search-modal-top-gap) - var(--search-modal-bottom-gap));
+    max-height: calc(100vh - var(--search-modal-top-gap) - var(--search-modal-bottom-gap));
+    max-height: calc(100dvh - var(--search-modal-top-gap) - var(--search-modal-bottom-gap));
+    overflow: hidden;
     display: grid;
-    gap: 0.65rem;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    gap: 0.8rem;
+    padding: 0.95rem 1rem 1rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 1.35rem;
+    background: color-mix(in srgb, var(--panel-solid) 96%, transparent);
+    box-shadow: var(--shadow-panel);
+    overscroll-behavior: contain;
+  }
+
+  .search-handle {
+    display: none;
   }
 
   .search-head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: 0.75rem;
+  }
+
+  .search-head-copy {
+    display: grid;
+    gap: 0.2rem;
   }
 
   .search-head h3 {
     margin: 0;
+    font-size: 1.15rem;
+    color: var(--fg-strong);
   }
 
   .search-form {
     margin: 0;
   }
 
+  .search-field-shell {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0 0.3rem 0 0.9rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    color: var(--muted);
+  }
+
+  .search-field-shell :global(.ui-field) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .search-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 1.5rem;
+  }
+
+  .search-meta-copy {
+    min-width: 0;
+    display: grid;
+    gap: 0.18rem;
+  }
+
   .search-status {
     margin: 0;
-    color: #64748b;
-    font-size: 0.85rem;
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+
+  .search-viewport-status {
+    margin: 0;
+    color: var(--accent-ink);
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+
+  .search-viewport-status[data-loading='true'] {
+    color: var(--muted);
+  }
+
+  .search-viewport-status-note {
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .search-total {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.9rem;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 0.76rem;
+    font-weight: 700;
   }
 
   .search-results-list {
     display: grid;
-    gap: 0.5rem;
-    min-height: 8rem;
+    gap: 0.65rem;
+    min-height: 0;
+    overflow: auto;
     align-content: start;
+    padding-right: 0.2rem;
+    overscroll-behavior: contain;
   }
 
   .search-item {
-    border: 1px solid #e2e8f0;
-    border-radius: 1rem;
-    background: #ffffff;
-    padding: 0.7rem;
+    width: 100%;
+    text-align: left;
+    display: grid;
+    gap: 0.8rem;
+    padding: 0.85rem 0.95rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 1.1rem;
+    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    cursor: pointer;
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  }
+
+  .search-item:hover,
+  .search-item:focus-visible {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--panel-border));
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+    outline: none;
+  }
+
+  .search-item-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
   }
 
   .search-item-title {
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: #0f172a;
-    margin-bottom: 0.3rem;
-  }
-
-  .search-item-line {
-    font-size: 0.76rem;
-    color: #334155;
-    margin-bottom: 0.25rem;
-  }
-
-  .search-item-actions {
-    margin-top: 0.35rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
+    font-weight: 800;
+    font-size: 0.98rem;
+    color: var(--fg-strong);
   }
 
   .search-item-key {
-    font-size: 0.7rem;
-    color: #64748b;
+    margin-top: 0.18rem;
+    color: var(--muted);
+    font-size: 0.73rem;
   }
 
-  .search-empty,
-  .search-skeleton {
-    border: 1px dashed #cbd5e1;
-    border-radius: 0.8rem;
-    padding: 0.75rem;
-    color: #64748b;
-    font-size: 0.85rem;
+  .search-item-cta {
+    white-space: nowrap;
+    padding: 0.42rem 0.72rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 0.76rem;
+    font-weight: 700;
+  }
+
+  .search-item-body {
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .search-item-line {
+    display: grid;
+    gap: 0.18rem;
+    color: var(--muted-strong);
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+
+  .search-item-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .search-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .search-badge {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0.42rem 0.62rem;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    color: var(--muted-strong);
+    font-size: 0.76rem;
+    line-height: 1.25;
+  }
+
+  .search-badge-map-visible {
+    border-color: color-mix(in srgb, var(--accent) 26%, var(--panel-border));
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+
+  .search-badge strong {
+    color: var(--fg-strong);
+  }
+
+  .search-empty {
+    padding: 1rem;
+    border-radius: 1rem;
+    border: 1px dashed var(--panel-border-strong);
+    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+
+  .search-empty-loading {
+    border-style: solid;
+  }
+
+  .search-load-more {
+    width: 100%;
+    justify-content: center;
   }
 
   @media (min-width: 768px) {
     .search-backdrop {
-      place-items: end start;
-      padding: 5.15rem 0.75rem 0.75rem;
+      --search-modal-top-gap: calc(var(--desktop-nav-clearance) + var(--desktop-surface-gap));
+      --search-modal-side-gap: 0.85rem;
+      --search-modal-bottom-gap: 0.85rem;
       background: transparent;
       pointer-events: none;
     }
 
     .search-modal {
+      width: clamp(25rem, 32vw, 31rem);
       pointer-events: auto;
-      max-height: calc(100vh - 6rem);
+    }
+
+    .search-dismiss-layer {
+      display: none;
     }
   }
 
-  :global(html[data-theme='dark']) .search-backdrop {
-    background: rgba(2, 6, 23, 0.68);
-  }
+  @media (max-width: 520px) {
+    .search-item-head {
+      flex-direction: column;
+    }
 
-  :global(html[data-theme='dark']) .search-modal {
-    border-color: #334155;
-    background: #111a2d;
-    box-shadow: 0 20px 40px rgba(2, 6, 23, 0.62);
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .search-status,
-  :global(html[data-theme='dark']) .search-item-line,
-  :global(html[data-theme='dark']) .search-item-key,
-  :global(html[data-theme='dark']) .search-empty,
-  :global(html[data-theme='dark']) .search-skeleton {
-    color: #94a3b8;
-  }
-
-  :global(html[data-theme='dark']) .search-item {
-    border-color: #334155;
-    background: #0f172a;
-  }
-
-  :global(html[data-theme='dark']) .search-item-title {
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .search-empty,
-  :global(html[data-theme='dark']) .search-skeleton {
-    border-color: #334155;
-    background: #0f172a;
-  }
-
-  :global(html[data-theme='dark']) .search-form .ui-field {
-    border-color: #334155;
-    background: #0f172a;
-    color: #e2e8f0;
-  }
-
-  :global(html[data-theme='dark']) .search-form .ui-field::placeholder {
-    color: #94a3b8;
-  }
-
-  @media (min-width: 768px) {
-    :global(html[data-theme='dark']) .search-backdrop {
-      background: transparent;
+    .search-item-cta {
+      align-self: flex-start;
     }
   }
 </style>

@@ -30,6 +30,19 @@ test('getFeatureIdentity falls back to encoded feature id', async () => {
   assert.deepEqual(identity, { osmType: 'relation', osmId: 42 });
 });
 
+test('getFeatureIdentity infers relation for multipolygon with osm_id', async () => {
+  const { getFeatureIdentity } = await loadSelectionUtils();
+  const identity = getFeatureIdentity({
+    properties: {
+      osm_id: 777
+    },
+    geometry: {
+      type: 'MultiPolygon'
+    }
+  });
+  assert.deepEqual(identity, { osmType: 'relation', osmId: 777 });
+});
+
 test('getSelectionFilter is deterministic for same building and switches for different buildings', async () => {
   const { getSelectionFilter } = await loadSelectionUtils();
 

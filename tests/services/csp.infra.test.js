@@ -1,6 +1,11 @@
+const crypto = require('crypto');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildCspDirectives, serializeCspDirectives } = require('../../src/lib/server/infra/csp.infra');
+const {
+  buildCspDirectives,
+  serializeCspDirectives,
+  extractInlineScriptHashesFromHtml
+} = require('../../src/lib/server/infra/csp.infra');
 
 test('csp prod profile has no unsafe-inline', () => {
   const directives = buildCspDirectives({
@@ -22,4 +27,20 @@ test('csp dev profile allows ws/wss connect for local tooling', () => {
   assert.ok(csp.includes('connect-src'));
   assert.ok(csp.includes('ws:'));
   assert.ok(csp.includes('wss:'));
+});
+
+test('extractInlineScriptHashesFromHtml tolerates spaced and malformed script closing tags', () => {
+  const firstBody = 'window.__ARCHIMAP__ = { ready: true };';
+  const secondBody = 'console.log("inline");';
+  const expected = [firstBody, secondBody].map((body) => (
+    `'sha256-${crypto.createHash('sha256').update(body, 'utf8').digest('base64')}'`
+  ));
+
+  const hashes = extractInlineScriptHashesFromHtml(`
+    <script>${firstBody}</script   >
+    <script>${secondBody}</script foo="bar">
+    <script src="/assets/app.js"></script >
+  `);
+
+  assert.deepEqual(hashes, expected);
 });

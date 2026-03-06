@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const TEST_PORT = 3322;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const PAGE_CHECKS = ['/', '/account', '/admin', '/info', '/app-config.js', '/api/contours-status'];
+const SMOKE_DB_PROVIDER = String(process.env.DB_PROVIDER || 'sqlite').trim().toLowerCase() || 'sqlite';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -132,7 +133,8 @@ async function checkAuthFlow(session, userAuthDbPath) {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      USER_AUTH_DB_PATH: userAuthDbPath
+      DB_PROVIDER: SMOKE_DB_PROVIDER,
+      ...(SMOKE_DB_PROVIDER === 'sqlite' ? { USER_AUTH_DB_PATH: userAuthDbPath } : {})
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -199,19 +201,25 @@ async function main() {
   fs.mkdirSync(smokeDataDir, { recursive: true });
   const userAuthDbPath = path.join(smokeDataDir, 'users.db');
 
-  const child = spawn(process.execPath, ['server.js'], {
+  const child = spawn(process.execPath, ['server.sveltekit.js'], {
     env: {
       ...process.env,
+      DB_PROVIDER: SMOKE_DB_PROVIDER,
       PORT: String(TEST_PORT),
       DATA_DIR: smokeDataDir,
-      ARCHIMAP_DB_PATH: path.join(smokeDataDir, 'archimap.db'),
-      OSM_DB_PATH: path.join(smokeDataDir, 'osm.db'),
-      LOCAL_EDITS_DB_PATH: path.join(smokeDataDir, 'local-edits.db'),
-      USER_EDITS_DB_PATH: path.join(smokeDataDir, 'user-edits.db'),
-      USER_AUTH_DB_PATH: userAuthDbPath,
+      ...(SMOKE_DB_PROVIDER === 'sqlite'
+        ? {
+          ARCHIMAP_DB_PATH: path.join(smokeDataDir, 'archimap.db'),
+          OSM_DB_PATH: path.join(smokeDataDir, 'osm.db'),
+          LOCAL_EDITS_DB_PATH: path.join(smokeDataDir, 'local-edits.db'),
+          USER_EDITS_DB_PATH: path.join(smokeDataDir, 'user-edits.db'),
+          USER_AUTH_DB_PATH: userAuthDbPath
+        }
+        : {}),
       AUTO_SYNC_ENABLED: 'false',
       AUTO_SYNC_ON_START: 'false',
-      SESSION_ALLOW_MEMORY_FALLBACK: 'true'
+      SESSION_ALLOW_MEMORY_FALLBACK: 'true',
+      SESSION_COOKIE_SECURE: 'false'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

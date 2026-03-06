@@ -9,8 +9,12 @@ CACHE_REF=""
 TIPPECANOE_REF="2.79.0"
 QUACKOSM_VERSION="0.17.0"
 DUCKDB_VERSION="1.4.4"
+PIP_VERSION="26.0.1"
+RUNTIME_BASE_TAG=""
 BUILDER="archimap-multiarch"
 SKIP_BINFMT_REPAIR=0
+SKIP_RUNTIME_BASE=0
+FORCE_RUNTIME_BASE=0
 
 usage() {
   cat <<'EOF'
@@ -26,8 +30,12 @@ Options:
   --tippecanoe-ref <value>    Tippecanoe git ref (default: 2.79.0)
   --quackosm-version <value>  QuackOSM version (default: 0.17.0)
   --duckdb-version <value>    DuckDB version (default: 1.4.4)
+  --pip-version <value>       pip version in runtime base (default: 26.0.1)
+  --runtime-base-tag <value>  Runtime base tag (default: derived from deps)
   --builder <value>           Buildx builder name (default: archimap-multiarch)
   --skip-binfmt-repair        Skip binfmt auto-install
+  --skip-runtime-base         Skip runtime-base build/push (use existing tag)
+  --force-runtime-base        Force runtime-base rebuild/push even if tag exists
   -h, --help                  Show help
 EOF
 }
@@ -46,8 +54,12 @@ while [[ $# -gt 0 ]]; do
     --tippecanoe-ref) TIPPECANOE_REF="${2:-}"; shift 2 ;;
     --quackosm-version) QUACKOSM_VERSION="${2:-}"; shift 2 ;;
     --duckdb-version) DUCKDB_VERSION="${2:-}"; shift 2 ;;
+    --pip-version) PIP_VERSION="${2:-}"; shift 2 ;;
+    --runtime-base-tag) RUNTIME_BASE_TAG="${2:-}"; shift 2 ;;
     --builder) BUILDER="${2:-}"; shift 2 ;;
     --skip-binfmt-repair) SKIP_BINFMT_REPAIR=1; shift ;;
+    --skip-runtime-base) SKIP_RUNTIME_BASE=1; shift ;;
+    --force-runtime-base) FORCE_RUNTIME_BASE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -66,6 +78,12 @@ if [[ -z "${CACHE_REF}" ]]; then
   CACHE_REF="${IMAGE}:buildcache"
 fi
 
+if [[ -z "${RUNTIME_BASE_TAG}" ]]; then
+  raw_runtime_base_tag="runtime-base-t${TIPPECANOE_REF}-q${QUACKOSM_VERSION}-d${DUCKDB_VERSION}-p${PIP_VERSION}"
+  RUNTIME_BASE_TAG="$(printf '%s' "${raw_runtime_base_tag}" | tr '/:@ ' '-' | tr -c 'A-Za-z0-9._-' '-')"
+fi
+RUNTIME_BASE_IMAGE="${IMAGE}:${RUNTIME_BASE_TAG}"
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required" >&2
   exit 1
@@ -80,6 +98,13 @@ export DOCKER_BUILDKIT=1
 
 BUILD_SHA="$(git rev-parse --short HEAD 2>/dev/null | tr '[:upper:]' '[:lower:]')"
 BUILD_DESCRIBE="$(git describe --tags --always --dirty 2>/dev/null)"
+BUILD_LATEST_TAG=""
+while IFS= read -r tag; do
+  if [[ "${tag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+    BUILD_LATEST_TAG="${tag}"
+    break
+  fi
+done < <(git tag --list --sort=-v:refname 2>/dev/null)
 if [[ -z "${BUILD_SHA}" || -z "${BUILD_DESCRIBE}" ]]; then
   echo "Failed to resolve git metadata (BUILD_SHA/BUILD_DESCRIBE)." >&2
   exit 1
@@ -140,8 +165,11 @@ args=(
   --build-arg "TIPPECANOE_REF=${TIPPECANOE_REF}"
   --build-arg "QUACKOSM_VERSION=${QUACKOSM_VERSION}"
   --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
+  --build-arg "PIP_VERSION=${PIP_VERSION}"
+  --build-arg "RUNTIME_BASE_IMAGE=${RUNTIME_BASE_IMAGE}"
   --build-arg "BUILD_SHA=${BUILD_SHA}"
   --build-arg "BUILD_DESCRIBE=${BUILD_DESCRIBE}"
+  --build-arg "BUILD_LATEST_TAG=${BUILD_LATEST_TAG}"
   -t "${IMAGE}:${VERSION}"
 )
 
@@ -158,15 +186,60 @@ fi
 
 args+=( --push . )
 
-log "Publishing image..."
+if [[ "${SKIP_RUNTIME_BASE}" -eq 0 ]]; then
+  runtime_base_exists=0
+  if docker buildx imagetools inspect "${RUNTIME_BASE_IMAGE}" >/dev/null 2>&1; then
+    runtime_base_exists=1
+  fi
+
+  if [[ "${FORCE_RUNTIME_BASE}" -eq 1 || "${runtime_base_exists}" -eq 0 ]]; then
+    base_args=(
+      buildx build
+      --builder "${BUILDER}"
+      --platform "${PLATFORMS}"
+      --target runtime-base
+      --build-arg "TIPPECANOE_REF=${TIPPECANOE_REF}"
+      --build-arg "QUACKOSM_VERSION=${QUACKOSM_VERSION}"
+      --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
+      --build-arg "PIP_VERSION=${PIP_VERSION}"
+      -t "${RUNTIME_BASE_IMAGE}"
+    )
+    if [[ "${NO_CACHE}" -eq 1 ]]; then
+      base_args+=( --no-cache )
+    else
+      base_args+=( --cache-from "type=registry,ref=${CACHE_REF}" )
+      base_args+=( --cache-to "type=registry,ref=${CACHE_REF},mode=max" )
+    fi
+    base_args+=( --push . )
+
+    if [[ "${FORCE_RUNTIME_BASE}" -eq 1 ]]; then
+      log "Force-publishing runtime-base image..."
+    else
+      log "Publishing runtime-base image (not found in registry)..."
+    fi
+    log "Runtime base tag: ${RUNTIME_BASE_IMAGE}"
+    docker "${base_args[@]}"
+  else
+    log "Runtime-base image already exists. Skipping rebuild:"
+    log "  ${RUNTIME_BASE_IMAGE}"
+    log "Use --force-runtime-base to rebuild it explicitly."
+  fi
+fi
+
+log "Publishing app image..."
 log "Image: ${IMAGE}"
 log "Version tag: ${VERSION}"
+log "Runtime base image: ${RUNTIME_BASE_IMAGE}"
 log "Platforms: ${PLATFORMS}"
 log "Tippecanoe ref: ${TIPPECANOE_REF}"
 log "QuackOSM version: ${QUACKOSM_VERSION}"
 log "DuckDB version: ${DUCKDB_VERSION}"
+log "pip version: ${PIP_VERSION}"
 log "Build SHA: ${BUILD_SHA}"
 log "Build describe: ${BUILD_DESCRIBE}"
+if [[ -n "${BUILD_LATEST_TAG}" ]]; then
+  log "Build latest tag: ${BUILD_LATEST_TAG}"
+fi
 if [[ "${NO_CACHE}" -eq 1 ]]; then
   log "Build cache: disabled (--no-cache)"
 else
@@ -181,6 +254,7 @@ log "  ${IMAGE}:${VERSION}"
 if [[ "${PUBLISH_LATEST}" -eq 1 ]]; then
   log "  ${IMAGE}:latest"
 fi
+log "  ${RUNTIME_BASE_IMAGE}"
 log "Server deploy (layer-based):"
 log "  docker pull ${IMAGE}:${VERSION}"
 log "  docker compose up -d"
