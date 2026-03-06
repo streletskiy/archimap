@@ -311,7 +311,7 @@
     if (typeof window === 'undefined') return;
     if (urlUpdateInFlight) return;
 
-    const state = parseUrlState($page.url);
+    const state = parseUrlState(new URL(window.location.href));
     const signature = getUrlStateSignature(state);
     if (signature === handledUrlSignature) return;
     handledUrlSignature = signature;
@@ -916,8 +916,6 @@
   $: {
     $page;
     $mapReady;
-    $buildingModalOpen;
-    $selectedBuilding;
     applyUrlStateToUi();
   }
 
