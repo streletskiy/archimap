@@ -20,6 +20,7 @@
     "test:security": "node scripts/check-csp-security.js",
     "pretest:e2e": "npm run frontend:build",
     "test:e2e": "playwright test",
+    "pretest:smoke": "npm run frontend:build",
     "test:smoke": "node scripts/smoke-test.js",
     "perf:smoke": "node scripts/perf-smoke.js",
     "analyze": "npm --prefix frontend run analyze",
