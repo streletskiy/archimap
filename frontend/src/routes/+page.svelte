@@ -10,7 +10,7 @@
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson, apiJsonCached } from '$lib/services/http';
   import { session } from '$lib/stores/auth';
-  import { mapCenter, mapReady, mapViewport, mapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
+  import { mapCenter, mapReady, mapViewport, mapZoom, normalizeOptionalMapZoom, requestMapFocus, selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
   import { buildingModalOpen, closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
   import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
   import { resolveAddressText } from '$lib/utils/building-address';
@@ -327,7 +327,7 @@
         requestMapFocus({
           lon: state.camera.lng,
           lat: state.camera.lat,
-          zoom: Number.isFinite(Number(state.camera.z)) ? Number(state.camera.z) : undefined,
+          zoom: normalizeOptionalMapZoom(state.camera.z) ?? undefined,
           duration: 0
         });
         lastAppliedCameraKey = cameraKey;
@@ -931,12 +931,12 @@
     );
   }
 
-  $: if ($mapReady && $mapCenter && Number.isFinite(Number($mapZoom)) && !cameraApplyInFlight) {
+  $: if ($mapReady && $mapCenter && normalizeOptionalMapZoom($mapZoom) != null && !cameraApplyInFlight) {
     updateUrlState({
       camera: {
         lat: $mapCenter.lat,
         lng: $mapCenter.lng,
-        z: $mapZoom
+        z: normalizeOptionalMapZoom($mapZoom)
       }
     });
   }

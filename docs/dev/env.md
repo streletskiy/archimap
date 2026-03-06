@@ -70,7 +70,7 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 - `MAP_DEFAULT_LAT`
 - `MAP_DEFAULT_ZOOM`
 
-These values are used as initial camera only when URL does not provide `lat/lng/z`.
+These values are used as fallback camera only when neither URL nor the saved client-side camera provide a valid position.
 
 ## Troubleshooting
 

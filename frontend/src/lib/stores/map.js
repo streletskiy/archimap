@@ -1,12 +1,27 @@
 import { get, writable } from 'svelte/store';
+import { parseUrlState } from '../client/urlState.js';
 
 const LAST_MAP_CAMERA_STORAGE_KEY = 'archimap-last-map-camera';
 
-function normalizeLastMapCamera(value) {
+function getStorageHost(storageHost = null) {
+  if (storageHost) return storageHost;
+  if (typeof window === 'undefined') return null;
+  return window;
+}
+
+export function normalizeOptionalMapZoom(value) {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const zoom = Number(value);
+  return Number.isFinite(zoom) ? zoom : null;
+}
+
+export function normalizeLastMapCamera(value) {
   const lat = Number(value?.lat);
   const lng = Number(value?.lng);
-  const zoom = Number(value?.z);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const zoom = normalizeOptionalMapZoom(value?.z);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
   return {
     lat,
     lng,
@@ -14,10 +29,10 @@ function normalizeLastMapCamera(value) {
   };
 }
 
-function getInitialLastMapCamera() {
-  if (typeof window === 'undefined') return null;
+function readLastMapCameraFromStorage(storage) {
+  if (!storage?.getItem) return null;
   try {
-    const raw = window.sessionStorage.getItem(LAST_MAP_CAMERA_STORAGE_KEY);
+    const raw = storage.getItem(LAST_MAP_CAMERA_STORAGE_KEY);
     if (!raw) return null;
     return normalizeLastMapCamera(JSON.parse(raw));
   } catch {
@@ -25,15 +40,55 @@ function getInitialLastMapCamera() {
   }
 }
 
-function persistLastMapCamera(camera) {
-  if (typeof window === 'undefined') return;
+export function getInitialLastMapCamera(storageHost = null) {
+  const host = getStorageHost(storageHost);
+  if (!host) return null;
+  const fromLocalStorage = readLastMapCameraFromStorage(host.localStorage);
+  if (fromLocalStorage) return fromLocalStorage;
+  const fromSessionStorage = readLastMapCameraFromStorage(host.sessionStorage);
+  if (!fromSessionStorage) return null;
   try {
-    const normalized = normalizeLastMapCamera(camera);
-    if (!normalized) return;
-    window.sessionStorage.setItem(LAST_MAP_CAMERA_STORAGE_KEY, JSON.stringify(normalized));
+    host.localStorage?.setItem?.(LAST_MAP_CAMERA_STORAGE_KEY, JSON.stringify(fromSessionStorage));
   } catch {
     // ignore
   }
+  return fromSessionStorage;
+}
+
+function persistLastMapCamera(camera, storageHost = null) {
+  const host = getStorageHost(storageHost);
+  if (!host) return;
+  try {
+    const normalized = normalizeLastMapCamera(camera);
+    if (!normalized) return;
+    host.localStorage?.setItem?.(LAST_MAP_CAMERA_STORAGE_KEY, JSON.stringify(normalized));
+    host.sessionStorage?.removeItem?.(LAST_MAP_CAMERA_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function withFallbackZoom(camera, fallbackCamera) {
+  if (!camera) return null;
+  return {
+    lat: camera.lat,
+    lng: camera.lng,
+    z: camera.z != null ? camera.z : fallbackCamera.z
+  };
+}
+
+export function resolveInitialMapCamera({ url, fallbackCamera, persistedCamera } = {}) {
+  const normalizedFallbackCamera = normalizeLastMapCamera(fallbackCamera);
+  if (!normalizedFallbackCamera) return null;
+  const urlCamera = normalizeLastMapCamera(parseUrlState(url || 'http://localhost').camera);
+  if (urlCamera) {
+    return withFallbackZoom(urlCamera, normalizedFallbackCamera);
+  }
+  const normalizedPersistedCamera = normalizeLastMapCamera(persistedCamera);
+  if (normalizedPersistedCamera) {
+    return withFallbackZoom(normalizedPersistedCamera, normalizedFallbackCamera);
+  }
+  return normalizedFallbackCamera;
 }
 
 function patchLastMapCamera(patch = {}) {
@@ -93,8 +148,8 @@ export function setMapCenter(center) {
 }
 
 export function setMapZoom(zoom) {
-  const value = Number(zoom);
-  if (!Number.isFinite(value)) {
+  const value = normalizeOptionalMapZoom(zoom);
+  if (value == null) {
     mapZoom.set(null);
     return;
   }
@@ -123,13 +178,14 @@ export function requestMapFocus(payload = {}) {
   const lon = Number(payload?.lon);
   const lat = Number(payload?.lat);
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+  const zoom = normalizeOptionalMapZoom(payload?.zoom);
   mapFocusRequest.set({
     id: Date.now() + Math.random(),
     lon,
     lat,
     offsetX: Number(payload?.offsetX || 0),
     offsetY: Number(payload?.offsetY || 0),
-    zoom: Number.isFinite(Number(payload?.zoom)) ? Number(payload.zoom) : null,
+    zoom,
     duration: Number.isFinite(Number(payload?.duration)) ? Number(payload.duration) : 420
   });
 }

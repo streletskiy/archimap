@@ -117,6 +117,12 @@
   $: basePrefix = currentPathname === '/app' || currentPathname.startsWith('/app/') ? '/app' : '';
   $: normalizedPathname = basePrefix ? (currentPathname.slice(basePrefix.length) || '/') : currentPathname;
   $: isMapRoute = normalizedPathname === '/';
+  $: mapHref = navHref('/', basePrefix, isMapRoute, $lastMapCamera);
+  $: infoHref = navHref('/info', basePrefix, isMapRoute, $lastMapCamera);
+  $: accountHref = navHref('/account', basePrefix, isMapRoute, $lastMapCamera);
+  $: adminHref = navHref('/admin', basePrefix, isMapRoute, $lastMapCamera);
+  $: termsHref = navHref('/info?tab=legal&doc=terms', basePrefix, isMapRoute, $lastMapCamera);
+  $: privacyHref = navHref('/info?tab=legal&doc=privacy', basePrefix, isMapRoute, $lastMapCamera);
   $: activeSearchText = String(searchText || '').trim();
   $: searchReady = activeSearchText.length >= 2;
   $: activeFilterCount = Array.isArray($buildingFilterRules) ? $buildingFilterRules.length : 0;
@@ -124,10 +130,10 @@
   $: visibleFilterCount = filterOpen ? draftFilterCount : activeFilterCount;
   $: filterPreviewRules = Array.isArray($buildingFilterRules) ? $buildingFilterRules.slice(0, 3) : [];
   $: primaryLinks = [
-    { href: navHref('/'), label: $t('header.map'), active: normalizedPathname === '/' },
-    { href: navHref('/info'), label: $t('header.info'), active: isActive(normalizedPathname, '/info') },
-    ...($session.authenticated ? [{ href: navHref('/account'), label: $t('header.profile'), active: isActive(normalizedPathname, '/account') }] : []),
-    ...($session.user?.isAdmin ? [{ href: navHref('/admin'), label: $t('header.admin'), active: isActive(normalizedPathname, '/admin') }] : [])
+    { href: mapHref, label: $t('header.map'), active: normalizedPathname === '/' },
+    { href: infoHref, label: $t('header.info'), active: isActive(normalizedPathname, '/info') },
+    ...($session.authenticated ? [{ href: accountHref, label: $t('header.profile'), active: isActive(normalizedPathname, '/account') }] : []),
+    ...($session.user?.isAdmin ? [{ href: adminHref, label: $t('header.admin'), active: isActive(normalizedPathname, '/admin') }] : [])
   ];
   $: userInitials = getUserInitials($session.user);
   $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');
@@ -136,14 +142,14 @@
     filterOpen = false;
   }
 
-  function navHref(path) {
+  function navHref(path, currentBasePrefix, currentIsMapRoute, currentLastMapCamera) {
     const target = path === '/' ? '' : path;
-    const pathname = `${basePrefix}${target || '/'}`;
-    if (path !== '/' || isMapRoute || !$lastMapCamera) {
+    const pathname = `${currentBasePrefix}${target || '/'}`;
+    if (path !== '/' || currentIsMapRoute || !currentLastMapCamera) {
       return pathname;
     }
     const nextUrl = patchUrlState(new URL(pathname, 'http://localhost'), {
-      camera: $lastMapCamera
+      camera: currentLastMapCamera
     });
     return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
   }
@@ -601,7 +607,7 @@
 <header class="nav-shell">
   <div class:map-route={isMapRoute} class="nav">
     <div class="brand-cluster">
-      <a href={navHref('/')} class="logo" aria-label={$t('common.appName')}>
+      <a href={mapHref} class="logo" aria-label={$t('common.appName')}>
         <span class="logo-copy">
           <span class="logo-name">{$t('common.appName')}</span>
         </span>
@@ -855,11 +861,11 @@
             <input class="ui-field" bind:value={regPasswordConfirm} type="password" placeholder={$t('header.repeatPassword')} required />
             <label class="consent">
               <input type="checkbox" bind:checked={regAcceptTerms} required aria-required="true" />
-              <span>{$t('header.acceptTerms')} <a href={navHref('/info?tab=legal&doc=terms')} on:click={() => (menuOpen = false)}>{$t('header.termsLink')}</a></span>
+              <span>{$t('header.acceptTerms')} <a href={termsHref} on:click={() => (menuOpen = false)}>{$t('header.termsLink')}</a></span>
             </label>
             <label class="consent">
               <input type="checkbox" bind:checked={regAcceptPrivacy} required aria-required="true" />
-              <span>{$t('header.acceptPrivacy')} <a href={navHref('/info?tab=legal&doc=privacy')} on:click={() => (menuOpen = false)}>{$t('header.privacyLink')}</a></span>
+              <span>{$t('header.acceptPrivacy')} <a href={privacyHref} on:click={() => (menuOpen = false)}>{$t('header.privacyLink')}</a></span>
             </label>
             <button class="ui-btn ui-btn-primary" type="submit" disabled={registerStartInFlight}>{$t('header.createAccount')}</button>
           </form>

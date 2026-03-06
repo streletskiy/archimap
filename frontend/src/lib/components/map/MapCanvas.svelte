@@ -1,12 +1,17 @@
 <script>
+  import { beforeNavigate } from '$app/navigation';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { t, translateNow } from '$lib/i18n/index';
   import {
+    lastMapCamera,
     mapFocusRequest,
     mapLabelsVisible,
+    normalizeOptionalMapZoom,
+    resolveInitialMapCamera,
     selectedBuilding,
     setMapCenter,
     setMapReady,
@@ -139,6 +144,19 @@
   let filteredFeatureStateFeatureIds = new Set();
   let filterDataByOsmKeyCache = new Map();
   let filterStatusOverlayText = '';
+  let cameraStoreSyncEnabled = false;
+
+  beforeNavigate((navigation) => {
+    if (typeof window === 'undefined') return;
+    const nextPathname = String(navigation?.to?.url?.pathname || '').trim();
+    if (!nextPathname) {
+      cameraStoreSyncEnabled = false;
+      return;
+    }
+    if (nextPathname !== window.location.pathname) {
+      cameraStoreSyncEnabled = false;
+    }
+  });
 
   function getFilterStatusOverlayText(statusCode) {
     const code = String(statusCode || 'idle');
@@ -850,10 +868,15 @@
   }
 
   function syncMapCameraStores() {
-    if (!map) return;
+    if (!map || !cameraStoreSyncEnabled) return;
     setMapCenter(map.getCenter());
     setMapZoom(map.getZoom());
     setMapViewport(buildBboxSnapshot(map.getBounds?.()));
+  }
+
+  function syncMapZoomStore() {
+    if (!map || !cameraStoreSyncEnabled) return;
+    setMapZoom(map.getZoom());
   }
 
   function getMapStyleForTheme(theme) {
@@ -1974,9 +1997,7 @@
 
   $: if (map && $mapFocusRequest && $mapFocusRequest.id !== lastMapFocusRequestId) {
     lastMapFocusRequestId = $mapFocusRequest.id;
-    const nextZoom = Number.isFinite(Number($mapFocusRequest.zoom))
-      ? Number($mapFocusRequest.zoom)
-      : map.getZoom();
+    const nextZoom = normalizeOptionalMapZoom($mapFocusRequest.zoom) ?? map.getZoom();
     map.easeTo({
       center: [Number($mapFocusRequest.lon), Number($mapFocusRequest.lat)],
       offset: [Number($mapFocusRequest.offsetX || 0), Number($mapFocusRequest.offsetY || 0)],
@@ -2006,6 +2027,24 @@
       currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
       coverageCache = new Map();
       coverageVisibleState = 'visible';
+      const initialCamera = resolveInitialMapCamera({
+        url: window.location.href,
+        persistedCamera: get(lastMapCamera),
+        fallbackCamera: {
+          lng: config.mapDefault.lon,
+          lat: config.mapDefault.lat,
+          z: config.mapDefault.zoom
+        }
+      }) || {
+        lng: Number(config.mapDefault.lon),
+        lat: Number(config.mapDefault.lat),
+        z: Number(config.mapDefault.zoom)
+      };
+      setMapCenter({
+        lng: initialCamera.lng,
+        lat: initialCamera.lat
+      });
+      setMapZoom(initialCamera.z);
 
       const pmtilesUrl = resolvePmtilesUrl(config.buildingsPmtiles.url, window.location.origin);
       pmtilesArchive = new PMTilesCtor(pmtilesUrl);
@@ -2025,8 +2064,8 @@
       map = new maplibregl.Map({
         container,
         style: currentMapStyleUrl,
-        center: [config.mapDefault.lon, config.mapDefault.lat],
-        zoom: config.mapDefault.zoom,
+        center: [initialCamera.lng, initialCamera.lat],
+        zoom: Number(initialCamera.z),
         attributionControl: true
       });
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -2038,7 +2077,7 @@
       map.on('moveend', scheduleCoverageCheck);
       map.on('move', scheduleCoverageCheck);
       map.on('zoomend', scheduleFilterRefresh);
-      map.on('zoomend', () => setMapZoom(map.getZoom()));
+      map.on('zoomend', syncMapZoomStore);
       map.on('zoomend', scheduleCoverageCheck);
       map.on('resize', scheduleCoverageCheck);
 
@@ -2049,6 +2088,7 @@
       });
 
       map.on('load', () => {
+        cameraStoreSyncEnabled = true;
         registerFilterMoveEnd();
         syncMapCameraStores();
         setMapReady(true);
@@ -2074,6 +2114,7 @@
   });
 
   onDestroy(() => {
+    cameraStoreSyncEnabled = false;
     setMapReady(false);
     setMapCenter(null);
     setMapZoom(null);
