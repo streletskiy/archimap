@@ -205,7 +205,7 @@
   }
 
   .legal-markdown :global(a) {
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
@@ -266,7 +266,7 @@
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(a) {
-    color: var(--accent);
+    color: var(--accent-ink);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(blockquote) {

@@ -19,6 +19,8 @@
   const L_CLUSTER = 'edited-points-clusters';
   const L_COUNT = 'edited-points-cluster-count';
   const L_POINT = 'edited-points-unclustered';
+  const MAP_PIN_COLOR = '#FDC82F';
+  const MAP_PIN_INK = '#342700';
 
   let activeTab = 'edits';
 
@@ -127,13 +129,13 @@
       if (!map.getSource('local-buildings')) map.addSource('local-buildings', { type: 'vector', url: `pmtiles://${pmtilesUrl}` });
       if (!map.getSource('selected-building')) map.addSource('selected-building', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterRadius: 44, clusterMaxZoom: 12 });
-      if (!map.getLayer('edited-fill')) map.addLayer({ id: 'edited-fill', type: 'fill', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0.25 } });
-      if (!map.getLayer('edited-line')) map.addLayer({ id: 'edited-line', type: 'line', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'line-color': '#5B62F0', 'line-width': 2 } });
-      if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0.2 } });
-      if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#5B62F0', 'line-width': 3 } });
-      if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': '#5B62F0', 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
-      if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': '#fff' } });
-      if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': '#5B62F0', 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+      if (!map.getLayer('edited-fill')) map.addLayer({ id: 'edited-fill', type: 'fill', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.25 } });
+      if (!map.getLayer('edited-line')) map.addLayer({ id: 'edited-line', type: 'line', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'line-color': '#2B2824', 'line-width': 2 } });
+      if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.2 } });
+      if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#2B2824', 'line-width': 3 } });
+      if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
+      if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': MAP_PIN_INK } });
+      if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
       applyMapData();
       fitAllEdited();
     });
@@ -688,7 +690,7 @@
                         {#if u.isMasterAdmin}
                           <span class="badge-pill mr-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">{$t('admin.users.masterAdmin')}</span>
                         {/if}
-                        <span class="badge-pill mr-1 rounded-full px-2.5 py-1 text-xs font-semibold {u.isAdmin ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700'}">{u.isAdmin ? $t('admin.users.admin') : $t('admin.users.user')}</span>
+                        <span class="badge-pill mr-1 rounded-full px-2.5 py-1 text-xs font-semibold {u.isAdmin ? 'bg-slate-200 text-slate-800' : 'bg-slate-100 text-slate-700'}">{u.isAdmin ? $t('admin.users.admin') : $t('admin.users.user')}</span>
                         <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {u.canEdit ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}">{u.canEdit ? $t('admin.users.canEdit') : $t('admin.users.readOnly')}</span>
                       </td>
                       <td class="px-3 py-2">{u.editsCount || 0}</td>
@@ -743,7 +745,7 @@
                       <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">ID: {it.osmType}/{it.osmId}</p></td>
                       <td class="px-3 py-2">{it.updatedBy || '-'}</td>
                       <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
-                      <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('admin.edits.changesTotal')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('admin.edits.changesCreated')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~{counters.modified} {$t('admin.edits.changesModified')}</span>{/if}</div></td>
+          <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('admin.edits.changesTotal')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('admin.edits.changesCreated')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-slate-200 px-2 py-1 text-xs text-slate-700">~{counters.modified} {$t('admin.edits.changesModified')}</span>{/if}</div></td>
                     </tr>
                   {/each}
                 {/if}

@@ -546,7 +546,7 @@
     padding: 0.42rem 0.72rem;
     border-radius: 999px;
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     font-size: 0.78rem;
     font-weight: 700;
   }
@@ -756,7 +756,7 @@
   }
 
   .osm-tag-key {
-    color: var(--accent-strong);
+    color: var(--accent-ink);
   }
 
   .osm-tag-value {

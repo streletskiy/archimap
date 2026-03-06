@@ -291,7 +291,7 @@
     padding: 0.25rem 0.55rem;
     border-radius: 999px;
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     font-size: 0.76rem;
     font-weight: 700;
   }
@@ -352,7 +352,7 @@
     padding: 0.42rem 0.72rem;
     border-radius: 999px;
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     font-size: 0.76rem;
     font-weight: 700;
   }

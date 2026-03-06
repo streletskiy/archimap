@@ -40,6 +40,8 @@
   const SEARCH_RESULTS_LAYER_ID = 'search-results-points-layer';
   const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
   const SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID = 'search-results-clusters-count-layer';
+  const MAP_PIN_COLOR = '#FDC82F';
+  const MAP_PIN_INK = '#342700';
   const CARTO_BUILDING_LAYER_IDS = ['building', 'building-top'];
   const STYLE_OVERLAY_FADE_MS = 260;
   const FILTER_REQUEST_DEBOUNCE_MS = 180;
@@ -1220,7 +1222,7 @@
         minzoom: 13,
         filter: ['==', ['id'], -1],
         paint: {
-          'fill-color': '#12b4a6',
+          'fill-color': '#6d655b',
           'fill-opacity': 0.72
         }
       });
@@ -1235,7 +1237,7 @@
         minzoom: 13,
         filter: ['==', ['id'], -1],
         paint: {
-          'line-color': '#0b6d67',
+          'line-color': '#3d3832',
           'line-width': 2.2
         }
       });
@@ -1249,8 +1251,8 @@
         filter: ['has', 'point_count'],
         paint: {
           'circle-radius': ['step', ['get', 'point_count'], 16, 12, 19, 30, 22, 60, 26],
-          'circle-color': '#1d4ed8',
-          'circle-stroke-color': '#ffffff',
+          'circle-color': MAP_PIN_COLOR,
+          'circle-stroke-color': MAP_PIN_INK,
           'circle-stroke-width': 2,
           'circle-opacity': 0.92
         }
@@ -1269,7 +1271,7 @@
           'text-size': 12
         },
         paint: {
-          'text-color': '#ffffff'
+          'text-color': MAP_PIN_INK
         }
       });
     }
@@ -1282,8 +1284,8 @@
         filter: ['!', ['has', 'point_count']],
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 16, 7],
-          'circle-color': '#2563eb',
-          'circle-stroke-color': '#ffffff',
+          'circle-color': MAP_PIN_COLOR,
+          'circle-stroke-color': MAP_PIN_INK,
           'circle-stroke-width': 2,
           'circle-opacity': 0.9
         }

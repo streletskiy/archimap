@@ -16,6 +16,8 @@
   const L_CLUSTER = 'account-edited-points-clusters';
   const L_COUNT = 'account-edited-points-cluster-count';
   const L_POINT = 'account-edited-points-unclustered';
+  const MAP_PIN_COLOR = '#FDC82F';
+  const MAP_PIN_INK = '#342700';
 
   let activeTab = 'settings';
   let firstName = '';
@@ -113,13 +115,13 @@
       if (!map.getSource('local-buildings')) map.addSource('local-buildings', { type: 'vector', url: `pmtiles://${pmtilesUrl}` });
       if (!map.getSource('selected-building')) map.addSource('selected-building', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterRadius: 44, clusterMaxZoom: 12 });
-      if (!map.getLayer('edited-fill')) map.addLayer({ id: 'edited-fill', type: 'fill', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0.25 } });
-      if (!map.getLayer('edited-line')) map.addLayer({ id: 'edited-line', type: 'line', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'line-color': '#5B62F0', 'line-width': 2 } });
-      if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#5B62F0', 'fill-opacity': 0.2 } });
-      if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#5B62F0', 'line-width': 3 } });
-      if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': '#5B62F0', 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
-      if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': '#fff' } });
-      if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': '#5B62F0', 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+      if (!map.getLayer('edited-fill')) map.addLayer({ id: 'edited-fill', type: 'fill', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.25 } });
+      if (!map.getLayer('edited-line')) map.addLayer({ id: 'edited-line', type: 'line', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'line-color': '#2B2824', 'line-width': 2 } });
+      if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.2 } });
+      if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#2B2824', 'line-width': 3 } });
+      if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
+      if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': MAP_PIN_INK } });
+      if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
       applyMapData();
       fitAllEdited();
     });
@@ -399,7 +401,7 @@
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-accent peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
                 </label>
               </div>
               <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
@@ -409,7 +411,7 @@
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-accent peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
                 </label>
               </div>
               <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
@@ -419,7 +421,7 @@
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-purple peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-accent peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
                 </label>
               </div>
             </div>
@@ -428,8 +430,8 @@
             <h3 class="text-base font-bold text-slate-900">{$t('account.legal.title')}</h3>
             <p class="mt-1 text-sm text-slate-600">{$t('account.legal.text')}</p>
             <div class="mt-4 space-y-2">
-              <a href="/info?tab=legal&doc=terms" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.terms')}</a>
-              <a href="/info?tab=legal&doc=privacy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-indigo-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.privacy')}</a>
+              <a href="/info?tab=legal&doc=terms" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.terms')}</a>
+              <a href="/info?tab=legal&doc=privacy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.privacy')}</a>
             </div>
           </section>
       </div>
@@ -462,7 +464,7 @@
                       <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs text-rose-600">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
                       <td class="px-3 py-2">{it.updatedBy || '-'}</td>
                       <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
-                      <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-600">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
+          <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-slate-200 px-2 py-1 text-xs text-slate-700">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
                     </tr>
                   {/each}
                 {/if}

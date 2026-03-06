@@ -947,7 +947,7 @@
 
   .nav-links a.active {
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-ink);
   }
 
   .search {
@@ -982,8 +982,8 @@
     border: 0;
     padding: 0.62rem 0.95rem;
     border-radius: 999px;
-    background: var(--accent);
-    color: #ffffff;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-brass) 100%);
+    color: var(--accent-contrast);
     font-size: 0.8rem;
     font-weight: 700;
     cursor: pointer;
@@ -1065,8 +1065,8 @@
     height: 1.55rem;
     padding: 0 0.38rem;
     border-radius: 999px;
-    background: var(--accent);
-    color: #ffffff;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-brass) 100%);
+    color: var(--accent-contrast);
     font-size: 0.73rem;
     font-weight: 800;
   }
@@ -1094,7 +1094,7 @@
     justify-content: center;
     border-radius: 0.75rem;
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     font-size: 0.8rem;
     font-weight: 800;
     flex: none;
@@ -1224,7 +1224,7 @@
   .menu-links a.active {
     border-color: color-mix(in srgb, var(--accent) 22%, var(--panel-border));
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-ink);
   }
 
   .rows {
@@ -1238,7 +1238,7 @@
     border-radius: 1rem;
     border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--panel-border));
     background: color-mix(in srgb, var(--accent-soft) 76%, var(--panel-solid));
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     font-size: 0.78rem;
     line-height: 1.35;
   }
@@ -1461,7 +1461,7 @@
     border: 0;
     background: transparent;
     text-align: right;
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     font-weight: 700;
     font-size: 0.8rem;
     cursor: pointer;
@@ -1497,7 +1497,7 @@
   }
 
   .consent a {
-    color: var(--accent-strong);
+    color: var(--accent-ink);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
