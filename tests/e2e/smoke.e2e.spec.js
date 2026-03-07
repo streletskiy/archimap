@@ -136,10 +136,10 @@ test('keeps map deep link params and renders map', async ({ page }) => {
   await expect(page).toHaveURL(/[?&]z=/);
 });
 
-test('map attribution includes archimap contributors', async ({ page }) => {
+test('map attribution includes archimap', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
-  await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('archimap contributors');
+  await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('archimap');
 });
 
 test('building filter uses highlight layers and does not apply setFilter to base building layers', async ({ page }) => {

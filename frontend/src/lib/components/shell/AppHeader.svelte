@@ -635,7 +635,7 @@
     <div class="right-controls">
       {#if isMapRoute}
         <button type="button" data-testid="filter-trigger" class:active={filterOpen} class:has-rules={visibleFilterCount > 0} class="filter-trigger" aria-label={$t('header.openFilters')} aria-expanded={filterOpen} on:click={toggleFilterPanel}>
-          <svg viewBox="0 0 512 512" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
+          <svg class="filter-trigger-icon" viewBox="0 0 512 512" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.9 54.9C10.5 40.9 24.5 32 40 32l432 0c15.5 0 29.5 8.9 36.1 22.9s4.6 30.5-5.2 42.5L320 320.9 320 448c0 12.1-6.8 23.2-17.7 28.6s-23.8 4.3-33.5-3l-64-48c-8.1-6-12.8-15.5-12.8-25.6l0-79.1L9 97.3C-.7 85.4-2.8 68.8 3.9 54.9z"/></svg>
           <span class="filter-trigger-copy">
             <span class="filter-trigger-title">{$t('header.filterTitle')}</span>
           </span>
@@ -647,7 +647,7 @@
 
       {#if isMapRoute}
         <button type="button" class="icon-btn search-mobile-btn" aria-label={$t('header.openSearch')} on:click={openMobileSearch}>
-          <svg viewBox="0 0 640 640" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
+          <svg class="search-mobile-icon" viewBox="0 0 640 640" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M480 272C480 317.9 465.1 360.3 440 394.7L566.6 521.4C579.1 533.9 579.1 554.2 566.6 566.7C554.1 579.2 533.8 579.2 521.3 566.7L394.7 440C360.3 465.1 317.9 480 272 480C157.1 480 64 386.9 64 272C64 157.1 157.1 64 272 64C386.9 64 480 157.1 480 272zM272 416C351.5 416 416 351.5 416 272C416 192.5 351.5 128 272 128C192.5 128 128 192.5 128 272C128 351.5 192.5 416 272 416z"/></svg>
         </button>
       {/if}
 
@@ -1047,6 +1047,13 @@
     min-height: 2.9rem;
     padding: 0.45rem 0.55rem 0.45rem 0.9rem;
     border-radius: 1rem;
+  }
+
+  .filter-trigger-icon,
+  .search-mobile-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex: none;
   }
 
   .filter-trigger.active,
@@ -1535,9 +1542,31 @@
     .search {
       display: none;
     }
+
+    .nav-center-spacer {
+      display: none;
+    }
+
     .search-mobile-btn {
       display: inline-flex;
     }
+
+    .filter-trigger {
+      width: 2.7rem;
+      height: 2.7rem;
+      min-width: 2.7rem;
+      min-height: 2.7rem;
+      padding: 0;
+      gap: 0;
+      justify-content: center;
+      border-radius: 0.9rem;
+    }
+
+    .filter-trigger-copy,
+    .filter-trigger-badge {
+      display: none;
+    }
+
     .nav {
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 0.55rem;
