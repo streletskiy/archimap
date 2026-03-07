@@ -35,11 +35,6 @@ test('integration: sveltekit runtime serves api parity', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-sveltekit-it-'));
   const port = 3900 + Math.floor(Math.random() * 400);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const pmtilesFileName = `sveltekit-test-buildings-${Date.now()}.pmtiles`;
-  const repoDataDir = path.join(__dirname, '..', '..', 'data');
-  const pmtilesPath = path.join(repoDataDir, pmtilesFileName);
-  fs.mkdirSync(repoDataDir, { recursive: true });
-  fs.writeFileSync(pmtilesPath, Buffer.alloc(4096, 13));
 
   const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: path.join(__dirname, '..', '..'),
@@ -68,8 +63,7 @@ test('integration: sveltekit runtime serves api parity', async () => {
       ARCHIMAP_DB_PATH: path.join(tempRoot, 'archimap.db'),
       LOCAL_EDITS_DB_PATH: path.join(tempRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tempRoot, 'user-edits.db'),
-      USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: pmtilesFileName
+      USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -188,7 +182,6 @@ test('integration: sveltekit runtime serves api parity', async () => {
       await new Promise((resolve) => server.once('exit', resolve));
     }
     fs.rmSync(tempRoot, { recursive: true, force: true });
-    fs.rmSync(pmtilesPath, { force: true });
   }
 
   if (server.exitCode && server.exitCode !== 0) {

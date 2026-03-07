@@ -58,10 +58,10 @@
 
 ## Data refresh
 
-1. Update OSM source settings.
-2. Run `npm run tiles:build`.
+1. Update region settings in `Admin -> Data`.
+2. Run `Sync now` for the target region or `npm run tiles:build -- --region-id=<id>`.
 3. Verify PMTiles:
-   - `curl -I -H "Range: bytes=0-1023" http://host/api/buildings.pmtiles`
+   - `curl -I -H "Range: bytes=0-1023" http://host/api/data/regions/<id>/pmtiles`
    - Expect `206`, `Accept-Ranges`, `Content-Range`.
 
 ## First master admin setup
@@ -76,8 +76,8 @@
 
 ### Map tiles not loading
 
-- Check PMTiles file exists in `data/`.
-- Check `/api/buildings.pmtiles` returns `200` or `206`.
+- Check region PMTiles file exists in `data/regions/`.
+- Check `/api/data/regions/<id>/pmtiles` returns `200` or `206`.
 - Check CSP `connect-src`/`worker-src` and browser console.
 
 ### Search degraded

@@ -40,10 +40,9 @@ System notes:
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).
-- `GET /api/buildings.pmtiles`
-  - PMTiles binary stream.
+- `GET /api/data/regions/:regionId/pmtiles`
+  - Region-specific PMTiles binary stream.
   - Supports `Range`, `If-None-Match`, `If-Modified-Since`.
-  - Returns `206` for valid byte ranges and `416` for invalid ranges.
 - `GET /api/contours-status`
   - Total contours + last update timestamp.
   - Cache: `Cache-Control: public, max-age=60`, `ETag`, `Last-Modified` (if available).
@@ -59,9 +58,45 @@ System notes:
 - `POST /api/admin/users/edit-permission`, `POST /api/admin/users/role`
 - `GET/POST /api/admin/app-settings/general`
 - `GET/POST /api/admin/app-settings/smtp`, `POST /api/admin/app-settings/smtp/test`
+- `GET /api/admin/app-settings/data`
+  - Returns DB-backed data settings summary, bootstrap state, and current regions.
+- `GET /api/admin/app-settings/data/regions`
+  - Returns region list for admin UI.
+- `POST /api/admin/app-settings/data/regions`
+  - Creates or updates a region.
+  - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
+  - Supported v1 source: `sourceType=extract_query`.
+- `DELETE /api/admin/app-settings/data/regions/:regionId`
+  - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
+  - Regions in `queued` or `running` state cannot be deleted.
+- `GET /api/admin/app-settings/data/regions/:regionId/runs`
+  - Returns recent sync runs for the region.
+- `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
+  - Queues region sync in the single managed queue.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
+- `POST /api/admin/building-edits/:editId/reassign`
+- `DELETE /api/admin/building-edits/:editId`
+  - Master-admin only.
+  - `pending`, `rejected`, `superseded`: deletes only the edit history row.
+  - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit still points to the same building.
+  - Returns `409 EDIT_DELETE_SHARED_MERGED_STATE` when merged local data is already shared with other accepted edits for the same OSM object.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
+
+## Runtime config payload
+
+- `GET /app-config.js`
+  - Returns `window.__ARCHIMAP_CONFIG`.
+  - Multi-region payload adds `buildingRegionsPmtiles[]`, each item containing:
+    - `id`
+    - `slug`
+    - `name`
+    - `url`
+    - `sourceLayer`
+    - `bounds`
+    - `pmtilesMinZoom`
+    - `pmtilesMaxZoom`
+    - `lastSuccessfulSyncAt`
 
 ## Cache semantics
 

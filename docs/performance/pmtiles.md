@@ -2,7 +2,7 @@
 
 ## HTTP behavior
 
-- Endpoint: `GET /api/buildings.pmtiles`.
+- Endpoint: `GET /api/data/regions/:regionId/pmtiles`.
 - Implementation: `src/lib/server/infra/pmtiles-stream.infra.js`.
 - Uses `fs.createReadStream` with explicit byte window.
 
@@ -18,4 +18,4 @@
 ## CDN compatibility notes
 
 - Byte-range and validators are CDN-friendly.
-- Keep URL stable (`/api/buildings.pmtiles`) and prefer immutable file name changes via `BUILDINGS_PMTILES_FILE` during tile updates.
+- Keep region URLs stable by addressing PMTiles through `regionId`; the on-disk file may still use the current region slug.

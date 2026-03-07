@@ -448,6 +448,7 @@ function registerBuildingsRoutes(deps) {
     attachInfoToFeatures,
     applyUserEditRowToInfo,
     getMergedInfoRow,
+    getOsmContourRow,
     getLatestUserEditRow,
     normalizeUserEditStatus,
     sanitizeArchiPayload,
@@ -909,6 +910,10 @@ function registerBuildingsRoutes(deps) {
     if (!actorKey) {
       return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
     }
+    const currentContour = await getOsmContourRow(osmType, osmId);
+    if (!currentContour) {
+      return res.status(404).json({ error: 'Здание не найдено в локальной базе контуров' });
+    }
     const requestedEditedFields = sanitizeEditedFields(body.editedFields);
     if (requestedEditedFields.length === 0) {
       return res.status(409).json({ error: 'В правке нет отличий от текущих данных' });
@@ -934,6 +939,8 @@ function registerBuildingsRoutes(deps) {
             address = @address,
             archimap_description = @archimap_description,
             edited_fields_json = @edited_fields_json,
+            source_tags_json = @source_tags_json,
+            source_osm_updated_at = @source_osm_updated_at,
             status = 'pending',
             admin_comment = NULL,
             reviewed_by = NULL,
@@ -945,6 +952,8 @@ function registerBuildingsRoutes(deps) {
           WHERE id = @id
         `).run({
           id: latest.id,
+          source_tags_json: currentContour.tags_json ?? null,
+          source_osm_updated_at: currentContour.updated_at ?? null,
           ...payload
         });
         await supersedePendingUserEdits(osmType, osmId, actorKey, Number(latest.id));
@@ -956,12 +965,12 @@ function registerBuildingsRoutes(deps) {
         const inserted = await db.prepare(`
           INSERT INTO user_edits.building_user_edits (
             osm_type, osm_id, created_by,
-            name, style, levels, year_built, architect, address, archimap_description, edited_fields_json,
+            name, style, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
             status, created_at, updated_at
           )
           VALUES (
             @osm_type, @osm_id, @created_by,
-            @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json,
+            @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
             'pending', datetime('now'), datetime('now')
           )
           RETURNING id
@@ -969,6 +978,8 @@ function registerBuildingsRoutes(deps) {
           osm_type: osmType,
           osm_id: osmId,
           created_by: actorKey,
+          source_tags_json: currentContour.tags_json ?? null,
+          source_osm_updated_at: currentContour.updated_at ?? null,
           ...payload
         });
         return Number(inserted?.id || 0);
@@ -977,18 +988,20 @@ function registerBuildingsRoutes(deps) {
       const inserted = await db.prepare(`
         INSERT INTO user_edits.building_user_edits (
           osm_type, osm_id, created_by,
-          name, style, levels, year_built, architect, address, archimap_description, edited_fields_json,
+          name, style, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
           status, created_at, updated_at
         )
         VALUES (
           @osm_type, @osm_id, @created_by,
-          @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json,
+          @name, @style, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
           'pending', datetime('now'), datetime('now')
         )
       `).run({
         osm_type: osmType,
         osm_id: osmId,
         created_by: actorKey,
+        source_tags_json: currentContour.tags_json ?? null,
+        source_osm_updated_at: currentContour.updated_at ?? null,
         ...payload
       });
       return Number(inserted?.lastInsertRowid || 0);

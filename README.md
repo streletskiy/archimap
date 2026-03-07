@@ -177,6 +177,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - Docs index -> [docs/README.md](docs/README.md)
 - Architecture -> [docs/architecture.md](docs/architecture.md)
 - API -> [docs/api.md](docs/api.md)
+- OSM import pipeline -> [docs/osm-import-pipeline.md](docs/osm-import-pipeline.md)
 - Security -> [docs/security.md](docs/security.md)
 - Performance -> [docs/performance/](docs/performance/)
 - Runbook -> [docs/runbook.md](docs/runbook.md)

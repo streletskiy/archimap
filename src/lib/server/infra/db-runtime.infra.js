@@ -223,7 +223,6 @@ async function createDbRuntime(options = {}) {
     localEditsDbPath: sqlite.localEditsDbPath,
     userEditsDbPath: sqlite.userEditsDbPath,
     userAuthDbPath: sqlite.userAuthDbPath,
-    buildingsPmtilesPath: sqlite.buildingsPmtilesPath,
     ensureAuthSchema: sqlite.ensureAuthSchema,
     rtreeRebuildBatchSize: sqlite.rtreeRebuildBatchSize,
     rtreeRebuildPauseMs: sqlite.rtreeRebuildPauseMs,

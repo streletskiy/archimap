@@ -7,6 +7,7 @@
   import { apiJson } from '$lib/services/http';
   import { getRuntimeConfig } from '$lib/services/config';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
+  import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { t, translateNow } from '$lib/i18n/index';
   import { getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, parseEditKey } from '$lib/utils/edit-ui';
   import { focusMapOnGeometry, getGeometryCenter } from '$lib/utils/map-geometry';
@@ -51,6 +52,7 @@
   let mapRuntimePromise = null;
   let protocol = null;
   let mapInitNonce = 0;
+  let activeRegionPmtiles = [];
   const centerByKey = new Map();
   const editIdByKey = new Map();
 
@@ -71,6 +73,57 @@
 
   function styleByTheme() {
     return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark' ? DARK : LIGHT;
+  }
+
+  function getEditedFillLayerIds() {
+    return activeRegionPmtiles.length > 0
+      ? activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'edited-fill'))
+      : ['edited-fill'];
+  }
+
+  function getEditedLineLayerIds() {
+    return activeRegionPmtiles.length > 0
+      ? activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'edited-line'))
+      : ['edited-line'];
+  }
+
+  function ensureAccountBuildingLayers(cfg) {
+    if (!map) return;
+    const regions = Array.isArray(cfg?.buildingRegionsPmtiles) ? cfg.buildingRegionsPmtiles : [];
+    activeRegionPmtiles = regions;
+
+    if (!map.getSource('selected-building')) {
+      map.addSource('selected-building', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getSource(SRC)) {
+      map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterRadius: 44, clusterMaxZoom: 12 });
+    }
+
+    if (map.getLayer('edited-fill')) map.removeLayer('edited-fill');
+    if (map.getLayer('edited-line')) map.removeLayer('edited-line');
+    if (map.getSource('local-buildings')) map.removeSource('local-buildings');
+
+    for (const region of regions) {
+      const sourceId = buildRegionSourceId(region.id);
+      const fillLayerId = buildRegionLayerId(region.id, 'edited-fill');
+      const lineLayerId = buildRegionLayerId(region.id, 'edited-line');
+      const sourceUrl = resolvePmtilesUrl(region.url, window.location.origin);
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, { type: 'vector', url: `pmtiles://${sourceUrl}` });
+      }
+      if (!map.getLayer(fillLayerId)) {
+        map.addLayer({ id: fillLayerId, type: 'fill', source: sourceId, 'source-layer': region.sourceLayer, minzoom: 13, paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.25 } });
+      }
+      if (!map.getLayer(lineLayerId)) {
+        map.addLayer({ id: lineLayerId, type: 'line', source: sourceId, 'source-layer': region.sourceLayer, minzoom: 13, paint: { 'line-color': '#2B2824', 'line-width': 2 } });
+      }
+    }
+
+    if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.2 } });
+    if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#2B2824', 'line-width': 3 } });
+    if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
+    if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': MAP_PIN_INK } });
+    if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
   }
 
   function focusMapOnFeature(feature) {
@@ -104,7 +157,6 @@
       maplibregl.addProtocol('pmtiles', protocol.tile);
     }
     const cfg = getRuntimeConfig();
-    const pmtilesUrl = resolvePmtilesUrl(cfg.buildingsPmtiles.url, window.location.origin);
     map = new maplibregl.Map({
       container: mapEl,
       style: styleByTheme(),
@@ -118,16 +170,7 @@
     }));
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.on('style.load', () => {
-      if (!map.getSource('local-buildings')) map.addSource('local-buildings', { type: 'vector', url: `pmtiles://${pmtilesUrl}` });
-      if (!map.getSource('selected-building')) map.addSource('selected-building', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterRadius: 44, clusterMaxZoom: 12 });
-      if (!map.getLayer('edited-fill')) map.addLayer({ id: 'edited-fill', type: 'fill', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.25 } });
-      if (!map.getLayer('edited-line')) map.addLayer({ id: 'edited-line', type: 'line', source: 'local-buildings', 'source-layer': cfg.buildingsPmtiles.sourceLayer, minzoom: 13, paint: { 'line-color': '#2B2824', 'line-width': 2 } });
-      if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.2 } });
-      if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#2B2824', 'line-width': 3 } });
-      if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
-      if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': MAP_PIN_INK } });
-      if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
+      ensureAccountBuildingLayers(cfg);
       applyMapData();
       fitAllEdited();
     });
@@ -142,8 +185,11 @@
       const id = Number(e?.features?.[0]?.properties?.editId || 0);
       if (Number.isInteger(id) && id > 0) await openEdit(id);
     });
-    map.on('click', 'edited-fill', async (e) => {
-      const v = Number(e?.features?.[0]?.id);
+    map.on('click', async (e) => {
+      const clusterFeatures = map.queryRenderedFeatures(e.point, { layers: [L_CLUSTER, L_POINT] });
+      if (Array.isArray(clusterFeatures) && clusterFeatures.length > 0) return;
+      const buildingFeatures = map.queryRenderedFeatures(e.point, { layers: getEditedFillLayerIds() });
+      const v = Number(buildingFeatures?.[0]?.id);
       if (!Number.isInteger(v)) return;
       const key = `${v % 2 === 1 ? 'relation' : 'way'}/${Math.floor(v / 2)}`;
       const id = Number(editIdByKey.get(key) || 0);
@@ -171,8 +217,12 @@
       if (p) ids.push((p.osmId * 2) + (p.osmType === 'relation' ? 1 : 0));
     }
     map.getSource(SRC).setData({ type: 'FeatureCollection', features });
-    if (map.getLayer('edited-fill')) map.setFilter('edited-fill', ['in', ['id'], ['literal', ids]]);
-    if (map.getLayer('edited-line')) map.setFilter('edited-line', ['in', ['id'], ['literal', ids]]);
+    for (const layerId of getEditedFillLayerIds()) {
+      if (map.getLayer(layerId)) map.setFilter(layerId, ['in', ['id'], ['literal', ids]]);
+    }
+    for (const layerId of getEditedLineLayerIds()) {
+      if (map.getLayer(layerId)) map.setFilter(layerId, ['in', ['id'], ['literal', ids]]);
+    }
   }
 
   async function loadCenters(items) {
@@ -467,7 +517,7 @@
                         {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
                     {@const counters = getChangeCounters(it.changes)}
                     <tr class="cursor-pointer border-b border-slate-100 hover:bg-slate-50" on:click={() => openEdit(it.id || it.editId)}>
-                      <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs text-rose-600">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
+                      <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p><div class="mt-1 flex flex-wrap gap-1">{#if it.orphaned}<span class="rounded-md bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700">{$t('account.edits.orphaned')}</span>{/if}{#if !it.osmPresent && !it.orphaned}<span class="rounded-md bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">{$t('account.edits.missingTarget')}</span>{/if}{#if it.sourceOsmChanged}<span class="rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-800">{$t('account.edits.osmChanged')}</span>{/if}</div>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs text-rose-600">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
                       <td class="px-3 py-2">{it.updatedBy || '-'}</td>
                       <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
           <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-slate-200 px-2 py-1 text-xs text-slate-700">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
@@ -491,6 +541,19 @@
           {:else}
                 {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
             <p class="flex flex-wrap items-center gap-2 text-sm text-slate-600"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
+            {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
+              <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                {#if selectedEdit.orphaned}
+                  <p>{$t('account.edits.orphanedHelp')}</p>
+                {/if}
+                {#if !selectedEdit.osmPresent && !selectedEdit.orphaned}
+                  <p>{$t('account.edits.missingTargetHelp')}</p>
+                {/if}
+                {#if selectedEdit.sourceOsmChanged}
+                  <p>{$t('account.edits.osmChangedHelp')}</p>
+                {/if}
+              </div>
+            {/if}
             <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border border-slate-200 p-2">
               {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
                 <p class="text-sm text-slate-500">{$t('account.edits.noChanges')}</p>

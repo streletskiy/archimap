@@ -2,6 +2,8 @@ const { sanitizeEditedFields } = require('./edits.service');
 
 function createBuildingEditsService({ db, normalizeUserEditStatus }) {
   const isPostgres = db.provider === 'postgres';
+  const REASSIGNABLE_EDIT_STATUSES = new Set(['pending', 'accepted', 'partially_accepted']);
+  const MERGED_EDIT_STATUSES = new Set(['accepted', 'partially_accepted']);
 
   function normalizeInfoForDiff(value) {
     if (value == null) return null;
@@ -105,6 +107,29 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
+  }
+
+  async function getOsmContourRow(osmType, osmId) {
+    return await db.prepare(`
+      SELECT osm_type, osm_id, tags_json, updated_at
+      FROM osm.building_contours
+      WHERE osm_type = ? AND osm_id = ?
+      LIMIT 1
+    `).get(osmType, osmId) || null;
+  }
+
+  async function countMergedEditsForTarget(osmType, osmId, excludeEditId = null) {
+    const excludedId = Number(excludeEditId);
+    const hasExcludedId = Number.isInteger(excludedId) && excludedId > 0;
+    const row = await db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM user_edits.building_user_edits
+      WHERE osm_type = ?
+        AND osm_id = ?
+        AND status IN ('accepted', 'partially_accepted')
+        ${hasExcludedId ? 'AND id <> ?' : ''}
+    `).get(...(hasExcludedId ? [osmType, osmId, excludedId] : [osmType, osmId])) || {};
+    return Math.max(0, Number(row.total || 0));
   }
 
   async function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
@@ -220,6 +245,24 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     }
   }
 
+  function stableNormalizeJson(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => stableNormalizeJson(item));
+    }
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      out[key] = stableNormalizeJson(value[key]);
+    }
+    return out;
+  }
+
+  function normalizeTagsFingerprint(raw) {
+    return JSON.stringify(stableNormalizeJson(parseTagsJsonSafe(raw)));
+  }
+
   function getSessionEditActorKey(req) {
     const email = String(req?.session?.user?.email || '').trim().toLowerCase();
     if (email) return email;
@@ -227,7 +270,63 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     return username || null;
   }
 
+  function normalizeMergedInfoRow(row) {
+    if (!row) return null;
+    const hasMergedValue = row.name != null
+      || row.style != null
+      || row.levels != null
+      || row.year_built != null
+      || row.architect != null
+      || row.address != null
+      || row.description != null
+      || row.archimap_description != null;
+    if (!hasMergedValue) return null;
+
+    return {
+      name: row.name ?? null,
+      style: row.style ?? null,
+      levels: row.levels ?? null,
+      year_built: row.year_built ?? null,
+      architect: row.architect ?? null,
+      address: row.address ?? null,
+      description: row.description ?? null,
+      archimap_description: row.archimap_description ?? null,
+      updated_by: row.updated_by ?? null,
+      updated_at: row.updated_at ?? null
+    };
+  }
+
+  function buildEditRuntimeState(row, mergedInfoRow = null) {
+    const status = normalizeUserEditStatus(row?.status);
+    const osmPresent = row?.contour_osm_id != null;
+    const hasMergedLocal = Boolean(mergedInfoRow);
+    const orphaned = !osmPresent && hasMergedLocal;
+    const sourceOsmChanged = Boolean(
+      osmPresent
+      && row?.source_tags_json
+      && normalizeTagsFingerprint(row.source_tags_json) !== normalizeTagsFingerprint(row.tags_json)
+    );
+    const mergedEditsForTarget = Math.max(0, Number(row?.merged_edits_for_target || 0));
+    const canHardDelete = !MERGED_EDIT_STATUSES.has(status) || mergedEditsForTarget <= 1;
+    const hardDeleteBlockedReason = canHardDelete
+      ? null
+      : 'merged_with_other_accepted_edits';
+
+    return {
+      status,
+      osmPresent,
+      orphaned,
+      hasMergedLocal,
+      sourceOsmChanged,
+      canReassign: REASSIGNABLE_EDIT_STATUSES.has(status),
+      canHardDelete,
+      hardDeleteBlockedReason,
+      mergedEditsForTarget
+    };
+  }
+
   function mapUserEditRow(row, tags, mergedInfoRow) {
+    const runtimeState = buildEditRuntimeState(row, mergedInfoRow);
     const changes = buildChangesFromRows(row, tags, mergedInfoRow);
     const editedFields = getEditedFieldsFromRow(row);
     const mergedFields = row.merged_fields_json
@@ -249,12 +348,22 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       updatedBy: row.created_by,
       updatedAt: row.updated_at,
       createdAt: row.created_at,
-      status: normalizeUserEditStatus(row.status),
+      status: runtimeState.status,
       adminComment: row.admin_comment ?? null,
       reviewedBy: row.reviewed_by ?? null,
       reviewedAt: row.reviewed_at ?? null,
       mergedBy: row.merged_by ?? null,
       mergedAt: row.merged_at ?? null,
+      osmPresent: runtimeState.osmPresent,
+      orphaned: runtimeState.orphaned,
+      hasMergedLocal: runtimeState.hasMergedLocal,
+      sourceOsmChanged: runtimeState.sourceOsmChanged,
+      canReassign: runtimeState.canReassign,
+      canHardDelete: runtimeState.canHardDelete,
+      hardDeleteBlockedReason: runtimeState.hardDeleteBlockedReason,
+      mergedEditsForTarget: runtimeState.mergedEditsForTarget,
+      sourceOsmUpdatedAt: row.source_osm_updated_at ?? null,
+      currentOsmUpdatedAt: row.current_osm_updated_at ?? null,
       editedFields,
       mergedFields,
       values: {
@@ -297,8 +406,18 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
         ue.created_by,
         ue.updated_at,
         ue.created_at,
-        ue.status
+        ue.status,
+        bc.osm_id AS contour_osm_id,
+        (
+          SELECT COUNT(*)
+          FROM user_edits.building_user_edits ue2
+          WHERE ue2.osm_type = ue.osm_type
+            AND ue2.osm_id = ue.osm_id
+            AND ue2.status IN ('accepted', 'partially_accepted')
+        ) AS merged_edits_for_target
       FROM user_edits.building_user_edits ue
+      LEFT JOIN osm.building_contours bc
+        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
       ${whereSql}
       ORDER BY ue.updated_at DESC, ue.id DESC
       LIMIT ?
@@ -312,14 +431,24 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
         updatedBy: row.created_by,
         updatedAt: row.updated_at,
         createdAt: row.created_at,
-        status: normalizeUserEditStatus(row.status)
+        status: normalizeUserEditStatus(row.status),
+        osmPresent: row.contour_osm_id != null
       }));
     }
 
     const rows = await db.prepare(`
       SELECT
         ue.*,
+        bc.osm_id AS contour_osm_id,
         bc.tags_json,
+        bc.updated_at AS current_osm_updated_at,
+        (
+          SELECT COUNT(*)
+          FROM user_edits.building_user_edits ue2
+          WHERE ue2.osm_type = ue.osm_type
+            AND ue2.osm_id = ue.osm_id
+            AND ue2.status IN ('accepted', 'partially_accepted')
+        ) AS merged_edits_for_target,
         ai.name AS merged_name,
         ai.style AS merged_style,
         ai.levels AS merged_levels,
@@ -342,21 +471,19 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
     const out = [];
     for (const row of rows) {
-      const tags = parseTagsJsonSafe(row.tags_json);
-      const mergedInfoRow = row.merged_name != null || row.merged_style != null || row.merged_levels != null || row.merged_year_built != null || row.merged_architect != null || row.merged_address != null || row.merged_description != null || row.merged_archimap_description != null
-        ? {
-          name: row.merged_name,
-          style: row.merged_style,
-          levels: row.merged_levels,
-          year_built: row.merged_year_built,
-          architect: row.merged_architect,
-          address: row.merged_address,
-          description: row.merged_description,
-          archimap_description: row.merged_archimap_description,
-          updated_by: row.merged_updated_by,
-          updated_at: row.merged_updated_at
-        }
-        : null;
+      const tags = parseTagsJsonSafe(row.source_tags_json || row.tags_json);
+      const mergedInfoRow = normalizeMergedInfoRow({
+        name: row.merged_name,
+        style: row.merged_style,
+        levels: row.merged_levels,
+        year_built: row.merged_year_built,
+        architect: row.merged_architect,
+        address: row.merged_address,
+        description: row.merged_description,
+        archimap_description: row.merged_archimap_description,
+        updated_by: row.merged_updated_by,
+        updated_at: row.merged_updated_at
+      });
 
       out.push(mapUserEditRow(row, tags, mergedInfoRow));
     }
@@ -370,7 +497,16 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     const row = await db.prepare(`
       SELECT
         ue.*,
+        bc.osm_id AS contour_osm_id,
         bc.tags_json,
+        bc.updated_at AS current_osm_updated_at,
+        (
+          SELECT COUNT(*)
+          FROM user_edits.building_user_edits ue2
+          WHERE ue2.osm_type = ue.osm_type
+            AND ue2.osm_id = ue.osm_id
+            AND ue2.status IN ('accepted', 'partially_accepted')
+        ) AS merged_edits_for_target,
         ai.name AS merged_name,
         ai.style AS merged_style,
         ai.levels AS merged_levels,
@@ -392,24 +528,24 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
     if (!row) return null;
 
-    const tags = parseTagsJsonSafe(row.tags_json);
-    const mergedInfoRow = row.merged_name != null || row.merged_style != null || row.merged_levels != null || row.merged_year_built != null || row.merged_architect != null || row.merged_address != null || row.merged_description != null || row.merged_archimap_description != null
-      ? {
-        name: row.merged_name,
-        style: row.merged_style,
-        levels: row.merged_levels,
-        year_built: row.merged_year_built,
-        architect: row.merged_architect,
-        address: row.merged_address,
-        description: row.merged_description,
-        archimap_description: row.merged_archimap_description,
-        updated_by: row.merged_updated_by,
-        updated_at: row.merged_updated_at
-      }
-      : null;
+    const tags = parseTagsJsonSafe(row.source_tags_json || row.tags_json);
+    const mergedInfoRow = normalizeMergedInfoRow({
+      name: row.merged_name,
+      style: row.merged_style,
+      levels: row.merged_levels,
+      year_built: row.merged_year_built,
+      architect: row.merged_architect,
+      address: row.merged_address,
+      description: row.merged_description,
+      archimap_description: row.merged_archimap_description,
+      updated_by: row.merged_updated_by,
+      updated_at: row.merged_updated_at
+    });
 
     const mapped = mapUserEditRow(row, tags, mergedInfoRow);
     mapped.tags = tags;
+    mapped.currentTags = parseTagsJsonSafe(row.tags_json);
+    mapped.sourceTags = parseTagsJsonSafe(row.source_tags_json);
     mapped.latestMerged = mergedInfoRow
       ? {
         name: mergedInfoRow.name ?? null,
@@ -425,6 +561,201 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
       }
       : null;
     return mapped;
+  }
+
+  function mergeLocalInfoForReassign(sourceRow, targetRow, { force = false } = {}) {
+    const fields = ['name', 'style', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+    const conflicts = [];
+    const merged = {};
+
+    for (const field of fields) {
+      const sourceValue = sourceRow?.[field] ?? null;
+      const targetValue = targetRow?.[field] ?? null;
+
+      if (sourceValue == null) {
+        merged[field] = targetValue;
+        continue;
+      }
+      if (targetValue == null || normalizeComparableForField(field, sourceValue) === normalizeComparableForField(field, targetValue) || force) {
+        merged[field] = sourceValue;
+        continue;
+      }
+
+      conflicts.push(field);
+      merged[field] = targetValue;
+    }
+
+    return { merged, conflicts };
+  }
+
+  async function reassignUserEdit(editId, target, options = {}) {
+    const id = Number(editId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Некорректный идентификатор правки');
+    }
+
+    const targetOsmType = String(target?.osmType || '').trim();
+    const targetOsmId = Number(target?.osmId);
+    if (!['way', 'relation'].includes(targetOsmType) || !Number.isInteger(targetOsmId) || targetOsmId <= 0) {
+      throw new Error('Некорректный идентификатор целевого здания');
+    }
+
+    const actor = String(options.actor || '').trim() || 'admin';
+    const force = Boolean(options.force);
+    const item = await getUserEditDetailsById(id);
+    if (!item) {
+      throw new Error('Правка не найдена');
+    }
+    if (!REASSIGNABLE_EDIT_STATUSES.has(item.status)) {
+      throw new Error('Эту правку нельзя переназначить');
+    }
+
+    const targetContour = await getOsmContourRow(targetOsmType, targetOsmId);
+    if (!targetContour) {
+      throw new Error('Целевое здание не найдено в локальной базе контуров');
+    }
+
+    if (item.osmType === targetOsmType && Number(item.osmId) === targetOsmId) {
+      return item;
+    }
+
+    if (item.status === 'pending') {
+      const tx = db.transaction(async () => {
+        await db.prepare(`
+          UPDATE user_edits.building_user_edits
+          SET
+            osm_type = ?,
+            osm_id = ?,
+            source_tags_json = ?,
+            source_osm_updated_at = ?,
+            updated_at = datetime('now')
+          WHERE id = ?
+        `).run(targetOsmType, targetOsmId, targetContour.tags_json ?? null, targetContour.updated_at ?? null, id);
+
+        await supersedePendingUserEdits(targetOsmType, targetOsmId, item.updatedBy, id);
+      });
+
+      await tx();
+      return getUserEditDetailsById(id);
+    }
+
+    const sourceMerged = await getMergedInfoRow(item.osmType, item.osmId);
+    if (!sourceMerged) {
+      throw new Error('Локальные объединённые данные для этой правки не найдены');
+    }
+    const targetMerged = await getMergedInfoRow(targetOsmType, targetOsmId);
+    const { merged, conflicts } = mergeLocalInfoForReassign(sourceMerged, targetMerged, { force });
+    if (conflicts.length > 0) {
+      throw new Error(`Целевое здание уже содержит конфликтующие локальные поля: ${conflicts.join(', ')}`);
+    }
+
+    const tx = db.transaction(async () => {
+      await db.prepare(`
+        INSERT INTO local.architectural_info (
+          osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(osm_type, osm_id) DO UPDATE SET
+          name = excluded.name,
+          style = excluded.style,
+          levels = excluded.levels,
+          year_built = excluded.year_built,
+          architect = excluded.architect,
+          address = excluded.address,
+          archimap_description = excluded.archimap_description,
+          updated_by = excluded.updated_by,
+          updated_at = datetime('now')
+      `).run(
+        targetOsmType,
+        targetOsmId,
+        merged.name ?? null,
+        merged.style ?? null,
+        merged.levels ?? null,
+        merged.year_built ?? null,
+        merged.architect ?? null,
+        merged.address ?? null,
+        merged.archimap_description ?? null,
+        actor
+      );
+
+      await db.prepare(`
+        DELETE FROM local.architectural_info
+        WHERE osm_type = ? AND osm_id = ?
+      `).run(item.osmType, item.osmId);
+
+      await db.prepare(`
+        UPDATE user_edits.building_user_edits
+        SET
+          osm_type = ?,
+          osm_id = ?,
+          updated_at = datetime('now')
+        WHERE osm_type = ?
+          AND osm_id = ?
+          AND status IN ('accepted', 'partially_accepted')
+      `).run(targetOsmType, targetOsmId, item.osmType, item.osmId);
+    });
+
+    await tx();
+    return getUserEditDetailsById(id);
+  }
+
+  async function deleteUserEdit(editId) {
+    const id = Number(editId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Некорректный идентификатор правки');
+    }
+
+    const tx = db.transaction(async () => {
+      const row = await db.prepare(`
+        SELECT id, osm_type, osm_id, status
+        FROM user_edits.building_user_edits
+        WHERE id = ?
+        LIMIT 1
+      `).get(id);
+
+      if (!row) {
+        const error = new Error('Правка не найдена');
+        error.code = 'EDIT_NOT_FOUND';
+        throw error;
+      }
+
+      const status = normalizeUserEditStatus(row.status);
+      const deletesMergedLocal = MERGED_EDIT_STATUSES.has(status);
+      if (deletesMergedLocal) {
+        const otherMergedCount = await countMergedEditsForTarget(row.osm_type, row.osm_id, id);
+        if (otherMergedCount > 0) {
+          const error = new Error('Нельзя полностью удалить принятую правку, пока у здания есть другие accepted/partially_accepted правки: локальные merged-данные уже общие.');
+          error.code = 'EDIT_DELETE_SHARED_MERGED_STATE';
+          throw error;
+        }
+
+        await db.prepare(`
+          DELETE FROM local.architectural_info
+          WHERE osm_type = ? AND osm_id = ?
+        `).run(row.osm_type, row.osm_id);
+      }
+
+      const result = await db.prepare(`
+        DELETE FROM user_edits.building_user_edits
+        WHERE id = ?
+      `).run(id);
+
+      if (Number(result?.changes || 0) === 0) {
+        const error = new Error('Правка не найдена');
+        error.code = 'EDIT_NOT_FOUND';
+        throw error;
+      }
+
+      return {
+        editId: id,
+        osmType: row.osm_type,
+        osmId: Number(row.osm_id),
+        status,
+        deletedMergedLocal: deletesMergedLocal
+      };
+    });
+
+    return tx();
   }
 
   async function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
@@ -557,12 +888,15 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     ARCHI_EDIT_FIELDS,
     ARCHI_FIELD_SET,
     getMergedInfoRow,
+    getOsmContourRow,
     getLatestUserEditRow,
     supersedePendingUserEdits,
     getSessionEditActorKey,
     applyUserEditRowToInfo,
     getUserEditsList,
     getUserEditDetailsById,
+    reassignUserEdit,
+    deleteUserEdit,
     getUserPersonalEditsByKeys,
     mergePersonalEditsIntoFeatureInfo,
     applyPersonalEditsToFilterItems

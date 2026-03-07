@@ -22,7 +22,6 @@ function initDbBootstrapInfra(options = {}) {
     localEditsDbPath,
     userEditsDbPath,
     userAuthDbPath,
-    buildingsPmtilesPath,
     ensureAuthSchema,
     rtreeRebuildBatchSize = 4000,
     rtreeRebuildPauseMs = 8,
@@ -36,7 +35,6 @@ function initDbBootstrapInfra(options = {}) {
   ensureParentDir(localEditsDbPath);
   ensureParentDir(userEditsDbPath);
   ensureParentDir(userAuthDbPath);
-  ensureParentDir(buildingsPmtilesPath);
 
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');

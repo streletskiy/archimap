@@ -34,11 +34,8 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-it-'));
   const port = 3600 + Math.floor(Math.random() * 400);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const pmtilesFileName = `test-buildings-${Date.now()}.pmtiles`;
   const repoDataDir = path.join(__dirname, '..', '..', 'data');
-  const pmtilesPath = path.join(repoDataDir, pmtilesFileName);
-  fs.mkdirSync(repoDataDir, { recursive: true });
-  fs.writeFileSync(pmtilesPath, Buffer.alloc(4096, 7));
+  const generatedPmtilesPaths = [];
 
   const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: path.join(__dirname, '..', '..'),
@@ -67,8 +64,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       ARCHIMAP_DB_PATH: path.join(tempRoot, 'archimap.db'),
       LOCAL_EDITS_DB_PATH: path.join(tempRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tempRoot, 'user-edits.db'),
-      USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: pmtilesFileName
+      USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -286,6 +282,138 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.ok(Array.isArray(mapSearchBody.items));
     });
 
+    await t.test('admin data settings endpoints support create/rename/delete flow for regions', async () => {
+      const dataSettings = await callApi('/api/admin/app-settings/data');
+      assert.equal(dataSettings.status, 200);
+      const dataSettingsBody = await dataSettings.json();
+      assert.equal(dataSettingsBody?.ok, true);
+      assert.ok(Array.isArray(dataSettingsBody?.item?.regions));
+
+      const createRegion = await callApi('/api/admin/app-settings/data/regions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          region: {
+            name: 'Test Region',
+            slug: 'test-region',
+            sourceType: 'extract_query',
+            sourceValue: 'Test Region',
+            enabled: true,
+            autoSyncEnabled: false,
+            autoSyncOnStart: false,
+            autoSyncIntervalHours: 0,
+            pmtilesMinZoom: 12,
+            pmtilesMaxZoom: 15,
+            sourceLayer: 'buildings'
+          }
+        })
+      });
+      assert.equal(createRegion.status, 200);
+      const createRegionBody = await createRegion.json();
+      assert.equal(createRegionBody?.ok, true);
+      assert.equal(createRegionBody?.item?.slug, 'test-region');
+
+      const regions = await callApi('/api/admin/app-settings/data/regions');
+      assert.equal(regions.status, 200);
+      const regionsBody = await regions.json();
+      assert.ok(Array.isArray(regionsBody?.items));
+      let region = regionsBody.items.find((item) => String(item?.slug || '') === 'test-region');
+      assert.ok(region);
+      assert.equal(region.lastSyncStatus, 'idle');
+
+      const runs = await callApi(`/api/admin/app-settings/data/regions/${region.id}/runs`);
+      assert.equal(runs.status, 200);
+      const runsBody = await runs.json();
+      assert.equal(runsBody?.ok, true);
+      assert.ok(Array.isArray(runsBody?.items));
+      assert.equal(runsBody.items.length, 0);
+
+      const renameRegion = await callApi('/api/admin/app-settings/data/regions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          region: {
+            id: region.id,
+            name: 'Renamed Test Region',
+            slug: 'renamed-test-region',
+            sourceType: 'extract_query',
+            sourceValue: 'Test Region',
+            enabled: true,
+            autoSyncEnabled: false,
+            autoSyncOnStart: false,
+            autoSyncIntervalHours: 0,
+            pmtilesMinZoom: 12,
+            pmtilesMaxZoom: 15,
+            sourceLayer: 'buildings'
+          }
+        })
+      });
+      assert.equal(renameRegion.status, 200);
+      const renameRegionBody = await renameRegion.json();
+      assert.equal(renameRegionBody?.ok, true);
+      assert.equal(renameRegionBody?.item?.id, region.id);
+      assert.equal(renameRegionBody?.item?.slug, 'renamed-test-region');
+      assert.equal(renameRegionBody?.item?.name, 'Renamed Test Region');
+
+      const regionsAfterRename = await callApi('/api/admin/app-settings/data/regions');
+      assert.equal(regionsAfterRename.status, 200);
+      const regionsAfterRenameBody = await regionsAfterRename.json();
+      region = regionsAfterRenameBody.items.find((item) => Number(item?.id || 0) === Number(region.id));
+      assert.ok(region);
+      assert.equal(region.slug, 'renamed-test-region');
+      assert.equal(region.name, 'Renamed Test Region');
+
+      const regionPmtilesPath = path.join(repoDataDir, 'regions', `buildings-region-${region.slug}.pmtiles`);
+      fs.mkdirSync(path.dirname(regionPmtilesPath), { recursive: true });
+      fs.writeFileSync(regionPmtilesPath, Buffer.alloc(4096, 7));
+      generatedPmtilesPaths.push(regionPmtilesPath);
+
+      const response = await callApi(`/api/data/regions/${region.id}/pmtiles`, {
+        headers: {
+          range: 'bytes=0-1023'
+        }
+      });
+      assert.equal(response.status, 206);
+      assert.equal(response.headers.get('accept-ranges'), 'bytes');
+      assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
+      const payload = new Uint8Array(await response.arrayBuffer());
+      assert.equal(payload.length, 1024);
+
+      const full = await callApi(`/api/data/regions/${region.id}/pmtiles`);
+      assert.equal(full.status, 200);
+      const pmtilesEtag = String(full.headers.get('etag') || '');
+      assert.ok(pmtilesEtag.length > 0);
+      assert.ok(String(full.headers.get('last-modified') || '').length > 0);
+      await full.arrayBuffer();
+
+      const notModified = await callApi(`/api/data/regions/${region.id}/pmtiles`, {
+        headers: { 'if-none-match': pmtilesEtag }
+      });
+      assert.equal(notModified.status, 304);
+
+      const deleteRegion = await callApi(`/api/admin/app-settings/data/regions/${region.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-csrf-token': csrfToken
+        }
+      });
+      const deleteRegionBody = await deleteRegion.json().catch(async () => ({ error: await deleteRegion.text() }));
+      assert.equal(deleteRegion.status, 200, JSON.stringify(deleteRegionBody));
+      assert.equal(deleteRegionBody?.ok, true);
+      assert.equal(deleteRegionBody?.item?.region?.id, region.id, JSON.stringify(deleteRegionBody));
+
+      const regionsAfterDelete = await callApi('/api/admin/app-settings/data/regions');
+      assert.equal(regionsAfterDelete.status, 200);
+      const regionsAfterDeleteBody = await regionsAfterDelete.json();
+      assert.equal(regionsAfterDeleteBody.items.some((item) => Number(item?.id || 0) === Number(region.id)), false);
+    });
+
     await t.test('filter-matches endpoint validates input, returns meta and uses cache', async () => {
       const invalid = await callApi('/api/buildings/filter-matches', {
         method: 'POST',
@@ -345,36 +473,15 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(secondBody?.meta?.bboxHash, firstBody?.meta?.bboxHash);
     });
 
-    await t.test('pmtiles supports range requests', async () => {
-      const response = await callApi('/api/buildings.pmtiles', {
-        headers: {
-          range: 'bytes=0-1023'
-        }
-      });
-      assert.equal(response.status, 206);
-      assert.equal(response.headers.get('accept-ranges'), 'bytes');
-      assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
-      const payload = new Uint8Array(await response.arrayBuffer());
-      assert.equal(payload.length, 1024);
-
-      const full = await callApi('/api/buildings.pmtiles');
-      assert.equal(full.status, 200);
-      const pmtilesEtag = String(full.headers.get('etag') || '');
-      assert.ok(pmtilesEtag.length > 0);
-      assert.ok(String(full.headers.get('last-modified') || '').length > 0);
-
-      const notModified = await callApi('/api/buildings.pmtiles', {
-        headers: { 'if-none-match': pmtilesEtag }
-      });
-      assert.equal(notModified.status, 304);
-    });
   } finally {
     if (server.exitCode == null) {
       server.kill('SIGTERM');
       await new Promise((resolve) => server.once('exit', resolve));
     }
     fs.rmSync(tempRoot, { recursive: true, force: true });
-    fs.rmSync(pmtilesPath, { force: true });
+    for (const filePath of generatedPmtilesPaths) {
+      fs.rmSync(filePath, { force: true });
+    }
   }
 
   if (server.exitCode && server.exitCode !== 0) {

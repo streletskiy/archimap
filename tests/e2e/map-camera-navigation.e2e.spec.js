@@ -49,8 +49,7 @@ test.beforeAll(async () => {
       ARCHIMAP_DB_PATH: path.join(tmpRoot, 'archimap.db'),
       LOCAL_EDITS_DB_PATH: path.join(tmpRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tmpRoot, 'user-edits.db'),
-      USER_AUTH_DB_PATH: path.join(tmpRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: 'buildings.pmtiles'
+      USER_AUTH_DB_PATH: path.join(tmpRoot, 'users.db')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

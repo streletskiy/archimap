@@ -3,6 +3,10 @@ const fs = require('fs');
 const { pathToFileURL } = require('url');
 const { sendCachedJson } = require('../infra/http-cache.infra');
 const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
+const {
+  resolveExistingRegionPmtilesPath,
+  resolveRegionPmtilesPath
+} = require('../services/data-settings.service');
 
 function createSvelteNodeHandlerInvoker(rootDir) {
   const handlerPath = path.join(rootDir, 'frontend', 'build', 'handler.js');
@@ -33,13 +37,13 @@ function registerAppRoutes(deps) {
     app,
     publicApiRateLimiter,
     rootDir,
-    buildingsPmtilesPath,
+    dataDir,
     normalizeMapConfig,
     getBuildInfo,
     getAppVersion,
     registrationEnabled,
     getRegistrationEnabled,
-    buildingsPmtilesSourceLayer,
+    dataSettingsService,
     getFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress
   } = deps;
@@ -47,12 +51,20 @@ function registerAppRoutes(deps) {
   const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
   const invokeSvelteNodeHandler = createSvelteNodeHandlerInvoker(rootDir);
 
-  app.get('/app-config.js', publicApiRateLimiter, (req, res) => {
+  async function getAvailableRegionPmtiles() {
+    if (!dataSettingsService) return [];
+    const regions = await dataSettingsService.listRuntimePmtilesRegions();
+    return regions.filter((region) => {
+      return Boolean(resolveExistingRegionPmtilesPath(dataDir, region));
+    }).map((region) => ({
+      ...region,
+      url: `/api/data/regions/${region.id}/pmtiles`
+    }));
+  }
+
+  app.get('/app-config.js', publicApiRateLimiter, async (req, res) => {
     const mapDefault = normalizeMapConfig();
-    const buildingsPmtiles = {
-      url: '/api/buildings.pmtiles',
-      sourceLayer: buildingsPmtilesSourceLayer
-    };
+    const regionalPmtiles = await getAvailableRegionPmtiles();
     const buildInfo = getBuildInfo();
     const mapSelection = {
       debug: String(process.env.MAP_SELECTION_ATOMIC_DEBUG || '').trim() === 'true'
@@ -64,7 +76,13 @@ function registerAppRoutes(deps) {
       registrationEnabled: effectiveRegistrationEnabled
     };
     res.type('application/javascript').send(
-      `window.__ARCHIMAP_CONFIG = ${JSON.stringify({ mapDefault, buildingsPmtiles, buildInfo, auth, mapSelection })};`
+      `window.__ARCHIMAP_CONFIG = ${JSON.stringify({
+        mapDefault,
+        buildingRegionsPmtiles: regionalPmtiles,
+        buildInfo,
+        auth,
+        mapSelection
+      })};`
     );
   });
 
@@ -104,8 +122,20 @@ function registerAppRoutes(deps) {
     return res.sendFile(frontendIndexPath);
   });
 
-  app.get('/api/buildings.pmtiles', (req, res) => {
-    return sendPmtiles(req, res, buildingsPmtilesPath, {
+  app.get('/api/data/regions/:regionId/pmtiles', async (req, res) => {
+    const regionId = Number(req.params.regionId);
+    if (!Number.isInteger(regionId) || regionId <= 0) {
+      return res.status(400).json({ error: 'Некорректный идентификатор региона' });
+    }
+    const region = dataSettingsService
+      ? await dataSettingsService.getRegionById(regionId)
+      : null;
+    if (!region) {
+      return res.status(404).json({ error: 'Регион не найден' });
+    }
+    const pmtilesPath = resolveExistingRegionPmtilesPath(dataDir, region)
+      || resolveRegionPmtilesPath(dataDir, region);
+    return sendPmtiles(req, res, pmtilesPath, {
       cacheControl: 'public, max-age=300, stale-while-revalidate=120'
     });
   });

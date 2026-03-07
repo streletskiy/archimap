@@ -7,7 +7,7 @@ services:
         BUILD_SHA: ${BUILD_SHA:-}
         BUILD_DESCRIBE: ${BUILD_DESCRIBE:-}
         BUILD_LATEST_TAG: ${BUILD_LATEST_TAG:-}
-    image: ${ARCHIMAP_IMAGE:-streletskiy/archimap:dev}
+    image: ${ARCHIMAP_IMAGE:-streletskiy/archimap:alpha}
     container_name: archimap
     restart: unless-stopped
     ports:

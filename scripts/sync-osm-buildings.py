@@ -7,30 +7,13 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
+from typing import Tuple
 
 import duckdb  # type: ignore
 from quackosm import PbfFileReader, convert_osm_extract_to_duckdb  # type: ignore
 
 
 BATCH_SIZE = 20000
-
-
-def parse_extract_queries(single: str, raw_list: str) -> List[str]:
-    out: List[str] = []
-    if single and single.strip():
-        out.append(single.strip())
-    out.extend([x.strip() for x in (raw_list or '').split(';') if x.strip()])
-
-    seen = set()
-    deduped: List[str] = []
-    for q in out:
-        key = q.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(q)
-    return deduped
 
 
 def ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
@@ -427,12 +410,6 @@ def main() -> None:
     parser.add_argument('--out-ndjson', required=False)
     args = parser.parse_args()
     extract_queries = list(args.extract_query or [])
-    extract_queries.extend(
-        parse_extract_queries(
-            os.getenv('OSM_EXTRACT_QUERY', ''),
-            os.getenv('OSM_EXTRACT_QUERIES', '')
-        )
-    )
     dedup = []
     seen = set()
     for q in extract_queries:
@@ -445,7 +422,7 @@ def main() -> None:
 
     pbf_path = (args.pbf or '').strip()
     if not pbf_path and not extract_queries:
-        raise ValueError('Either --pbf or --extract-query / OSM_EXTRACT_QUERY / OSM_EXTRACT_QUERIES must be provided')
+        raise ValueError('Either --pbf or --extract-query must be provided')
     if pbf_path and not os.path.exists(pbf_path):
         raise FileNotFoundError(pbf_path)
 

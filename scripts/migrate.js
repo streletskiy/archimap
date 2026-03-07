@@ -21,10 +21,6 @@ async function runSqliteMigrations() {
   const userEditsDbPath = String(process.env.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db')).trim() || path.join(dataDir, 'user-edits.db');
   const userAuthDbPath = String(process.env.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db');
   const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
-  const buildingsPmtilesPath = path.join(
-    dataDir,
-    String(process.env.BUILDINGS_PMTILES_FILE || 'buildings.pmtiles').trim() || 'buildings.pmtiles'
-  );
 
   const runtime = initDbBootstrapInfra({
     Database,
@@ -33,7 +29,6 @@ async function runSqliteMigrations() {
     localEditsDbPath,
     userEditsDbPath,
     userAuthDbPath,
-    buildingsPmtilesPath,
     ensureAuthSchema,
     migrationsDir,
     logger

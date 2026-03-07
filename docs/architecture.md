@@ -12,7 +12,7 @@
   - `data/user-edits.db` (moderation queue)
   - `data/users.db` (auth/users)
 - Redis (optional): session store backend.
-- PMTiles: local vector tiles file served as `/api/buildings.pmtiles`.
+- PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`.
 
 ## Execution boundaries
 

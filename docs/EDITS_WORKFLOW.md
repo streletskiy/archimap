@@ -26,6 +26,20 @@ Corner cases handled:
   - optimistic lock: merge/reject updates are allowed only when `status='pending'`.
 - Stale edit merge:
   - merge returns `409 EDIT_OUTDATED` when local building data changed after edit creation (unless `force=true`).
+- Upstream OSM drift:
+  - user edit stores OSM source snapshot (`source_tags_json`, `source_osm_updated_at`);
+  - merge returns `409 EDIT_OUTDATED_OSM` when current OSM tags changed after edit creation (unless `force=true`).
+- Missing OSM target:
+  - merge returns `409 EDIT_TARGET_MISSING` when the original contour no longer exists;
+  - admin must reassign the edit to another existing OSM object before merge.
+- Orphan accepted edit:
+  - accepted / partially accepted history rows remain visible in account/admin lists even if the original OSM contour disappears;
+  - admin can reassign merged local data to another existing OSM object.
+- Full delete by master admin:
+  - `pending`, `rejected`, `superseded` edits can be removed completely from history;
+  - `accepted` / `partially_accepted` can be fully deleted only when they are the only accepted edit for that OSM object;
+  - in that safe case the delete removes both the history row and `local.architectural_info`;
+  - if the same building already has other accepted edits, delete is blocked with `409 EDIT_DELETE_SHARED_MERGED_STATE` because merged local data is already shared.
 - Multiple edits from one user for same building:
   - only one active `pending`, old duplicate pendings become `superseded`.
 - Multiple users editing same building:

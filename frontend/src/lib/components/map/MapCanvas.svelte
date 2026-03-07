@@ -6,6 +6,12 @@
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
+  import {
+    buildRegionLayerId,
+    buildRegionSourceId,
+    getActiveRegionPmtiles,
+    pointInBounds
+  } from '$lib/services/region-pmtiles';
   import { t, translateNow } from '$lib/i18n/index';
   import {
     lastMapCamera,
@@ -34,14 +40,7 @@
   const dispatch = createEventDispatcher();
   const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
   const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
-  const BUILDINGS_SOURCE_ID = 'local-buildings';
-  const BUILDINGS_FILL_LAYER_ID = 'local-buildings-fill';
-  const BUILDINGS_LINE_LAYER_ID = 'local-buildings-line';
-  const FILTER_HIGHLIGHT_FILL_LAYER_ID = 'buildings-filter-highlight-fill';
-  const FILTER_HIGHLIGHT_LINE_LAYER_ID = 'buildings-filter-highlight-outline';
   const FILTER_HIGHLIGHT_MODE = 'feature-state';
-  const SELECTED_FILL_LAYER_ID = 'selected-building-fill';
-  const SELECTED_LINE_LAYER_ID = 'selected-building-line';
   const SEARCH_RESULTS_SOURCE_ID = 'search-results-points';
   const SEARCH_RESULTS_LAYER_ID = 'search-results-points-layer';
   const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
@@ -92,9 +91,7 @@
   let map = null;
   let maplibregl = null;
   let protocol = null;
-  let pmtilesArchive = null;
-  let pmtilesMinZoom = null;
-  let pmtilesMaxZoom = null;
+  let activeRegionPmtiles = [];
   let themeObserver = null;
   let mapMoveDebounceTimer = null;
   let coverageDebounceTimer = null;
@@ -103,7 +100,6 @@
   let prefetchFilterAbortController = null;
   let coverageEvalToken = 0;
   let coverageVisibleState = 'visible';
-  let coverageCache = new Map();
   let filterMatchesCache = new Map();
   let filterWorker = null;
   let filterWorkerReqSeq = 0;
@@ -233,20 +229,21 @@
       : [];
     window.__MAP_DEBUG__.filterPhaseHistory = [...phaseHistory, String(phase || 'idle')].slice(-120);
     if (map) {
-      const fillLayerVisible = map.getLayer(FILTER_HIGHLIGHT_FILL_LAYER_ID)
-        ? (map.getLayoutProperty(FILTER_HIGHLIGHT_FILL_LAYER_ID, 'visibility') || 'visible')
-        : 'missing';
-      const lineLayerVisible = map.getLayer(FILTER_HIGHLIGHT_LINE_LAYER_ID)
-        ? (map.getLayoutProperty(FILTER_HIGHLIGHT_LINE_LAYER_ID, 'visibility') || 'visible')
-        : 'missing';
-      window.__MAP_DEBUG__.layersVisibility = {
-        [BUILDINGS_FILL_LAYER_ID]: map.getLayoutProperty(BUILDINGS_FILL_LAYER_ID, 'visibility') || 'visible',
-        [BUILDINGS_LINE_LAYER_ID]: map.getLayoutProperty(BUILDINGS_LINE_LAYER_ID, 'visibility') || 'visible',
-        [FILTER_HIGHLIGHT_FILL_LAYER_ID]: fillLayerVisible,
-        [FILTER_HIGHLIGHT_LINE_LAYER_ID]: lineLayerVisible,
-        [SELECTED_FILL_LAYER_ID]: map.getLayoutProperty(SELECTED_FILL_LAYER_ID, 'visibility') || 'visible',
-        [SELECTED_LINE_LAYER_ID]: map.getLayoutProperty(SELECTED_LINE_LAYER_ID, 'visibility') || 'visible'
-      };
+      const visibilityByLayer = {};
+      const layerIds = [
+        ...getCurrentBuildingsFillLayerIds(),
+        ...getCurrentBuildingsLineLayerIds(),
+        ...getCurrentFilterHighlightFillLayerIds(),
+        ...getCurrentFilterHighlightLineLayerIds(),
+        ...getCurrentSelectedFillLayerIds(),
+        ...getCurrentSelectedLineLayerIds()
+      ];
+      for (const layerId of layerIds) {
+        visibilityByLayer[layerId] = map.getLayer(layerId)
+          ? (map.getLayoutProperty(layerId, 'visibility') || 'visible')
+          : 'missing';
+      }
+      window.__MAP_DEBUG__.layersVisibility = visibilityByLayer;
     }
   }
 
@@ -390,25 +387,68 @@
     return true;
   }
 
+  function getConfiguredRegionPmtiles(config = runtimeConfig) {
+    return Array.isArray(config?.buildingRegionsPmtiles) ? config.buildingRegionsPmtiles : [];
+  }
+
+  function getViewportActiveRegionPmtiles(config = runtimeConfig) {
+    if (!map) return [];
+    return getActiveRegionPmtiles(getConfiguredRegionPmtiles(config), map.getBounds());
+  }
+
+  function getCurrentBuildingSourceConfigs() {
+    return activeRegionPmtiles.map((region) => ({
+      regionId: region.id,
+      sourceId: buildRegionSourceId(region.id),
+      sourceLayer: region.sourceLayer
+    }));
+  }
+
+  function getCurrentBuildingsFillLayerIds() {
+    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'fill'));
+  }
+
+  function getCurrentBuildingsLineLayerIds() {
+    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'line'));
+  }
+
+  function getCurrentFilterHighlightFillLayerIds() {
+    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'filter-highlight-fill'));
+  }
+
+  function getCurrentFilterHighlightLineLayerIds() {
+    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'filter-highlight-line'));
+  }
+
+  function getCurrentSelectedFillLayerIds() {
+    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'selected-fill'));
+  }
+
+  function getCurrentSelectedLineLayerIds() {
+    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'selected-line'));
+  }
+
   function setLocalBuildingFeatureStateById(id, state) {
     if (!map) return false;
     if (!Number.isInteger(id) || id <= 0) return false;
-    const sourceLayer = runtimeConfig?.buildingsPmtiles?.sourceLayer;
-    if (!sourceLayer) return false;
-    try {
-      map.setFeatureState(
-        {
-          source: BUILDINGS_SOURCE_ID,
-          sourceLayer,
-          id
-        },
-        state
-      );
-      return true;
-    } catch {
-      // Source/style might be reloading.
-      return false;
+    let applied = false;
+    for (const sourceConfig of getCurrentBuildingSourceConfigs()) {
+      if (!sourceConfig?.sourceLayer) continue;
+      try {
+        map.setFeatureState(
+          {
+            source: sourceConfig.sourceId,
+            sourceLayer: sourceConfig.sourceLayer,
+            id
+          },
+          state
+        );
+        applied = true;
+      } catch {
+        // Source/style might be reloading.
+      }
     }
+    return applied;
   }
 
   function cancelPrefetchRequest() {
@@ -644,8 +684,13 @@
     if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
       return null;
     }
+    const buildingLayerIds = [
+      ...getCurrentBuildingsLineLayerIds(),
+      ...getCurrentBuildingsFillLayerIds()
+    ];
+    if (buildingLayerIds.length === 0) return null;
     const features = map.queryRenderedFeatures(event.point, {
-      layers: [BUILDINGS_LINE_LAYER_ID, BUILDINGS_FILL_LAYER_ID]
+      layers: buildingLayerIds
     });
     return features?.[0] || null;
   }
@@ -670,13 +715,15 @@
     if (!map) return;
     const filter = getSelectionFilter(feature, identity);
     const selectionKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
-    if (map.getLayer(SELECTED_FILL_LAYER_ID)) {
-      map.setFilter(SELECTED_FILL_LAYER_ID, filter);
-      recordDebugSetFilter(SELECTED_FILL_LAYER_ID);
+    for (const layerId of getCurrentSelectedFillLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+      recordDebugSetFilter(layerId);
     }
-    if (map.getLayer(SELECTED_LINE_LAYER_ID)) {
-      map.setFilter(SELECTED_LINE_LAYER_ID, filter);
-      recordDebugSetFilter(SELECTED_LINE_LAYER_ID);
+    for (const layerId of getCurrentSelectedLineLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+      recordDebugSetFilter(layerId);
     }
     debugSelectionLog('highlight-applied', {
       method: 'setFilter',
@@ -724,13 +771,15 @@
 
   function clearSelectedFeature() {
     if (!map) return;
-    if (map.getLayer(SELECTED_FILL_LAYER_ID)) {
-      map.setFilter(SELECTED_FILL_LAYER_ID, ['==', ['id'], -1]);
-      recordDebugSetFilter(SELECTED_FILL_LAYER_ID);
+    for (const layerId of getCurrentSelectedFillLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, ['==', ['id'], -1]);
+      recordDebugSetFilter(layerId);
     }
-    if (map.getLayer(SELECTED_LINE_LAYER_ID)) {
-      map.setFilter(SELECTED_LINE_LAYER_ID, ['==', ['id'], -1]);
-      recordDebugSetFilter(SELECTED_LINE_LAYER_ID);
+    for (const layerId of getCurrentSelectedLineLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, ['==', ['id'], -1]);
+      recordDebugSetFilter(layerId);
     }
   }
 
@@ -741,13 +790,15 @@
       osmId: Number(selection.osmId)
     };
     const filter = getSelectionFilter(null, identity);
-    if (map.getLayer(SELECTED_FILL_LAYER_ID)) {
-      map.setFilter(SELECTED_FILL_LAYER_ID, filter);
-      recordDebugSetFilter(SELECTED_FILL_LAYER_ID);
+    for (const layerId of getCurrentSelectedFillLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+      recordDebugSetFilter(layerId);
     }
-    if (map.getLayer(SELECTED_LINE_LAYER_ID)) {
-      map.setFilter(SELECTED_LINE_LAYER_ID, filter);
-      recordDebugSetFilter(SELECTED_LINE_LAYER_ID);
+    for (const layerId of getCurrentSelectedLineLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+      recordDebugSetFilter(layerId);
     }
   }
 
@@ -891,13 +942,15 @@
   function applyBuildingThemePaint(theme) {
     if (!map) return;
     const paint = getBuildingThemePaint(theme);
-    if (map.getLayer(BUILDINGS_FILL_LAYER_ID)) {
-      map.setPaintProperty(BUILDINGS_FILL_LAYER_ID, 'fill-color', paint.fillColor);
-      map.setPaintProperty(BUILDINGS_FILL_LAYER_ID, 'fill-opacity', paint.fillOpacity);
+    for (const layerId of getCurrentBuildingsFillLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setPaintProperty(layerId, 'fill-color', paint.fillColor);
+      map.setPaintProperty(layerId, 'fill-opacity', paint.fillOpacity);
     }
-    if (map.getLayer(BUILDINGS_LINE_LAYER_ID)) {
-      map.setPaintProperty(BUILDINGS_LINE_LAYER_ID, 'line-color', paint.lineColor);
-      map.setPaintProperty(BUILDINGS_LINE_LAYER_ID, 'line-width', paint.lineWidth);
+    for (const layerId of getCurrentBuildingsLineLayerIds()) {
+      if (!map.getLayer(layerId)) continue;
+      map.setPaintProperty(layerId, 'line-color', paint.lineColor);
+      map.setPaintProperty(layerId, 'line-width', paint.lineWidth);
     }
   }
 
@@ -938,29 +991,43 @@
 
   function bindStyleInteractionHandlers() {
     if (!map) return;
+    const fillLayerIds = [...new Set(getCurrentBuildingsFillLayerIds())];
+    const lineLayerIds = [...new Set(getCurrentBuildingsLineLayerIds())];
     map.off('click', handleMapBuildingClick);
     map.off('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
     map.off('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
-    map.off('mouseenter', BUILDINGS_FILL_LAYER_ID, onPointerEnter);
-    map.off('mouseleave', BUILDINGS_FILL_LAYER_ID, onPointerLeave);
-    map.off('mouseenter', BUILDINGS_LINE_LAYER_ID, onPointerEnter);
-    map.off('mouseleave', BUILDINGS_LINE_LAYER_ID, onPointerLeave);
     map.off('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
     map.off('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
     map.off('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
     map.off('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
+    for (const layerId of fillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.off('mouseenter', layerId, onPointerEnter);
+      map.off('mouseleave', layerId, onPointerLeave);
+    }
+    for (const layerId of lineLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.off('mouseenter', layerId, onPointerEnter);
+      map.off('mouseleave', layerId, onPointerLeave);
+    }
 
     map.on('click', handleMapBuildingClick);
     map.on('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
     map.on('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
-    map.on('mouseenter', BUILDINGS_FILL_LAYER_ID, onPointerEnter);
-    map.on('mouseleave', BUILDINGS_FILL_LAYER_ID, onPointerLeave);
-    map.on('mouseenter', BUILDINGS_LINE_LAYER_ID, onPointerEnter);
-    map.on('mouseleave', BUILDINGS_LINE_LAYER_ID, onPointerLeave);
     map.on('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
     map.on('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
     map.on('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
     map.on('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
+    for (const layerId of fillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.on('mouseenter', layerId, onPointerEnter);
+      map.on('mouseleave', layerId, onPointerLeave);
+    }
+    for (const layerId of lineLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.on('mouseenter', layerId, onPointerEnter);
+      map.on('mouseleave', layerId, onPointerLeave);
+    }
   }
 
   function isBaseLabelLayer(layer) {
@@ -1011,28 +1078,6 @@
     }, CARTO_SHOW_DELAY_MS);
   }
 
-  function normalizeLon(lon) {
-    let next = Number(lon);
-    while (next < -180) next += 360;
-    while (next > 180) next -= 360;
-    return next;
-  }
-
-  function lonLatToTile(lon, lat, z) {
-    const zoom = Math.max(0, Math.floor(Number(z)));
-    const latClamped = Math.max(-85.05112878, Math.min(85.05112878, Number(lat)));
-    const lngWrapped = normalizeLon(lon);
-    const world = 2 ** zoom;
-    const xRaw = Math.floor(((lngWrapped + 180) / 360) * world);
-    const latRad = (latClamped * Math.PI) / 180;
-    const yRaw = Math.floor(((1 - (Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI)) / 2) * world);
-    return {
-      z: zoom,
-      x: Math.max(0, Math.min(world - 1, xRaw)),
-      y: Math.max(0, Math.min(world - 1, yRaw))
-    };
-  }
-
   function getViewportSamplePoints() {
     if (!map) return [];
     const bounds = map.getBounds();
@@ -1057,75 +1102,26 @@
     ];
   }
 
-  function readCoverageCache(key) {
-    if (!coverageCache.has(key)) return null;
-    const value = coverageCache.get(key);
-    coverageCache.delete(key);
-    coverageCache.set(key, value);
-    return value;
-  }
-
-  function writeCoverageCache(key, value) {
-    if (coverageCache.has(key)) {
-      coverageCache.delete(key);
-    }
-    coverageCache.set(key, value);
-    if (coverageCache.size <= COVERAGE_CACHE_LIMIT) return;
-    const oldest = coverageCache.keys().next().value;
-    if (oldest != null) coverageCache.delete(oldest);
-  }
-
-  async function hasPmtilesTile(tile) {
-    if (!pmtilesArchive) return false;
-    const key = `${tile.z}/${tile.x}/${tile.y}`;
-    const cached = readCoverageCache(key);
-    if (cached != null) return cached;
-    try {
-      const entry = await pmtilesArchive.getZxy(tile.z, tile.x, tile.y);
-      const exists = Boolean(entry?.data || entry);
-      writeCoverageCache(key, exists);
-      return exists;
-    } catch {
-      // Treat transport/runtime errors as unknown to avoid false-positive base-layer flicker.
-      return null;
-    }
-  }
-
-  async function hasPmtilesCoverageAtPoint(lon, lat, startZoom) {
-    const minZoom = Number.isInteger(pmtilesMinZoom) ? pmtilesMinZoom : 0;
-    for (let z = startZoom; z >= minZoom; z -= 1) {
-      const tile = lonLatToTile(lon, lat, z);
-      const exists = await hasPmtilesTile(tile);
-      if (exists === true) return true;
-      if (exists == null) return null;
-    }
-    return false;
-  }
-
   async function evaluatePmtilesCoverage() {
-    if (!map || !map.isStyleLoaded() || !pmtilesArchive) return;
+    if (!map || !map.isStyleLoaded()) return;
     const token = ++coverageEvalToken;
-    const rawZoom = Math.floor(map.getZoom());
-    const zoom = Number.isInteger(pmtilesMaxZoom)
-      ? Math.min(rawZoom, pmtilesMaxZoom)
-      : rawZoom;
+    const regions = activeRegionPmtiles.length > 0
+      ? activeRegionPmtiles
+      : getViewportActiveRegionPmtiles(runtimeConfig);
+    if (regions.length === 0) {
+      queueCartoBuildingsVisibility('visible');
+      return;
+    }
     const points = getViewportSamplePoints();
     if (points.length === 0) return;
-    let hasUnknownCoverage = false;
-
     for (const [lon, lat] of points) {
-      const exists = await hasPmtilesCoverageAtPoint(lon, lat, zoom);
       if (token !== coverageEvalToken) return;
-      if (exists == null) {
-        hasUnknownCoverage = true;
-        continue;
-      }
-      if (!exists) {
+      const covered = regions.some((region) => pointInBounds(lon, lat, region.bounds));
+      if (!covered) {
         queueCartoBuildingsVisibility('visible');
         return;
       }
     }
-    if (hasUnknownCoverage) return;
     queueCartoBuildingsVisibility('none');
   }
 
@@ -1140,21 +1136,8 @@
     }, 80);
   }
 
-  function ensureMapSourcesAndLayers(config) {
+  function ensureSearchResultsSourceAndLayers() {
     if (!map) return;
-    const buildingPaint = getBuildingThemePaint(getCurrentTheme());
-
-    const pmtilesUrl = config.buildingsPmtiles.url.startsWith('http')
-      ? config.buildingsPmtiles.url
-      : `${window.location.origin}${config.buildingsPmtiles.url.startsWith('/') ? '' : '/'}${config.buildingsPmtiles.url}`;
-
-    if (!map.getSource(BUILDINGS_SOURCE_ID)) {
-      map.addSource(BUILDINGS_SOURCE_ID, {
-        type: 'vector',
-        url: `pmtiles://${pmtilesUrl}`
-      });
-    }
-
     if (!map.getSource(SEARCH_RESULTS_SOURCE_ID)) {
       map.addSource(SEARCH_RESULTS_SOURCE_ID, {
         type: 'geojson',
@@ -1162,108 +1145,6 @@
         cluster: true,
         clusterRadius: 48,
         clusterMaxZoom: 16
-      });
-    }
-
-    if (!map.getLayer(BUILDINGS_FILL_LAYER_ID)) {
-      map.addLayer({
-        id: BUILDINGS_FILL_LAYER_ID,
-        type: 'fill',
-        source: BUILDINGS_SOURCE_ID,
-        'source-layer': config.buildingsPmtiles.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'fill-color': buildingPaint.fillColor,
-          'fill-opacity': buildingPaint.fillOpacity
-        }
-      });
-    }
-
-    if (!map.getLayer(BUILDINGS_LINE_LAYER_ID)) {
-      map.addLayer({
-        id: BUILDINGS_LINE_LAYER_ID,
-        type: 'line',
-        source: BUILDINGS_SOURCE_ID,
-        'source-layer': config.buildingsPmtiles.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'line-color': buildingPaint.lineColor,
-          'line-width': buildingPaint.lineWidth
-        }
-      });
-    }
-
-    if (!map.getLayer(FILTER_HIGHLIGHT_FILL_LAYER_ID)) {
-      map.addLayer({
-        id: FILTER_HIGHLIGHT_FILL_LAYER_ID,
-        type: 'fill',
-        source: BUILDINGS_SOURCE_ID,
-        'source-layer': config.buildingsPmtiles.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'fill-color': '#f59e0b',
-          'fill-opacity': [
-            'case',
-            ['boolean', ['feature-state', 'isFiltered'], false],
-            0.36,
-            0
-          ]
-        }
-      });
-    }
-
-    if (!map.getLayer(FILTER_HIGHLIGHT_LINE_LAYER_ID)) {
-      map.addLayer({
-        id: FILTER_HIGHLIGHT_LINE_LAYER_ID,
-        type: 'line',
-        source: BUILDINGS_SOURCE_ID,
-        'source-layer': config.buildingsPmtiles.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'line-color': '#b45309',
-          'line-width': [
-            'case',
-            ['boolean', ['feature-state', 'isFiltered'], false],
-            1.8,
-            0
-          ],
-          'line-opacity': [
-            'case',
-            ['boolean', ['feature-state', 'isFiltered'], false],
-            0.95,
-            0
-          ]
-        }
-      });
-    }
-
-    if (!map.getLayer(SELECTED_FILL_LAYER_ID)) {
-      map.addLayer({
-        id: SELECTED_FILL_LAYER_ID,
-        type: 'fill',
-        source: BUILDINGS_SOURCE_ID,
-        'source-layer': config.buildingsPmtiles.sourceLayer,
-        minzoom: 13,
-        filter: ['==', ['id'], -1],
-        paint: {
-          'fill-color': '#6d655b',
-          'fill-opacity': 0.72
-        }
-      });
-    }
-
-    if (!map.getLayer(SELECTED_LINE_LAYER_ID)) {
-      map.addLayer({
-        id: SELECTED_LINE_LAYER_ID,
-        type: 'line',
-        source: BUILDINGS_SOURCE_ID,
-        'source-layer': config.buildingsPmtiles.sourceLayer,
-        minzoom: 13,
-        filter: ['==', ['id'], -1],
-        paint: {
-          'line-color': '#3d3832',
-          'line-width': 2.2
-        }
       });
     }
 
@@ -1315,6 +1196,165 @@
         }
       });
     }
+  }
+
+  function ensureRegionBuildingSourceAndLayers(region, buildingPaint) {
+    if (!map || !region) return;
+    const sourceId = buildRegionSourceId(region.id);
+    const fillLayerId = buildRegionLayerId(region.id, 'fill');
+    const lineLayerId = buildRegionLayerId(region.id, 'line');
+    const filterFillLayerId = buildRegionLayerId(region.id, 'filter-highlight-fill');
+    const filterLineLayerId = buildRegionLayerId(region.id, 'filter-highlight-line');
+    const selectedFillLayerId = buildRegionLayerId(region.id, 'selected-fill');
+    const selectedLineLayerId = buildRegionLayerId(region.id, 'selected-line');
+    const pmtilesUrl = resolvePmtilesUrl(region.url, window.location.origin);
+
+    if (!map.getSource(sourceId)) {
+      map.addSource(sourceId, {
+        type: 'vector',
+        url: `pmtiles://${pmtilesUrl}`
+      });
+    }
+
+    if (!map.getLayer(fillLayerId)) {
+      map.addLayer({
+        id: fillLayerId,
+        type: 'fill',
+        source: sourceId,
+        'source-layer': region.sourceLayer,
+        minzoom: 13,
+        paint: {
+          'fill-color': buildingPaint.fillColor,
+          'fill-opacity': buildingPaint.fillOpacity
+        }
+      });
+    }
+
+    if (!map.getLayer(lineLayerId)) {
+      map.addLayer({
+        id: lineLayerId,
+        type: 'line',
+        source: sourceId,
+        'source-layer': region.sourceLayer,
+        minzoom: 13,
+        paint: {
+          'line-color': buildingPaint.lineColor,
+          'line-width': buildingPaint.lineWidth
+        }
+      });
+    }
+
+    if (!map.getLayer(filterFillLayerId)) {
+      map.addLayer({
+        id: filterFillLayerId,
+        type: 'fill',
+        source: sourceId,
+        'source-layer': region.sourceLayer,
+        minzoom: 13,
+        paint: {
+          'fill-color': '#f59e0b',
+          'fill-opacity': [
+            'case',
+            ['boolean', ['feature-state', 'isFiltered'], false],
+            0.36,
+            0
+          ]
+        }
+      });
+    }
+
+    if (!map.getLayer(filterLineLayerId)) {
+      map.addLayer({
+        id: filterLineLayerId,
+        type: 'line',
+        source: sourceId,
+        'source-layer': region.sourceLayer,
+        minzoom: 13,
+        paint: {
+          'line-color': '#b45309',
+          'line-width': [
+            'case',
+            ['boolean', ['feature-state', 'isFiltered'], false],
+            1.8,
+            0
+          ],
+          'line-opacity': [
+            'case',
+            ['boolean', ['feature-state', 'isFiltered'], false],
+            0.95,
+            0
+          ]
+        }
+      });
+    }
+
+    if (!map.getLayer(selectedFillLayerId)) {
+      map.addLayer({
+        id: selectedFillLayerId,
+        type: 'fill',
+        source: sourceId,
+        'source-layer': region.sourceLayer,
+        minzoom: 13,
+        filter: ['==', ['id'], -1],
+        paint: {
+          'fill-color': '#6d655b',
+          'fill-opacity': 0.72
+        }
+      });
+    }
+
+    if (!map.getLayer(selectedLineLayerId)) {
+      map.addLayer({
+        id: selectedLineLayerId,
+        type: 'line',
+        source: sourceId,
+        'source-layer': region.sourceLayer,
+        minzoom: 13,
+        filter: ['==', ['id'], -1],
+        paint: {
+          'line-color': '#3d3832',
+          'line-width': 2.2
+        }
+      });
+    }
+  }
+
+  function removeRegionBuildingSourceAndLayers(regionId) {
+    if (!map) return;
+    const layerIds = [
+      buildRegionLayerId(regionId, 'selected-line'),
+      buildRegionLayerId(regionId, 'selected-fill'),
+      buildRegionLayerId(regionId, 'filter-highlight-line'),
+      buildRegionLayerId(regionId, 'filter-highlight-fill'),
+      buildRegionLayerId(regionId, 'line'),
+      buildRegionLayerId(regionId, 'fill')
+    ];
+    for (const layerId of layerIds) {
+      if (map.getLayer(layerId)) {
+        map.removeLayer(layerId);
+      }
+    }
+    const sourceId = buildRegionSourceId(regionId);
+    if (map.getSource(sourceId)) {
+      map.removeSource(sourceId);
+    }
+  }
+
+  function ensureMapSourcesAndLayers(config) {
+    if (!map) return;
+    const buildingPaint = getBuildingThemePaint(getCurrentTheme());
+    ensureSearchResultsSourceAndLayers();
+
+    const nextActiveRegions = getViewportActiveRegionPmtiles(config);
+    const nextIds = new Set(nextActiveRegions.map((region) => region.id));
+    for (const currentRegion of activeRegionPmtiles) {
+      if (nextIds.has(currentRegion.id)) continue;
+      removeRegionBuildingSourceAndLayers(currentRegion.id);
+    }
+    activeRegionPmtiles = nextActiveRegions;
+    for (const region of nextActiveRegions) {
+      ensureRegionBuildingSourceAndLayers(region, buildingPaint);
+    }
 
     bindStyleInteractionHandlers();
     applySelectionFromStore($selectedBuilding);
@@ -1328,6 +1368,11 @@
       mode: FILTER_HIGHLIGHT_MODE
     });
     reapplyFilteredFeatureState();
+  }
+
+  function syncMapRegionSources() {
+    if (!map || !runtimeConfig) return;
+    ensureMapSourcesAndLayers(runtimeConfig);
   }
 
   function scheduleFilterRefresh() {
@@ -1493,7 +1538,12 @@
 
   function getVisibleBuildingOsmKeys() {
     if (!map) return [];
-    const features = map.queryRenderedFeatures({ layers: [BUILDINGS_FILL_LAYER_ID, BUILDINGS_LINE_LAYER_ID] });
+    const layerIds = [
+      ...getCurrentBuildingsFillLayerIds(),
+      ...getCurrentBuildingsLineLayerIds()
+    ];
+    if (layerIds.length === 0) return [];
+    const features = map.queryRenderedFeatures({ layers: layerIds });
     const keys = new Set();
     for (const feature of Array.isArray(features) ? features : []) {
       const identity = getFeatureIdentity(feature);
@@ -1504,15 +1554,17 @@
   }
 
   function getLoadedSourceBuildingOsmKeys() {
-    if (!map || !runtimeConfig?.buildingsPmtiles?.sourceLayer) return [];
-    const features = map.querySourceFeatures(BUILDINGS_SOURCE_ID, {
-      sourceLayer: runtimeConfig.buildingsPmtiles.sourceLayer
-    });
     const keys = new Set();
-    for (const feature of Array.isArray(features) ? features : []) {
-      const identity = getFeatureIdentity(feature);
-      if (!identity?.osmType || !Number.isInteger(identity?.osmId)) continue;
-      keys.add(`${identity.osmType}/${identity.osmId}`);
+    for (const sourceConfig of getCurrentBuildingSourceConfigs()) {
+      if (!map || !sourceConfig?.sourceLayer || !map.getSource(sourceConfig.sourceId)) continue;
+      const features = map.querySourceFeatures(sourceConfig.sourceId, {
+        sourceLayer: sourceConfig.sourceLayer
+      });
+      for (const feature of Array.isArray(features) ? features : []) {
+        const identity = getFeatureIdentity(feature);
+        if (!identity?.osmType || !Number.isInteger(identity?.osmId)) continue;
+        keys.add(`${identity.osmType}/${identity.osmId}`);
+      }
     }
     return [...keys];
   }
@@ -2017,7 +2069,7 @@
     filterDenseBurstEnabled = resolveFilterDenseBurstEnabled();
 
     async function initMap() {
-      const { maplibregl: maplibreModule, PMTiles: PMTilesCtor, Protocol: ProtocolCtor } = await loadMapRuntime();
+      const { maplibregl: maplibreModule, Protocol: ProtocolCtor } = await loadMapRuntime();
       if (!mountAlive) return;
       maplibregl = maplibreModule;
 
@@ -2026,7 +2078,6 @@
       protocol = new ProtocolCtor();
       maplibregl.addProtocol('pmtiles', protocol.tile);
       currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
-      coverageCache = new Map();
       coverageVisibleState = 'visible';
       const initialCamera = resolveInitialMapCamera({
         url: window.location.href,
@@ -2047,21 +2098,6 @@
       });
       setMapZoom(initialCamera.z);
 
-      const pmtilesUrl = resolvePmtilesUrl(config.buildingsPmtiles.url, window.location.origin);
-      pmtilesArchive = new PMTilesCtor(pmtilesUrl);
-      pmtilesArchive.getHeader()
-        .then((header) => {
-          const headerMinZoom = Number(header?.minZoom);
-          const headerMaxZoom = Number(header?.maxZoom);
-          pmtilesMinZoom = Number.isInteger(headerMinZoom) ? headerMinZoom : null;
-          pmtilesMaxZoom = Number.isInteger(headerMaxZoom) ? headerMaxZoom : null;
-          scheduleCoverageCheck();
-        })
-        .catch(() => {
-          pmtilesMinZoom = null;
-          pmtilesMaxZoom = null;
-        });
-
       map = new maplibregl.Map({
         container,
         style: currentMapStyleUrl,
@@ -2077,13 +2113,16 @@
       map.on('moveend', () => {
         registerFilterMoveEnd();
         syncMapCameraStores();
+        syncMapRegionSources();
       });
       map.on('moveend', scheduleFilterRefresh);
       map.on('moveend', scheduleCoverageCheck);
       map.on('move', scheduleCoverageCheck);
       map.on('zoomend', scheduleFilterRefresh);
       map.on('zoomend', syncMapZoomStore);
+      map.on('zoomend', syncMapRegionSources);
       map.on('zoomend', scheduleCoverageCheck);
+      map.on('resize', syncMapRegionSources);
       map.on('resize', scheduleCoverageCheck);
 
       map.on('style.load', () => {
@@ -2168,10 +2207,6 @@
       protocol?.destroy?.();
       protocol = null;
     }
-    pmtilesArchive = null;
-    pmtilesMinZoom = null;
-    pmtilesMaxZoom = null;
-    coverageCache = new Map();
     filterMatchesCache = new Map();
     filterDataByOsmKeyCache = new Map();
     filteredFeatureStateFeatureIds = new Set();

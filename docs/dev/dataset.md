@@ -7,13 +7,11 @@
 
 ## Build PMTiles locally
 
-1. Configure OSM source in `.env`:
-   - `OSM_EXTRACT_QUERY=...` or `OSM_EXTRACT_QUERIES=...`
-   - or `OSM_PBF_PATH=/path/to/file.osm.pbf`
-2. Run:
-   - `npm run tiles:build`
+1. Create and sync a region in `Admin -> Data`.
+2. For CLI-only maintenance, run:
+   - `npm run tiles:build -- --region-id=<id>`
 3. Result:
-   - PMTiles file under `data/` (default `buildings.pmtiles`).
+   - Region PMTiles file under `data/regions/buildings-region-<slug>.pmtiles`.
 
 ## Search index refresh
 

@@ -28,5 +28,5 @@
 - `npm run migrate`: DB migrations.
 - `npm run db:seed`: seed demo admin user into auth DB.
 - `npm run admin:create-master -- --email=<email> --password=<password>`: create or promote master admin.
-- `npm run tiles:build`: run PMTiles build pipeline ([`scripts/sync-osm-buildings.js`](../../scripts/sync-osm-buildings.js)).
-- `npm run sync:city`: OSM sync/import pipeline.
+- `npm run tiles:build -- --region-id=<id>`: build/sync one managed region through the region pipeline.
+- `npm run sync:city -- --region-id=<id>`: compatibility wrapper around managed region sync.

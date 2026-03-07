@@ -2,6 +2,7 @@
 set -euo pipefail
 
 VERSION=""
+LATEST=0
 IMAGE="streletskiy/archimap"
 PLATFORMS="linux/amd64,linux/arm64"
 NO_CACHE=0
@@ -20,9 +21,11 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release-docker.sh --version 1.2.3 [options]
+  ./scripts/release-docker.sh --version 1.2.3 --latest [options]
 
 Options:
   --version <value>           Required release tag (example: 1.2.3)
+  --latest                    Also publish the :latest tag explicitly
   --image <value>             Image repository (default: streletskiy/archimap)
   --platforms <value>         Target platforms (default: linux/amd64,linux/arm64)
   --no-cache                  Disable build cache
@@ -47,6 +50,7 @@ log() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) VERSION="${2:-}"; shift 2 ;;
+    --latest) LATEST=1; shift ;;
     --image) IMAGE="${2:-}"; shift 2 ;;
     --platforms) PLATFORMS="${2:-}"; shift 2 ;;
     --no-cache) NO_CACHE=1; shift ;;
@@ -71,6 +75,11 @@ done
 
 if [[ -z "${VERSION}" ]]; then
   echo "--version is required. Example: ./scripts/release-docker.sh --version 1.2.3" >&2
+  exit 1
+fi
+
+if [[ "${LATEST}" -eq 1 && "${VERSION,,}" == "dev" ]]; then
+  echo "Publishing :latest requires a concrete release version, not 'dev'." >&2
   exit 1
 fi
 
@@ -153,10 +162,7 @@ ensure_builder() {
 
 ensure_builder "${PLATFORMS}"
 
-PUBLISH_LATEST=1
-if [[ "${VERSION,,}" == "dev" ]]; then
-  PUBLISH_LATEST=0
-fi
+PUBLISH_LATEST="${LATEST}"
 
 args=(
   buildx build
@@ -229,6 +235,7 @@ fi
 log "Publishing app image..."
 log "Image: ${IMAGE}"
 log "Version tag: ${VERSION}"
+log "Publish latest tag: $([[ "${PUBLISH_LATEST}" -eq 1 ]] && echo yes || echo no)"
 log "Runtime base image: ${RUNTIME_BASE_IMAGE}"
 log "Platforms: ${PLATFORMS}"
 log "Tippecanoe ref: ${TIPPECANOE_REF}"

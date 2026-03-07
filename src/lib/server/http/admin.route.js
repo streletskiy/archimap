@@ -17,6 +17,9 @@ function registerAdminRoutes(deps) {
     sanitizeYearBuilt,
     sanitizeLevels,
     getMergedInfoRow,
+    getOsmContourRow,
+    reassignUserEdit,
+    deleteUserEdit,
     enqueueSearchIndexRefresh,
     ARCHI_FIELD_SET,
     registrationCodeHtmlTemplate,
@@ -24,8 +27,11 @@ function registerAdminRoutes(deps) {
     passwordResetHtmlTemplate,
     passwordResetTextTemplate,
     appSettingsService,
+    dataSettingsService,
     onGeneralSettingsSaved,
     onSmtpSettingsSaved,
+    onDataRegionsSaved,
+    onRegionSyncRequested,
     appDisplayName,
     getAppDisplayName,
     appBaseUrl,
@@ -76,6 +82,22 @@ function registerAdminRoutes(deps) {
     if (!Number.isFinite(n)) return fallback;
     const v = Math.trunc(n);
     return Math.max(min, Math.min(max, v));
+  }
+
+  function parseRegionId(raw) {
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    return id;
+  }
+
+  function parseOsmTarget(value) {
+    const target = value && typeof value === 'object' ? value : {};
+    const osmType = String(target.osmType || '').trim();
+    const osmId = Number(target.osmId);
+    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
+      return null;
+    }
+    return { osmType, osmId };
   }
 
   app.use('/api/admin', adminApiRateLimiter);
@@ -240,6 +262,132 @@ function registerAdminRoutes(deps) {
     }
   });
 
+  app.get('/api/admin/app-settings/data', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    return sendCachedJson(req, res, {
+      ok: true,
+      item: await dataSettingsService.getDataSettingsForAdmin()
+    }, {
+      cacheControl: 'private, no-cache'
+    });
+  });
+
+  app.get('/api/admin/app-settings/data/regions', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    const includeDisabled = String(req.query?.includeDisabled ?? 'true').trim().toLowerCase() !== 'false';
+    const items = await dataSettingsService.listRegions({ includeDisabled });
+    return sendCachedJson(req, res, {
+      ok: true,
+      items
+    }, {
+      cacheControl: 'private, no-cache'
+    });
+  });
+
+  app.get('/api/admin/app-settings/data/regions/:regionId/runs', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    const regionId = parseRegionId(req.params.regionId);
+    if (!regionId) {
+      return res.status(400).json({ error: 'Некорректный идентификатор региона' });
+    }
+    const limit = parseLimit(req.query?.limit, 20, 1, 200);
+    const region = await dataSettingsService.getRegionById(regionId);
+    if (!region) {
+      return res.status(404).json({ error: 'Регион не найден' });
+    }
+    const items = await dataSettingsService.getRecentRuns(regionId, limit);
+    return sendCachedJson(req, res, {
+      ok: true,
+      region,
+      items
+    }, {
+      cacheControl: 'private, no-cache'
+    });
+  });
+
+  app.post('/api/admin/app-settings/data/regions', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    try {
+      const region = req.body?.region && typeof req.body.region === 'object' ? req.body.region : {};
+      const actor = getSessionEditActorKey(req) || 'admin';
+      const previous = region?.id ? await dataSettingsService.getRegionById(region.id) : null;
+      const saved = await dataSettingsService.saveRegion(region, actor);
+      if (typeof onDataRegionsSaved === 'function') {
+        await Promise.resolve(onDataRegionsSaved({
+          action: 'save',
+          saved,
+          previous
+        }));
+      }
+      return res.json({
+        ok: true,
+        item: saved
+      });
+    } catch (error) {
+      return res.status(400).json({ error: String(error?.message || error || 'Не удалось сохранить регион') });
+    }
+  });
+
+  app.delete('/api/admin/app-settings/data/regions/:regionId', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    const regionId = parseRegionId(req.params.regionId);
+    if (!regionId) {
+      return res.status(400).json({ error: 'Некорректный идентификатор региона' });
+    }
+    try {
+      const actor = getSessionEditActorKey(req) || 'admin';
+      const deleted = await dataSettingsService.deleteRegion(regionId, actor);
+      if (typeof onDataRegionsSaved === 'function') {
+        await Promise.resolve(onDataRegionsSaved({
+          action: 'delete',
+          deleted
+        }));
+      }
+      return res.json({
+        ok: true,
+        item: deleted
+      });
+    } catch (error) {
+      return res.status(400).json({ error: String(error?.message || error || 'Не удалось удалить регион') });
+    }
+  });
+
+  app.post('/api/admin/app-settings/data/regions/:regionId/sync-now', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    if (typeof onRegionSyncRequested !== 'function') {
+      return res.status(503).json({ error: 'Очередь синхронизации пока недоступна' });
+    }
+    const regionId = parseRegionId(req.params.regionId);
+    if (!regionId) {
+      return res.status(400).json({ error: 'Некорректный идентификатор региона' });
+    }
+    try {
+      const requestedBy = getSessionEditActorKey(req) || 'admin';
+      const result = await onRegionSyncRequested(regionId, {
+        triggerReason: 'manual',
+        requestedBy
+      });
+      return res.json({
+        ok: true,
+        item: result
+      });
+    } catch (error) {
+      return res.status(400).json({ error: String(error?.message || error || 'Не удалось поставить регион в очередь синхронизации') });
+    }
+  });
+
   app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {
     return res.redirect('/admin');
   });
@@ -365,6 +513,75 @@ function registerAdminRoutes(deps) {
     return res.json({ ok: true, editId, status: 'rejected' });
   });
 
+  app.post('/api/admin/building-edits/:editId/reassign', requireCsrfSession, requireAuth, requireAdmin, async (req, res) => {
+    const editId = Number(req.params.editId);
+    if (!Number.isInteger(editId) || editId <= 0) {
+      return res.status(400).json({ error: 'Некорректный идентификатор правки' });
+    }
+
+    const target = parseOsmTarget(req.body?.target);
+    if (!target) {
+      return res.status(400).json({ error: 'Укажите корректный идентификатор целевого здания' });
+    }
+
+    const before = await getUserEditDetailsById(editId);
+    if (!before) {
+      return res.status(404).json({ error: 'Правка не найдена' });
+    }
+
+    const actor = getSessionEditActorKey(req) || 'admin';
+    const force = Boolean(req.body?.force === true);
+    try {
+      const updated = await reassignUserEdit(editId, target, { actor, force });
+      if (before.osmType && Number.isInteger(Number(before.osmId))) {
+        enqueueSearchIndexRefresh(before.osmType, before.osmId);
+      }
+      if (updated?.osmType && Number.isInteger(Number(updated.osmId))) {
+        enqueueSearchIndexRefresh(updated.osmType, updated.osmId);
+      }
+      return res.json({
+        ok: true,
+        item: updated
+      });
+    } catch (error) {
+      const message = String(error?.message || error || 'Не удалось переназначить правку');
+      if (message.includes('не найдена')) {
+        return res.status(404).json({ error: message });
+      }
+      if (message.includes('конфликтующие локальные поля')) {
+        return res.status(409).json({ error: message, code: 'REASSIGN_TARGET_CONFLICT' });
+      }
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.delete('/api/admin/building-edits/:editId', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    const editId = Number(req.params.editId);
+    if (!Number.isInteger(editId) || editId <= 0) {
+      return res.status(400).json({ error: 'Некорректный идентификатор правки' });
+    }
+
+    try {
+      const deleted = await deleteUserEdit(editId);
+      if (deleted?.osmType && Number.isInteger(Number(deleted.osmId))) {
+        enqueueSearchIndexRefresh(deleted.osmType, deleted.osmId);
+      }
+      return res.json({
+        ok: true,
+        item: deleted
+      });
+    } catch (error) {
+      const message = String(error?.message || error || 'Не удалось удалить правку');
+      if (error?.code === 'EDIT_NOT_FOUND' || message.includes('не найдена')) {
+        return res.status(404).json({ error: message });
+      }
+      if (error?.code === 'EDIT_DELETE_SHARED_MERGED_STATE') {
+        return res.status(409).json({ error: message, code: error.code });
+      }
+      return res.status(400).json({ error: message });
+    }
+  });
+
   app.post('/api/admin/building-edits/:editId/merge', requireCsrfSession, requireAuth, requireAdmin, async (req, res) => {
     const editId = Number(req.params.editId);
     if (!Number.isInteger(editId) || editId <= 0) {
@@ -378,6 +595,21 @@ function registerAdminRoutes(deps) {
       return res.status(409).json({ error: 'Правка уже обработана' });
     }
     const forceMerge = Boolean(req.body?.force === true);
+    const currentContour = await getOsmContourRow(item.osmType, item.osmId);
+    if (!currentContour) {
+      return res.status(409).json({
+        error: 'Исходное OSM-здание больше не существует в локальной базе контуров. Сначала переназначьте правку на актуальное здание.',
+        code: 'EDIT_TARGET_MISSING'
+      });
+    }
+    if (!forceMerge && item.sourceOsmChanged) {
+      return res.status(409).json({
+        error: 'Правка устарела: OSM-данные здания изменились после её создания. Обновите правку, переназначьте её или выполните merge с force.',
+        code: 'EDIT_OUTDATED_OSM',
+        currentUpdatedAt: item.currentOsmUpdatedAt || null,
+        sourceUpdatedAt: item.sourceOsmUpdatedAt || null
+      });
+    }
 
     const allowedFields = new Set(item.changes.map((change) => String(change.field || '')));
     if (allowedFields.size === 0) {
