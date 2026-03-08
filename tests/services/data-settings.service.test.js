@@ -6,6 +6,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 
 const migration = require('../../db/migrations/003_data_regions.migration.js');
+const filterTagAllowlistMigration = require('../../db/migrations/005_filter_tag_allowlist.migration.js');
 const {
   createDataSettingsService,
   buildRegionPmtilesFileName,
@@ -13,10 +14,12 @@ const {
   resolveLegacyRegionPmtilesPath,
   resolveExistingRegionPmtilesPath
 } = require('../../src/lib/server/services/data-settings.service');
+const { DEFAULT_FILTER_TAG_ALLOWLIST } = require('../../src/lib/server/services/filter-tags.service');
 
 function createTestDb() {
   const db = new Database(':memory:');
   migration.up(db);
+  filterTagAllowlistMigration.up(db);
   return db;
 }
 
@@ -94,6 +97,52 @@ test('bootstrapFromEnvIfNeeded records db-only bootstrap without creating region
   const bootstrapState = await service.getBootstrapState();
   assert.equal(bootstrapState.completed, true);
   assert.equal(bootstrapState.source, 'db-only');
+});
+
+test('filter tag allowlist uses important defaults when DB config is absent', async () => {
+  const db = createTestDb();
+  const service = createDataSettingsService({
+    db,
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 72,
+      pmtilesMinZoom: 12,
+      pmtilesMaxZoom: 15,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const settings = await service.getFilterTagAllowlistForAdmin();
+  assert.equal(settings.source, 'default');
+  assert.deepEqual(settings.allowlist, DEFAULT_FILTER_TAG_ALLOWLIST);
+  assert.deepEqual(settings.defaultAllowlist, DEFAULT_FILTER_TAG_ALLOWLIST);
+});
+
+test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () => {
+  const db = createTestDb();
+  const service = createDataSettingsService({
+    db,
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 72,
+      pmtilesMinZoom: 12,
+      pmtilesMaxZoom: 15,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const saved = await service.saveFilterTagAllowlist([
+    'roof:shape',
+    'building',
+    'roof:shape',
+    ' building:architecture '
+  ], 'tester@example.com');
+
+  assert.equal(saved.source, 'db');
+  assert.deepEqual(saved.allowlist, ['building', 'building:architecture', 'roof:shape']);
+  assert.equal(saved.updatedBy, 'tester@example.com');
 });
 
 test('saveRegion allows renaming existing region while preserving id', async () => {

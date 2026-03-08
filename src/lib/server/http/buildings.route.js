@@ -264,12 +264,19 @@ function encodeOsmFeatureId(osmType, osmId) {
   return (Number(osmId) * 2) + typeBit;
 }
 
-function normalizeFilterRule(rule) {
+function normalizeFilterRule(rule, options = {}) {
   const key = String(rule?.key || '').trim();
   const op = String(rule?.op || 'contains').trim();
   const value = String(rule?.value || '').trim();
   if (!key) return { error: 'Rule key is required' };
   if (key.length > FILTER_MATCH_MAX_KEY_LEN) return { error: 'Rule key is too long' };
+  const isFilterTagAllowed = typeof options.isFilterTagAllowed === 'function'
+    ? options.isFilterTagAllowed
+    : null;
+  const isArchiKey = key.startsWith('archi.');
+  if (!isArchiKey && isFilterTagAllowed && !isFilterTagAllowed(key)) {
+    return { error: `Ключ фильтра не разрешен: ${key}` };
+  }
   if (!FILTER_RULE_OPS.has(op)) return { error: `Invalid rule operator: ${op}` };
   if (value.length > FILTER_MATCH_MAX_VALUE_LEN) return { error: 'Rule value is too long' };
   return {
@@ -444,6 +451,7 @@ function registerBuildingsRoutes(deps) {
     requireBuildingEditPermission,
     getSessionEditActorKey,
     applyPersonalEditsToFilterItems,
+    isFilterTagAllowed,
     rowToFeature,
     attachInfoToFeatures,
     applyUserEditRowToInfo,
@@ -638,7 +646,7 @@ function registerBuildingsRoutes(deps) {
 
     const normalizedRules = [];
     for (const entry of rulesRaw) {
-      const parsed = normalizeFilterRule(entry);
+      const parsed = normalizeFilterRule(entry, { isFilterTagAllowed });
       if (parsed.error) {
         return res.status(400).json({ error: parsed.error });
       }

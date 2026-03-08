@@ -1,3 +1,8 @@
+const {
+  DEFAULT_FILTER_TAG_ALLOWLIST,
+  normalizeFilterTagKeyList
+} = require('./filter-tags.service');
+
 function normalizeRegionPmtilesSlug(regionOrSlug) {
   const raw = typeof regionOrSlug === 'object' && regionOrSlug
     ? regionOrSlug.slug
@@ -249,6 +254,7 @@ function normalizeFallbackData(raw = {}) {
           id,
           env_bootstrap_completed,
           env_bootstrap_source,
+          filter_tag_allowlist_json,
           updated_by,
           updated_at
         FROM app_data_settings
@@ -464,6 +470,36 @@ function normalizeFallbackData(raw = {}) {
     };
   }
 
+  function parseStoredFilterTagAllowlist(raw) {
+    if (raw == null || String(raw).trim() === '') return null;
+    try {
+      const parsed = JSON.parse(String(raw));
+      return normalizeFilterTagKeyList(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  async function getFilterTagAllowlistForAdmin() {
+    const settingsRow = await readAppDataSettingsRow();
+    const storedAllowlist = parseStoredFilterTagAllowlist(settingsRow?.filter_tag_allowlist_json);
+    const allowlist = storedAllowlist || [...DEFAULT_FILTER_TAG_ALLOWLIST];
+    return {
+      source: storedAllowlist ? 'db' : 'default',
+      allowlist,
+      defaultAllowlist: [...DEFAULT_FILTER_TAG_ALLOWLIST],
+      updatedBy: settingsRow?.updated_by ? String(settingsRow.updated_by) : null,
+      updatedAt: settingsRow?.updated_at ? String(settingsRow.updated_at) : null
+    };
+  }
+
+  async function getEffectiveFilterTagAllowlistConfig() {
+    const current = await getFilterTagAllowlistForAdmin();
+    return {
+      allowlist: [...current.allowlist]
+    };
+  }
+
   async function ensureUniqueSlug(baseSlug, excludeRegionId = null) {
     const normalizedBase = slugify(baseSlug) || 'region';
     let candidate = normalizedBase;
@@ -501,6 +537,34 @@ function normalizeFallbackData(raw = {}) {
         updated_by = excluded.updated_by,
         updated_at = datetime('now')
     `).run(String(source || 'legacy-env'), updatedBy);
+  }
+
+  async function saveFilterTagAllowlist(input = [], actor = null) {
+    await ensureBootstrapped();
+    const settingsRow = await readAppDataSettingsRow();
+    const updatedBy = normalizeNullableText(actor, 160);
+    const normalizedAllowlist = normalizeFilterTagKeyList(input);
+    await db.prepare(`
+      INSERT INTO app_data_settings (
+        id,
+        env_bootstrap_completed,
+        env_bootstrap_source,
+        filter_tag_allowlist_json,
+        updated_by,
+        updated_at
+      )
+      VALUES (1, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        filter_tag_allowlist_json = excluded.filter_tag_allowlist_json,
+        updated_by = excluded.updated_by,
+        updated_at = datetime('now')
+    `).run(
+      Number(settingsRow?.env_bootstrap_completed || 0) > 0 ? 1 : 0,
+      settingsRow?.env_bootstrap_source ? String(settingsRow.env_bootstrap_source) : null,
+      JSON.stringify(normalizedAllowlist),
+      updatedBy
+    );
+    return getFilterTagAllowlistForAdmin();
   }
 
   async function bootstrapFromEnvIfNeeded(actor = 'system') {
@@ -897,10 +961,12 @@ function normalizeFallbackData(raw = {}) {
     await ensureBootstrapped();
     const bootstrap = await getBootstrapState();
     const regions = await listRegions();
+    const filterTags = await getFilterTagAllowlistForAdmin();
     return {
       source: 'db',
       bootstrap,
-      regions
+      regions,
+      filterTags
     };
   }
 
@@ -1196,6 +1262,9 @@ function normalizeFallbackData(raw = {}) {
     saveRegion,
     deleteRegion,
     getDataSettingsForAdmin,
+    getFilterTagAllowlistForAdmin,
+    getEffectiveFilterTagAllowlistConfig,
+    saveFilterTagAllowlist,
     listRuntimePmtilesRegions,
     getRecentRuns,
     getRunById,

@@ -8,6 +8,11 @@ const { createSearchService } = require('./src/lib/server/services/search.servic
 const { createBuildingEditsService } = require('./src/lib/server/services/building-edits.service');
 const { createAppSettingsService } = require('./src/lib/server/services/app-settings.service');
 const {
+  DEFAULT_FILTER_TAG_ALLOWLIST,
+  normalizeFilterTagKeyList,
+  normalizeFilterTagKey
+} = require('./src/lib/server/services/filter-tags.service');
+const {
   createDataSettingsService,
   resolveLegacyRegionPmtilesPath,
   resolveRegionPmtilesPath
@@ -409,6 +414,21 @@ const smtpSettingsCache = createRuntimeSettingsCache({
     from: String(config.from || '').trim()
   })
 });
+const filterTagAllowlistCache = createRuntimeSettingsCache({
+  fallback: {
+    allowlist: [...DEFAULT_FILTER_TAG_ALLOWLIST],
+    allowlistSet: new Set(DEFAULT_FILTER_TAG_ALLOWLIST)
+  },
+  load: () => dataSettingsService.getEffectiveFilterTagAllowlistConfig(),
+  normalize: (config) => {
+    const allowlist = normalizeFilterTagKeyList(config?.allowlist);
+    return {
+      allowlist,
+      allowlistSet: new Set(allowlist)
+    };
+  },
+  selectConfig: (value) => value
+});
 
 function getEffectiveGeneralConfig() {
   return generalSettingsCache.getValue();
@@ -434,12 +454,26 @@ function getEffectiveSmtpConfig() {
   return smtpSettingsCache.getValue();
 }
 
+function getEffectiveFilterTagAllowlist() {
+  return filterTagAllowlistCache.getValue();
+}
+
+function isFilterTagAllowed(key) {
+  const normalized = normalizeFilterTagKey(key);
+  if (!normalized) return false;
+  return Boolean(getEffectiveFilterTagAllowlist().allowlistSet?.has(normalized));
+}
+
 function applyGeneralSettingsSnapshot(saved) {
   generalSettingsCache.applySnapshot(saved?.general);
 }
 
 function applySmtpSettingsSnapshot(saved) {
   smtpSettingsCache.applySnapshot(saved?.smtp);
+}
+
+function applyFilterTagAllowlistSnapshot(saved) {
+  filterTagAllowlistCache.applySnapshot(saved);
 }
 
 app.use(jsonMiddleware());
@@ -507,7 +541,7 @@ function scheduleFilterTagKeysCacheRebuild(reason = 'manual') {
   });
 }
 
-async function getFilterTagKeysCached() {
+async function getAllFilterTagKeysCached() {
   const now = Date.now();
   const ttlMs = 5 * 60 * 1000;
   if (Array.isArray(filterTagKeysCache.keys) && (now - filterTagKeysCache.loadedAt) < ttlMs) {
@@ -527,6 +561,12 @@ async function getFilterTagKeysCached() {
   }
   filterTagKeysCache = { keys: [], loadedAt: now };
   return [];
+}
+
+async function getFilterTagKeysCached() {
+  const allKeys = await getAllFilterTagKeysCached();
+  const allowedSet = getEffectiveFilterTagAllowlist().allowlistSet || new Set();
+  return allKeys.filter((key) => allowedSet.has(key));
 }
 
 applySecurityHeadersMiddleware(app, {
@@ -1032,6 +1072,7 @@ registerAppRoutes({
   getRegistrationEnabled,
   dataSettingsService,
   getFilterTagKeysCached,
+  getAllFilterTagKeysCached,
   isFilterTagKeysRebuildInProgress: () => filterTagKeysRebuildInProgress
 });
 
@@ -1061,6 +1102,8 @@ registerAdminRoutes({
   passwordResetTextTemplate,
   appSettingsService,
   dataSettingsService,
+  getAllFilterTagKeysCached,
+  applyFilterTagAllowlistSnapshot,
   onGeneralSettingsSaved: applyGeneralSettingsSnapshot,
   onSmtpSettingsSaved: applySmtpSettingsSnapshot,
   onDataRegionsSaved: async ({ action, saved, previous, deleted } = {}) => {
@@ -1098,6 +1141,7 @@ registerBuildingsRoutes({
   requireBuildingEditPermission,
   getSessionEditActorKey,
   applyPersonalEditsToFilterItems,
+  isFilterTagAllowed,
   rowToFeature,
   attachInfoToFeatures,
   applyUserEditRowToInfo,
@@ -1162,6 +1206,7 @@ function runStartupTasksOnce() {
     .then(() => {
       generalSettingsCache.refresh();
       smtpSettingsCache.refresh();
+      filterTagAllowlistCache.refresh();
       rebuildSearchIndex('startup').catch((error) => {
         logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
       });

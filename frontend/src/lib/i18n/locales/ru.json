@@ -180,6 +180,7 @@
       "levels": "Этажей",
       "building_colour": "Цвет здания",
       "building_material": "Материал здания",
+      "building_prefabricated": "Панельное / prefabricated",
       "building_height": "Высота здания",
       "roof_colour": "Цвет крыши",
       "roof_shape": "Форма крыши",
@@ -428,6 +429,22 @@
         "regionSourceLabel": "Источник региона",
         "regionSourceValue": "QuackOSM extract query"
       },
+      "filterTags": {
+        "title": "Allowlist тегов фильтрации",
+        "description": "Показываются все OSM-теги, которые реально есть в текущей базе. Галочка добавляет тег в allowlist для публичного UI фильтров.",
+        "source": "Источник",
+        "selectedCount": "Включено: {count}",
+        "availableCount": "Доступно в базе: {count}",
+        "updatedAt": "Обновлено",
+        "updatedBy": "Изменил",
+        "empty": "В базе пока нет OSM-тегов для фильтрации. Дождитесь завершения импорта или пересборки кеша ключей.",
+        "unsavedWarning": "Есть несохраненные изменения allowlist. Они не применятся к публичным фильтрам, пока вы не нажмете «Сохранить allowlist».",
+        "pendingEnabled": "вкл. не сохранено",
+        "pendingDisabled": "выкл. не сохранено",
+        "confirmDiscard": "Есть несохраненные изменения allowlist тегов. Выйти без сохранения?",
+        "resetDefaults": "Включить важные по умолчанию",
+        "save": "Сохранить allowlist"
+      },
       "list": {
         "title": "Список регионов",
         "loading": "Загрузка регионов...",
@@ -507,6 +524,9 @@
         "deletingRegion": "Удаляем регион...",
         "regionDeleted": "Регион удалён",
         "deleteRegionFailed": "Не удалось удалить регион",
+        "savingFilterTags": "Сохраняем allowlist тегов...",
+        "filterTagsSaved": "Allowlist тегов сохранён",
+        "saveFilterTagsFailed": "Не удалось сохранить allowlist тегов",
         "queueingSync": "Ставим регион в очередь синхронизации...",
         "queuedSync": "Регион поставлен в очередь синхронизации",
         "syncFailed": "Не удалось запустить синхронизацию региона"

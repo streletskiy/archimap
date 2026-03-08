@@ -22,7 +22,7 @@ System notes:
   - Returns paginated building search results.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`
-  - Returns cached list of OSM tag keys plus `warmingUp`.
+  - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`, plus `warmingUp`.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
 - `POST /api/buildings/filter-data`
   - Body: `{ keys: ["way/123", "relation/456", ...] }`.
@@ -60,6 +60,11 @@ System notes:
 - `GET/POST /api/admin/app-settings/smtp`, `POST /api/admin/app-settings/smtp/test`
 - `GET /api/admin/app-settings/data`
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
+  - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
+- `POST /api/admin/app-settings/data/filter-tag-allowlist`
+  - Master-admin only.
+  - Body: `{ allowlist: ["building", "height", ...] }`.
+  - Saves the explicit allowlist used by public filter-tag suggestions and server-side filter-key validation.
 - `GET /api/admin/app-settings/data/regions`
   - Returns region list for admin UI.
 - `POST /api/admin/app-settings/data/regions`

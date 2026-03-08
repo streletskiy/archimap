@@ -55,6 +55,7 @@
     levels: 'header.filterLabels.levels',
     'building:colour': 'header.filterLabels.building_colour',
     'building:material': 'header.filterLabels.building_material',
+    'building:prefabricated': 'header.filterLabels.building_prefabricated',
     'building:height': 'header.filterLabels.building_height',
     'roof:colour': 'header.filterLabels.roof_colour',
     'roof:shape': 'header.filterLabels.roof_shape',
@@ -326,6 +327,10 @@
     }
   }
 
+  function handleFilterTagKeysChanged() {
+    loadFilterTagKeys();
+  }
+
   function submitSearch(event) {
     event.preventDefault();
     const text = String(searchText || '').trim().slice(0, 120);
@@ -575,6 +580,9 @@
       darkTheme = getCurrentTheme() === 'dark';
     });
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('archimap:filter-tag-keys-changed', handleFilterTagKeysChanged);
+    }
     loadFilterTagKeys();
   });
 
@@ -586,6 +594,9 @@
     if (filterTagKeysRetryTimer) {
       clearTimeout(filterTagKeysRetryTimer);
       filterTagKeysRetryTimer = null;
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('archimap:filter-tag-keys-changed', handleFilterTagKeysChanged);
     }
   });
 

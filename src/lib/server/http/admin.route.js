@@ -28,6 +28,8 @@ function registerAdminRoutes(deps) {
     passwordResetTextTemplate,
     appSettingsService,
     dataSettingsService,
+    getAllFilterTagKeysCached,
+    applyFilterTagAllowlistSnapshot,
     onGeneralSettingsSaved,
     onSmtpSettingsSaved,
     onDataRegionsSaved,
@@ -266,12 +268,42 @@ function registerAdminRoutes(deps) {
     if (!dataSettingsService) {
       return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
     }
+    const base = await dataSettingsService.getDataSettingsForAdmin();
+    const availableKeys = typeof getAllFilterTagKeysCached === 'function'
+      ? await getAllFilterTagKeysCached()
+      : [];
     return sendCachedJson(req, res, {
       ok: true,
-      item: await dataSettingsService.getDataSettingsForAdmin()
+      item: {
+        ...base,
+        filterTags: {
+          ...(base.filterTags || {}),
+          availableKeys
+        }
+      }
     }, {
       cacheControl: 'private, no-cache'
     });
+  });
+
+  app.post('/api/admin/app-settings/data/filter-tag-allowlist', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    try {
+      const allowlist = Array.isArray(req.body?.allowlist) ? req.body.allowlist : [];
+      const actor = getSessionEditActorKey(req) || 'admin';
+      const saved = await dataSettingsService.saveFilterTagAllowlist(allowlist, actor);
+      if (typeof applyFilterTagAllowlistSnapshot === 'function') {
+        applyFilterTagAllowlistSnapshot(saved);
+      }
+      return res.json({
+        ok: true,
+        item: saved
+      });
+    } catch (error) {
+      return res.status(400).json({ error: String(error?.message || error || 'Не удалось сохранить allowlist тегов') });
+    }
   });
 
   app.get('/api/admin/app-settings/data/regions', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {

@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { beforeNavigate, goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { fade } from 'svelte/transition';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
@@ -86,10 +86,22 @@
   let dataSettings = {
     source: 'db',
     bootstrap: { completed: false, source: null },
-    regions: []
+    regions: [],
+    filterTags: {
+      source: 'default',
+      allowlist: [],
+      defaultAllowlist: [],
+      availableKeys: [],
+      updatedBy: null,
+      updatedAt: null
+    }
   };
   let dataLoading = false;
   let dataStatus = '';
+  let filterTagAllowlistDraft = [];
+  let filterTagAllowlistSaving = false;
+  let sortedAvailableFilterTagKeys = [];
+  let filterTagAllowlistDirty = false;
   let regionDraft = createRegionDraft();
   let regionSaving = false;
   let regionDeleting = false;
@@ -178,6 +190,100 @@
   function getRegionById(regionId) {
     return dataSettings.regions.find((item) => Number(item?.id || 0) === Number(regionId)) || null;
   }
+
+  function seedFilterTagAllowlistDraft(filterTags = null) {
+    const current = filterTags && typeof filterTags === 'object' ? filterTags : {};
+    filterTagAllowlistDraft = Array.isArray(current.allowlist) ? [...current.allowlist] : [];
+  }
+
+  function isFilterTagSelected(key) {
+    return filterTagAllowlistDraft.includes(String(key || '').trim());
+  }
+
+  function getSavedFilterTagAllowlist() {
+    return Array.isArray(dataSettings?.filterTags?.allowlist) ? dataSettings.filterTags.allowlist : [];
+  }
+
+  function getFilterTagDraftState(key) {
+    const normalized = String(key || '').trim();
+    if (!normalized) return 'unchanged';
+    const saved = new Set(getSavedFilterTagAllowlist());
+    const current = new Set(filterTagAllowlistDraft);
+    if (current.has(normalized) && !saved.has(normalized)) return 'enabled_pending';
+    if (!current.has(normalized) && saved.has(normalized)) return 'disabled_pending';
+    return 'unchanged';
+  }
+
+  function confirmDiscardFilterTagChanges() {
+    if (!filterTagAllowlistDirty) return true;
+    if (typeof window === 'undefined') return false;
+    return window.confirm(dataT('filterTags.confirmDiscard'));
+  }
+
+  function ensureFilterTagChangesDiscarded() {
+    return confirmDiscardFilterTagChanges();
+  }
+
+  function toggleFilterTagSelection(key, checked) {
+    const nextKey = String(key || '').trim();
+    if (!nextKey) return;
+    if (checked) {
+      if (filterTagAllowlistDraft.includes(nextKey)) return;
+      filterTagAllowlistDraft = [...filterTagAllowlistDraft, nextKey];
+      return;
+    }
+    filterTagAllowlistDraft = filterTagAllowlistDraft.filter((item) => item !== nextKey);
+  }
+
+  function sortFilterTagKeys(keys = [], selected = []) {
+    const selectedSet = new Set(Array.isArray(selected) ? selected : []);
+    return [...(Array.isArray(keys) ? keys : [])].sort((left, right) => {
+      const leftSelected = selectedSet.has(left);
+      const rightSelected = selectedSet.has(right);
+      if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
+      return String(left || '').localeCompare(String(right || ''), 'en', { sensitivity: 'base' });
+    });
+  }
+
+  function resetFilterTagAllowlistToDefault() {
+    const defaults = Array.isArray(dataSettings?.filterTags?.defaultAllowlist)
+      ? dataSettings.filterTags.defaultAllowlist
+      : [];
+    const available = new Set(Array.isArray(dataSettings?.filterTags?.availableKeys) ? dataSettings.filterTags.availableKeys : []);
+    filterTagAllowlistDraft = defaults.filter((key) => available.has(key));
+  }
+
+  $: sortedAvailableFilterTagKeys = sortFilterTagKeys(
+    dataSettings?.filterTags?.availableKeys,
+    getSavedFilterTagAllowlist()
+  );
+  $: filterTagAllowlistDirty = (() => {
+    const saved = [...getSavedFilterTagAllowlist()].sort();
+    const draft = [...filterTagAllowlistDraft].sort();
+    return JSON.stringify(saved) !== JSON.stringify(draft);
+  })();
+
+  onMount(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onBeforeUnload = (event) => {
+      if (!filterTagAllowlistDirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  });
+
+  beforeNavigate((navigation) => {
+    if (!filterTagAllowlistDirty) return;
+    const nextPathname = String(navigation?.to?.url?.pathname || '').trim();
+    if (!nextPathname) return;
+    if (typeof window !== 'undefined' && nextPathname !== window.location.pathname && !confirmDiscardFilterTagChanges()) {
+      navigation.cancel();
+    }
+  });
 
   function getActiveTabLabel(tab = activeTab) {
     if (tab === 'users') return translateNow('admin.tabs.users');
@@ -888,7 +994,10 @@
   }
 
   async function loadDataSettings(options = {}) {
-    const { selectedRegionId = null, preserveSelection = true } = options;
+    const { selectedRegionId = null, preserveSelection = true, ignoreUnsavedFilterTags = false } = options;
+    if (!ignoreUnsavedFilterTags && !ensureFilterTagChangesDiscarded()) {
+      return false;
+    }
     dataLoading = true;
     dataStatus = dataT('status.loadingSettings');
     try {
@@ -900,8 +1009,17 @@
           completed: Boolean(nextSettings?.bootstrap?.completed),
           source: nextSettings?.bootstrap?.source ? String(nextSettings.bootstrap.source) : null
         },
-        regions: Array.isArray(nextSettings?.regions) ? nextSettings.regions : []
+        regions: Array.isArray(nextSettings?.regions) ? nextSettings.regions : [],
+        filterTags: {
+          source: String(nextSettings?.filterTags?.source || 'default'),
+          allowlist: Array.isArray(nextSettings?.filterTags?.allowlist) ? nextSettings.filterTags.allowlist : [],
+          defaultAllowlist: Array.isArray(nextSettings?.filterTags?.defaultAllowlist) ? nextSettings.filterTags.defaultAllowlist : [],
+          availableKeys: Array.isArray(nextSettings?.filterTags?.availableKeys) ? nextSettings.filterTags.availableKeys : [],
+          updatedBy: nextSettings?.filterTags?.updatedBy ? String(nextSettings.filterTags.updatedBy) : null,
+          updatedAt: nextSettings?.filterTags?.updatedAt ? String(nextSettings.filterTags.updatedAt) : null
+        }
       };
+      seedFilterTagAllowlistDraft(dataSettings.filterTags);
 
       const nextSelectedRegionId =
         selectedRegionId != null
@@ -912,14 +1030,53 @@
       const selectedRegion = getRegionById(nextSelectedRegionId) || dataSettings.regions[0] || null;
       await selectDataRegion(selectedRegion);
       dataStatus = '';
+      return true;
     } catch (e) {
       dataStatus = msg(e, dataT('status.loadSettingsFailed'));
+      return false;
     } finally {
       dataLoading = false;
     }
   }
 
+  async function saveFilterTagAllowlist() {
+    filterTagAllowlistSaving = true;
+    dataStatus = dataT('status.savingFilterTags');
+    try {
+      const payload = {
+        allowlist: [...filterTagAllowlistDraft]
+      };
+      const data = await apiJson('/api/admin/app-settings/data/filter-tag-allowlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const saved = data?.item && typeof data.item === 'object' ? data.item : null;
+      dataSettings = {
+        ...dataSettings,
+        filterTags: {
+          ...dataSettings.filterTags,
+          source: String(saved?.source || dataSettings.filterTags.source || 'default'),
+          allowlist: Array.isArray(saved?.allowlist) ? saved.allowlist : [...filterTagAllowlistDraft],
+          defaultAllowlist: Array.isArray(saved?.defaultAllowlist) ? saved.defaultAllowlist : dataSettings.filterTags.defaultAllowlist,
+          updatedBy: saved?.updatedBy ? String(saved.updatedBy) : null,
+          updatedAt: saved?.updatedAt ? String(saved.updatedAt) : null
+        }
+      };
+      seedFilterTagAllowlistDraft(dataSettings.filterTags);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('archimap:filter-tag-keys-changed'));
+      }
+      dataStatus = dataT('status.filterTagsSaved');
+    } catch (e) {
+      dataStatus = msg(e, dataT('status.saveFilterTagsFailed'));
+    } finally {
+      filterTagAllowlistSaving = false;
+    }
+  }
+
   function startNewRegionDraft() {
+    if (!ensureFilterTagChangesDiscarded()) return;
     selectedDataRegionId = null;
     regionDraft = createRegionDraft();
     regionRunsLoading = false;
@@ -930,6 +1087,7 @@
 
   async function saveDataRegion(event) {
     event.preventDefault();
+    if (!ensureFilterTagChangesDiscarded()) return;
     regionSaving = true;
     dataStatus = dataT('status.savingRegion');
     try {
@@ -966,6 +1124,7 @@
   }
 
   async function deleteDataRegion(regionId) {
+    if (!ensureFilterTagChangesDiscarded()) return;
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0 || regionDeleting) return;
     const region = getRegionById(numericRegionId);
@@ -995,6 +1154,7 @@
   }
 
   async function syncRegionNow(regionId) {
+    if (!ensureFilterTagChangesDiscarded()) return;
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) return;
     regionSyncBusy = true;
@@ -1018,6 +1178,9 @@
   }
 
   async function switchTab(tab) {
+    if (tab !== activeTab && !confirmDiscardFilterTagChanges()) {
+      return;
+    }
     activeTab = tab;
     await tick();
     if (tab === 'edits') {
@@ -1358,6 +1521,90 @@
           {#if dataStatus}
             <p class="text-sm text-slate-600">{dataStatus}</p>
           {/if}
+
+          <section class="data-form-card space-y-3 rounded-2xl p-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 class="text-base font-bold text-slate-900">{$t('admin.data.filterTags.title')}</h4>
+                <p class="text-sm text-slate-600">{$t('admin.data.filterTags.description')}</p>
+              </div>
+              <div class="text-xs text-slate-500">
+                <p>{$t('admin.data.filterTags.source')}: {dataSettings.filterTags.source}</p>
+                <p>{$t('admin.data.filterTags.selectedCount', { count: filterTagAllowlistDraft.length })}</p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+              <span class="rounded-full bg-slate-100 px-2 py-1">
+                {$t('admin.data.filterTags.availableCount', { count: dataSettings.filterTags.availableKeys.length })}
+              </span>
+              {#if dataSettings.filterTags.updatedAt}
+                <span class="rounded-full bg-slate-100 px-2 py-1">
+                  {$t('admin.data.filterTags.updatedAt')}: {formatUiDate(dataSettings.filterTags.updatedAt)}
+                </span>
+              {/if}
+              {#if dataSettings.filterTags.updatedBy}
+                <span class="rounded-full bg-slate-100 px-2 py-1">
+                  {$t('admin.data.filterTags.updatedBy')}: {dataSettings.filterTags.updatedBy}
+                </span>
+              {/if}
+            </div>
+
+            {#if filterTagAllowlistDirty}
+              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {$t('admin.data.filterTags.unsavedWarning')}
+              </div>
+            {/if}
+
+            {#if dataSettings.filterTags.availableKeys.length === 0}
+              <p class="rounded-xl border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500">
+                {$t('admin.data.filterTags.empty')}
+              </p>
+            {:else}
+              <div class="max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-white p-3">
+                <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  {#each sortedAvailableFilterTagKeys as key (key)}
+                    {@const draftState = getFilterTagDraftState(key)}
+                    <label
+                      class="filter-tag-option flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+                      data-state={draftState}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isFilterTagSelected(key)}
+                        on:change={(event) => toggleFilterTagSelection(key, event.currentTarget.checked)}
+                      />
+                      <span class="break-all">{key}</span>
+                      {#if draftState === 'enabled_pending'}
+                        <span class="filter-tag-badge rounded-full px-2 py-0.5 text-[11px] font-semibold" data-state={draftState}>
+                          {$t('admin.data.filterTags.pendingEnabled')}
+                        </span>
+                      {:else if draftState === 'disabled_pending'}
+                        <span class="filter-tag-badge rounded-full px-2 py-0.5 text-[11px] font-semibold" data-state={draftState}>
+                          {$t('admin.data.filterTags.pendingDisabled')}
+                        </span>
+                      {/if}
+                    </label>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="ui-btn ui-btn-secondary"
+                disabled={dataLoading || filterTagAllowlistSaving}
+                on:click={resetFilterTagAllowlistToDefault}>{$t('admin.data.filterTags.resetDefaults')}</button
+              >
+              <button
+                type="button"
+                class="ui-btn ui-btn-primary"
+                disabled={dataLoading || filterTagAllowlistSaving}
+                on:click={saveFilterTagAllowlist}>{$t('admin.data.filterTags.save')}</button
+              >
+            </div>
+          </section>
 
           <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
             <section class="space-y-3 min-w-0">
@@ -2022,6 +2269,60 @@
   }
 
   :global(html[data-theme='dark']) .data-status-pill[data-tone='failed'] {
+    background: #4c1024;
+    color: #fda4af;
+  }
+
+  .filter-tag-option {
+    border-color: var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    color: var(--ink);
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  .filter-tag-option[data-state='enabled_pending'] {
+    border-color: color-mix(in srgb, #10b981 42%, var(--panel-border));
+    background: color-mix(in srgb, #10b981 12%, var(--panel-solid));
+    box-shadow: 0 0 0 1px color-mix(in srgb, #10b981 16%, transparent);
+  }
+
+  .filter-tag-option[data-state='disabled_pending'] {
+    border-color: color-mix(in srgb, #e11d48 42%, var(--panel-border));
+    background: color-mix(in srgb, #e11d48 10%, var(--panel-solid));
+    box-shadow: 0 0 0 1px color-mix(in srgb, #e11d48 14%, transparent);
+  }
+
+  .filter-tag-badge[data-state='enabled_pending'] {
+    background: #d1fae5;
+    color: #047857;
+  }
+
+  .filter-tag-badge[data-state='disabled_pending'] {
+    background: #ffe4e6;
+    color: #be123c;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-option[data-state='enabled_pending'] {
+    border-color: color-mix(in srgb, #34d399 48%, var(--panel-border));
+    background: color-mix(in srgb, #064e3b 58%, var(--panel-solid));
+    box-shadow: 0 0 0 1px color-mix(in srgb, #34d399 22%, transparent);
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-option[data-state='disabled_pending'] {
+    border-color: color-mix(in srgb, #fb7185 48%, var(--panel-border));
+    background: color-mix(in srgb, #4c1024 52%, var(--panel-solid));
+    box-shadow: 0 0 0 1px color-mix(in srgb, #fb7185 20%, transparent);
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-badge[data-state='enabled_pending'] {
+    background: #064e3b;
+    color: #6ee7b7;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-badge[data-state='disabled_pending'] {
     background: #4c1024;
     color: #fda4af;
   }

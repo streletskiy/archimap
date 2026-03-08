@@ -45,6 +45,7 @@ function registerAppRoutes(deps) {
     getRegistrationEnabled,
     dataSettingsService,
     getFilterTagKeysCached,
+    getAllFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress
   } = deps;
   const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
@@ -142,10 +143,13 @@ function registerAppRoutes(deps) {
 
   app.get('/api/filter-tag-keys', publicApiRateLimiter, async (req, res) => {
     try {
+      const allKeys = typeof getAllFilterTagKeysCached === 'function'
+        ? await getAllFilterTagKeysCached()
+        : [];
       const keys = await getFilterTagKeysCached();
       return sendCachedJson(req, res, {
         keys,
-        warmingUp: isFilterTagKeysRebuildInProgress() || keys.length === 0
+        warmingUp: isFilterTagKeysRebuildInProgress() || allKeys.length === 0
       }, {
         cacheControl: 'public, max-age=300'
       });

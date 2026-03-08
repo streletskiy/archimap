@@ -180,6 +180,7 @@
       "levels": "Levels",
       "building_colour": "Building color",
       "building_material": "Building material",
+      "building_prefabricated": "Prefabricated",
       "building_height": "Building height",
       "roof_colour": "Roof color",
       "roof_shape": "Roof shape",
@@ -428,6 +429,22 @@
         "regionSourceLabel": "Region source",
         "regionSourceValue": "QuackOSM extract query"
       },
+      "filterTags": {
+        "title": "Filter tag allowlist",
+        "description": "Shows all OSM tags currently present in the local database. Checking a tag adds it to the public filter UI allowlist.",
+        "source": "Source",
+        "selectedCount": "Enabled: {count}",
+        "availableCount": "Available in DB: {count}",
+        "updatedAt": "Updated",
+        "updatedBy": "Updated by",
+        "empty": "No OSM tags are currently available for filtering. Wait for an import or filter-tag cache rebuild.",
+        "unsavedWarning": "There are unsaved allowlist changes. They will not affect public filters until you click \"Save allowlist\".",
+        "pendingEnabled": "enabled, unsaved",
+        "pendingDisabled": "disabled, unsaved",
+        "confirmDiscard": "There are unsaved filter tag allowlist changes. Leave without saving?",
+        "resetDefaults": "Enable default important tags",
+        "save": "Save allowlist"
+      },
       "list": {
         "title": "Region list",
         "loading": "Loading regions...",
@@ -507,6 +524,9 @@
         "deletingRegion": "Deleting region...",
         "regionDeleted": "Region deleted",
         "deleteRegionFailed": "Failed to delete region",
+        "savingFilterTags": "Saving tag allowlist...",
+        "filterTagsSaved": "Tag allowlist saved",
+        "saveFilterTagsFailed": "Failed to save tag allowlist",
         "queueingSync": "Queueing region sync...",
         "queuedSync": "Region sync queued",
         "syncFailed": "Failed to start region sync"
