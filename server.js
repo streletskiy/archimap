@@ -364,6 +364,7 @@ const appSettingsService = createAppSettingsService({
 
 const dataSettingsService = createDataSettingsService({
   db,
+  dataDir,
   fallbackData: {
     autoSyncEnabled: AUTO_SYNC_ENABLED,
     autoSyncOnStart: AUTO_SYNC_ON_START,

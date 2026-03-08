@@ -59,6 +59,7 @@ function resolveExistingRegionPmtilesPath(dataDir, region) {
 function createDataSettingsService(options = {}) {
   const {
     db,
+    dataDir = '',
     fallbackData = {},
     now = () => new Date()
   } = options;
@@ -208,6 +209,9 @@ function createDataSettingsService(options = {}) {
       nextSyncAt: row.next_sync_at ? String(row.next_sync_at) : null,
       bounds: boundsFromRow(row),
       lastFeatureCount: row.last_feature_count == null ? null : Number(row.last_feature_count),
+      pmtilesBytes: row.pmtiles_bytes == null ? null : Number(row.pmtiles_bytes),
+      dbBytes: row.db_bytes == null ? null : Number(row.db_bytes),
+      dbBytesApproximate: Boolean(row.db_bytes_approximate),
       updatedBy: row.updated_by ? String(row.updated_by) : null,
       createdAt: row.created_at ? String(row.created_at) : null,
       updatedAt: row.updated_at ? String(row.updated_at) : null
@@ -349,10 +353,142 @@ function normalizeFallbackData(raw = {}) {
   async function listRegions(options = {}) {
     await ensureBootstrapped();
     const includeDisabled = options.includeDisabled !== false;
+    const includeStorageStats = options.includeStorageStats === true;
     const rows = await listRegionRows();
-    return rows
+    const items = rows
       .map(rowToRegion)
       .filter((item) => includeDisabled || item.enabled);
+    return includeStorageStats
+      ? await enrichRegionsWithStorageStats(items)
+      : items;
+  }
+
+  async function getLatestPmtilesBytesByRegionId() {
+    let rows = [];
+    try {
+      rows = await db.prepare(`
+        SELECT runs.region_id, runs.pmtiles_bytes
+        FROM data_region_sync_runs runs
+        INNER JOIN (
+          SELECT region_id, MAX(id) AS latest_id
+          FROM data_region_sync_runs
+          GROUP BY region_id
+        ) latest
+          ON latest.latest_id = runs.id
+      `).all();
+    } catch {
+      rows = [];
+    }
+    const map = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const regionId = Number(row?.region_id || 0);
+      if (!Number.isInteger(regionId) || regionId <= 0) continue;
+      map.set(regionId, row?.pmtiles_bytes == null ? null : Number(row.pmtiles_bytes));
+    }
+    return map;
+  }
+
+  async function getRegionDbBytesByRegionId() {
+    if (db.provider === 'postgres') {
+      let rows = [];
+      try {
+        rows = await db.prepare(`
+          SELECT
+            drm.region_id,
+            (
+              COALESCE(SUM(pg_column_size(bc.*)), 0)
+              + COALESCE(SUM(pg_column_size(drm.*)), 0)
+            )::bigint AS db_bytes
+          FROM public.data_region_memberships drm
+          LEFT JOIN osm.building_contours bc
+            ON bc.osm_type = drm.osm_type
+           AND bc.osm_id = drm.osm_id
+          GROUP BY drm.region_id
+        `).all();
+      } catch {
+        rows = [];
+      }
+      const map = new Map();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const regionId = Number(row?.region_id || 0);
+        if (!Number.isInteger(regionId) || regionId <= 0) continue;
+        map.set(regionId, row?.db_bytes == null ? 0 : Number(row.db_bytes));
+      }
+      return {
+        byRegionId: map,
+        approximate: false
+      };
+    }
+
+    let rows = [];
+    try {
+      rows = await db.prepare(`
+        SELECT
+          drm.region_id,
+          COALESCE(SUM(
+            length(CAST(COALESCE(bc.osm_type, '') AS BLOB))
+            + length(CAST(COALESCE(bc.tags_json, '') AS BLOB))
+            + length(CAST(COALESCE(bc.geometry_json, '') AS BLOB))
+            + length(CAST(COALESCE(bc.updated_at, '') AS BLOB))
+            + 48
+          ), 0)
+          + COALESCE(SUM(
+            length(CAST(COALESCE(drm.osm_type, '') AS BLOB))
+            + length(CAST(COALESCE(drm.created_at, '') AS BLOB))
+            + length(CAST(COALESCE(drm.updated_at, '') AS BLOB))
+            + 24
+          ), 0) AS db_bytes
+        FROM data_region_memberships drm
+        LEFT JOIN osm.building_contours bc
+          ON bc.osm_type = drm.osm_type
+         AND bc.osm_id = drm.osm_id
+        GROUP BY drm.region_id
+      `).all();
+    } catch {
+      rows = [];
+    }
+    const map = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const regionId = Number(row?.region_id || 0);
+      if (!Number.isInteger(regionId) || regionId <= 0) continue;
+      map.set(regionId, row?.db_bytes == null ? 0 : Number(row.db_bytes));
+    }
+    return {
+      byRegionId: map,
+      approximate: true
+    };
+  }
+
+  function resolveStoredPmtilesBytes(region, fallbackBytes = null) {
+    if (dataDir) {
+      const fs = require('fs');
+      const pmtilesPath = resolveExistingRegionPmtilesPath(dataDir, region);
+      if (pmtilesPath) {
+        try {
+          return Number(fs.statSync(pmtilesPath).size || 0);
+        } catch {
+          // fall through to persisted bytes
+        }
+      }
+    }
+    return fallbackBytes == null ? null : Number(fallbackBytes);
+  }
+
+  async function enrichRegionsWithStorageStats(regions = []) {
+    const items = Array.isArray(regions) ? regions : [];
+    if (items.length === 0) return [];
+
+    const [pmtilesBytesByRegionId, dbBytesStats] = await Promise.all([
+      getLatestPmtilesBytesByRegionId(),
+      getRegionDbBytesByRegionId()
+    ]);
+
+    return items.map((region) => ({
+      ...region,
+      pmtilesBytes: resolveStoredPmtilesBytes(region, pmtilesBytesByRegionId.get(region.id) ?? region.pmtilesBytes ?? null),
+      dbBytes: dbBytesStats.byRegionId.get(region.id) ?? region.dbBytes ?? 0,
+      dbBytesApproximate: dbBytesStats.approximate
+    }));
   }
 
   async function getRecentRuns(regionId = null, limit = 25) {
@@ -573,27 +709,30 @@ function normalizeFallbackData(raw = {}) {
     bootstrapPromise = (async () => {
       const existingRegions = await countRegions();
       if (existingRegions > 0) {
+        const regions = (await listRegionRows()).map(rowToRegion);
         return {
           source: 'db',
           imported: false,
-          regions: (await listRegionRows()).map(rowToRegion)
+          regions
         };
       }
 
       const bootstrapState = await getBootstrapState();
       if (bootstrapState.completed) {
+        const regions = (await listRegionRows()).map(rowToRegion);
         return {
           source: 'db',
           imported: false,
-          regions: (await listRegionRows()).map(rowToRegion)
+          regions
         };
       }
 
       await writeBootstrapState('db-only', actor);
+      const regions = (await listRegionRows()).map(rowToRegion);
       return {
         source: 'db',
         imported: false,
-        regions: (await listRegionRows()).map(rowToRegion)
+        regions
       };
     })();
 
@@ -960,7 +1099,7 @@ function normalizeFallbackData(raw = {}) {
   async function getDataSettingsForAdmin() {
     await ensureBootstrapped();
     const bootstrap = await getBootstrapState();
-    const regions = await listRegions();
+    const regions = await listRegions({ includeStorageStats: true });
     const filterTags = await getFilterTagAllowlistForAdmin();
     return {
       source: 'db',

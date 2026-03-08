@@ -372,10 +372,7 @@ html[data-theme='dark'] #search-results-list::-webkit-scrollbar-thumb:hover {
 }
 
 html[data-theme='dark'] body {
-  background:
-    radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 24%),
-    linear-gradient(180deg, #09111e 0%, #08111f 52%, #08111f 100%);
+  background: linear-gradient(180deg, #09111e 0%, #08111f 52%, #08111f 100%);
   color: var(--fg);
 }
 

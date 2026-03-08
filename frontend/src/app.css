@@ -67,10 +67,7 @@ body {
   min-height: 100%;
   font-family: var(--font-body);
   color: var(--fg);
-  background:
-    radial-gradient(circle at top left, rgba(253, 200, 47, 0.16), transparent 32%),
-    radial-gradient(circle at top right, rgba(79, 74, 67, 0.08), transparent 28%),
-    linear-gradient(180deg, var(--bg-muted) 0%, var(--bg) 48%, var(--bg) 100%);
+  background: linear-gradient(180deg, var(--bg-muted) 0%, var(--bg) 48%, var(--bg) 100%);
   overflow-x: hidden;
 }
 

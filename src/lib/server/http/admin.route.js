@@ -311,7 +311,7 @@ function registerAdminRoutes(deps) {
       return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
     }
     const includeDisabled = String(req.query?.includeDisabled ?? 'true').trim().toLowerCase() !== 'false';
-    const items = await dataSettingsService.listRegions({ includeDisabled });
+    const items = await dataSettingsService.listRegions({ includeDisabled, includeStorageStats: true });
     return sendCachedJson(req, res, {
       ok: true,
       items

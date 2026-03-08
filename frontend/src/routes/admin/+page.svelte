@@ -102,6 +102,7 @@
   let filterTagAllowlistSaving = false;
   let sortedAvailableFilterTagKeys = [];
   let filterTagAllowlistDirty = false;
+  let filterTagDraftStateByKey = {};
   let regionDraft = createRegionDraft();
   let regionSaving = false;
   let regionDeleting = false;
@@ -191,6 +192,22 @@
     return dataSettings.regions.find((item) => Number(item?.id || 0) === Number(regionId)) || null;
   }
 
+  function formatStorageBytes(value, options = {}) {
+    const { fallback = '—' } = options;
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes < 0) return fallback;
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    const digits = size >= 100 || unitIndex === 0 ? 0 : size >= 10 ? 1 : 2;
+    return `${size.toFixed(digits)} ${units[unitIndex]}`;
+  }
+
   function seedFilterTagAllowlistDraft(filterTags = null) {
     const current = filterTags && typeof filterTags === 'object' ? filterTags : {};
     filterTagAllowlistDraft = Array.isArray(current.allowlist) ? [...current.allowlist] : [];
@@ -212,6 +229,32 @@
     if (current.has(normalized) && !saved.has(normalized)) return 'enabled_pending';
     if (!current.has(normalized) && saved.has(normalized)) return 'disabled_pending';
     return 'unchanged';
+  }
+
+  function getFilterTagDraftClass(state) {
+    if (state === 'enabled_pending') return 'filter-tag-option-enabled-pending';
+    if (state === 'disabled_pending') return 'filter-tag-option-disabled-pending';
+    return 'filter-tag-option-unchanged';
+  }
+
+  function buildFilterTagDraftStateByKey(keys = [], saved = [], draft = []) {
+    const result = {};
+    const savedSet = new Set(Array.isArray(saved) ? saved : []);
+    const draftSet = new Set(Array.isArray(draft) ? draft : []);
+    for (const rawKey of Array.isArray(keys) ? keys : []) {
+      const key = String(rawKey || '').trim();
+      if (!key) continue;
+      if (draftSet.has(key) && !savedSet.has(key)) {
+        result[key] = 'enabled_pending';
+        continue;
+      }
+      if (!draftSet.has(key) && savedSet.has(key)) {
+        result[key] = 'disabled_pending';
+        continue;
+      }
+      result[key] = 'unchanged';
+    }
+    return result;
   }
 
   function confirmDiscardFilterTagChanges() {
@@ -256,6 +299,11 @@
   $: sortedAvailableFilterTagKeys = sortFilterTagKeys(
     dataSettings?.filterTags?.availableKeys,
     getSavedFilterTagAllowlist()
+  );
+  $: filterTagDraftStateByKey = buildFilterTagDraftStateByKey(
+    dataSettings?.filterTags?.availableKeys,
+    getSavedFilterTagAllowlist(),
+    filterTagAllowlistDraft
   );
   $: filterTagAllowlistDirty = (() => {
     const saved = [...getSavedFilterTagAllowlist()].sort();
@@ -1551,7 +1599,7 @@
             </div>
 
             {#if filterTagAllowlistDirty}
-              <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div class="filter-tag-unsaved-warning rounded-xl px-3 py-2 text-sm">
                 {$t('admin.data.filterTags.unsavedWarning')}
               </div>
             {/if}
@@ -1564,10 +1612,9 @@
               <div class="max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-white p-3">
                 <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   {#each sortedAvailableFilterTagKeys as key (key)}
-                    {@const draftState = getFilterTagDraftState(key)}
+                    {@const draftState = filterTagDraftStateByKey[key] || 'unchanged'}
                     <label
-                      class="filter-tag-option flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
-                      data-state={draftState}
+                      class={`filter-tag-option ${getFilterTagDraftClass(draftState)} flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm`}
                     >
                       <input
                         type="checkbox"
@@ -1575,15 +1622,6 @@
                         on:change={(event) => toggleFilterTagSelection(key, event.currentTarget.checked)}
                       />
                       <span class="break-all">{key}</span>
-                      {#if draftState === 'enabled_pending'}
-                        <span class="filter-tag-badge rounded-full px-2 py-0.5 text-[11px] font-semibold" data-state={draftState}>
-                          {$t('admin.data.filterTags.pendingEnabled')}
-                        </span>
-                      {:else if draftState === 'disabled_pending'}
-                        <span class="filter-tag-badge rounded-full px-2 py-0.5 text-[11px] font-semibold" data-state={draftState}>
-                          {$t('admin.data.filterTags.pendingDisabled')}
-                        </span>
-                      {/if}
                     </label>
                   {/each}
                 </div>
@@ -1642,6 +1680,11 @@
                       <div class="mt-2 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
                         <p>{$t('admin.data.list.lastSync')}: {formatUiDate(region.lastSuccessfulSyncAt) || '—'}</p>
                         <p>{$t('admin.data.list.nextSync')}: {formatUiDate(region.nextSyncAt) || '—'}</p>
+                        <p>{$t('admin.data.list.pmtilesSize')}: {formatStorageBytes(region.pmtilesBytes)}</p>
+                        <p>
+                          {$t('admin.data.list.dbSize')}:
+                          {region.dbBytesApproximate ? '~' : ''}{formatStorageBytes(region.dbBytes)}
+                        </p>
                       </div>
                       <div class="mt-2 flex flex-wrap gap-2 text-xs">
                         <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600"
@@ -1755,6 +1798,11 @@
                       <p>{$t('admin.data.form.lastSync')}: {formatUiDate(selectedRegion?.lastSuccessfulSyncAt) || '—'}</p>
                       <p>{$t('admin.data.form.nextSync')}: {formatUiDate(selectedRegion?.nextSyncAt) || '—'}</p>
                       <p>{$t('admin.data.form.lastFinished')}: {formatUiDate(selectedRegion?.lastSyncFinishedAt) || '—'}</p>
+                      <p>{$t('admin.data.form.pmtilesSize')}: {formatStorageBytes(selectedRegion?.pmtilesBytes)}</p>
+                      <p>
+                        {$t('admin.data.form.dbSize')}:
+                        {selectedRegion?.dbBytesApproximate ? '~' : ''}{formatStorageBytes(selectedRegion?.dbBytes)}
+                      </p>
                       <p class="break-words">
                         {$t('admin.data.form.bounds')}: {selectedRegion?.bounds
                           ? `${selectedRegion.bounds.west.toFixed(4)}, ${selectedRegion.bounds.south.toFixed(4)} .. ${selectedRegion.bounds.east.toFixed(4)}, ${selectedRegion.bounds.north.toFixed(4)}`
@@ -2273,56 +2321,94 @@
     color: #fda4af;
   }
 
+  .filter-tag-unsaved-warning {
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+    color: #92400e;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-unsaved-warning {
+    border-color: #b45309;
+    background: #3f2a05;
+    color: #fcd34d;
+  }
+
   .filter-tag-option {
     border-color: var(--panel-border);
     background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
-    color: var(--ink);
+    color: var(--fg);
     transition:
       background-color 140ms ease,
       border-color 140ms ease,
       box-shadow 140ms ease;
   }
 
-  .filter-tag-option[data-state='enabled_pending'] {
-    border-color: color-mix(in srgb, #10b981 42%, var(--panel-border));
-    background: color-mix(in srgb, #10b981 12%, var(--panel-solid));
-    box-shadow: 0 0 0 1px color-mix(in srgb, #10b981 16%, transparent);
+  .filter-tag-option input {
+    flex: 0 0 auto;
   }
 
-  .filter-tag-option[data-state='disabled_pending'] {
-    border-color: color-mix(in srgb, #e11d48 42%, var(--panel-border));
-    background: color-mix(in srgb, #e11d48 10%, var(--panel-solid));
-    box-shadow: 0 0 0 1px color-mix(in srgb, #e11d48 14%, transparent);
+  .filter-tag-option-unchanged {
+    border-color: var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    color: var(--fg);
+    box-shadow: none;
   }
 
-  .filter-tag-badge[data-state='enabled_pending'] {
+  .filter-tag-option-enabled-pending {
+    border-color: #34d399 !important;
+    background: #dcfce7 !important;
+    box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.22);
+    color: #065f46 !important;
+  }
+
+  .filter-tag-option-disabled-pending {
+    border-color: #fb7185 !important;
+    background: #ffe4e6 !important;
+    box-shadow: inset 0 0 0 1px rgba(225, 29, 72, 0.16);
+    color: #9f1239 !important;
+  }
+
+  .filter-tag-badge-enabled {
     background: #d1fae5;
     color: #047857;
   }
 
-  .filter-tag-badge[data-state='disabled_pending'] {
+  .filter-tag-badge-disabled {
     background: #ffe4e6;
     color: #be123c;
   }
 
-  :global(html[data-theme='dark']) .filter-tag-option[data-state='enabled_pending'] {
-    border-color: color-mix(in srgb, #34d399 48%, var(--panel-border));
-    background: color-mix(in srgb, #064e3b 58%, var(--panel-solid));
-    box-shadow: 0 0 0 1px color-mix(in srgb, #34d399 22%, transparent);
+  :global(html[data-theme='dark']) .filter-tag-option-enabled-pending {
+    border-color: #34d399 !important;
+    background: #0b3b2e !important;
+    box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.24);
+    color: #a7f3d0 !important;
   }
 
-  :global(html[data-theme='dark']) .filter-tag-option[data-state='disabled_pending'] {
-    border-color: color-mix(in srgb, #fb7185 48%, var(--panel-border));
-    background: color-mix(in srgb, #4c1024 52%, var(--panel-solid));
-    box-shadow: 0 0 0 1px color-mix(in srgb, #fb7185 20%, transparent);
+  :global(html[data-theme='dark']) .filter-tag-option-disabled-pending {
+    border-color: #fb7185 !important;
+    background: #4a1524 !important;
+    box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.22);
+    color: #fecdd3 !important;
   }
 
-  :global(html[data-theme='dark']) .filter-tag-badge[data-state='enabled_pending'] {
+  :global(html[data-theme='dark']) .filter-tag-option-unchanged {
+    border-color: var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    color: var(--fg);
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-pending-indicator {
+    border-color: rgba(148, 163, 184, 0.32);
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.92);
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-badge-enabled {
     background: #064e3b;
     color: #6ee7b7;
   }
 
-  :global(html[data-theme='dark']) .filter-tag-badge[data-state='disabled_pending'] {
+  :global(html[data-theme='dark']) .filter-tag-badge-disabled {
     background: #4c1024;
     color: #fda4af;
   }

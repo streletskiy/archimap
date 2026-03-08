@@ -185,6 +185,85 @@ test('saveRegion allows renaming existing region while preserving id', async () 
   assert.equal(renamed.slug, 'renamed-region');
 });
 
+test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage bytes for region', async () => {
+  const db = createTestDb();
+  ensureContoursTable(db);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-region-storage-'));
+  const service = createDataSettingsService({
+    db,
+    dataDir: tempDir,
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  try {
+    const region = await service.saveRegion({
+      name: 'Storage Region',
+      slug: 'storage-region',
+      sourceType: 'extract_query',
+      sourceValue: 'Storage Region',
+      enabled: true,
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }, 'tester');
+
+    const pmtilesPath = resolveRegionPmtilesPath(tempDir, region);
+    fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
+    fs.writeFileSync(pmtilesPath, Buffer.alloc(1536, 7));
+
+    db.prepare(`
+      INSERT INTO osm.building_contours (
+        osm_type,
+        osm_id,
+        tags_json,
+        geometry_json,
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(
+      'way',
+      101,
+      JSON.stringify({ building: 'yes', name: 'Storage test' }),
+      JSON.stringify({
+        type: 'MultiPolygon',
+        coordinates: [[[[37.6, 55.7], [37.61, 55.7], [37.61, 55.71], [37.6, 55.71], [37.6, 55.7]]]]
+      }),
+      37.6,
+      55.7,
+      37.61,
+      55.71
+    );
+    db.prepare(`
+      INSERT INTO data_region_memberships (
+        region_id,
+        osm_type,
+        osm_id,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, datetime('now'), datetime('now'))
+    `).run(region.id, 'way', 101);
+
+    const settings = await service.getDataSettingsForAdmin();
+    const saved = settings.regions.find((item) => item.id === region.id);
+    assert.equal(saved.pmtilesBytes, 1536);
+    assert.equal(saved.dbBytesApproximate, true);
+    assert.ok(saved.dbBytes > 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('overlapping enabled region bounds are allowed to complete syncs', async () => {
   const db = createTestDb();
   const service = createDataSettingsService({
