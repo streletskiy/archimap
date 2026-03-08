@@ -1,7 +1,9 @@
 <script>
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { goto } from '$app/navigation';
-  import { parseUrlState, patchUrlState } from '$lib/client/urlState';
+  import { page } from '$app/stores';
+  import { buildInfoUrl, resolveInfoTabFromUrl } from '$lib/client/section-routes';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { t } from '$lib/i18n/index';
   import { marked } from 'marked';
@@ -9,7 +11,7 @@
   import agreementMarkdownSource from '../../../../legal/user-agreement.ru.md?raw';
   import privacyMarkdownSource from '../../../../legal/privacy-policy.ru.md?raw';
 
-  let activeTab = 'about';
+  let activeTab = resolveInfoTabFromUrl(get(page).url);
   let infoUrlSyncBusy = false;
   let agreementHtml = '';
   let privacyHtml = '';
@@ -25,28 +27,17 @@
   agreementHtml = markdownToHtml(agreementMarkdownSource);
   privacyHtml = markdownToHtml(privacyMarkdownSource);
 
-  function resolveActiveTabFromInfoState(info) {
-    if (info?.tab === 'legal' && info?.doc === 'privacy') return 'privacy';
-    if (info?.tab === 'legal') return 'agreement';
-    return 'about';
+  async function setTab(nextTab) {
+    if (activeTab !== nextTab) {
+      activeTab = nextTab;
+    }
+    await replaceInfoUrl(nextTab);
   }
 
-  function toInfoStateFromActiveTab(tab) {
-    if (tab === 'privacy') return { tab: 'legal', doc: 'privacy' };
-    if (tab === 'agreement') return { tab: 'legal', doc: 'terms' };
-    return { tab: 'about', doc: null };
-  }
-
-  function setTab(nextTab) {
-    if (activeTab === nextTab) return;
-    activeTab = nextTab;
-    replaceInfoUrlFromState(nextTab);
-  }
-
-  async function replaceInfoUrlFromState(tab) {
+  async function replaceInfoUrl(tab) {
     if (typeof window === 'undefined') return;
+    const next = buildInfoUrl(window.location.href, tab);
     const current = new URL(window.location.href);
-    const next = patchUrlState(current, { info: toInfoStateFromActiveTab(tab) });
     if (next.toString() === current.toString()) return;
     infoUrlSyncBusy = true;
     try {
@@ -63,17 +54,18 @@
   }
 
   onMount(() => {
-    const syncFromLocation = () => {
-      if (infoUrlSyncBusy || typeof window === 'undefined') return;
-      const state = parseUrlState(window.location.href);
-      const nextTab = resolveActiveTabFromInfoState(state.info);
+    const syncFromPage = async ($pageState) => {
+      if (infoUrlSyncBusy) return;
+      const nextTab = resolveInfoTabFromUrl($pageState.url);
       if (nextTab !== activeTab) activeTab = nextTab;
+      await replaceInfoUrl(nextTab);
     };
-    syncFromLocation();
-    window.addEventListener('popstate', syncFromLocation);
+    const unsubscribePage = page.subscribe(($pageState) => {
+      void syncFromPage($pageState);
+    });
 
     return () => {
-      window.removeEventListener('popstate', syncFromLocation);
+      unsubscribePage();
     };
   });
 </script>

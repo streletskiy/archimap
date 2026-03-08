@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { page } from '$app/stores';
+  import { buildAccountUrl, buildAdminUrl, buildInfoUrl } from '$lib/client/section-routes';
   import { clearSession, session, setSession } from '$lib/stores/auth';
   import { patchUrlState } from '$lib/client/urlState';
   import { apiJson } from '$lib/services/http';
@@ -119,11 +120,11 @@
   $: normalizedPathname = basePrefix ? (currentPathname.slice(basePrefix.length) || '/') : currentPathname;
   $: isMapRoute = normalizedPathname === '/';
   $: mapHref = navHref('/', basePrefix, isMapRoute, $lastMapCamera);
-  $: infoHref = navHref('/info', basePrefix, isMapRoute, $lastMapCamera);
-  $: accountHref = navHref('/account', basePrefix, isMapRoute, $lastMapCamera);
-  $: adminHref = navHref('/admin', basePrefix, isMapRoute, $lastMapCamera);
-  $: termsHref = navHref('/info?tab=legal&doc=terms', basePrefix, isMapRoute, $lastMapCamera);
-  $: privacyHref = navHref('/info?tab=legal&doc=privacy', basePrefix, isMapRoute, $lastMapCamera);
+  $: infoHref = navHref(buildInfoUrl('/info', 'about').pathname, basePrefix, isMapRoute, $lastMapCamera);
+  $: accountHref = navHref(buildAccountUrl('/account', 'settings').pathname, basePrefix, isMapRoute, $lastMapCamera);
+  $: adminHref = navHref(buildAdminUrl('/admin', 'edits').pathname, basePrefix, isMapRoute, $lastMapCamera);
+  $: termsHref = navHref(buildInfoUrl('/info', 'agreement').pathname, basePrefix, isMapRoute, $lastMapCamera);
+  $: privacyHref = navHref(buildInfoUrl('/info', 'privacy').pathname, basePrefix, isMapRoute, $lastMapCamera);
   $: activeSearchText = String(searchText || '').trim();
   $: searchReady = activeSearchText.length >= 2;
   $: activeFilterCount = Array.isArray($buildingFilterRules) ? $buildingFilterRules.length : 0;

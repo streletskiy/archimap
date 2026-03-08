@@ -1,7 +1,11 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { get } from 'svelte/store';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { fade } from 'svelte/transition';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
+  import { buildAccountUrl, buildInfoUrl, resolveAccountTabFromUrl } from '$lib/client/section-routes';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
@@ -21,7 +25,8 @@
   const MAP_PIN_COLOR = '#FDC82F';
   const MAP_PIN_INK = '#342700';
 
-  let activeTab = 'settings';
+  let activeTab = resolveAccountTabFromUrl(get(page).url);
+  let accountUrlSyncBusy = false;
   let firstName = '';
   let lastName = '';
   let email = '';
@@ -357,7 +362,27 @@
     }
   }
 
-  async function switchTab(tab) {
+  async function replaceAccountUrl(tab) {
+    if (typeof window === 'undefined') return;
+    const next = buildAccountUrl(window.location.href, tab);
+    const current = new URL(window.location.href);
+    if (next.toString() === current.toString()) return;
+    accountUrlSyncBusy = true;
+    try {
+      await goto(`${next.pathname}${next.search}${next.hash}`, {
+        replaceState: true,
+        keepFocus: true,
+        noScroll: true
+      });
+    } finally {
+      queueMicrotask(() => {
+        accountUrlSyncBusy = false;
+      });
+    }
+  }
+
+  async function activateTab(tab) {
+    if (activeTab === tab) return;
     activeTab = tab;
     await tick();
     if (tab === 'edits') {
@@ -370,6 +395,11 @@
     }
     resetEditPanelState();
     destroyMap();
+  }
+
+  async function switchTab(tab) {
+    await activateTab(tab);
+    await replaceAccountUrl(tab);
   }
 
   $: {
@@ -401,10 +431,19 @@
   $: accountUserLabel = `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim() || String(email || '').trim() || '-';
 
   onMount(() => {
+    const unsubscribePage = page.subscribe(($pageState) => {
+      if (accountUrlSyncBusy) return;
+      const nextTab = resolveAccountTabFromUrl($pageState.url);
+      void (async () => {
+        await activateTab(nextTab);
+        await replaceAccountUrl(nextTab);
+      })();
+    });
     if ($session.authenticated) loadEdits();
     const obs = new MutationObserver(() => { if (map) map.setStyle(styleByTheme()); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => {
+      unsubscribePage();
       obs.disconnect();
       destroyMap();
     };
@@ -486,8 +525,8 @@
             <h3 class="text-base font-bold text-slate-900">{$t('account.legal.title')}</h3>
             <p class="mt-1 text-sm text-slate-600">{$t('account.legal.text')}</p>
             <div class="mt-4 space-y-2">
-              <a href="/info?tab=legal&doc=terms" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.terms')}</a>
-              <a href="/info?tab=legal&doc=privacy" class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.privacy')}</a>
+              <a href={buildInfoUrl($page.url, 'agreement').pathname} class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.terms')}</a>
+              <a href={buildInfoUrl($page.url, 'privacy').pathname} class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.privacy')}</a>
             </div>
           </section>
       </div>

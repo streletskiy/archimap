@@ -1,10 +1,12 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { get } from 'svelte/store';
   import { beforeNavigate, goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { fade } from 'svelte/transition';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
+  import { buildAdminUrl, resolveAdminTabFromUrl } from '$lib/client/section-routes';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
   import { session } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
@@ -32,7 +34,7 @@
   const MAP_PIN_INK = '#342700';
   const DATA_I18N_PREFIX = 'admin.data';
 
-  let activeTab = 'edits';
+  let activeTab = resolveAdminTabFromUrl(get(page).url);
 
   let users = [];
   let usersLoading = false;
@@ -575,7 +577,7 @@
   async function replaceAdminUrlState(patch) {
     if (typeof window === 'undefined') return;
     const current = new URL(window.location.href);
-    const next = patchUrlState(current, patch);
+    const next = patchUrlState(buildAdminUrl(current, activeTab), patch);
     if (next.toString() === current.toString()) return;
     adminUrlSyncBusy = true;
     try {
@@ -760,10 +762,11 @@
   function closeEditPanel() {
     detailRequestToken += 1;
     detailPaneVisible = false;
-    replaceAdminUrlState({ editId: null });
+    void replaceAdminUrlState({ editId: null });
   }
 
-  async function resetEditPanelState() {
+  async function resetEditPanelState(options = {}) {
+    const { syncUrl = true } = options;
     detailRequestToken += 1;
     detailPaneVisible = false;
     selectedEdit = null;
@@ -778,7 +781,9 @@
     if (map?.getSource('selected-building')) {
       map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
     }
-    await replaceAdminUrlState({ editId: null });
+    if (syncUrl) {
+      await replaceAdminUrlState({ editId: null });
+    }
   }
 
   function onDetailPaneOutroEnd() {
@@ -1225,12 +1230,16 @@
     }
   }
 
-  async function switchTab(tab) {
-    if (tab !== activeTab && !confirmDiscardFilterTagChanges()) {
+  async function switchTab(tab, options = {}) {
+    const { syncUrl = true, force = false } = options;
+    if (!force && tab !== activeTab && !confirmDiscardFilterTagChanges()) {
       return;
     }
     activeTab = tab;
     await tick();
+    if (syncUrl) {
+      await replaceAdminUrlState({ editId: null });
+    }
     if (tab === 'edits') {
       await ensureMap();
       map?.resize();
@@ -1239,7 +1248,7 @@
       await loadEdits();
       return;
     }
-    await resetEditPanelState();
+    await resetEditPanelState({ syncUrl: false });
     destroyMap();
     if (tab === 'users') {
       loadUsers();
@@ -1322,13 +1331,28 @@
       const editId = Number(state?.editId || 0);
       pendingUrlEditId = Number.isInteger(editId) && editId > 0 ? editId : null;
       if (!adminUrlSyncBusy) {
-        maybeOpenPendingUrlEdit();
+        const nextTab = resolveAdminTabFromUrl($pageState.url);
+        void (async () => {
+          if (nextTab !== activeTab) {
+            await switchTab(nextTab, { syncUrl: false, force: true });
+          }
+          await replaceAdminUrlState({ editId: pendingUrlEditId });
+          await maybeOpenPendingUrlEdit();
+        })();
       }
     });
 
     if ($session.authenticated && $session.user?.isAdmin) {
       loadEdits();
       loadUsers();
+      if (activeTab === 'settings') {
+        loadGeneral();
+        if ($session.user?.isMasterAdmin) {
+          loadSmtp();
+        }
+      } else if (activeTab === 'data' && $session.user?.isMasterAdmin) {
+        loadDataSettings({ preserveSelection: true });
+      }
     }
     const obs = new MutationObserver(() => {
       if (map) map.setStyle(styleByTheme());
