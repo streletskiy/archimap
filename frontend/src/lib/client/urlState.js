@@ -1,3 +1,5 @@
+import { decodeFilterLayersFromUrl, encodeFilterLayersForUrl } from './filterUrlState.js';
+
 const CAMERA_PRECISION = 6;
 const ZOOM_PRECISION = 2;
 
@@ -98,6 +100,7 @@ export function parseUrlState(input) {
   const params = url.searchParams;
   return {
     camera: parseCameraCore(params),
+    filters: decodeFilterLayersFromUrl(params.get('f')),
     building: parseBuildingParam(params.get('building')),
     editId: parsePositiveInt(params.get('edit') || params.get('adminEdit')),
     info: parseInfoState(params)
@@ -139,6 +142,15 @@ export function patchUrlState(currentUrl, patch = {}) {
       params.delete('building');
     } else {
       params.set('building', `${osmType}/${osmId}`);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'filters')) {
+    const encodedFilters = encodeFilterLayersForUrl(patch.filters);
+    if (!encodedFilters) {
+      params.delete('f');
+    } else {
+      params.set('f', encodedFilters);
     }
   }
 

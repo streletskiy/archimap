@@ -121,6 +121,7 @@
     "tagKey": "Ключ тега",
     "tagValue": "Значение",
     "addRule": "+ Критерий",
+    "addLayer": "+ Слой",
     "resetRules": "Сброс",
     "applyRules": "Применить",
     "login": "Войти",
@@ -164,8 +165,22 @@
       "equals": "равно",
       "not_equals": "не равно",
       "starts_with": "начинается с",
+      "greater_than": "больше",
+      "greater_or_equals": "больше или равно",
+      "less_than": "меньше",
+      "less_or_equals": "меньше или равно",
       "exists": "существует",
       "not_exists": "отсутствует"
+    },
+    "filterLayerMode": {
+      "and": "И",
+      "or": "ИЛИ",
+      "layer": "Слой"
+    },
+    "presets": {
+      "title": "Пресеты",
+      "buildingLevels": "Этажность",
+      "buildingMaterial": "Материал"
     },
     "filterLabels": {
       "architect": "Архитектор",

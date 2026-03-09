@@ -1,6 +1,16 @@
 import { EMPTY_LAYER_FILTER } from '$lib/components/map/filter-highlight-utils';
 import { setLocalBuildingFeatureStateById } from './map-layer-utils';
-import { encodeOsmFeatureId, getNow, nextAnimationFrame, parseOsmKey } from './filter-utils';
+import { getNow, nextAnimationFrame } from './filter-utils';
+import {
+  buildFeatureStateEntry,
+  buildFeatureStateEntryDiffPlan,
+  toFeatureIdSetFromMatches
+} from '$lib/components/map/filter-pipeline-utils';
+
+const FILTER_CLEAR_STATE = Object.freeze({
+  isFiltered: false,
+  filterColor: '#000000'
+});
 
 export function createFilterFeatureStateManager({
   resolveMap,
@@ -22,7 +32,7 @@ export function createFilterFeatureStateManager({
   applyDenseFrameBudgetMs,
   applyDenseMaxOpsPerFrame
 } = {}) {
-  let filteredFeatureStateFeatureIds = new Set();
+  let filteredFeatureStateEntries = new Map();
 
   function setBuildingFilterFeatureStateById(id, nextState) {
     return setLocalBuildingFeatureStateById({
@@ -34,30 +44,33 @@ export function createFilterFeatureStateManager({
   }
 
   async function applyFeatureStatePlanInChunks(plan, token, meta = {}) {
-    const workingSet = new Set(filteredFeatureStateFeatureIds);
+    const workingEntries = new Map(filteredFeatureStateEntries);
     const toDisable = Array.isArray(plan?.toDisable) ? plan.toDisable : [];
     const toEnable = Array.isArray(plan?.toEnable) ? plan.toEnable : [];
+    const toUpdate = Array.isArray(plan?.toUpdate) ? plan.toUpdate : [];
     const chunkSize = Math.max(120, Number(meta.chunkSize || featureStateChunkSize) || featureStateChunkSize);
-    const totalOps = toDisable.length + toEnable.length;
+    const totalOps = toDisable.length + toEnable.length + toUpdate.length;
     const denseMode = Boolean(getFilterDenseBurstEnabled?.()) && totalOps >= denseDiffThreshold;
     let disableIndex = 0;
     let enableIndex = 0;
+    let updateIndex = 0;
     let setCalls = 0;
     const applyStartedAt = getNow();
     recordFilterTelemetry?.('apply_plan_start', {
       token,
       toDisable: toDisable.length,
       toEnable: toEnable.length,
+      toUpdate: toUpdate.length,
       delayFromMoveEndMs: getFilterMoveEndDelayMs?.() ?? null
     });
 
-    while (disableIndex < toDisable.length || enableIndex < toEnable.length) {
+    while (disableIndex < toDisable.length || enableIndex < toEnable.length || updateIndex < toUpdate.length) {
       if (token !== Number(getLatestFilterToken?.() ?? token)) {
-        filteredFeatureStateFeatureIds = workingSet;
+        filteredFeatureStateEntries = workingEntries;
         recordFilterTelemetry?.('apply_plan_cancelled', {
           token,
           setCalls,
-          partialSize: workingSet.size
+          partialSize: workingEntries.size
         });
         return { cancelled: true, setCalls, elapsedMs: Math.round(getNow() - applyStartedAt) };
       }
@@ -73,8 +86,8 @@ export function createFilterFeatureStateManager({
         (getNow() - frameStartedAt) <= frameBudgetMs
       ) {
         const id = toDisable[disableIndex++];
-        if (setBuildingFilterFeatureStateById(id, { isFiltered: false })) {
-          workingSet.delete(id);
+        if (setBuildingFilterFeatureStateById(id, FILTER_CLEAR_STATE)) {
+          workingEntries.delete(id);
           setCalls += 1;
         }
         frameOps += 1;
@@ -84,19 +97,34 @@ export function createFilterFeatureStateManager({
         enableIndex < toEnable.length &&
         (getNow() - frameStartedAt) <= frameBudgetMs
       ) {
-        const id = toEnable[enableIndex++];
-        if (setBuildingFilterFeatureStateById(id, { isFiltered: true })) {
-          workingSet.add(id);
+        const entry = toEnable[enableIndex++];
+        if (setBuildingFilterFeatureStateById(entry?.id, entry?.state)) {
+          workingEntries.set(entry.id, entry.state);
           setCalls += 1;
         }
         frameOps += 1;
       }
-      if (disableIndex < toDisable.length || enableIndex < toEnable.length) {
+      while (
+        frameOps < maxOpsPerFrame &&
+        updateIndex < toUpdate.length &&
+        (getNow() - frameStartedAt) <= frameBudgetMs
+      ) {
+        const entry = toUpdate[updateIndex++];
+        if (setBuildingFilterFeatureStateById(entry?.id, entry?.state)) {
+          workingEntries.set(entry.id, entry.state);
+          setCalls += 1;
+        }
+        frameOps += 1;
+      }
+      if (disableIndex < toDisable.length || enableIndex < toEnable.length || updateIndex < toUpdate.length) {
         await nextAnimationFrame();
       }
     }
 
-    filteredFeatureStateFeatureIds = new Set(Array.isArray(plan?.nextFeatureIds) ? plan.nextFeatureIds : [...workingSet]);
+    filteredFeatureStateEntries = new Map(
+      (Array.isArray(plan?.nextEntries) ? plan.nextEntries : [...workingEntries.entries()].map(([id, state]) => ({ id, state })))
+        .map((entry) => [entry.id, entry.state])
+    );
     const elapsedMs = Math.round(getNow() - applyStartedAt);
     patchState?.({
       setFeatureStateCallsLast: setCalls,
@@ -106,6 +134,7 @@ export function createFilterFeatureStateManager({
       token,
       toDisable: toDisable.length,
       toEnable: toEnable.length,
+      toUpdate: toUpdate.length,
       setCalls,
       elapsedMs,
       denseMode,
@@ -115,40 +144,33 @@ export function createFilterFeatureStateManager({
   }
 
   async function applyFilteredFeatureStateMatches(matches, token, meta = {}) {
-    const prevFeatureIds = [...filteredFeatureStateFeatureIds];
+    const filterColor = String(meta?.filterColor || '#f59e0b');
+    const nextEntries = [...toFeatureIdSetFromMatches(matches)]
+      .map((id) => buildFeatureStateEntry(id, {
+        isFiltered: true,
+        filterColor
+      }))
+      .filter(Boolean);
+    return applyFilteredFeatureStateEntries(nextEntries, token, meta);
+  }
+
+  async function applyFilteredFeatureStateEntries(entries, token, meta = {}) {
+    const prevEntries = [...filteredFeatureStateEntries.entries()].map(([id, state]) => ({ id, state }));
     let plan;
     try {
       const workerResponse = await requestFilterWorker('build-apply-plan', {
-        prevFeatureIds,
-        matches
+        prevEntries,
+        nextEntries: entries
       });
       plan = {
         toEnable: Array.isArray(workerResponse?.toEnable) ? workerResponse.toEnable : [],
         toDisable: Array.isArray(workerResponse?.toDisable) ? workerResponse.toDisable : [],
-        nextFeatureIds: Array.isArray(workerResponse?.nextFeatureIds) ? workerResponse.nextFeatureIds : [],
+        toUpdate: Array.isArray(workerResponse?.toUpdate) ? workerResponse.toUpdate : [],
+        nextEntries: Array.isArray(workerResponse?.nextEntries) ? workerResponse.nextEntries : [],
         total: Number(workerResponse?.total || 0)
       };
     } catch {
-      const nextFeatureIds = new Set(Array.isArray(matches?.matchedFeatureIds) ? matches.matchedFeatureIds : []);
-      for (const key of Array.isArray(matches?.matchedKeys) ? matches.matchedKeys : []) {
-        const parsed = parseOsmKey(key);
-        if (!parsed) continue;
-        nextFeatureIds.add(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
-      }
-      const toDisable = [];
-      const toEnable = [];
-      for (const id of prevFeatureIds) {
-        if (!nextFeatureIds.has(id)) toDisable.push(id);
-      }
-      for (const id of nextFeatureIds) {
-        if (!filteredFeatureStateFeatureIds.has(id)) toEnable.push(id);
-      }
-      plan = {
-        toEnable,
-        toDisable,
-        nextFeatureIds: [...nextFeatureIds],
-        total: nextFeatureIds.size
-      };
+      plan = buildFeatureStateEntryDiffPlan(prevEntries, entries);
     }
     if (token !== Number(getLatestFilterToken?.() ?? token)) return;
 
@@ -172,12 +194,12 @@ export function createFilterFeatureStateManager({
 
   function clearFilteredFeatureState() {
     let setCalls = 0;
-    for (const id of filteredFeatureStateFeatureIds) {
-      if (setBuildingFilterFeatureStateById(id, { isFiltered: false })) {
+    for (const id of filteredFeatureStateEntries.keys()) {
+      if (setBuildingFilterFeatureStateById(id, FILTER_CLEAR_STATE)) {
         setCalls += 1;
       }
     }
-    filteredFeatureStateFeatureIds = new Set();
+    filteredFeatureStateEntries = new Map();
     patchState?.({
       lastCount: 0,
       setFeatureStateCallsLast: setCalls
@@ -196,10 +218,10 @@ export function createFilterFeatureStateManager({
   }
 
   function reapplyFilteredFeatureState() {
-    if (filteredFeatureStateFeatureIds.size === 0) return;
+    if (filteredFeatureStateEntries.size === 0) return;
     let setCalls = 0;
-    for (const id of filteredFeatureStateFeatureIds) {
-      if (setBuildingFilterFeatureStateById(id, { isFiltered: true })) {
+    for (const [id, state] of filteredFeatureStateEntries.entries()) {
+      if (setBuildingFilterFeatureStateById(id, state)) {
         setCalls += 1;
       }
     }
@@ -212,11 +234,12 @@ export function createFilterFeatureStateManager({
   }
 
   function getFilteredFeatureStateIdsSize() {
-    return filteredFeatureStateFeatureIds.size;
+    return filteredFeatureStateEntries.size;
   }
 
   return {
     applyFeatureStatePlanInChunks,
+    applyFilteredFeatureStateEntries,
     applyFilteredFeatureStateMatches,
     clearFilteredFeatureState,
     getFilteredFeatureStateIdsSize,

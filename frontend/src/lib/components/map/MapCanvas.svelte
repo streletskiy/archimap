@@ -52,6 +52,7 @@
     lastMapCamera,
     mapFocusRequest,
     mapLabelsVisible,
+    mapReady as mapReadyStore,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
     selectedBuilding,
@@ -60,7 +61,7 @@
     setMapViewport,
     setMapZoom
   } from '$lib/stores/map';
-  import { buildingFilterRules, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
+  import { buildingFilterLayers, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchMapState, searchState } from '$lib/stores/search';
   import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter } from './selection-utils';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
@@ -544,7 +545,7 @@
     applyBuildingThemePaint(theme);
     applyLabelLayerVisibility($mapLabelsVisible);
     scheduleCoverageCheck();
-    filterPipeline.refreshDebugState(Array.isArray($buildingFilterRules) && $buildingFilterRules.length > 0);
+    filterPipeline.refreshDebugState(Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0);
     filterPipeline.reapplyFilteredFeatureState();
   }
 
@@ -560,7 +561,7 @@
       if (!map.isStyleLoaded()) return;
       ensureMapSourcesAndLayers(runtimeConfig);
       applyBuildingThemePaint(getCurrentTheme());
-      filterPipeline.applyBuildingFilters($buildingFilterRules, { reason: 'style' });
+      filterPipeline.applyBuildingFilters($buildingFilterLayers, { reason: 'style' });
       clearStyleTransitionOverlaySoon();
     };
     map.once('styledata', tryRestore);
@@ -590,9 +591,9 @@
     }
   }
 
-  $: if (map) {
-    const rules = $buildingFilterRules;
-    filterPipeline.scheduleFilterRulesRefresh(rules);
+  $: if (map && $mapReadyStore) {
+    const layers = $buildingFilterLayers;
+    filterPipeline.scheduleFilterRulesRefresh(layers);
   }
 
   $: if (map) {
@@ -669,10 +670,10 @@
         syncMapCameraStores();
         syncMapRegionSources();
       });
-      map.on('moveend', () => filterPipeline.scheduleFilterRefresh($buildingFilterRules));
+      map.on('moveend', () => filterPipeline.scheduleFilterRefresh($buildingFilterLayers));
       map.on('moveend', scheduleCoverageCheck);
       map.on('move', scheduleCoverageCheck);
-      map.on('zoomend', () => filterPipeline.scheduleFilterRefresh($buildingFilterRules));
+      map.on('zoomend', () => filterPipeline.scheduleFilterRefresh($buildingFilterLayers));
       map.on('zoomend', syncMapZoomStore);
       map.on('zoomend', syncMapRegionSources);
       map.on('zoomend', scheduleCoverageCheck);
@@ -681,7 +682,9 @@
 
       map.on('style.load', () => {
         ensureMapSourcesAndLayers(config);
-        filterPipeline.scheduleFilterRefresh($buildingFilterRules);
+        if ($mapReadyStore) {
+          filterPipeline.scheduleFilterRefresh($buildingFilterLayers);
+        }
         scheduleCoverageCheck();
       });
 
@@ -690,6 +693,7 @@
         filterPipeline.registerFilterMoveEnd();
         syncMapCameraStores();
         setMapReady(true);
+        filterPipeline.scheduleFilterRulesRefresh($buildingFilterLayers);
         scheduleCoverageCheck();
       });
 

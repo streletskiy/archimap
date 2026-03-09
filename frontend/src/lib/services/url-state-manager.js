@@ -1,6 +1,7 @@
 import { pushState, replaceState } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { get } from 'svelte/store';
+import { getFilterLayersUrlSignature } from '$lib/client/filterUrlState';
 import { parseUrlState, patchUrlState } from '$lib/client/urlState';
 import { normalizeOptionalMapZoom, requestMapFocus } from '$lib/stores/map';
 
@@ -12,7 +13,11 @@ function toBuildingUrlParam(selection) {
 }
 
 function getUrlStateSignature(state) {
-  return `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}|${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`;
+  return [
+    `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}`,
+    `${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`,
+    getFilterLayersUrlSignature(state.filters)
+  ].join('|');
 }
 
 function getUrlBuildingKey(state) {
@@ -29,12 +34,15 @@ function getSelectedBuildingKey(selection) {
 export function createUrlStateManager({
   pageStore,
   onApplyBuilding,
-  onClearBuildingSelection
+  onClearBuildingSelection,
+  onApplyFilters,
+  onClearFilters
 } = {}) {
   let urlUpdateInFlight = false;
   let cameraApplyInFlight = false;
   let buildingApplyInFlight = false;
   let buildingCloseInFlight = false;
+  let filterApplyInFlight = false;
   let lastAppliedCameraKey = '';
   let handledUrlSignature = '';
   let lastUrlBuildingKey = '';
@@ -83,7 +91,21 @@ export function createUrlStateManager({
     }
   }
 
-  async function applyUrlStateToUi({ mapReady, buildingModalOpen, selectedBuilding } = {}) {
+  function applyFiltersFromUrl(filters, currentFilters = []) {
+    const nextFilterKey = getFilterLayersUrlSignature(filters);
+    const currentFilterKey = getFilterLayersUrlSignature(currentFilters);
+    if (nextFilterKey === currentFilterKey) return;
+    filterApplyInFlight = true;
+    try {
+      onApplyFilters?.(filters);
+    } finally {
+      queueMicrotask(() => {
+        filterApplyInFlight = false;
+      });
+    }
+  }
+
+  async function applyUrlStateToUi({ mapReady, buildingModalOpen, selectedBuilding, currentFilters } = {}) {
     if (typeof window === 'undefined') return;
     if (urlUpdateInFlight) return;
 
@@ -109,6 +131,19 @@ export function createUrlStateManager({
         lastAppliedCameraKey = cameraKey;
         queueMicrotask(() => {
           cameraApplyInFlight = false;
+        });
+      }
+    }
+
+    if (state.filters) {
+      applyFiltersFromUrl(state.filters, currentFilters);
+    } else if (!filterApplyInFlight && Array.isArray(currentFilters) && currentFilters.length > 0) {
+      filterApplyInFlight = true;
+      try {
+        onClearFilters?.();
+      } finally {
+        queueMicrotask(() => {
+          filterApplyInFlight = false;
         });
       }
     }
@@ -146,6 +181,13 @@ export function createUrlStateManager({
     });
   }
 
+  function syncFilters({ currentFilters } = {}) {
+    if (filterApplyInFlight) return;
+    updateUrlState({
+      filters: currentFilters
+    });
+  }
+
   function handleManualBuildingClose({ mapReady } = {}) {
     buildingCloseInFlight = true;
     if (mapReady) {
@@ -163,6 +205,7 @@ export function createUrlStateManager({
     destroy,
     handleManualBuildingClose,
     syncBuildingSelection,
-    syncCamera
+    syncCamera,
+    syncFilters
   };
 }

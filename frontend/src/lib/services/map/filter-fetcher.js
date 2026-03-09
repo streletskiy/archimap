@@ -1,4 +1,5 @@
 import { apiJson } from '$lib/services/http';
+import { matchesFilterRules } from '$lib/components/map/filter-pipeline-utils';
 import { encodeOsmFeatureId, parseOsmKey, resolveFeatureIdentity } from './filter-utils';
 
 export function createFilterFetcher({
@@ -13,22 +14,6 @@ export function createFilterFetcher({
   dataRequestChunkSize
 } = {}) {
   let filterDataByOsmKeyCache = new Map();
-
-  function matchesRule(tags, rule) {
-    if (!rule || !rule.key) return true;
-    const actualRaw = tags?.[rule.key];
-    const actual = Array.isArray(actualRaw) ? actualRaw.join(';') : (actualRaw == null ? null : String(actualRaw));
-    const hasValue = actual != null && String(actual).trim().length > 0;
-    if (rule.op === 'exists') return hasValue;
-    if (rule.op === 'not_exists') return !hasValue;
-    if (actual == null) return false;
-    const left = String(actual).toLowerCase();
-    const right = String(rule.value || '').toLowerCase();
-    if (rule.op === 'equals') return left === right;
-    if (rule.op === 'not_equals') return left !== right;
-    if (rule.op === 'starts_with') return left.startsWith(right);
-    return left.includes(right);
-  }
 
   function getVisibleBuildingOsmKeys() {
     const currentMap = resolveMap();
@@ -159,7 +144,7 @@ export function createFilterFetcher({
       const item = byKey.get(key);
       if (!item) continue;
       const tags = item?.sourceTags || {};
-      const ok = rules.every((rule) => matchesRule(tags, rule));
+      const ok = matchesFilterRules(tags, rules);
       if (!ok) continue;
       matchedKeys.push(key);
       const parsed = parseOsmKey(key);
