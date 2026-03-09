@@ -130,11 +130,11 @@ function createDataSettingsService(options = {}) {
     return getFilterTagAllowlistForAdmin();
   }
 
-  async function getLatestPmtilesBytesByRegionId() {
+  async function getLatestStorageStatsByRegionId() {
     let rows = [];
     try {
       rows = await db.prepare(`
-        SELECT runs.region_id, runs.pmtiles_bytes
+        SELECT runs.region_id, runs.pmtiles_bytes, runs.db_bytes, runs.db_bytes_approximate
         FROM data_region_sync_runs runs
         INNER JOIN (
           SELECT region_id, MAX(id) AS latest_id
@@ -150,80 +150,13 @@ function createDataSettingsService(options = {}) {
     for (const row of Array.isArray(rows) ? rows : []) {
       const regionId = Number(row?.region_id || 0);
       if (!Number.isInteger(regionId) || regionId <= 0) continue;
-      map.set(regionId, row?.pmtiles_bytes == null ? null : Number(row.pmtiles_bytes));
+      map.set(regionId, {
+        pmtilesBytes: row?.pmtiles_bytes == null ? null : Number(row.pmtiles_bytes),
+        dbBytes: row?.db_bytes == null ? null : Number(row.db_bytes),
+        dbBytesApproximate: Boolean(row?.db_bytes_approximate)
+      });
     }
     return map;
-  }
-
-  async function getRegionDbBytesByRegionId() {
-    if (db.provider === 'postgres') {
-      let rows = [];
-      try {
-        rows = await db.prepare(`
-          SELECT
-            drm.region_id,
-            (
-              COALESCE(SUM(pg_column_size(bc.*)), 0)
-              + COALESCE(SUM(pg_column_size(drm.*)), 0)
-            )::bigint AS db_bytes
-          FROM public.data_region_memberships drm
-          LEFT JOIN osm.building_contours bc
-            ON bc.osm_type = drm.osm_type
-           AND bc.osm_id = drm.osm_id
-          GROUP BY drm.region_id
-        `).all();
-      } catch {
-        rows = [];
-      }
-      const map = new Map();
-      for (const row of Array.isArray(rows) ? rows : []) {
-        const regionId = Number(row?.region_id || 0);
-        if (!Number.isInteger(regionId) || regionId <= 0) continue;
-        map.set(regionId, row?.db_bytes == null ? 0 : Number(row.db_bytes));
-      }
-      return {
-        byRegionId: map,
-        approximate: false
-      };
-    }
-
-    let rows = [];
-    try {
-      rows = await db.prepare(`
-        SELECT
-          drm.region_id,
-          COALESCE(SUM(
-            length(CAST(COALESCE(bc.osm_type, '') AS BLOB))
-            + length(CAST(COALESCE(bc.tags_json, '') AS BLOB))
-            + length(CAST(COALESCE(bc.geometry_json, '') AS BLOB))
-            + length(CAST(COALESCE(bc.updated_at, '') AS BLOB))
-            + 48
-          ), 0)
-          + COALESCE(SUM(
-            length(CAST(COALESCE(drm.osm_type, '') AS BLOB))
-            + length(CAST(COALESCE(drm.created_at, '') AS BLOB))
-            + length(CAST(COALESCE(drm.updated_at, '') AS BLOB))
-            + 24
-          ), 0) AS db_bytes
-        FROM data_region_memberships drm
-        LEFT JOIN osm.building_contours bc
-          ON bc.osm_type = drm.osm_type
-         AND bc.osm_id = drm.osm_id
-        GROUP BY drm.region_id
-      `).all();
-    } catch {
-      rows = [];
-    }
-    const map = new Map();
-    for (const row of Array.isArray(rows) ? rows : []) {
-      const regionId = Number(row?.region_id || 0);
-      if (!Number.isInteger(regionId) || regionId <= 0) continue;
-      map.set(regionId, row?.db_bytes == null ? 0 : Number(row.db_bytes));
-    }
-    return {
-      byRegionId: map,
-      approximate: true
-    };
   }
 
   function resolveStoredPmtilesBytes(region, fallbackBytes = null) {
@@ -245,17 +178,17 @@ function createDataSettingsService(options = {}) {
     const items = Array.isArray(regions) ? regions : [];
     if (items.length === 0) return [];
 
-    const [pmtilesByRegionId, dbStats] = await Promise.all([
-      getLatestPmtilesBytesByRegionId(),
-      getRegionDbBytesByRegionId()
-    ]);
+    const storageStatsByRegionId = await getLatestStorageStatsByRegionId();
 
-    return items.map((region) => ({
-      ...region,
-      pmtilesBytes: resolveStoredPmtilesBytes(region, pmtilesByRegionId.get(region.id) ?? null),
-      dbBytes: dbStats.byRegionId.get(region.id) ?? 0,
-      dbBytesApproximate: dbStats.approximate
-    }));
+    return items.map((region) => {
+      const stats = storageStatsByRegionId.get(region.id) || {};
+      return {
+        ...region,
+        pmtilesBytes: resolveStoredPmtilesBytes(region, stats.pmtilesBytes ?? null),
+        dbBytes: stats.dbBytes ?? 0,
+        dbBytesApproximate: stats.dbBytesApproximate ?? false
+      };
+    });
   }
 
   context.enrichRegionsWithStorageStats = enrichRegionsWithStorageStats;

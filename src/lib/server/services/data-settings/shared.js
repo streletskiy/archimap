@@ -12,6 +12,8 @@ const RUN_SELECT_FIELDS = `
   active_feature_count,
   orphan_deleted_count,
   pmtiles_bytes,
+  db_bytes,
+  db_bytes_approximate,
   bounds_west,
   bounds_south,
   bounds_east,
@@ -55,7 +57,7 @@ function wrapRawSqliteDb(rawDb) {
         };
 
         const execution = txQueue.then(run, run);
-        txQueue = execution.catch(() => {});
+        txQueue = execution.catch(() => { });
         return execution;
       };
     }
@@ -255,6 +257,8 @@ function createDataSettingsContext(options = {}) {
       activeFeatureCount: row.active_feature_count == null ? null : Number(row.active_feature_count),
       orphanDeletedCount: row.orphan_deleted_count == null ? null : Number(row.orphan_deleted_count),
       pmtilesBytes: row.pmtiles_bytes == null ? null : Number(row.pmtiles_bytes),
+      dbBytes: row.db_bytes == null ? null : Number(row.db_bytes),
+      dbBytesApproximate: Boolean(row.db_bytes_approximate),
       bounds: boundsFromRow(row),
       createdAt: row.created_at ? String(row.created_at) : null,
       updatedAt: row.updated_at ? String(row.updated_at) : null

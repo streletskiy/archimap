@@ -14,6 +14,61 @@ function createSyncRunsDomain(context = {}) {
     now
   } = context;
 
+  async function computeRegionDbBytes(regionId) {
+    if (db.provider === 'postgres') {
+      try {
+        const row = await db.prepare(`
+          SELECT
+            (
+              COALESCE(SUM(pg_column_size(bc.*)), 0)
+              + COALESCE(SUM(pg_column_size(drm.*)), 0)
+            )::bigint AS db_bytes
+          FROM public.data_region_memberships drm
+          LEFT JOIN osm.building_contours bc
+            ON bc.osm_type = drm.osm_type
+           AND bc.osm_id = drm.osm_id
+          WHERE drm.region_id = ?
+        `).get(Number(regionId));
+        return {
+          dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
+          dbBytesApproximate: false
+        };
+      } catch {
+        return { dbBytes: 0, dbBytesApproximate: false };
+      }
+    }
+
+    try {
+      const row = await db.prepare(`
+        SELECT
+          COALESCE(SUM(
+            length(CAST(COALESCE(bc.osm_type, '') AS BLOB))
+            + length(CAST(COALESCE(bc.tags_json, '') AS BLOB))
+            + length(CAST(COALESCE(bc.geometry_json, '') AS BLOB))
+            + length(CAST(COALESCE(bc.updated_at, '') AS BLOB))
+            + 48
+          ), 0)
+          + COALESCE(SUM(
+            length(CAST(COALESCE(drm.osm_type, '') AS BLOB))
+            + length(CAST(COALESCE(drm.created_at, '') AS BLOB))
+            + length(CAST(COALESCE(drm.updated_at, '') AS BLOB))
+            + 24
+          ), 0) AS db_bytes
+        FROM data_region_memberships drm
+        LEFT JOIN osm.building_contours bc
+          ON bc.osm_type = drm.osm_type
+         AND bc.osm_id = drm.osm_id
+        WHERE drm.region_id = ?
+      `).get(Number(regionId));
+      return {
+        dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
+        dbBytesApproximate: true
+      };
+    } catch {
+      return { dbBytes: 0, dbBytesApproximate: true };
+    }
+  }
+
   async function getRecentRuns(regionId = null, limit = 25) {
     await ensureBootstrapped();
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 25));
@@ -138,6 +193,7 @@ function createSyncRunsDomain(context = {}) {
     const activeFeatureCount = summary.activeFeatureCount == null ? null : Number(summary.activeFeatureCount);
     const orphanDeletedCount = summary.orphanDeletedCount == null ? null : Number(summary.orphanDeletedCount);
     const pmtilesBytes = summary.pmtilesBytes == null ? null : Number(summary.pmtilesBytes);
+    const { dbBytes, dbBytesApproximate } = await computeRegionDbBytes(region.id);
     const nextSyncAt = computeNextSyncAt({
       ...region,
       lastSuccessfulSyncAt: finishedAt
@@ -152,6 +208,8 @@ function createSyncRunsDomain(context = {}) {
         active_feature_count = ?,
         orphan_deleted_count = ?,
         pmtiles_bytes = ?,
+        db_bytes = ?,
+        db_bytes_approximate = ?,
         bounds_west = ?,
         bounds_south = ?,
         bounds_east = ?,
@@ -164,6 +222,8 @@ function createSyncRunsDomain(context = {}) {
       activeFeatureCount,
       orphanDeletedCount,
       pmtilesBytes,
+      dbBytes,
+      dbBytesApproximate ? 1 : 0,
       bounds?.west ?? null,
       bounds?.south ?? null,
       bounds?.east ?? null,
