@@ -70,35 +70,36 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 15. If the DB transaction commits, the backup is dropped and the new archive becomes current.
 16. If any step fails after swap staging, the DB transaction is rolled back and the previous PMTiles file is restored.
 17. Runtime clients later receive the region PMTiles metadata via `/app-config.js` and fetch the archive through `/api/data/regions/:regionId/pmtiles`.
+18. For managed in-app syncs, `src/lib/server/boot/server-runtime.boot.js` then rebuilds search index tables and schedules filter-tag cache refresh; direct standalone CLI runs do not add this wrapper step.
 
 ## Mermaid diagram
 
 ```mermaid
 flowchart TD
-  A[Admin Data settings / Scheduler / CLI] --> B[data_sync_regions]
-  B --> C[scripts/sync-osm-region.js]
-  C --> D[Create temp workspace]
-  D --> E[scripts/sync-osm-buildings.py]
-  E --> F[QuackOSM extract query resolution]
-  F --> G[DuckDB file in data/quackosm]
-  G --> H[DuckDB spatial SQL over quackosm_raw]
-  H --> I[region-import.ndjson]
-  I --> J[GeoJSON NDJSON for tippecanoe]
-  J --> K[tippecanoe]
-  K --> L[temp region.pmtiles]
-  I --> M[temp staging table region_import_tmp]
-  M --> N[Upsert osm.building_contours]
-  M --> O[Upsert data_region_memberships]
-  O --> P[Delete stale memberships for this region]
-  P --> Q[Delete orphan contours not referenced by any region]
-  N --> R[PostgreSQL: refresh osm.building_contours_summary]
-  L --> S[Protected PMTiles swap with backup]
+  A["Admin Data settings / Scheduler / CLI"] --> B["data_sync_regions"]
+  B --> C["scripts/sync-osm-region.js"]
+  C --> D["Create temp workspace"]
+  D --> E["scripts/sync-osm-buildings.py"]
+  E --> F["QuackOSM extract query resolution"]
+  F --> G["DuckDB file in data/quackosm"]
+  G --> H["DuckDB spatial SQL over quackosm_raw"]
+  H --> I["region-import.ndjson"]
+  I --> J["GeoJSON NDJSON for tippecanoe"]
+  J --> K["tippecanoe"]
+  K --> L["temp region.pmtiles"]
+  I --> M["temp staging table region_import_tmp"]
+  M --> N["Upsert osm.building_contours"]
+  M --> O["Upsert data_region_memberships"]
+  O --> P["Delete stale memberships for this region"]
+  P --> Q["Delete orphan contours not referenced by any region"]
+  N --> R["PostgreSQL: refresh osm.building_contours_summary"]
+  L --> S["Protected PMTiles swap with backup"]
   Q --> T[DB COMMIT]
   R --> T
   S --> T
-  T --> U[/app-config.js]
-  T --> V[/api/data/regions/:regionId/pmtiles]
-  U --> W[MapLibre client]
+  T --> U["/app-config.js"]
+  T --> V["/api/data/regions/:regionId/pmtiles"]
+  U --> W["MapLibre client"]
   V --> W
 ```
 
@@ -125,6 +126,12 @@ flowchart TD
 - `data_region_memberships` keeps per-region ownership, which prevents one overlapping region sync from deleting objects still needed by another region.
 - PostgreSQL keeps `osm.building_contours_summary` updated for runtime fast paths.
 - SQLite follows the same logical flow but uses local temp tables and file-backed DBs.
+
+### Search source normalization
+
+- `building_search_source` and `building_search_fts` are populated from raw `osm.building_contours.tags_json` plus `local.architectural_info`.
+- Parsing and fallback composition for `name`, `address`, `style`, and `architect` now happens in Node.js via `src/lib/server/services/search-index-source.service.js`.
+- The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 
 ### PMTiles
 
@@ -154,6 +161,12 @@ flowchart TD
   - `data_region_memberships`
   - `osm.building_contours_summary` in PostgreSQL
   - `data/regions/buildings-region-<slug>.pmtiles`
+
+## Managed runtime follow-up after successful sync
+
+- In-app sync flow (scheduler/admin queue) runs follow-up jobs from `src/lib/server/boot/server-runtime.boot.js`.
+- These jobs rebuild `building_search_source` and `building_search_fts`, then reset and warm `filter_tag_keys_cache`.
+- Direct standalone execution of `scripts/sync-osm-region.js` updates imported OSM data and PMTiles only; it does not run these wrapper jobs by itself.
 
 ## Failure handling and invariants
 

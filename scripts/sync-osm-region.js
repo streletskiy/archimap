@@ -11,6 +11,7 @@ const { Client } = require('pg');
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { resolveRegionPmtilesPath } = require('../src/lib/server/services/data-settings.service');
+const { moveFileSync } = require('../src/lib/server/utils/fs');
 
 const DB_PROVIDER = getDbProvider(process.env);
 const DATABASE_URL = getPostgresConnectionString(process.env);
@@ -142,19 +143,6 @@ function encodeOsmFeatureId(osmType, osmId) {
 
 function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-function moveFileSync(sourcePath, targetPath) {
-  try {
-    fs.renameSync(sourcePath, targetPath);
-  } catch (error) {
-    if (error && error.code === 'EXDEV') {
-      fs.copyFileSync(sourcePath, targetPath);
-      fs.rmSync(sourcePath, { force: true });
-      return;
-    }
-    throw error;
-  }
 }
 
 function createWorkspace(regionId) {

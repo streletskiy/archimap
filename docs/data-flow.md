@@ -25,6 +25,9 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - a refreshed union dataset in the runtime DB
    - a refreshed PMTiles archive for the target region
    - updated region sync metadata and bounds for runtime clients
+6. For managed in-app syncs, the runtime then runs post-sync maintenance from `src/lib/server/boot/server-runtime.boot.js`:
+   - rebuilds `building_search_source` and `building_search_fts`
+   - resets and schedules `filter_tag_keys_cache` refresh
 
 ## Safety invariants
 
@@ -46,10 +49,12 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 ## Search/filter/building APIs
 
 - Existing building/search/filter APIs continue to read the union dataset from `osm.building_contours`.
+- Search source rows are normalized in Node.js from raw `tags_json` plus `local.architectural_info` via `src/lib/server/services/search-index-source.service.js`, shared by incremental updates and full rebuild worker.
 - This keeps `/api/building/*`, `/api/building-info/*`, `/api/search-buildings`, and filter endpoints backward-compatible in single-region and multi-region setups.
 
 ## Operational notes
 
 - Region PMTiles are named by region slug on disk; runtime/API addressing still uses numeric `regionId`, and legacy id-based filenames are accepted as a fallback during migration.
+- `server.js` is now only a thin entrypoint; managed sync hooks and runtime orchestration live in `src/lib/server/boot/server-runtime.boot.js`.
 - Search index rebuild still runs after successful syncs so search/filter APIs stay aligned with the union dataset.
 - Bounds-driven PMTiles activation is a v1 tradeoff: source activation is rectangle-based, not polygon-precise by extract shape.

@@ -28,7 +28,8 @@ References:
 ## Architecture (Short)
 
 - SvelteKit (UI)
-- API layer (`server.js` internal app dispatched by `server.sveltekit.js` for `/api` and system endpoints)
+- API layer (`server.js` thin entrypoint + `src/lib/server/boot/server-runtime.boot.js` internal runtime dispatched by `server.sveltekit.js` for `/api` and system endpoints)
+  - Boot/orchestration modules live in `src/lib/server/boot/**`
   - HTTP route modules live in `src/lib/server/http/**`
 - PostgreSQL + PostGIS / SQLite (switchable runtime)
 - PMTiles

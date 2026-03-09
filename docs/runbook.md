@@ -96,7 +96,8 @@
 ### Runtime mode and entrypoint
 
 - Public HTTP runtime entrypoint is `server.sveltekit.js`.
-- API/system routes are dispatched by `server.sveltekit.js` directly to internal app runtime (`server.js`).
+- `server.js` is a thin backend entrypoint that creates and exports the internal app runtime.
+- API/system routes are dispatched by `server.sveltekit.js` to the internal runtime assembled in `src/lib/server/boot/server-runtime.boot.js`.
 
 ### Building selection in map UI
 

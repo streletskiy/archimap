@@ -14,8 +14,8 @@
   - search results
   - bbox filter payloads
 - Rate limiting:
-  - `POST /api/buildings/filter-data` has a dedicated limiter tuned for interactive map filtering (`server.js`, `filterDataRateLimiter`).
-  - `POST /api/buildings/filter-matches` has its own limiter for bbox+rules interactive workloads (`server.js`, `filterMatchesRateLimiter`).
+  - `POST /api/buildings/filter-data` has a dedicated limiter tuned for interactive map filtering (`src/lib/server/boot/rate-limiters.boot.js`, `filterDataRateLimiter`).
+  - `POST /api/buildings/filter-matches` has its own limiter for bbox+rules interactive workloads (`src/lib/server/boot/rate-limiters.boot.js`, `filterMatchesRateLimiter`).
 - `POST /api/buildings/filter-matches` uses adaptive PostgreSQL strategy for anonymous users:
   - tag-only rules (`contains|equals|not_equals|starts_with|exists|not_exists`) are compiled to SQL predicates;
   - spatial bbox is compiled once via `env` CTE (`ST_MakeEnvelope` + `ST_Intersects`);
@@ -31,6 +31,7 @@
   - `getUserPersonalEditsByKeys` (`building-edits.service`)
 - `/api/contours-status` fast path now reads from `osm.building_contours_summary` (1 row), with aggregate fallback if summary is empty/unavailable.
 - OSM sync for PostgreSQL updates `osm.building_contours_summary` in the same import transaction.
+- Search source normalization for `building_search_source` / `building_search_fts` now uses raw DB rows plus Node-side JSON parsing in `src/lib/server/services/search-index-source.service.js`, shared by incremental refresh and full rebuild worker.
 - `rebuild-filter-tag-keys-cache.worker` (PostgreSQL) switched from row-by-row insert to set-based `INSERT ... SELECT DISTINCT`.
 
 ## DB and indexes
