@@ -1,5 +1,14 @@
 import { writable } from 'svelte/store';
 import { EMPTY_LAYER_FILTER, hashFilterExpression } from '$lib/components/map/filter-highlight-utils';
+import { FILTER_LAYER_BASE_COLOR } from '$lib/constants/filter-presets';
+import {
+  buildFeatureStateEntry,
+  computeRulesHash,
+  normalizeFilterLayers,
+  normalizeFilterRules,
+  sortFilterLayersByPriority,
+  toFeatureIdSetFromMatches
+} from '$lib/components/map/filter-pipeline-utils';
 import { createFilterCache } from './filter-cache';
 import {
   buildBboxHash,
@@ -19,7 +28,6 @@ export const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.me
 const FILTER_REQUEST_DEBOUNCE_MS = 180;
 const FILTER_HEAVY_RULE_DEBOUNCE_MS = 500;
 const FILTER_RULE_CHANGE_DEBOUNCE_MS = 90;
-const FILTER_RULE_OPS = new Set(['contains', 'equals', 'not_equals', 'starts_with', 'exists', 'not_exists']);
 const FILTER_MATCH_CACHE_TTL_MS = 8_000;
 const FILTER_MATCH_CACHE_MAX_ITEMS = 90;
 const FILTER_MATCH_DEGRADE_LIMIT = 20_000;
@@ -36,6 +44,178 @@ const FILTER_COVERAGE_MARGIN_MIN = 0.2;
 const FILTER_COVERAGE_MARGIN_MAX = 0.35;
 const FILTER_PREFETCH_ENABLED = true;
 const FILTER_PREFETCH_MIN_INTERVAL_MS = 900;
+const FILTER_CLEAR_COLOR = '#000000';
+
+function isLayerInput(input) {
+  return Array.isArray(input) && input.some((item) => (
+    Array.isArray(item?.rules) ||
+    item?.mode != null ||
+    item?.color != null ||
+    item?.priority != null ||
+    item?.id != null
+  ));
+}
+
+function normalizeFilterInputLayers(input) {
+  if (isLayerInput(input)) {
+    return normalizeFilterLayers(input);
+  }
+  const normalizedRules = normalizeFilterRules(input);
+  if (normalizedRules.invalidReason) {
+    return { layers: [], invalidReason: normalizedRules.invalidReason };
+  }
+  if (normalizedRules.rules.length === 0) {
+    return { layers: [], invalidReason: '' };
+  }
+  return normalizeFilterLayers([{
+    id: 'compat-filter-layer',
+    color: FILTER_LAYER_BASE_COLOR,
+    priority: 0,
+    mode: 'and',
+    rules: normalizedRules.rules
+  }]);
+}
+
+function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket) {
+  return `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}`;
+}
+
+function buildFilterRequestSpecs(layers) {
+  const sortedLayers = sortFilterLayersByPriority(layers);
+  const combinedLayers = sortedLayers.filter((layer) => layer.mode === 'and' || layer.mode === 'or');
+  const andLayers = combinedLayers.filter((layer) => layer.mode === 'and');
+  const orLayers = combinedLayers.filter((layer) => layer.mode === 'or');
+  const standaloneLayers = sortedLayers.filter((layer) => layer.mode === 'layer');
+  const requestSpecs = [];
+  const combinedGroup = combinedLayers.length > 0
+    ? {
+      id: 'combined-group',
+      color: combinedLayers[0].color || FILTER_LAYER_BASE_COLOR,
+      priority: Number(combinedLayers[0].priority || 0),
+      hasAnd: andLayers.length > 0,
+      hasOr: orLayers.length > 0
+    }
+    : null;
+
+  if (andLayers.length > 0) {
+    const rules = andLayers.flatMap((layer) => layer.rules);
+    requestSpecs.push({
+      id: 'combined-and',
+      kind: 'combined-and',
+      groupId: 'combined-group',
+      rules,
+      rulesHash: computeRulesHash(rules),
+      color: combinedGroup?.color || FILTER_LAYER_BASE_COLOR,
+      priority: combinedGroup?.priority ?? 0
+    });
+  }
+
+  for (const layer of orLayers) {
+    requestSpecs.push({
+      id: `combined-or:${layer.id}`,
+      kind: 'combined-or',
+      groupId: 'combined-group',
+      layerId: layer.id,
+      rules: layer.rules,
+      rulesHash: computeRulesHash(layer.rules),
+      color: combinedGroup?.color || FILTER_LAYER_BASE_COLOR,
+      priority: combinedGroup?.priority ?? Number(layer.priority || 0)
+    });
+  }
+
+  for (const layer of standaloneLayers) {
+    requestSpecs.push({
+      id: `layer:${layer.id}`,
+      kind: 'layer',
+      groupId: layer.id,
+      layerId: layer.id,
+      rules: layer.rules,
+      rulesHash: computeRulesHash(layer.rules),
+      color: layer.color || FILTER_LAYER_BASE_COLOR,
+      priority: Number(layer.priority || 0)
+    });
+  }
+
+  return {
+    layers: sortedLayers,
+    combinedGroup,
+    requestSpecs,
+    hasStandaloneLayers: standaloneLayers.length > 0
+  };
+}
+
+function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cacheHit = false }) {
+  const resolvedEntriesById = new Map();
+  const requestSpecs = Array.isArray(prepared?.requestSpecs) ? prepared.requestSpecs : [];
+  const combinedGroup = prepared?.combinedGroup || null;
+  const combinedAndPayload = payloadsByRequestId.get('combined-and');
+  const combinedOrPayloads = requestSpecs
+    .filter((spec) => spec.kind === 'combined-or')
+    .map((spec) => payloadsByRequestId.get(spec.id))
+    .filter(Boolean);
+
+  function assignResolvedFeature(id, color, priority) {
+    if (!Number.isInteger(id) || id <= 0) return;
+    const current = resolvedEntriesById.get(id);
+    if (current && current.priority <= priority) return;
+    resolvedEntriesById.set(id, {
+      color,
+      priority
+    });
+  }
+
+  if (combinedGroup) {
+    let combinedSet = null;
+    if (combinedAndPayload) {
+      combinedSet = toFeatureIdSetFromMatches(combinedAndPayload);
+    }
+    if (combinedOrPayloads.length > 0) {
+      const unionOrSet = new Set();
+      for (const payload of combinedOrPayloads) {
+        for (const id of toFeatureIdSetFromMatches(payload)) {
+          unionOrSet.add(id);
+        }
+      }
+      combinedSet = combinedSet
+        ? new Set([...combinedSet].filter((id) => unionOrSet.has(id)))
+        : unionOrSet;
+    }
+    if (combinedSet) {
+      for (const id of combinedSet) {
+        assignResolvedFeature(id, combinedGroup.color, combinedGroup.priority);
+      }
+    }
+  }
+
+  for (const spec of requestSpecs) {
+    if (spec.kind !== 'layer') continue;
+    const payload = payloadsByRequestId.get(spec.id);
+    if (!payload) continue;
+    for (const id of toFeatureIdSetFromMatches(payload)) {
+      assignResolvedFeature(id, spec.color, spec.priority);
+    }
+  }
+
+  const featureStateEntries = [...resolvedEntriesById.entries()]
+    .map(([id, entry]) => buildFeatureStateEntry(id, {
+      isFiltered: true,
+      filterColor: entry.color
+    }))
+    .filter(Boolean);
+
+  const payloads = [...payloadsByRequestId.values()];
+  return {
+    featureStateEntries,
+    meta: {
+      rulesHash: String(prepared?.rulesHash || 'fnv1a-0'),
+      bboxHash: '',
+      truncated: payloads.some((payload) => Boolean(payload?.meta?.truncated)),
+      elapsedMs: payloads.reduce((sum, payload) => sum + Number(payload?.meta?.elapsedMs || 0), 0),
+      cacheHit: cacheHit,
+      clearColor: FILTER_CLEAR_COLOR
+    }
+  };
+}
 
 function createInitialState(mapDebug) {
   const debugState = mapDebug?.getState?.() || {
@@ -296,16 +476,23 @@ export function createFilterPipeline({
     return buildPrefetchCoverageWindowSnapshot(coverageWindow, filterLastMoveVector);
   }
 
-  async function prepareRulesForFiltering(rules) {
+  async function prepareRulesForFiltering(input) {
     try {
-      const workerResult = await requestFilterWorker('prepare-rules', {
-        rules
-      });
+      const requestPayload = isLayerInput(input)
+        ? { layers: input }
+        : { rules: input };
+      const workerResult = await requestFilterWorker('prepare-rules', requestPayload);
       if (workerResult?.ok) {
+        const normalizedLayers = Array.isArray(workerResult.layers) && workerResult.layers.length > 0
+          ? workerResult.layers
+          : normalizeFilterInputLayers(input).layers;
+        const preparedRequests = buildFilterRequestSpecs(normalizedLayers);
         return {
           ok: true,
-          rules: Array.isArray(workerResult.rules) ? workerResult.rules : [],
-          rulesHash: String(workerResult.rulesHash || 'fnv1a-0'),
+          layers: preparedRequests.layers,
+          requestSpecs: preparedRequests.requestSpecs,
+          combinedGroup: preparedRequests.combinedGroup,
+          rulesHash: String(workerResult.rulesHash || computeRulesHash(preparedRequests.layers)),
           heavy: Boolean(workerResult.heavy)
         };
       }
@@ -314,36 +501,90 @@ export function createFilterPipeline({
         error: String(workerResult?.invalidReason || 'Invalid filter rules')
       };
     } catch {
-      const activeRules = Array.isArray(rules) ? rules.filter((rule) => rule?.key) : [];
-      const invalidRule = activeRules.find((rule) => !FILTER_RULE_OPS.has(String(rule?.op || 'contains')));
-      if (invalidRule) {
+      const normalizedLayers = normalizeFilterInputLayers(input);
+      if (normalizedLayers.invalidReason) {
         return {
           ok: false,
-          error: `Invalid filter operator: ${String(invalidRule.op || '')}`
+          error: normalizedLayers.invalidReason
         };
       }
-      const normalized = activeRules.map((rule) => ({
-        key: String(rule.key || '').trim(),
-        op: String(rule.op || 'contains').trim(),
-        value: String(rule.value || '').trim()
-      }));
+      const preparedRequests = buildFilterRequestSpecs(normalizedLayers.layers);
       return {
         ok: true,
-        rules: normalized,
-        rulesHash: hashFilterExpression(['literal', normalized]),
-        heavy: normalized.some((rule) => rule.op === 'contains')
+        layers: preparedRequests.layers,
+        requestSpecs: preparedRequests.requestSpecs,
+        combinedGroup: preparedRequests.combinedGroup,
+        rulesHash: computeRulesHash(preparedRequests.layers),
+        heavy: preparedRequests.requestSpecs.some((spec) => spec.rules.some((rule) => rule.op === 'contains'))
       };
     }
   }
 
+  async function fetchMatchesForRequestSpec(spec, context, signal, { allowCache = true } = {}) {
+    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket);
+    if (allowCache) {
+      const cached = filterCache.getCachedFilterMatches(requestCacheKey);
+      if (cached) {
+        return {
+          payload: {
+            ...cached,
+            meta: {
+              ...(cached?.meta || {}),
+              cacheHit: true
+            }
+          },
+          cacheHit: true,
+          usedFallback: Boolean(cached?.meta?.fallback)
+        };
+      }
+    }
+
+    let payload;
+    let usedFallback = false;
+    try {
+      payload = await filterFetcher.fetchFilterMatchesPrimary({
+        bbox: context.coverageWindow,
+        zoomBucket: context.zoomBucket,
+        rules: spec.rules,
+        rulesHash: spec.rulesHash,
+        signal
+      });
+    } catch (error) {
+      if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
+      usedFallback = true;
+      payload = await filterFetcher.fetchFilterMatchesFallback({
+        rules: spec.rules,
+        signal
+      });
+    }
+
+    const normalizedPayload = {
+      ...payload,
+      meta: {
+        ...(payload?.meta || {}),
+        fallback: usedFallback,
+        cacheHit: Boolean(payload?.meta?.cacheHit)
+      }
+    };
+    filterCache.putCachedFilterMatches(requestCacheKey, normalizedPayload);
+    return {
+      payload: normalizedPayload,
+      cacheHit: false,
+      usedFallback
+    };
+  }
+
   function scheduleFilterPrefetch(context, token) {
-    if (!FILTER_PREFETCH_ENABLED || !context?.coverageWindow || !context?.rulesHash || !context?.rules?.length) return;
+    if (!FILTER_PREFETCH_ENABLED || !context?.coverageWindow || !context?.rulesHash) return;
+    if (!Array.isArray(context?.requestSpecs) || context.requestSpecs.length !== 1) return;
+    const spec = context.requestSpecs[0];
+    if (!Array.isArray(spec?.rules) || spec.rules.length === 0) return;
     const now = Date.now();
     if ((now - filterLastPrefetchAt) < FILTER_PREFETCH_MIN_INTERVAL_MS) return;
     const prefetchBbox = buildPrefetchCoverageWindow(context.coverageWindow);
     if (!prefetchBbox) return;
     const prefetchHash = buildBboxHash(prefetchBbox, 4);
-    const prefetchCacheKey = `${context.rulesHash}:${prefetchHash}:${context.zoomBucket}`;
+    const prefetchCacheKey = buildFilterRequestCacheKey(spec, prefetchHash, context.zoomBucket);
     if (filterCache.getCachedFilterMatches(prefetchCacheKey)) return;
 
     cancelPrefetchRequest();
@@ -363,12 +604,18 @@ export function createFilterPipeline({
         const payload = await filterFetcher.fetchFilterMatchesPrimary({
           bbox: prefetchBbox,
           zoomBucket: context.zoomBucket,
-          rules: context.rules,
-          rulesHash: context.rulesHash,
+          rules: spec.rules,
+          rulesHash: spec.rulesHash,
           signal
         });
         if (token !== latestFilterToken) return;
-        filterCache.putCachedFilterMatches(prefetchCacheKey, payload);
+        filterCache.putCachedFilterMatches(prefetchCacheKey, {
+          ...payload,
+          meta: {
+            ...(payload?.meta || {}),
+            cacheHit: Boolean(payload?.meta?.cacheHit)
+          }
+        });
         recordFilterRequestDebugEvent('prefetch-finish');
         recordFilterTelemetry('prefetch_finish', {
           prefetchHash,
@@ -430,24 +677,18 @@ export function createFilterPipeline({
       updateFilterRuntimeStatus({
         statusCode: 'refining'
       });
-
-      let payload;
-      let usedFallback = false;
+      let requestResults = [];
       try {
-        payload = await filterFetcher.fetchFilterMatchesPrimary({
-          bbox: context.coverageWindow,
-          zoomBucket: context.zoomBucket,
-          rules: context.rules,
-          rulesHash: context.rulesHash,
-          signal
-        });
+        requestResults = await Promise.all(context.requestSpecs.map(async (spec) => {
+          const result = await fetchMatchesForRequestSpec(spec, context, signal);
+          return {
+            spec,
+            ...result
+          };
+        }));
       } catch (error) {
         if (String(error?.name || '').toLowerCase() === 'aborterror') return;
-        usedFallback = true;
-        payload = await filterFetcher.fetchFilterMatchesFallback({
-          rules: context.rules,
-          signal
-        });
+        return;
       } finally {
         if (activeFilterAbortController?.signal === signal) {
           activeFilterAbortController = null;
@@ -455,10 +696,20 @@ export function createFilterPipeline({
       }
       if (token !== latestFilterToken) return;
 
-      const matchedSize = Math.max(
-        Array.isArray(payload?.matchedFeatureIds) ? payload.matchedFeatureIds.length : 0,
-        Array.isArray(payload?.matchedKeys) ? payload.matchedKeys.length : 0
-      );
+      const payloadsByRequestId = new Map(requestResults.map((result) => [result.spec.id, result.payload]));
+      const usedFallback = requestResults.some((result) => result.usedFallback);
+      const resolvedPayload = buildResolvedLayerPayload({
+        prepared: context,
+        payloadsByRequestId,
+        cacheHit: requestResults.length > 0 && requestResults.every((result) => result.cacheHit)
+      });
+      resolvedPayload.meta = {
+        ...(resolvedPayload.meta || {}),
+        bboxHash: context.bboxHash
+      };
+      const matchedSize = Array.isArray(resolvedPayload.featureStateEntries)
+        ? resolvedPayload.featureStateEntries.length
+        : 0;
       if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
         updateFilterRuntimeStatus({
           statusCode: 'too_many_matches',
@@ -472,9 +723,13 @@ export function createFilterPipeline({
         return;
       }
 
-      await filterFeatureStateManager.applyFilteredFeatureStateMatches(payload, token, { phase: 'authoritative' });
+      await filterFeatureStateManager.applyFilteredFeatureStateEntries(
+        resolvedPayload.featureStateEntries || [],
+        token,
+        { phase: 'authoritative' }
+      );
       if (token !== latestFilterToken) return;
-      filterCache.putCachedFilterMatches(context.cacheKey, payload);
+      filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
       activeFilterCoverageWindow = {
         ...context.coverageWindow,
         rulesHash: context.rulesHash,
@@ -484,8 +739,8 @@ export function createFilterPipeline({
 
       patchState({
         errorMessage: '',
-        lastElapsedMs: Number(payload?.meta?.elapsedMs || 0),
-        lastCacheHit: Boolean(payload?.meta?.cacheHit),
+        lastElapsedMs: Number(resolvedPayload?.meta?.elapsedMs || 0),
+        lastCacheHit: Boolean(resolvedPayload?.meta?.cacheHit),
         lastCount: matchedSize
       });
       setFilterPhase('authoritative');
@@ -494,7 +749,7 @@ export function createFilterPipeline({
         count: matchedSize,
         elapsedMs: currentState.lastElapsedMs,
         cacheHit: currentState.lastCacheHit,
-        truncated: Boolean(payload?.meta?.truncated),
+        truncated: Boolean(resolvedPayload?.meta?.truncated),
         fallback: usedFallback
       });
       recordFilterRequestDebugEvent('finish');
@@ -507,7 +762,7 @@ export function createFilterPipeline({
         toEnable: filterFeatureStateManager.getFilteredFeatureStateIdsSize()
       });
       updateFilterRuntimeStatus({
-        statusCode: payload?.meta?.truncated ? 'truncated' : 'applied',
+        statusCode: resolvedPayload?.meta?.truncated ? 'truncated' : 'applied',
         count: currentState.lastCount,
         elapsedMs: currentState.lastElapsedMs,
         cacheHit: currentState.lastCacheHit,
@@ -560,10 +815,10 @@ export function createFilterPipeline({
     });
   }
 
-  async function applyBuildingFilters(rules, { reason = 'rules' } = {}) {
+  async function applyBuildingFilters(input, { reason = 'rules' } = {}) {
     if (!resolveMap()) return;
     const token = ++latestFilterToken;
-    const prepared = await prepareRulesForFiltering(rules);
+    const prepared = await prepareRulesForFiltering(input);
     if (token !== latestFilterToken) return;
 
     if (!prepared.ok) {
@@ -580,10 +835,10 @@ export function createFilterPipeline({
       });
       return;
     }
-    const activeRules = prepared.rules;
-    debugFilterLog('filter rules changed', { reason, rules: activeRules });
+    const activeLayers = Array.isArray(prepared.layers) ? prepared.layers : [];
+    debugFilterLog('filter rules changed', { reason, layers: activeLayers });
     currentFilterRulesHash = prepared.rulesHash;
-    if (activeRules.length === 0) {
+    if (activeLayers.length === 0 || prepared.requestSpecs.length === 0) {
       patchState({
         errorMessage: ''
       });
@@ -636,15 +891,23 @@ export function createFilterPipeline({
 
     const cached = filterCache.getCachedFilterMatches(cacheKey);
     if (cached) {
-      await filterFeatureStateManager.applyFilteredFeatureStateMatches(cached, token, { phase: 'optimistic' });
+      const cachedPayload = {
+        ...cached,
+        meta: {
+          ...(cached?.meta || {}),
+          cacheHit: true
+        }
+      };
+      await filterFeatureStateManager.applyFilteredFeatureStateEntries(
+        Array.isArray(cachedPayload?.featureStateEntries) ? cachedPayload.featureStateEntries : [],
+        token,
+        { phase: 'optimistic' }
+      );
       if (token !== latestFilterToken) return;
       patchState({
-        lastElapsedMs: Number(cached?.meta?.elapsedMs || 0),
-        lastCacheHit: Boolean(cached?.meta?.cacheHit),
-        lastCount: Math.max(
-          Array.isArray(cached?.matchedFeatureIds) ? cached.matchedFeatureIds.length : 0,
-          Array.isArray(cached?.matchedKeys) ? cached.matchedKeys.length : 0
-        )
+        lastElapsedMs: Number(cachedPayload?.meta?.elapsedMs || 0),
+        lastCacheHit: Boolean(cachedPayload?.meta?.cacheHit),
+        lastCount: Array.isArray(cachedPayload?.featureStateEntries) ? cachedPayload.featureStateEntries.length : 0
       });
       activeFilterCoverageWindow = {
         ...coverageWindow,
@@ -680,7 +943,9 @@ export function createFilterPipeline({
     scheduleAuthoritativeRequest({
       reason,
       heavy: prepared.heavy,
-      rules: activeRules,
+      layers: activeLayers,
+      requestSpecs: prepared.requestSpecs,
+      combinedGroup: prepared.combinedGroup,
       rulesHash: prepared.rulesHash,
       coverageWindow,
       coverageHash,
@@ -690,7 +955,7 @@ export function createFilterPipeline({
     }, token, debounceMs);
   }
 
-  function scheduleFilterRefresh(rules) {
+  function scheduleFilterRefresh(input) {
     if (mapMoveDebounceTimer) {
       clearTimeout(mapMoveDebounceTimer);
       mapMoveDebounceTimer = null;
@@ -701,7 +966,7 @@ export function createFilterPipeline({
     }
     mapMoveDebounceTimer = setTimeout(() => {
       mapMoveDebounceTimer = null;
-      applyBuildingFilters(rules, { reason: 'viewport' });
+      applyBuildingFilters(input, { reason: 'viewport' });
     }, FILTER_REQUEST_DEBOUNCE_MS);
   }
 
@@ -727,12 +992,12 @@ export function createFilterPipeline({
     });
   }
 
-  function scheduleFilterRulesRefresh(rules) {
+  function scheduleFilterRulesRefresh(input) {
     if (filterRulesDebounceTimer) {
       clearTimeout(filterRulesDebounceTimer);
       filterRulesDebounceTimer = null;
     }
-    applyBuildingFilters(rules, { reason: 'rules' });
+    applyBuildingFilters(input, { reason: 'rules' });
   }
 
   function refreshDebugState(active) {

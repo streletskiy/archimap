@@ -12,6 +12,7 @@
   import { buildAccountUrl, buildAdminUrl, buildInfoUrl } from '$lib/client/section-routes';
   import { patchUrlState } from '$lib/client/urlState';
   import { apiJson } from '$lib/services/http';
+  import { buildingFilterLayers } from '$lib/stores/filters';
   import { clearSession, session, setSession } from '$lib/stores/auth';
   import { lastMapCamera } from '$lib/stores/map';
   import { openSearchModal, requestSearch, searchState, setSearchQuery } from '$lib/stores/search';
@@ -30,12 +31,12 @@
   $: basePrefix = currentPathname === '/app' || currentPathname.startsWith('/app/') ? '/app' : '';
   $: normalizedPathname = basePrefix ? (currentPathname.slice(basePrefix.length) || '/') : currentPathname;
   $: isMapRoute = normalizedPathname === '/';
-  $: mapHref = navHref('/', basePrefix, isMapRoute, $lastMapCamera);
-  $: infoHref = navHref(buildInfoUrl('/info', 'about').pathname, basePrefix, isMapRoute, $lastMapCamera);
-  $: accountHref = navHref(buildAccountUrl('/account', 'settings').pathname, basePrefix, isMapRoute, $lastMapCamera);
-  $: adminHref = navHref(buildAdminUrl('/admin', 'edits').pathname, basePrefix, isMapRoute, $lastMapCamera);
-  $: termsHref = navHref(buildInfoUrl('/info', 'agreement').pathname, basePrefix, isMapRoute, $lastMapCamera);
-  $: privacyHref = navHref(buildInfoUrl('/info', 'privacy').pathname, basePrefix, isMapRoute, $lastMapCamera);
+  $: mapHref = navHref('/', basePrefix, isMapRoute, $lastMapCamera, $buildingFilterLayers);
+  $: infoHref = navHref(buildInfoUrl('/info', 'about').pathname, basePrefix, isMapRoute, $lastMapCamera, $buildingFilterLayers);
+  $: accountHref = navHref(buildAccountUrl('/account', 'settings').pathname, basePrefix, isMapRoute, $lastMapCamera, $buildingFilterLayers);
+  $: adminHref = navHref(buildAdminUrl('/admin', 'edits').pathname, basePrefix, isMapRoute, $lastMapCamera, $buildingFilterLayers);
+  $: termsHref = navHref(buildInfoUrl('/info', 'agreement').pathname, basePrefix, isMapRoute, $lastMapCamera, $buildingFilterLayers);
+  $: privacyHref = navHref(buildInfoUrl('/info', 'privacy').pathname, basePrefix, isMapRoute, $lastMapCamera, $buildingFilterLayers);
   $: primaryLinks = [
     { href: mapHref, label: $t('header.map'), active: normalizedPathname === '/' },
     { href: infoHref, label: $t('header.info'), active: isActive(normalizedPathname, '/info') },
@@ -48,14 +49,19 @@
     filterOpen = false;
   }
 
-  function navHref(path, currentBasePrefix, currentIsMapRoute, currentLastMapCamera) {
+  function navHref(path, currentBasePrefix, currentIsMapRoute, currentLastMapCamera, currentFilterLayers) {
     const target = path === '/' ? '' : path;
     const pathname = `${currentBasePrefix}${target || '/'}`;
-    if (path !== '/' || currentIsMapRoute || !currentLastMapCamera) {
+    if (
+      path !== '/'
+      || currentIsMapRoute
+      || (!currentLastMapCamera && (!Array.isArray(currentFilterLayers) || currentFilterLayers.length === 0))
+    ) {
       return pathname;
     }
     const nextUrl = patchUrlState(new URL(pathname, 'http://localhost'), {
-      camera: currentLastMapCamera
+      camera: currentLastMapCamera,
+      filters: currentFilterLayers
     });
     return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
   }

@@ -31,7 +31,7 @@
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
-- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/section-routes.js`.
+- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/filterUrlState.js`, `frontend/src/lib/client/section-routes.js`.
 
 ## Security and auth points
 
@@ -60,12 +60,21 @@
 ## Map filter highlight
 
 - Building base layers are region-scoped PMTiles layers (`<region>-fill`, `<region>-line`) and remain visible; custom rules do not hide or re-filter them directly.
+- UI filter state is layer-based (`buildingFilterLayers[]`): each layer carries `color`, `priority`, `mode` (`and|or|layer`), and `rules[]`.
 - Custom building filter renders through dedicated region-scoped highlight layers:
   - `<region>-filter-highlight-fill`
   - `<region>-filter-highlight-line`
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
   - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
+- Multi-layer execution stays client-side:
+  - all `and` and `or` layers are resolved as one combined logical group;
+  - each `layer` mode layer is fetched independently;
+  - endpoint contract stays backward-compatible because each request still contains flat `rules[]`.
+- Combined group semantics:
+  - all `and` layers must pass;
+  - if any `or` layers exist, at least one `or` layer must pass;
+  - rules inside one layer are ANDed.
 - Client filter pipeline is decomposed into dedicated modules under `frontend/src/lib/services/map/`:
   - `map-filter-pipeline.js`: orchestration and runtime status
   - `filter-bbox.js`: bbox hashing, coverage window, prefetch window helpers
@@ -74,7 +83,8 @@
   - `filter-fetcher.js`: primary/fallback fetch paths and fallback data cache
   - `filter-utils.js`: encoded OSM id and layer snapshot helpers
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
-- Matched buildings are marked with `setFeatureState({ isFiltered: true })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- Matched buildings are marked with `setFeatureState({ isFiltered: true, filterColor: '#rrggbb' })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- When one building matches multiple layers, the highest-priority layer wins and provides the visible `filterColor`.
 - Feature-state updates are diff-based (`toEnable` / `toDisable`) via worker apply-plan and are chunked per frame for smoothness.
 - Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.
 - Filter prefetch (optional) warms neighbor windows in background with strict throttling and cancellation.

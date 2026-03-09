@@ -1,7 +1,19 @@
 const { sendCachedJson } = require('../infra/http-cache.infra');
 const { createLruCache } = require('../infra/lru-cache.infra');
 
-const FILTER_RULE_OPS = new Set(['contains', 'equals', 'not_equals', 'starts_with', 'exists', 'not_exists']);
+const FILTER_RULE_OPS = new Set([
+  'contains',
+  'equals',
+  'not_equals',
+  'starts_with',
+  'exists',
+  'not_exists',
+  'greater_than',
+  'greater_or_equals',
+  'less_than',
+  'less_or_equals'
+]);
+const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
 const FILTER_MATCH_MAX_RULES = 30;
 const FILTER_MATCH_MAX_KEY_LEN = 80;
 const FILTER_MATCH_MAX_VALUE_LEN = 240;
@@ -37,6 +49,21 @@ function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${r
     sql: `CASE WHEN jsonb_exists(${tagsAlias}, ?) THEN jsonb_extract_path_text(${tagsAlias}, ?) ELSE ${fallbackSql} END`,
     params: [key, key]
   };
+}
+
+function buildPostgresNumericValueSql(valueSql, valueParams = []) {
+  const normalizedSql = `replace(btrim(${valueSql}), ',', '.')`;
+  return {
+    sql: `CASE WHEN ${normalizedSql} ~ '^-?\\d+(?:\\.\\d+)?$' THEN (${normalizedSql})::double precision ELSE NULL END`,
+    params: [...valueParams, ...valueParams]
+  };
+}
+
+function parseNumericFilterValue(rawValue) {
+  const text = String(rawValue ?? '').trim().replace(',', '.');
+  if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
 }
 
 function usesArchiFallbackRuleKey(ruleKey) {
@@ -101,6 +128,34 @@ function compilePostgresFilterRulePredicate(rule, options = {}) {
     };
   }
 
+  if (NUMERIC_FILTER_RULE_OPS.has(op)) {
+    const numericExpr = buildPostgresNumericValueSql(valueExpr.sql, valueExpr.params);
+    const right = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
+    const numericParams = [...numericExpr.params, right];
+    if (op === 'greater_than') {
+      return {
+        sql: `${numericExpr.sql} > ?`,
+        params: numericParams
+      };
+    }
+    if (op === 'greater_or_equals') {
+      return {
+        sql: `${numericExpr.sql} >= ?`,
+        params: numericParams
+      };
+    }
+    if (op === 'less_than') {
+      return {
+        sql: `${numericExpr.sql} < ?`,
+        params: numericParams
+      };
+    }
+    return {
+      sql: `${numericExpr.sql} <= ?`,
+      params: numericParams
+    };
+  }
+
   const right = String(rule.valueNormalized || '').toLowerCase();
   params.push(right);
 
@@ -158,6 +213,7 @@ function compilePostgresFilterRuleGuardPredicate(rule, options = {}) {
   const right = String(rule.valueNormalized || '').toLowerCase();
   const tagExistsSql = `jsonb_exists(${tagsAlias}, ?)`;
   const tagValueSql = `jsonb_extract_path_text(${tagsAlias}, ?)`;
+  const tagNumericExpr = buildPostgresNumericValueSql(tagValueSql, [key]);
 
   if (!usesArchiFallbackRuleKey(key)) {
     if (op === 'exists') {
@@ -188,6 +244,32 @@ function compilePostgresFilterRuleGuardPredicate(rule, options = {}) {
       return {
         sql: `lower(${tagValueSql}) LIKE (? || '%')`,
         params: [key, right]
+      };
+    }
+    if (NUMERIC_FILTER_RULE_OPS.has(op)) {
+      const numericValue = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
+      const numericParams = [...tagNumericExpr.params, numericValue];
+      if (op === 'greater_than') {
+        return {
+          sql: `${tagNumericExpr.sql} > ?`,
+          params: numericParams
+        };
+      }
+      if (op === 'greater_or_equals') {
+        return {
+          sql: `${tagNumericExpr.sql} >= ?`,
+          params: numericParams
+        };
+      }
+      if (op === 'less_than') {
+        return {
+          sql: `${tagNumericExpr.sql} < ?`,
+          params: numericParams
+        };
+      }
+      return {
+        sql: `${tagNumericExpr.sql} <= ?`,
+        params: numericParams
       };
     }
     return {
@@ -224,6 +306,33 @@ function compilePostgresFilterRuleGuardPredicate(rule, options = {}) {
     return {
       sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) NOT LIKE (? || '%')))`,
       params: [key, key, key, right]
+    };
+  }
+  if (NUMERIC_FILTER_RULE_OPS.has(op)) {
+    const numericValue = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
+    const leftSql = tagNumericExpr.sql;
+    const leftParams = tagNumericExpr.params;
+    if (op === 'greater_than') {
+      return {
+        sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} <= ?))`,
+        params: [key, ...leftParams, ...leftParams, numericValue]
+      };
+    }
+    if (op === 'greater_or_equals') {
+      return {
+        sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} < ?))`,
+        params: [key, ...leftParams, ...leftParams, numericValue]
+      };
+    }
+    if (op === 'less_than') {
+      return {
+        sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} >= ?))`,
+        params: [key, ...leftParams, ...leftParams, numericValue]
+      };
+    }
+    return {
+      sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} > ?))`,
+      params: [key, ...leftParams, ...leftParams, numericValue]
     };
   }
   return {
@@ -279,12 +388,17 @@ function normalizeFilterRule(rule, options = {}) {
   }
   if (!FILTER_RULE_OPS.has(op)) return { error: `Invalid rule operator: ${op}` };
   if (value.length > FILTER_MATCH_MAX_VALUE_LEN) return { error: 'Rule value is too long' };
+  const numericValue = NUMERIC_FILTER_RULE_OPS.has(op) ? parseNumericFilterValue(value) : null;
+  if (NUMERIC_FILTER_RULE_OPS.has(op) && !Number.isFinite(numericValue)) {
+    return { error: 'Rule value must be numeric' };
+  }
   return {
     value: {
       key,
       op,
       value,
-      valueNormalized: value.toLowerCase()
+      valueNormalized: value.toLowerCase(),
+      numericValue
     }
   };
 }
@@ -316,6 +430,15 @@ function matchesFilterRule(item, rule) {
   if (rule.op === 'exists') return hasValue;
   if (rule.op === 'not_exists') return !hasValue;
   if (actual == null) return false;
+  if (NUMERIC_FILTER_RULE_OPS.has(rule.op)) {
+    const leftNumber = parseNumericFilterValue(actual);
+    const rightNumber = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
+    if (!Number.isFinite(leftNumber) || !Number.isFinite(rightNumber)) return false;
+    if (rule.op === 'greater_than') return leftNumber > rightNumber;
+    if (rule.op === 'greater_or_equals') return leftNumber >= rightNumber;
+    if (rule.op === 'less_than') return leftNumber < rightNumber;
+    return leftNumber <= rightNumber;
+  }
 
   const left = String(actual).toLowerCase();
   if (rule.op === 'equals') return left === rule.valueNormalized;

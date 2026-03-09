@@ -121,6 +121,7 @@
     "tagKey": "Tag key",
     "tagValue": "Tag value",
     "addRule": "+ Rule",
+    "addLayer": "+ Layer",
     "resetRules": "Reset",
     "applyRules": "Apply",
     "login": "Sign in",
@@ -164,8 +165,22 @@
       "equals": "equals",
       "not_equals": "not equals",
       "starts_with": "starts with",
+      "greater_than": "greater than",
+      "greater_or_equals": "greater or equal",
+      "less_than": "less than",
+      "less_or_equals": "less or equal",
       "exists": "exists",
       "not_exists": "not exists"
+    },
+    "filterLayerMode": {
+      "and": "AND",
+      "or": "OR",
+      "layer": "Layer"
+    },
+    "presets": {
+      "title": "Presets",
+      "buildingLevels": "Building levels",
+      "buildingMaterial": "Building material"
     },
     "filterLabels": {
       "architect": "Architect",

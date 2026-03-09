@@ -7,6 +7,7 @@
   import { createBuildingDetailsManager } from '$lib/services/building-details-manager';
   import { createSearchManager } from '$lib/services/search-manager';
   import { createUrlStateManager } from '$lib/services/url-state-manager';
+  import { buildingFilterLayers, resetBuildingFilterLayers, setBuildingFilterLayers } from '$lib/stores/filters';
   import { session } from '$lib/stores/auth';
   import { mapCenter, mapReady, mapZoom, requestMapFocus, selectedBuilding } from '$lib/stores/map';
   import { closeSearchModal } from '$lib/stores/search';
@@ -17,7 +18,9 @@
   const urlStateManager = createUrlStateManager({
     pageStore: page,
     onApplyBuilding: (building) => buildingDetailsManager.selectBuilding(building),
-    onClearBuildingSelection: () => buildingDetailsManager.clearSelection()
+    onClearBuildingSelection: () => buildingDetailsManager.clearSelection(),
+    onApplyFilters: (filters) => setBuildingFilterLayers(filters),
+    onClearFilters: () => resetBuildingFilterLayers()
   });
 
   let MapCanvasComponent = null;
@@ -72,7 +75,8 @@
     urlStateManager.applyUrlStateToUi({
       mapReady: $mapReady,
       buildingModalOpen: $buildingModalOpen,
-      selectedBuilding: $selectedBuilding
+      selectedBuilding: $selectedBuilding,
+      currentFilters: $buildingFilterLayers
     });
   }
 
@@ -86,6 +90,10 @@
     mapReady: $mapReady,
     mapCenter: $mapCenter,
     mapZoom: $mapZoom
+  });
+
+  $: urlStateManager.syncFilters({
+    currentFilters: $buildingFilterLayers
   });
 </script>
 

@@ -294,11 +294,16 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       'source-layer': region.sourceLayer,
       minzoom: 13,
       paint: {
-        'fill-color': '#f59e0b',
+        'fill-color': [
+          'case',
+          ['boolean', ['feature-state', 'isFiltered'], false],
+          ['to-color', ['feature-state', 'filterColor']],
+          'transparent'
+        ],
         'fill-opacity': [
           'case',
           ['boolean', ['feature-state', 'isFiltered'], false],
-          0.36,
+          0.4,
           0
         ]
       }
@@ -313,7 +318,12 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       'source-layer': region.sourceLayer,
       minzoom: 13,
       paint: {
-        'line-color': '#b45309',
+        'line-color': [
+          'case',
+          ['boolean', ['feature-state', 'isFiltered'], false],
+          ['to-color', ['feature-state', 'filterColor']],
+          'transparent'
+        ],
         'line-width': [
           'case',
           ['boolean', ['feature-state', 'isFiltered'], false],

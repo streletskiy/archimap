@@ -32,6 +32,9 @@ System notes:
   - Cache: `Cache-Control: public, max-age=10`, `ETag`.
 - `POST /api/buildings/filter-matches`
   - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, rules[], rulesHash?, maxResults? }`.
+  - `rules[]` remains a flat per-request contract. Layer modes, priorities, presets, and color resolution are handled client-side by issuing one or more requests against this endpoint.
+  - Supported operators: `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, `less_or_equals`.
+  - Numeric operators expect a numeric `value`; `exists` / `not_exists` ignore `value`.
   - Returns `{ matchedKeys[], matchedFeatureIds[], meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
   - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket`), per-request `meta.cacheHit`.
 - `GET /api/building/:osmType/:osmId`

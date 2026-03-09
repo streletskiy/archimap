@@ -457,6 +457,9 @@ paths:
   /api/buildings/filter-matches:
     post:
       summary: Match filter rules against bbox
+      description: |
+        The endpoint accepts a flat `rules[]` array per request.
+        Client-side filter layers, priorities, colors, and AND/OR/layer composition are resolved before calling this endpoint.
       requestBody:
         required: true
         content:
@@ -484,6 +487,7 @@ paths:
                   type: integer
                 rules:
                   type: array
+                  description: Flat rule list for one request. Supported operators are `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, and `less_or_equals`.
                   items:
                     type: object
                     properties:
@@ -491,8 +495,11 @@ paths:
                         type: string
                       op:
                         type: string
+                        enum: [contains, equals, not_equals, starts_with, exists, not_exists, greater_than, greater_or_equals, less_than, less_or_equals]
+                        description: `exists` and `not_exists` do not require `value`. Numeric operators expect a numeric string in `value`.
                       value:
                         type: string
+                        description: Optional for `exists` and `not_exists`.
       responses:
         '200':
           description: Match result

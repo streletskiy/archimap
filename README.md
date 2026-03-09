@@ -192,18 +192,18 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 ## Deep Links (URL state)
 
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
+- Shareable filter state: `?f=<encodedFilterLayers>`
 - Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
 - Open admin edit details: `?edit=<id>` (`adminEdit=<id>` is still supported for backward compatibility)
 - Canonical info/legal routes:
   - `/info/about`, `/info/terms`, `/info/privacy`
   - `/app/info/about`, `/app/info/terms`, `/app/info/privacy`
-- Backward-compatible legal query aliases are still supported:
-  - `?tab=legal&doc=terms`
-  - `?tab=legal&doc=privacy`
 
 Notes:
 
 - Camera updates use history replace (no history spam while panning/zooming).
+- Shareable map links can combine camera, building, and filter state in one URL, for example `?lat=55.751244&lng=37.618423&z=15.2&f=...`.
+- `f` is a compact versioned payload for filter layers and should be treated as opaque; it stores layer order, mode, color, and rules.
 - Legacy legal params remain compatible (`tab=user-agreement`, `tab=privacy-policy`).
 - Section root routes such as `/app/info` and `/info` still honor legacy query aliases and normalize back to canonical tab state.
 

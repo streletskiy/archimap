@@ -24,18 +24,35 @@ test('computeRulesHash is stable for normalized rules', async () => {
 });
 
 test('normalizeFilterRules validates operators and trims values', async () => {
-  const { normalizeFilterRules } = await loadFilterPipelineUtils();
+  const { matchesFilterRule, normalizeFilterRules } = await loadFilterPipelineUtils();
   const ok = normalizeFilterRules([{ key: ' name ', op: 'starts_with', value: '  Arc ' }]);
   assert.equal(ok.invalidReason, '');
   assert.deepEqual(ok.rules[0], {
     key: 'name',
     op: 'starts_with',
     value: 'Arc',
-    valueNormalized: 'arc'
+    valueNormalized: 'arc',
+    numericValue: null
   });
 
   const bad = normalizeFilterRules([{ key: 'name', op: 'regex', value: '.*' }]);
   assert.match(String(bad.invalidReason || ''), /Invalid filter operator/);
+
+  const numeric = normalizeFilterRules([{ key: 'levels', op: 'greater_or_equals', value: ' 5 ' }]);
+  assert.equal(numeric.invalidReason, '');
+  assert.deepEqual(numeric.rules[0], {
+    key: 'levels',
+    op: 'greater_or_equals',
+    value: '5',
+    valueNormalized: '5',
+    numericValue: 5
+  });
+  assert.equal(matchesFilterRule({ levels: '7' }, numeric.rules[0]), true);
+  assert.equal(matchesFilterRule({ levels: '4' }, numeric.rules[0]), false);
+  assert.equal(matchesFilterRule({ levels: 'five' }, numeric.rules[0]), false);
+
+  const badNumeric = normalizeFilterRules([{ key: 'levels', op: 'greater_than', value: 'many' }]);
+  assert.match(String(badNumeric.invalidReason || ''), /numeric/i);
 });
 
 test('buildFeatureStateDiffPlan returns only changed ids', async () => {
