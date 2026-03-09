@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import { page } from '$app/stores';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import { t, translateNow } from '$lib/i18n/index';
@@ -33,6 +34,8 @@
   let handledRegisterToken = '';
   let handledResetToken = '';
   let lastHandledRequestId = 0;
+  let modalEl = null;
+  let hadOpenState = false;
 
   $: if (requestId && requestId !== lastHandledRequestId) {
     lastHandledRequestId = requestId;
@@ -57,6 +60,12 @@
 
   function closeAuth() {
     open = false;
+  }
+
+  function closeOnKeydown(event) {
+    if (event.key === 'Escape') {
+      closeAuth();
+    }
   }
 
   async function submitLogin(event) {
@@ -234,23 +243,45 @@
     open = true;
     stripAuthQueryParams(['resetToken', 'reset', 'auth']);
   }
+
+  $: if (open && !hadOpenState) {
+    hadOpenState = true;
+    tick().then(() => modalEl?.focus());
+  } else if (!open && hadOpenState) {
+    hadOpenState = false;
+  }
 </script>
 
 {#if open}
-  <div
-    class="auth-backdrop"
-    role="button"
-    tabindex="0"
-    on:click={(event) => event.target === event.currentTarget && closeAuth()}
-    on:keydown={(event) => event.key === 'Escape' && closeAuth()}
-  >
-    <section class="auth-modal">
+  <div class="auth-backdrop">
+    <button
+      type="button"
+      class="auth-dismiss-layer"
+      tabindex="-1"
+      aria-label={$t('common.close')}
+      on:click={closeAuth}
+    ></button>
+
+    <div
+      class="auth-modal"
+      bind:this={modalEl}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+      tabindex="-1"
+      on:keydown={closeOnKeydown}
+    >
       <div class="auth-head">
         <div class="auth-head-copy">
           <p class="ui-kicker">{$t('common.appName')}</p>
-          <h3>{$t('header.authTitle')}</h3>
+          <h3 id="auth-modal-title">{$t('header.authTitle')}</h3>
         </div>
-        <button type="button" class="icon-btn ui-close-x" on:click={closeAuth} aria-label={$t('common.close')}>
+        <button
+          type="button"
+          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
+          on:click={closeAuth}
+          aria-label={$t('common.close')}
+        >
           <CloseIcon class="ui-close-icon" />
         </button>
       </div>
@@ -373,7 +404,7 @@
       {#if status}
         <p class="status">{status}</p>
       {/if}
-    </section>
+    </div>
   </div>
 {/if}
 
@@ -387,9 +418,20 @@
     padding: 1rem;
     background: rgba(8, 17, 31, 0.44);
     backdrop-filter: blur(8px);
+    pointer-events: auto;
+  }
+
+  .auth-dismiss-layer {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    background: transparent;
   }
 
   .auth-modal {
+    position: relative;
+    z-index: 1;
     width: min(31rem, 100%);
     padding: 1rem;
     border: 1px solid var(--panel-border);
@@ -397,6 +439,7 @@
     background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
     box-shadow: var(--shadow-panel);
     backdrop-filter: blur(18px);
+    pointer-events: auto;
   }
 
   .auth-head {
@@ -415,32 +458,6 @@
   .auth-head h3 {
     margin: 0;
     color: var(--fg-strong);
-  }
-
-  .icon-btn {
-    border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
-    color: var(--muted-strong);
-    cursor: pointer;
-    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-  }
-
-  .icon-btn:hover {
-    transform: translateY(-1px);
-    border-color: var(--panel-border-strong);
-    background: var(--panel-solid);
-    color: var(--fg-strong);
-    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
-  }
-
-  .ui-close-x {
-    width: 2.4rem;
-    height: 2.4rem;
-    min-width: 2.4rem;
-    min-height: 2.4rem;
-    padding: 0;
-    font-size: 0;
-    line-height: 0;
   }
 
   .tabs {

@@ -75,7 +75,7 @@ function buildSectionPath(pathname, sectionName, slug) {
 export function resolveInfoTabFromUrl(input) {
   const url = toUrl(input);
   const child = getSectionChild(url.pathname, 'info');
-  if (child != null) {
+  if (child != null && child !== '') {
     const slug = String(child.split('/')[0] || '').trim().toLowerCase();
     if (slug === 'terms' || slug === 'agreement') return 'agreement';
     if (slug === 'privacy') return 'privacy';
@@ -87,7 +87,7 @@ export function resolveInfoTabFromUrl(input) {
 export function resolveAccountTabFromUrl(input) {
   const url = toUrl(input);
   const child = getSectionChild(url.pathname, 'account');
-  if (child != null) {
+  if (child != null && child !== '') {
     const slug = String(child.split('/')[0] || '').trim().toLowerCase();
     if (slug === 'edits' || slug === 'history') return 'edits';
     return 'settings';
@@ -99,7 +99,7 @@ export function resolveAdminTabFromUrl(input) {
   const url = toUrl(input);
   if (url.searchParams.has('edit') || url.searchParams.has('adminEdit')) return 'edits';
   const child = getSectionChild(url.pathname, 'admin');
-  if (child != null) {
+  if (child != null && child !== '') {
     const slug = String(child.split('/')[0] || '').trim().toLowerCase();
     if (slug === 'users') return 'users';
     if (slug === 'data') return 'data';

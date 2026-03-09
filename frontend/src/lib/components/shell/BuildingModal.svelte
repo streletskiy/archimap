@@ -5,15 +5,19 @@
   import { selectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
+  import FormRow from '$lib/components/shell/FormRow.svelte';
+  import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
   import {
-    getArchitectureStyleOptions,
-    normalizeArchitectureStyleKey,
-    toHumanArchitectureStyle
-  } from '$lib/utils/architecture-style';
-  import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from '$lib/utils/building-address';
+    buildAddressFromBuildingForm,
+    buildBuildingComparableSnapshot,
+    createEmptyBuildingComparable,
+    createEmptyBuildingForm,
+    getEditedBuildingFields,
+    hydrateBuildingForm,
+    resolveDisplayBuildingStyle
+  } from '$lib/utils/building-mapper';
   import {
     formatDisplayText,
-    normalizeIntegerField,
     pickFirstText
   } from '$lib/utils/text';
 
@@ -26,114 +30,31 @@
   const dispatch = createEventDispatcher();
 
   let lastBuildingKey = null;
-  let form = createEmptyForm();
-  let initialComparable = createEmptyComparable();
+  let form = createEmptyBuildingForm();
+  let initialComparable = createEmptyBuildingComparable();
   let canEditAddressFull = true;
-  let sourceTags = {};
   let osmTagEntries = [];
   let modalEl = null;
   let hadOpenState = false;
-  function createEmptyForm() {
-    return {
-      name: '',
-      levels: '',
-      yearBuilt: '',
-      architect: '',
-      style: '',
-      archimapDescription: '',
-      addressFull: '',
-      addressPostcode: '',
-      addressCity: '',
-      addressPlace: '',
-      addressStreet: '',
-      addressHouseNumber: ''
-    };
-  }
-
-  function createEmptyComparable() {
-    return {
-      name: '',
-      levels: '',
-      yearBuilt: '',
-      architect: '',
-      style: '',
-      archimapDescription: '',
-      address: ''
-    };
-  }
-
-  function normalizeStyleForForm(value) {
-    const raw = pickFirstText(value).split(';')[0];
-    return normalizeArchitectureStyleKey(raw);
-  }
 
   function hydrateForm(details) {
-    const info = details?.properties?.archiInfo || {};
-    sourceTags = info?._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {};
-    const hasExplicitFullAddress = Boolean(pickFirstText(sourceTags?.['addr:full'], sourceTags?.addr_full));
-    const addressPartsPresent = hasStructuredAddressParts(sourceTags, pickFirstText);
-    canEditAddressFull = hasExplicitFullAddress || !addressPartsPresent;
-    const fallbackAddress = pickFirstText(info.address, sourceTags?.['addr:full'], sourceTags?.addr_full);
-    const nextAddressFields = parseAddressFields(sourceTags, pickFirstText, {
-      fallbackAddress,
-      allowAddressRawAsFull: canEditAddressFull
-    });
-    const nextForm = {
-      name: pickFirstText(info.name, sourceTags?.name, sourceTags?.['name:ru'], sourceTags?.['name:en']),
-      levels: normalizeIntegerField(info.levels ?? sourceTags?.['building:levels'] ?? sourceTags?.levels, 0, 300),
-      yearBuilt: normalizeIntegerField(
-        info.year_built ?? sourceTags?.['building:year'] ?? sourceTags?.year_built ?? sourceTags?.start_date,
-        1000,
-        2100
-      ),
-      architect: pickFirstText(info.architect, sourceTags?.architect, sourceTags?.architect_name),
-      style: normalizeStyleForForm(info.styleRaw ?? info.style ?? sourceTags?.['building:architecture'] ?? sourceTags?.architecture ?? sourceTags?.style),
-      archimapDescription: pickFirstText(info.archimap_description, info.description),
-      addressFull: nextAddressFields.full,
-      addressPostcode: nextAddressFields.postcode,
-      addressCity: nextAddressFields.city,
-      addressPlace: nextAddressFields.place,
-      addressStreet: nextAddressFields.street,
-      addressHouseNumber: nextAddressFields.housenumber
-    };
-    form = nextForm;
-    initialComparable = buildComparableSnapshot(nextForm);
-    osmTagEntries = Object.entries(sourceTags)
-      .map(([key, value]) => ({
-        key: String(key || '').trim(),
-        value: value == null
-          ? ''
-          : (typeof value === 'object' ? JSON.stringify(value) : String(value))
-      }))
-      .filter((item) => item.key.length > 0)
-      .sort((a, b) => a.key.localeCompare(b.key, 'en'));
+    const nextState = hydrateBuildingForm(details);
+    form = nextState.form;
+    initialComparable = nextState.initialComparable;
+    canEditAddressFull = nextState.canEditAddressFull;
+    osmTagEntries = nextState.osmTagEntries;
   }
 
   function buildAddressFromForm(formValue = form) {
-    return buildAddressText({
-      full: formValue.addressFull,
-      postcode: formValue.addressPostcode,
-      city: formValue.addressCity,
-      place: formValue.addressPlace,
-      street: formValue.addressStreet,
-      housenumber: formValue.addressHouseNumber
-    }, pickFirstText);
+    return buildAddressFromBuildingForm(formValue);
   }
 
   function buildComparableSnapshot(formValue = form) {
-    return {
-      name: pickFirstText(formValue.name),
-      style: normalizeArchitectureStyleKey(formValue.style),
-      levels: pickFirstText(formValue.levels),
-      yearBuilt: pickFirstText(formValue.yearBuilt),
-      architect: pickFirstText(formValue.architect),
-      address: buildAddressFromForm(formValue),
-      archimapDescription: pickFirstText(formValue.archimapDescription)
-    };
+    return buildBuildingComparableSnapshot(formValue);
   }
 
   function getEditedFields(currentSnapshot, initialSnapshot) {
-    return Object.keys(currentSnapshot).filter((key) => currentSnapshot[key] !== (initialSnapshot?.[key] || ''));
+    return getEditedBuildingFields(currentSnapshot, initialSnapshot);
   }
 
   $: currentComparable = buildComparableSnapshot(form);
@@ -171,9 +92,7 @@
   }
 
   function resolveDisplayStyle(value, localeValue) {
-    const raw = pickFirstText(value);
-    if (!raw) return '';
-    return toHumanArchitectureStyle(raw, localeValue) || raw;
+    return resolveDisplayBuildingStyle(value, localeValue);
   }
 
   $: if ($buildingModalOpen && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
@@ -289,42 +208,36 @@
                 <h4>{$t('buildingModal.primarySection')}</h4>
               </div>
 
-              <div class="row">
-                <label for="building-name">{$t('buildingModal.name')}</label>
+              <FormRow forId="building-name" label={$t('buildingModal.name')}>
                 <input id="building-name" class="ui-field" type="text" bind:value={form.name} />
-              </div>
+              </FormRow>
 
               <div class="grid2">
-                <div class="row">
-                  <label for="building-levels">{$t('buildingModal.levels')}</label>
+                <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
                   <input id="building-levels" class="ui-field" type="number" min="0" max="300" bind:value={form.levels} />
-                </div>
+                </FormRow>
 
-                <div class="row">
-                  <label for="building-year">{$t('buildingModal.yearBuilt')}</label>
+                <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
                   <input id="building-year" class="ui-field" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
-                </div>
+                </FormRow>
               </div>
 
-              <div class="row">
-                <label for="building-architect">{$t('buildingModal.architect')}</label>
+              <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
                 <input id="building-architect" class="ui-field" type="text" bind:value={form.architect} />
-              </div>
+              </FormRow>
 
-              <div class="row">
-                <label for="building-style-select">{$t('buildingModal.style')}</label>
+              <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
                 <select id="building-style-select" class="ui-field" bind:value={form.style}>
                   <option value="">{$t('buildingModal.notSpecified')}</option>
                   {#each getArchitectureStyleOptions($locale) as option}
                     <option value={option.value}>{option.label}</option>
                   {/each}
                 </select>
-              </div>
+              </FormRow>
 
-              <div class="row">
-                <label for="building-archimap-description">{$t('buildingModal.extraInfo')}</label>
+              <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
                 <textarea id="building-archimap-description" class="ui-field" rows="4" bind:value={form.archimapDescription}></textarea>
-              </div>
+              </FormRow>
             </section>
 
             <section class="form-section">
@@ -333,40 +246,34 @@
               </div>
 
               {#if canEditAddressFull}
-                <div class="row">
-                  <label for="building-addr-full">{$t('buildingModal.addressFull')}</label>
+                <FormRow forId="building-addr-full" label={$t('buildingModal.addressFull')}>
                   <input id="building-addr-full" class="ui-field" type="text" bind:value={form.addressFull} />
-                </div>
+                </FormRow>
               {:else}
-                <p class="field-note">{$t('buildingModal.addressFullDerived')}</p>
+                <FormRow note={$t('buildingModal.addressFullDerived')} />
               {/if}
 
               <div class="grid2">
-                <div class="row">
-                  <label for="building-addr-postcode">{$t('buildingModal.postcode')}</label>
+                <FormRow forId="building-addr-postcode" label={$t('buildingModal.postcode')}>
                   <input id="building-addr-postcode" class="ui-field" type="text" bind:value={form.addressPostcode} />
-                </div>
+                </FormRow>
 
-                <div class="row">
-                  <label for="building-addr-city">{$t('buildingModal.city')}</label>
+                <FormRow forId="building-addr-city" label={$t('buildingModal.city')}>
                   <input id="building-addr-city" class="ui-field" type="text" bind:value={form.addressCity} />
-                </div>
+                </FormRow>
 
-                <div class="row">
-                  <label for="building-addr-place">{$t('buildingModal.place')}</label>
+                <FormRow forId="building-addr-place" label={$t('buildingModal.place')}>
                   <input id="building-addr-place" class="ui-field" type="text" bind:value={form.addressPlace} />
-                </div>
+                </FormRow>
 
-                <div class="row">
-                  <label for="building-addr-street">{$t('buildingModal.street')}</label>
+                <FormRow forId="building-addr-street" label={$t('buildingModal.street')}>
                   <input id="building-addr-street" class="ui-field" type="text" bind:value={form.addressStreet} />
-                </div>
+                </FormRow>
               </div>
 
-              <div class="row">
-                <label for="building-addr-housenumber">{$t('buildingModal.houseNumber')}</label>
+              <FormRow forId="building-addr-housenumber" label={$t('buildingModal.houseNumber')}>
                 <input id="building-addr-housenumber" class="ui-field" type="text" bind:value={form.addressHouseNumber} />
-              </div>
+              </FormRow>
             </section>
 
             <details class="osm-tags">
@@ -631,25 +538,6 @@
     margin: 0;
     font-size: 1rem;
     color: var(--fg-strong);
-  }
-
-  .row {
-    display: grid;
-    gap: 0.38rem;
-  }
-
-  .row > label {
-    font-size: 0.76rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-  }
-
-  .field-note {
-    margin: -0.15rem 0 0.1rem;
-    color: var(--muted);
-    font-size: 0.84rem;
-    line-height: 1.45;
   }
 
   .grid2 {

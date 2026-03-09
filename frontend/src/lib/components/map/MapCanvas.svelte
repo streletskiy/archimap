@@ -5,10 +5,41 @@
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { getRuntimeConfig } from '$lib/services/config';
   import { apiJson } from '$lib/services/http';
-  import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
+  import MapFeedbackOverlay from '$lib/components/map/MapFeedbackOverlay.svelte';
+  import { createMapDebugController } from '$lib/services/map/map-debug';
+  import { MapFilterService } from '$lib/services/map/map-filter.service';
   import {
-    buildRegionLayerId,
-    buildRegionSourceId,
+    applyBuildingThemePaint as applyBuildingThemePaintToLayers,
+    applyLabelLayerVisibility as applyMapLabelLayerVisibility,
+    bindMapInteractionHandlers,
+    bringSearchResultsLayersToFront,
+    CARTO_BUILDING_LAYER_IDS,
+    ensureRegionBuildingSourceAndLayers,
+    ensureSearchResultsSourceAndLayers,
+    getCurrentBuildingSourceConfigs as getBuildingSourceConfigsFromRegions,
+    getRegionLayerIds,
+    removeRegionBuildingSourceAndLayers
+  } from '$lib/services/map/map-layer-utils';
+  import {
+    expandBboxWithMargin,
+    getAdaptiveCoverageMarginRatio
+  } from '$lib/services/map/map-math-utils';
+  import {
+    fitMapToSearchResults as fitMapToSearchItems,
+    SEARCH_RESULTS_CLUSTER_LAYER_ID,
+    SEARCH_RESULTS_LAYER_ID,
+    SEARCH_RESULTS_SOURCE_ID,
+    updateSearchMarkers as updateSearchMarkerSource
+  } from '$lib/services/map/map-search-utils';
+  import {
+    getBuildingThemePaint,
+    getCurrentTheme,
+    getMapStyleForTheme,
+    LIGHT_MAP_STYLE_URL,
+    STYLE_OVERLAY_FADE_MS
+  } from '$lib/services/map/map-theme-utils';
+  import { loadMapRuntime } from '$lib/services/map-runtime';
+  import {
     getActiveRegionPmtiles,
     pointInBounds
   } from '$lib/services/region-pmtiles';
@@ -31,24 +62,12 @@
   import {
     buildBboxHash,
     buildBboxSnapshot,
-    expandBboxWithMargin,
-    getAdaptiveCoverageMarginRatio,
     isViewportInsideBbox
   } from './filter-pipeline-utils';
   import { EMPTY_LAYER_FILTER, hashFilterExpression } from './filter-highlight-utils';
 
   const dispatch = createEventDispatcher();
-  const LIGHT_MAP_STYLE_URL = '/styles/positron-custom.json';
-  const DARK_MAP_STYLE_URL = '/styles/dark-matter-custom.json';
   const FILTER_HIGHLIGHT_MODE = 'feature-state';
-  const SEARCH_RESULTS_SOURCE_ID = 'search-results-points';
-  const SEARCH_RESULTS_LAYER_ID = 'search-results-points-layer';
-  const SEARCH_RESULTS_CLUSTER_LAYER_ID = 'search-results-clusters-layer';
-  const SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID = 'search-results-clusters-count-layer';
-  const MAP_PIN_COLOR = '#FDC82F';
-  const MAP_PIN_INK = '#342700';
-  const CARTO_BUILDING_LAYER_IDS = ['building', 'building-top'];
-  const STYLE_OVERLAY_FADE_MS = 260;
   const FILTER_REQUEST_DEBOUNCE_MS = 180;
   const FILTER_HEAVY_RULE_DEBOUNCE_MS = 500;
   const FILTER_RULE_CHANGE_DEBOUNCE_MS = 90;
@@ -72,20 +91,6 @@
   const FILTER_PREFETCH_ENABLED = true;
   const FILTER_PREFETCH_MIN_INTERVAL_MS = 900;
   const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
-  const BUILDING_THEME = {
-    light: {
-      fillColor: '#a3a3a3',
-      fillOpacity: 0.32,
-      lineColor: '#bcbcbc',
-      lineWidth: 0.9
-    },
-    dark: {
-      fillColor: '#64748b',
-      fillOpacity: 0.36,
-      lineColor: '#94a3b8',
-      lineWidth: 1
-    }
-  };
 
   let container;
   let map = null;
@@ -101,9 +106,7 @@
   let coverageEvalToken = 0;
   let coverageVisibleState = 'visible';
   let filterMatchesCache = new Map();
-  let filterWorker = null;
-  let filterWorkerReqSeq = 0;
-  let filterWorkerPending = new Map();
+  let filterWorkerService = null;
   let latestFilterToken = 0;
   let lastSelectedKey = null;
   let lastSearchFitSeq = 0;
@@ -142,6 +145,20 @@
   let filterDataByOsmKeyCache = new Map();
   let filterStatusOverlayText = '';
   let cameraStoreSyncEnabled = false;
+
+  const mapDebug = createMapDebugController({
+    getMap: () => map,
+    getLayerIds: () => [
+      ...getCurrentBuildingsFillLayerIds(),
+      ...getCurrentBuildingsLineLayerIds(),
+      ...getCurrentFilterHighlightFillLayerIds(),
+      ...getCurrentFilterHighlightLineLayerIds(),
+      ...getCurrentSelectedFillLayerIds(),
+      ...getCurrentSelectedLineLayerIds()
+    ],
+    isFilterDebugEnabled,
+    telemetryEnabled: FILTER_TELEMETRY_ENABLED
+  });
 
   beforeNavigate((navigation) => {
     if (typeof window === 'undefined') return;
@@ -184,11 +201,7 @@
   }
 
   function debugFilterLog(eventName, payload = {}) {
-    if (!isFilterDebugEnabled()) return;
-    console.debug('[map-filter]', eventName, {
-      ts: new Date().toISOString(),
-      ...payload
-    });
+    mapDebug.log(eventName, payload);
   }
 
   function updateFilterDebugHook({
@@ -201,50 +214,18 @@
     cacheHit = filterLastCacheHit,
     setFeatureStateCalls = filterSetFeatureStateCallsLast
   } = {}) {
-    if (typeof document === 'undefined') return;
-    const exprHash = hashFilterExpression(expr);
-    filterDebugActive = Boolean(active);
-    filterDebugExprHash = exprHash;
-    document.body.dataset.filterActive = active ? 'true' : 'false';
-    document.body.dataset.filterHighlightMode = String(mode);
-    document.body.dataset.filterExprHash = exprHash;
-    document.body.dataset.filterPhase = String(phase || 'idle');
-    document.body.dataset.filterLastElapsedMs = String(Number(lastElapsedMs) || 0);
-    document.body.dataset.filterLastCount = String(Number(lastCount) || 0);
-    document.body.dataset.filterCacheHit = cacheHit ? 'true' : 'false';
-    document.body.dataset.filterSetFeatureStateCalls = String(Number(setFeatureStateCalls) || 0);
-    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
-    window.__MAP_DEBUG__.filter = {
-      active: Boolean(active),
-      mode: String(mode),
-      exprHash,
-      phase: String(phase || 'idle'),
-      elapsedMs: Number(lastElapsedMs) || 0,
-      count: Number(lastCount) || 0,
-      cacheHit: Boolean(cacheHit),
-      setFeatureStateCalls: Number(setFeatureStateCalls) || 0
-    };
-    const phaseHistory = Array.isArray(window.__MAP_DEBUG__.filterPhaseHistory)
-      ? window.__MAP_DEBUG__.filterPhaseHistory
-      : [];
-    window.__MAP_DEBUG__.filterPhaseHistory = [...phaseHistory, String(phase || 'idle')].slice(-120);
-    if (map) {
-      const visibilityByLayer = {};
-      const layerIds = [
-        ...getCurrentBuildingsFillLayerIds(),
-        ...getCurrentBuildingsLineLayerIds(),
-        ...getCurrentFilterHighlightFillLayerIds(),
-        ...getCurrentFilterHighlightLineLayerIds(),
-        ...getCurrentSelectedFillLayerIds(),
-        ...getCurrentSelectedLineLayerIds()
-      ];
-      for (const layerId of layerIds) {
-        visibilityByLayer[layerId] = map.getLayer(layerId)
-          ? (map.getLayoutProperty(layerId, 'visibility') || 'visible')
-          : 'missing';
-      }
-      window.__MAP_DEBUG__.layersVisibility = visibilityByLayer;
-    }
+    const nextDebugState = mapDebug.updateHook({
+      active,
+      expr,
+      mode,
+      phase,
+      lastElapsedMs,
+      lastCount,
+      cacheHit,
+      setFeatureStateCalls
+    });
+    filterDebugActive = nextDebugState.active;
+    filterDebugExprHash = nextDebugState.exprHash;
   }
 
   function setFilterPhase(phase) {
@@ -264,88 +245,23 @@
     });
   }
 
-  function ensureFilterWorker() {
-    if (filterWorker || typeof Worker === 'undefined') return;
-    filterWorker = new Worker(new URL('../../workers/building-filter.worker.js', import.meta.url), { type: 'module' });
-    filterWorker.onmessage = (event) => {
-      const data = event?.data || {};
-      const requestId = String(data?.requestId || '');
-      const handlers = filterWorkerPending.get(requestId);
-      if (!handlers) return;
-      filterWorkerPending.delete(requestId);
-      handlers.resolve(data);
-    };
-    filterWorker.onerror = () => {
-      for (const [requestId, handlers] of filterWorkerPending.entries()) {
-        filterWorkerPending.delete(requestId);
-        handlers.reject(new Error('Filter worker crashed'));
-      }
-    };
-  }
-
   function requestFilterWorker(type, payload = {}) {
-    ensureFilterWorker();
-    if (!filterWorker) {
-      return Promise.reject(new Error('Filter worker is unavailable'));
+    if (!filterWorkerService) {
+      filterWorkerService = new MapFilterService();
     }
-    const requestId = `w-${Date.now()}-${++filterWorkerReqSeq}`;
-    return new Promise((resolve, reject) => {
-      filterWorkerPending.set(requestId, { resolve, reject });
-      filterWorker.postMessage({
-        type,
-        requestId,
-        ...payload
-      });
-    });
+    return filterWorkerService.request(type, payload);
   }
 
   function recordDebugSetFilter(layerId) {
-    if (typeof window === 'undefined') return;
-    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
-    const current = Array.isArray(window.__MAP_DEBUG__.setFilterLayers)
-      ? window.__MAP_DEBUG__.setFilterLayers
-      : [];
-    const next = [...current, String(layerId)].slice(-80);
-    window.__MAP_DEBUG__.setFilterLayers = next;
+    mapDebug.recordSetFilter(layerId);
   }
 
   function recordFilterRequestDebugEvent(eventName) {
-    if (typeof window === 'undefined') return;
-    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
-    const stats = window.__MAP_DEBUG__.filterRequests || {
-      start: 0,
-      abort: 0,
-      finish: 0,
-      prefetchStart: 0,
-      prefetchAbort: 0,
-      prefetchFinish: 0
-    };
-    if (eventName === 'start') stats.start += 1;
-    if (eventName === 'abort') stats.abort += 1;
-    if (eventName === 'finish') stats.finish += 1;
-    if (eventName === 'prefetch-start') stats.prefetchStart += 1;
-    if (eventName === 'prefetch-abort') stats.prefetchAbort += 1;
-    if (eventName === 'prefetch-finish') stats.prefetchFinish += 1;
-    window.__MAP_DEBUG__.filterRequests = stats;
+    mapDebug.recordFilterRequestEvent(eventName);
   }
 
   function recordFilterTelemetry(eventName, payload = {}) {
-    if (!FILTER_TELEMETRY_ENABLED || typeof window === 'undefined') return;
-    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
-    const telemetry = window.__MAP_DEBUG__.filterTelemetry || {
-      counters: {},
-      recentEvents: []
-    };
-    telemetry.counters[eventName] = Number(telemetry.counters[eventName] || 0) + 1;
-    telemetry.recentEvents = [
-      ...telemetry.recentEvents,
-      {
-        event: eventName,
-        at: Date.now(),
-        ...payload
-      }
-    ].slice(-140);
-    window.__MAP_DEBUG__.filterTelemetry = telemetry;
+    mapDebug.recordFilterTelemetry(eventName, payload);
   }
 
   function updateFilterRuntimeStatus(status = {}) {
@@ -397,35 +313,31 @@
   }
 
   function getCurrentBuildingSourceConfigs() {
-    return activeRegionPmtiles.map((region) => ({
-      regionId: region.id,
-      sourceId: buildRegionSourceId(region.id),
-      sourceLayer: region.sourceLayer
-    }));
+    return getBuildingSourceConfigsFromRegions(activeRegionPmtiles);
   }
 
   function getCurrentBuildingsFillLayerIds() {
-    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'fill'));
+    return getRegionLayerIds(activeRegionPmtiles, 'fill');
   }
 
   function getCurrentBuildingsLineLayerIds() {
-    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'line'));
+    return getRegionLayerIds(activeRegionPmtiles, 'line');
   }
 
   function getCurrentFilterHighlightFillLayerIds() {
-    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'filter-highlight-fill'));
+    return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-fill');
   }
 
   function getCurrentFilterHighlightLineLayerIds() {
-    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'filter-highlight-line'));
+    return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-line');
   }
 
   function getCurrentSelectedFillLayerIds() {
-    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'selected-fill'));
+    return getRegionLayerIds(activeRegionPmtiles, 'selected-fill');
   }
 
   function getCurrentSelectedLineLayerIds() {
-    return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'selected-line'));
+    return getRegionLayerIds(activeRegionPmtiles, 'selected-line');
   }
 
   function setLocalBuildingFeatureStateById(id, state) {
@@ -802,79 +714,12 @@
     }
   }
 
-  function getSearchItemPoint(item) {
-    const lon = Number(item?.lon);
-    const lat = Number(item?.lat);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
-    if (lon < -180 || lon > 180 || lat < -90 || lat > 90) return null;
-    return [lon, lat];
-  }
-
-  function buildSearchMarkersGeojson(items) {
-    const features = [];
-    for (const item of Array.isArray(items) ? items : []) {
-      const point = getSearchItemPoint(item);
-      if (!point) continue;
-      features.push({
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: point
-        },
-        properties: {
-          osm_type: String(item?.osmType || ''),
-          osm_id: Number(item?.osmId || 0),
-          osm_key: `${String(item?.osmType || '')}/${String(item?.osmId || '')}`
-        }
-      });
-    }
-    return {
-      type: 'FeatureCollection',
-      features
-    };
-  }
-
   function updateSearchMarkers(items) {
-    if (!map) return;
-    const source = map.getSource(SEARCH_RESULTS_SOURCE_ID);
-    if (!source) return;
-    source.setData(buildSearchMarkersGeojson(items));
+    updateSearchMarkerSource(map, items);
   }
 
   function fitMapToSearchResults(items) {
-    if (!map) return;
-    const points = (Array.isArray(items) ? items : [])
-      .map((item) => getSearchItemPoint(item))
-      .filter(Boolean);
-    if (points.length === 0) return;
-
-    if (points.length === 1) {
-      map.easeTo({
-        center: points[0],
-        zoom: Math.max(map.getZoom(), 16),
-        duration: 450,
-        essential: true
-      });
-      return;
-    }
-
-    let minLon = Infinity;
-    let minLat = Infinity;
-    let maxLon = -Infinity;
-    let maxLat = -Infinity;
-    for (const [lon, lat] of points) {
-      minLon = Math.min(minLon, lon);
-      minLat = Math.min(minLat, lat);
-      maxLon = Math.max(maxLon, lon);
-      maxLat = Math.max(maxLat, lat);
-    }
-
-    map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-      padding: { top: 88, right: 30, bottom: 30, left: 30 },
-      duration: 500,
-      maxZoom: 16.5,
-      essential: true
-    });
+    fitMapToSearchItems(map, items);
   }
 
   function onSearchClusterClick(event) {
@@ -915,10 +760,6 @@
     });
   }
 
-  function getCurrentTheme() {
-    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-  }
-
   function syncMapCameraStores() {
     if (!map || !cameraStoreSyncEnabled) return;
     setMapCenter(map.getCenter());
@@ -931,27 +772,13 @@
     setMapZoom(map.getZoom());
   }
 
-  function getMapStyleForTheme(theme) {
-    return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
-  }
-
-  function getBuildingThemePaint(theme) {
-    return theme === 'dark' ? BUILDING_THEME.dark : BUILDING_THEME.light;
-  }
-
   function applyBuildingThemePaint(theme) {
-    if (!map) return;
-    const paint = getBuildingThemePaint(theme);
-    for (const layerId of getCurrentBuildingsFillLayerIds()) {
-      if (!map.getLayer(layerId)) continue;
-      map.setPaintProperty(layerId, 'fill-color', paint.fillColor);
-      map.setPaintProperty(layerId, 'fill-opacity', paint.fillOpacity);
-    }
-    for (const layerId of getCurrentBuildingsLineLayerIds()) {
-      if (!map.getLayer(layerId)) continue;
-      map.setPaintProperty(layerId, 'line-color', paint.lineColor);
-      map.setPaintProperty(layerId, 'line-width', paint.lineWidth);
-    }
+    applyBuildingThemePaintToLayers({
+      map,
+      theme,
+      fillLayerIds: getCurrentBuildingsFillLayerIds(),
+      lineLayerIds: getCurrentBuildingsLineLayerIds()
+    });
   }
 
   function clearStyleTransitionOverlaySoon() {
@@ -990,64 +817,20 @@
   }
 
   function bindStyleInteractionHandlers() {
-    if (!map) return;
-    const fillLayerIds = [...new Set(getCurrentBuildingsFillLayerIds())];
-    const lineLayerIds = [...new Set(getCurrentBuildingsLineLayerIds())];
-    map.off('click', handleMapBuildingClick);
-    map.off('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
-    map.off('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
-    map.off('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
-    map.off('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
-    map.off('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
-    map.off('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
-    for (const layerId of fillLayerIds) {
-      if (!map.getLayer(layerId)) continue;
-      map.off('mouseenter', layerId, onPointerEnter);
-      map.off('mouseleave', layerId, onPointerLeave);
-    }
-    for (const layerId of lineLayerIds) {
-      if (!map.getLayer(layerId)) continue;
-      map.off('mouseenter', layerId, onPointerEnter);
-      map.off('mouseleave', layerId, onPointerLeave);
-    }
-
-    map.on('click', handleMapBuildingClick);
-    map.on('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
-    map.on('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
-    map.on('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
-    map.on('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
-    map.on('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
-    map.on('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
-    for (const layerId of fillLayerIds) {
-      if (!map.getLayer(layerId)) continue;
-      map.on('mouseenter', layerId, onPointerEnter);
-      map.on('mouseleave', layerId, onPointerLeave);
-    }
-    for (const layerId of lineLayerIds) {
-      if (!map.getLayer(layerId)) continue;
-      map.on('mouseenter', layerId, onPointerEnter);
-      map.on('mouseleave', layerId, onPointerLeave);
-    }
-  }
-
-  function isBaseLabelLayer(layer) {
-    if (!layer || layer.type !== 'symbol') return false;
-    const id = String(layer.id || '').toLowerCase();
-    // Keep app-owned symbol overlays visible; toggle only base map symbols.
-    if (id === SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID) return false;
-    if (id.startsWith('search-results-')) return false;
-    return true;
+    bindMapInteractionHandlers({
+      map,
+      buildingFillLayerIds: getCurrentBuildingsFillLayerIds(),
+      buildingLineLayerIds: getCurrentBuildingsLineLayerIds(),
+      onBuildingClick: handleMapBuildingClick,
+      onSearchClusterClick,
+      onSearchResultClick,
+      onPointerEnter,
+      onPointerLeave
+    });
   }
 
   function applyLabelLayerVisibility(visible) {
-    if (!map || !map.isStyleLoaded()) return;
-    const layers = map.getStyle()?.layers || [];
-    const nextVisibility = visible ? 'visible' : 'none';
-    for (const layer of layers) {
-      if (!isBaseLabelLayer(layer)) continue;
-      if (!map.getLayer(layer.id)) continue;
-      map.setLayoutProperty(layer.id, 'visibility', nextVisibility);
-    }
+    applyMapLabelLayerVisibility(map, visible);
   }
 
   function setCartoBuildingsVisibility(nextVisibility) {
@@ -1136,244 +919,33 @@
     }, 80);
   }
 
-  function ensureSearchResultsSourceAndLayers() {
-    if (!map) return;
-    if (!map.getSource(SEARCH_RESULTS_SOURCE_ID)) {
-      map.addSource(SEARCH_RESULTS_SOURCE_ID, {
-        type: 'geojson',
-        data: buildSearchMarkersGeojson($searchMapState.items),
-        cluster: true,
-        clusterRadius: 48,
-        clusterMaxZoom: 16
-      });
-    }
-
-    if (!map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID)) {
-      map.addLayer({
-        id: SEARCH_RESULTS_CLUSTER_LAYER_ID,
-        type: 'circle',
-        source: SEARCH_RESULTS_SOURCE_ID,
-        filter: ['has', 'point_count'],
-        paint: {
-          'circle-radius': ['step', ['get', 'point_count'], 16, 12, 19, 30, 22, 60, 26],
-          'circle-color': MAP_PIN_COLOR,
-          'circle-stroke-color': MAP_PIN_INK,
-          'circle-stroke-width': 2,
-          'circle-opacity': 0.92
-        }
-      });
-    }
-
-    if (!map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID)) {
-      map.addLayer({
-        id: SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
-        type: 'symbol',
-        source: SEARCH_RESULTS_SOURCE_ID,
-        filter: ['has', 'point_count'],
-        layout: {
-          'text-field': ['to-string', ['get', 'point_count']],
-          'text-font': ['Open Sans Bold'],
-          'text-size': 12
-        },
-        paint: {
-          'text-color': MAP_PIN_INK
-        }
-      });
-    }
-
-    if (!map.getLayer(SEARCH_RESULTS_LAYER_ID)) {
-      map.addLayer({
-        id: SEARCH_RESULTS_LAYER_ID,
-        type: 'circle',
-        source: SEARCH_RESULTS_SOURCE_ID,
-        filter: ['!', ['has', 'point_count']],
-        paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 4, 14, 6, 16, 7],
-          'circle-color': MAP_PIN_COLOR,
-          'circle-stroke-color': MAP_PIN_INK,
-          'circle-stroke-width': 2,
-          'circle-opacity': 0.9
-        }
-      });
-    }
-  }
-
-  function bringSearchResultsLayersToFront() {
-    if (!map) return;
-    const orderedLayerIds = [
-      SEARCH_RESULTS_CLUSTER_LAYER_ID,
-      SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
-      SEARCH_RESULTS_LAYER_ID
-    ];
-    for (const layerId of orderedLayerIds) {
-      if (!map.getLayer(layerId)) continue;
-      map.moveLayer(layerId);
-    }
-  }
-
-  function ensureRegionBuildingSourceAndLayers(region, buildingPaint) {
-    if (!map || !region) return;
-    const sourceId = buildRegionSourceId(region.id);
-    const fillLayerId = buildRegionLayerId(region.id, 'fill');
-    const lineLayerId = buildRegionLayerId(region.id, 'line');
-    const filterFillLayerId = buildRegionLayerId(region.id, 'filter-highlight-fill');
-    const filterLineLayerId = buildRegionLayerId(region.id, 'filter-highlight-line');
-    const selectedFillLayerId = buildRegionLayerId(region.id, 'selected-fill');
-    const selectedLineLayerId = buildRegionLayerId(region.id, 'selected-line');
-    const pmtilesUrl = resolvePmtilesUrl(region.url, window.location.origin);
-
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, {
-        type: 'vector',
-        url: `pmtiles://${pmtilesUrl}`
-      });
-    }
-
-    if (!map.getLayer(fillLayerId)) {
-      map.addLayer({
-        id: fillLayerId,
-        type: 'fill',
-        source: sourceId,
-        'source-layer': region.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'fill-color': buildingPaint.fillColor,
-          'fill-opacity': buildingPaint.fillOpacity
-        }
-      });
-    }
-
-    if (!map.getLayer(lineLayerId)) {
-      map.addLayer({
-        id: lineLayerId,
-        type: 'line',
-        source: sourceId,
-        'source-layer': region.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'line-color': buildingPaint.lineColor,
-          'line-width': buildingPaint.lineWidth
-        }
-      });
-    }
-
-    if (!map.getLayer(filterFillLayerId)) {
-      map.addLayer({
-        id: filterFillLayerId,
-        type: 'fill',
-        source: sourceId,
-        'source-layer': region.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'fill-color': '#f59e0b',
-          'fill-opacity': [
-            'case',
-            ['boolean', ['feature-state', 'isFiltered'], false],
-            0.36,
-            0
-          ]
-        }
-      });
-    }
-
-    if (!map.getLayer(filterLineLayerId)) {
-      map.addLayer({
-        id: filterLineLayerId,
-        type: 'line',
-        source: sourceId,
-        'source-layer': region.sourceLayer,
-        minzoom: 13,
-        paint: {
-          'line-color': '#b45309',
-          'line-width': [
-            'case',
-            ['boolean', ['feature-state', 'isFiltered'], false],
-            1.8,
-            0
-          ],
-          'line-opacity': [
-            'case',
-            ['boolean', ['feature-state', 'isFiltered'], false],
-            0.95,
-            0
-          ]
-        }
-      });
-    }
-
-    if (!map.getLayer(selectedFillLayerId)) {
-      map.addLayer({
-        id: selectedFillLayerId,
-        type: 'fill',
-        source: sourceId,
-        'source-layer': region.sourceLayer,
-        minzoom: 13,
-        filter: ['==', ['id'], -1],
-        paint: {
-          'fill-color': '#6d655b',
-          'fill-opacity': 0.72
-        }
-      });
-    }
-
-    if (!map.getLayer(selectedLineLayerId)) {
-      map.addLayer({
-        id: selectedLineLayerId,
-        type: 'line',
-        source: sourceId,
-        'source-layer': region.sourceLayer,
-        minzoom: 13,
-        filter: ['==', ['id'], -1],
-        paint: {
-          'line-color': '#3d3832',
-          'line-width': 2.2
-        }
-      });
-    }
-  }
-
-  function removeRegionBuildingSourceAndLayers(regionId) {
-    if (!map) return;
-    const layerIds = [
-      buildRegionLayerId(regionId, 'selected-line'),
-      buildRegionLayerId(regionId, 'selected-fill'),
-      buildRegionLayerId(regionId, 'filter-highlight-line'),
-      buildRegionLayerId(regionId, 'filter-highlight-fill'),
-      buildRegionLayerId(regionId, 'line'),
-      buildRegionLayerId(regionId, 'fill')
-    ];
-    for (const layerId of layerIds) {
-      if (map.getLayer(layerId)) {
-        map.removeLayer(layerId);
-      }
-    }
-    const sourceId = buildRegionSourceId(regionId);
-    if (map.getSource(sourceId)) {
-      map.removeSource(sourceId);
-    }
-  }
-
   function ensureMapSourcesAndLayers(config) {
     if (!map) return;
-    const buildingPaint = getBuildingThemePaint(getCurrentTheme());
-    ensureSearchResultsSourceAndLayers();
+    const theme = getCurrentTheme();
+    const buildingPaint = getBuildingThemePaint(theme);
+    ensureSearchResultsSourceAndLayers(map, $searchMapState.items);
 
     const nextActiveRegions = getViewportActiveRegionPmtiles(config);
     const nextIds = new Set(nextActiveRegions.map((region) => region.id));
     for (const currentRegion of activeRegionPmtiles) {
       if (nextIds.has(currentRegion.id)) continue;
-      removeRegionBuildingSourceAndLayers(currentRegion.id);
+      removeRegionBuildingSourceAndLayers(map, currentRegion.id);
     }
     activeRegionPmtiles = nextActiveRegions;
     for (const region of nextActiveRegions) {
-      ensureRegionBuildingSourceAndLayers(region, buildingPaint);
+      ensureRegionBuildingSourceAndLayers({
+        map,
+        region,
+        buildingPaint,
+        origin: window.location.origin
+      });
     }
-    bringSearchResultsLayersToFront();
+    bringSearchResultsLayersToFront(map);
 
     bindStyleInteractionHandlers();
     applySelectionFromStore($selectedBuilding);
     updateSearchMarkers($searchMapState.items);
-    applyBuildingThemePaint(getCurrentTheme());
+    applyBuildingThemePaint(theme);
     applyLabelLayerVisibility($mapLabelsVisible);
     scheduleCoverageCheck();
     updateFilterDebugHook({
@@ -2234,11 +1806,10 @@
       setFeatureStateCalls: 0,
       updatedAt: Date.now()
     });
-    if (filterWorker) {
-      filterWorker.terminate();
-      filterWorker = null;
+    if (filterWorkerService) {
+      filterWorkerService.destroy();
+      filterWorkerService = null;
     }
-    filterWorkerPending = new Map();
     updateFilterDebugHook({
       active: false,
       expr: EMPTY_LAYER_FILTER
@@ -2259,57 +1830,17 @@
   data-filter-set-feature-state-calls={String(filterSetFeatureStateCallsLast)}
   data-filter-last-apply-diff-ms={String(filterLastApplyDiffMs)}
 ></div>
-{#if filterStatusOverlayText}
-  <div class="map-filter-status" data-filter-status-code={filterStatusCode} role="status" aria-live="polite">{filterStatusOverlayText}</div>
-{/if}
-{#if filterErrorMessage}
-  <div class="map-filter-error" role="status" aria-live="polite">{filterErrorMessage}</div>
-{/if}
-{#if styleTransitionOverlaySrc}
-  <img
-    class:visible={styleTransitionOverlayVisible}
-    class="map-style-transition-overlay"
-    src={styleTransitionOverlaySrc}
-    alt=""
-    aria-hidden="true"
-  />
-{/if}
+<MapFeedbackOverlay
+  {filterStatusCode}
+  {filterStatusOverlayText}
+  {filterErrorMessage}
+  {styleTransitionOverlaySrc}
+  {styleTransitionOverlayVisible}
+/>
 
 <style>
   .map-canvas {
     position: fixed;
     inset: 0;
   }
-
-  .map-style-transition-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 260ms ease;
-  }
-
-  .map-style-transition-overlay.visible {
-    opacity: 1;
-  }
-
-  .map-filter-error {
-    position: fixed;
-    left: 0.75rem;
-    bottom: 3.9rem;
-    z-index: 10;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: rgba(185, 28, 28, 0.9);
-    color: #ffffff;
-    font-size: 12px;
-    line-height: 1.3;
-    max-width: min(78vw, 440px);
-    pointer-events: none;
-  }
-
 </style>

@@ -1,6 +1,5 @@
-const path = require('path');
 const { spawn } = require('child_process');
-const { ensureAuthSchema, registerAuthRoutes } = require('../auth');
+const { ensureAuthSchema } = require('../auth');
 const { createSimpleRateLimiter } = require('../services/rate-limiter.service');
 const { createSearchService } = require('../services/search.service');
 const { createBuildingEditsService } = require('../services/building-edits.service');
@@ -11,7 +10,6 @@ const {
   normalizeFilterTagKey
 } = require('../services/filter-tags.service');
 const { createDataSettingsService } = require('../services/data-settings.service');
-const { requireCsrfSession } = require('../services/csrf.service');
 const { createLogger } = require('../services/logger.service');
 const {
   normalizeUserEditStatus,
@@ -22,675 +20,448 @@ const {
   sanitizeEditedFields
 } = require('../services/edits.service');
 const { validateSecurityConfig } = require('../infra/security-config.infra');
-const { collectInlineScriptHashesFromFile } = require('../infra/csp.infra');
-const { parseRuntimeEnv } = require('../infra/env.infra');
-const { applySecurityHeadersMiddleware } = require('../infra/security-headers.infra');
 const { registerErrorHandlers } = require('../infra/error-handling.infra');
 const { initSessionStore } = require('../infra/session-store.infra');
 const { initSyncWorkersInfra } = require('../infra/sync-workers.infra');
-const { initObservabilityInfra } = require('../infra/observability.infra');
-const { registerContoursStatusRoute } = require('../http/contours-status.route');
-const { registerAppRoutes } = require('../http/app.route');
-const { registerAdminRoutes } = require('../http/admin.route');
-const { registerBuildingsRoutes } = require('../http/buildings.route');
-const { registerSearchRoutes } = require('../http/search.route');
-const { registerAccountRoutes } = require('../http/account.route');
-const { createAuthMiddlewareSupport } = require('../http/auth-middleware.http');
 const { createFeatureInfoSupport } = require('../http/feature-info.http');
-const { createMiniApp, jsonMiddleware } = require('../infra/mini-app.infra');
+const { createAuthMiddlewareSupport } = require('../http/auth-middleware.http');
+const { createMiniApp } = require('../infra/mini-app.infra');
 const { getAppVersion, getBuildInfo } = require('../version');
-const {
-  registrationCodeHtmlTemplate,
-  registrationCodeTextTemplate,
-  passwordResetHtmlTemplate,
-  passwordResetTextTemplate
-} = require('../email-templates');
 const { createRateLimiters } = require('./rate-limiters.boot');
 const { createRuntimeSettingsBoot } = require('./runtime-settings.boot');
 const { createDbRuntimeBoot } = require('./db-runtime.boot');
 const { createFilterTagKeysBoot } = require('./filter-tag-keys.boot');
 const { createSearchIndexBoot } = require('./search-index.boot');
 const { createRegionPmtilesBoot } = require('./region-pmtiles.boot');
+const { createServerRuntimeConfig } = require('./server-runtime.config');
+const { applyServerRuntimeMiddleware } = require('./server-runtime.middleware');
+const { registerServerRuntimeRoutes } = require('./server-runtime.routes');
 
-function createServerRuntime(options = {}) {
-  const rootDir = path.resolve(options.rootDir || path.join(__dirname, '..', '..', '..', '..'));
-  const rawEnv = options.rawEnv || process.env;
-  const processRef = options.processRef || process;
+class ServerRuntime {
+  constructor(options = {}) {
+    this.config = createServerRuntimeConfig(options);
+    this.app = createMiniApp();
+    this.app.disable('x-powered-by');
+    if (this.config.trustProxy) {
+      this.app.set('trust proxy', 1);
+    }
 
-  const app = createMiniApp();
-  app.disable('x-powered-by');
+    this.createSimpleRateLimiter = createSimpleRateLimiter;
+    this.normalizeUserEditStatus = normalizeUserEditStatus;
+    this.sanitizeFieldText = sanitizeFieldText;
+    this.sanitizeYearBuilt = sanitizeYearBuilt;
+    this.sanitizeLevels = sanitizeLevels;
+    this.sanitizeArchiPayload = sanitizeArchiPayload;
+    this.sanitizeEditedFields = sanitizeEditedFields;
+    this.getAppVersion = getAppVersion;
+    this.getBuildInfo = getBuildInfo;
+    this.logger = createLogger({
+      level: this.config.logLevel,
+      service: 'archimap-server'
+    });
 
-  const runtimeEnv = parseRuntimeEnv(rawEnv);
-  const PORT = runtimeEnv.port;
-  const HOST = runtimeEnv.host;
-  const NODE_ENV = runtimeEnv.nodeEnv;
-  const DB_PROVIDER = runtimeEnv.dbProvider;
-  const TRUST_PROXY = String(rawEnv.TRUST_PROXY ?? 'false').toLowerCase() === 'true';
-  if (TRUST_PROXY) {
-    app.set('trust proxy', 1);
+    this.sessionMiddleware = null;
+    this.httpServer = null;
+    this.shuttingDown = false;
+    this.syncWorkers = null;
+    this.runtimeInitPromise = null;
+    this.startupTasksScheduled = false;
+    this.stopRuntimePromise = null;
+    this.signalHandlersRegistered = false;
+
+    this.initializeSubsystems();
+    applyServerRuntimeMiddleware(this);
+    registerServerRuntimeRoutes(this);
+    registerErrorHandlers(this.app, {
+      logger: this.logger,
+      nodeEnv: this.config.nodeEnv
+    });
+    this.syncWorkers = this.createSyncWorkers();
   }
-  const SESSION_SECRET = runtimeEnv.sessionSecret;
-  const SESSION_ALLOW_MEMORY_FALLBACK = String(rawEnv.SESSION_ALLOW_MEMORY_FALLBACK ?? (NODE_ENV === 'production' ? 'false' : 'true')).toLowerCase() === 'true';
-  const SESSION_COOKIE_SECURE_RAW = String(rawEnv.SESSION_COOKIE_SECURE || '').trim().toLowerCase();
-  const SESSION_COOKIE_SECURE = SESSION_COOKIE_SECURE_RAW === 'true'
-    ? true
-    : (SESSION_COOKIE_SECURE_RAW === 'false'
-      ? false
-      : (NODE_ENV === 'production'));
-  const AUTO_SYNC_ENABLED = String(rawEnv.AUTO_SYNC_ENABLED ?? 'true').toLowerCase() === 'true';
-  const AUTO_SYNC_ON_START = String(rawEnv.AUTO_SYNC_ON_START ?? 'true').toLowerCase() === 'true';
-  const AUTO_SYNC_INTERVAL_HOURS = Number(rawEnv.AUTO_SYNC_INTERVAL_HOURS || 168);
-  const REDIS_URL = rawEnv.REDIS_URL || 'redis://redis:6379';
-  const MAP_DEFAULT_LON = Number(rawEnv.MAP_DEFAULT_LON ?? 44.0059);
-  const MAP_DEFAULT_LAT = Number(rawEnv.MAP_DEFAULT_LAT ?? 56.3269);
-  const MAP_DEFAULT_ZOOM = Number(rawEnv.MAP_DEFAULT_ZOOM ?? 15);
-  const BUILDINGS_PMTILES_SOURCE_LAYER = String(rawEnv.BUILDINGS_PMTILES_SOURCE_LAYER || 'buildings').trim() || 'buildings';
-  const BUILDINGS_PMTILES_MIN_ZOOM = Math.max(0, Math.min(22, Number(rawEnv.BUILDINGS_PMTILES_MIN_ZOOM || 13)));
-  const BUILDINGS_PMTILES_MAX_ZOOM = Math.max(BUILDINGS_PMTILES_MIN_ZOOM, Math.min(22, Number(rawEnv.BUILDINGS_PMTILES_MAX_ZOOM || 16)));
-  const SMTP_URL = String(rawEnv.SMTP_URL || '').trim();
-  const SMTP_HOST = String(rawEnv.SMTP_HOST || '').trim();
-  const SMTP_PORT = Number(rawEnv.SMTP_PORT || 587);
-  const SMTP_SECURE = String(rawEnv.SMTP_SECURE || 'false').toLowerCase() === 'true';
-  const SMTP_USER = String(rawEnv.SMTP_USER || '').trim();
-  const SMTP_PASS = String(rawEnv.SMTP_PASS || '').trim();
-  const EMAIL_FROM = String(rawEnv.EMAIL_FROM || SMTP_USER || '').trim();
-  const APP_SETTINGS_SECRET = String(rawEnv.APP_SETTINGS_SECRET || SESSION_SECRET).trim() || SESSION_SECRET;
-  const APP_BASE_URL = runtimeEnv.appBaseUrl;
-  const USER_EDIT_REQUIRES_PERMISSION = String(rawEnv.USER_EDIT_REQUIRES_PERMISSION ?? 'true').toLowerCase() === 'true';
-  const REGISTRATION_ENABLED = String(rawEnv.REGISTRATION_ENABLED ?? 'true').toLowerCase() === 'true';
-  const REGISTRATION_CODE_TTL_MINUTES = Math.max(2, Math.min(60, Number(rawEnv.REGISTRATION_CODE_TTL_MINUTES || 15)));
-  const REGISTRATION_CODE_RESEND_COOLDOWN_SEC = Math.max(10, Math.min(600, Number(rawEnv.REGISTRATION_CODE_RESEND_COOLDOWN_SEC || 60)));
-  const REGISTRATION_CODE_MAX_ATTEMPTS = Math.max(3, Math.min(12, Number(rawEnv.REGISTRATION_CODE_MAX_ATTEMPTS || 6)));
-  const REGISTRATION_MIN_PASSWORD_LENGTH = Math.max(8, Math.min(72, Number(rawEnv.REGISTRATION_MIN_PASSWORD_LENGTH || 8)));
-  const PASSWORD_RESET_TTL_MINUTES = Math.max(5, Math.min(180, Number(rawEnv.PASSWORD_RESET_TTL_MINUTES || 60)));
-  const APP_DISPLAY_NAME = String(rawEnv.APP_DISPLAY_NAME || 'archimap').trim() || 'archimap';
-  const LOG_LEVEL = String(rawEnv.LOG_LEVEL || 'info').trim().toLowerCase() || 'info';
-  const METRICS_ENABLED = String(rawEnv.METRICS_ENABLED ?? 'true').toLowerCase() === 'true';
-  const FRONTEND_INDEX_PATH = path.join(rootDir, 'frontend', 'build', 'index.html');
-  const CSP_SCRIPT_HASHES = collectInlineScriptHashesFromFile(FRONTEND_INDEX_PATH);
 
-  const dataDir = path.join(rootDir, 'data');
-  const dbPath = String(
-    rawEnv.DATABASE_PATH
-    || rawEnv.ARCHIMAP_DB_PATH
-    || runtimeEnv.sqliteUrl
-    || path.join(dataDir, 'archimap.db')
-  ).trim() || path.join(dataDir, 'archimap.db');
-  const osmDbPath = String(rawEnv.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
-  const localEditsDbPath = rawEnv.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db');
-  const userEditsDbPath = rawEnv.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db');
-  const userAuthDbPath = String(rawEnv.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db');
-  const syncRegionScriptPath = path.join(rootDir, 'scripts', 'sync-osm-region.js');
-  const searchRebuildScriptPath = path.join(rootDir, 'workers', 'rebuild-search-index.worker.js');
-  const filterTagKeysRebuildScriptPath = path.join(rootDir, 'workers', 'rebuild-filter-tag-keys-cache.worker.js');
-  const SEARCH_INDEX_BATCH_SIZE = Math.max(200, Math.min(20000, Number(rawEnv.SEARCH_INDEX_BATCH_SIZE || 2500)));
-  const logger = createLogger({ level: LOG_LEVEL, service: 'archimap-server' });
+  initializeSubsystems() {
+    this.rateLimiters = createRateLimiters({
+      createSimpleRateLimiter: this.createSimpleRateLimiter
+    });
 
-  let sessionMiddleware = null;
-  let httpServer = null;
-  let shuttingDown = false;
-  let syncWorkers = null;
-  let runtimeInitPromise = null;
-  let startupTasksScheduled = false;
-  let stopRuntimePromise = null;
-  let signalHandlersRegistered = false;
+    const dbRuntime = createDbRuntimeBoot({
+      runtimeEnv: this.config.runtimeEnv,
+      rawEnv: this.config.rawEnv,
+      provider: this.config.dbProvider,
+      sqlite: {
+        dbPath: this.config.paths.dbPath,
+        osmDbPath: this.config.paths.osmDbPath,
+        localEditsDbPath: this.config.paths.localEditsDbPath,
+        userEditsDbPath: this.config.paths.userEditsDbPath,
+        userAuthDbPath: this.config.paths.userAuthDbPath,
+        ensureAuthSchema,
+        rtreeRebuildBatchSize: this.config.rtreeRebuildBatchSize,
+        rtreeRebuildPauseMs: this.config.rtreeRebuildPauseMs,
+        isSyncInProgress: () => this.syncWorkers?.isSyncInProgress?.() || false
+      },
+      postgres: {},
+      logger: this.logger
+    });
+    this.db = dbRuntime.db;
+    this.dbRuntimePromise = dbRuntime.dbRuntimePromise;
+    this.closeDbRuntime = dbRuntime.closeDbRuntime;
+    this.rtreeState = dbRuntime.rtreeState;
+    this.isDbRuntimeReady = dbRuntime.isDbRuntimeReady;
+    this.scheduleBuildingContoursRtreeRebuild = dbRuntime.scheduleBuildingContoursRtreeRebuild;
 
-  function normalizeMapConfig() {
-    const lon = Number.isFinite(MAP_DEFAULT_LON) ? Math.min(180, Math.max(-180, MAP_DEFAULT_LON)) : 44.0059;
-    const lat = Number.isFinite(MAP_DEFAULT_LAT) ? Math.min(90, Math.max(-90, MAP_DEFAULT_LAT)) : 56.3269;
-    const zoom = Number.isFinite(MAP_DEFAULT_ZOOM) ? Math.min(22, Math.max(0, MAP_DEFAULT_ZOOM)) : 15;
+    this.appSettingsService = createAppSettingsService({
+      db: this.db,
+      settingsSecret: String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
+      fallbackGeneral: {
+        appDisplayName: this.config.appDisplayName,
+        appBaseUrl: this.config.appBaseUrl,
+        registrationEnabled: this.config.registrationEnabled,
+        userEditRequiresPermission: this.config.userEditRequiresPermission
+      },
+      fallbackSmtp: {
+        url: this.config.smtpUrl,
+        host: this.config.smtpHost,
+        port: this.config.smtpPort,
+        secure: this.config.smtpSecure,
+        user: this.config.smtpUser,
+        pass: this.config.smtpPass,
+        from: String(this.config.rawEnv.EMAIL_FROM || this.config.smtpUser || '').trim()
+      }
+    });
+
+    this.dataSettingsService = createDataSettingsService({
+      db: this.db,
+      dataDir: this.config.paths.dataDir,
+      fallbackData: {
+        autoSyncEnabled: this.config.autoSyncEnabled,
+        autoSyncOnStart: this.config.autoSyncOnStart,
+        autoSyncIntervalHours: this.config.autoSyncIntervalHours,
+        pmtilesMinZoom: this.config.buildingsPmtilesMinZoom,
+        pmtilesMaxZoom: this.config.buildingsPmtilesMaxZoom,
+        sourceLayer: this.config.buildingsPmtilesSourceLayer
+      }
+    });
+
+    Object.assign(this, createRuntimeSettingsBoot({
+      appSettingsService: this.appSettingsService,
+      dataSettingsService: this.dataSettingsService,
+      defaults: {
+        appDisplayName: this.config.appDisplayName,
+        appBaseUrl: this.config.appBaseUrl,
+        registrationEnabled: this.config.registrationEnabled,
+        userEditRequiresPermission: this.config.userEditRequiresPermission,
+        smtpUrl: this.config.smtpUrl,
+        smtpHost: this.config.smtpHost,
+        smtpPort: this.config.smtpPort,
+        smtpSecure: this.config.smtpSecure,
+        smtpUser: this.config.smtpUser,
+        smtpPass: this.config.smtpPass,
+        emailFrom: String(this.config.rawEnv.EMAIL_FROM || this.config.smtpUser || '').trim()
+      },
+      filterTags: {
+        defaultAllowlist: DEFAULT_FILTER_TAG_ALLOWLIST,
+        normalizeFilterTagKeyList
+      }
+    }));
+
+    const filterTagKeysBoot = createFilterTagKeysBoot({
+      db: this.db,
+      dbProvider: this.config.dbProvider,
+      logger: this.logger,
+      spawn,
+      processExecPath: this.config.processRef.execPath,
+      rootDir: this.config.rootDir,
+      filterTagKeysRebuildScriptPath: this.config.paths.filterTagKeysRebuildScriptPath,
+      env: this.config.rawEnv,
+      sqlite: {
+        dbPath: this.config.paths.dbPath,
+        osmDbPath: this.config.paths.osmDbPath
+      },
+      getEffectiveFilterTagAllowlist: this.getEffectiveFilterTagAllowlist,
+      normalizeFilterTagKey,
+      isShuttingDown: () => this.shuttingDown
+    });
+    this.scheduleFilterTagKeysCacheRebuild = filterTagKeysBoot.scheduleFilterTagKeysCacheRebuild;
+    this.getAllFilterTagKeysCached = filterTagKeysBoot.getAllFilterTagKeysCached;
+    this.getFilterTagKeysCached = filterTagKeysBoot.getFilterTagKeysCached;
+    this.isFilterTagAllowed = filterTagKeysBoot.isFilterTagAllowed;
+    this.resetFilterTagKeysCache = filterTagKeysBoot.resetFilterTagKeysCache;
+    this.stopFilterTagKeysBoot = filterTagKeysBoot.stop;
+    this.isFilterTagKeysRebuildInProgress = filterTagKeysBoot.isFilterTagKeysRebuildInProgress;
+
+    const searchIndexBoot = createSearchIndexBoot({
+      db: this.db,
+      dbProvider: this.config.dbProvider,
+      logger: this.logger,
+      spawn,
+      processExecPath: this.config.processRef.execPath,
+      rootDir: this.config.rootDir,
+      searchRebuildScriptPath: this.config.paths.searchRebuildScriptPath,
+      batchSize: this.config.searchIndexBatchSize,
+      env: this.config.rawEnv,
+      sqlite: {
+        dbPath: this.config.paths.dbPath,
+        osmDbPath: this.config.paths.osmDbPath,
+        localEditsDbPath: this.config.paths.localEditsDbPath
+      },
+      isShuttingDown: () => this.shuttingDown
+    });
+    this.rebuildSearchIndex = searchIndexBoot.rebuildSearchIndex;
+    this.refreshSearchIndexForBuilding = searchIndexBoot.refreshSearchIndexForBuilding;
+    this.enqueueSearchIndexRefresh = searchIndexBoot.enqueueSearchIndexRefresh;
+    this.stopSearchIndexBoot = searchIndexBoot.stop;
+    this.isSearchIndexRebuildInProgress = searchIndexBoot.isSearchIndexRebuildInProgress;
+
+    Object.assign(this, createRegionPmtilesBoot({
+      dataDir: this.config.paths.dataDir,
+      logger: this.logger
+    }));
+
+    const buildingEditsService = createBuildingEditsService({
+      db: this.db,
+      normalizeUserEditStatus: this.normalizeUserEditStatus
+    });
+    this.ARCHI_FIELD_SET = buildingEditsService.ARCHI_FIELD_SET;
+    this.getMergedInfoRow = buildingEditsService.getMergedInfoRow;
+    this.getOsmContourRow = buildingEditsService.getOsmContourRow;
+    this.getLatestUserEditRow = buildingEditsService.getLatestUserEditRow;
+    this.supersedePendingUserEdits = buildingEditsService.supersedePendingUserEdits;
+    this.getSessionEditActorKey = buildingEditsService.getSessionEditActorKey;
+    this.applyUserEditRowToInfo = buildingEditsService.applyUserEditRowToInfo;
+    this.getUserEditsList = buildingEditsService.getUserEditsList;
+    this.getUserEditDetailsById = buildingEditsService.getUserEditDetailsById;
+    this.reassignUserEdit = buildingEditsService.reassignUserEdit;
+    this.deleteUserEdit = buildingEditsService.deleteUserEdit;
+    this.mergePersonalEditsIntoFeatureInfo = buildingEditsService.mergePersonalEditsIntoFeatureInfo;
+    this.applyPersonalEditsToFilterItems = buildingEditsService.applyPersonalEditsToFilterItems;
+
+    const featureInfoSupport = createFeatureInfoSupport({
+      db: this.db,
+      mergePersonalEditsIntoFeatureInfo: this.mergePersonalEditsIntoFeatureInfo
+    });
+    this.rowToFeature = featureInfoSupport.rowToFeature;
+    this.attachInfoToFeatures = featureInfoSupport.attachInfoToFeatures;
+
+    const authMiddlewareSupport = createAuthMiddlewareSupport({
+      db: this.db,
+      getUserEditRequiresPermission: this.getUserEditRequiresPermission
+    });
+    this.requireAuth = authMiddlewareSupport.requireAuth;
+    this.requireAdmin = authMiddlewareSupport.requireAdmin;
+    this.requireBuildingEditPermission = authMiddlewareSupport.requireBuildingEditPermission;
+
+    this.searchService = createSearchService({
+      db: this.db,
+      defaultLon: this.config.mapDefaultLon,
+      defaultLat: this.config.mapDefaultLat,
+      isRebuildInProgress: this.isSearchIndexRebuildInProgress
+    });
+  }
+
+  normalizeMapConfig() {
+    const lon = Number.isFinite(this.config.mapDefaultLon)
+      ? Math.min(180, Math.max(-180, this.config.mapDefaultLon))
+      : 44.0059;
+    const lat = Number.isFinite(this.config.mapDefaultLat)
+      ? Math.min(90, Math.max(-90, this.config.mapDefaultLat))
+      : 56.3269;
+    const zoom = Number.isFinite(this.config.mapDefaultZoom)
+      ? Math.min(22, Math.max(0, this.config.mapDefaultZoom))
+      : 15;
     return { lon, lat, zoom };
   }
 
-  const {
-    searchRateLimiter,
-    publicApiRateLimiter,
-    accountReadRateLimiter,
-    adminApiRateLimiter,
-    filterDataRateLimiter,
-    filterDataBboxRateLimiter,
-    filterMatchesRateLimiter,
-    buildingsReadRateLimiter,
-    buildingsWriteRateLimiter,
-    contoursStatusRateLimiter
-  } = createRateLimiters({
-    createSimpleRateLimiter
-  });
-
-  const RTREE_REBUILD_BATCH_SIZE = Math.max(500, Math.min(20000, Number(rawEnv.RTREE_REBUILD_BATCH_SIZE || 4000)));
-  const RTREE_REBUILD_PAUSE_MS = Math.max(0, Math.min(200, Number(rawEnv.RTREE_REBUILD_PAUSE_MS || 8)));
-  const {
-    db,
-    dbRuntimePromise,
-    closeDbRuntime,
-    rtreeState,
-    isDbRuntimeReady,
-    scheduleBuildingContoursRtreeRebuild
-  } = createDbRuntimeBoot({
-    runtimeEnv,
-    rawEnv,
-    provider: DB_PROVIDER,
-    sqlite: {
-      dbPath,
-      osmDbPath,
-      localEditsDbPath,
-      userEditsDbPath,
-      userAuthDbPath,
-      ensureAuthSchema,
-      rtreeRebuildBatchSize: RTREE_REBUILD_BATCH_SIZE,
-      rtreeRebuildPauseMs: RTREE_REBUILD_PAUSE_MS,
-      isSyncInProgress: () => syncWorkers?.isSyncInProgress?.() || false
-    },
-    postgres: {},
-    logger
-  });
-
-  const appSettingsService = createAppSettingsService({
-    db,
-    settingsSecret: APP_SETTINGS_SECRET,
-    fallbackGeneral: {
-      appDisplayName: APP_DISPLAY_NAME,
-      appBaseUrl: APP_BASE_URL,
-      registrationEnabled: REGISTRATION_ENABLED,
-      userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION
-    },
-    fallbackSmtp: {
-      url: SMTP_URL,
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_SECURE,
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-      from: EMAIL_FROM
-    }
-  });
-
-  const dataSettingsService = createDataSettingsService({
-    db,
-    dataDir,
-    fallbackData: {
-      autoSyncEnabled: AUTO_SYNC_ENABLED,
-      autoSyncOnStart: AUTO_SYNC_ON_START,
-      autoSyncIntervalHours: AUTO_SYNC_INTERVAL_HOURS,
-      pmtilesMinZoom: BUILDINGS_PMTILES_MIN_ZOOM,
-      pmtilesMaxZoom: BUILDINGS_PMTILES_MAX_ZOOM,
-      sourceLayer: BUILDINGS_PMTILES_SOURCE_LAYER
-    }
-  });
-
-  const {
-    getUserEditRequiresPermission,
-    getRegistrationEnabled,
-    getAppBaseUrl,
-    getAppDisplayName,
-    getEffectiveSmtpConfig,
-    getEffectiveFilterTagAllowlist,
-    applyGeneralSettingsSnapshot,
-    applySmtpSettingsSnapshot,
-    applyFilterTagAllowlistSnapshot,
-    refreshRuntimeSettings
-  } = createRuntimeSettingsBoot({
-    appSettingsService,
-    dataSettingsService,
-    defaults: {
-      appDisplayName: APP_DISPLAY_NAME,
-      appBaseUrl: APP_BASE_URL,
-      registrationEnabled: REGISTRATION_ENABLED,
-      userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION,
-      smtpUrl: SMTP_URL,
-      smtpHost: SMTP_HOST,
-      smtpPort: SMTP_PORT,
-      smtpSecure: SMTP_SECURE,
-      smtpUser: SMTP_USER,
-      smtpPass: SMTP_PASS,
-      emailFrom: EMAIL_FROM
-    },
-    filterTags: {
-      defaultAllowlist: DEFAULT_FILTER_TAG_ALLOWLIST,
-      normalizeFilterTagKeyList
-    }
-  });
-
-  const {
-    scheduleFilterTagKeysCacheRebuild,
-    getAllFilterTagKeysCached,
-    getFilterTagKeysCached,
-    isFilterTagAllowed,
-    resetFilterTagKeysCache,
-    stop: stopFilterTagKeysBoot,
-    isFilterTagKeysRebuildInProgress
-  } = createFilterTagKeysBoot({
-    db,
-    dbProvider: DB_PROVIDER,
-    logger,
-    spawn,
-    processExecPath: processRef.execPath,
-    rootDir,
-    filterTagKeysRebuildScriptPath,
-    env: rawEnv,
-    sqlite: {
-      dbPath,
-      osmDbPath
-    },
-    getEffectiveFilterTagAllowlist,
-    normalizeFilterTagKey,
-    isShuttingDown: () => shuttingDown
-  });
-
-  const {
-    rebuildSearchIndex,
-    enqueueSearchIndexRefresh,
-    stop: stopSearchIndexBoot,
-    isSearchIndexRebuildInProgress
-  } = createSearchIndexBoot({
-    db,
-    dbProvider: DB_PROVIDER,
-    logger,
-    spawn,
-    processExecPath: processRef.execPath,
-    rootDir,
-    searchRebuildScriptPath,
-    batchSize: SEARCH_INDEX_BATCH_SIZE,
-    env: rawEnv,
-    sqlite: {
-      dbPath,
-      osmDbPath,
-      localEditsDbPath
-    },
-    isShuttingDown: () => shuttingDown
-  });
-
-  const {
-    migrateRegionPmtilesFile,
-    removeRegionPmtilesFiles
-  } = createRegionPmtilesBoot({
-    dataDir,
-    logger
-  });
-
-  app.use(jsonMiddleware());
-
-  applySecurityHeadersMiddleware(app, {
-    nodeEnv: NODE_ENV,
-    cspConnectOrigins: runtimeEnv.cspConnectSrcExtra,
-    cspScriptHashes: CSP_SCRIPT_HASHES
-  });
-  initObservabilityInfra(app, {
-    logger,
-    requestIdFactory: () => logger.requestId(),
-    metricsEnabled: METRICS_ENABLED,
-    getVersionInfo: getAppVersion,
-    getReadinessChecks: () => ({
-      sessionStoreReady: Boolean(sessionMiddleware),
-      dbReady: isDbRuntimeReady()
-    })
-  });
-
-  app.use((req, res, next) => {
-    if (!isDbRuntimeReady()) {
-      return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
-    }
-    if (!sessionMiddleware) {
-      return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
-    }
-    return sessionMiddleware(req, res, next);
-  });
-
-  const buildingEditsService = createBuildingEditsService({
-    db,
-    normalizeUserEditStatus
-  });
-  const {
-    ARCHI_FIELD_SET,
-    getMergedInfoRow,
-    getOsmContourRow,
-    getLatestUserEditRow,
-    supersedePendingUserEdits,
-    getSessionEditActorKey,
-    applyUserEditRowToInfo,
-    getUserEditsList,
-    getUserEditDetailsById,
-    reassignUserEdit,
-    deleteUserEdit,
-    mergePersonalEditsIntoFeatureInfo,
-    applyPersonalEditsToFilterItems
-  } = buildingEditsService;
-
-  const {
-    rowToFeature,
-    attachInfoToFeatures
-  } = createFeatureInfoSupport({
-    db,
-    mergePersonalEditsIntoFeatureInfo
-  });
-
-  const {
-    requireAuth,
-    requireAdmin,
-    requireBuildingEditPermission
-  } = createAuthMiddlewareSupport({
-    db,
-    getUserEditRequiresPermission
-  });
-
-  const searchService = createSearchService({
-    db,
-    defaultLon: MAP_DEFAULT_LON,
-    defaultLat: MAP_DEFAULT_LAT,
-    isRebuildInProgress: isSearchIndexRebuildInProgress
-  });
-
-  async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
-    return searchService.getBuildingSearchResults(queryText, centerLon, centerLat, limit, cursor);
+  createSyncWorkers() {
+    return initSyncWorkersInfra({
+      spawn,
+      processExecPath: this.config.processRef.execPath,
+      syncRegionScriptPath: this.config.paths.syncRegionScriptPath,
+      cwd: this.config.rootDir,
+      env: {
+        ...this.config.rawEnv,
+        DB_PROVIDER: this.config.dbProvider
+      },
+      dataSettingsService: this.dataSettingsService,
+      autoSyncEnabled: this.config.autoSyncEnabled,
+      autoSyncOnStart: this.config.autoSyncOnStart,
+      autoSyncIntervalHours: this.config.autoSyncIntervalHours,
+      isShuttingDown: () => this.shuttingDown,
+      getContoursTotal: async () => Number((await this.db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
+      onSyncSuccess: async (payload = null) => {
+        const managedRegionSync = Boolean(payload?.region);
+        await this.rebuildSearchIndex(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
+        this.resetFilterTagKeysCache();
+        this.scheduleFilterTagKeysCacheRebuild(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
+      }
+    });
   }
 
-  registerAuthRoutes({
-    app,
-    db,
-    createSimpleRateLimiter,
-    logger,
-    sessionSecret: SESSION_SECRET,
-    userEditRequiresPermission: USER_EDIT_REQUIRES_PERMISSION,
-    getUserEditRequiresPermission,
-    registrationEnabled: REGISTRATION_ENABLED,
-    getRegistrationEnabled,
-    registrationCodeTtlMinutes: REGISTRATION_CODE_TTL_MINUTES,
-    registrationCodeResendCooldownSec: REGISTRATION_CODE_RESEND_COOLDOWN_SEC,
-    registrationCodeMaxAttempts: REGISTRATION_CODE_MAX_ATTEMPTS,
-    registrationMinPasswordLength: REGISTRATION_MIN_PASSWORD_LENGTH,
-    passwordResetTtlMinutes: PASSWORD_RESET_TTL_MINUTES,
-    appBaseUrl: APP_BASE_URL,
-    getAppBaseUrl,
-    appDisplayName: APP_DISPLAY_NAME,
-    getAppDisplayName,
-    getSmtpConfig: getEffectiveSmtpConfig
-  });
+  async getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
+    return this.searchService.getBuildingSearchResults(queryText, centerLon, centerLat, limit, cursor);
+  }
 
-  registerAppRoutes({
-    app,
-    publicApiRateLimiter,
-    rootDir,
-    dataDir,
-    normalizeMapConfig,
-    getBuildInfo,
-    getAppVersion,
-    registrationEnabled: REGISTRATION_ENABLED,
-    getRegistrationEnabled,
-    dataSettingsService,
-    getFilterTagKeysCached,
-    getAllFilterTagKeysCached,
-    isFilterTagKeysRebuildInProgress
-  });
-
-  registerAdminRoutes({
-    app,
-    db,
-    adminApiRateLimiter,
-    requireAuth,
-    requireAdmin,
-    requireCsrfSession,
-    getUserEditsList,
-    getUserEditDetailsById,
-    getSessionEditActorKey,
-    normalizeUserEditStatus,
-    sanitizeFieldText,
-    sanitizeYearBuilt,
-    sanitizeLevels,
-    getMergedInfoRow,
-    getOsmContourRow,
-    reassignUserEdit,
-    deleteUserEdit,
-    enqueueSearchIndexRefresh,
-    ARCHI_FIELD_SET,
-    registrationCodeHtmlTemplate,
-    registrationCodeTextTemplate,
-    passwordResetHtmlTemplate,
-    passwordResetTextTemplate,
-    appSettingsService,
-    dataSettingsService,
-    getAllFilterTagKeysCached,
-    applyFilterTagAllowlistSnapshot,
-    onGeneralSettingsSaved: applyGeneralSettingsSnapshot,
-    onSmtpSettingsSaved: applySmtpSettingsSnapshot,
-    onDataRegionsSaved: async ({ action, saved, previous, deleted } = {}) => {
-      if (action === 'save') {
-        migrateRegionPmtilesFile(previous, saved);
-      }
-      if (action === 'delete') {
-        removeRegionPmtilesFiles(deleted?.region);
-        await rebuildSearchIndex(`region-delete:${deleted?.region?.id || 'unknown'}`);
-        resetFilterTagKeysCache();
-        scheduleFilterTagKeysCacheRebuild(`region-delete:${deleted?.region?.id || 'unknown'}`);
-      }
-      return syncWorkers?.reloadSchedules?.();
-    },
-    onRegionSyncRequested: (regionId, options) => syncWorkers?.requestRegionSync?.(regionId, options),
-    appDisplayName: APP_DISPLAY_NAME,
-    getAppDisplayName,
-    appBaseUrl: APP_BASE_URL,
-    getAppBaseUrl,
-    registrationCodeTtlMinutes: REGISTRATION_CODE_TTL_MINUTES,
-    passwordResetTtlMinutes: PASSWORD_RESET_TTL_MINUTES
-  });
-
-  registerBuildingsRoutes({
-    app,
-    db,
-    rtreeState,
-    buildingsReadRateLimiter,
-    buildingsWriteRateLimiter,
-    filterDataRateLimiter,
-    filterDataBboxRateLimiter,
-    filterMatchesRateLimiter,
-    requireCsrfSession,
-    requireAuth,
-    requireBuildingEditPermission,
-    getSessionEditActorKey,
-    applyPersonalEditsToFilterItems,
-    isFilterTagAllowed,
-    rowToFeature,
-    attachInfoToFeatures,
-    applyUserEditRowToInfo,
-    getMergedInfoRow,
-    getOsmContourRow,
-    getLatestUserEditRow,
-    normalizeUserEditStatus,
-    sanitizeArchiPayload,
-    sanitizeEditedFields,
-    supersedePendingUserEdits
-  });
-
-  registerSearchRoutes({
-    app,
-    searchRateLimiter,
-    getBuildingSearchResults
-  });
-
-  registerAccountRoutes({
-    app,
-    accountReadRateLimiter,
-    requireAuth,
-    getSessionEditActorKey,
-    normalizeUserEditStatus,
-    getUserEditsList,
-    getUserEditDetailsById
-  });
-
-  registerContoursStatusRoute(app, db, contoursStatusRateLimiter);
-  registerErrorHandlers(app, { logger, nodeEnv: NODE_ENV });
-  syncWorkers = initSyncWorkersInfra({
-    spawn,
-    processExecPath: processRef.execPath,
-    syncRegionScriptPath,
-    cwd: rootDir,
-    env: {
-      ...rawEnv,
-      DB_PROVIDER
-    },
-    dataSettingsService,
-    autoSyncEnabled: AUTO_SYNC_ENABLED,
-    autoSyncOnStart: AUTO_SYNC_ON_START,
-    autoSyncIntervalHours: AUTO_SYNC_INTERVAL_HOURS,
-    isShuttingDown: () => shuttingDown,
-    getContoursTotal: async () => Number((await db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
-    onSyncSuccess: async (payload = null) => {
-      const managedRegionSync = Boolean(payload?.region);
-      await rebuildSearchIndex(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
-      resetFilterTagKeysCache();
-      scheduleFilterTagKeysCacheRebuild(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
-    }
-  });
-
-  function runStartupTasksOnce() {
-    if (startupTasksScheduled) return;
-    startupTasksScheduled = true;
-    Promise.resolve(dbRuntimePromise)
+  runStartupTasksOnce() {
+    if (this.startupTasksScheduled) return;
+    this.startupTasksScheduled = true;
+    Promise.resolve(this.dbRuntimePromise)
       .then(() => {
-        refreshRuntimeSettings();
-        rebuildSearchIndex('startup').catch((error) => {
-          logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
+        this.refreshRuntimeSettings();
+        this.rebuildSearchIndex('startup').catch((error) => {
+          this.logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
         });
-        scheduleFilterTagKeysCacheRebuild('startup');
-        if (syncWorkers) {
-          Promise.resolve(syncWorkers.initAutoSync()).catch((error) => {
-            logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
+        this.scheduleFilterTagKeysCacheRebuild('startup');
+        if (this.syncWorkers) {
+          Promise.resolve(this.syncWorkers.initAutoSync()).catch((error) => {
+            this.logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
           });
         }
-        if (!rtreeState.ready) {
-          scheduleBuildingContoursRtreeRebuild('startup');
+        if (!this.rtreeState.ready) {
+          this.scheduleBuildingContoursRtreeRebuild('startup');
         }
       })
       .catch((error) => {
-        logger.error('startup_tasks_wait_db_failed', { error: String(error?.message || error) });
+        this.logger.error('startup_tasks_wait_db_failed', { error: String(error?.message || error) });
       });
   }
 
-  function initializeRuntime() {
-    if (runtimeInitPromise) return runtimeInitPromise;
-    runtimeInitPromise = initSessionStore({
-      sessionSecret: SESSION_SECRET,
-      nodeEnv: NODE_ENV,
-      sessionCookieSecure: SESSION_COOKIE_SECURE,
-      redisUrl: REDIS_URL,
-      sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK,
+  initializeRuntime() {
+    if (this.runtimeInitPromise) return this.runtimeInitPromise;
+
+    this.runtimeInitPromise = initSessionStore({
+      sessionSecret: this.config.sessionSecret,
+      nodeEnv: this.config.nodeEnv,
+      sessionCookieSecure: this.config.sessionCookieSecure,
+      redisUrl: this.config.redisUrl,
+      sessionAllowMemoryFallback: this.config.sessionAllowMemoryFallback,
       maxAgeMs: 1000 * 60 * 60 * 24 * 30,
-      logger
+      logger: this.logger
     })
       .then((middleware) => {
-        sessionMiddleware = middleware;
+        this.sessionMiddleware = middleware;
         validateSecurityConfig({
-          nodeEnv: NODE_ENV,
-          sessionSecret: SESSION_SECRET,
-          appBaseUrl: APP_BASE_URL,
-          sessionAllowMemoryFallback: SESSION_ALLOW_MEMORY_FALLBACK
+          nodeEnv: this.config.nodeEnv,
+          sessionSecret: this.config.sessionSecret,
+          appBaseUrl: this.config.appBaseUrl,
+          sessionAllowMemoryFallback: this.config.sessionAllowMemoryFallback
         });
         return middleware;
       })
       .catch((error) => {
-        runtimeInitPromise = null;
+        this.runtimeInitPromise = null;
         throw error;
       });
-    return runtimeInitPromise;
+
+    return this.runtimeInitPromise;
   }
 
-  async function startHttpServer() {
-    await initializeRuntime();
-    if (httpServer) return httpServer;
+  async startHttpServer() {
+    await this.initializeRuntime();
+    if (this.httpServer) return this.httpServer;
 
     await new Promise((resolve, reject) => {
-      const server = app.listen(PORT, HOST, () => {
-        httpServer = server;
-        logger.info('server_started', {
-          localUrl: `http://localhost:${PORT}`,
-          networkUrl: `http://${HOST}:${PORT}`,
-          nodeEnv: NODE_ENV
+      const server = this.app.listen(this.config.port, this.config.host, () => {
+        this.httpServer = server;
+        this.logger.info('server_started', {
+          localUrl: `http://localhost:${this.config.port}`,
+          networkUrl: `http://${this.config.host}:${this.config.port}`,
+          nodeEnv: this.config.nodeEnv
         });
         resolve();
       });
       server.once('error', reject);
     });
 
-    runStartupTasksOnce();
-    return httpServer;
+    this.runStartupTasksOnce();
+    return this.httpServer;
   }
 
-  async function prepareRuntime() {
-    await initializeRuntime();
-    runStartupTasksOnce();
-    return app;
+  async prepareRuntime() {
+    await this.initializeRuntime();
+    this.runStartupTasksOnce();
+    return this.app;
   }
 
-  function stopRuntime(signal = 'manual') {
-    if (stopRuntimePromise) return stopRuntimePromise;
-    stopRuntimePromise = (async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      logger.info('server_shutdown_started', { signal });
+  stopRuntime(signal = 'manual') {
+    if (this.stopRuntimePromise) return this.stopRuntimePromise;
 
-      if (syncWorkers) {
-        syncWorkers.stop();
+    this.stopRuntimePromise = (async () => {
+      if (this.shuttingDown) return;
+      this.shuttingDown = true;
+      this.logger.info('server_shutdown_started', { signal });
+
+      if (this.syncWorkers) {
+        this.syncWorkers.stop();
       }
-      stopSearchIndexBoot();
-      stopFilterTagKeysBoot();
+      this.stopSearchIndexBoot();
+      this.stopFilterTagKeysBoot();
 
-      if (httpServer) {
+      if (this.httpServer) {
         await new Promise((resolve) => {
-          httpServer.close(() => {
-            logger.info('server_shutdown_complete');
+          this.httpServer.close(() => {
+            this.logger.info('server_shutdown_complete');
             resolve();
           });
         });
-        httpServer = null;
+        this.httpServer = null;
       }
-      await closeDbRuntime();
+
+      await this.closeDbRuntime();
     })().finally(() => {
-      stopRuntimePromise = null;
+      this.stopRuntimePromise = null;
     });
-    return stopRuntimePromise;
+
+    return this.stopRuntimePromise;
   }
 
-  function shutdown(signal) {
-    stopRuntime(signal)
+  shutdown(signal) {
+    this.stopRuntime(signal)
       .then(() => {
-        processRef.exit(0);
+        this.config.processRef.exit(0);
       })
       .catch((error) => {
-        logger.error('server_shutdown_failed', { error: String(error?.message || error) });
-        processRef.exit(1);
+        this.logger.error('server_shutdown_failed', { error: String(error?.message || error) });
+        this.config.processRef.exit(1);
       });
 
     setTimeout(() => {
-      logger.error('server_shutdown_forced_timeout');
-      processRef.exit(1);
+      this.logger.error('server_shutdown_forced_timeout');
+      this.config.processRef.exit(1);
     }, 10000).unref();
   }
 
-  function registerSignalHandlers() {
-    if (signalHandlersRegistered) return;
-    signalHandlersRegistered = true;
-    processRef.on('SIGTERM', () => shutdown('SIGTERM'));
-    processRef.on('SIGINT', () => shutdown('SIGINT'));
+  registerSignalHandlers() {
+    if (this.signalHandlersRegistered) return;
+    this.signalHandlersRegistered = true;
+    this.config.processRef.on('SIGTERM', () => this.shutdown('SIGTERM'));
+    this.config.processRef.on('SIGINT', () => this.shutdown('SIGINT'));
   }
 
-  function runAsMain() {
-    registerSignalHandlers();
-    return startHttpServer()
+  runAsMain() {
+    this.registerSignalHandlers();
+    return this.startHttpServer()
       .catch((error) => {
-        logger.error('server_session_store_init_failed', { error: String(error?.message || error) });
-        processRef.exit(1);
+        this.logger.error('server_session_store_init_failed', { error: String(error?.message || error) });
+        this.config.processRef.exit(1);
       });
   }
 
-  return {
-    app,
-    initializeRuntime,
-    prepareRuntime,
-    startHttpServer,
-    stopRuntime,
-    runAsMain
-  };
+  toRuntimeHandle() {
+    return {
+      app: this.app,
+      initializeRuntime: this.initializeRuntime.bind(this),
+      prepareRuntime: this.prepareRuntime.bind(this),
+      startHttpServer: this.startHttpServer.bind(this),
+      stopRuntime: this.stopRuntime.bind(this),
+      runAsMain: this.runAsMain.bind(this)
+    };
+  }
+}
+
+function createServerRuntime(options = {}) {
+  return new ServerRuntime(options).toRuntimeHandle();
 }
 
 module.exports = {
+  ServerRuntime,
   createServerRuntime
 };

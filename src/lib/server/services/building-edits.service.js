@@ -4,6 +4,57 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
   const isPostgres = db.provider === 'postgres';
   const REASSIGNABLE_EDIT_STATUSES = new Set(['pending', 'accepted', 'partially_accepted']);
   const MERGED_EDIT_STATUSES = new Set(['accepted', 'partially_accepted']);
+  const MERGED_EDITS_FOR_TARGET_SQL = `
+        (
+          SELECT COUNT(*)
+          FROM user_edits.building_user_edits ue2
+          WHERE ue2.osm_type = ue.osm_type
+            AND ue2.osm_id = ue.osm_id
+            AND ue2.status IN ('accepted', 'partially_accepted')
+        ) AS merged_edits_for_target`;
+  const BASE_USER_EDITS_SUMMARY_SELECT = `
+      SELECT
+        ue.id,
+        ue.osm_type,
+        ue.osm_id,
+        ue.created_by,
+        ue.updated_at,
+        ue.created_at,
+        ue.status,
+        bc.osm_id AS contour_osm_id,
+        ${MERGED_EDITS_FOR_TARGET_SQL}
+  `;
+  const BASE_USER_EDITS_SELECT = `
+      SELECT
+        ue.*,
+        bc.osm_id AS contour_osm_id,
+        bc.tags_json,
+        bc.updated_at AS current_osm_updated_at,
+        ${MERGED_EDITS_FOR_TARGET_SQL},
+        ai.name AS merged_name,
+        ai.style AS merged_style,
+        ai.levels AS merged_levels,
+        ai.year_built AS merged_year_built,
+        ai.architect AS merged_architect,
+        ai.address AS merged_address,
+        ai.description AS merged_description,
+        ai.archimap_description AS merged_archimap_description,
+        ai.updated_by AS merged_updated_by,
+        ai.updated_at AS merged_updated_at
+  `;
+  const BASE_USER_EDITS_SUMMARY_JOINS = `
+      FROM user_edits.building_user_edits ue
+      LEFT JOIN osm.building_contours bc
+        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
+  `;
+  const BASE_USER_EDITS_JOINS = `
+      FROM user_edits.building_user_edits ue
+      LEFT JOIN osm.building_contours bc
+        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
+      LEFT JOIN local.architectural_info ai
+        ON ai.osm_type = ue.osm_type AND ai.osm_id = ue.osm_id
+  `;
+  const USER_EDITS_ORDER_BY_SQL = 'ORDER BY ue.updated_at DESC, ue.id DESC';
 
   function normalizeInfoForDiff(value) {
     if (value == null) return null;
@@ -296,6 +347,31 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     };
   }
 
+  function getMergedInfoRowFromUserEditRow(row) {
+    return normalizeMergedInfoRow({
+      name: row?.merged_name,
+      style: row?.merged_style,
+      levels: row?.merged_levels,
+      year_built: row?.merged_year_built,
+      architect: row?.merged_architect,
+      address: row?.merged_address,
+      description: row?.merged_description,
+      archimap_description: row?.merged_archimap_description,
+      updated_by: row?.merged_updated_by,
+      updated_at: row?.merged_updated_at
+    });
+  }
+
+  function mapDetailedUserEditRow(row) {
+    const tags = parseTagsJsonSafe(row?.source_tags_json || row?.tags_json);
+    const mergedInfoRow = getMergedInfoRowFromUserEditRow(row);
+    return {
+      tags,
+      mergedInfoRow,
+      mapped: mapUserEditRow(row, tags, mergedInfoRow)
+    };
+  }
+
   function buildEditRuntimeState(row, mergedInfoRow = null) {
     const status = normalizeUserEditStatus(row?.status);
     const osmPresent = row?.contour_osm_id != null;
@@ -399,27 +475,10 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
 
     if (summary) {
       const rows = await db.prepare(`
-      SELECT
-        ue.id,
-        ue.osm_type,
-        ue.osm_id,
-        ue.created_by,
-        ue.updated_at,
-        ue.created_at,
-        ue.status,
-        bc.osm_id AS contour_osm_id,
-        (
-          SELECT COUNT(*)
-          FROM user_edits.building_user_edits ue2
-          WHERE ue2.osm_type = ue.osm_type
-            AND ue2.osm_id = ue.osm_id
-            AND ue2.status IN ('accepted', 'partially_accepted')
-        ) AS merged_edits_for_target
-      FROM user_edits.building_user_edits ue
-      LEFT JOIN osm.building_contours bc
-        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
+      ${BASE_USER_EDITS_SUMMARY_SELECT}
+      ${BASE_USER_EDITS_SUMMARY_JOINS}
       ${whereSql}
-      ORDER BY ue.updated_at DESC, ue.id DESC
+      ${USER_EDITS_ORDER_BY_SQL}
       LIMIT ?
     `).all(...params, cap);
 
@@ -437,55 +496,16 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     }
 
     const rows = await db.prepare(`
-      SELECT
-        ue.*,
-        bc.osm_id AS contour_osm_id,
-        bc.tags_json,
-        bc.updated_at AS current_osm_updated_at,
-        (
-          SELECT COUNT(*)
-          FROM user_edits.building_user_edits ue2
-          WHERE ue2.osm_type = ue.osm_type
-            AND ue2.osm_id = ue.osm_id
-            AND ue2.status IN ('accepted', 'partially_accepted')
-        ) AS merged_edits_for_target,
-        ai.name AS merged_name,
-        ai.style AS merged_style,
-        ai.levels AS merged_levels,
-        ai.year_built AS merged_year_built,
-        ai.architect AS merged_architect,
-        ai.address AS merged_address,
-        ai.description AS merged_description,
-        ai.archimap_description AS merged_archimap_description,
-        ai.updated_by AS merged_updated_by,
-        ai.updated_at AS merged_updated_at
-      FROM user_edits.building_user_edits ue
-      LEFT JOIN osm.building_contours bc
-        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
-      LEFT JOIN local.architectural_info ai
-        ON ai.osm_type = ue.osm_type AND ai.osm_id = ue.osm_id
+      ${BASE_USER_EDITS_SELECT}
+      ${BASE_USER_EDITS_JOINS}
       ${whereSql}
-      ORDER BY ue.updated_at DESC, ue.id DESC
+      ${USER_EDITS_ORDER_BY_SQL}
       LIMIT ?
     `).all(...params, cap);
 
     const out = [];
     for (const row of rows) {
-      const tags = parseTagsJsonSafe(row.source_tags_json || row.tags_json);
-      const mergedInfoRow = normalizeMergedInfoRow({
-        name: row.merged_name,
-        style: row.merged_style,
-        levels: row.merged_levels,
-        year_built: row.merged_year_built,
-        architect: row.merged_architect,
-        address: row.merged_address,
-        description: row.merged_description,
-        archimap_description: row.merged_archimap_description,
-        updated_by: row.merged_updated_by,
-        updated_at: row.merged_updated_at
-      });
-
-      out.push(mapUserEditRow(row, tags, mergedInfoRow));
+      out.push(mapDetailedUserEditRow(row).mapped);
     }
     return out;
   }
@@ -495,54 +515,15 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     if (!Number.isInteger(id) || id <= 0) return null;
 
     const row = await db.prepare(`
-      SELECT
-        ue.*,
-        bc.osm_id AS contour_osm_id,
-        bc.tags_json,
-        bc.updated_at AS current_osm_updated_at,
-        (
-          SELECT COUNT(*)
-          FROM user_edits.building_user_edits ue2
-          WHERE ue2.osm_type = ue.osm_type
-            AND ue2.osm_id = ue.osm_id
-            AND ue2.status IN ('accepted', 'partially_accepted')
-        ) AS merged_edits_for_target,
-        ai.name AS merged_name,
-        ai.style AS merged_style,
-        ai.levels AS merged_levels,
-        ai.year_built AS merged_year_built,
-        ai.architect AS merged_architect,
-        ai.address AS merged_address,
-        ai.description AS merged_description,
-        ai.archimap_description AS merged_archimap_description,
-        ai.updated_by AS merged_updated_by,
-        ai.updated_at AS merged_updated_at
-      FROM user_edits.building_user_edits ue
-      LEFT JOIN osm.building_contours bc
-        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
-      LEFT JOIN local.architectural_info ai
-        ON ai.osm_type = ue.osm_type AND ai.osm_id = ue.osm_id
+      ${BASE_USER_EDITS_SELECT}
+      ${BASE_USER_EDITS_JOINS}
       WHERE ue.id = ?
       LIMIT 1
     `).get(id);
 
     if (!row) return null;
 
-    const tags = parseTagsJsonSafe(row.source_tags_json || row.tags_json);
-    const mergedInfoRow = normalizeMergedInfoRow({
-      name: row.merged_name,
-      style: row.merged_style,
-      levels: row.merged_levels,
-      year_built: row.merged_year_built,
-      architect: row.merged_architect,
-      address: row.merged_address,
-      description: row.merged_description,
-      archimap_description: row.merged_archimap_description,
-      updated_by: row.merged_updated_by,
-      updated_at: row.merged_updated_at
-    });
-
-    const mapped = mapUserEditRow(row, tags, mergedInfoRow);
+    const { mapped, tags, mergedInfoRow } = mapDetailedUserEditRow(row);
     mapped.tags = tags;
     mapped.currentTags = parseTagsJsonSafe(row.tags_json);
     mapped.sourceTags = parseTagsJsonSafe(row.source_tags_json);

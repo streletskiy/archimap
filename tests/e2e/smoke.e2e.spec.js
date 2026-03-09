@@ -127,6 +127,26 @@ test('language switch updates visible UI content', async ({ page }) => {
   await expect(page.locator('.menu .menu-btn', { hasText: 'Sign in' })).toBeVisible({ timeout: 10000 });
 });
 
+test('auth modal accepts clicks, switches tabs, and closes with shared close button', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await page.locator('.menu-btn-trigger').click();
+  await page.locator('.menu-auth-actions .menu-btn').first().click();
+
+  const authModal = page.locator('.auth-modal');
+  await expect(authModal).toBeVisible({ timeout: 10000 });
+
+  await page.locator('.auth-modal .ui-tab-btn').nth(1).click();
+  await expect(page.locator('.auth-modal .ui-tab-btn-active')).toHaveCount(1);
+
+  const firstRegisterInput = page.locator('.auth-modal .stack input').first();
+  await firstRegisterInput.click();
+  await firstRegisterInput.fill('Test');
+  await expect(firstRegisterInput).toHaveValue('Test');
+
+  await page.locator('.auth-modal .ui-btn-close').click();
+  await expect(authModal).toBeHidden({ timeout: 10000 });
+});
+
 test('keeps map deep link params and renders map', async ({ page }) => {
   await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });

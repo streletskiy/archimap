@@ -15,7 +15,9 @@
 5. Recommended verification after changes:
    - `npm run lint`
    - `npm run frontend:check`
-   - `npm run test:unit`
+   - `npm test`
+   - `npm run test:e2e` for UI-impacting changes
+   - `npm run test:integration:postgres` when validating PostgreSQL-specific behavior with `DATABASE_URL`
 
 ## Development loop
 

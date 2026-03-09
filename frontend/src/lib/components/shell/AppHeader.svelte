@@ -203,8 +203,9 @@
     on:close={() => (menuOpen = false)}
     on:openAuth={(event) => openAuth(event.detail?.tab)}
   />
-  <AuthModal bind:open={authOpen} preferredTab={authPreferredTab} requestId={authRequestId} {termsHref} {privacyHref} />
 </header>
+
+<AuthModal bind:open={authOpen} preferredTab={authPreferredTab} requestId={authRequestId} {termsHref} {privacyHref} />
 
 <style>
   .nav-shell {

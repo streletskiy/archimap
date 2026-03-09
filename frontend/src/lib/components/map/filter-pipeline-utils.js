@@ -1,3 +1,9 @@
+import {
+  clampMapNumber as clampNumber,
+  expandBboxWithMargin,
+  getAdaptiveCoverageMarginRatio
+} from '../../services/map/map-math-utils.js';
+
 const FILTER_RULE_OPS = new Set(['contains', 'equals', 'not_equals', 'starts_with', 'exists', 'not_exists']);
 
 export function parseOsmKey(raw) {
@@ -106,33 +112,6 @@ export function buildBboxHash(bbox, precision = 4) {
   ].join(':');
 }
 
-export function clampNumber(value, min, max) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return Number(min);
-  return Math.max(Number(min), Math.min(Number(max), num));
-}
-
-export function expandBboxWithMargin(bbox, marginRatio = 0.25) {
-  if (!bbox) return null;
-  const west = Number(bbox.west);
-  const south = Number(bbox.south);
-  const east = Number(bbox.east);
-  const north = Number(bbox.north);
-  if (![west, south, east, north].every(Number.isFinite)) return null;
-
-  const width = Math.max(1e-6, east - west);
-  const height = Math.max(1e-6, north - south);
-  const ratio = clampNumber(marginRatio, 0, 2);
-  const growX = width * ratio;
-  const growY = height * ratio;
-  return {
-    west: west - growX,
-    south: clampNumber(south - growY, -90, 90),
-    east: east + growX,
-    north: clampNumber(north + growY, -90, 90)
-  };
-}
-
 export function isViewportInsideBbox(viewport, containerBbox, epsilon = 1e-7) {
   if (!viewport || !containerBbox) return false;
   const viewportWest = Number(viewport.west);
@@ -154,17 +133,8 @@ export function isViewportInsideBbox(viewport, containerBbox, epsilon = 1e-7) {
   );
 }
 
-export function getAdaptiveCoverageMarginRatio({
-  lastCount = 0,
-  defaultLimit = 12_000,
-  min = 0.2,
-  max = 0.35
-} = {}) {
-  const minRatio = clampNumber(min, 0, 1);
-  const maxRatio = clampNumber(max, minRatio, 1);
-  const count = Math.max(0, Number(lastCount) || 0);
-  const limit = Math.max(1, Number(defaultLimit) || 1);
-  const saturation = clampNumber(count / limit, 0, 1);
-  const ratio = maxRatio - ((maxRatio - minRatio) * saturation);
-  return clampNumber(ratio, minRatio, maxRatio);
-}
+export {
+  clampNumber,
+  expandBboxWithMargin,
+  getAdaptiveCoverageMarginRatio
+};

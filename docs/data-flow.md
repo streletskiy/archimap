@@ -16,18 +16,24 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 1. Scheduler recalculates `nextSyncAt` per enabled region.
 2. Each region can have its own schedule, but execution always goes through one in-process queue.
 3. Queue launches [`scripts/sync-osm-region.js`](../scripts/sync-osm-region.js) for a concrete `regionId`.
-4. The region sync script runs the full OSM import pipeline described in [OSM Import Pipeline](osm-import-pipeline.md):
+4. The sync script acts as an orchestrator and delegates the real stages to `scripts/region-sync/**`:
+   - `python-extractor.js`: Python detection/dependency checks + `sync-osm-buildings.py` invocation
+   - `db-ingester.js`: facade for region loading/export and DB import publishing
+   - `region-db.js`: region config loading + current-members export
+   - `import-applier.js`: transactional DB apply + protected PMTiles swap
+   - `pmtiles-builder.js`: NDJSON -> GeoJSON conversion and `tippecanoe` wrapper
+5. The region sync script runs the full OSM import pipeline described in [OSM Import Pipeline](osm-import-pipeline.md):
    - extract resolution through `quackosm`
    - transformation/export through `duckdb`
    - transactional import into `osm.building_contours` and `data_region_memberships`
    - region-specific PMTiles build and protected swap
-5. The result is:
+6. The result is:
    - a refreshed union dataset in the runtime DB
    - a refreshed PMTiles archive for the target region
    - updated region sync metadata and bounds for runtime clients
-6. For managed in-app syncs, the runtime then runs post-sync maintenance from `src/lib/server/boot/server-runtime.boot.js`:
-   - rebuilds `building_search_source` and `building_search_fts`
-   - resets and schedules `filter_tag_keys_cache` refresh
+7. For managed in-app syncs, the runtime then runs post-sync maintenance through `ServerRuntime` boot modules:
+   - `search-index.boot.js` rebuilds `building_search_source` and `building_search_fts`
+   - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
 
 ## Safety invariants
 
@@ -55,6 +61,6 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 ## Operational notes
 
 - Region PMTiles are named by region slug on disk; runtime/API addressing still uses numeric `regionId`, and legacy id-based filenames are accepted as a fallback during migration.
-- `server.js` is now only a thin entrypoint; managed sync hooks and runtime orchestration live in `src/lib/server/boot/server-runtime.boot.js`.
+- `server.js` is only a thin entrypoint; runtime orchestration is built by `ServerRuntime` and split across `src/lib/server/boot/server-runtime.boot.js` plus `server-runtime.{config,middleware,routes}.js`.
 - Search index rebuild still runs after successful syncs so search/filter APIs stay aligned with the union dataset.
 - Bounds-driven PMTiles activation is a v1 tradeoff: source activation is rectangle-based, not polygon-precise by extract shape.

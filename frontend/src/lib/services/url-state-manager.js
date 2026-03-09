@@ -1,4 +1,5 @@
 import { pushState, replaceState } from '$app/navigation';
+import { resolve } from '$app/paths';
 import { get } from 'svelte/store';
 import { parseUrlState, patchUrlState } from '$lib/client/urlState';
 import { normalizeOptionalMapZoom, requestMapFocus } from '$lib/stores/map';
@@ -48,7 +49,7 @@ export function createUrlStateManager({
     try {
       handledUrlSignature = getUrlStateSignature(nextState);
       lastUrlBuildingKey = getUrlBuildingKey(nextState);
-      const target = `${next.pathname}${next.search}${next.hash}`;
+      const target = resolve(`${next.pathname}${next.search}${next.hash}`);
       const currentPageState = get(pageStore)?.state ?? {};
       if (shouldReplaceState) {
         replaceState(target, currentPageState);

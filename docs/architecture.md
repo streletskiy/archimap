@@ -4,9 +4,15 @@
 
 - `server.sveltekit.js`: main public HTTP runtime (SvelteKit Node handler + internal app dispatch for API/system paths).
 - `server.js`: thin backend entrypoint that loads env, creates runtime, and re-exports lifecycle hooks.
-- `src/lib/server/boot/server-runtime.boot.js`: internal app runtime composition root (`prepareRuntime`, `app`, `stopRuntime`).
+- `src/lib/server/boot/server-runtime.boot.js`: internal app runtime class/factory (`ServerRuntime`, `createServerRuntime`) used by `server.js`.
+- `src/lib/server/boot/server-runtime.config.js`: runtime config/env/path normalization.
+- `src/lib/server/boot/server-runtime.middleware.js`: middleware/security/session wiring for the internal app.
+- `src/lib/server/boot/server-runtime.routes.js`: route registration for API/system endpoints.
 - `src/lib/server/boot/*.boot.js`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
 - `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
+- `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
+- `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
+- `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
 - SQLite:
   - `data/archimap.db` (main app DB)
   - `data/osm.db` (OSM contours/search source)
@@ -19,12 +25,13 @@
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
+- Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
-- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`.
+- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/section-routes.js`.
 
 ## Security and auth points
 
@@ -80,6 +87,8 @@ SvelteKit Node runtime (server.sveltekit.js)
     server.js (thin entrypoint)
        v
     Internal app runtime boot (src/lib/server/boot/server-runtime.boot.js)
+      |- ServerRuntime + createServerRuntime(...)
+      |- server-runtime.config / middleware / routes
       |- rate limiters + runtime settings caches
       |- security headers + CSP + request-id + logging
       |- auth/session + CSRF
@@ -89,5 +98,5 @@ SvelteKit Node runtime (server.sveltekit.js)
   |
   +--> SQLite (main + osm + local/user edits + auth)
   +--> Redis session store (optional, prod)
-  +--> workers/scripts (sync, search index rebuild, tag cache rebuild)
+  +--> workers/scripts (region-sync pipeline, search index rebuild, tag cache rebuild)
 ```

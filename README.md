@@ -29,7 +29,8 @@ References:
 
 - SvelteKit (UI)
 - API layer (`server.js` thin entrypoint + `src/lib/server/boot/server-runtime.boot.js` internal runtime dispatched by `server.sveltekit.js` for `/api` and system endpoints)
-  - Boot/orchestration modules live in `src/lib/server/boot/**`
+  - internal runtime is built around `ServerRuntime` + `createServerRuntime(...)`
+  - runtime composition is split across `src/lib/server/boot/server-runtime.{config,middleware,routes}.js` and other `*.boot.js` modules
   - HTTP route modules live in `src/lib/server/http/**`
 - PostgreSQL + PostGIS / SQLite (switchable runtime)
 - PMTiles
@@ -154,7 +155,9 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - `build`
 - `start`
 - `test`
+- `test:e2e`
 - `lint`
+- `frontend:check`
 - `perf:smoke`
 - `analyze`
 - `db:seed`
@@ -191,7 +194,10 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
 - Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
 - Open admin edit details: `?edit=<id>` (`adminEdit=<id>` is still supported for backward compatibility)
-- Open legal docs directly:
+- Canonical info/legal routes:
+  - `/info/about`, `/info/terms`, `/info/privacy`
+  - `/app/info/about`, `/app/info/terms`, `/app/info/privacy`
+- Backward-compatible legal query aliases are still supported:
   - `?tab=legal&doc=terms`
   - `?tab=legal&doc=privacy`
 
@@ -199,6 +205,7 @@ Notes:
 
 - Camera updates use history replace (no history spam while panning/zooming).
 - Legacy legal params remain compatible (`tab=user-agreement`, `tab=privacy-policy`).
+- Section root routes such as `/app/info` and `/info` still honor legacy query aliases and normalize back to canonical tab state.
 
 ## License
 
