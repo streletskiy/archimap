@@ -7,11 +7,11 @@ export function formatUiDate(value) {
 
 export function getStatusBadgeMeta(status, translate) {
   const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'accepted') return { text: translate('admin.status.accepted'), cls: 'bg-emerald-100 text-emerald-700' };
-  if (normalized === 'partially_accepted') return { text: translate('admin.status.partially_accepted'), cls: 'bg-slate-200 text-slate-800' };
-  if (normalized === 'rejected') return { text: translate('admin.status.rejected'), cls: 'bg-rose-100 text-rose-700' };
-  if (normalized === 'superseded') return { text: translate('admin.status.superseded'), cls: 'bg-slate-100 text-slate-700' };
-  return { text: translate('admin.status.pending'), cls: 'bg-amber-100 text-amber-700' };
+  if (normalized === 'accepted') return { text: translate('admin.status.accepted'), cls: 'ui-surface-success ui-text-success' };
+  if (normalized === 'partially_accepted') return { text: translate('admin.status.partially_accepted'), cls: 'ui-surface-emphasis ui-text-emphasis' };
+  if (normalized === 'rejected') return { text: translate('admin.status.rejected'), cls: 'ui-surface-danger ui-text-danger' };
+  if (normalized === 'superseded') return { text: translate('admin.status.superseded'), cls: 'ui-surface-soft ui-text-body' };
+  return { text: translate('admin.status.pending'), cls: 'ui-surface-warning ui-text-warning' };
 }
 
 export function getEditKey(item) {

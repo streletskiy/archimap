@@ -453,8 +453,8 @@
 {#if !$session.authenticated}
   <PortalFrame eyebrow="Archimap" title={$t('account.title')} description={$t('account.subtitle')}>
     <div class="portal-notice">
-      <h2 class="text-xl font-extrabold text-slate-900">{$t('account.authRequiredTitle')}</h2>
-      <p class="mt-2 text-sm text-slate-600">{$t('account.authRequiredText')}</p>
+      <h2 class="text-xl font-extrabold ui-text-strong">{$t('account.authRequiredTitle')}</h2>
+      <p class="mt-2 text-sm ui-text-muted">{$t('account.authRequiredText')}</p>
     </div>
   </PortalFrame>
 {:else}
@@ -484,62 +484,62 @@
     <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist"><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'settings'} on:click={() => switchTab('settings')}>{$t('account.tabs.settings')}</button></li><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'edits'} on:click={() => switchTab('edits')}>{$t('account.tabs.edits')}</button></li></ul>
     {#if activeTab === 'settings'}
       <div class="mt-4 grid gap-4 xl:grid-cols-3">
-          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 class="text-base font-bold text-slate-900">{$t('account.profile.title')}</h3><form class="mt-4 space-y-4" on:submit={saveProfile}><div><label for="account-first-name" class="mb-1 block text-sm font-medium text-slate-700">{$t('account.profile.firstName')}</label><input id="account-first-name" class="ui-field bg-white" bind:value={firstName} /></div><div><label for="account-last-name" class="mb-1 block text-sm font-medium text-slate-700">{$t('account.profile.lastName')}</label><input id="account-last-name" class="ui-field bg-white" bind:value={lastName} /></div><div><label for="account-email" class="mb-1 block text-sm font-medium text-slate-700">{$t('account.profile.email')}</label><input id="account-email" class="ui-field bg-white text-slate-500" readonly value={email} /></div><button type="submit" class="ui-btn ui-btn-primary">{$t('account.profile.save')}</button></form>{#if profileStatus}<p class="mt-3 text-sm text-slate-600">{profileStatus}</p>{/if}</section>
-          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4"><h3 class="text-base font-bold text-slate-900">{$t('account.security.title')}</h3><form class="mt-4 space-y-4" on:submit={changePassword}><input type="password" class="ui-field bg-white" placeholder={$t('account.security.currentPassword')} bind:value={currentPassword} required /><input type="password" class="ui-field bg-white" placeholder={$t('account.security.newPassword')} bind:value={newPassword} required /><input type="password" class="ui-field bg-white" placeholder={$t('account.security.repeatPassword')} bind:value={confirmNewPassword} required /><button type="submit" class="ui-btn ui-btn-outline-brand">{$t('account.security.change')}</button></form>{#if passwordStatus}<p class="mt-3 text-sm text-slate-600">{passwordStatus}</p>{/if}</section>
-          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 class="text-base font-bold text-slate-900">{$t('account.notifications.title')}</h3>
+          <section class="rounded-2xl border ui-border ui-surface-muted p-4"><h3 class="text-base font-bold ui-text-strong">{$t('account.profile.title')}</h3><form class="mt-4 space-y-4" on:submit={saveProfile}><div><label for="account-first-name" class="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.firstName')}</label><input id="account-first-name" class="ui-field ui-surface-base" bind:value={firstName} /></div><div><label for="account-last-name" class="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.lastName')}</label><input id="account-last-name" class="ui-field ui-surface-base" bind:value={lastName} /></div><div><label for="account-email" class="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.email')}</label><input id="account-email" class="ui-field ui-surface-base ui-text-subtle" readonly value={email} /></div><button type="submit" class="ui-btn ui-btn-primary">{$t('account.profile.save')}</button></form>{#if profileStatus}<p class="mt-3 text-sm ui-text-muted">{profileStatus}</p>{/if}</section>
+          <section class="rounded-2xl border ui-border ui-surface-muted p-4"><h3 class="text-base font-bold ui-text-strong">{$t('account.security.title')}</h3><form class="mt-4 space-y-4" on:submit={changePassword}><input type="password" class="ui-field ui-surface-base" placeholder={$t('account.security.currentPassword')} bind:value={currentPassword} required /><input type="password" class="ui-field ui-surface-base" placeholder={$t('account.security.newPassword')} bind:value={newPassword} required /><input type="password" class="ui-field ui-surface-base" placeholder={$t('account.security.repeatPassword')} bind:value={confirmNewPassword} required /><button type="submit" class="ui-btn ui-btn-outline-brand">{$t('account.security.change')}</button></form>{#if passwordStatus}<p class="mt-3 text-sm ui-text-muted">{passwordStatus}</p>{/if}</section>
+          <section class="rounded-2xl border ui-border ui-surface-muted p-4">
+            <h3 class="text-base font-bold ui-text-strong">{$t('account.notifications.title')}</h3>
             <div class="mt-4 space-y-4">
-              <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <div class="flex items-start justify-between gap-3 rounded-2xl border ui-border ui-surface-base p-4">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">{$t('account.notifications.commentsTitle')}</p>
-                  <p class="mt-1 text-sm text-slate-500">{$t('account.notifications.commentsText')}</p>
+                  <p class="text-sm font-semibold ui-text-strong">{$t('account.notifications.commentsTitle')}</p>
+                  <p class="mt-1 text-sm ui-text-subtle">{$t('account.notifications.commentsText')}</p>
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-accent peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  <div class="ui-faux-switch" aria-hidden="true"></div>
                 </label>
               </div>
-              <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <div class="flex items-start justify-between gap-3 rounded-2xl border ui-border ui-surface-base p-4">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">{$t('account.notifications.moderationTitle')}</p>
-                  <p class="mt-1 text-sm text-slate-500">{$t('account.notifications.moderationText')}</p>
+                  <p class="text-sm font-semibold ui-text-strong">{$t('account.notifications.moderationTitle')}</p>
+                  <p class="mt-1 text-sm ui-text-subtle">{$t('account.notifications.moderationText')}</p>
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-accent peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  <div class="ui-faux-switch" aria-hidden="true"></div>
                 </label>
               </div>
-              <div class="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <div class="flex items-start justify-between gap-3 rounded-2xl border ui-border ui-surface-base p-4">
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">{$t('account.notifications.weeklyTitle')}</p>
-                  <p class="mt-1 text-sm text-slate-500">{$t('account.notifications.weeklyText')}</p>
+                  <p class="text-sm font-semibold ui-text-strong">{$t('account.notifications.weeklyTitle')}</p>
+                  <p class="mt-1 text-sm ui-text-subtle">{$t('account.notifications.weeklyText')}</p>
                 </div>
                 <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
                   <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="h-6 w-11 rounded-full bg-slate-300 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all peer-checked:bg-brand-accent peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                  <div class="ui-faux-switch" aria-hidden="true"></div>
                 </label>
               </div>
             </div>
           </section>
-          <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h3 class="text-base font-bold text-slate-900">{$t('account.legal.title')}</h3>
-            <p class="mt-1 text-sm text-slate-600">{$t('account.legal.text')}</p>
+          <section class="rounded-2xl border ui-border ui-surface-muted p-4">
+            <h3 class="text-base font-bold ui-text-strong">{$t('account.legal.title')}</h3>
+            <p class="mt-1 text-sm ui-text-muted">{$t('account.legal.text')}</p>
             <div class="mt-4 space-y-2">
-              <a href={buildInfoUrl($page.url, 'agreement').pathname} class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.terms')}</a>
-              <a href={buildInfoUrl($page.url, 'privacy').pathname} class="block rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 underline underline-offset-2 hover:bg-slate-50">{$t('account.legal.privacy')}</a>
+              <a href={buildInfoUrl($page.url, 'agreement').pathname} class="block rounded-xl border ui-border ui-surface-base px-3 py-2 text-sm font-semibold ui-text-body underline underline-offset-2 ui-hover-surface">{$t('account.legal.terms')}</a>
+              <a href={buildInfoUrl($page.url, 'privacy').pathname} class="block rounded-xl border ui-border ui-surface-base px-3 py-2 text-sm font-semibold ui-text-body underline underline-offset-2 ui-hover-surface">{$t('account.legal.privacy')}</a>
             </div>
           </section>
       </div>
     {:else}
       <div class="mt-4 grid gap-4 overflow-x-hidden" class:lg:grid-cols-[1.1fr_1fr]={accountPaneOpen} class:lg:grid-cols-1={!accountPaneOpen}>
-        <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
+        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3">
           <div class="grid gap-2 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]"><input class="ui-field" type="search" placeholder={$t('account.edits.searchPlaceholder')} bind:value={editsQuery} /><input class="ui-field" type="date" bind:value={editsDate} /><div class="flex gap-2"><select class="ui-field ui-field-xs" bind:value={editsFilter} on:change={loadEdits}><option value="all">{$t('account.edits.filterAll')}</option><option value="pending">{$t('account.edits.filterPending')}</option><option value="accepted">{$t('account.edits.filterAccepted')}</option><option value="partially_accepted">{$t('account.edits.filterPartiallyAccepted')}</option><option value="rejected">{$t('account.edits.filterRejected')}</option><option value="superseded">{$t('account.edits.filterSuperseded')}</option></select><select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select><button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>{$t('common.refresh')}</button></div></div>
-          <p class="text-sm text-slate-600">{editsStatus}</p>
-          <div class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border border-slate-200" bind:this={mapEl}></div>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <p class="text-sm ui-text-muted">{editsStatus}</p>
+          <div class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
+          <div class="overflow-x-auto rounded-xl border ui-border">
             <table class="min-w-full text-sm">
               <thead>
-                <tr class="border-b border-slate-200 text-left text-slate-600">
+                <tr class="border-b ui-border text-left ui-text-muted">
                   <th class="px-3 py-2">{$t('account.edits.tableObject')}</th>
                   <th class="px-3 py-2">{$t('account.edits.tableAuthor')}</th>
                   <th class="px-3 py-2">{$t('account.edits.tableStatus')}</th>
@@ -548,18 +548,18 @@
               </thead>
               <tbody>
                 {#if editsLoading}
-                  <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('account.edits.loading')}</td></tr>
+                  <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('account.edits.loading')}</td></tr>
                 {:else if visibleEdits.length===0}
-                  <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('account.edits.empty')}</td></tr>
+                  <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('account.edits.empty')}</td></tr>
                 {:else}
                   {#each visibleEdits as it (`${it.id || it.editId}`)}
                         {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
                     {@const counters = getChangeCounters(it.changes)}
-                    <tr class="cursor-pointer border-b border-slate-100 hover:bg-slate-50" on:click={() => openEdit(it.id || it.editId)}>
-                      <td class="px-3 py-2"><p class="font-semibold text-slate-900">{getEditAddress(it)}</p><p class="text-xs text-slate-500">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p><div class="mt-1 flex flex-wrap gap-1">{#if it.orphaned}<span class="rounded-md bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700">{$t('account.edits.orphaned')}</span>{/if}{#if !it.osmPresent && !it.orphaned}<span class="rounded-md bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800">{$t('account.edits.missingTarget')}</span>{/if}{#if it.sourceOsmChanged}<span class="rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-800">{$t('account.edits.osmChanged')}</span>{/if}</div>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs text-rose-600">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
+                    <tr class="cursor-pointer border-b ui-border-soft ui-hover-surface" on:click={() => openEdit(it.id || it.editId)}>
+                      <td class="px-3 py-2"><p class="font-semibold ui-text-strong">{getEditAddress(it)}</p><p class="text-xs ui-text-subtle">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p><div class="mt-1 flex flex-wrap gap-1">{#if it.orphaned}<span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>{/if}{#if !it.osmPresent && !it.orphaned}<span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>{/if}{#if it.sourceOsmChanged}<span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>{/if}</div>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
                       <td class="px-3 py-2">{it.updatedBy || '-'}</td>
                       <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
-          <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md bg-slate-200 px-2 py-1 text-xs text-slate-700">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
+          <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
                     </tr>
                   {/each}
                 {/if}
@@ -568,18 +568,18 @@
           </div>
         </section>
         {#if detailPaneVisible}
-        <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
+        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-base font-bold text-slate-900">{$t('account.edits.detailTitle')}</h3>
+            <h3 class="text-base font-bold ui-text-strong">{$t('account.edits.detailTitle')}</h3>
             <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close" aria-label={$t('account.edits.closeDetail')} on:click={closeEditPanel}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
           </div>
           {#if detailLoading}
-            <p class="text-sm text-slate-500">{$t('account.edits.loading')}</p>
+            <p class="text-sm ui-text-subtle">{$t('account.edits.loading')}</p>
           {:else if !selectedEdit}
-            <p class="text-sm text-slate-500">{$t('account.edits.selectHint')}</p>
+            <p class="text-sm ui-text-subtle">{$t('account.edits.selectHint')}</p>
           {:else}
                 {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
-            <p class="flex flex-wrap items-center gap-2 text-sm text-slate-600"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
+            <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
             {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
               <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                 {#if selectedEdit.orphaned}
@@ -593,16 +593,16 @@
                 {/if}
               </div>
             {/if}
-            <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border border-slate-200 p-2">
+            <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border ui-border p-2">
               {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
-                <p class="text-sm text-slate-500">{$t('account.edits.noChanges')}</p>
+                <p class="text-sm ui-text-subtle">{$t('account.edits.noChanges')}</p>
               {:else}
                 {#each selectedEdit.changes as ch (`${ch.field}`)}
-                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-2"><p class="text-sm font-semibold text-slate-900">{ch.label || ch.field}</p><p class="text-xs text-slate-600"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
+                  <div class="rounded-lg border ui-border ui-surface-muted p-2"><p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p><p class="text-xs ui-text-muted"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
                 {/each}
               {/if}
             </div>
-            {#if detailStatus}<p class="text-sm text-slate-600">{detailStatus}</p>{/if}
+            {#if detailStatus}<p class="text-sm ui-text-muted">{detailStatus}</p>{/if}
           {/if}
         </section>
         {/if}

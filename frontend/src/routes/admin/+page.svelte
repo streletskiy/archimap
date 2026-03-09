@@ -1369,13 +1369,13 @@
 {#if !$session.authenticated}
   <PortalFrame eyebrow="Archimap" title={$t('admin.title')} description={$t('admin.subtitle')}>
     <div class="portal-notice">
-      <h2 class="text-xl font-extrabold text-slate-900">{$t('admin.authRequired')}</h2>
+      <h2 class="text-xl font-extrabold ui-text-strong">{$t('admin.authRequired')}</h2>
     </div>
   </PortalFrame>
 {:else if !$session.user?.isAdmin}
   <PortalFrame eyebrow="Archimap" title={$t('admin.title')} description={$t('admin.subtitle')}>
     <div class="portal-notice">
-      <h2 class="text-xl font-extrabold text-slate-900">{$t('admin.forbidden')}</h2>
+      <h2 class="text-xl font-extrabold ui-text-strong">{$t('admin.forbidden')}</h2>
     </div>
   </PortalFrame>
 {:else}
@@ -1470,11 +1470,11 @@
             ><button type="submit" class="ui-btn ui-btn-secondary">{$t('common.refresh')}</button>
           </div>
         </form>
-        <p class="text-sm text-slate-600">{usersStatus}</p>
-        <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <p class="text-sm ui-text-muted">{usersStatus}</p>
+        <div class="overflow-x-auto rounded-2xl border ui-border ui-surface-base">
           <table class="min-w-full text-sm">
             <thead>
-              <tr class="border-b border-slate-200 text-left text-slate-600">
+              <tr class="border-b ui-border text-left ui-text-muted">
                 <th class="px-3 py-2">{$t('admin.users.table.email')}</th>
                 <th class="px-3 py-2">{$t('admin.users.table.role')}</th>
                 <th class="px-3 py-2">{$t('admin.users.table.edits')}</th>
@@ -1485,16 +1485,16 @@
             </thead>
             <tbody>
               {#if usersLoading}
-                <tr><td colspan="6" class="px-3 py-3 text-slate-500">{$t('admin.loading')}</td></tr>
+                <tr><td colspan="6" class="px-3 py-3 ui-text-subtle">{$t('admin.loading')}</td></tr>
               {:else if users.length === 0}
-                <tr><td colspan="6" class="px-3 py-3 text-slate-500">{$t('admin.empty')}</td></tr>
+                <tr><td colspan="6" class="px-3 py-3 ui-text-subtle">{$t('admin.empty')}</td></tr>
               {:else}
                 {#each users as u (`${u.email}`)}
-                  <tr class="border-b border-slate-100">
+                  <tr class="border-b ui-border-soft">
                     <td class="px-3 py-2">
-                      <p class="font-semibold text-slate-900">{u.email}</p>
+                      <p class="font-semibold ui-text-strong">{u.email}</p>
                       {#if u.firstName || u.lastName}
-                        <p class="text-xs text-slate-500">
+                        <p class="text-xs ui-text-subtle">
                           {String(u.firstName || '').trim()}
                           {String(u.lastName || '').trim()}
                         </p>
@@ -1503,20 +1503,20 @@
                     <td class="px-3 py-2">
                       {#if u.isMasterAdmin}
                         <span
-                          class="badge-pill mr-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700"
+                          class="badge-pill mr-1 rounded-full ui-surface-warning px-2.5 py-1 text-xs font-semibold ui-text-warning"
                           >{$t('admin.users.masterAdmin')}</span
                         >
                       {/if}
                       <span
                         class="badge-pill mr-1 rounded-full px-2.5 py-1 text-xs font-semibold {u.isAdmin
-                          ? 'bg-slate-200 text-slate-800'
-                          : 'bg-slate-100 text-slate-700'}"
+                          ? 'ui-surface-emphasis ui-text-emphasis'
+                          : 'ui-surface-soft ui-text-body'}"
                         >{u.isAdmin ? $t('admin.users.admin') : $t('admin.users.user')}</span
                       >
                       <span
                         class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {u.canEdit
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-slate-100 text-slate-700'}"
+                          ? 'ui-surface-success ui-text-success'
+                          : 'ui-surface-soft ui-text-body'}"
                         >{u.canEdit ? $t('admin.users.canEdit') : $t('admin.users.readOnly')}</span
                       >
                     </td>
@@ -1544,13 +1544,13 @@
       </div>
     {:else if activeTab === 'data'}
       {#if !$session.user?.isMasterAdmin}
-        <p class="mt-3 text-sm text-slate-600">{$t('admin.settings.masterOnly')}</p>
+        <p class="mt-3 text-sm ui-text-muted">{$t('admin.settings.masterOnly')}</p>
       {:else}
-        <section class="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 min-w-0">
+        <section class="mt-3 space-y-4 rounded-2xl border ui-border ui-surface-base p-4 min-w-0">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="space-y-1">
-              <h3 class="text-base font-bold text-slate-900">{$t('admin.data.title')}</h3>
-              <p class="text-sm text-slate-600">{$t('admin.data.subtitle')}</p>
+              <h3 class="text-base font-bold ui-text-strong">{$t('admin.data.title')}</h3>
+              <p class="text-sm ui-text-muted">{$t('admin.data.subtitle')}</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button
@@ -1569,7 +1569,7 @@
           </div>
 
           <div class="grid gap-3 lg:grid-cols-3">
-            <article class="data-summary-card rounded-xl p-3 text-sm text-slate-700">
+            <article class="data-summary-card rounded-xl p-3 text-sm ui-text-body">
               <p><strong>{$t('admin.data.summary.sourceLabel')}:</strong> {dataSettings.source}</p>
               <p>
                 <strong>{$t('admin.data.summary.bootstrapLabel')}:</strong> {getBootstrapStatusLabel(
@@ -1581,7 +1581,7 @@
                 {dataSettings.bootstrap.source || $t('admin.data.summary.notAvailable')}
               </p>
             </article>
-            <article class="data-summary-card rounded-xl p-3 text-sm text-slate-700 lg:col-span-2">
+            <article class="data-summary-card rounded-xl p-3 text-sm ui-text-body lg:col-span-2">
               <p><strong>{$t('admin.data.summary.syncModeLabel')}:</strong> {$t('admin.data.summary.syncModeValue')}</p>
               <p><strong>{$t('admin.data.summary.regionsCountLabel')}:</strong> {dataSettings.regions.length}</p>
               <p>
@@ -1591,32 +1591,32 @@
           </div>
 
           {#if dataStatus}
-            <p class="text-sm text-slate-600">{dataStatus}</p>
+            <p class="text-sm ui-text-muted">{dataStatus}</p>
           {/if}
 
           <section class="data-form-card space-y-3 rounded-2xl p-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h4 class="text-base font-bold text-slate-900">{$t('admin.data.filterTags.title')}</h4>
-                <p class="text-sm text-slate-600">{$t('admin.data.filterTags.description')}</p>
+                <h4 class="text-base font-bold ui-text-strong">{$t('admin.data.filterTags.title')}</h4>
+                <p class="text-sm ui-text-muted">{$t('admin.data.filterTags.description')}</p>
               </div>
-              <div class="text-xs text-slate-500">
+              <div class="text-xs ui-text-subtle">
                 <p>{$t('admin.data.filterTags.source')}: {dataSettings.filterTags.source}</p>
                 <p>{$t('admin.data.filterTags.selectedCount', { count: filterTagAllowlistDraft.length })}</p>
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-2 text-xs text-slate-500">
-              <span class="rounded-full bg-slate-100 px-2 py-1">
+            <div class="flex flex-wrap gap-2 text-xs ui-text-subtle">
+              <span class="rounded-full ui-surface-soft px-2 py-1">
                 {$t('admin.data.filterTags.availableCount', { count: dataSettings.filterTags.availableKeys.length })}
               </span>
               {#if dataSettings.filterTags.updatedAt}
-                <span class="rounded-full bg-slate-100 px-2 py-1">
+                <span class="rounded-full ui-surface-soft px-2 py-1">
                   {$t('admin.data.filterTags.updatedAt')}: {formatUiDate(dataSettings.filterTags.updatedAt)}
                 </span>
               {/if}
               {#if dataSettings.filterTags.updatedBy}
-                <span class="rounded-full bg-slate-100 px-2 py-1">
+                <span class="rounded-full ui-surface-soft px-2 py-1">
                   {$t('admin.data.filterTags.updatedBy')}: {dataSettings.filterTags.updatedBy}
                 </span>
               {/if}
@@ -1629,11 +1629,11 @@
             {/if}
 
             {#if dataSettings.filterTags.availableKeys.length === 0}
-              <p class="rounded-xl border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500">
+              <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">
                 {$t('admin.data.filterTags.empty')}
               </p>
             {:else}
-              <div class="max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-white p-3">
+              <div class="max-h-[28rem] overflow-auto rounded-xl border ui-border ui-surface-base p-3">
                 <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   {#each sortedAvailableFilterTagKeys as key (key)}
                     {@const draftState = filterTagDraftStateByKey[key] || 'unchanged'}
@@ -1671,13 +1671,13 @@
           <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
             <section class="space-y-3 min-w-0">
               <div class="flex items-center justify-between gap-2">
-                <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-600">{$t('admin.data.list.title')}</h4>
-                <span class="text-xs text-slate-500">{dataSettings.regions.length}</span>
+                <h4 class="text-sm font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.list.title')}</h4>
+                <span class="text-xs ui-text-subtle">{dataSettings.regions.length}</span>
               </div>
               {#if dataLoading}
-                <p class="data-summary-card rounded-xl px-3 py-2 text-sm text-slate-500">{$t('admin.data.list.loading')}</p>
+                <p class="data-summary-card rounded-xl px-3 py-2 text-sm ui-text-subtle">{$t('admin.data.list.loading')}</p>
               {:else if dataSettings.regions.length === 0}
-                <p class="rounded-xl border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500">
+                <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">
                   {$t('admin.data.list.empty')}
                 </p>
               {:else}
@@ -1692,16 +1692,16 @@
                     >
                       <div class="flex flex-wrap items-start justify-between gap-2">
                         <div class="min-w-0 flex-1">
-                          <p class="font-semibold text-slate-900 break-words">{region.name}</p>
-                          <p class="text-xs text-slate-500 break-words">#{region.id} · {region.slug}</p>
+                          <p class="font-semibold ui-text-strong break-words">{region.name}</p>
+                          <p class="text-xs ui-text-subtle break-words">#{region.id} · {region.slug}</p>
                         </div>
                         <span
                           class="badge-pill data-status-pill shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
                           data-tone={statusMeta.tone}>{statusMeta.text}</span
                         >
                       </div>
-                      <p class="mt-2 text-sm text-slate-700 break-all">{region.sourceValue}</p>
-                      <div class="mt-2 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
+                      <p class="mt-2 text-sm ui-text-body break-all">{region.sourceValue}</p>
+                      <div class="mt-2 grid gap-1 text-xs ui-text-subtle sm:grid-cols-2">
                         <p>{$t('admin.data.list.lastSync')}: {formatUiDate(region.lastSuccessfulSyncAt) || '—'}</p>
                         <p>{$t('admin.data.list.nextSync')}: {formatUiDate(region.nextSyncAt) || '—'}</p>
                         <p>{$t('admin.data.list.pmtilesSize')}: {formatStorageBytes(region.pmtilesBytes)}</p>
@@ -1711,15 +1711,15 @@
                         </p>
                       </div>
                       <div class="mt-2 flex flex-wrap gap-2 text-xs">
-                        <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600"
+                        <span class="rounded-full ui-surface-soft px-2 py-1 ui-text-muted"
                           >{getRegionEnabledLabel(region.enabled)}</span
                         >
-                        <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-600"
+                        <span class="rounded-full ui-surface-soft px-2 py-1 ui-text-muted"
                           >{getRegionSyncModeLabel(region)}</span
                         >
                       </div>
                       {#if region.lastSyncError}
-                        <p class="mt-2 text-xs text-rose-700 break-words">{region.lastSyncError}</p>
+                        <p class="mt-2 text-xs ui-text-danger break-words">{region.lastSyncError}</p>
                       {/if}
                     </button>
                   {/each}
@@ -1731,10 +1731,10 @@
               <form class="data-form-card space-y-3 rounded-2xl p-4" on:submit={saveDataRegion}>
                 <div class="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h4 class="text-base font-bold text-slate-900">
+                    <h4 class="text-base font-bold ui-text-strong">
                       {regionDraft.id ? $t('admin.data.form.editTitle') : $t('admin.data.form.newTitle')}
                     </h4>
-                    <p class="text-sm text-slate-600">
+                    <p class="text-sm ui-text-muted">
                       {$t('admin.data.form.description')}
                     </p>
                   </div>
@@ -1750,32 +1750,32 @@
 
                 <div class="grid gap-3 md:grid-cols-2">
                   {#if regionDraft.id}
-                    <label class="space-y-1 text-sm text-slate-700">
+                    <label class="space-y-1 text-sm ui-text-body">
                       <span>{$t('admin.data.form.regionId')}</span>
                       <input class="ui-field" value={regionDraft.id} readonly disabled />
                     </label>
                   {/if}
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.regionName')}</span>
                     <input class="ui-field" bind:value={regionDraft.name} placeholder={$t('admin.data.form.regionNamePlaceholder')} />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.slug')}</span>
                     <input class="ui-field" bind:value={regionDraft.slug} placeholder={$t('admin.data.form.slugPlaceholder')} />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700 md:col-span-2">
+                  <label class="space-y-1 text-sm ui-text-body md:col-span-2">
                     <span>{$t('admin.data.form.sourceValue')}</span>
                     <input class="ui-field" bind:value={regionDraft.sourceValue} placeholder={$t('admin.data.form.sourceValuePlaceholder')} />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.sourceLayer')}</span>
                     <input class="ui-field" bind:value={regionDraft.sourceLayer} placeholder={$t('admin.data.form.sourceLayerPlaceholder')} />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.sourceType')}</span>
                     <input class="ui-field" value="extract_query" disabled />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.autoSyncIntervalHours')}</span>
                     <input
                       class="ui-field"
@@ -1785,24 +1785,24 @@
                       bind:value={regionDraft.autoSyncIntervalHours}
                     />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.pmtilesMinZoom')}</span>
                     <input class="ui-field" type="number" min="0" max="22" bind:value={regionDraft.pmtilesMinZoom} />
                   </label>
-                  <label class="space-y-1 text-sm text-slate-700">
+                  <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.pmtilesMaxZoom')}</span>
                     <input class="ui-field" type="number" min="0" max="22" bind:value={regionDraft.pmtilesMaxZoom} />
                   </label>
                 </div>
 
                 <div class="grid gap-2 md:grid-cols-2">
-                  <label class="flex items-center gap-2 text-sm text-slate-700"
+                  <label class="flex items-center gap-2 text-sm ui-text-body"
                     ><input type="checkbox" bind:checked={regionDraft.enabled} /> {$t('admin.data.form.enabled')}</label
                   >
-                  <label class="flex items-center gap-2 text-sm text-slate-700"
+                  <label class="flex items-center gap-2 text-sm ui-text-body"
                     ><input type="checkbox" bind:checked={regionDraft.autoSyncEnabled} /> {$t('admin.data.form.autoSyncEnabled')}</label
                   >
-                  <label class="flex items-center gap-2 text-sm text-slate-700"
+                  <label class="flex items-center gap-2 text-sm ui-text-body"
                     ><input type="checkbox" bind:checked={regionDraft.autoSyncOnStart} /> {$t('admin.data.form.autoSyncOnStart')}</label
                   >
                 </div>
@@ -1810,15 +1810,15 @@
                 {#if regionDraft.id}
                   {@const selectedRegion = getRegionById(regionDraft.id)}
                   {@const selectedStatusMeta = getRegionStatusMeta(selectedRegion?.lastSyncStatus)}
-                  <div class="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+                  <div class="rounded-xl border ui-border ui-surface-base px-3 py-3 text-sm ui-text-body">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="font-semibold text-slate-900">{$t('admin.data.form.currentStatus')}</span>
+                      <span class="font-semibold ui-text-strong">{$t('admin.data.form.currentStatus')}</span>
                       <span
                         class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
                         data-tone={selectedStatusMeta.tone}>{selectedStatusMeta.text}</span
                       >
                     </div>
-                    <div class="mt-2 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
+                    <div class="mt-2 grid gap-1 text-xs ui-text-subtle sm:grid-cols-2">
                       <p>{$t('admin.data.form.lastSync')}: {formatUiDate(selectedRegion?.lastSuccessfulSyncAt) || '—'}</p>
                       <p>{$t('admin.data.form.nextSync')}: {formatUiDate(selectedRegion?.nextSyncAt) || '—'}</p>
                       <p>{$t('admin.data.form.lastFinished')}: {formatUiDate(selectedRegion?.lastSyncFinishedAt) || '—'}</p>
@@ -1834,7 +1834,7 @@
                       </p>
                     </div>
                     {#if selectedRegion?.lastSyncError}
-                      <p class="mt-2 text-xs text-rose-700 break-words">{selectedRegion.lastSyncError}</p>
+                      <p class="mt-2 text-xs ui-text-danger break-words">{selectedRegion.lastSyncError}</p>
                     {/if}
                   </div>
                 {/if}
@@ -1861,19 +1861,19 @@
 
               <section class="data-history-card rounded-2xl p-4 min-w-0">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                  <h4 class="text-base font-bold text-slate-900">{$t('admin.data.history.title')}</h4>
+                  <h4 class="text-base font-bold ui-text-strong">{$t('admin.data.history.title')}</h4>
                   {#if regionRunsLoading}
-                    <span class="text-sm text-slate-500">{$t('admin.data.history.loading')}</span>
+                    <span class="text-sm ui-text-subtle">{$t('admin.data.history.loading')}</span>
                   {/if}
                 </div>
                 {#if regionRunsStatus}
-                  <p class="mt-2 text-sm text-slate-600">{regionRunsStatus}</p>
+                  <p class="mt-2 text-sm ui-text-muted">{regionRunsStatus}</p>
                 {/if}
                 {#if selectedDataRegionId && regionRuns.length > 0}
-                  <div class="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+                  <div class="mt-3 overflow-x-auto rounded-xl border ui-border">
                     <table class="min-w-full text-sm">
                       <thead>
-                        <tr class="border-b border-slate-200 text-left text-slate-600">
+                        <tr class="border-b ui-border text-left ui-text-muted">
                           <th class="px-3 py-2">{$t('admin.data.history.run')}</th>
                           <th class="px-3 py-2">{$t('admin.data.history.trigger')}</th>
                           <th class="px-3 py-2">{$t('admin.data.history.status')}</th>
@@ -1885,26 +1885,26 @@
                       <tbody>
                         {#each regionRuns as run (`region-run-${run.id}`)}
                           {@const runStatusMeta = getRegionStatusMeta(run.status)}
-                          <tr class="border-b border-slate-100">
-                            <td class="px-3 py-2 font-medium text-slate-900">#{run.id}</td>
-                            <td class="px-3 py-2 text-slate-600">{formatRunTriggerReason(run.triggerReason)}</td>
+                          <tr class="border-b ui-border-soft">
+                            <td class="px-3 py-2 font-medium ui-text-strong">#{run.id}</td>
+                            <td class="px-3 py-2 ui-text-muted">{formatRunTriggerReason(run.triggerReason)}</td>
                             <td class="px-3 py-2"
                               ><span
                                 class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
                                 data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
                               ></td
                             >
-                            <td class="px-3 py-2 text-slate-600"
+                            <td class="px-3 py-2 ui-text-muted"
                               >{formatUiDate(run.requestedAt || run.startedAt) || '—'}</td
                             >
-                            <td class="px-3 py-2 text-slate-600">{formatUiDate(run.finishedAt) || '—'}</td>
-                            <td class="px-3 py-2 text-slate-600"
+                            <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.finishedAt) || '—'}</td>
+                            <td class="px-3 py-2 ui-text-muted"
                               >{run.activeFeatureCount ?? run.importedFeatureCount ?? '—'}</td
                             >
                           </tr>
                           {#if run.error}
-                            <tr class="border-b border-slate-100 bg-rose-50">
-                              <td colspan="6" class="px-3 py-2 text-xs text-rose-700">{run.error}</td>
+                            <tr class="border-b ui-border-soft ui-surface-danger-soft">
+                              <td colspan="6" class="px-3 py-2 text-xs ui-text-danger">{run.error}</td>
                             </tr>
                           {/if}
                         {/each}
@@ -1912,7 +1912,7 @@
                     </table>
                   </div>
                 {:else if !selectedDataRegionId}
-                  <p class="mt-3 text-sm text-slate-500">{$t('admin.data.history.selectRegionHint')}</p>
+                  <p class="mt-3 text-sm ui-text-subtle">{$t('admin.data.history.selectRegionHint')}</p>
                 {/if}
               </section>
             </section>
@@ -1921,11 +1921,11 @@
       {/if}
     {:else if activeTab === 'settings'}
       {#if !$session.user?.isMasterAdmin}
-        <p class="mt-3 text-sm text-slate-600">{$t('admin.settings.masterOnly')}</p>
+        <p class="mt-3 text-sm ui-text-muted">{$t('admin.settings.masterOnly')}</p>
       {:else}
         <div class="mt-3 grid gap-4 lg:grid-cols-2">
-          <form class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" on:submit={saveGeneral}>
-            <h3 class="text-base font-bold text-slate-900">{$t('admin.settings.generalTitle')}</h3>
+          <form class="space-y-2 rounded-2xl border ui-border ui-surface-muted p-4" on:submit={saveGeneral}>
+            <h3 class="text-base font-bold ui-text-strong">{$t('admin.settings.generalTitle')}</h3>
             <input
               class="ui-field"
               bind:value={general.appDisplayName}
@@ -1934,17 +1934,17 @@
               class="ui-field"
               bind:value={general.appBaseUrl}
               placeholder={$t('admin.settings.baseUrlPlaceholder')}
-            /><label class="flex items-center gap-2 text-sm text-slate-700"
+            /><label class="flex items-center gap-2 text-sm ui-text-body"
               ><input type="checkbox" bind:checked={general.registrationEnabled} />
               {$t('admin.settings.registrationEnabled')}</label
-            ><label class="flex items-center gap-2 text-sm text-slate-700"
+            ><label class="flex items-center gap-2 text-sm ui-text-body"
               ><input type="checkbox" bind:checked={general.userEditRequiresPermission} />
               {$t('admin.settings.editRequiresPermission')}</label
             ><button type="submit" class="ui-btn ui-btn-primary" disabled={generalLoading}>{$t('common.save')}</button
-            >{#if generalStatus}<p class="text-sm text-slate-600">{generalStatus}</p>{/if}
+            >{#if generalStatus}<p class="text-sm ui-text-muted">{generalStatus}</p>{/if}
           </form>
-          <form class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4" on:submit={saveSmtp}>
-            <h3 class="text-base font-bold text-slate-900">{$t('admin.settings.smtpTitle')}</h3>
+          <form class="space-y-2 rounded-2xl border ui-border ui-surface-muted p-4" on:submit={saveSmtp}>
+            <h3 class="text-base font-bold ui-text-strong">{$t('admin.settings.smtpTitle')}</h3>
             <input class="ui-field" bind:value={smtp.url} placeholder={$t('admin.settings.smtpUrl')} />
             <div class="grid gap-2 sm:grid-cols-2">
               <input class="ui-field" bind:value={smtp.host} placeholder={$t('admin.settings.host')} /><input
@@ -1962,7 +1962,7 @@
               bind:value={smtp.pass}
               placeholder={smtp.hasPassword ? $t('admin.settings.passwordKeep') : $t('admin.settings.password')}
             /><input class="ui-field" bind:value={smtp.from} placeholder={$t('admin.settings.from')} /><label
-              class="flex items-center gap-2 text-sm text-slate-700"
+              class="flex items-center gap-2 text-sm ui-text-body"
               ><input type="checkbox" bind:checked={smtp.secure} /> {$t('admin.settings.secure')}</label
             >
             <div class="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
@@ -1977,7 +1977,7 @@
                 >{$t('admin.settings.smtpSave')}</button
               >
             </div>
-            {#if smtpStatus}<p class="text-sm text-slate-600">{smtpStatus}</p>{/if}
+            {#if smtpStatus}<p class="text-sm ui-text-muted">{smtpStatus}</p>{/if}
           </form>
         </div>
       {/if}
@@ -1987,7 +1987,7 @@
         class:lg:grid-cols-[1.1fr_1fr]={adminPaneOpen}
         class:lg:grid-cols-1={!adminPaneOpen}
       >
-        <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
+        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3">
           <div class="grid gap-2 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
             <input
               class="ui-field"
@@ -2018,15 +2018,15 @@
               >
             </div>
           </div>
-          <p class="text-sm text-slate-600">{editsStatus}</p>
+          <p class="text-sm ui-text-muted">{editsStatus}</p>
           <div
-            class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border border-slate-200"
+            class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border ui-border"
             bind:this={mapEl}
           ></div>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <div class="overflow-x-auto rounded-xl border ui-border">
             <table class="min-w-full text-sm">
               <thead>
-                <tr class="border-b border-slate-200 text-left text-slate-600">
+                <tr class="border-b ui-border text-left ui-text-muted">
                   <th class="px-3 py-2">{$t('admin.edits.tableBuilding')}</th>
                   <th class="px-3 py-2">{$t('admin.edits.tableAuthor')}</th>
                   <th class="px-3 py-2">{$t('admin.edits.tableStatus')}</th>
@@ -2035,30 +2035,30 @@
               </thead>
               <tbody>
                 {#if editsLoading}
-                  <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('admin.loading')}</td></tr>
+                  <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('admin.loading')}</td></tr>
                 {:else if visibleEdits.length === 0}
-                  <tr><td colspan="4" class="px-3 py-3 text-slate-500">{$t('admin.empty')}</td></tr>
+                  <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('admin.empty')}</td></tr>
                 {:else}
                   {#each visibleEdits as it (`${it.id || it.editId}`)}
                     {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
                     {@const counters = getChangeCounters(it.changes)}
                     <tr
-                      class="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                      class="cursor-pointer border-b ui-border-soft ui-hover-surface"
                       on:click={() => openEdit(it.id || it.editId)}
                     >
                       <td class="px-3 py-2"
-                        ><p class="font-semibold text-slate-900">{getEditAddress(it)}</p>
-                        <p class="text-xs text-slate-500">ID: {it.osmType}/{it.osmId}</p>
+                        ><p class="font-semibold ui-text-strong">{getEditAddress(it)}</p>
+                        <p class="text-xs ui-text-subtle">ID: {it.osmType}/{it.osmId}</p>
                         <div class="mt-1 flex flex-wrap gap-1">
-                          {#if it.orphaned}<span class="rounded-md bg-rose-100 px-2 py-1 text-[11px] font-semibold text-rose-700"
+                          {#if it.orphaned}<span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger"
                               >{$t('admin.edits.orphaned')}</span
                             >{/if}
                           {#if !it.osmPresent && !it.orphaned}<span
-                              class="rounded-md bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800"
+                              class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning"
                               >{$t('admin.edits.missingTarget')}</span
                             >{/if}
                           {#if it.sourceOsmChanged}<span
-                              class="rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-800"
+                              class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info"
                               >{$t('admin.edits.osmChanged')}</span
                             >{/if}
                         </div></td
@@ -2071,13 +2071,13 @@
                       >
                       <td class="px-3 py-2"
                         ><div class="flex flex-wrap items-center gap-2">
-                          <span class="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600"
+                          <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted"
                             >{counters.total} {$t('admin.edits.changesTotal')}</span
                           >{#if counters.created > 0}<span
-                              class="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-600"
+                              class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft"
                               >+{counters.created} {$t('admin.edits.changesCreated')}</span
                             >{/if}{#if counters.modified > 0}<span
-                              class="rounded-md bg-slate-200 px-2 py-1 text-xs text-slate-700"
+                              class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body"
                               >~{counters.modified} {$t('admin.edits.changesModified')}</span
                             >{/if}
                         </div></td
@@ -2091,13 +2091,13 @@
         </section>
         {#if detailPaneVisible}
           <section
-            class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3"
+            class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3"
             in:fade={{ duration: 180 }}
             out:fade={{ duration: 180 }}
             on:outroend={onDetailPaneOutroEnd}
           >
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-base font-bold text-slate-900">{$t('admin.edits.detailTitle')}</h3>
+              <h3 class="text-base font-bold ui-text-strong">{$t('admin.edits.detailTitle')}</h3>
               <button
                 type="button"
                 class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
@@ -2114,12 +2114,12 @@
               >
             </div>
             {#if detailLoading}
-              <p class="text-sm text-slate-500">{$t('admin.loading')}</p>
+              <p class="text-sm ui-text-subtle">{$t('admin.loading')}</p>
             {:else if !selectedEdit}
-              <p class="text-sm text-slate-500">{$t('admin.edits.selectHint')}</p>
+              <p class="text-sm ui-text-subtle">{$t('admin.edits.selectHint')}</p>
             {:else}
               {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
-              <p class="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+              <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted">
                 <span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span
                 ><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}"
                   >{selectedStatusMeta.text}</span
@@ -2138,16 +2138,16 @@
                   {/if}
                 </div>
               {/if}
-              <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border border-slate-200 p-2">
+              <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border ui-border p-2">
                 {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}<p
-                    class="text-sm text-slate-500"
+                    class="text-sm ui-text-subtle"
                   >
                     {$t('admin.edits.noChanges')}
                   </p>{:else}{#each selectedEdit.changes as ch (`${ch.field}`)}<div
-                      class="rounded-lg border border-slate-200 bg-slate-50 p-2"
+                      class="rounded-lg border ui-border ui-surface-muted p-2"
                     >
                       <div class="mb-1 flex items-center justify-between gap-2">
-                        <p class="text-sm font-semibold text-slate-900">{ch.label || ch.field}</p>
+                        <p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p>
                         <div class="flex items-center gap-1">
                           <button
                             type="button"
@@ -2166,7 +2166,7 @@
                           >
                         </div>
                       </div>
-                      <p class="text-xs text-slate-600">
+                      <p class="text-xs ui-text-muted">
                         <span class="line-through">{String(ch.osmValue ?? $t('admin.edits.emptyValue'))}</span> ->
                         <strong>{String(ch.localValue ?? $t('admin.edits.emptyValue'))}</strong>
                       </p>
@@ -2183,9 +2183,9 @@
                 bind:value={moderationComment}
               ></textarea>
               {#if selectedEdit.canReassign}
-                <div class="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p class="text-sm font-semibold text-slate-900">{$t('admin.edits.reassignTitle')}</p>
-                  <p class="text-xs text-slate-600">{$t('admin.edits.reassignHelp')}</p>
+                <div class="space-y-2 rounded-xl border ui-border ui-surface-muted p-3">
+                  <p class="text-sm font-semibold ui-text-strong">{$t('admin.edits.reassignTitle')}</p>
+                  <p class="text-xs ui-text-muted">{$t('admin.edits.reassignHelp')}</p>
                   <div class="grid gap-2 sm:grid-cols-[120px_1fr_auto]">
                     <select class="ui-field" bind:value={reassignTargetType}>
                       <option value="way">way</option>
@@ -2205,21 +2205,21 @@
                       on:click={reassignSelectedEdit}>{$t('admin.edits.reassignAction')}</button
                     >
                   </div>
-                  <label class="flex items-center gap-2 text-xs text-slate-700"
+                  <label class="flex items-center gap-2 text-xs ui-text-body"
                     ><input type="checkbox" bind:checked={reassignForce} />
                     {$t('admin.edits.reassignForce')}</label
                   >
                 </div>
               {/if}
               {#if $session.user?.isMasterAdmin}
-                <div class="space-y-2 rounded-xl border border-rose-200 bg-rose-50 p-3">
-                  <p class="text-sm font-semibold text-rose-900">{$t('admin.edits.deleteTitle')}</p>
+                <div class="space-y-2 rounded-xl border ui-border-danger-soft ui-surface-danger-soft p-3">
+                  <p class="text-sm font-semibold ui-text-danger-strong">{$t('admin.edits.deleteTitle')}</p>
                   {#if selectedEdit.canHardDelete}
-                    <p class="text-xs text-rose-800">{$t('admin.edits.deleteHelp')}</p>
+                    <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteHelp')}</p>
                   {:else if selectedEdit.hardDeleteBlockedReason === 'merged_with_other_accepted_edits'}
-                    <p class="text-xs text-rose-800">{$t('admin.edits.deleteBlockedSharedMergedState')}</p>
+                    <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlockedSharedMergedState')}</p>
                   {:else}
-                    <p class="text-xs text-rose-800">{$t('admin.edits.deleteBlocked')}</p>
+                    <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlocked')}</p>
                   {/if}
                   <button
                     type="button"
@@ -2246,7 +2246,7 @@
                   on:click={() => applyDecision('reject')}>{$t('admin.edits.rejectEdit')}</button
                 >
               </div>
-              {#if detailStatus}<p class="text-sm text-slate-600">{detailStatus}</p>{/if}
+              {#if detailStatus}<p class="text-sm ui-text-muted">{detailStatus}</p>{/if}
             {/if}
           </section>
         {/if}

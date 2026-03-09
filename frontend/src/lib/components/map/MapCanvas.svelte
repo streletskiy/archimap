@@ -1198,6 +1198,19 @@
     }
   }
 
+  function bringSearchResultsLayersToFront() {
+    if (!map) return;
+    const orderedLayerIds = [
+      SEARCH_RESULTS_CLUSTER_LAYER_ID,
+      SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
+      SEARCH_RESULTS_LAYER_ID
+    ];
+    for (const layerId of orderedLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.moveLayer(layerId);
+    }
+  }
+
   function ensureRegionBuildingSourceAndLayers(region, buildingPaint) {
     if (!map || !region) return;
     const sourceId = buildRegionSourceId(region.id);
@@ -1355,6 +1368,7 @@
     for (const region of nextActiveRegions) {
       ensureRegionBuildingSourceAndLayers(region, buildingPaint);
     }
+    bringSearchResultsLayersToFront();
 
     bindStyleInteractionHandlers();
     applySelectionFromStore($selectedBuilding);

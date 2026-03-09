@@ -4,12 +4,18 @@
   import { buildingModalOpen } from '$lib/stores/ui';
   import { selectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
+  import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import {
     getArchitectureStyleOptions,
     normalizeArchitectureStyleKey,
     toHumanArchitectureStyle
   } from '$lib/utils/architecture-style';
   import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from '$lib/utils/building-address';
+  import {
+    formatDisplayText,
+    normalizeIntegerField,
+    pickFirstText
+  } from '$lib/utils/text';
 
   export let buildingDetails = null;
   export let isAuthenticated = false;
@@ -27,8 +33,6 @@
   let osmTagEntries = [];
   let modalEl = null;
   let hadOpenState = false;
-  const EMPTY_OPTIONAL_TEXT_TOKENS = new Set(['-', '--', '—', 'n/a', 'na', 'null']);
-
   function createEmptyForm() {
     return {
       name: '',
@@ -56,34 +60,6 @@
       archimapDescription: '',
       address: ''
     };
-  }
-
-  function sanitizeOptionalText(value) {
-    if (value == null) return '';
-    const text = String(value).trim();
-    if (!text) return '';
-    if (EMPTY_OPTIONAL_TEXT_TOKENS.has(text.toLowerCase())) return '';
-    return text;
-  }
-
-  function pickFirstText(...values) {
-    for (const value of values) {
-      const text = sanitizeOptionalText(value);
-      if (text) return text;
-    }
-    return '';
-  }
-
-  function formatDisplayText(...values) {
-    return pickFirstText(...values) || '-';
-  }
-
-  function normalizeIntegerField(value, min, max) {
-    const text = sanitizeOptionalText(value);
-    if (!text) return '';
-    const parsed = Number(text);
-    if (!Number.isInteger(parsed) || parsed < min || parsed > max) return '';
-    return String(parsed);
   }
 
   function normalizeStyleForForm(value) {
@@ -279,10 +255,7 @@
           on:click={closeModal}
           aria-label={$t('common.close')}
         >
-          <svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
-            <path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" />
-          </svg>
+          <CloseIcon class="ui-close-icon" />
         </button>
       </header>
 

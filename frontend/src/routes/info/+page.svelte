@@ -73,7 +73,7 @@
 <PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
   <svelte:fragment slot="meta">
     <span class="ui-chip"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</span>
-    <a class="ui-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
+    <a class="ui-chip repo-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
   </svelte:fragment>
 
   <div>
@@ -103,11 +103,11 @@
     </section>
   {:else if activeTab === 'agreement'}
     <section class="legal-shell mt-4">
-      <div class="legal-markdown text-sm leading-7 text-slate-700">{@html agreementHtml}</div>
+      <div class="legal-markdown text-sm leading-7 ui-text-body">{@html agreementHtml}</div>
     </section>
   {:else}
     <section class="legal-shell mt-4">
-      <div class="legal-markdown text-sm leading-7 text-slate-700">{@html privacyHtml}</div>
+      <div class="legal-markdown text-sm leading-7 ui-text-body">{@html privacyHtml}</div>
     </section>
   {/if}
 </PortalFrame>
@@ -156,6 +156,19 @@
     box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
   }
 
+  .repo-chip {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .legal-markdown {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .legal-markdown :global(h1),
   .legal-markdown :global(h2),
   .legal-markdown :global(h3),
@@ -199,6 +212,8 @@
     color: var(--accent-ink);
     text-decoration: underline;
     text-underline-offset: 2px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .legal-markdown :global(blockquote) {
@@ -247,6 +262,16 @@
     border: 0;
     border-top: 1px solid var(--panel-border);
     margin: 0.85rem 0;
+  }
+
+  @media (max-width: 768px) {
+    .legal-shell {
+      padding: 1rem 0.95rem;
+    }
+
+    .repo-chip {
+      width: 100%;
+    }
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(h1),
