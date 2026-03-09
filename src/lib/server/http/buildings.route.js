@@ -54,7 +54,7 @@ function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${r
 function buildPostgresNumericValueSql(valueSql, valueParams = []) {
   const normalizedSql = `replace(btrim(${valueSql}), ',', '.')`;
   return {
-    sql: `CASE WHEN ${normalizedSql} ~ '^-?\\d+(?:\\.\\d+)?$' THEN (${normalizedSql})::double precision ELSE NULL END`,
+    sql: `CASE WHEN ${normalizedSql} ~ '^-{0,1}\\d+(\\.\\d+){0,1}$' THEN (${normalizedSql})::double precision ELSE NULL END`,
     params: [...valueParams, ...valueParams]
   };
 }

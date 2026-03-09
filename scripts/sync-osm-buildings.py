@@ -214,6 +214,19 @@ def run_quackosm_extract_to_duckdb(extract_query: str, work_dir: Path, index: in
                         )
                         query_to_use = suggestion
                         continue
+            elif attempt == 0 and 'Multiple extracts matched by query' in msg:
+                match = re.search(r'Matching extracts full names:\s*(.+)', msg)
+                if match:
+                    options = [x.strip(' "\'.') for x in match.group(1).split(',')]
+                    if options:
+                        suggestion = next((o for o in options if o.startswith('osmfr')), options[0])
+                        if suggestion and suggestion.lower() != query_to_use.lower():
+                            print(
+                                f'Multiple extracts matched for "{extract_query}", retrying with "{suggestion}"',
+                                flush=True,
+                            )
+                            query_to_use = suggestion
+                            continue
             raise
     return duckdb_path
 
