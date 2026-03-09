@@ -65,7 +65,7 @@
     "@eslint/js": "^9.21.0",
     "@playwright/test": "^1.54.2",
     "depcheck": "^1.4.7",
-    "drizzle-kit": "1.0.0-beta.15-859cf75",
+    "drizzle-kit": "1.0.0-beta.16-2ffd1a5",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-svelte": "^3.12.4",
