@@ -7,6 +7,7 @@ import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
 import { closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
 import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
 import { resolveAddressText } from '$lib/utils/building-address';
+import { isAbortError } from '$lib/utils/error';
 import {
   coerceNullableIntegerText,
   coerceNullableText,
@@ -20,10 +21,6 @@ const initialState = {
   saveStatus: '',
   selectedBuildingIdentity: null
 };
-
-function isAbortError(error) {
-  return String(error?.name || '').toLowerCase() === 'aborterror';
-}
 
 function isSelectionDebugEnabled() {
   const cfg = getRuntimeConfig();

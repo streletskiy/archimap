@@ -59,13 +59,20 @@
 
 ## Map filter highlight
 
-- Building base layers (`local-buildings-fill`, `local-buildings-line`) are always visible and are no longer filtered out by custom rules.
-- Custom building filter now renders through dedicated highlight layers:
-  - `buildings-filter-highlight-fill`
-  - `buildings-filter-highlight-outline`
+- Building base layers are region-scoped PMTiles layers (`<region>-fill`, `<region>-line`) and remain visible; custom rules do not hide or re-filter them directly.
+- Custom building filter renders through dedicated region-scoped highlight layers:
+  - `<region>-filter-highlight-fill`
+  - `<region>-filter-highlight-line`
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
   - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
+- Client filter pipeline is decomposed into dedicated modules under `frontend/src/lib/services/map/`:
+  - `map-filter-pipeline.js`: orchestration and runtime status
+  - `filter-bbox.js`: bbox hashing, coverage window, prefetch window helpers
+  - `filter-cache.js`: short-lived match cache
+  - `filter-feature-state.js`: chunked `feature-state` diff apply
+  - `filter-fetcher.js`: primary/fallback fetch paths and fallback data cache
+  - `filter-utils.js`: encoded OSM id and layer snapshot helpers
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
 - Matched buildings are marked with `setFeatureState({ isFiltered: true })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
 - Feature-state updates are diff-based (`toEnable` / `toDisable`) via worker apply-plan and are chunked per frame for smoothness.

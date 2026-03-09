@@ -132,7 +132,7 @@ export function setMapReady(value) {
 }
 
 export function setMapCenter(center) {
-  if (!center || !Number.isFinite(Number(center.lng)) || !Number.isFinite(Number(center.lat))) {
+  if (!center || !Number.isFinite(+center.lng) || !Number.isFinite(+center.lat)) {
     mapCenter.set(null);
     return;
   }
@@ -186,7 +186,7 @@ export function requestMapFocus(payload = {}) {
     offsetX: Number(payload?.offsetX || 0),
     offsetY: Number(payload?.offsetY || 0),
     zoom,
-    duration: Number.isFinite(Number(payload?.duration)) ? Number(payload.duration) : 420
+    duration: Number.isFinite(+payload?.duration) ? Number(payload.duration) : 420
   });
 }
 

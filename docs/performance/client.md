@@ -10,7 +10,7 @@
   - Search requests now use `AbortController` in `+page.svelte`.
   - Building filter match requests (`POST /api/buildings/filter-matches`) cancel stale requests through `MapFilterService`.
 - Debounce:
-  - Map filter reload on `moveend/zoomend` is debounced (`180ms`) in the extracted `MapFilterService`.
+  - Map filter reload on `moveend/zoomend` is debounced (`180ms`) in `frontend/src/lib/services/map/map-filter-pipeline.js`.
   - Rule-change refresh applies optimistic state immediately and debounces authoritative fetch (default `90ms`, heavy contains rules `500ms`).
 - Client cache:
   - `apiJsonCached` in `frontend/src/lib/services/http.js`.
@@ -23,6 +23,7 @@
   - Primary filter path is bbox server-matching (not rendered-feature enumeration), reducing request fan-out.
   - Authoritative fetch uses adaptive coverage-window and skips refetch while viewport stays inside active window.
   - Optional low-priority directional prefetch warms cache without competing with main requests.
+  - Filter pipeline responsibilities are split across `filter-bbox.js`, `filter-cache.js`, `filter-feature-state.js`, `filter-fetcher.js`, and `filter-utils.js`, which keeps `map-filter-pipeline.js` orchestration-only.
   - Theme switching keeps custom PMTiles layers and applies style repaint instead of layer drop.
   - Theme, layer, search, debug, and bbox math helpers are split into dedicated map service modules instead of living in one Svelte component.
 

@@ -25,6 +25,62 @@ export function getRegionLayerIds(activeRegionPmtiles = [], suffix) {
   return activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, suffix));
 }
 
+export function getCurrentBuildingsFillLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'fill');
+}
+
+export function getCurrentBuildingsLineLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'line');
+}
+
+export function getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-fill');
+}
+
+export function getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-line');
+}
+
+export function getCurrentSelectedFillLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'selected-fill');
+}
+
+export function getCurrentSelectedLineLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'selected-line');
+}
+
+export function setLocalBuildingFeatureStateById({
+  map,
+  activeRegionPmtiles = [],
+  sourceConfigs = null,
+  id,
+  state
+}) {
+  if (!map) return false;
+  if (!Number.isInteger(id) || id <= 0) return false;
+  const configs = Array.isArray(sourceConfigs)
+    ? sourceConfigs
+    : getCurrentBuildingSourceConfigs(activeRegionPmtiles);
+  let applied = false;
+  for (const sourceConfig of configs) {
+    if (!sourceConfig?.sourceLayer) continue;
+    try {
+      map.setFeatureState(
+        {
+          source: sourceConfig.sourceId,
+          sourceLayer: sourceConfig.sourceLayer,
+          id
+        },
+        state
+      );
+      applied = true;
+    } catch {
+      // Ignore setFeatureState errors for sources or features that are not ready.
+    }
+  }
+  return applied;
+}
+
 export function applyBuildingThemePaint({ map, theme, fillLayerIds = [], lineLayerIds = [] }) {
   if (!map) return;
   const paint = getBuildingThemePaint(theme);

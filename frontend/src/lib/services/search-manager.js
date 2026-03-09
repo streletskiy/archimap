@@ -1,6 +1,12 @@
 import { get } from 'svelte/store';
 import { translateNow } from '$lib/i18n/index';
 import { apiJsonCached } from '$lib/services/http';
+import {
+  buildSearchRequestParams,
+  buildSearchViewportHash,
+  mergeChunkedSearchResults,
+  normalizeSearchViewport
+} from '$lib/services/search-params';
 import { mapCenter, mapReady, mapViewport } from '$lib/stores/map';
 import {
   applySearchMapResults,
@@ -22,43 +28,12 @@ import {
   resolveArchitectureStyleSearchKey,
   resolveArchitectureStyleSearchKeys
 } from '$lib/utils/architecture-style';
+import { isAbortError } from '$lib/utils/error';
+import { clampText } from '$lib/utils/text';
 
 const SEARCH_PAGE_SIZE = 120;
 const SEARCH_MAP_RESULTS_LIMIT = 5000;
 const SEARCH_VIEWPORT_REFRESH_DEBOUNCE_MS = 260;
-
-function isAbortError(error) {
-  return String(error?.name || '').toLowerCase() === 'aborterror';
-}
-
-function normalizeSearchViewport(viewport) {
-  const west = Number(viewport?.west);
-  const south = Number(viewport?.south);
-  const east = Number(viewport?.east);
-  const north = Number(viewport?.north);
-  if (![west, south, east, north].every(Number.isFinite) || west >= east || south >= north) {
-    return null;
-  }
-  return { west, south, east, north };
-}
-
-function buildSearchViewportHash(viewport) {
-  if (!viewport) return '';
-  return [
-    Number(viewport.west).toFixed(4),
-    Number(viewport.south).toFixed(4),
-    Number(viewport.east).toFixed(4),
-    Number(viewport.north).toFixed(4)
-  ].join(':');
-}
-
-function appendSearchViewportParams(params, viewport) {
-  if (!viewport) return;
-  params.set('west', String(viewport.west));
-  params.set('south', String(viewport.south));
-  params.set('east', String(viewport.east));
-  params.set('north', String(viewport.north));
-}
 
 export function createSearchManager() {
   let activeSearchRequestToken = 0;
@@ -165,7 +140,7 @@ export function createSearchManager() {
 
   async function runSearchRequest(command) {
     const append = Boolean(command?.append);
-    const text = String(command?.query || '').trim().slice(0, 120);
+    const text = clampText(command?.query);
     const current = get(searchState);
     const scope = String(command?.scope || (append ? current.scope : 'global') || 'global');
     const fit = !append && command?.fit !== false;
@@ -202,15 +177,12 @@ export function createSearchManager() {
       try {
         const keysToQuery = styleSearchKeys.slice(0, 5);
         const chunks = await Promise.all(keysToQuery.map(async (key) => {
-          const params = new URLSearchParams({
-            q: String(key).slice(0, 120),
-            limit: String(SEARCH_PAGE_SIZE)
+          const params = buildSearchRequestParams({
+            query: key,
+            center,
+            viewport: useViewportScope ? viewport : null,
+            limit: SEARCH_PAGE_SIZE
           });
-          if (Number.isFinite(Number(center?.lng)) && Number.isFinite(Number(center?.lat))) {
-            params.set('lon', String(center.lng));
-            params.set('lat', String(center.lat));
-          }
-          appendSearchViewportParams(params, useViewportScope ? viewport : null);
           const url = `/api/search-buildings?${params.toString()}`;
           const data = await apiJsonCached(url, {
             ttlMs: 10_000,
@@ -219,15 +191,7 @@ export function createSearchManager() {
           return Array.isArray(data?.items) ? data.items : [];
         }));
         if (token !== activeSearchRequestToken) return;
-
-        const merged = [];
-        const seen = new Set();
-        for (const item of chunks.flat()) {
-          const key = `${String(item?.osmType || '')}/${String(item?.osmId || '')}`;
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push(item);
-        }
+        const merged = mergeChunkedSearchResults(chunks);
 
         const filtered = filterSearchItemsByStyleKeys(merged, styleSearchKeys);
         applySearchResults({
@@ -252,18 +216,13 @@ export function createSearchManager() {
     }
 
     setSearchLoading({ append, background });
-    const params = new URLSearchParams({
-      q: searchQuery,
-      limit: String(SEARCH_PAGE_SIZE)
+    const params = buildSearchRequestParams({
+      query: searchQuery,
+      center,
+      viewport: useViewportScope ? viewport : null,
+      limit: SEARCH_PAGE_SIZE,
+      cursor: append ? cursor : null
     });
-    if (Number.isFinite(Number(center?.lng)) && Number.isFinite(Number(center?.lat))) {
-      params.set('lon', String(center.lng));
-      params.set('lat', String(center.lat));
-    }
-    appendSearchViewportParams(params, useViewportScope ? viewport : null);
-    if (append && cursor > 0) {
-      params.set('cursor', String(cursor));
-    }
 
     try {
       const url = `/api/search-buildings?${params.toString()}`;
@@ -299,7 +258,7 @@ export function createSearchManager() {
   }
 
   async function runSearchMapRequest(queryText, { background = false } = {}) {
-    const text = String(queryText || '').trim().slice(0, 120);
+    const text = clampText(queryText);
     if (text.length < 2) {
       resetSearchMapState();
       lastSearchMapRefreshKey = '';
@@ -333,15 +292,12 @@ export function createSearchManager() {
       if (styleSearchKeys.length > 0) {
         const keysToQuery = styleSearchKeys.slice(0, 5);
         const chunks = await Promise.all(keysToQuery.map(async (key) => {
-          const params = new URLSearchParams({
-            q: String(key).slice(0, 120),
-            limit: String(SEARCH_MAP_RESULTS_LIMIT)
+          const params = buildSearchRequestParams({
+            query: key,
+            center,
+            viewport,
+            limit: SEARCH_MAP_RESULTS_LIMIT
           });
-          if (Number.isFinite(Number(center?.lng)) && Number.isFinite(Number(center?.lat))) {
-            params.set('lon', String(center.lng));
-            params.set('lat', String(center.lat));
-          }
-          appendSearchViewportParams(params, viewport);
           const data = await apiJsonCached(`/api/search-buildings-map?${params.toString()}`, {
             ttlMs: 10_000,
             signal
@@ -352,15 +308,7 @@ export function createSearchManager() {
           };
         }));
         if (token !== activeSearchMapRequestToken) return;
-
-        const merged = [];
-        const seen = new Set();
-        for (const item of chunks.flatMap((chunk) => chunk.items)) {
-          const key = `${String(item?.osmType || '')}/${String(item?.osmId || '')}`;
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push(item);
-        }
+        const merged = mergeChunkedSearchResults(chunks);
 
         const filtered = filterSearchItemsByStyleKeys(merged, styleSearchKeys);
         applySearchMapResults({
@@ -373,15 +321,12 @@ export function createSearchManager() {
         return;
       }
 
-      const params = new URLSearchParams({
-        q: String(styleSearchKey || text).slice(0, 120),
-        limit: String(SEARCH_MAP_RESULTS_LIMIT)
+      const params = buildSearchRequestParams({
+        query: styleSearchKey || text,
+        center,
+        viewport,
+        limit: SEARCH_MAP_RESULTS_LIMIT
       });
-      if (Number.isFinite(Number(center?.lng)) && Number.isFinite(Number(center?.lat))) {
-        params.set('lon', String(center.lng));
-        params.set('lat', String(center.lat));
-      }
-      appendSearchViewportParams(params, viewport);
       const data = await apiJsonCached(`/api/search-buildings-map?${params.toString()}`, {
         ttlMs: 10_000,
         signal

@@ -1,4 +1,4 @@
-const EMPTY_OPTIONAL_TEXT_TOKENS = new Set(['-', '--', '—', 'n/a', 'na', 'null']);
+export const EMPTY_TEXT_TOKENS = new Set(['-', '--', '—', 'n/a', 'na', 'null']);
 
 export const BUILDING_EDITABLE_FIELDS = Object.freeze([
   'name',
@@ -14,7 +14,7 @@ export function sanitizeOptionalText(value) {
   if (value == null) return '';
   const text = String(value).trim();
   if (!text) return '';
-  if (EMPTY_OPTIONAL_TEXT_TOKENS.has(text.toLowerCase())) return '';
+  if (EMPTY_TEXT_TOKENS.has(text.toLowerCase())) return '';
   return text;
 }
 
@@ -40,6 +40,10 @@ export function pickNullableText(...values) {
 
 export function formatDisplayText(...values) {
   return pickFirstText(...values) || '-';
+}
+
+export function clampText(value, maxLen = 120) {
+  return String(value || '').trim().slice(0, maxLen);
 }
 
 export function normalizeIntegerField(value, min, max) {
