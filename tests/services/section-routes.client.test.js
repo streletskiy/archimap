@@ -17,9 +17,11 @@ test('resolveInfoTabFromUrl keeps legacy info query compatibility on section roo
 });
 
 test('resolveAccountTabFromUrl and resolveAdminTabFromUrl keep legacy query compatibility on section root', async () => {
-  const { resolveAccountTabFromUrl, resolveAdminTabFromUrl } = await loadSectionRoutesModule();
+  const { resolveAccountTabFromUrl, resolveAdminTabFromUrl, buildAdminUrl } = await loadSectionRoutesModule();
 
   assert.equal(resolveAccountTabFromUrl('http://localhost/app/account?tab=history'), 'edits');
   assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin?tab=users'), 'users');
   assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin?adminEdit=42'), 'edits');
+  assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin/filters'), 'filters');
+  assert.equal(buildAdminUrl('http://localhost/app/admin', 'filters').pathname, '/app/admin/filters');
 });

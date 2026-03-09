@@ -103,6 +103,7 @@ export function resolveAdminTabFromUrl(input) {
     const slug = String(child.split('/')[0] || '').trim().toLowerCase();
     if (slug === 'users') return 'users';
     if (slug === 'data') return 'data';
+    if (slug === 'filters') return 'filters';
     if (slug === 'settings') return 'settings';
     return 'edits';
   }
@@ -134,7 +135,7 @@ export function buildAccountUrl(input, tab) {
 export function buildAdminUrl(input, tab) {
   const current = toUrl(input);
   const next = new URL(current.toString());
-  const slug = tab === 'users' || tab === 'data' || tab === 'settings' ? tab : 'edits';
+  const slug = tab === 'users' || tab === 'data' || tab === 'filters' || tab === 'settings' ? tab : 'edits';
   next.pathname = buildSectionPath(current.pathname, 'admin', slug);
   next.searchParams.delete('tab');
   next.searchParams.delete('section');
