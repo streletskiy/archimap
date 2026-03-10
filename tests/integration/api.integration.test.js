@@ -524,6 +524,59 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(secondBody?.meta?.bboxHash, firstBody?.meta?.bboxHash);
     });
 
+    await t.test('filter-matches-batch endpoint validates input, returns items and uses cache', async () => {
+      const invalid = await callApi('/api/buildings/filter-matches-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          bbox: { west: 44, south: 56, east: 44.02, north: 56.02 },
+          requests: 'bad'
+        })
+      });
+      assert.equal(invalid.status, 400);
+
+      const payload = {
+        bbox: { west: 44, south: 56, east: 44.02, north: 56.02 },
+        zoomBucket: 14,
+        requests: [
+          {
+            id: 'contains-test',
+            rules: [{ key: 'name', op: 'contains', value: 'test' }],
+            maxResults: 15
+          },
+          {
+            id: 'exists-name',
+            rules: [{ key: 'name', op: 'exists', value: '' }],
+            maxResults: 15
+          }
+        ]
+      };
+
+      const first = await callApi('/api/buildings/filter-matches-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(first.status, 200);
+      const firstBody = await first.json();
+      assert.ok(Array.isArray(firstBody?.items));
+      assert.equal(firstBody.items.length, 2);
+      assert.equal(firstBody.items[0]?.id, 'contains-test');
+      assert.ok(Array.isArray(firstBody.items[0]?.matchedKeys));
+      assert.equal(typeof firstBody.items[0]?.meta?.truncated, 'boolean');
+      assert.equal(Boolean(firstBody.items[0]?.meta?.cacheHit), false);
+
+      const second = await callApi('/api/buildings/filter-matches-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      assert.equal(second.status, 200);
+      const secondBody = await second.json();
+      assert.equal(secondBody.items.length, 2);
+      assert.equal(Boolean(secondBody.items[0]?.meta?.cacheHit), true);
+    });
+
   } finally {
     if (server.exitCode == null) {
       server.kill('SIGTERM');

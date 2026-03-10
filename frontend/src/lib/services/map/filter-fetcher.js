@@ -73,6 +73,24 @@ export function createFilterFetcher({
     });
   }
 
+  async function fetchFilterMatchesBatchPrimary({ bbox, zoomBucket, requestSpecs, signal }) {
+    return apiJson('/api/buildings/filter-matches-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bbox,
+        zoomBucket,
+        requests: (Array.isArray(requestSpecs) ? requestSpecs : []).map((spec) => ({
+          id: String(spec?.id || ''),
+          rules: Array.isArray(spec?.rules) ? spec.rules : [],
+          rulesHash: String(spec?.rulesHash || ''),
+          maxResults: matchDefaultLimit
+        }))
+      }),
+      signal
+    });
+  }
+
   async function fetchFilterDataByOsmKeys(keys, signal) {
     const normalized = [...new Set((Array.isArray(keys) ? keys : [])
       .map((key) => String(key || '').trim())
@@ -174,6 +192,7 @@ export function createFilterFetcher({
   return {
     clear,
     fetchFilterDataByOsmKeys,
+    fetchFilterMatchesBatchPrimary,
     fetchFilterMatchesFallback,
     fetchFilterMatchesPrimary
   };

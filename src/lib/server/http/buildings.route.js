@@ -19,6 +19,7 @@ const FILTER_MATCH_MAX_KEY_LEN = 80;
 const FILTER_MATCH_MAX_VALUE_LEN = 240;
 const FILTER_MATCH_MAX_RESULTS = 20000;
 const FILTER_MATCH_DEFAULT_RESULTS = 12000;
+const FILTER_MATCH_BATCH_MAX_REQUESTS = 16;
 const FILTER_MATCH_CANDIDATE_CAP = 50000;
 const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
 const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
@@ -454,6 +455,132 @@ function buildBboxHash(minLon, minLat, maxLon, maxLat) {
   return `${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}`;
 }
 
+function buildFilterMatchPayload({
+  id = '',
+  matchedKeys = [],
+  matchedFeatureIds = [],
+  rulesHash = 'fnv1a-0',
+  bboxHash = '',
+  truncated = false,
+  elapsedMs = 0,
+  cacheHit = false
+} = {}) {
+  const payload = {
+    matchedKeys,
+    matchedFeatureIds,
+    meta: {
+      rulesHash,
+      bboxHash,
+      truncated: Boolean(truncated),
+      elapsedMs: Number(elapsedMs) || 0,
+      cacheHit: Boolean(cacheHit)
+    }
+  };
+  if (!id) return payload;
+  return {
+    id,
+    ...payload
+  };
+}
+
+function normalizeFilterMatchRequest(request, { isFilterTagAllowed } = {}) {
+  const normalizedRules = [];
+  const rulesRaw = request?.rules;
+  if (!Array.isArray(rulesRaw)) {
+    return { error: 'Ожидается массив rules' };
+  }
+  if (rulesRaw.length > FILTER_MATCH_MAX_RULES) {
+    return { error: `Слишком много правил (максимум ${FILTER_MATCH_MAX_RULES})` };
+  }
+  for (const entry of rulesRaw) {
+    const parsed = normalizeFilterRule(entry, { isFilterTagAllowed });
+    if (parsed.error) {
+      return { error: parsed.error };
+    }
+    normalizedRules.push(parsed.value);
+  }
+
+  const maxResultsRaw = Number(request?.maxResults ?? request?.limit);
+  const maxResults = Math.max(
+    1,
+    Math.min(FILTER_MATCH_MAX_RESULTS, Number.isFinite(maxResultsRaw) ? maxResultsRaw : FILTER_MATCH_DEFAULT_RESULTS)
+  );
+
+  return {
+    value: {
+      id: String(request?.id || '').trim() || stableRulesHash(normalizedRules),
+      rules: normalizedRules,
+      maxResults,
+      rulesHash: String(request?.rulesHash || '').trim() || stableRulesHash(normalizedRules)
+    }
+  };
+}
+
+function getBatchFilterMatchCandidateLimit(requests) {
+  const normalizedRequests = Array.isArray(requests) ? requests : [];
+  const maxPerRequest = normalizedRequests.reduce(
+    (best, request) => Math.max(best, getFilterMatchCandidateLimit(request?.rules, request?.maxResults)),
+    0
+  );
+  const totalRequested = normalizedRequests.reduce((sum, request) => sum + Math.max(0, Number(request?.maxResults || 0)), 0);
+  return Math.max(
+    5000,
+    Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxPerRequest, totalRequested))
+  );
+}
+
+function buildFilterMatchResultForRules(items, rules, maxResults) {
+  const matchedKeys = [];
+  const matchedFeatureIds = [];
+  let truncated = false;
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const ok = rules.every((rule) => matchesFilterRule(item, rule));
+    if (!ok) continue;
+    matchedKeys.push(item.osmKey);
+    const parsed = parseOsmKey(item.osmKey);
+    if (parsed) {
+      matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+    }
+    if (matchedKeys.length >= maxResults) {
+      truncated = true;
+      break;
+    }
+  }
+
+  return {
+    matchedKeys,
+    matchedFeatureIds,
+    truncated
+  };
+}
+
+function buildFilterMatchBatchResults(items, requests, {
+  bboxHash = '',
+  elapsedMs = 0,
+  cacheHit = false,
+  forceTruncated = false
+} = {}) {
+  return (Array.isArray(requests) ? requests : []).map((request) => {
+    const result = buildFilterMatchResultForRules(
+      Array.isArray(items) ? items : [],
+      Array.isArray(request?.rules) ? request.rules : [],
+      Number(request?.maxResults || FILTER_MATCH_DEFAULT_RESULTS)
+    );
+    return buildFilterMatchPayload({
+      id: request?.id,
+      matchedKeys: result.matchedKeys,
+      matchedFeatureIds: result.matchedFeatureIds,
+      rulesHash: request?.rulesHash,
+      bboxHash,
+      truncated: forceTruncated || result.truncated,
+      elapsedMs,
+      cacheHit
+    });
+  });
+}
+
 function parseBboxInput(source, fields) {
   const minLon = Number(source?.[fields.minLon]);
   const minLat = Number(source?.[fields.minLat]);
@@ -552,6 +679,20 @@ const FILTER_DATA_POSTGIS_BBOX_SQL = `
   LIMIT ?
 `;
 
+const FILTER_MATCH_TAGS_ONLY_POSTGIS_BBOX_SQL = `
+  WITH env AS (
+    SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom
+  )
+  SELECT
+    bc.osm_type,
+    bc.osm_id,
+    bc.tags_json
+  FROM osm.building_contours bc
+  JOIN env ON bc.geom && env.geom
+  WHERE ST_Intersects(bc.geom, env.geom)
+  LIMIT ?
+`;
+
 function registerBuildingsRoutes(deps) {
   const {
     app,
@@ -611,6 +752,21 @@ function registerBuildingsRoutes(deps) {
     LIMIT ?
   `) : null;
 
+  const selectFilterMatchRowsBboxRtree = !isPostgres ? db.prepare(`
+    SELECT
+      bc.osm_type,
+      bc.osm_id,
+      bc.tags_json
+    FROM osm.building_contours_rtree br
+    JOIN osm.building_contours bc
+      ON bc.rowid = br.contour_rowid
+    WHERE br.max_lon >= ?
+      AND br.min_lon <= ?
+      AND br.max_lat >= ?
+      AND br.min_lat <= ?
+    LIMIT ?
+  `) : null;
+
   const selectFilterRowsBboxPlain = !isPostgres ? db.prepare(`
     ${FILTER_DATA_SELECT_FIELDS_SQL}
     WHERE bc.max_lon >= ?
@@ -620,7 +776,21 @@ function registerBuildingsRoutes(deps) {
     LIMIT ?
   `) : null;
 
+  const selectFilterMatchRowsBboxPlain = !isPostgres ? db.prepare(`
+    SELECT
+      bc.osm_type,
+      bc.osm_id,
+      bc.tags_json
+    FROM osm.building_contours bc
+    WHERE bc.max_lon >= ?
+      AND bc.min_lon <= ?
+      AND bc.max_lat >= ?
+      AND bc.min_lat <= ?
+    LIMIT ?
+  `) : null;
+
   const selectFilterRowsBboxPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
+  const selectFilterMatchRowsBboxPostgis = isPostgres ? db.prepare(FILTER_MATCH_TAGS_ONLY_POSTGIS_BBOX_SQL) : null;
 
   const selectBuildingById = db.prepare(`
     SELECT osm_type, osm_id, tags_json, geometry_json
@@ -632,15 +802,21 @@ function registerBuildingsRoutes(deps) {
     return resolveBboxQueryMode(isPostgres, rtreeState);
   }
 
-  async function selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit) {
+  async function selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit, { tagsOnly = false } = {}) {
     const queryMode = getBboxQueryMode();
     if (queryMode === 'postgis') {
-      return selectFilterRowsBboxPostgis.all(minLon, minLat, maxLon, maxLat, limit);
+      return tagsOnly
+        ? selectFilterMatchRowsBboxPostgis.all(minLon, minLat, maxLon, maxLat, limit)
+        : selectFilterRowsBboxPostgis.all(minLon, minLat, maxLon, maxLat, limit);
     }
     if (queryMode === 'rtree') {
-      return selectFilterRowsBboxRtree.all(minLon, maxLon, minLat, maxLat, limit);
+      return tagsOnly
+        ? selectFilterMatchRowsBboxRtree.all(minLon, maxLon, minLat, maxLat, limit)
+        : selectFilterRowsBboxRtree.all(minLon, maxLon, minLat, maxLat, limit);
     }
-    return selectFilterRowsBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
+    return tagsOnly
+      ? selectFilterMatchRowsBboxPlain.all(minLon, maxLon, minLat, maxLat, limit)
+      : selectFilterRowsBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
   }
 
   app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
@@ -738,6 +914,103 @@ function registerBuildingsRoutes(deps) {
     return sendCachedJson(req, res, payload, {
       cacheControl: 'public, max-age=10'
     });
+  });
+
+  app.post('/api/buildings/filter-matches-batch', filterMatchesRateLimiter, async (req, res) => {
+    const startedAt = Date.now();
+    const body = req.body || {};
+    const { bbox, error } = parseBboxInput(
+      body?.bbox && typeof body.bbox === 'object' ? body.bbox : body,
+      { minLon: 'west', minLat: 'south', maxLon: 'east', maxLat: 'north' }
+    );
+    if (error) {
+      return res.status(400).json({ error });
+    }
+    const { minLon, minLat, maxLon, maxLat } = bbox;
+
+    const requestsRaw = body?.requests;
+    if (!Array.isArray(requestsRaw)) {
+      return res.status(400).json({ error: 'Ожидается массив requests' });
+    }
+    if (requestsRaw.length > FILTER_MATCH_BATCH_MAX_REQUESTS) {
+      return res.status(400).json({ error: `Слишком много requests (максимум ${FILTER_MATCH_BATCH_MAX_REQUESTS})` });
+    }
+
+    const normalizedRequests = [];
+    for (const request of requestsRaw) {
+      const parsed = normalizeFilterMatchRequest(request, { isFilterTagAllowed });
+      if (parsed.error) {
+        return res.status(400).json({ error: parsed.error });
+      }
+      normalizedRequests.push(parsed.value);
+    }
+
+    const zoom = Number(body?.zoom);
+    const zoomBucket = Number.isFinite(Number(body?.zoomBucket))
+      ? Number(body.zoomBucket)
+      : (Number.isFinite(zoom) ? Math.round(zoom * 2) / 2 : 0);
+    const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
+    const actorKeyRaw = getSessionEditActorKey(req);
+    const actorKey = String(actorKeyRaw || '').trim().toLowerCase() || 'anon';
+    const queryMode = getBboxQueryMode();
+    const cacheKey = `${actorKey}:batch:${bboxHash}:${zoomBucket}:${queryMode}:${normalizedRequests.map((request) => `${request.id}:${request.rulesHash}:${request.maxResults}`).join('|')}`;
+    const cached = filterMatchesCache.get(cacheKey);
+    if (cached) {
+      return res.json({
+        items: (Array.isArray(cached?.items) ? cached.items : []).map((item) => ({
+          ...item,
+          meta: {
+            ...(item?.meta || {}),
+            cacheHit: true,
+            elapsedMs: Date.now() - startedAt
+          }
+        })),
+        meta: {
+          elapsedMs: Date.now() - startedAt,
+          cacheHit: true
+        }
+      });
+    }
+
+    if (normalizedRequests.length === 0) {
+      return res.json({
+        items: [],
+        meta: {
+          elapsedMs: Date.now() - startedAt,
+          cacheHit: false
+        }
+      });
+    }
+
+    const allTagOnly = normalizedRequests.every((request) => splitPostgresPushdownRules(request.rules).fallbackRules.length === 0);
+    const candidateLimit = getBatchFilterMatchCandidateLimit(normalizedRequests);
+    const candidateRows = await selectFilterRowsByBbox(
+      minLon,
+      minLat,
+      maxLon,
+      maxLat,
+      candidateLimit,
+      { tagsOnly: actorKey === 'anon' && allTagOnly }
+    );
+    const candidateItems = actorKey === 'anon'
+      ? candidateRows.map(mapFilterDataRow)
+      : await applyPersonalEditsToFilterItems(candidateRows.map(mapFilterDataRow), actorKeyRaw);
+    const elapsedMs = Date.now() - startedAt;
+    const items = buildFilterMatchBatchResults(candidateItems, normalizedRequests, {
+      bboxHash,
+      elapsedMs,
+      cacheHit: false,
+      forceTruncated: candidateRows.length >= candidateLimit
+    });
+    const payload = {
+      items,
+      meta: {
+        elapsedMs,
+        cacheHit: false
+      }
+    };
+    filterMatchesCache.set(cacheKey, payload);
+    return res.json(payload);
   });
 
   app.post('/api/buildings/filter-matches', filterMatchesRateLimiter, async (req, res) => {
@@ -1157,6 +1430,7 @@ function registerBuildingsRoutes(deps) {
 }
 
 module.exports = {
+  buildFilterMatchBatchResults,
   registerBuildingsRoutes,
   compilePostgresFilterRulePredicate,
   compilePostgresFilterRulesPredicate,

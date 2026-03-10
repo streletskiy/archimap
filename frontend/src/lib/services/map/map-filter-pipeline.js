@@ -29,7 +29,7 @@ const FILTER_HEAVY_RULE_DEBOUNCE_MS = 500;
 const FILTER_RULE_CHANGE_DEBOUNCE_MS = 90;
 const FILTER_MATCH_CACHE_TTL_MS = 8_000;
 const FILTER_MATCH_CACHE_MAX_ITEMS = 90;
-const FILTER_MATCH_DEGRADE_LIMIT = 20_000;
+const FILTER_MATCH_DEGRADE_LIMIT = FILTER_HIGHLIGHT_MODE === 'paint-property' ? 30_000 : 20_000;
 const FILTER_MATCH_DEFAULT_LIMIT = 12_000;
 const FILTER_DATA_CACHE_TTL_MS = 45_000;
 const FILTER_DATA_CACHE_MAX_ITEMS = 25_000;
@@ -560,6 +560,68 @@ export function createFilterPipeline({
     };
   }
 
+  function getCachedRequestSpecResult(spec, context) {
+    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket);
+    const cached = filterCache.getCachedFilterMatches(requestCacheKey);
+    if (!cached) return null;
+    return {
+      spec,
+      payload: {
+        ...cached,
+        meta: {
+          ...(cached?.meta || {}),
+          cacheHit: true
+        }
+      },
+      cacheHit: true,
+      usedFallback: Boolean(cached?.meta?.fallback)
+    };
+  }
+
+  async function fetchMatchesBatchForRequestSpecs(specs, context, signal) {
+    const batchPayload = await filterFetcher.fetchFilterMatchesBatchPrimary({
+      bbox: context.coverageWindow,
+      zoomBucket: context.zoomBucket,
+      requestSpecs: specs,
+      signal
+    });
+    const itemsById = new Map(
+      (Array.isArray(batchPayload?.items) ? batchPayload.items : [])
+        .map((item) => [String(item?.id || ''), item])
+    );
+
+    return specs.map((spec) => {
+      const payload = itemsById.get(String(spec.id || '')) || {
+        matchedKeys: [],
+        matchedFeatureIds: [],
+        meta: {
+          rulesHash: spec.rulesHash,
+          bboxHash: context.bboxHash,
+          truncated: false,
+          elapsedMs: Number(batchPayload?.meta?.elapsedMs || 0),
+          cacheHit: Boolean(batchPayload?.meta?.cacheHit)
+        }
+      };
+      const normalizedPayload = {
+        ...payload,
+        meta: {
+          ...(payload?.meta || {}),
+          cacheHit: Boolean(payload?.meta?.cacheHit)
+        }
+      };
+      filterCache.putCachedFilterMatches(
+        buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket),
+        normalizedPayload
+      );
+      return {
+        spec,
+        payload: normalizedPayload,
+        cacheHit: Boolean(normalizedPayload?.meta?.cacheHit),
+        usedFallback: Boolean(normalizedPayload?.meta?.fallback)
+      };
+    });
+  }
+
   function scheduleFilterPrefetch(context, token) {
     if (!FILTER_PREFETCH_ENABLED || !context?.coverageWindow || !context?.rulesHash) return;
     if (!Array.isArray(context?.requestSpecs) || context.requestSpecs.length !== 1) return;
@@ -665,13 +727,40 @@ export function createFilterPipeline({
       });
       let requestResults = [];
       try {
-        requestResults = await Promise.all(context.requestSpecs.map(async (spec) => {
-          const result = await fetchMatchesForRequestSpec(spec, context, signal);
-          return {
-            spec,
-            ...result
-          };
-        }));
+        const cachedResults = [];
+        const missingSpecs = [];
+        for (const spec of context.requestSpecs) {
+          const cachedResult = getCachedRequestSpecResult(spec, context);
+          if (cachedResult) {
+            cachedResults.push(cachedResult);
+          } else {
+            missingSpecs.push(spec);
+          }
+        }
+
+        requestResults = [...cachedResults];
+        if (missingSpecs.length > 0) {
+          const fetchedResults = missingSpecs.length > 1
+            ? await (() => fetchMatchesBatchForRequestSpecs(missingSpecs, context, signal))()
+                .catch(async (error) => {
+                  if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
+                  return Promise.all(missingSpecs.map(async (spec) => {
+                    const result = await fetchMatchesForRequestSpec(spec, context, signal);
+                    return {
+                      spec,
+                      ...result
+                    };
+                  }));
+                })
+            : await Promise.all(missingSpecs.map(async (spec) => {
+                const result = await fetchMatchesForRequestSpec(spec, context, signal);
+                return {
+                  spec,
+                  ...result
+                };
+              }));
+          requestResults.push(...fetchedResults);
+        }
       } catch (error) {
         if (String(error?.name || '').toLowerCase() === 'aborterror') return;
         return;
