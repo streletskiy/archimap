@@ -1,0 +1,155 @@
+.data-summary-card,
+.data-form-card,
+.data-history-card {
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+  box-shadow: var(--shadow-soft);
+}
+
+.data-region-card {
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--panel-solid) 78%, transparent);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.data-region-card:hover {
+  background: color-mix(in srgb, var(--panel-solid) 70%, var(--accent-soft));
+}
+
+.data-region-card[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-border-strong));
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--panel-solid));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    var(--shadow-soft);
+}
+
+.data-status-pill {
+  border: 1px solid transparent;
+}
+
+.data-status-pill[data-tone='idle'] {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.data-status-pill[data-tone='queued'] {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.data-status-pill[data-tone='running'] {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.data-status-pill[data-tone='success'] {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.data-status-pill[data-tone='failed'] {
+  background: #ffe4e6;
+  color: #be123c;
+}
+
+:global(html[data-theme='dark']) .data-region-card {
+  box-shadow: 0 14px 32px rgba(2, 6, 23, 0.28);
+}
+
+:global(html[data-theme='dark']) .data-region-card[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border-strong));
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--panel-solid));
+}
+
+:global(html[data-theme='dark']) .data-status-pill[data-tone='idle'] {
+  background: #18233a;
+  color: #dbe5f2;
+}
+
+:global(html[data-theme='dark']) .data-status-pill[data-tone='queued'] {
+  background: #10213b;
+  color: #93c5fd;
+}
+
+:global(html[data-theme='dark']) .data-status-pill[data-tone='running'] {
+  background: #3f2a05;
+  color: #fcd34d;
+}
+
+:global(html[data-theme='dark']) .data-status-pill[data-tone='success'] {
+  background: #064e3b;
+  color: #6ee7b7;
+}
+
+:global(html[data-theme='dark']) .data-status-pill[data-tone='failed'] {
+  background: #4c1024;
+  color: #fda4af;
+}
+
+.filter-tag-unsaved-warning {
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+:global(html[data-theme='dark']) .filter-tag-unsaved-warning {
+  border-color: #b45309;
+  background: #3f2a05;
+  color: #fcd34d;
+}
+
+.filter-tag-option {
+  border-color: var(--panel-border);
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+  color: var(--fg);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.filter-tag-option input {
+  flex: 0 0 auto;
+}
+
+.filter-tag-option-unchanged {
+  border-color: var(--panel-border);
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+  color: var(--fg);
+  box-shadow: none;
+}
+
+.filter-tag-option-enabled-pending {
+  border-color: #34d399 !important;
+  background: #dcfce7 !important;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.22);
+  color: #065f46 !important;
+}
+
+.filter-tag-option-disabled-pending {
+  border-color: #fb7185 !important;
+  background: #ffe4e6 !important;
+  box-shadow: inset 0 0 0 1px rgba(225, 29, 72, 0.16);
+  color: #9f1239 !important;
+}
+
+:global(html[data-theme='dark']) .filter-tag-option-enabled-pending {
+  border-color: #34d399 !important;
+  background: #0b3b2e !important;
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.24);
+  color: #a7f3d0 !important;
+}
+
+:global(html[data-theme='dark']) .filter-tag-option-disabled-pending {
+  border-color: #fb7185 !important;
+  background: #4a1524 !important;
+  box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.22);
+  color: #fecdd3 !important;
+}
+
+:global(html[data-theme='dark']) .filter-tag-option-unchanged {
+  border-color: var(--panel-border);
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+  color: var(--fg);
+}

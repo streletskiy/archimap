@@ -10,6 +10,8 @@
 - `src/lib/server/boot/server-runtime.routes.js`: route registration for API/system endpoints.
 - `src/lib/server/boot/*.boot.js`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
 - `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
+- `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
+- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
@@ -28,10 +30,11 @@
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
-- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
 - Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/filterUrlState.js`, `frontend/src/lib/client/section-routes.js`.
+- Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and filter-tag management is isolated into a dedicated `Filters` tab instead of being embedded inside `Data`.
 
 ## Security and auth points
 

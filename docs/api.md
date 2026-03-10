@@ -64,21 +64,31 @@ System notes:
 - `GET /api/admin/app-settings/data`
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
+  - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`) and storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`).
+  - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
 - `POST /api/admin/app-settings/data/filter-tag-allowlist`
   - Master-admin only.
   - Body: `{ allowlist: ["building", "height", ...] }`.
   - Saves the explicit allowlist used by public filter-tag suggestions and server-side filter-key validation.
 - `GET /api/admin/app-settings/data/regions`
   - Returns region list for admin UI.
+  - Region payload mirrors admin data summary items, including extract-resolution fields plus cached storage stats `pmtilesBytes`, `dbBytes`, `dbBytesApproximate`.
+- `POST /api/admin/app-settings/data/regions/resolve-extract`
+  - Master-admin only.
+  - Body: `{ query: "Moscow", source?: "any|..." }`.
+  - Returns `{ ok, query, items[] }`, where each candidate contains `extractSource`, `extractId`, `extractLabel`, and may also include `downloadUrl`, `matchKind`, `exact`.
 - `POST /api/admin/app-settings/data/regions`
   - Creates or updates a region.
   - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
-  - Supported v1 source: `sourceType=extract_query`.
+  - Supported source type: `sourceType=extract`.
+  - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`) and rejects legacy `sourceType=extract_query`.
 - `DELETE /api/admin/app-settings/data/regions/:regionId`
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
   - Regions in `queued` or `running` state cannot be deleted.
 - `GET /api/admin/app-settings/data/regions/:regionId/runs`
   - Returns recent sync runs for the region.
+  - Run items include storage metadata captured during sync (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`) plus feature counters (`importedFeatureCount`, `activeFeatureCount`, `orphanDeletedCount`).
+  - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
