@@ -289,6 +289,51 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(dataSettingsBody?.ok, true);
       assert.ok(Array.isArray(dataSettingsBody?.item?.regions));
 
+      const resolveExtract = await callApi('/api/admin/app-settings/data/regions/resolve-extract', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          query: 'Antarctica'
+        })
+      });
+      assert.equal(resolveExtract.status, 200);
+      const resolveExtractBody = await resolveExtract.json();
+      assert.equal(resolveExtractBody?.ok, true);
+      assert.ok(Array.isArray(resolveExtractBody?.items));
+      assert.ok(resolveExtractBody.items.some((item) => String(item?.extractId || '') === 'geofabrik_antarctica'));
+
+      const rejectLegacyPayload = await callApi('/api/admin/app-settings/data/regions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          region: {
+            name: 'Legacy Payload',
+            slug: 'legacy-payload',
+            sourceType: 'extract',
+            sourceValue: 'Antarctica',
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_antarctica',
+            extractLabel: 'antarctica',
+            enabled: true,
+            autoSyncEnabled: false,
+            autoSyncOnStart: false,
+            autoSyncIntervalHours: 0,
+            pmtilesMinZoom: 12,
+            pmtilesMaxZoom: 15,
+            sourceLayer: 'buildings'
+          }
+        })
+      });
+      assert.equal(rejectLegacyPayload.status, 400);
+      const rejectLegacyBody = await rejectLegacyPayload.json();
+      assert.match(String(rejectLegacyBody?.error || ''), /sourceValue/i);
+
       const createRegion = await callApi('/api/admin/app-settings/data/regions', {
         method: 'POST',
         headers: {
@@ -299,8 +344,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           region: {
             name: 'Test Region',
             slug: 'test-region',
-            sourceType: 'extract_query',
-            sourceValue: 'Test Region',
+            sourceType: 'extract',
+            searchQuery: 'Antarctica',
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_antarctica',
+            extractLabel: 'antarctica',
             enabled: true,
             autoSyncEnabled: false,
             autoSyncOnStart: false,
@@ -342,8 +390,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
             id: region.id,
             name: 'Renamed Test Region',
             slug: 'renamed-test-region',
-            sourceType: 'extract_query',
-            sourceValue: 'Test Region',
+            sourceType: 'extract',
+            searchQuery: 'Antarctica',
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_antarctica',
+            extractLabel: 'antarctica',
             enabled: true,
             autoSyncEnabled: false,
             autoSyncOnStart: false,

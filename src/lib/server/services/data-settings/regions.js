@@ -56,8 +56,10 @@ function createRegionsDomain(context = {}) {
     slugify,
     boundsOverlap,
     computeNextSyncAt,
+    hasResolvedExtract,
     fallback,
-    now
+    now,
+    validateSelectedExtract
   } = context;
 
   async function getRegionById(regionId) {
@@ -110,19 +112,38 @@ function createRegionsDomain(context = {}) {
 
   async function normalizeRegionInput(input = {}, previous = null) {
     const previousRegion = previous || null;
-    const sourceValue = normalizeNullableText(
-      input.sourceValue ?? input.source_value ?? previousRegion?.sourceValue ?? '',
+    const hasLegacySourceValueField = Object.prototype.hasOwnProperty.call(input, 'sourceValue')
+      || Object.prototype.hasOwnProperty.call(input, 'source_value');
+    const rawSearchQuery = normalizeNullableText(
+      input.searchQuery
+        ?? input.search_query
+        ?? previousRegion?.searchQuery
+        ?? '',
       240
     );
-    const sourceType = String(
-      input.sourceType ?? input.source_type ?? previousRegion?.sourceType ?? 'extract_query'
-    ).trim() || 'extract_query';
+    const extractSource = normalizeNullableText(
+      input.extractSource ?? input.extract_source ?? previousRegion?.extractSource ?? '',
+      64
+    );
+    const extractId = normalizeNullableText(
+      input.extractId ?? input.extract_id ?? previousRegion?.extractId ?? '',
+      240
+    );
+    const extractLabel = normalizeNullableText(
+      input.extractLabel ?? input.extract_label ?? previousRegion?.extractLabel ?? '',
+      240
+    );
+    const sourceTypeRaw = String(
+      input.sourceType ?? input.source_type ?? previousRegion?.sourceType ?? 'extract'
+    ).trim().toLowerCase();
+    const sourceType = sourceTypeRaw || 'extract';
+    const searchQuery = rawSearchQuery || extractLabel || extractId || '';
     const name = normalizeNullableText(
-      input.name ?? previousRegion?.name ?? sourceValue ?? '',
+      input.name ?? previousRegion?.name ?? extractLabel ?? searchQuery ?? '',
       160
     );
     const slugRaw = normalizeNullableText(
-      input.slug ?? previousRegion?.slug ?? name ?? sourceValue ?? 'region',
+      input.slug ?? previousRegion?.slug ?? name ?? extractLabel ?? searchQuery ?? 'region',
       100
     );
     const slug = await ensureUniqueSlug(slugRaw, previousRegion?.id || null);
@@ -130,9 +151,19 @@ function createRegionsDomain(context = {}) {
     const next = {
       id: previousRegion?.id ? Number(previousRegion.id) : null,
       slug,
-      name: name || sourceValue || 'Region',
+      name: name || extractLabel || searchQuery || 'Region',
       sourceType,
-      sourceValue: sourceValue || '',
+      sourceValue: searchQuery,
+      searchQuery,
+      extractSource: extractSource || '',
+      extractId: extractId || '',
+      extractLabel: extractLabel || extractId || null,
+      extractResolutionStatus: hasResolvedExtract({
+        extractSource,
+        extractId,
+        extractResolutionStatus: previousRegion?.extractResolutionStatus
+      }) ? 'resolved' : 'needs_resolution',
+      extractResolutionError: null,
       enabled: normalizeBoolean(input.enabled ?? previousRegion?.enabled, true),
       autoSyncEnabled: normalizeBoolean(input.autoSyncEnabled ?? previousRegion?.autoSyncEnabled, fallback.autoSyncEnabled),
       autoSyncOnStart: normalizeBoolean(input.autoSyncOnStart ?? previousRegion?.autoSyncOnStart, fallback.autoSyncOnStart),
@@ -168,14 +199,21 @@ function createRegionsDomain(context = {}) {
     };
 
     next.pmtilesMaxZoom = Math.max(next.pmtilesMinZoom, next.pmtilesMaxZoom);
-    next.nextSyncAt = computeNextSyncAt(next, now());
+    next.nextSyncAt = hasResolvedExtract(next)
+      ? computeNextSyncAt(next, now())
+      : null;
 
     const errors = [];
-    if (next.sourceType !== 'extract_query') {
-      errors.push('Для v1 поддерживается только sourceType=extract_query');
+    if (hasLegacySourceValueField) {
+      errors.push('Поле sourceValue больше не поддерживается. Используйте searchQuery.');
     }
-    if (!next.sourceValue) {
-      errors.push('Укажите QuackOSM extract query');
+    if (sourceTypeRaw === 'extract_query') {
+      errors.push('sourceType=extract_query больше не поддерживается. Используйте sourceType=extract.');
+    } else if (next.sourceType !== 'extract') {
+      errors.push('Для v2 поддерживается только sourceType=extract');
+    }
+    if (!next.extractSource || !next.extractId) {
+      errors.push('Выберите canonical extract перед сохранением региона');
     }
     if (!next.name) {
       errors.push('Укажите название региона');
@@ -205,14 +243,23 @@ function createRegionsDomain(context = {}) {
     }
 
     if (existing) {
-      const nextSourceType = input.sourceType ?? input.source_type ?? existing.sourceType ?? '';
-      const nextSourceValue = input.sourceValue ?? input.source_value ?? existing.sourceValue ?? '';
-      const sourceChanged = String(existing.sourceType || '') !== String(nextSourceType || '')
-        || String(existing.sourceValue || '') !== String(nextSourceValue || '').trim();
-      if (sourceChanged) {
+      const existingExtractSource = normalizeNullableText(existing.extractSource, 64) || '';
+      const existingExtractId = normalizeNullableText(existing.extractId, 240) || '';
+      const nextExtractSource = normalizeNullableText(
+        input.extractSource ?? input.extract_source ?? existing.extractSource ?? '',
+        64
+      ) || '';
+      const nextExtractId = normalizeNullableText(
+        input.extractId ?? input.extract_id ?? existing.extractId ?? '',
+        240
+      ) || '';
+      const extractChanged = existingExtractSource !== nextExtractSource
+        || existingExtractId !== nextExtractId;
+      const hasSavedCanonicalExtract = Boolean(existingExtractSource && existingExtractId);
+      if (extractChanged && hasSavedCanonicalExtract) {
         const membershipCount = await countRegionMemberships(existing.id);
         if (membershipCount > 0 || existing.lastSuccessfulSyncAt) {
-          throw new Error('Изменение extract query для уже синхронизированного региона не поддерживается в v1. Создайте новый регион.');
+          throw new Error('Изменение canonical extract для уже синхронизированного региона не поддерживается. Создайте новый регион.');
         }
       }
     }
@@ -222,7 +269,23 @@ function createRegionsDomain(context = {}) {
       throw new Error(normalized.errors.join(' '));
     }
 
-    const next = normalized.value;
+    const extractValidation = await validateSelectedExtract(normalized.value, existing);
+    if (extractValidation.error || !extractValidation.candidate) {
+      throw new Error(extractValidation.error || 'Не удалось проверить canonical extract');
+    }
+
+    const next = {
+      ...normalized.value,
+      sourceType: 'extract',
+      extractSource: extractValidation.candidate.extractSource,
+      extractId: extractValidation.candidate.extractId,
+      extractLabel: extractValidation.candidate.extractLabel,
+      extractResolutionStatus: 'resolved',
+      extractResolutionError: null
+    };
+    next.sourceValue = next.searchQuery || next.extractLabel || next.extractId;
+    next.nextSyncAt = computeNextSyncAt(next, now());
+
     const updatedBy = normalizeNullableText(actor, 160);
     if (existing) {
       await db.prepare(`
@@ -232,6 +295,11 @@ function createRegionsDomain(context = {}) {
           name = ?,
           source_type = ?,
           source_value = ?,
+          extract_source = ?,
+          extract_id = ?,
+          extract_label = ?,
+          extract_resolution_status = ?,
+          extract_resolution_error = NULL,
           enabled = ?,
           auto_sync_enabled = ?,
           auto_sync_on_start = ?,
@@ -248,6 +316,10 @@ function createRegionsDomain(context = {}) {
         next.name,
         next.sourceType,
         next.sourceValue,
+        next.extractSource,
+        next.extractId,
+        next.extractLabel,
+        next.extractResolutionStatus,
         next.enabled ? 1 : 0,
         next.autoSyncEnabled ? 1 : 0,
         next.autoSyncOnStart ? 1 : 0,
@@ -268,6 +340,11 @@ function createRegionsDomain(context = {}) {
         name,
         source_type,
         source_value,
+        extract_source,
+        extract_id,
+        extract_label,
+        extract_resolution_status,
+        extract_resolution_error,
         enabled,
         auto_sync_enabled,
         auto_sync_on_start,
@@ -281,12 +358,16 @@ function createRegionsDomain(context = {}) {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, datetime('now'), datetime('now'))
     `).run(
       next.slug,
       next.name,
       next.sourceType,
       next.sourceValue,
+      next.extractSource,
+      next.extractId,
+      next.extractLabel,
+      next.extractResolutionStatus,
       next.enabled ? 1 : 0,
       next.autoSyncEnabled ? 1 : 0,
       next.autoSyncOnStart ? 1 : 0,

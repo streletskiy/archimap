@@ -16,12 +16,23 @@ function openSqliteRegionDb(archimapDbPath, osmDbPath) {
 
 function normalizeRegionRow(row) {
   if (!row) return null;
+  const extractSource = String(row.extract_source || '').trim();
+  const extractId = String(row.extract_id || '').trim();
+  const extractResolutionStatus = String(
+    row.extract_resolution_status || (extractSource && extractId ? 'resolved' : 'needs_resolution')
+  ).trim().toLowerCase() || 'needs_resolution';
   return {
     id: Number(row.id),
     slug: String(row.slug || ''),
     name: String(row.name || ''),
-    sourceType: String(row.source_type || 'extract_query'),
-    sourceValue: String(row.source_value || ''),
+    sourceType: String(row.source_type || 'extract'),
+    searchQuery: String(row.source_value || ''),
+    extractSource,
+    extractId,
+    extractLabel: row.extract_label ? String(row.extract_label) : null,
+    extractResolutionStatus,
+    extractResolutionError: row.extract_resolution_error ? String(row.extract_resolution_error) : null,
+    canSync: Boolean(extractSource && extractId && extractResolutionStatus === 'resolved'),
     enabled: Number(row.enabled || 0) > 0,
     autoSyncEnabled: Number(row.auto_sync_enabled || 0) > 0,
     autoSyncOnStart: Number(row.auto_sync_on_start || 0) > 0,
@@ -42,11 +53,14 @@ function assertRegionSupportsManagedSync(region) {
   if (!region) {
     throw new Error('Region not found');
   }
-  if (region.sourceType !== 'extract_query') {
-    throw new Error('Only sourceType=extract_query is supported by managed region sync');
+  if (region.sourceType !== 'extract') {
+    throw new Error('Only sourceType=extract is supported by managed region sync');
   }
-  if (!region.sourceValue) {
-    throw new Error('Region extract query is empty');
+  if (!region.extractId || !region.extractSource) {
+    throw new Error(region.extractResolutionError || 'Region canonical extract is empty');
+  }
+  if (region.extractResolutionStatus !== 'resolved') {
+    throw new Error(region.extractResolutionError || 'Region canonical extract requires manual resolution');
   }
 }
 
@@ -60,6 +74,11 @@ function getRegionFromSqlite({ archimapDbPath, osmDbPath }, regionId) {
         name,
         source_type,
         source_value,
+        extract_source,
+        extract_id,
+        extract_label,
+        extract_resolution_status,
+        extract_resolution_error,
         enabled,
         auto_sync_enabled,
         auto_sync_on_start,
@@ -92,6 +111,11 @@ async function getRegionFromPostgres({ databaseUrl }, regionId) {
         name,
         source_type,
         source_value,
+        extract_source,
+        extract_id,
+        extract_label,
+        extract_resolution_status,
+        extract_resolution_error,
         enabled,
         auto_sync_enabled,
         auto_sync_on_start,

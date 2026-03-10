@@ -28,8 +28,13 @@ function up(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slug TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
-      source_type TEXT NOT NULL DEFAULT 'extract_query',
-      source_value TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'extract',
+      source_value TEXT NOT NULL DEFAULT '',
+      extract_source TEXT,
+      extract_id TEXT,
+      extract_label TEXT,
+      extract_resolution_status TEXT NOT NULL DEFAULT 'needs_resolution',
+      extract_resolution_error TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       auto_sync_enabled INTEGER NOT NULL DEFAULT 1,
       auto_sync_on_start INTEGER NOT NULL DEFAULT 0,
@@ -70,6 +75,8 @@ function up(db) {
       active_feature_count INTEGER,
       orphan_deleted_count INTEGER,
       pmtiles_bytes INTEGER,
+      db_bytes INTEGER,
+      db_bytes_approximate INTEGER NOT NULL DEFAULT 0,
       bounds_west REAL,
       bounds_south REAL,
       bounds_east REAL,
@@ -101,6 +108,37 @@ function up(db) {
 
   if (!hasColumn(db, 'data_sync_regions', 'last_feature_count')) {
     db.exec('ALTER TABLE data_sync_regions ADD COLUMN last_feature_count INTEGER;');
+  }
+  if (!hasColumn(db, 'data_sync_regions', 'extract_source')) {
+    db.exec('ALTER TABLE data_sync_regions ADD COLUMN extract_source TEXT;');
+  }
+  if (!hasColumn(db, 'data_sync_regions', 'extract_id')) {
+    db.exec('ALTER TABLE data_sync_regions ADD COLUMN extract_id TEXT;');
+  }
+  if (!hasColumn(db, 'data_sync_regions', 'extract_label')) {
+    db.exec('ALTER TABLE data_sync_regions ADD COLUMN extract_label TEXT;');
+  }
+  if (!hasColumn(db, 'data_sync_regions', 'extract_resolution_status')) {
+    db.exec("ALTER TABLE data_sync_regions ADD COLUMN extract_resolution_status TEXT NOT NULL DEFAULT 'needs_resolution';");
+  }
+  if (!hasColumn(db, 'data_sync_regions', 'extract_resolution_error')) {
+    db.exec('ALTER TABLE data_sync_regions ADD COLUMN extract_resolution_error TEXT;');
+  }
+  db.exec(`
+    UPDATE data_sync_regions
+    SET source_type = 'extract'
+    WHERE COALESCE(TRIM(source_type), '') IN ('', 'extract_query');
+
+    UPDATE data_sync_regions
+    SET extract_resolution_status = 'resolved'
+    WHERE COALESCE(TRIM(extract_id), '') <> ''
+      AND COALESCE(TRIM(extract_source), '') <> '';
+  `);
+  if (!hasColumn(db, 'data_region_sync_runs', 'db_bytes')) {
+    db.exec('ALTER TABLE data_region_sync_runs ADD COLUMN db_bytes INTEGER;');
+  }
+  if (!hasColumn(db, 'data_region_sync_runs', 'db_bytes_approximate')) {
+    db.exec('ALTER TABLE data_region_sync_runs ADD COLUMN db_bytes_approximate INTEGER NOT NULL DEFAULT 0;');
   }
 }
 

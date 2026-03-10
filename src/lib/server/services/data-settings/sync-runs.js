@@ -11,62 +11,21 @@ function createSyncRunsDomain(context = {}) {
     normalizeNullableText,
     toIsoOrNull,
     computeNextSyncAt,
+    computeRegionDbBytes,
     now
   } = context;
 
-  async function computeRegionDbBytes(regionId) {
-    if (db.provider === 'postgres') {
-      try {
-        const row = await db.prepare(`
-          SELECT
-            (
-              COALESCE(SUM(pg_column_size(bc.*)), 0)
-              + COALESCE(SUM(pg_column_size(drm.*)), 0)
-            )::bigint AS db_bytes
-          FROM public.data_region_memberships drm
-          LEFT JOIN osm.building_contours bc
-            ON bc.osm_type = drm.osm_type
-           AND bc.osm_id = drm.osm_id
-          WHERE drm.region_id = ?
-        `).get(Number(regionId));
-        return {
-          dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
-          dbBytesApproximate: false
-        };
-      } catch {
-        return { dbBytes: 0, dbBytesApproximate: false };
-      }
+  function buildRegionSyncEligibilityError(region) {
+    if (!region) {
+      return 'Регион не найден';
     }
-
-    try {
-      const row = await db.prepare(`
-        SELECT
-          COALESCE(SUM(
-            length(CAST(COALESCE(bc.osm_type, '') AS BLOB))
-            + length(CAST(COALESCE(bc.tags_json, '') AS BLOB))
-            + length(CAST(COALESCE(bc.geometry_json, '') AS BLOB))
-            + length(CAST(COALESCE(bc.updated_at, '') AS BLOB))
-            + 48
-          ), 0)
-          + COALESCE(SUM(
-            length(CAST(COALESCE(drm.osm_type, '') AS BLOB))
-            + length(CAST(COALESCE(drm.created_at, '') AS BLOB))
-            + length(CAST(COALESCE(drm.updated_at, '') AS BLOB))
-            + 24
-          ), 0) AS db_bytes
-        FROM data_region_memberships drm
-        LEFT JOIN osm.building_contours bc
-          ON bc.osm_type = drm.osm_type
-         AND bc.osm_id = drm.osm_id
-        WHERE drm.region_id = ?
-      `).get(Number(regionId));
-      return {
-        dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
-        dbBytesApproximate: true
-      };
-    } catch {
-      return { dbBytes: 0, dbBytesApproximate: true };
+    if (region.extractResolutionStatus === 'resolution_error') {
+      return region.extractResolutionError || 'Не удалось подтвердить canonical extract для региона';
     }
+    if (region.extractResolutionStatus === 'resolution_required' || region.extractResolutionStatus === 'needs_resolution') {
+      return region.extractResolutionError || 'Для региона требуется ручной выбор canonical extract';
+    }
+    return 'Регион не готов к синхронизации: canonical extract не выбран';
   }
 
   async function getRecentRuns(regionId = null, limit = 25) {
@@ -108,6 +67,9 @@ function createSyncRunsDomain(context = {}) {
     }
     if (!region.enabled) {
       throw new Error('Синхронизация доступна только для enabled региона');
+    }
+    if (!region.canSync) {
+      throw new Error(buildRegionSyncEligibilityError(region));
     }
 
     const queuedAt = toIsoOrNull(now());
@@ -346,6 +308,16 @@ function createSyncRunsDomain(context = {}) {
     if (!region) return null;
     if (['queued', 'running'].includes(region.lastSyncStatus)) {
       return region;
+    }
+    if (!region.canSync) {
+      await db.prepare(`
+        UPDATE data_sync_regions
+        SET
+          next_sync_at = NULL,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(region.id);
+      return getRegionById(region.id);
     }
     const nextSyncAt = computeNextSyncAt(region, now());
     await db.prepare(`

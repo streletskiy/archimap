@@ -1,4 +1,5 @@
 import argparse
+import difflib
 import json
 import os
 import re
@@ -6,14 +7,202 @@ import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
 
 import duckdb  # type: ignore
+import pandas as pd  # type: ignore
 from quackosm import PbfFileReader, convert_osm_extract_to_duckdb  # type: ignore
+from quackosm.osm_extracts import (  # type: ignore
+    OSM_EXTRACT_SOURCE_INDEX_FUNCTION,
+    OsmExtractMultipleMatchesError,
+    OsmExtractSource,
+    OsmExtractZeroMatchesError,
+    get_extract_by_query,
+)
 
 
 BATCH_SIZE = 20000
+
+
+def normalize_extract_source(value: str) -> str:
+    raw = str(value or 'any').strip() or 'any'
+    try:
+        return str(OsmExtractSource(raw).value)
+    except ValueError as exc:
+        raise ValueError(f'Unknown OSM extract source: {raw}') from exc
+
+
+def normalize_search_text(value: str) -> str:
+    text = str(value or '').strip().casefold()
+    text = text.replace('_', ' ')
+    text = re.sub(r'[/\\|:;,.()+-]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+def tokenize_search_text(value: str) -> list[str]:
+    return [token for token in normalize_search_text(value).split(' ') if token]
+
+
+def infer_extract_source(file_name: str) -> str:
+    value = str(file_name or '').strip().casefold()
+    if value.startswith('osmfr_'):
+      return 'osmfr'
+    if value.startswith('geofabrik_'):
+      return 'geofabrik'
+    if value.startswith('bbbike_'):
+      return 'bbbike'
+    return 'any'
+
+
+def serialize_extract(extract: Any, *, match_kind: str | None = None, exact: bool | None = None) -> dict[str, Any]:
+    file_name = str(getattr(extract, 'file_name', '') or '').strip()
+    return {
+        'extractSource': infer_extract_source(file_name),
+        'extractId': file_name,
+        'extractLabel': str(getattr(extract, 'name', '') or file_name).strip() or file_name,
+        'downloadUrl': str(getattr(extract, 'url', '') or '').strip() or None,
+        'matchKind': match_kind,
+        'exact': bool(exact),
+    }
+
+
+@lru_cache(maxsize=None)
+def get_extract_index(source: str) -> Any:
+    source_name = normalize_extract_source(source)
+    source_enum = OsmExtractSource(source_name)
+    if source_enum == OsmExtractSource.any:
+        index = pd.concat(
+            [get_index_function() for get_index_function in OSM_EXTRACT_SOURCE_INDEX_FUNCTION.values()],
+            ignore_index=True,
+        )
+    else:
+        index = OSM_EXTRACT_SOURCE_INDEX_FUNCTION[source_enum]()
+
+    index = index.copy()
+    index['source_name'] = index['file_name'].map(infer_extract_source)
+    index['normalized_name'] = index['name'].map(normalize_search_text)
+    index['normalized_file_name'] = index['file_name'].map(normalize_search_text)
+    return index
+
+
+def resolve_exact_extract(query: str, source: str = 'any') -> dict[str, Any]:
+    normalized_source = normalize_extract_source(source)
+    try:
+        extract = get_extract_by_query(query, source=normalized_source)
+        return {
+            'candidate': serialize_extract(extract, match_kind='exact', exact=True),
+            'errorCode': None,
+            'message': None,
+            'matchingExtractIds': [],
+        }
+    except OsmExtractMultipleMatchesError as exc:
+        return {
+            'candidate': None,
+            'errorCode': 'multiple',
+            'message': str(exc),
+            'matchingExtractIds': list(getattr(exc, 'matching_full_names', []) or []),
+        }
+    except OsmExtractZeroMatchesError as exc:
+        return {
+            'candidate': None,
+            'errorCode': 'not_found',
+            'message': str(exc),
+            'matchingExtractIds': list(getattr(exc, 'matching_full_names', []) or []),
+        }
+
+
+def search_extract_candidates(query: str, source: str = 'any', limit: int = 12) -> dict[str, Any]:
+    normalized_source = normalize_extract_source(source)
+    normalized_query = normalize_search_text(query)
+    query_tokens = set(tokenize_search_text(query))
+    if not normalized_query:
+        return {
+            'query': '',
+            'items': [],
+        }
+
+    index = get_extract_index(normalized_source)
+    ranked: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for row in index.itertuples(index=False):
+        normalized_name = str(getattr(row, 'normalized_name', '') or '')
+        normalized_file_name = str(getattr(row, 'normalized_file_name', '') or '')
+        name_tokens = set(tokenize_search_text(normalized_name))
+        file_tokens = set(tokenize_search_text(normalized_file_name))
+        overlap = len(query_tokens & name_tokens) + len(query_tokens & file_tokens)
+        ratio = max(
+            difflib.SequenceMatcher(None, normalized_query, normalized_name).ratio() if normalized_name else 0.0,
+            difflib.SequenceMatcher(None, normalized_query, normalized_file_name).ratio() if normalized_file_name else 0.0,
+        )
+
+        score = 0
+        match_kind = 'fuzzy'
+        exact = False
+
+        if normalized_query == normalized_file_name:
+            score = 1000
+            match_kind = 'exact_file_name'
+            exact = True
+        elif normalized_query == normalized_name:
+            score = 950
+            match_kind = 'exact_name'
+            exact = True
+        elif normalized_query in normalized_file_name:
+            score = 820
+            match_kind = 'file_name_contains'
+        elif normalized_query in normalized_name:
+            score = 780
+            match_kind = 'name_contains'
+        elif query_tokens and (query_tokens <= name_tokens or query_tokens <= file_tokens):
+            score = 720 + overlap
+            match_kind = 'token_subset'
+        elif overlap > 0:
+            score = 520 + (overlap * 20) + int(ratio * 100)
+            match_kind = 'token_overlap'
+        elif ratio >= 0.72:
+            score = 320 + int(ratio * 100)
+            match_kind = 'fuzzy'
+
+        if score <= 0:
+            continue
+
+        extract_id = str(getattr(row, 'file_name', '') or '').strip()
+        if not extract_id or extract_id in seen_ids:
+            continue
+        seen_ids.add(extract_id)
+
+        ranked.append({
+            'extractSource': infer_extract_source(extract_id),
+            'extractId': extract_id,
+            'extractLabel': str(getattr(row, 'name', '') or extract_id).strip() or extract_id,
+            'downloadUrl': str(getattr(row, 'url', '') or '').strip() or None,
+            'matchKind': match_kind,
+            'exact': exact,
+            'score': score,
+            'area': float(getattr(row, 'area', 0.0) or 0.0),
+        })
+
+    ranked.sort(key=lambda item: (-int(item['score']), float(item['area']), str(item['extractId'])))
+    items = [
+        {
+            'extractSource': item['extractSource'],
+            'extractId': item['extractId'],
+            'extractLabel': item['extractLabel'],
+            'downloadUrl': item['downloadUrl'],
+            'matchKind': item['matchKind'],
+            'exact': item['exact'],
+        }
+        for item in ranked[: max(1, min(50, int(limit or 12)))]
+    ]
+
+    return {
+        'query': str(query or '').strip(),
+        'items': items,
+    }
 
 
 def ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
@@ -180,7 +369,7 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
     return duckdb_path
 
 
-def run_quackosm_extract_to_duckdb(extract_query: str, work_dir: Path, index: int) -> Path:
+def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work_dir: Path, index: int) -> Path:
     safe_slug = ''.join(ch if ch.isalnum() else '-' for ch in extract_query.lower()).strip('-')
     if not safe_slug:
         safe_slug = 'extract'
@@ -188,46 +377,16 @@ def run_quackosm_extract_to_duckdb(extract_query: str, work_dir: Path, index: in
     if duckdb_path.exists():
         duckdb_path.unlink()
 
-    query_to_use = extract_query
-    for attempt in range(2):
-        try:
-            convert_osm_extract_to_duckdb(
-                osm_extract_query=query_to_use,
-                tags_filter={'building': True},
-                result_file_path=duckdb_path,
-                keep_all_tags=True,
-                explode_tags=False,
-                ignore_cache=False,
-                duckdb_table_name='quackosm_raw',
-            )
-            return duckdb_path
-        except Exception as exc:
-            msg = str(exc)
-            if attempt == 0 and 'Zero extracts matched by query' in msg:
-                match = re.search(r'Found full names close to query:\s*"([^"]+)"', msg)
-                if match:
-                    suggestion = match.group(1).strip()
-                    if suggestion and suggestion.lower() != query_to_use.lower():
-                        print(
-                            f'No exact extract match for "{extract_query}", retrying with suggested full name: "{suggestion}"',
-                            flush=True,
-                        )
-                        query_to_use = suggestion
-                        continue
-            elif attempt == 0 and 'Multiple extracts matched by query' in msg:
-                match = re.search(r'Matching extracts full names:\s*(.+)', msg)
-                if match:
-                    options = [x.strip(' "\'.') for x in match.group(1).split(',')]
-                    if options:
-                        suggestion = next((o for o in options if o.startswith('osmfr')), options[0])
-                        if suggestion and suggestion.lower() != query_to_use.lower():
-                            print(
-                                f'Multiple extracts matched for "{extract_query}", retrying with "{suggestion}"',
-                                flush=True,
-                            )
-                            query_to_use = suggestion
-                            continue
-            raise
+    convert_osm_extract_to_duckdb(
+        osm_extract_query=extract_query,
+        osm_extract_source=normalize_extract_source(extract_source),
+        tags_filter={'building': True},
+        result_file_path=duckdb_path,
+        keep_all_tags=True,
+        explode_tags=False,
+        ignore_cache=False,
+        duckdb_table_name='quackosm_raw',
+    )
     return duckdb_path
 
 
@@ -268,6 +427,7 @@ SELECT
 FROM filtered
 WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
 '''
+
 
 def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection) -> None:
     for ext in ('spatial',):
@@ -415,13 +575,38 @@ WHERE updated_at <> ?;
     return cur.rowcount if cur.rowcount is not None else 0
 
 
+def print_json(payload: dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.write('\n')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--pbf', required=False)
     parser.add_argument('--extract-query', action='append', default=[])
+    parser.add_argument('--extract-source', default='any')
+    parser.add_argument('--resolve-extract-query', required=False)
+    parser.add_argument('--resolve-exact-extract', required=False)
     parser.add_argument('--no-count-pass', action='store_true')
     parser.add_argument('--out-ndjson', required=False)
+    parser.add_argument('--limit', type=int, default=12)
     args = parser.parse_args()
+
+    if args.resolve_extract_query is not None:
+        print_json(search_extract_candidates(
+            query=args.resolve_extract_query,
+            source=args.extract_source,
+            limit=args.limit,
+        ))
+        return
+
+    if args.resolve_exact_extract is not None:
+        print_json(resolve_exact_extract(
+            query=args.resolve_exact_extract,
+            source=args.extract_source,
+        ))
+        return
+
     extract_queries = list(args.extract_query or [])
     dedup = []
     seen = set()
@@ -433,6 +618,7 @@ def main() -> None:
         dedup.append(q.strip())
     extract_queries = dedup
 
+    extract_source = normalize_extract_source(args.extract_source)
     pbf_path = (args.pbf or '').strip()
     if not pbf_path and not extract_queries:
         raise ValueError('Either --pbf or --extract-query must be provided')
@@ -472,13 +658,13 @@ def main() -> None:
             ndjson_path.unlink()
 
     if extract_queries:
-        print(f'Extract query import started (QuackOSM + DuckDB): {extract_queries}', flush=True)
+        print(f'Extract import started (QuackOSM + DuckDB): source={extract_source}, queries={extract_queries}', flush=True)
         for idx, query in enumerate(extract_queries, start=1):
             if import_limit > 0 and imported >= import_limit:
                 print(f'IMPORT_LIMIT reached: {import_limit}', flush=True)
                 break
-            print(f'[{idx}/{len(extract_queries)}] Resolving extract: {query}', flush=True)
-            duckdb_path = run_quackosm_extract_to_duckdb(query, work_dir, idx)
+            print(f'[{idx}/{len(extract_queries)}] Loading extract: source={extract_source}, id={query}', flush=True)
+            duckdb_path = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx)
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
             if ndjson_path is not None:
                 p, i = export_rows_duckdb_ndjson(

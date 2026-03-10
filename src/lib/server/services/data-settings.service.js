@@ -2,10 +2,13 @@ const {
   DEFAULT_FILTER_TAG_ALLOWLIST,
   normalizeFilterTagKeyList
 } = require('./filter-tags.service');
+const path = require('path');
 const { createDataSettingsContext } = require('./data-settings/shared');
 const { createBootstrapDomain } = require('./data-settings/bootstrap');
+const { createExtractsDomain } = require('./data-settings/extracts');
 const { createRegionsDomain } = require('./data-settings/regions');
 const { createSyncRunsDomain } = require('./data-settings/sync-runs');
+const { createPythonExtractResolver } = require('../../../../scripts/region-sync/python-extractor');
 
 function normalizeRegionPmtilesSlug(regionOrSlug) {
   const raw = typeof regionOrSlug === 'object' && regionOrSlug
@@ -61,12 +64,18 @@ function resolveExistingRegionPmtilesPath(dataDir, region) {
 }
 
 function createDataSettingsService(options = {}) {
-  const context = createDataSettingsContext(options);
+  const context = createDataSettingsContext({
+    ...options,
+    extractResolver: options.extractResolver || createPythonExtractResolver({
+      importerPath: path.resolve(__dirname, '../../../../scripts/sync-osm-buildings.py')
+    })
+  });
   const {
     db,
     dataDir,
     readAppDataSettingsRow,
-    normalizeNullableText
+    normalizeNullableText,
+    computeRegionDbBytes
   } = context;
 
   const bootstrapDomain = createBootstrapDomain(context);
@@ -179,9 +188,21 @@ function createDataSettingsService(options = {}) {
     if (items.length === 0) return [];
 
     const storageStatsByRegionId = await getLatestStorageStatsByRegionId();
+    const computedStorageStatsByRegionId = new Map(
+      await Promise.all(
+        items.map(async (region) => {
+          if (storageStatsByRegionId.has(region.id)) {
+            return [region.id, null];
+          }
+          return [region.id, await computeRegionDbBytes(region.id)];
+        })
+      )
+    );
 
     return items.map((region) => {
-      const stats = storageStatsByRegionId.get(region.id) || {};
+      const stats = storageStatsByRegionId.get(region.id)
+        || computedStorageStatsByRegionId.get(region.id)
+        || {};
       return {
         ...region,
         pmtilesBytes: resolveStoredPmtilesBytes(region, stats.pmtilesBytes ?? null),
@@ -192,6 +213,9 @@ function createDataSettingsService(options = {}) {
   }
 
   context.enrichRegionsWithStorageStats = enrichRegionsWithStorageStats;
+
+  const extractsDomain = createExtractsDomain(context);
+  Object.assign(context, extractsDomain);
 
   const regionsDomain = createRegionsDomain(context);
   Object.assign(context, regionsDomain);
@@ -220,6 +244,7 @@ function createDataSettingsService(options = {}) {
     bootstrapFromEnvIfNeeded: bootstrapDomain.bootstrapFromEnvIfNeeded,
     listRegions: regionsDomain.listRegions,
     getRegionById: regionsDomain.getRegionById,
+    searchExtractCandidates: extractsDomain.searchExtractCandidates,
     saveRegion: regionsDomain.saveRegion,
     deleteRegion: regionsDomain.deleteRegion,
     getDataSettingsForAdmin,

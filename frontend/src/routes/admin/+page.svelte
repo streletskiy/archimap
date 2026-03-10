@@ -109,6 +109,8 @@
   let regionSaving = false;
   let regionDeleting = false;
   let regionSyncBusy = false;
+  let regionResolveBusy = false;
+  let regionExtractCandidates = [];
   let selectedDataRegionId = null;
   let regionRuns = [];
   let regionRunsLoading = false;
@@ -144,8 +146,12 @@
       id: Number(region?.id || 0) || null,
       name: String(region?.name || ''),
       slug: String(region?.slug || ''),
-      sourceType: String(region?.sourceType || 'extract_query'),
-      sourceValue: String(region?.sourceValue || ''),
+      searchQuery: String(region?.searchQuery || ''),
+      extractSource: String(region?.extractSource || ''),
+      extractId: String(region?.extractId || ''),
+      extractLabel: String(region?.extractLabel || ''),
+      extractResolutionStatus: String(region?.extractResolutionStatus || 'needs_resolution'),
+      extractResolutionError: region?.extractResolutionError ? String(region.extractResolutionError) : null,
       enabled: region?.enabled !== false,
       autoSyncEnabled: region?.autoSyncEnabled !== false,
       autoSyncOnStart: Boolean(region?.autoSyncOnStart),
@@ -154,6 +160,100 @@
       pmtilesMaxZoom: Number(region?.pmtilesMaxZoom ?? 16) || 0,
       sourceLayer: String(region?.sourceLayer || 'buildings')
     };
+  }
+
+  function clearRegionExtractSelection() {
+    regionDraft = {
+      ...regionDraft,
+      extractSource: '',
+      extractId: '',
+      extractLabel: '',
+      extractResolutionStatus: 'needs_resolution',
+      extractResolutionError: null
+    };
+  }
+
+  function applyRegionExtractCandidate(candidate, options = {}) {
+    const next = candidate && typeof candidate === 'object' ? candidate : {};
+    regionDraft = {
+      ...regionDraft,
+      extractSource: String(next.extractSource || '').trim(),
+      extractId: String(next.extractId || '').trim(),
+      extractLabel: String(next.extractLabel || '').trim(),
+      extractResolutionStatus: 'resolved',
+      extractResolutionError: null
+    };
+    if (options.setStatus !== false) {
+      dataStatus = dataT('status.extractSelected');
+    }
+  }
+
+  function isRegionExtractSelected(candidate) {
+    return String(regionDraft.extractSource || '').trim() === String(candidate?.extractSource || '').trim()
+      && String(regionDraft.extractId || '').trim() === String(candidate?.extractId || '').trim();
+  }
+
+  function handleRegionSearchQueryInput(event) {
+    const nextValue = String(event?.currentTarget?.value || '');
+    const searchChanged = nextValue !== String(regionDraft.searchQuery || '');
+    regionDraft = {
+      ...regionDraft,
+      searchQuery: nextValue
+    };
+    if (searchChanged && (regionDraft.extractId || regionDraft.extractSource)) {
+      clearRegionExtractSelection();
+    }
+    regionExtractCandidates = [];
+  }
+
+  async function resolveRegionExtractCandidates() {
+    const query = String(regionDraft.searchQuery || '').trim();
+    if (!query) {
+      dataStatus = dataT('status.resolveExtractMissingQuery');
+      regionExtractCandidates = [];
+      clearRegionExtractSelection();
+      return;
+    }
+
+    regionResolveBusy = true;
+    dataStatus = dataT('status.resolvingExtract');
+    try {
+      const data = await apiJson('/api/admin/app-settings/data/regions/resolve-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      regionExtractCandidates = items;
+
+      if (items.length === 1) {
+        applyRegionExtractCandidate(items[0], { setStatus: false });
+        dataStatus = dataT('status.extractResolvedSingle');
+        return;
+      }
+
+      clearRegionExtractSelection();
+      dataStatus = items.length > 0
+        ? dataT('status.extractCandidatesLoaded', { count: items.length })
+        : dataT('status.resolveExtractNoMatches');
+    } catch (e) {
+      regionExtractCandidates = [];
+      clearRegionExtractSelection();
+      dataStatus = msg(e, dataT('status.resolveExtractFailed'));
+    } finally {
+      regionResolveBusy = false;
+    }
+  }
+
+  function getRegionExtractPrimaryText(region) {
+    return String(region?.extractLabel || region?.searchQuery || '').trim() || '—';
+  }
+
+  function getRegionExtractSecondaryText(region) {
+    if (region?.extractId && region?.extractSource) {
+      return `${region.extractSource} · ${region.extractId}`;
+    }
+    return String(region?.extractResolutionError || '').trim();
   }
 
   function getRegionStatusMeta(status) {
@@ -1038,6 +1138,8 @@
     const numericRegionId = Number(region?.id || 0);
     selectedDataRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0 ? numericRegionId : null;
     regionDraft = createRegionDraft(region || null);
+    regionResolveBusy = false;
+    regionExtractCandidates = [];
     if (selectedDataRegionId) {
       await loadRegionRuns(selectedDataRegionId);
       return;
@@ -1133,6 +1235,8 @@
     if (!ensureFilterTagChangesDiscarded()) return;
     selectedDataRegionId = null;
     regionDraft = createRegionDraft();
+    regionResolveBusy = false;
+    regionExtractCandidates = [];
     regionRunsLoading = false;
     regionRuns = [];
     regionRunsStatus = '';
@@ -1149,8 +1253,11 @@
         ...(regionDraft.id ? { id: regionDraft.id } : {}),
         name: String(regionDraft.name || '').trim(),
         slug: String(regionDraft.slug || '').trim(),
-        sourceType: 'extract_query',
-        sourceValue: String(regionDraft.sourceValue || '').trim(),
+        sourceType: 'extract',
+        searchQuery: String(regionDraft.searchQuery || '').trim(),
+        extractSource: String(regionDraft.extractSource || '').trim(),
+        extractId: String(regionDraft.extractId || '').trim(),
+        extractLabel: String(regionDraft.extractLabel || '').trim(),
         enabled: Boolean(regionDraft.enabled),
         autoSyncEnabled: Boolean(regionDraft.autoSyncEnabled),
         autoSyncOnStart: Boolean(regionDraft.autoSyncOnStart),
@@ -1635,7 +1742,10 @@
                           data-tone={statusMeta.tone}>{statusMeta.text}</span
                         >
                       </div>
-                      <p class="mt-2 text-sm ui-text-body break-all">{region.sourceValue}</p>
+                      <p class="mt-2 text-sm ui-text-body break-all">{getRegionExtractPrimaryText(region)}</p>
+                      {#if getRegionExtractSecondaryText(region)}
+                        <p class="mt-1 text-xs ui-text-subtle break-all">{getRegionExtractSecondaryText(region)}</p>
+                      {/if}
                       <div class="mt-2 grid gap-1 text-xs ui-text-subtle sm:grid-cols-2">
                         <p>{$t('admin.data.list.lastSync')}: {formatUiDate(region.lastSuccessfulSyncAt) || '—'}</p>
                         <p>{$t('admin.data.list.nextSync')}: {formatUiDate(region.nextSyncAt) || '—'}</p>
@@ -1698,17 +1808,68 @@
                     <span>{$t('admin.data.form.slug')}</span>
                     <input class="ui-field" bind:value={regionDraft.slug} placeholder={$t('admin.data.form.slugPlaceholder')} />
                   </label>
-                  <label class="space-y-1 text-sm ui-text-body md:col-span-2">
-                    <span>{$t('admin.data.form.sourceValue')}</span>
-                    <input class="ui-field" bind:value={regionDraft.sourceValue} placeholder={$t('admin.data.form.sourceValuePlaceholder')} />
-                  </label>
+                  <div class="space-y-2 text-sm ui-text-body md:col-span-2">
+                    <label class="space-y-1 block">
+                      <span>{$t('admin.data.form.searchQuery')}</span>
+                      <div class="flex flex-col gap-2 sm:flex-row">
+                        <input
+                          class="ui-field flex-1"
+                          value={regionDraft.searchQuery}
+                          on:input={handleRegionSearchQueryInput}
+                          placeholder={$t('admin.data.form.searchQueryPlaceholder')}
+                        />
+                        <button
+                          type="button"
+                          class="ui-btn ui-btn-secondary"
+                          on:click={resolveRegionExtractCandidates}
+                          disabled={regionResolveBusy || regionSaving || regionDeleting}
+                        >
+                          {regionResolveBusy ? $t('admin.data.form.resolvingExtract') : $t('admin.data.form.resolveExtract')}
+                        </button>
+                      </div>
+                    </label>
+
+                    {#if regionDraft.extractResolutionStatus !== 'resolved' && regionDraft.extractResolutionError}
+                      <p class="text-xs ui-text-danger break-words">{regionDraft.extractResolutionError}</p>
+                    {/if}
+
+                    {#if regionExtractCandidates.length > 0}
+                      <div class="space-y-2 rounded-xl border ui-border px-3 py-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.form.extractCandidates')}</p>
+                        <div class="space-y-2">
+                          {#each regionExtractCandidates as candidate (`extract-candidate-${candidate.extractSource}-${candidate.extractId}`)}
+                            <label class="block cursor-pointer rounded-lg border ui-border px-3 py-2">
+                              <div class="flex items-start gap-3">
+                                <input
+                                  type="radio"
+                                  name="region-extract-candidate"
+                                  checked={isRegionExtractSelected(candidate)}
+                                  on:change={() => applyRegionExtractCandidate(candidate)}
+                                />
+                                <div class="min-w-0">
+                                  <p class="font-medium ui-text-strong break-words">{candidate.extractLabel}</p>
+                                  <p class="text-xs ui-text-subtle break-all">{candidate.extractSource} · {candidate.extractId}</p>
+                                </div>
+                              </div>
+                            </label>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+
+                    <div class="rounded-xl border ui-border ui-surface-base px-3 py-3">
+                      <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.form.selectedExtract')}</p>
+                      {#if regionDraft.extractId && regionDraft.extractSource}
+                        <p class="mt-2 text-sm font-medium ui-text-strong break-words">{regionDraft.extractLabel || regionDraft.extractId}</p>
+                        <p class="mt-1 text-xs ui-text-subtle break-all">{regionDraft.extractSource} · {regionDraft.extractId}</p>
+                      {:else}
+                        <p class="mt-2 text-sm ui-text-subtle">{$t('admin.data.form.selectedExtractEmpty')}</p>
+                      {/if}
+                    </div>
+                  </div>
                   <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.sourceLayer')}</span>
                     <input class="ui-field" bind:value={regionDraft.sourceLayer} placeholder={$t('admin.data.form.sourceLayerPlaceholder')} />
-                  </label>
-                  <label class="space-y-1 text-sm ui-text-body">
-                    <span>{$t('admin.data.form.sourceType')}</span>
-                    <input class="ui-field" value="extract_query" disabled />
                   </label>
                   <label class="space-y-1 text-sm ui-text-body">
                     <span>{$t('admin.data.form.autoSyncIntervalHours')}</span>
@@ -1775,7 +1936,10 @@
                 {/if}
 
                 <div class="flex flex-wrap gap-2">
-                  <button type="submit" class="ui-btn ui-btn-primary" disabled={regionSaving || regionDeleting}
+                  <button
+                    type="submit"
+                    class="ui-btn ui-btn-primary"
+                    disabled={regionSaving || regionDeleting || !regionDraft.extractId || !regionDraft.extractSource}
                     >{regionDraft.id ? $t('admin.data.form.saveRegion') : $t('admin.data.form.createRegion')}</button
                   >
                   <button

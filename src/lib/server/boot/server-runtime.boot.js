@@ -37,6 +37,32 @@ const { createServerRuntimeConfig } = require('./server-runtime.config');
 const { applyServerRuntimeMiddleware } = require('./server-runtime.middleware');
 const { registerServerRuntimeRoutes } = require('./server-runtime.routes');
 
+async function runPostDbStartupTasks(runtime) {
+  runtime.refreshRuntimeSettings();
+  runtime.scheduleFilterTagKeysCacheRebuild('startup');
+
+  if (runtime.syncWorkers) {
+    try {
+      await Promise.resolve(runtime.syncWorkers.initAutoSync());
+    } catch (error) {
+      runtime.logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
+    }
+  }
+
+  const syncInProgress = Boolean(runtime.syncWorkers?.isSyncInProgress?.());
+  if (syncInProgress) {
+    runtime.logger.info('search_rebuild_startup_deferred', { reason: 'sync_in_progress' });
+  } else {
+    runtime.rebuildSearchIndex('startup').catch((error) => {
+      runtime.logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
+    });
+  }
+
+  if (!runtime.rtreeState.ready) {
+    runtime.scheduleBuildingContoursRtreeRebuild('startup');
+  }
+}
+
 class ServerRuntime {
   constructor(options = {}) {
     this.config = createServerRuntimeConfig(options);
@@ -304,21 +330,7 @@ class ServerRuntime {
     if (this.startupTasksScheduled) return;
     this.startupTasksScheduled = true;
     Promise.resolve(this.dbRuntimePromise)
-      .then(() => {
-        this.refreshRuntimeSettings();
-        this.rebuildSearchIndex('startup').catch((error) => {
-          this.logger.error('search_rebuild_startup_failed', { error: String(error?.message || error) });
-        });
-        this.scheduleFilterTagKeysCacheRebuild('startup');
-        if (this.syncWorkers) {
-          Promise.resolve(this.syncWorkers.initAutoSync()).catch((error) => {
-            this.logger.error('auto_sync_init_failed', { error: String(error?.message || error) });
-          });
-        }
-        if (!this.rtreeState.ready) {
-          this.scheduleBuildingContoursRtreeRebuild('startup');
-        }
-      })
+      .then(() => runPostDbStartupTasks(this))
       .catch((error) => {
         this.logger.error('startup_tasks_wait_db_failed', { error: String(error?.message || error) });
       });
@@ -463,5 +475,6 @@ function createServerRuntime(options = {}) {
 
 module.exports = {
   ServerRuntime,
-  createServerRuntime
+  createServerRuntime,
+  runPostDbStartupTasks
 };

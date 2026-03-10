@@ -1,4 +1,9 @@
 const { spawnSync } = require('child_process');
+const path = require('path');
+
+function getDefaultImporterPath() {
+  return path.resolve(__dirname, '..', 'sync-osm-buildings.py');
+}
 
 function getPythonCandidates(env = process.env) {
   const out = [];
@@ -28,21 +33,21 @@ function runPythonWithCandidate(candidate, args, stdio = 'inherit', env = proces
     shell: false,
     env
   });
-  return { ok: result.status === 0, status: result.status ?? 1 };
+  return { ok: result.status === 0, status: result.status ?? 1, result };
 }
 
 function runPython(args, stdio = 'inherit', preferredCandidate = null, env = process.env) {
   if (preferredCandidate) {
     const direct = runPythonWithCandidate(preferredCandidate, args, stdio, env);
-    if (direct.ok) return { ok: true, candidate: preferredCandidate };
-    return { ok: false, candidate: preferredCandidate };
+    if (direct.ok) return { ok: true, candidate: preferredCandidate, result: direct.result };
+    return { ok: false, candidate: preferredCandidate, result: direct.result };
   }
 
   for (const candidate of getPythonCandidates(env)) {
     const result = runPythonWithCandidate(candidate, args, stdio, env);
-    if (result.ok) return { ok: true, candidate };
+    if (result.ok) return { ok: true, candidate, result: result.result };
   }
-  return { ok: false, candidate: null };
+  return { ok: false, candidate: null, result: null };
 }
 
 function ensurePythonImporterDeps(env = process.env) {
@@ -65,6 +70,69 @@ function ensurePythonImporterDeps(env = process.env) {
   );
 }
 
+function parseJsonPayload(raw) {
+  const text = String(raw || '').trim();
+  if (!text) {
+    throw new Error('Python extractor returned empty JSON payload');
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Failed to parse Python extractor JSON: ${String(error?.message || error)}`);
+  }
+}
+
+function runImporterJson(importerPath, args, env = process.env) {
+  const pythonCandidate = ensurePythonImporterDeps(env);
+  const result = spawnSync(pythonCandidate.exe, [
+    ...pythonCandidate.prefixArgs,
+    importerPath,
+    ...args
+  ], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+    env
+  });
+
+  const stdout = String(result.stdout || '');
+  const stderr = String(result.stderr || '');
+  if (result.status !== 0) {
+    const message = stderr.trim() || stdout.trim() || 'Python extractor command failed';
+    throw new Error(message);
+  }
+
+  return parseJsonPayload(stdout);
+}
+
+function createPythonExtractResolver(options = {}) {
+  const importerPath = String(options.importerPath || getDefaultImporterPath()).trim() || getDefaultImporterPath();
+  const env = options.env || process.env;
+
+  return {
+    async searchExtractCandidates(query, searchOptions = {}) {
+      const limit = Math.max(1, Math.min(50, Number(searchOptions.limit || 12) || 12));
+      const source = String(searchOptions.source || 'any').trim() || 'any';
+      return runImporterJson(importerPath, [
+        '--resolve-extract-query',
+        String(query || ''),
+        '--extract-source',
+        source,
+        '--limit',
+        String(limit)
+      ], env);
+    },
+    async resolveExactExtract(query, resolveOptions = {}) {
+      const source = String(resolveOptions.source || 'any').trim() || 'any';
+      return runImporterJson(importerPath, [
+        '--resolve-exact-extract',
+        String(query || ''),
+        '--extract-source',
+        source
+      ], env);
+    }
+  };
+}
+
 function exportRegionExtractToNdjson({
   importerPath,
   region,
@@ -72,9 +140,16 @@ function exportRegionExtractToNdjson({
   env = process.env
 }) {
   const pythonCandidate = ensurePythonImporterDeps(env);
+  const extractId = String(region?.extractId || '').trim();
+  const extractSource = String(region?.extractSource || 'any').trim() || 'any';
+  if (!extractId) {
+    throw new Error('Managed region sync requires canonical extract id');
+  }
+
   const result = runPython([
     importerPath,
-    '--extract-query', region.sourceValue,
+    '--extract-query', extractId,
+    '--extract-source', extractSource,
     '--out-ndjson', outputPath
   ], 'inherit', pythonCandidate, {
     ...env,
@@ -87,5 +162,8 @@ function exportRegionExtractToNdjson({
 }
 
 module.exports = {
-  exportRegionExtractToNdjson
+  createPythonExtractResolver,
+  ensurePythonImporterDeps,
+  exportRegionExtractToNdjson,
+  getDefaultImporterPath
 };

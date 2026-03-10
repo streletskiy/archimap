@@ -17,7 +17,9 @@ function hasColumn(db, tableName, columnName) {
 function up(db) {
     if (!hasColumn(db, 'data_region_sync_runs', 'db_bytes')) {
         db.exec('ALTER TABLE data_region_sync_runs ADD COLUMN db_bytes INTEGER;');
-        db.exec('ALTER TABLE data_region_sync_runs ADD COLUMN db_bytes_approximate INTEGER DEFAULT 0;');
+    }
+    if (!hasColumn(db, 'data_region_sync_runs', 'db_bytes_approximate')) {
+        db.exec('ALTER TABLE data_region_sync_runs ADD COLUMN db_bytes_approximate INTEGER NOT NULL DEFAULT 0;');
     }
 }
 

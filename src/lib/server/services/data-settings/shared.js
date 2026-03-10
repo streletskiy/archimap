@@ -77,6 +77,7 @@ function ensureCompatDb(db) {
 function createDataSettingsContext(options = {}) {
   const db = ensureCompatDb(options.db);
   const dataDir = String(options.dataDir || '');
+  const extractResolver = options.extractResolver || null;
   const now = typeof options.now === 'function'
     ? options.now
     : () => new Date();
@@ -115,6 +116,14 @@ function createDataSettingsContext(options = {}) {
     const raw = String(value || fallbackValue || 'buildings').trim();
     const safe = raw.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
     return safe.slice(0, 64) || 'buildings';
+  }
+
+  function normalizeExtractResolutionStatus(value, fallbackValue = 'needs_resolution') {
+    const raw = String(value || fallbackValue || '').trim().toLowerCase();
+    if (['resolved', 'needs_resolution', 'resolution_required', 'resolution_error'].includes(raw)) {
+      return raw;
+    }
+    return fallbackValue;
   }
 
   function normalizeBounds(raw) {
@@ -209,14 +218,42 @@ function createDataSettingsContext(options = {}) {
     return referenceIso;
   }
 
+  function hasResolvedExtract(regionLike = {}) {
+    const extractSource = String(regionLike?.extractSource || regionLike?.extract_source || '').trim();
+    const extractId = String(regionLike?.extractId || regionLike?.extract_id || '').trim();
+    const resolutionStatus = normalizeExtractResolutionStatus(
+      regionLike?.extractResolutionStatus ?? regionLike?.extract_resolution_status,
+      extractSource && extractId ? 'resolved' : 'needs_resolution'
+    );
+    return Boolean(extractSource && extractId && resolutionStatus === 'resolved');
+  }
+
   function rowToRegion(row) {
     if (!row) return null;
+    const extractSource = String(row.extract_source || '').trim();
+    const extractId = String(row.extract_id || '').trim();
+    const extractResolutionStatus = normalizeExtractResolutionStatus(
+      row.extract_resolution_status,
+      extractSource && extractId ? 'resolved' : 'needs_resolution'
+    );
+    const canSync = hasResolvedExtract({
+      extractSource,
+      extractId,
+      extractResolutionStatus
+    });
     return {
       id: Number(row.id),
       slug: String(row.slug || ''),
       name: String(row.name || ''),
-      sourceType: String(row.source_type || 'extract_query'),
-      sourceValue: String(row.source_value || ''),
+      sourceType: String(row.source_type || 'extract'),
+      searchQuery: String(row.source_value || ''),
+      extractSource,
+      extractId,
+      extractLabel: row.extract_label ? String(row.extract_label) : null,
+      extractResolutionStatus,
+      extractResolutionError: row.extract_resolution_error ? String(row.extract_resolution_error) : null,
+      resolutionRequired: extractResolutionStatus !== 'resolved',
+      canSync,
       enabled: Number(row.enabled || 0) > 0,
       autoSyncEnabled: Number(row.auto_sync_enabled || 0) > 0,
       autoSyncOnStart: Number(row.auto_sync_on_start || 0) > 0,
@@ -293,6 +330,11 @@ function createDataSettingsContext(options = {}) {
           name,
           source_type,
           source_value,
+          extract_source,
+          extract_id,
+          extract_label,
+          extract_resolution_status,
+          extract_resolution_error,
           enabled,
           auto_sync_enabled,
           auto_sync_on_start,
@@ -332,6 +374,11 @@ function createDataSettingsContext(options = {}) {
         name,
         source_type,
         source_value,
+        extract_source,
+        extract_id,
+        extract_label,
+        extract_resolution_status,
+        extract_resolution_error,
         enabled,
         auto_sync_enabled,
         auto_sync_on_start,
@@ -376,6 +423,61 @@ function createDataSettingsContext(options = {}) {
     return Number(row?.total || 0);
   }
 
+  async function computeRegionDbBytes(regionId) {
+    if (db.provider === 'postgres') {
+      try {
+        const row = await db.prepare(`
+          SELECT
+            (
+              COALESCE(SUM(pg_column_size(bc.*)), 0)
+              + COALESCE(SUM(pg_column_size(drm.*)), 0)
+            )::bigint AS db_bytes
+          FROM public.data_region_memberships drm
+          LEFT JOIN osm.building_contours bc
+            ON bc.osm_type = drm.osm_type
+           AND bc.osm_id = drm.osm_id
+          WHERE drm.region_id = ?
+        `).get(Number(regionId));
+        return {
+          dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
+          dbBytesApproximate: false
+        };
+      } catch {
+        return { dbBytes: 0, dbBytesApproximate: false };
+      }
+    }
+
+    try {
+      const row = await db.prepare(`
+        SELECT
+          COALESCE(SUM(
+            length(CAST(COALESCE(bc.osm_type, '') AS BLOB))
+            + length(CAST(COALESCE(bc.tags_json, '') AS BLOB))
+            + length(CAST(COALESCE(bc.geometry_json, '') AS BLOB))
+            + length(CAST(COALESCE(bc.updated_at, '') AS BLOB))
+            + 48
+          ), 0)
+          + COALESCE(SUM(
+            length(CAST(COALESCE(drm.osm_type, '') AS BLOB))
+            + length(CAST(COALESCE(drm.created_at, '') AS BLOB))
+            + length(CAST(COALESCE(drm.updated_at, '') AS BLOB))
+            + 24
+          ), 0) AS db_bytes
+        FROM data_region_memberships drm
+        LEFT JOIN osm.building_contours bc
+          ON bc.osm_type = drm.osm_type
+         AND bc.osm_id = drm.osm_id
+        WHERE drm.region_id = ?
+      `).get(Number(regionId));
+      return {
+        dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
+        dbBytesApproximate: true
+      };
+    } catch {
+      return { dbBytes: 0, dbBytesApproximate: true };
+    }
+  }
+
   return {
     db,
     dataDir,
@@ -385,19 +487,23 @@ function createDataSettingsContext(options = {}) {
     normalizeNullableText,
     normalizeInteger,
     normalizeSourceLayer,
+    normalizeExtractResolutionStatus,
     slugify,
     normalizeBounds,
     boundsFromRow,
     boundsOverlap,
     toIsoOrNull,
     computeNextSyncAt,
+    hasResolvedExtract,
     rowToRegion,
     rowToRun,
+    extractResolver,
     readAppDataSettingsRow,
     listRegionRows,
     getRegionRowById,
     countRegions,
     countRegionMemberships,
+    computeRegionDbBytes,
     state: {
       bootstrapPromise: null
     }

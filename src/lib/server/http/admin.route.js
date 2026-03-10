@@ -311,13 +311,37 @@ function registerAdminRoutes(deps) {
       return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
     }
     const includeDisabled = String(req.query?.includeDisabled ?? 'true').trim().toLowerCase() !== 'false';
-    const items = await dataSettingsService.listRegions({ includeDisabled, includeStorageStats: true });
+    const items = await dataSettingsService.listRegions({
+      includeDisabled,
+      includeStorageStats: true
+    });
     return sendCachedJson(req, res, {
       ok: true,
       items
     }, {
       cacheControl: 'private, no-cache'
     });
+  });
+
+  app.post('/api/admin/app-settings/data/regions/resolve-extract', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {
+    if (!dataSettingsService) {
+      return res.status(500).json({ error: 'Сервис настроек данных недоступен' });
+    }
+    try {
+      const query = String(req.body?.query || '').trim();
+      const source = String(req.body?.source || 'any').trim() || 'any';
+      const resolved = await dataSettingsService.searchExtractCandidates(query, {
+        source,
+        limit: 12
+      });
+      return res.json({
+        ok: true,
+        query: resolved.query,
+        items: resolved.items
+      });
+    } catch (error) {
+      return res.status(400).json({ error: String(error?.message || error || 'Не удалось подобрать extract-кандидатов') });
+    }
   });
 
   app.get('/api/admin/app-settings/data/regions/:regionId/runs', requireAuth, requireAdmin, requireMasterAdmin, async (req, res) => {

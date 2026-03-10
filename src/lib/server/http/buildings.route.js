@@ -379,13 +379,6 @@ function normalizeFilterRule(rule, options = {}) {
   const value = String(rule?.value || '').trim();
   if (!key) return { error: 'Rule key is required' };
   if (key.length > FILTER_MATCH_MAX_KEY_LEN) return { error: 'Rule key is too long' };
-  const isFilterTagAllowed = typeof options.isFilterTagAllowed === 'function'
-    ? options.isFilterTagAllowed
-    : null;
-  const isArchiKey = key.startsWith('archi.');
-  if (!isArchiKey && isFilterTagAllowed && !isFilterTagAllowed(key)) {
-    return { error: `Ключ фильтра не разрешен: ${key}` };
-  }
   if (!FILTER_RULE_OPS.has(op)) return { error: `Invalid rule operator: ${op}` };
   if (value.length > FILTER_MATCH_MAX_VALUE_LEN) return { error: 'Rule value is too long' };
   const numericValue = NUMERIC_FILTER_RULE_OPS.has(op) ? parseNumericFilterValue(value) : null;

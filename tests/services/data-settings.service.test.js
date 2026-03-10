@@ -44,6 +44,97 @@ function ensureContoursTable(db) {
   `);
 }
 
+function createMockExtractResolver(fixtures = {}) {
+  const exact = fixtures.exact || {};
+
+  function buildDefaultCandidate(query, source = 'mock') {
+    const extractSource = String(source || 'mock').trim() || 'mock';
+    const extractId = String(query || '').trim();
+    return extractId
+      ? {
+        extractSource: extractSource === 'any' ? 'mock' : extractSource,
+        extractId,
+        extractLabel: extractId
+      }
+      : null;
+  }
+
+  function lookupExact(query, source = 'any') {
+    const sourceKey = String(source || 'any').trim() || 'any';
+    const queryKey = String(query || '').trim();
+    return exact[`${sourceKey}:${queryKey}`] ?? exact[queryKey] ?? null;
+  }
+
+  return {
+    async searchExtractCandidates(query, options = {}) {
+      const candidate = buildDefaultCandidate(query, options.source || 'mock');
+      return {
+        query: String(query || '').trim(),
+        items: candidate ? [candidate] : []
+      };
+    },
+    async resolveExactExtract(query, options = {}) {
+      const fixture = lookupExact(query, options.source);
+      if (fixture) {
+        return fixture;
+      }
+      const candidate = buildDefaultCandidate(query, options.source || 'mock');
+      if (!candidate) {
+        return {
+          candidate: null,
+          errorCode: 'not_found',
+          message: 'Extract not found'
+        };
+      }
+      return {
+        candidate,
+        errorCode: null,
+        message: null
+      };
+    }
+  };
+}
+
+function createService(options = {}) {
+  return createDataSettingsService({
+    db: options.db,
+    dataDir: options.dataDir,
+    now: options.now,
+    extractResolver: options.extractResolver || createMockExtractResolver(),
+    fallbackData: options.fallbackData || {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+}
+
+function buildRegionInput(input = {}) {
+  const name = String(input.name || '').trim() || 'Test Region';
+  const slug = String(input.slug || '').trim() || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const extractId = String(input.extractId || slug).trim() || slug;
+  return {
+    ...(input.id ? { id: input.id } : {}),
+    name,
+    slug,
+    sourceType: 'extract',
+    searchQuery: String(input.searchQuery || name).trim() || name,
+    extractSource: String(input.extractSource || 'mock').trim() || 'mock',
+    extractId,
+    extractLabel: String(input.extractLabel || name).trim() || name,
+    enabled: input.enabled ?? true,
+    autoSyncEnabled: input.autoSyncEnabled ?? true,
+    autoSyncOnStart: input.autoSyncOnStart ?? false,
+    autoSyncIntervalHours: input.autoSyncIntervalHours ?? 24,
+    pmtilesMinZoom: input.pmtilesMinZoom ?? 13,
+    pmtilesMaxZoom: input.pmtilesMaxZoom ?? 16,
+    sourceLayer: String(input.sourceLayer || 'buildings').trim() || 'buildings'
+  };
+}
+
 test('region PMTiles filenames use slug and resolve legacy id fallback during migration', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-region-pmtiles-'));
   const region = {
@@ -72,7 +163,7 @@ test('region PMTiles filenames use slug and resolve legacy id fallback during mi
 
 test('bootstrapFromEnvIfNeeded records db-only bootstrap without creating regions', async () => {
   const db = createTestDb();
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     fallbackData: {
       autoSyncEnabled: true,
@@ -101,7 +192,7 @@ test('bootstrapFromEnvIfNeeded records db-only bootstrap without creating region
 
 test('filter tag allowlist uses important defaults when DB config is absent', async () => {
   const db = createTestDb();
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     fallbackData: {
       autoSyncEnabled: true,
@@ -121,7 +212,7 @@ test('filter tag allowlist uses important defaults when DB config is absent', as
 
 test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () => {
   const db = createTestDb();
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     fallbackData: {
       autoSyncEnabled: true,
@@ -147,7 +238,7 @@ test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () 
 
 test('saveRegion allows renaming existing region while preserving id', async () => {
   const db = createTestDb();
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     fallbackData: {
       autoSyncEnabled: true,
@@ -159,37 +250,242 @@ test('saveRegion allows renaming existing region while preserving id', async () 
     }
   });
 
-  const created = await service.saveRegion({
+  const created = await service.saveRegion(buildRegionInput({
     name: 'Original Region',
     slug: 'original-region',
-    sourceType: 'extract_query',
-    sourceValue: 'Original Region',
-    enabled: true,
+    extractId: 'original-region',
     autoSyncEnabled: true,
     autoSyncIntervalHours: 24
-  }, 'tester');
+  }), 'tester');
 
-  const renamed = await service.saveRegion({
+  const renamed = await service.saveRegion(buildRegionInput({
     id: created.id,
     name: 'Renamed Region',
     slug: 'renamed-region',
-    sourceType: 'extract_query',
-    sourceValue: 'Original Region',
-    enabled: true,
+    searchQuery: 'Original Region',
+    extractId: 'original-region',
     autoSyncEnabled: true,
     autoSyncIntervalHours: 24
-  }, 'tester');
+  }), 'tester');
 
   assert.equal(renamed.id, created.id);
   assert.equal(renamed.name, 'Renamed Region');
   assert.equal(renamed.slug, 'renamed-region');
 });
 
+test('saveRegion rejects free-form region payload without canonical extract', async () => {
+  const db = createTestDb();
+  const service = createService({ db });
+
+  await assert.rejects(
+    service.saveRegion({
+      name: 'Legacy Query Only',
+      slug: 'legacy-query-only',
+      sourceType: 'extract',
+      searchQuery: 'Moscow City',
+      enabled: true,
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }, 'tester'),
+    /canonical extract/i
+  );
+});
+
+test('saveRegion rejects legacy sourceValue/sourceType aliases', async () => {
+  const db = createTestDb();
+  const service = createService({ db });
+
+  await assert.rejects(
+    service.saveRegion({
+      name: 'Legacy Source Value',
+      slug: 'legacy-source-value',
+      sourceType: 'extract',
+      sourceValue: 'Moscow City',
+      extractSource: 'mock',
+      extractId: 'legacy-source-value',
+      extractLabel: 'Legacy Source Value',
+      enabled: true,
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }, 'tester'),
+    /sourceValue/i
+  );
+
+  await assert.rejects(
+    service.saveRegion({
+      name: 'Legacy Source Type',
+      slug: 'legacy-source-type',
+      sourceType: 'extract_query',
+      searchQuery: 'Moscow City',
+      extractSource: 'mock',
+      extractId: 'legacy-source-type',
+      extractLabel: 'Legacy Source Type',
+      enabled: true,
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }, 'tester'),
+    /extract_query/i
+  );
+});
+
+test('legacy unresolved regions stay unresolved until manual extract selection', async () => {
+  const db = createTestDb();
+  const service = createService({
+    db,
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'legacy-exact': {
+          candidate: {
+            extractSource: 'osmfr',
+            extractId: 'osmfr_region_exact',
+            extractLabel: 'Exact Region'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    })
+  });
+
+  db.prepare(`
+    INSERT INTO data_sync_regions (
+      slug,
+      name,
+      source_type,
+      source_value,
+      extract_resolution_status,
+      enabled,
+      auto_sync_enabled,
+      auto_sync_interval_hours,
+      pmtiles_min_zoom,
+      pmtiles_max_zoom,
+      source_layer,
+      last_sync_status,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, 1, 1, 24, 13, 16, 'buildings', 'idle', datetime('now'), datetime('now'))
+  `).run('legacy-exact', 'Legacy Exact', 'extract', 'legacy-exact', 'needs_resolution');
+
+  const adminSettings = await service.getDataSettingsForAdmin();
+  const legacy = adminSettings.regions.find((item) => item.slug === 'legacy-exact');
+  assert.ok(legacy);
+  assert.equal(legacy.extractResolutionStatus, 'needs_resolution');
+  assert.equal(legacy.extractSource, '');
+  assert.equal(legacy.extractId, '');
+  assert.equal(legacy.canSync, false);
+
+  const stored = db.prepare(`
+    SELECT extract_source, extract_id, extract_resolution_status
+    FROM data_sync_regions
+    WHERE slug = ?
+    LIMIT 1
+  `).get('legacy-exact');
+  assert.equal(stored.extract_source, null);
+  assert.equal(stored.extract_id, null);
+  assert.equal(stored.extract_resolution_status, 'needs_resolution');
+
+  await assert.rejects(
+    service.createQueuedRun(legacy.id, 'manual', 'tester'),
+    /ручной выбор canonical extract/i
+  );
+});
+
+test('saveRegion allows first canonical extract selection for already synced legacy region', async () => {
+  const db = createTestDb();
+  const service = createService({
+    db,
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'geofabrik:geofabrik_antarctica': {
+          candidate: {
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_antarctica',
+            extractLabel: 'antarctica'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    })
+  });
+
+  db.prepare(`
+    INSERT INTO data_sync_regions (
+      slug,
+      name,
+      source_type,
+      source_value,
+      extract_resolution_status,
+      enabled,
+      auto_sync_enabled,
+      auto_sync_on_start,
+      auto_sync_interval_hours,
+      pmtiles_min_zoom,
+      pmtiles_max_zoom,
+      source_layer,
+      last_sync_status,
+      last_successful_sync_at,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, 'extract', ?, 'needs_resolution', 1, 0, 0, 0, 12, 15, 'buildings', 'idle', datetime('now'), datetime('now'), datetime('now'))
+  `).run('legacy-synced-region', 'Legacy Synced Region', 'Antarctica');
+
+  const inserted = db.prepare(`
+    SELECT id
+    FROM data_sync_regions
+    WHERE slug = ?
+    LIMIT 1
+  `).get('legacy-synced-region');
+  assert.ok(inserted?.id);
+
+  db.prepare(`
+    INSERT INTO data_region_memberships (
+      region_id,
+      osm_type,
+      osm_id,
+      created_at,
+      updated_at
+    )
+    VALUES (?, 'way', 101, datetime('now'), datetime('now'))
+  `).run(inserted.id);
+
+  const saved = await service.saveRegion({
+    id: inserted.id,
+    name: 'Legacy Synced Region',
+    slug: 'legacy-synced-region',
+    sourceType: 'extract',
+    searchQuery: 'Antarctica',
+    extractSource: 'geofabrik',
+    extractId: 'geofabrik_antarctica',
+    extractLabel: 'antarctica',
+    enabled: true,
+    autoSyncEnabled: false,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 0,
+    pmtilesMinZoom: 12,
+    pmtilesMaxZoom: 15,
+    sourceLayer: 'buildings'
+  }, 'tester');
+
+  assert.equal(saved.extractResolutionStatus, 'resolved');
+  assert.equal(saved.extractSource, 'geofabrik');
+  assert.equal(saved.extractId, 'geofabrik_antarctica');
+  assert.equal(saved.lastSuccessfulSyncAt !== null, true);
+});
+
 test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage bytes for region', async () => {
   const db = createTestDb();
   ensureContoursTable(db);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-region-storage-'));
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     dataDir: tempDir,
     fallbackData: {
@@ -203,15 +499,13 @@ test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage byt
   });
 
   try {
-    const region = await service.saveRegion({
+    const region = await service.saveRegion(buildRegionInput({
       name: 'Storage Region',
       slug: 'storage-region',
-      sourceType: 'extract_query',
-      sourceValue: 'Storage Region',
-      enabled: true,
+      extractId: 'storage-region',
       autoSyncEnabled: true,
       autoSyncIntervalHours: 24
-    }, 'tester');
+    }), 'tester');
 
     const pmtilesPath = resolveRegionPmtilesPath(tempDir, region);
     fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
@@ -266,7 +560,7 @@ test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage byt
 
 test('overlapping enabled region bounds are allowed to complete syncs', async () => {
   const db = createTestDb();
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     fallbackData: {
       autoSyncEnabled: true,
@@ -278,15 +572,13 @@ test('overlapping enabled region bounds are allowed to complete syncs', async ()
     }
   });
 
-  const first = await service.saveRegion({
+  const first = await service.saveRegion(buildRegionInput({
     name: 'Region A',
     slug: 'region-a',
-    sourceType: 'extract_query',
-    sourceValue: 'Region A',
-    enabled: true,
+    extractId: 'region-a',
     autoSyncEnabled: true,
     autoSyncIntervalHours: 24
-  }, 'tester');
+  }), 'tester');
 
   const firstRun = await service.createQueuedRun(first.id, 'manual', 'tester');
   await service.markRunStarted(firstRun.id);
@@ -303,15 +595,13 @@ test('overlapping enabled region bounds are allowed to complete syncs', async ()
     }
   });
 
-  const second = await service.saveRegion({
+  const second = await service.saveRegion(buildRegionInput({
     name: 'Region B',
     slug: 'region-b',
-    sourceType: 'extract_query',
-    sourceValue: 'Region B',
-    enabled: true,
+    extractId: 'region-b',
     autoSyncEnabled: true,
     autoSyncIntervalHours: 24
-  }, 'tester');
+  }), 'tester');
 
   const secondRun = await service.createQueuedRun(second.id, 'manual', 'tester');
   await service.markRunStarted(secondRun.id);
@@ -341,7 +631,7 @@ test('run lifecycle updates region status, history and nextSyncAt', async () => 
   const db = createTestDb();
   const fixedNow = new Date('2026-03-07T10:00:00.000Z');
   let currentNow = fixedNow;
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     now: () => currentNow,
     fallbackData: {
@@ -354,16 +644,14 @@ test('run lifecycle updates region status, history and nextSyncAt', async () => 
     }
   });
 
-  const region = await service.saveRegion({
+  const region = await service.saveRegion(buildRegionInput({
     name: 'Runtime Region',
     slug: 'runtime-region',
-    sourceType: 'extract_query',
-    sourceValue: 'Runtime Region',
-    enabled: true,
+    extractId: 'runtime-region',
     autoSyncEnabled: true,
     autoSyncOnStart: false,
     autoSyncIntervalHours: 24
-  }, 'tester');
+  }), 'tester');
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   assert.equal(queuedRun.status, 'queued');
@@ -401,7 +689,7 @@ test('run lifecycle updates region status, history and nextSyncAt', async () => 
 test('failed first sync schedules retry after interval instead of immediate rerun', async () => {
   const db = createTestDb();
   let currentNow = new Date('2026-03-07T10:00:00.000Z');
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     now: () => currentNow,
     fallbackData: {
@@ -414,16 +702,14 @@ test('failed first sync schedules retry after interval instead of immediate reru
     }
   });
 
-  const region = await service.saveRegion({
+  const region = await service.saveRegion(buildRegionInput({
     name: 'Retry Region',
     slug: 'retry-region',
-    sourceType: 'extract_query',
-    sourceValue: 'Retry Region',
-    enabled: true,
+    extractId: 'retry-region',
     autoSyncEnabled: true,
     autoSyncOnStart: false,
     autoSyncIntervalHours: 24
-  }, 'tester');
+  }), 'tester');
 
   assert.equal(region.nextSyncAt, '2026-03-07T10:00:00.000Z');
 
@@ -443,7 +729,7 @@ test('failed first sync schedules retry after interval instead of immediate reru
 test('deleteRegion removes only orphan features and preserves shared data of other regions', async () => {
   const db = createTestDb();
   ensureContoursTable(db);
-  const service = createDataSettingsService({
+  const service = createService({
     db,
     fallbackData: {
       autoSyncEnabled: true,
@@ -455,24 +741,20 @@ test('deleteRegion removes only orphan features and preserves shared data of oth
     }
   });
 
-  const regionA = await service.saveRegion({
+  const regionA = await service.saveRegion(buildRegionInput({
     name: 'Region A',
     slug: 'region-a',
-    sourceType: 'extract_query',
-    sourceValue: 'Region A',
-    enabled: true,
+    extractId: 'region-a',
     autoSyncEnabled: false,
     autoSyncIntervalHours: 0
-  }, 'tester');
-  const regionB = await service.saveRegion({
+  }), 'tester');
+  const regionB = await service.saveRegion(buildRegionInput({
     name: 'Region B',
     slug: 'region-b',
-    sourceType: 'extract_query',
-    sourceValue: 'Region B',
-    enabled: true,
+    extractId: 'region-b',
     autoSyncEnabled: false,
     autoSyncIntervalHours: 0
-  }, 'tester');
+  }), 'tester');
 
   db.prepare(`
     INSERT INTO osm.building_contours (
