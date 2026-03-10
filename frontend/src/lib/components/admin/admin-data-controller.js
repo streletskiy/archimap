@@ -4,6 +4,10 @@ import { translateNow } from '$lib/i18n/index';
 import { apiJson } from '$lib/services/http';
 
 const DATA_I18N_PREFIX = 'admin.data';
+const MAP_REGION_NAME_KEYS = Object.freeze(['Name', 'name']);
+const MAP_REGION_SLUG_KEYS = Object.freeze(['Slug', 'slug']);
+const MAP_REGION_EXTRACT_ID_KEYS = Object.freeze(['ExtractId', 'extractId', 'extract_id']);
+const MAP_REGION_EXTRACT_SOURCE_KEYS = Object.freeze(['ExtractSource', 'extractSource', 'extract_source']);
 
 const msg = (error, fallback) => String(error?.message || fallback);
 const dataT = (key, params = {}) => translateNow(`${DATA_I18N_PREFIX}.${key}`, params);
@@ -43,6 +47,29 @@ function createRegionDraft(region = null) {
     pmtilesMaxZoom: Number(region?.pmtilesMaxZoom ?? 16) || 0,
     sourceLayer: String(region?.sourceLayer || 'buildings')
   };
+}
+
+function getRecordTextValue(record, keys = []) {
+  const source = record && typeof record === 'object' ? record : {};
+  const byLowercaseKey = new Map(Object.entries(source).map(([key, value]) => [String(key || '').toLowerCase(), value]));
+
+  for (const key of Array.isArray(keys) ? keys : []) {
+    const direct = source[key];
+    const value = direct ?? byLowercaseKey.get(String(key || '').toLowerCase());
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function slugifyLoose(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 function normalizeDataSettings(nextSettings, fallback) {
@@ -152,6 +179,67 @@ export function createAdminDataController() {
       ...current,
       ...(patch && typeof patch === 'object' ? patch : {})
     }));
+  }
+
+  function getMapRegionFeatureMeta(feature) {
+    const properties = feature?.properties && typeof feature.properties === 'object' ? feature.properties : {};
+    const name = getRecordTextValue(properties, MAP_REGION_NAME_KEYS);
+    const slug = getRecordTextValue(properties, MAP_REGION_SLUG_KEYS) || slugifyLoose(name);
+    const extractId = getRecordTextValue(properties, MAP_REGION_EXTRACT_ID_KEYS);
+    const extractSource = getRecordTextValue(properties, MAP_REGION_EXTRACT_SOURCE_KEYS) || 'osmfr';
+
+    return {
+      name,
+      slug,
+      extractSource,
+      extractId
+    };
+  }
+
+  function findRegionByMapFeature(feature, regions = null) {
+    const items = Array.isArray(regions) ? regions : get(dataSettings).regions;
+    const meta = getMapRegionFeatureMeta(feature);
+    const featureSlug = String(meta.slug || '').trim().toLowerCase();
+    const featureExtractSource = String(meta.extractSource || '').trim().toLowerCase();
+    const featureExtractId = String(meta.extractId || '').trim().toLowerCase();
+
+    return (
+      items.find((item) => {
+        const regionSlug = String(item?.slug || '').trim().toLowerCase();
+        const regionExtractSource = String(item?.extractSource || '').trim().toLowerCase();
+        const regionExtractId = String(item?.extractId || '').trim().toLowerCase();
+
+        if (featureSlug && regionSlug === featureSlug) return true;
+        if (
+          featureExtractId
+          && regionExtractId === featureExtractId
+          && (!featureExtractSource || !regionExtractSource || regionExtractSource === featureExtractSource)
+        ) {
+          return true;
+        }
+        return false;
+      }) || null
+    );
+  }
+
+  function applyRegionDraftFromMapFeature(feature) {
+    const meta = getMapRegionFeatureMeta(feature);
+    if (!meta.name && !meta.slug && !meta.extractId) return false;
+
+    patchRegionDraft({
+      name: meta.name,
+      slug: meta.slug,
+      searchQuery: meta.name || meta.slug || meta.extractId,
+      extractSource: meta.extractSource || 'osmfr',
+      extractId: meta.extractId,
+      extractLabel: meta.name || meta.extractId,
+      extractResolutionStatus: meta.extractId ? 'resolved' : 'needs_resolution',
+      extractResolutionError: null
+    });
+    regionResolveBusy.set(false);
+    regionExtractCandidates.set([]);
+    dataStatus.set(meta.name ? dataT('status.mapRegionSelected', { name: meta.name }) : dataT('status.mapRegionSelectedFallback'));
+    return true;
   }
 
   function clearRegionExtractSelection() {
@@ -417,6 +505,7 @@ export function createAdminDataController() {
 
     try {
       const currentDraft = get(regionDraft);
+      const isNewRegion = !currentDraft.id;
       const payload = {
         ...(currentDraft.id ? { id: currentDraft.id } : {}),
         name: String(currentDraft.name || '').trim(),
@@ -440,12 +529,31 @@ export function createAdminDataController() {
         body: JSON.stringify({ region: payload })
       });
       const savedRegion = data?.item || null;
+      let queuedAfterCreate = false;
+      let queuedSyncError = null;
+
+      if (isNewRegion && Number(savedRegion?.id || 0) > 0) {
+        try {
+          await apiJson(`/api/admin/app-settings/data/regions/${Number(savedRegion.id)}/sync-now`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          queuedAfterCreate = true;
+        } catch (error) {
+          queuedSyncError = error;
+        }
+      }
 
       await loadDataSettings({
         selectedRegionId: savedRegion?.id || currentDraft.id || null,
         preserveSelection: false
       });
-      dataStatus.set(dataT('status.regionSaved'));
+      if (queuedSyncError) {
+        dataStatus.set(msg(queuedSyncError, dataT('status.regionSavedQueueFailed')));
+      } else {
+        dataStatus.set(queuedAfterCreate ? dataT('status.regionSavedQueued') : dataT('status.regionSaved'));
+      }
     } catch (error) {
       dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
     } finally {
@@ -522,7 +630,18 @@ export function createAdminDataController() {
     return String(region?.extractResolutionError || '').trim();
   }
 
-  function getRegionStatusMeta(status) {
+  function getRegionSyncState(region) {
+    const code = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
+    if (code === 'running' || code === 'queued') return 'syncing';
+    if (code === 'success') return 'ready';
+    if (code === 'idle' && region?.lastSuccessfulSyncAt) return 'ready';
+    if (code === 'failed' || code === 'abandoned') return 'failed';
+    return 'pending';
+  }
+
+  function getRegionStatusMeta(status, context = null) {
     const code = String(status || 'idle')
       .trim()
       .toLowerCase();
@@ -530,6 +649,7 @@ export function createAdminDataController() {
     if (code === 'queued') return { text: dataT('runStatus.queued'), tone: 'queued' };
     if (code === 'failed' || code === 'abandoned') return { text: dataT('runStatus.failed'), tone: 'failed' };
     if (code === 'success') return { text: dataT('runStatus.success'), tone: 'success' };
+    if (code === 'idle' && context?.lastSuccessfulSyncAt) return { text: dataT('runStatus.success'), tone: 'success' };
     return { text: dataT('runStatus.planned'), tone: 'idle' };
   }
 
@@ -617,12 +737,16 @@ export function createAdminDataController() {
     getRegionEnabledLabel,
     getRegionExtractPrimaryText,
     getRegionExtractSecondaryText,
+    getRegionSyncState,
     getRegionStatusMeta,
     getRegionSyncModeLabel,
+    getMapRegionFeatureMeta,
     handleRegionSearchQueryInput,
     isFilterTagSelected,
     loadDataSettings,
     patchRegionDraft,
+    findRegionByMapFeature,
+    applyRegionDraftFromMapFeature,
     resetFilterTagAllowlistToDefault,
     resolveRegionExtractCandidates,
     saveDataRegion,

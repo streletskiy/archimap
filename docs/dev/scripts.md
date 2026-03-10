@@ -33,6 +33,7 @@
 - `npm run db:seed`: seed demo admin user into auth DB.
 - `npm run admin:create-master -- --email=<email> --password=<password>`: create or promote master admin.
 - `npm run tiles:build -- --region-id=<id>`: build/sync one managed region through the region pipeline.
+- `npm run admin:regions:pmtiles`: rebuild the admin region coverage archive in `frontend/static/admin-regions.pmtiles` from `frontend/static/admin-regions.geojson` through Dockerized `tippecanoe`.
 - `npm run sync:city -- --region-id=<id>`: compatibility wrapper around managed region sync.
 - `node scripts/sync-osm-region.js --region-id=<id>`: direct managed region sync orchestrator.
 - `node scripts/sync-osm-region.js --region-id=<id> --pmtiles-only`: rebuild PMTiles from already imported DB rows.

@@ -6,6 +6,7 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -69,6 +70,101 @@ def serialize_extract(extract: Any, *, match_kind: str | None = None, exact: boo
     }
 
 
+def trim_extract_archive_suffix(value: str) -> str:
+    text = str(value or '').strip()
+    for suffix in ('-latest.osm.pbf', '.osm.pbf', '-latest.pbf', '.pbf'):
+        if text.casefold().endswith(suffix):
+            return text[: -len(suffix)]
+    return text
+
+
+def normalize_path_alias(value: str) -> str:
+    text = str(value or '').strip().replace('\\', '/')
+    text = re.sub(r'/+', '/', text)
+    return text.strip('/').casefold()
+
+
+def build_path_aliases_for_row(row: Any) -> set[str]:
+    aliases: set[str] = set()
+    file_name = str(getattr(row, 'file_name', '') or '').strip()
+    source_name = infer_extract_source(file_name)
+    url = str(getattr(row, 'url', '') or '').strip()
+    if not url:
+        return aliases
+
+    parsed = urllib.parse.urlparse(url)
+    path = trim_extract_archive_suffix(parsed.path).lstrip('/')
+    if source_name == 'osmfr' and path.startswith('extracts/'):
+        path = path[len('extracts/') :]
+
+    normalized_path = normalize_path_alias(path)
+    if normalized_path:
+        aliases.add(normalized_path)
+
+    if source_name == 'geofabrik' and normalized_path:
+        parts = [part for part in normalized_path.split('/') if part]
+        for start in range(1, len(parts)):
+            suffix_alias = '/'.join(parts[start:])
+            if suffix_alias:
+                aliases.add(suffix_alias)
+
+    return aliases
+
+
+@lru_cache(maxsize=None)
+def get_extract_path_aliases(source: str) -> dict[str, list[str]]:
+    index = get_extract_index(source)
+    matches: dict[str, list[str]] = {}
+
+    for row in index.itertuples(index=False):
+        file_name = str(getattr(row, 'file_name', '') or '').strip()
+        if not file_name:
+            continue
+        for alias in build_path_aliases_for_row(row):
+            matches.setdefault(alias, []).append(file_name)
+
+    return matches
+
+
+def resolve_exact_extract_alias(query: str, source: str = 'any') -> dict[str, Any]:
+    normalized_source = normalize_extract_source(source)
+    normalized_query = normalize_path_alias(trim_extract_archive_suffix(str(query or '').strip()))
+    if not normalized_query:
+        return {
+            'candidate': None,
+            'errorCode': 'not_found',
+            'message': 'Empty extract query.',
+            'matchingExtractIds': [],
+        }
+
+    alias_matches = get_extract_path_aliases(normalized_source).get(normalized_query, [])
+    unique_matches = sorted(set(str(item or '').strip() for item in alias_matches if str(item or '').strip()))
+    if len(unique_matches) == 1:
+        extract = get_extract_by_query(unique_matches[0], source=normalized_source)
+        return {
+            'candidate': serialize_extract(extract, match_kind='exact_alias', exact=True),
+            'errorCode': None,
+            'message': None,
+            'matchingExtractIds': [],
+        }
+    if len(unique_matches) > 1:
+        return {
+            'candidate': None,
+            'errorCode': 'multiple',
+            'message': (
+                f'Extract query "{str(query or "").strip()}" matches multiple canonical extracts. '
+                f'Select one manually.'
+            ),
+            'matchingExtractIds': unique_matches,
+        }
+    return {
+        'candidate': None,
+        'errorCode': 'not_found',
+        'message': None,
+        'matchingExtractIds': [],
+    }
+
+
 @lru_cache(maxsize=None)
 def get_extract_index(source: str) -> Any:
     source_name = normalize_extract_source(source)
@@ -90,6 +186,11 @@ def get_extract_index(source: str) -> Any:
 
 def resolve_exact_extract(query: str, source: str = 'any') -> dict[str, Any]:
     normalized_source = normalize_extract_source(source)
+    raw_query = str(query or '').strip()
+    if '/' in raw_query or '\\' in raw_query:
+        alias_result = resolve_exact_extract_alias(raw_query, normalized_source)
+        if alias_result.get('candidate') or alias_result.get('errorCode') == 'multiple':
+            return alias_result
     try:
         extract = get_extract_by_query(query, source=normalized_source)
         return {
@@ -370,7 +471,12 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
 
 
 def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work_dir: Path, index: int) -> Path:
-    safe_slug = ''.join(ch if ch.isalnum() else '-' for ch in extract_query.lower()).strip('-')
+    resolved_query = str(extract_query or '').strip()
+    resolved = resolve_exact_extract_alias(resolved_query, extract_source)
+    if resolved.get('candidate'):
+        resolved_query = str(resolved['candidate'].get('extractId') or resolved_query).strip() or resolved_query
+
+    safe_slug = ''.join(ch if ch.isalnum() else '-' for ch in resolved_query.lower()).strip('-')
     if not safe_slug:
         safe_slug = 'extract'
     duckdb_path = work_dir / f'quackosm-buildings-{index:02d}-{safe_slug[:50]}.duckdb'
@@ -378,7 +484,7 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
         duckdb_path.unlink()
 
     convert_osm_extract_to_duckdb(
-        osm_extract_query=extract_query,
+        osm_extract_query=resolved_query,
         osm_extract_source=normalize_extract_source(extract_source),
         tags_filter={'building': True},
         result_file_path=duckdb_path,

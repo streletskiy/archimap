@@ -39,6 +39,7 @@
     "db:seed": "node scripts/db-seed.js",
     "admin:create-master": "node scripts/create-master-admin.js",
     "tiles:build": "node scripts/tiles-build.js",
+    "admin:regions:pmtiles": "node scripts/build-admin-regions-pmtiles.js",
     "sync:city": "node scripts/sync-osm-buildings.js",
     "migrate": "node scripts/migrate.js",
     "db:pg:migrate": "node scripts/postgres-migrate.js",

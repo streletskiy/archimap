@@ -31,6 +31,26 @@ test('resolveExactExtract validates canonical extract id with source', async () 
   assert.equal(result.candidate.extractId, 'geofabrik_antarctica');
 });
 
+test('resolveExactExtract accepts path-style osmfr region ids from admin map data', async () => {
+  const result = await resolver.resolveExactExtract('russia/central_federal_district/kostroma_oblast', {
+    source: 'osmfr'
+  });
+
+  assert.equal(result.errorCode, null);
+  assert.equal(result.candidate.extractSource, 'osmfr');
+  assert.equal(result.candidate.extractId, 'osmfr_russia_central_federal_district_kostroma_oblast');
+});
+
+test('resolveExactExtract accepts path-style geofabrik us state ids from admin map data', async () => {
+  const result = await resolver.resolveExactExtract('us/california', {
+    source: 'geofabrik'
+  });
+
+  assert.equal(result.errorCode, null);
+  assert.equal(result.candidate.extractSource, 'geofabrik');
+  assert.equal(result.candidate.extractId, 'geofabrik_north-america_us_us_california');
+});
+
 test('resolveExactExtract reports ambiguous exact-name matches instead of auto-selecting one', async () => {
   const result = await resolver.resolveExactExtract('ceuta', {
     source: 'any'

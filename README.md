@@ -163,6 +163,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - `db:seed`
 - `admin:create-master`
 - `tiles:build`
+- `admin:regions:pmtiles`
 - `i18n:extract`
 - `i18n:validate`
 - `i18n:check`

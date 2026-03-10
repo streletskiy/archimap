@@ -429,7 +429,7 @@
     },
     "data": {
       "title": "Данные",
-      "subtitle": "Регионы синхронизации OSM, их расписания, PMTiles и история запусков.",
+      "subtitle": "Добавляйте регионы синхронизации с карты, следите за PMTiles и историей запусков.",
       "newRegion": "Новый регион",
       "confirmDelete": "Удалить регион \"{label}\"? Это удалит его PMTiles, membership и orphan-данные, которые больше не принадлежат другим регионам.",
       "summary": {
@@ -443,7 +443,19 @@
         "syncModeValue": "только DB-backed регионы",
         "regionsCountLabel": "Регионов в системе",
         "regionSourceLabel": "Источник региона",
-        "regionSourceValue": "QuackOSM extract query"
+        "regionSourceValue": "страны и штаты из Geofabrik, регионы России из osmfr"
+      },
+      "map": {
+        "badge": "Geofabrik + osmfr",
+        "title": "Карта регионов",
+        "description": "Для стран используются extract из Geofabrik, для России регионы из osmfr, для США штаты из Geofabrik.",
+        "loading": "Загружаем регионы для карты...",
+        "loadFailed": "Не удалось загрузить регионы для карты",
+        "legendMissing": "Ещё не добавлен",
+        "legendSyncing": "Синхронизируется",
+        "legendReady": "Синхронизирован",
+        "selectionLabel": "Выбрано на карте: {name}",
+        "selectionHint": "Кликните по региону на карте, чтобы подготовить новый draft."
       },
       "filterTags": {
         "title": "Allowlist тегов фильтрации",
@@ -477,13 +489,15 @@
       "form": {
         "editTitle": "Редактирование региона",
         "newTitle": "Новый регион",
-        "description": "Название и slug можно менять после создания. Для сохранения нужно явно выбрать canonical extract.",
+        "description": "Выбор на карте сразу подставляет дефолтный источник и extract для выбранного региона. Advanced открывайте только если нужно переопределить источник.",
         "resetSelection": "Сбросить выбор",
         "regionId": "ID региона",
         "regionName": "Название региона",
         "regionNamePlaceholder": "Moscow Oblast",
         "slug": "Slug",
         "slugPlaceholder": "moscow-oblast",
+        "mapHint": "Кликните по региону на карте, чтобы предзаполнить форму его дефолтным источником и extract.",
+        "advancedTitle": "Alternative Sources / Advanced",
         "searchQuery": "Поиск extract",
         "searchQueryPlaceholder": "Moscow City",
         "resolveExtract": "Найти варианты",
@@ -549,8 +563,12 @@
         "extractCandidatesLoaded": "Найдено вариантов: {count}",
         "extractResolvedSingle": "Найден и выбран один canonical extract",
         "extractSelected": "Canonical extract выбран",
+        "mapRegionSelected": "Регион выбран на карте: {name}",
+        "mapRegionSelectedFallback": "Регион выбран на карте",
         "savingRegion": "Сохраняем регион...",
         "regionSaved": "Регион сохранён",
+        "regionSavedQueued": "Регион сохранён и поставлен в очередь начальной синхронизации",
+        "regionSavedQueueFailed": "Регион сохранён, но поставить начальную синхронизацию в очередь не удалось",
         "saveRegionFailed": "Не удалось сохранить регион",
         "deletingRegion": "Удаляем регион...",
         "regionDeleted": "Регион удалён",

@@ -22,6 +22,7 @@
   let activeTab = resolveAdminTabFromUrl(get(page).url);
   let pendingUrlEditId = normalizeEditId(parseUrlState(get(page).url)?.editId);
   let adminUrlSyncBusy = false;
+  let dataBootstrapTabKey = '';
 
   let usersCount = null;
   let editsTotal = null;
@@ -87,6 +88,19 @@
   function handleEditsSummary(event) {
     editsTotal = Number(event.detail?.total || 0);
     editsVisible = Number(event.detail?.visible || 0);
+  }
+
+  $: {
+    const nextDataBootstrapTabKey =
+      $session.user?.isMasterAdmin && (activeTab === 'data' || activeTab === 'filters')
+        ? activeTab
+        : '';
+    if (nextDataBootstrapTabKey && nextDataBootstrapTabKey !== dataBootstrapTabKey) {
+      dataBootstrapTabKey = nextDataBootstrapTabKey;
+      void dataController.ensureLoaded({ preserveSelection: true });
+    } else if (!nextDataBootstrapTabKey) {
+      dataBootstrapTabKey = '';
+    }
   }
 
   async function handleEditIdChange(event) {

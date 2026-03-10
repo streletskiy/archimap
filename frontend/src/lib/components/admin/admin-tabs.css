@@ -1,9 +1,16 @@
 .data-summary-card,
+.data-map-card,
 .data-form-card,
 .data-history-card {
   border: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
   box-shadow: var(--shadow-soft);
+}
+
+.data-map-card {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-soft) 72%, transparent), transparent 42%),
+    color-mix(in srgb, var(--panel-solid) 84%, transparent);
 }
 
 .data-region-card {

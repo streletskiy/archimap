@@ -429,7 +429,7 @@
     },
     "data": {
       "title": "Data",
-      "subtitle": "OSM sync regions, their schedules, PMTiles, and run history.",
+      "subtitle": "Add sync regions from the map, track PMTiles, and inspect run history.",
       "newRegion": "New region",
       "confirmDelete": "Delete region \"{label}\"? This will remove its PMTiles, membership, and orphan data that no longer belongs to other regions.",
       "summary": {
@@ -443,7 +443,19 @@
         "syncModeValue": "DB-backed regions only",
         "regionsCountLabel": "Regions in system",
         "regionSourceLabel": "Region source",
-        "regionSourceValue": "QuackOSM extract query"
+        "regionSourceValue": "Geofabrik countries, US states, and osmfr Russia regions"
+      },
+      "map": {
+        "badge": "Geofabrik + osmfr",
+        "title": "Region map",
+        "description": "Countries use Geofabrik extracts, Russia uses osmfr regions, and the US uses Geofabrik states.",
+        "loading": "Loading map regions...",
+        "loadFailed": "Failed to load map regions",
+        "legendMissing": "Not added",
+        "legendSyncing": "Syncing",
+        "legendReady": "Synced",
+        "selectionLabel": "Selected on map: {name}",
+        "selectionHint": "Click a region on the map to prepare a new draft."
       },
       "filterTags": {
         "title": "Filter tag allowlist",
@@ -477,13 +489,15 @@
       "form": {
         "editTitle": "Edit region",
         "newTitle": "New region",
-        "description": "Name and slug can be changed after creation. Saving requires an explicit canonical extract selection.",
+        "description": "Map selection prefills the default extract source for the chosen region. Open Advanced only when you need to override it.",
         "resetSelection": "Reset selection",
         "regionId": "Region ID",
         "regionName": "Region name",
         "regionNamePlaceholder": "Moscow Oblast",
         "slug": "Slug",
         "slugPlaceholder": "moscow-oblast",
+        "mapHint": "Click a region on the map to prefill this form with its default source and extract.",
+        "advancedTitle": "Alternative Sources / Advanced",
         "searchQuery": "Extract search",
         "searchQueryPlaceholder": "Moscow City",
         "resolveExtract": "Find matches",
@@ -549,8 +563,12 @@
         "extractCandidatesLoaded": "Candidates found: {count}",
         "extractResolvedSingle": "One canonical extract was found and selected",
         "extractSelected": "Canonical extract selected",
+        "mapRegionSelected": "Map region selected: {name}",
+        "mapRegionSelectedFallback": "Map region selected",
         "savingRegion": "Saving region...",
         "regionSaved": "Region saved",
+        "regionSavedQueued": "Region saved and initial sync queued",
+        "regionSavedQueueFailed": "Region saved, but the initial sync could not be queued",
         "saveRegionFailed": "Failed to save region",
         "deletingRegion": "Deleting region...",
         "regionDeleted": "Region deleted",
