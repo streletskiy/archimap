@@ -23,9 +23,9 @@
   - Primary filter path is bbox server-matching (not rendered-feature enumeration), reducing request fan-out.
   - Authoritative fetch uses adaptive coverage-window and skips refetch while viewport stays inside active window.
   - Optional low-priority directional prefetch warms cache without competing with main requests.
-  - Filter pipeline responsibilities are split across `filter-bbox.js`, `filter-cache.js`, `filter-feature-state.js`, `filter-fetcher.js`, and `filter-utils.js`, which keeps `map-filter-pipeline.js` orchestration-only.
+  - Filter pipeline responsibilities are split across `filter-request-planner.js`, `filter-match-cache-strategy.js`, `filter-worker-dispatcher.js`, `filter-diff-apply-strategy.js`, with `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js` as supporting modules; `map-filter-pipeline.js` stays orchestration-only.
   - Theme switching keeps custom PMTiles layers and applies style repaint instead of layer drop.
-  - Theme, layer, search, debug, and bbox math helpers are split into dedicated map service modules instead of living in one Svelte component.
+  - `MapCanvas.svelte` now delegates selection flow and region/source/layer orchestration to dedicated controllers instead of keeping that logic inside one Svelte component.
 
 ## Filter tech note
 

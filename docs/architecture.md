@@ -30,6 +30,38 @@
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
+- Building filter backend decomposition:
+  - `src/lib/server/http/buildings.route.js`: thin HTTP wiring for building/filter endpoints
+  - `src/lib/server/services/building-filters.service.js`: filter-data/filter-matches orchestration, cache policy, request normalization
+  - `src/lib/server/services/building-filter-query.service.js`: bbox/key query selection for SQLite RTREE/plain paths and PostGIS paths
+  - `src/lib/server/utils/filter-sql-builder.js`: isolated Postgres predicate/guard SQL builder for filter rules
+- Building edit backend decomposition:
+  - `src/lib/server/services/building-edits.service.js`: service assembly entrypoint for runtime wiring
+  - `src/lib/server/services/building-edits/shared.js`: shared edit context, row mapping, reusable SQL fragments, info normalization
+  - `src/lib/server/services/building-edits/history.js`: edit list/details queries and response shaping
+  - `src/lib/server/services/building-edits/moderation.js`: reassignment/delete flows and merged-local-state safety checks
+  - `src/lib/server/services/building-edits/personal-overlays.js`: pending/rejected personal overlay lookup for feature info and filter payloads
+- Auth backend decomposition:
+  - `src/lib/server/auth/index.js`: auth bootstrap and route registration entrypoint
+  - `src/lib/server/auth/schema.js`: auth schema bootstrap for SQLite
+  - `src/lib/server/auth/auth.route.js`: thin HTTP wiring for auth/session/password/admin-user endpoints
+  - `src/lib/server/auth/auth.service.js`: login/session/registration/password-reset workflows and admin auth guards
+  - `src/lib/server/auth/user-profile.service.js`: current-profile updates and admin user-management queries/mutations
+- Admin backend decomposition:
+  - `src/lib/server/http/admin.route.js`: thin HTTP wiring for admin/settings/moderation endpoints
+  - `src/lib/server/services/admin/shared.js`: shared admin guards, parsers, and typed error helpers
+  - `src/lib/server/services/admin/admin-settings.service.js`: email-preview, app-settings, data-settings, and region-sync orchestration
+  - `src/lib/server/services/admin/admin-edits.service.js`: admin edit moderation, merge flows, and admin user detail queries
+- Frontend map filter decomposition:
+  - `frontend/src/lib/services/map/map-filter-pipeline.js`: filter lifecycle orchestration entrypoint for viewport events and status transitions
+  - `frontend/src/lib/services/map/filter-request-planner.js`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping
+  - `frontend/src/lib/services/map/filter-match-cache-strategy.js`: optimistic cache reuse, authoritative request caching, and prefetch coordination
+  - `frontend/src/lib/services/map/filter-worker-dispatcher.js`: lazy `MapFilterService` worker lifecycle and request dispatch
+  - `frontend/src/lib/services/map/filter-diff-apply-strategy.js`: highlight diff/apply strategy over MapLibre paint properties
+- Frontend map canvas decomposition:
+  - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
+  - `frontend/src/lib/components/map/map-selection-controller.js`: map selection, selected-feature highlight, and search-result click routing
+  - `frontend/src/lib/components/map/map-region-layers-controller.js`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
@@ -41,7 +73,7 @@
 - Security headers/CSP:
   - internal app runtime: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`
   - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
-- Auth/session routes: `src/lib/server/auth/index.js`.
+- Auth/session routes: `src/lib/server/auth/auth.route.js` via facade `src/lib/server/auth/index.js`.
 - CSRF enforcement: `src/lib/server/services/csrf.service.js`.
 - Error normalization: `src/lib/server/infra/error-handling.infra.js`.
 
@@ -49,7 +81,7 @@
 
 - HTTP cache helpers (ETag/Last-Modified/304 + JSON compression): `src/lib/server/infra/http-cache.infra.js`.
 - PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.js`.
-- In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search and bbox hot-paths).
+- In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search hot-paths plus building filter bbox/match caches via `building-filters.service.js`).
 - Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.js`.
 
 ## i18n
@@ -79,12 +111,12 @@
   - if any `or` layers exist, at least one `or` layer must pass;
   - rules inside one layer are ANDed.
 - Client filter pipeline is decomposed into dedicated modules under `frontend/src/lib/services/map/`:
-  - `map-filter-pipeline.js`: orchestration and runtime status
-  - `filter-bbox.js`: bbox hashing, coverage window, prefetch window helpers
-  - `filter-cache.js`: short-lived match cache
-  - `filter-feature-state.js`: chunked `feature-state` diff apply
-  - `filter-fetcher.js`: primary/fallback fetch paths and fallback data cache
-  - `filter-utils.js`: encoded OSM id and layer snapshot helpers
+  - `map-filter-pipeline.js`: top-level orchestration and runtime status
+  - `filter-request-planner.js`: layer normalization, request planning, and resolved highlight payload shaping
+  - `filter-match-cache-strategy.js`: authoritative request caching, optimistic reuse, and prefetch coordination
+  - `filter-worker-dispatcher.js`: lazy worker lifecycle for `prepare-rules` and `build-apply-plan`
+  - `filter-diff-apply-strategy.js`: chunked highlight diff/apply over MapLibre paint properties
+  - supporting utilities remain split into `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js`
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
 - Matched buildings are marked with `setFeatureState({ isFiltered: true, filterColor: '#rrggbb' })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
 - When one building matches multiple layers, the highest-priority layer wins and provides the visible `filterColor`.
@@ -113,6 +145,7 @@ SvelteKit Node runtime (server.sveltekit.js)
       |- security headers + CSP + request-id + logging
       |- auth/session + CSRF
       |- route handlers (src/lib/server/http/*, auth/*)
+      |- building filter services/query/sql builder
       |- cached JSON + PMTiles streaming
       |- sync hooks + PMTiles/search/filter maintenance jobs
   |

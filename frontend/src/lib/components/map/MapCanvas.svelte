@@ -15,40 +15,20 @@
     applyBuildingThemePaint as applyBuildingThemePaintToLayers,
     applyLabelLayerVisibility as applyMapLabelLayerVisibility,
     bindMapInteractionHandlers,
-    bringSearchResultsLayersToFront,
-    CARTO_BUILDING_LAYER_IDS,
-    ensureRegionBuildingSourceAndLayers,
-    ensureSearchResultsSourceAndLayers,
-    getCurrentBuildingSourceConfigs,
     getCurrentBuildingsFillLayerIds,
-    getCurrentBuildingsLineLayerIds,
-    getCurrentFilterHighlightFillLayerIds,
-    getCurrentFilterHighlightLineLayerIds,
-    getCurrentSelectedFillLayerIds,
-    getCurrentSelectedLineLayerIds,
-    removeRegionBuildingSourceAndLayers
+    getCurrentBuildingsLineLayerIds
   } from '$lib/services/map/map-layer-utils';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
-    SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
-    SEARCH_RESULTS_CLUSTER_LAYER_ID,
-    SEARCH_RESULTS_LAYER_ID,
-    SEARCH_RESULTS_SOURCE_ID,
     updateSearchMarkers as updateSearchMarkerSource
   } from '$lib/services/map/map-search-utils';
   import {
-    getBuildingThemePaint,
     getCurrentTheme,
     getMapStyleForTheme,
     LIGHT_MAP_STYLE_URL,
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
   import { loadMapRuntime } from '$lib/services/map-runtime';
-  import {
-    buildRegionSourceId,
-    getActiveRegionPmtiles,
-    pointInBounds
-  } from '$lib/services/region-pmtiles';
   import { t, translateNow } from '$lib/i18n/index';
   import {
     lastMapCamera,
@@ -65,22 +45,17 @@
   } from '$lib/stores/map';
   import { buildingFilterLayers, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchMapState, searchState } from '$lib/stores/search';
-  import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter } from './selection-utils';
+  import { createMapRegionLayersController } from './map-region-layers-controller';
+  import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
 
   const dispatch = createEventDispatcher();
-  const CARTO_SHOW_DELAY_MS = 160;
 
   let container;
   let map = null;
   let maplibregl = null;
   let protocol = null;
-  let activeRegionPmtiles = [];
   let themeObserver = null;
-  let coverageDebounceTimer = null;
-  let cartoShowTimer = null;
-  let coverageEvalToken = 0;
-  let coverageVisibleState = 'visible';
   let lastSelectedKey = null;
   let lastSearchFitSeq = 0;
   let lastMapFocusRequestId = null;
@@ -89,96 +64,8 @@
   let styleTransitionOverlaySrc = null;
   let styleTransitionOverlayVisible = false;
   let styleTransitionTimer = null;
-  let lastHandledBuildingClickSig = null;
   let filterStatusOverlayText = '';
   let cameraStoreSyncEnabled = false;
-
-  function getCurrentMapLayerIds() {
-    return {
-      buildingFillLayerIds: getCurrentBuildingsFillLayerIds(activeRegionPmtiles),
-      buildingLineLayerIds: getCurrentBuildingsLineLayerIds(activeRegionPmtiles),
-      filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles),
-      filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles),
-      selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegionPmtiles),
-      selectedLineLayerIds: getCurrentSelectedLineLayerIds(activeRegionPmtiles)
-    };
-  }
-
-  function getAllCurrentMapLayerIds() {
-    const layerIds = getCurrentMapLayerIds();
-    return [
-      ...layerIds.buildingFillLayerIds,
-      ...layerIds.buildingLineLayerIds,
-      ...layerIds.filterHighlightFillLayerIds,
-      ...layerIds.filterHighlightLineLayerIds,
-      ...layerIds.selectedFillLayerIds,
-      ...layerIds.selectedLineLayerIds
-    ];
-  }
-
-  function getMapLayerIdsForRegions(regions = []) {
-    return {
-      buildingFillLayerIds: getCurrentBuildingsFillLayerIds(regions),
-      buildingLineLayerIds: getCurrentBuildingsLineLayerIds(regions),
-      filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(regions),
-      filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(regions),
-      selectedFillLayerIds: getCurrentSelectedFillLayerIds(regions),
-      selectedLineLayerIds: getCurrentSelectedLineLayerIds(regions)
-    };
-  }
-
-  function areRegionSetsEqualById(left = [], right = []) {
-    if (left.length !== right.length) return false;
-    for (let index = 0; index < left.length; index += 1) {
-      if (Number(left[index]?.id) !== Number(right[index]?.id)) return false;
-    }
-    return true;
-  }
-
-  function hasRegionLayersReady(regions = []) {
-    if (!map) return false;
-    const layerIds = getMapLayerIdsForRegions(regions);
-    const allLayerIds = [
-      ...layerIds.buildingFillLayerIds,
-      ...layerIds.buildingLineLayerIds,
-      ...layerIds.filterHighlightFillLayerIds,
-      ...layerIds.filterHighlightLineLayerIds,
-      ...layerIds.selectedFillLayerIds,
-      ...layerIds.selectedLineLayerIds
-    ];
-
-    for (const region of regions) {
-      if (!map.getSource(buildRegionSourceId(region.id))) return false;
-    }
-
-    return allLayerIds.every((layerId) => Boolean(map.getLayer(layerId)));
-  }
-
-  function hasSearchResultLayersReady() {
-    if (!map) return false;
-    return Boolean(map.getSource(SEARCH_RESULTS_SOURCE_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID));
-  }
-
-  const mapDebug = createMapDebugController({
-    getMap: () => map,
-    getLayerIds: getAllCurrentMapLayerIds,
-    isFilterDebugEnabled,
-    telemetryEnabled: FILTER_TELEMETRY_ENABLED
-  });
-
-  const filterPipeline = createFilterPipeline({
-    map: () => map,
-    mapDebug,
-    getLayerIds: getCurrentMapLayerIds,
-    getBuildingSourceConfigs: () => getCurrentBuildingSourceConfigs(activeRegionPmtiles),
-    onStatusChange: setBuildingFilterRuntimeStatus,
-    translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
-  });
-
-  const filterState = filterPipeline.state;
 
   beforeNavigate((navigation) => {
     if (typeof window === 'undefined') return;
@@ -224,140 +111,49 @@
     mapDebug.recordSetFilter(layerId);
   }
 
-  function getConfiguredRegionPmtiles(config = runtimeConfig) {
-    return Array.isArray(config?.buildingRegionsPmtiles) ? config.buildingRegionsPmtiles : [];
-  }
+  const regionLayersController = createMapRegionLayersController({
+    getMap: () => map,
+    getRuntimeConfig: () => runtimeConfig,
+    getCurrentTheme,
+    getSearchItems: () => $searchMapState.items,
+    getSelectedBuilding: () => $selectedBuilding,
+    getMapLabelsVisible: () => $mapLabelsVisible,
+    getBuildingFilterLayers: () => $buildingFilterLayers,
+    getWindowOrigin: () => window.location.origin,
+    onBindStyleInteractionHandlers: () => bindStyleInteractionHandlers(),
+    onApplySelectionFromStore: (selection) => selectionController.applySelectionFromStore(selection),
+    onUpdateSearchMarkers: (items) => updateSearchMarkers(items),
+    onApplyBuildingThemePaint: (theme) => applyBuildingThemePaint(theme),
+    onApplyLabelLayerVisibility: (visible) => applyLabelLayerVisibility(visible),
+    onRefreshFilterDebugState: (active) => filterPipeline.refreshDebugState(active),
+    onReapplyFilteredHighlight: () => filterPipeline.reapplyFilteredHighlight()
+  });
 
-  function getViewportActiveRegionPmtiles(config = runtimeConfig) {
-    if (!map) return [];
-    return getActiveRegionPmtiles(getConfiguredRegionPmtiles(config), map.getBounds());
-  }
+  const mapDebug = createMapDebugController({
+    getMap: () => map,
+    getLayerIds: () => regionLayersController.getAllCurrentMapLayerIds(),
+    isFilterDebugEnabled,
+    telemetryEnabled: FILTER_TELEMETRY_ENABLED
+  });
 
-  function getPrimaryBuildingFeature(event) {
-    if (!map) return null;
-    const searchFeatures = map.queryRenderedFeatures(event.point, {
-      layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
-    });
-    if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
-      return null;
-    }
-    const buildingLayerIds = [
-      ...getCurrentBuildingsLineLayerIds(activeRegionPmtiles),
-      ...getCurrentBuildingsFillLayerIds(activeRegionPmtiles)
-    ];
-    if (buildingLayerIds.length === 0) return null;
-    const features = map.queryRenderedFeatures(event.point, {
-      layers: buildingLayerIds
-    });
-    return features?.[0] || null;
-  }
+  const filterPipeline = createFilterPipeline({
+    map: () => map,
+    mapDebug,
+    getLayerIds: () => regionLayersController.getCurrentMapLayerIds(),
+    getBuildingSourceConfigs: () => regionLayersController.getCurrentBuildingSourceConfigs(),
+    onStatusChange: setBuildingFilterRuntimeStatus,
+    translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
+  });
 
-  function handleMapBuildingClick(event) {
-    const feature = getPrimaryBuildingFeature(event);
-    if (!feature) return;
-    const identity = getFeatureIdentity(feature);
-    if (!identity) return;
-    const clickSig = `${event?.originalEvent?.timeStamp || ''}:${event?.point?.x || ''}:${event?.point?.y || ''}:${identity.osmType}/${identity.osmId}`;
-    if (clickSig === lastHandledBuildingClickSig) return;
-    lastHandledBuildingClickSig = clickSig;
-    selectBuildingOnMap({
-      source: 'map-click',
-      feature,
-      identity,
-      lngLat: event?.lngLat
-    });
-  }
+  const selectionController = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => regionLayersController.getActiveRegionPmtiles(),
+    recordDebugSetFilter,
+    debugSelectionLog,
+    dispatchBuildingClick: (payload) => dispatch('buildingClick', payload)
+  });
 
-  function focusSelectedFeature({ feature, identity, lngLat }) {
-    if (!map) return;
-    const filter = getSelectionFilter(feature, identity);
-    const selectionKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
-    for (const layerId of getCurrentSelectedFillLayerIds(activeRegionPmtiles)) {
-      if (!map.getLayer(layerId)) continue;
-      map.setFilter(layerId, filter);
-      recordDebugSetFilter(layerId);
-    }
-    for (const layerId of getCurrentSelectedLineLayerIds(activeRegionPmtiles)) {
-      if (!map.getLayer(layerId)) continue;
-      map.setFilter(layerId, filter);
-      recordDebugSetFilter(layerId);
-    }
-    debugSelectionLog('highlight-applied', {
-      method: 'setFilter',
-      selectionKey,
-      encodedId: identity?.osmType && Number.isInteger(identity?.osmId)
-        ? encodeOsmFeatureId(identity.osmType, identity.osmId)
-        : null
-    });
-
-    if (!lngLat) return;
-    const desktopOffsetX = window.innerWidth >= 1024 ? -Math.round(window.innerWidth * 0.18) : 0;
-    debugSelectionLog('zoom-start', {
-      selectionKey,
-      center: { lon: Number(lngLat.lng), lat: Number(lngLat.lat) }
-    });
-    map.easeTo({
-      center: lngLat,
-      offset: [desktopOffsetX, 0],
-      duration: 420,
-      essential: true
-    });
-    map.once('moveend', () => {
-      debugSelectionLog('zoom-end', {
-        selectionKey
-      });
-    });
-  }
-
-  function selectBuildingOnMap({ source, feature, identity, lngLat, lon = null, lat = null }) {
-    focusSelectedFeature({ feature, identity, lngLat });
-    debugSelectionLog('building-click', {
-      source,
-      layerId: feature?.layer?.id || null,
-      featureId: feature?.id ?? null,
-      properties: feature?.properties || null,
-      selectionKey: `${identity.osmType}/${identity.osmId}`
-    });
-    dispatch('buildingClick', {
-      ...identity,
-      lon: Number.isFinite(Number(lon)) ? Number(lon) : null,
-      lat: Number.isFinite(Number(lat)) ? Number(lat) : null,
-      feature
-    });
-  }
-
-  function clearSelectedFeature() {
-    if (!map) return;
-    for (const layerId of getCurrentSelectedFillLayerIds(activeRegionPmtiles)) {
-      if (!map.getLayer(layerId)) continue;
-      map.setFilter(layerId, ['==', ['id'], -1]);
-      recordDebugSetFilter(layerId);
-    }
-    for (const layerId of getCurrentSelectedLineLayerIds(activeRegionPmtiles)) {
-      if (!map.getLayer(layerId)) continue;
-      map.setFilter(layerId, ['==', ['id'], -1]);
-      recordDebugSetFilter(layerId);
-    }
-  }
-
-  function applySelectionFromStore(selection) {
-    if (!map || !selection?.osmType || !selection?.osmId) return;
-    const identity = {
-      osmType: selection.osmType,
-      osmId: Number(selection.osmId)
-    };
-    const filter = getSelectionFilter(null, identity);
-    for (const layerId of getCurrentSelectedFillLayerIds(activeRegionPmtiles)) {
-      if (!map.getLayer(layerId)) continue;
-      map.setFilter(layerId, filter);
-      recordDebugSetFilter(layerId);
-    }
-    for (const layerId of getCurrentSelectedLineLayerIds(activeRegionPmtiles)) {
-      if (!map.getLayer(layerId)) continue;
-      map.setFilter(layerId, filter);
-      recordDebugSetFilter(layerId);
-    }
-  }
+  const filterState = filterPipeline.state;
 
   function updateSearchMarkers(items) {
     updateSearchMarkerSource(map, items);
@@ -365,44 +161,6 @@
 
   function fitMapToSearchResults(items) {
     fitMapToSearchItems(map, items);
-  }
-
-  function onSearchClusterClick(event) {
-    const feature = event?.features?.[0];
-    if (!feature) return;
-    const clusterId = feature.properties?.cluster_id;
-    const coordinates = feature.geometry?.coordinates;
-    const source = map.getSource(SEARCH_RESULTS_SOURCE_ID);
-    if (!source || clusterId == null || !Array.isArray(coordinates)) return;
-    source.getClusterExpansionZoom(clusterId, (error, zoom) => {
-      if (error) return;
-      map.easeTo({
-        center: coordinates,
-        zoom: Number.isFinite(zoom) ? zoom : Math.max(map.getZoom() + 1, 14),
-        duration: 350,
-        essential: true
-      });
-    });
-  }
-
-  function onSearchResultClick(event) {
-    const feature = event?.features?.[0];
-    if (!feature) return;
-    const osmType = String(feature?.properties?.osm_type || '').trim();
-    const osmId = Number(feature?.properties?.osm_id);
-    if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return;
-
-    const lng = Number(feature?.geometry?.coordinates?.[0]);
-    const lat = Number(feature?.geometry?.coordinates?.[1]);
-    const lngLat = (Number.isFinite(lng) && Number.isFinite(lat)) ? { lng, lat } : event?.lngLat;
-    selectBuildingOnMap({
-      source: 'search-result',
-      feature: null,
-      identity: { osmType, osmId },
-      lngLat,
-      lon: lng,
-      lat
-    });
   }
 
   function syncMapCameraStores() {
@@ -418,11 +176,12 @@
   }
 
   function applyBuildingThemePaint(theme) {
+    const activeRegions = regionLayersController.getActiveRegionPmtiles();
     applyBuildingThemePaintToLayers({
       map,
       theme,
-      fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegionPmtiles),
-      lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegionPmtiles)
+      fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegions),
+      lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions)
     });
   }
 
@@ -462,13 +221,14 @@
   }
 
   function bindStyleInteractionHandlers() {
+    const layerIds = regionLayersController.getCurrentMapLayerIds();
     bindMapInteractionHandlers({
       map,
-      buildingFillLayerIds: getCurrentBuildingsFillLayerIds(activeRegionPmtiles),
-      buildingLineLayerIds: getCurrentBuildingsLineLayerIds(activeRegionPmtiles),
-      onBuildingClick: handleMapBuildingClick,
-      onSearchClusterClick,
-      onSearchResultClick,
+      buildingFillLayerIds: layerIds.buildingFillLayerIds,
+      buildingLineLayerIds: layerIds.buildingLineLayerIds,
+      onBuildingClick: (event) => selectionController.handleMapBuildingClick(event),
+      onSearchClusterClick: (event) => selectionController.onSearchClusterClick(event),
+      onSearchResultClick: (event) => selectionController.onSearchResultClick(event),
       onPointerEnter,
       onPointerLeave
     });
@@ -478,154 +238,12 @@
     applyMapLabelLayerVisibility(map, visible);
   }
 
-  function setCartoBuildingsVisibility(nextVisibility) {
-    if (!map || !map.isStyleLoaded()) return;
-    if (coverageVisibleState === nextVisibility) return;
-    for (const layerId of CARTO_BUILDING_LAYER_IDS) {
-      if (!map.getLayer(layerId)) continue;
-      map.setLayoutProperty(layerId, 'visibility', nextVisibility);
-    }
-    coverageVisibleState = nextVisibility;
-  }
-
-  function queueCartoBuildingsVisibility(nextVisibility) {
-    if (nextVisibility === 'none') {
-      if (cartoShowTimer) {
-        clearTimeout(cartoShowTimer);
-        cartoShowTimer = null;
-      }
-      setCartoBuildingsVisibility('none');
-      return;
-    }
-    if (cartoShowTimer) {
-      clearTimeout(cartoShowTimer);
-    }
-    cartoShowTimer = setTimeout(() => {
-      cartoShowTimer = null;
-      setCartoBuildingsVisibility('visible');
-    }, CARTO_SHOW_DELAY_MS);
-  }
-
-  function getViewportSamplePoints() {
-    if (!map) return [];
-    const bounds = map.getBounds();
-    if (!bounds) return [];
-    const west = bounds.getWest();
-    const east = bounds.getEast();
-    const south = bounds.getSouth();
-    const north = bounds.getNorth();
-    const center = map.getCenter();
-    const midLon = (west + east) / 2;
-    const midLat = (north + south) / 2;
-    return [
-      [center.lng, center.lat],
-      [west, north],
-      [east, north],
-      [east, south],
-      [west, south],
-      [midLon, north],
-      [midLon, south],
-      [west, midLat],
-      [east, midLat]
-    ];
-  }
-
-  async function evaluatePmtilesCoverage() {
-    if (!map || !map.isStyleLoaded()) return;
-    const token = ++coverageEvalToken;
-    const regions = activeRegionPmtiles.length > 0
-      ? activeRegionPmtiles
-      : getViewportActiveRegionPmtiles(runtimeConfig);
-    if (regions.length === 0) {
-      queueCartoBuildingsVisibility('visible');
-      return;
-    }
-    const points = getViewportSamplePoints();
-    if (points.length === 0) return;
-    for (const [lon, lat] of points) {
-      if (token !== coverageEvalToken) return;
-      const covered = regions.some((region) => pointInBounds(lon, lat, region.bounds));
-      if (!covered) {
-        queueCartoBuildingsVisibility('visible');
-        return;
-      }
-    }
-    queueCartoBuildingsVisibility('none');
-  }
-
-  function scheduleCoverageCheck() {
-    if (coverageDebounceTimer) {
-      clearTimeout(coverageDebounceTimer);
-      coverageDebounceTimer = null;
-    }
-    coverageDebounceTimer = setTimeout(() => {
-      coverageDebounceTimer = null;
-      evaluatePmtilesCoverage();
-    }, 80);
-  }
-
-  function ensureMapSourcesAndLayers(config, { force = false } = {}) {
-    if (!map) return;
-    const theme = getCurrentTheme();
-    const buildingPaint = getBuildingThemePaint(theme);
-    const nextActiveRegions = getViewportActiveRegionPmtiles(config);
-    const regionsChanged = !areRegionSetsEqualById(activeRegionPmtiles, nextActiveRegions);
-    const searchLayersReady = hasSearchResultLayersReady();
-    const regionLayersReady = hasRegionLayersReady(nextActiveRegions);
-
-    if (!force && !regionsChanged && searchLayersReady && regionLayersReady) {
-      return;
-    }
-
-    const searchLayersChanged = !searchLayersReady;
-    ensureSearchResultsSourceAndLayers(map, $searchMapState.items);
-
-    const nextIds = new Set(nextActiveRegions.map((region) => region.id));
-    let regionLayersChanged = regionsChanged;
-    for (const currentRegion of activeRegionPmtiles) {
-      if (nextIds.has(currentRegion.id)) continue;
-      removeRegionBuildingSourceAndLayers(map, currentRegion.id);
-      regionLayersChanged = true;
-    }
-    activeRegionPmtiles = nextActiveRegions;
-    for (const region of nextActiveRegions) {
-      const hadRegionLayers = hasRegionLayersReady([region]);
-      ensureRegionBuildingSourceAndLayers({
-        map,
-        region,
-        buildingPaint,
-        origin: window.location.origin
-      });
-      if (!hadRegionLayers) {
-        regionLayersChanged = true;
-      }
-    }
-    bringSearchResultsLayersToFront(map);
-
-    bindStyleInteractionHandlers();
-    applySelectionFromStore($selectedBuilding);
-    updateSearchMarkers($searchMapState.items);
-    applyBuildingThemePaint(theme);
-    applyLabelLayerVisibility($mapLabelsVisible);
-    scheduleCoverageCheck();
-    if (force || searchLayersChanged || regionLayersChanged) {
-      filterPipeline.refreshDebugState(Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0);
-      filterPipeline.reapplyFilteredHighlight();
-    }
-  }
-
-  function syncMapRegionSources() {
-    if (!map || !runtimeConfig) return;
-    ensureMapSourcesAndLayers(runtimeConfig);
-  }
-
   function restoreCustomLayersAfterStyleChange() {
     if (!map || !runtimeConfig) return;
     const tryRestore = () => {
       if (!map || !runtimeConfig) return;
       if (!map.isStyleLoaded()) return;
-      ensureMapSourcesAndLayers(runtimeConfig, { force: true });
-      applyBuildingThemePaint(getCurrentTheme());
+      regionLayersController.ensureMapSourcesAndLayers(runtimeConfig, { force: true });
       filterPipeline.applyBuildingFilters($buildingFilterLayers, { reason: 'style' });
       clearStyleTransitionOverlaySoon();
     };
@@ -645,14 +263,14 @@
 
   $: if (map && !$selectedBuilding) {
     lastSelectedKey = null;
-    clearSelectedFeature();
+    selectionController.clearSelectedFeature();
   }
 
   $: if (map && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
     const key = `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`;
     if (key !== lastSelectedKey) {
       lastSelectedKey = key;
-      applySelectionFromStore($selectedBuilding);
+      selectionController.applySelectionFromStore($selectedBuilding);
     }
   }
 
@@ -698,7 +316,6 @@
       protocol = new ProtocolCtor();
       maplibregl.addProtocol('pmtiles', protocol.tile);
       currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
-      coverageVisibleState = 'visible';
       const initialCamera = resolveInitialMapCamera({
         url: window.location.href,
         persistedCamera: get(lastMapCamera),
@@ -733,24 +350,24 @@
       map.on('moveend', () => {
         filterPipeline.registerFilterMoveEnd();
         syncMapCameraStores();
-        syncMapRegionSources();
+        regionLayersController.syncMapRegionSources();
       });
       map.on('moveend', () => filterPipeline.scheduleFilterRefresh($buildingFilterLayers));
-      map.on('moveend', scheduleCoverageCheck);
-      map.on('move', scheduleCoverageCheck);
+      map.on('moveend', () => regionLayersController.scheduleCoverageCheck());
+      map.on('move', () => regionLayersController.scheduleCoverageCheck());
       map.on('zoomend', () => filterPipeline.scheduleFilterRefresh($buildingFilterLayers));
       map.on('zoomend', syncMapZoomStore);
-      map.on('zoomend', syncMapRegionSources);
-      map.on('zoomend', scheduleCoverageCheck);
-      map.on('resize', syncMapRegionSources);
-      map.on('resize', scheduleCoverageCheck);
+      map.on('zoomend', () => regionLayersController.syncMapRegionSources());
+      map.on('zoomend', () => regionLayersController.scheduleCoverageCheck());
+      map.on('resize', () => regionLayersController.syncMapRegionSources());
+      map.on('resize', () => regionLayersController.scheduleCoverageCheck());
 
       map.on('style.load', () => {
-        ensureMapSourcesAndLayers(config, { force: true });
+        regionLayersController.ensureMapSourcesAndLayers(config, { force: true });
         if ($mapReadyStore) {
           filterPipeline.scheduleFilterRefresh($buildingFilterLayers);
         }
-        scheduleCoverageCheck();
+        regionLayersController.scheduleCoverageCheck();
       });
 
       map.on('load', () => {
@@ -759,7 +376,7 @@
         syncMapCameraStores();
         setMapReady(true);
         filterPipeline.scheduleFilterRulesRefresh($buildingFilterLayers);
-        scheduleCoverageCheck();
+        regionLayersController.scheduleCoverageCheck();
       });
 
       themeObserver = new MutationObserver(() => {
@@ -794,14 +411,8 @@
       clearTimeout(styleTransitionTimer);
       styleTransitionTimer = null;
     }
-    if (coverageDebounceTimer) {
-      clearTimeout(coverageDebounceTimer);
-      coverageDebounceTimer = null;
-    }
-    if (cartoShowTimer) {
-      clearTimeout(cartoShowTimer);
-      cartoShowTimer = null;
-    }
+    selectionController.destroy();
+    regionLayersController.destroy();
     filterPipeline.destroy();
     if (map) {
       map.remove();

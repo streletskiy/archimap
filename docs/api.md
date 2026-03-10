@@ -82,6 +82,7 @@ System notes:
   - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
   - Supported source type: `sourceType=extract`.
   - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`) and rejects legacy `sourceType=extract_query`.
+  - On save, server re-validates the selected canonical extract via exact resolver lookup. Ambiguous or missing canonical extract selection returns `400` with a manual-resolution message; managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
 - `DELETE /api/admin/app-settings/data/regions/:regionId`
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
   - Regions in `queued` or `running` state cannot be deleted.

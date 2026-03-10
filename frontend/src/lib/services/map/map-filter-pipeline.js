@@ -1,13 +1,5 @@
 import { writable } from 'svelte/store';
-import { EMPTY_LAYER_FILTER, hashFilterExpression } from '$lib/components/map/filter-highlight-utils';
-import { FILTER_LAYER_BASE_COLOR } from '$lib/constants/filter-presets';
-import {
-  computeRulesHash,
-  normalizeFilterLayers,
-  normalizeFilterRules,
-  sortFilterLayersByPriority,
-  toFeatureIdSetFromMatches
-} from '$lib/components/map/filter-pipeline-utils';
+import { computeRulesHash } from '$lib/components/map/filter-pipeline-utils';
 import { createFilterCache } from './filter-cache';
 import {
   buildBboxHash,
@@ -16,10 +8,20 @@ import {
   getCoverageWindowForViewport as getCoverageWindowForViewportSnapshot,
   isViewportInsideBbox
 } from './filter-bbox';
-import { createFilterFeatureStateManager } from './filter-feature-state';
 import { createFilterFetcher } from './filter-fetcher';
+import { createFilterMatchCacheStrategy } from './filter-match-cache-strategy';
+import {
+  buildFilterRequestSpecs,
+  buildResolvedLayerPayload,
+  EMPTY_LAYER_FILTER,
+  hashFilterExpression,
+  isLayerInput,
+  normalizeFilterInputLayers,
+  buildFilterRequestCacheKey
+} from './filter-request-planner';
+import { createFilterDiffApplyStrategy } from './filter-diff-apply-strategy';
 import { normalizeLayerIdsSnapshot } from './filter-utils';
-import { MapFilterService } from './map-filter.service';
+import { createFilterWorkerDispatcher } from './filter-worker-dispatcher';
 
 export const FILTER_HIGHLIGHT_MODE = 'paint-property';
 export const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
@@ -38,183 +40,6 @@ const FILTER_COVERAGE_MARGIN_MIN = 0.2;
 const FILTER_COVERAGE_MARGIN_MAX = 0.35;
 const FILTER_PREFETCH_ENABLED = true;
 const FILTER_PREFETCH_MIN_INTERVAL_MS = 900;
-
-function isLayerInput(input) {
-  return Array.isArray(input) && input.some((item) => (
-    Array.isArray(item?.rules) ||
-    item?.mode != null ||
-    item?.color != null ||
-    item?.priority != null ||
-    item?.id != null
-  ));
-}
-
-function normalizeFilterInputLayers(input) {
-  if (isLayerInput(input)) {
-    return normalizeFilterLayers(input);
-  }
-  const normalizedRules = normalizeFilterRules(input);
-  if (normalizedRules.invalidReason) {
-    return { layers: [], invalidReason: normalizedRules.invalidReason };
-  }
-  if (normalizedRules.rules.length === 0) {
-    return { layers: [], invalidReason: '' };
-  }
-  return normalizeFilterLayers([{
-    id: 'compat-filter-layer',
-    color: FILTER_LAYER_BASE_COLOR,
-    priority: 0,
-    mode: 'and',
-    rules: normalizedRules.rules
-  }]);
-}
-
-function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket) {
-  return `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}`;
-}
-
-function buildFilterRequestSpecs(layers) {
-  const sortedLayers = sortFilterLayersByPriority(layers);
-  const combinedLayers = sortedLayers.filter((layer) => layer.mode === 'and' || layer.mode === 'or');
-  const andLayers = combinedLayers.filter((layer) => layer.mode === 'and');
-  const orLayers = combinedLayers.filter((layer) => layer.mode === 'or');
-  const standaloneLayers = sortedLayers.filter((layer) => layer.mode === 'layer');
-  const requestSpecs = [];
-  const combinedGroup = combinedLayers.length > 0
-    ? {
-      id: 'combined-group',
-      color: combinedLayers[0].color || FILTER_LAYER_BASE_COLOR,
-      priority: Number(combinedLayers[0].priority || 0),
-      hasAnd: andLayers.length > 0,
-      hasOr: orLayers.length > 0
-    }
-    : null;
-
-  if (andLayers.length > 0) {
-    const rules = andLayers.flatMap((layer) => layer.rules);
-    requestSpecs.push({
-      id: 'combined-and',
-      kind: 'combined-and',
-      groupId: 'combined-group',
-      rules,
-      rulesHash: computeRulesHash(rules),
-      color: combinedGroup?.color || FILTER_LAYER_BASE_COLOR,
-      priority: combinedGroup?.priority ?? 0
-    });
-  }
-
-  for (const layer of orLayers) {
-    requestSpecs.push({
-      id: `combined-or:${layer.id}`,
-      kind: 'combined-or',
-      groupId: 'combined-group',
-      layerId: layer.id,
-      rules: layer.rules,
-      rulesHash: computeRulesHash(layer.rules),
-      color: combinedGroup?.color || FILTER_LAYER_BASE_COLOR,
-      priority: combinedGroup?.priority ?? Number(layer.priority || 0)
-    });
-  }
-
-  for (const layer of standaloneLayers) {
-    requestSpecs.push({
-      id: `layer:${layer.id}`,
-      kind: 'layer',
-      groupId: layer.id,
-      layerId: layer.id,
-      rules: layer.rules,
-      rulesHash: computeRulesHash(layer.rules),
-      color: layer.color || FILTER_LAYER_BASE_COLOR,
-      priority: Number(layer.priority || 0)
-    });
-  }
-
-  return {
-    layers: sortedLayers,
-    combinedGroup,
-    requestSpecs,
-    hasStandaloneLayers: standaloneLayers.length > 0
-  };
-}
-
-function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cacheHit = false }) {
-  const resolvedEntriesById = new Map();
-  const requestSpecs = Array.isArray(prepared?.requestSpecs) ? prepared.requestSpecs : [];
-  const combinedGroup = prepared?.combinedGroup || null;
-  const combinedAndPayload = payloadsByRequestId.get('combined-and');
-  const combinedOrPayloads = requestSpecs
-    .filter((spec) => spec.kind === 'combined-or')
-    .map((spec) => payloadsByRequestId.get(spec.id))
-    .filter(Boolean);
-
-  function assignResolvedFeature(id, color, priority) {
-    if (!Number.isInteger(id) || id <= 0) return;
-    const current = resolvedEntriesById.get(id);
-    if (current && current.priority <= priority) return;
-    resolvedEntriesById.set(id, {
-      color,
-      priority
-    });
-  }
-
-  if (combinedGroup) {
-    let combinedSet = null;
-    if (combinedAndPayload) {
-      combinedSet = toFeatureIdSetFromMatches(combinedAndPayload);
-    }
-    if (combinedOrPayloads.length > 0) {
-      const unionOrSet = new Set();
-      for (const payload of combinedOrPayloads) {
-        for (const id of toFeatureIdSetFromMatches(payload)) {
-          unionOrSet.add(id);
-        }
-      }
-      combinedSet = combinedSet
-        ? new Set([...combinedSet].filter((id) => unionOrSet.has(id)))
-        : unionOrSet;
-    }
-    if (combinedSet) {
-      for (const id of combinedSet) {
-        assignResolvedFeature(id, combinedGroup.color, combinedGroup.priority);
-      }
-    }
-  }
-
-  for (const spec of requestSpecs) {
-    if (spec.kind !== 'layer') continue;
-    const payload = payloadsByRequestId.get(spec.id);
-    if (!payload) continue;
-    for (const id of toFeatureIdSetFromMatches(payload)) {
-      assignResolvedFeature(id, spec.color, spec.priority);
-    }
-  }
-
-  const highlightGroupsByColor = new Map();
-  for (const [id, entry] of resolvedEntriesById.entries()) {
-    const color = String(entry?.color || FILTER_LAYER_BASE_COLOR).trim() || FILTER_LAYER_BASE_COLOR;
-    const bucket = highlightGroupsByColor.get(color) || [];
-    bucket.push(id);
-    highlightGroupsByColor.set(color, bucket);
-  }
-
-  const highlightColorGroups = [...highlightGroupsByColor.entries()].map(([color, ids]) => ({
-    color,
-    ids
-  }));
-
-  const payloads = [...payloadsByRequestId.values()];
-  return {
-    highlightColorGroups,
-    matchedCount: resolvedEntriesById.size,
-    meta: {
-      rulesHash: String(prepared?.rulesHash || 'fnv1a-0'),
-      bboxHash: '',
-      truncated: payloads.some((payload) => Boolean(payload?.meta?.truncated)),
-      elapsedMs: payloads.reduce((sum, payload) => sum + Number(payload?.meta?.elapsedMs || 0), 0),
-      cacheHit: cacheHit
-    }
-  };
-}
 
 function createInitialState(mapDebug) {
   const debugState = mapDebug?.getState?.() || {
@@ -263,22 +88,18 @@ export function createFilterPipeline({
   const state = writable(currentState);
   let mapMoveDebounceTimer = null;
   let activeFilterAbortController = null;
-  let prefetchFilterAbortController = null;
   const filterCache = createFilterCache({
     ttlMs: FILTER_MATCH_CACHE_TTL_MS,
     maxItems: FILTER_MATCH_CACHE_MAX_ITEMS
   });
-  let filterWorkerService = null;
   let latestFilterToken = 0;
   let filterRulesDebounceTimer = null;
   let filterAuthoritativeTimer = null;
-  let filterPrefetchTimer = null;
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
   let lastAuthoritativeRequestKey = '';
   let activeFilterCoverageWindow = null;
   let activeFilterCoverageKey = '';
-  let filterLastPrefetchAt = 0;
   let filterLastMoveEndAt = 0;
   let filterLastMapCenter = null;
   let filterLastMoveVector = { dx: 0, dy: 0 };
@@ -362,7 +183,7 @@ export function createFilterPipeline({
       statusCode: phase === 'idle' ? 'idle' : undefined
     });
     updateFilterDebugHook({
-      active: filterFeatureStateManager.getFilteredFeatureCount() > 0,
+      active: filterDiffApplyStrategy.getFilteredFeatureCount() > 0,
       expr: ['literal', currentFilterRulesHash],
       mode: FILTER_HIGHLIGHT_MODE,
       phase,
@@ -370,13 +191,6 @@ export function createFilterPipeline({
       lastCount: currentState.lastCount,
       cacheHit: currentState.lastCacheHit
     });
-  }
-
-  function requestFilterWorker(type, payload = {}) {
-    if (!filterWorkerService) {
-      filterWorkerService = new MapFilterService();
-    }
-    return filterWorkerService.request(type, payload);
   }
 
   function recordFilterRequestDebugEvent(eventName) {
@@ -387,7 +201,8 @@ export function createFilterPipeline({
     mapDebug?.recordFilterTelemetry?.(eventName, payload);
   }
 
-  const filterFeatureStateManager = createFilterFeatureStateManager({
+  // Keep the pipeline as an orchestrator; planning/cache/worker/apply steps live in dedicated strategies.
+  const filterDiffApplyStrategy = createFilterDiffApplyStrategy({
     resolveMap,
     resolveLayerIds,
     getLatestFilterToken: () => latestFilterToken,
@@ -399,6 +214,7 @@ export function createFilterPipeline({
     getCurrentPhase: () => currentState.phase,
     highlightMode: FILTER_HIGHLIGHT_MODE
   });
+  const filterWorkerDispatcher = createFilterWorkerDispatcher();
   const filterFetcher = createFilterFetcher({
     resolveMap,
     resolveLayerIds,
@@ -410,19 +226,18 @@ export function createFilterPipeline({
     dataCacheMaxItems: FILTER_DATA_CACHE_MAX_ITEMS,
     dataRequestChunkSize: FILTER_DATA_REQUEST_CHUNK_SIZE
   });
-
-  function cancelPrefetchRequest() {
-    if (prefetchFilterAbortController) {
-      prefetchFilterAbortController.abort();
-      prefetchFilterAbortController = null;
-      recordFilterRequestDebugEvent('prefetch-abort');
-      recordFilterTelemetry('prefetch_abort');
-    }
-    if (filterPrefetchTimer) {
-      clearTimeout(filterPrefetchTimer);
-      filterPrefetchTimer = null;
-    }
-  }
+  const filterMatchCacheStrategy = createFilterMatchCacheStrategy({
+    filterCache,
+    filterFetcher,
+    buildFilterRequestCacheKey,
+    buildPrefetchCoverageWindow: (coverageWindow) => buildPrefetchCoverageWindowSnapshot(coverageWindow, filterLastMoveVector),
+    resolveMap,
+    getLatestFilterToken: () => latestFilterToken,
+    recordFilterRequestDebugEvent,
+    recordFilterTelemetry,
+    prefetchEnabled: FILTER_PREFETCH_ENABLED,
+    prefetchMinIntervalMs: FILTER_PREFETCH_MIN_INTERVAL_MS
+  });
 
   function getCoverageWindowForViewport(viewportBbox) {
     return getCoverageWindowForViewportSnapshot(viewportBbox, {
@@ -447,27 +262,12 @@ export function createFilterPipeline({
     return isViewportInsideBbox(viewportBbox, activeFilterCoverageWindow);
   }
 
-  function buildPrefetchCoverageWindow(coverageWindow) {
-    return buildPrefetchCoverageWindowSnapshot(coverageWindow, filterLastMoveVector);
-  }
-
-  function findReusableResolvedPayload({ viewportBbox, rulesHash, zoomBucket }) {
-    return filterCache.findCachedFilterMatches((payload) => {
-      const meta = payload?.meta || {};
-      const coverageWindow = meta.coverageWindow;
-      if (!coverageWindow) return false;
-      if (String(meta.rulesHash || '') !== String(rulesHash || '')) return false;
-      if (Number(meta.zoomBucket || 0) !== Number(zoomBucket || 0)) return false;
-      return isViewportInsideBbox(viewportBbox, coverageWindow);
-    });
-  }
-
   async function prepareRulesForFiltering(input) {
     try {
       const requestPayload = isLayerInput(input)
         ? { layers: input }
         : { rules: input };
-      const workerResult = await requestFilterWorker('prepare-rules', requestPayload);
+      const workerResult = await filterWorkerDispatcher.request('prepare-rules', requestPayload);
       if (workerResult?.ok) {
         const normalizedLayers = Array.isArray(workerResult.layers) && workerResult.layers.length > 0
           ? workerResult.layers
@@ -506,194 +306,12 @@ export function createFilterPipeline({
     }
   }
 
-  async function fetchMatchesForRequestSpec(spec, context, signal, { allowCache = true } = {}) {
-    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket);
-    if (allowCache) {
-      const cached = filterCache.getCachedFilterMatches(requestCacheKey);
-      if (cached) {
-        return {
-          payload: {
-            ...cached,
-            meta: {
-              ...(cached?.meta || {}),
-              cacheHit: true
-            }
-          },
-          cacheHit: true,
-          usedFallback: Boolean(cached?.meta?.fallback)
-        };
-      }
-    }
-
-    let payload;
-    let usedFallback = false;
-    try {
-      payload = await filterFetcher.fetchFilterMatchesPrimary({
-        bbox: context.coverageWindow,
-        zoomBucket: context.zoomBucket,
-        rules: spec.rules,
-        rulesHash: spec.rulesHash,
-        signal
-      });
-    } catch (error) {
-      if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
-      usedFallback = true;
-      payload = await filterFetcher.fetchFilterMatchesFallback({
-        rules: spec.rules,
-        signal
-      });
-    }
-
-    const normalizedPayload = {
-      ...payload,
-      meta: {
-        ...(payload?.meta || {}),
-        fallback: usedFallback,
-        cacheHit: Boolean(payload?.meta?.cacheHit)
-      }
-    };
-    filterCache.putCachedFilterMatches(requestCacheKey, normalizedPayload);
-    return {
-      payload: normalizedPayload,
-      cacheHit: false,
-      usedFallback
-    };
-  }
-
-  function getCachedRequestSpecResult(spec, context) {
-    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket);
-    const cached = filterCache.getCachedFilterMatches(requestCacheKey);
-    if (!cached) return null;
-    return {
-      spec,
-      payload: {
-        ...cached,
-        meta: {
-          ...(cached?.meta || {}),
-          cacheHit: true
-        }
-      },
-      cacheHit: true,
-      usedFallback: Boolean(cached?.meta?.fallback)
-    };
-  }
-
-  async function fetchMatchesBatchForRequestSpecs(specs, context, signal) {
-    const batchPayload = await filterFetcher.fetchFilterMatchesBatchPrimary({
-      bbox: context.coverageWindow,
-      zoomBucket: context.zoomBucket,
-      requestSpecs: specs,
-      signal
-    });
-    const itemsById = new Map(
-      (Array.isArray(batchPayload?.items) ? batchPayload.items : [])
-        .map((item) => [String(item?.id || ''), item])
-    );
-
-    return specs.map((spec) => {
-      const payload = itemsById.get(String(spec.id || '')) || {
-        matchedKeys: [],
-        matchedFeatureIds: [],
-        meta: {
-          rulesHash: spec.rulesHash,
-          bboxHash: context.bboxHash,
-          truncated: false,
-          elapsedMs: Number(batchPayload?.meta?.elapsedMs || 0),
-          cacheHit: Boolean(batchPayload?.meta?.cacheHit)
-        }
-      };
-      const normalizedPayload = {
-        ...payload,
-        meta: {
-          ...(payload?.meta || {}),
-          cacheHit: Boolean(payload?.meta?.cacheHit)
-        }
-      };
-      filterCache.putCachedFilterMatches(
-        buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket),
-        normalizedPayload
-      );
-      return {
-        spec,
-        payload: normalizedPayload,
-        cacheHit: Boolean(normalizedPayload?.meta?.cacheHit),
-        usedFallback: Boolean(normalizedPayload?.meta?.fallback)
-      };
-    });
-  }
-
-  function scheduleFilterPrefetch(context, token) {
-    if (!FILTER_PREFETCH_ENABLED || !context?.coverageWindow || !context?.rulesHash) return;
-    if (!Array.isArray(context?.requestSpecs) || context.requestSpecs.length !== 1) return;
-    const spec = context.requestSpecs[0];
-    if (!Array.isArray(spec?.rules) || spec.rules.length === 0) return;
-    const now = Date.now();
-    if ((now - filterLastPrefetchAt) < FILTER_PREFETCH_MIN_INTERVAL_MS) return;
-    const prefetchBbox = buildPrefetchCoverageWindow(context.coverageWindow);
-    if (!prefetchBbox) return;
-    const prefetchHash = buildBboxHash(prefetchBbox, 4);
-    const prefetchCacheKey = buildFilterRequestCacheKey(spec, prefetchHash, context.zoomBucket);
-    if (filterCache.getCachedFilterMatches(prefetchCacheKey)) return;
-
-    cancelPrefetchRequest();
-    filterPrefetchTimer = setTimeout(async () => {
-      filterPrefetchTimer = null;
-      if (token !== latestFilterToken || !resolveMap()) return;
-
-      prefetchFilterAbortController = new AbortController();
-      const signal = prefetchFilterAbortController.signal;
-      filterLastPrefetchAt = Date.now();
-      recordFilterRequestDebugEvent('prefetch-start');
-      recordFilterTelemetry('prefetch_start', {
-        prefetchHash
-      });
-
-      try {
-        const payload = await filterFetcher.fetchFilterMatchesPrimary({
-          bbox: prefetchBbox,
-          zoomBucket: context.zoomBucket,
-          rules: spec.rules,
-          rulesHash: spec.rulesHash,
-          signal
-        });
-        if (token !== latestFilterToken) return;
-        filterCache.putCachedFilterMatches(prefetchCacheKey, {
-          ...payload,
-          meta: {
-            ...(payload?.meta || {}),
-            cacheHit: Boolean(payload?.meta?.cacheHit)
-          }
-        });
-        recordFilterRequestDebugEvent('prefetch-finish');
-        recordFilterTelemetry('prefetch_finish', {
-          prefetchHash,
-          count: Math.max(
-            Array.isArray(payload?.matchedFeatureIds) ? payload.matchedFeatureIds.length : 0,
-            Array.isArray(payload?.matchedKeys) ? payload.matchedKeys.length : 0
-          )
-        });
-      } catch (error) {
-        if (String(error?.name || '').toLowerCase() === 'aborterror') {
-          recordFilterRequestDebugEvent('prefetch-abort');
-          recordFilterTelemetry('prefetch_abort', { prefetchHash });
-        }
-      } finally {
-        if (prefetchFilterAbortController?.signal === signal) {
-          prefetchFilterAbortController = null;
-        }
-      }
-    }, 60);
-  }
-
   function scheduleAuthoritativeRequest(context, token, debounceMs) {
     if (filterAuthoritativeTimer) {
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
     }
-    if (filterPrefetchTimer) {
-      clearTimeout(filterPrefetchTimer);
-      filterPrefetchTimer = null;
-    }
+    filterMatchCacheStrategy.cancelPrefetch();
     filterAuthoritativeTimer = setTimeout(async () => {
       filterAuthoritativeTimer = null;
       if (token !== latestFilterToken || !resolveMap()) return;
@@ -702,7 +320,7 @@ export function createFilterPipeline({
         return;
       }
       lastAuthoritativeRequestKey = requestKey;
-      cancelPrefetchRequest();
+      filterMatchCacheStrategy.cancelPrefetch();
       if (activeFilterAbortController) {
         debugFilterLog('filter request abort', { requestKey });
         recordFilterRequestDebugEvent('abort');
@@ -730,7 +348,7 @@ export function createFilterPipeline({
         const cachedResults = [];
         const missingSpecs = [];
         for (const spec of context.requestSpecs) {
-          const cachedResult = getCachedRequestSpecResult(spec, context);
+          const cachedResult = filterMatchCacheStrategy.getCachedRequestSpecResult(spec, context);
           if (cachedResult) {
             cachedResults.push(cachedResult);
           } else {
@@ -741,11 +359,11 @@ export function createFilterPipeline({
         requestResults = [...cachedResults];
         if (missingSpecs.length > 0) {
           const fetchedResults = missingSpecs.length > 1
-            ? await (() => fetchMatchesBatchForRequestSpecs(missingSpecs, context, signal))()
+            ? await (() => filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(missingSpecs, context, signal))()
                 .catch(async (error) => {
                   if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
                   return Promise.all(missingSpecs.map(async (spec) => {
-                    const result = await fetchMatchesForRequestSpec(spec, context, signal);
+                    const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, context, signal);
                     return {
                       spec,
                       ...result
@@ -753,7 +371,7 @@ export function createFilterPipeline({
                   }));
                 })
             : await Promise.all(missingSpecs.map(async (spec) => {
-                const result = await fetchMatchesForRequestSpec(spec, context, signal);
+                const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, context, signal);
                 return {
                   spec,
                   ...result
@@ -800,7 +418,7 @@ export function createFilterPipeline({
         return;
       }
 
-      await filterFeatureStateManager.applyFilteredFeaturePaintGroups(
+      await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
         resolvedPayload.highlightColorGroups || [],
         token,
         { phase: 'authoritative' }
@@ -836,7 +454,7 @@ export function createFilterPipeline({
         elapsedMs: currentState.lastElapsedMs,
         applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
         setPaintPropertyCalls: currentState.setPaintPropertyCallsLast,
-        highlightedCount: filterFeatureStateManager.getFilteredFeatureCount()
+        highlightedCount: filterDiffApplyStrategy.getFilteredFeatureCount()
       });
       updateFilterRuntimeStatus({
         statusCode: resolvedPayload?.meta?.truncated ? 'truncated' : 'applied',
@@ -854,7 +472,7 @@ export function createFilterPipeline({
         lastCount: currentState.lastCount,
         cacheHit: currentState.lastCacheHit
       });
-      scheduleFilterPrefetch(context, token);
+      filterMatchCacheStrategy.schedulePrefetch(context, token);
     }, Math.max(0, Number(debounceMs) || 0));
   }
 
@@ -863,16 +481,12 @@ export function createFilterPipeline({
       activeFilterAbortController.abort();
       activeFilterAbortController = null;
     }
-    if (prefetchFilterAbortController) {
-      prefetchFilterAbortController.abort();
-      prefetchFilterAbortController = null;
-    }
-    cancelPrefetchRequest();
+    filterMatchCacheStrategy.cancelPrefetch();
     if (filterAuthoritativeTimer) {
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
     }
-    filterFeatureStateManager.clearFilteredHighlight();
+    filterDiffApplyStrategy.clearFilteredHighlight();
     patchState({
       statusMessage: '',
       lastElapsedMs: 0,
@@ -903,7 +517,7 @@ export function createFilterPipeline({
         errorMessage: prepared.error || resolveInvalidMessage(),
         statusMessage: ''
       });
-      filterFeatureStateManager.clearFilteredHighlight();
+      filterDiffApplyStrategy.clearFilteredHighlight();
       setFilterPhase('idle');
       updateFilterRuntimeStatus({
         statusCode: 'invalid',
@@ -975,7 +589,7 @@ export function createFilterPipeline({
           cacheHit: true
         }
       };
-      await filterFeatureStateManager.applyFilteredFeaturePaintGroups(
+      await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
         Array.isArray(cachedPayload?.highlightColorGroups) ? cachedPayload.highlightColorGroups : [],
         token,
         { phase: 'optimistic' }
@@ -1016,7 +630,7 @@ export function createFilterPipeline({
       return;
     }
 
-    const reusableResolvedPayload = findReusableResolvedPayload({
+    const reusableResolvedPayload = filterMatchCacheStrategy.findReusableResolvedPayload({
       viewportBbox: bbox,
       rulesHash: prepared.rulesHash,
       zoomBucket
@@ -1029,7 +643,7 @@ export function createFilterPipeline({
           cacheHit: true
         }
       };
-      await filterFeatureStateManager.applyFilteredFeaturePaintGroups(
+      await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
         Array.isArray(reusedPayload?.highlightColorGroups) ? reusedPayload.highlightColorGroups : [],
         token,
         { phase: 'optimistic' }
@@ -1158,12 +772,12 @@ export function createFilterPipeline({
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
     }
-    cancelPrefetchRequest();
+    filterMatchCacheStrategy.destroy();
     if (activeFilterAbortController) {
       activeFilterAbortController.abort();
       activeFilterAbortController = null;
     }
-    filterFeatureStateManager.clearFilteredHighlight();
+    filterDiffApplyStrategy.clearFilteredHighlight();
     filterCache.clear();
     filterFetcher.clear();
     activeFilterCoverageWindow = null;
@@ -1171,7 +785,6 @@ export function createFilterPipeline({
     lastAuthoritativeRequestKey = '';
     currentFilterRulesHash = 'fnv1a-0';
     lastViewportHash = '';
-    filterLastPrefetchAt = 0;
     filterLastMoveEndAt = 0;
     filterLastMapCenter = null;
     filterLastMoveVector = { dx: 0, dy: 0 };
@@ -1186,10 +799,7 @@ export function createFilterPipeline({
       setPaintPropertyCalls: 0,
       updatedAt: Date.now()
     });
-    if (filterWorkerService) {
-      filterWorkerService.destroy();
-      filterWorkerService = null;
-    }
+    filterWorkerDispatcher.destroy();
     patchState({
       errorMessage: '',
       statusMessage: '',
@@ -1211,12 +821,12 @@ export function createFilterPipeline({
     state,
     applyBuildingFilters,
     clearFilterHighlight,
-    clearFilteredHighlight: () => filterFeatureStateManager.clearFilteredHighlight(),
+    clearFilteredHighlight: () => filterDiffApplyStrategy.clearFilteredHighlight(),
     destroy,
     getCoverageWindowForViewport,
     refreshDebugState,
     registerFilterMoveEnd,
-    reapplyFilteredHighlight: () => filterFeatureStateManager.reapplyFilteredHighlight(),
+    reapplyFilteredHighlight: () => filterDiffApplyStrategy.reapplyFilteredHighlight(),
     scheduleFilterRefresh,
     scheduleFilterRulesRefresh
   };

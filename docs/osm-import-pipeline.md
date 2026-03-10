@@ -11,7 +11,7 @@ its helper modules under [`scripts/region-sync/`](../scripts/region-sync/), and
 The pipeline below is the source of truth for managed region syncs where:
 
 - region config is stored in `Admin -> Data`
-- `sourceType=extract_query`
+- `sourceType=extract`
 - sync is started by scheduler, queue, admin action, or CLI
 
 Primary entrypoints:
@@ -42,11 +42,13 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 2. Scheduler or manual trigger chooses a concrete `regionId`.
 3. [`scripts/sync-osm-region.js`](../scripts/sync-osm-region.js) loads the region config through `scripts/region-sync/db-ingester.js` and validates:
    - region exists
-   - `sourceType=extract_query`
-   - extract query is not empty
+   - `sourceType=extract`
+   - canonical `extractSource` + `extractId` are present
+   - `extractResolutionStatus=resolved`
 4. The script creates a temp workspace under the OS temp directory for the current run.
 5. The orchestrator delegates the extract stage to `scripts/region-sync/python-extractor.js`, which resolves Python and calls the importer with:
-   - `--extract-query <region.sourceValue>`
+   - `--extract-query <region.extractId>`
+   - `--extract-source <region.extractSource>`
    - `--out-ndjson <workspace>/region-import.ndjson`
 6. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query and materialize the result into a DuckDB file under `data/quackosm/`.
 7. The Python importer opens that DuckDB file, loads the `spatial` extension, and runs SQL over `quackosm_raw` to:
@@ -123,6 +125,7 @@ flowchart TD
 - Resolves Python executable candidates.
 - Verifies `quackosm` and `duckdb` Python dependencies before starting import.
 - Invokes `scripts/sync-osm-buildings.py` and turns Python setup failures into explicit sync errors.
+- Exposes both fuzzy candidate search (`--resolve-extract-query`) and exact canonical resolution (`--resolve-exact-extract`) for admin data settings.
 
 ### `scripts/region-sync/db-ingester.js`
 
@@ -141,6 +144,20 @@ flowchart TD
 - Downloads or reuses the matching extract.
 - Filters source data by `tags_filter={'building': True}` before the project-specific SQL stage.
 - Writes the raw import result into DuckDB as `quackosm_raw`.
+
+### Canonical extract resolution and multiple matches
+
+- Managed region sync does not resolve ambiguous extract queries during the import itself. It requires an already stored canonical pair `extractSource + extractId`.
+- Admin region editing uses the Python extractor in two modes:
+  - `--resolve-extract-query` returns ranked extract candidates for manual selection.
+  - `--resolve-exact-extract` validates the chosen canonical extract before the region is saved.
+- In exact-resolution mode, [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) catches `OsmExtractMultipleMatchesError` and returns structured JSON instead of a raw traceback:
+  - `candidate: null`
+  - `errorCode: "multiple"`
+  - `message`: upstream resolver message
+  - `matchingExtractIds[]`: canonical extract ids that matched the query
+- The data-settings service converts that result into a user-facing validation error telling the admin to pick one extract manually.
+- Because of that validation, ambiguous canonical extract selection is rejected at save time, and managed sync later refuses to start for any region whose `extractResolutionStatus` is not `resolved`.
 
 ### `duckdb`
 
