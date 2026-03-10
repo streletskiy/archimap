@@ -23,7 +23,7 @@ export const buildingFilterRuntime = writable({
   count: 0,
   elapsedMs: 0,
   cacheHit: false,
-  setFeatureStateCalls: 0,
+  setPaintPropertyCalls: 0,
   updatedAt: 0
 });
 
@@ -119,9 +119,9 @@ export function setBuildingFilterRuntimeStatus(status = {}) {
     count: status.count != null ? Number(status.count || 0) : Number(prev.count || 0),
     elapsedMs: status.elapsedMs != null ? Number(status.elapsedMs || 0) : Number(prev.elapsedMs || 0),
     cacheHit: status.cacheHit != null ? Boolean(status.cacheHit) : Boolean(prev.cacheHit),
-    setFeatureStateCalls: status.setFeatureStateCalls != null
-      ? Number(status.setFeatureStateCalls || 0)
-      : Number(prev.setFeatureStateCalls || 0),
+    setPaintPropertyCalls: status.setPaintPropertyCalls != null
+      ? Number(status.setPaintPropertyCalls || 0)
+      : Number(prev.setPaintPropertyCalls || 0),
     updatedAt: Number(status.updatedAt || Date.now())
   }));
 }

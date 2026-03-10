@@ -49,38 +49,6 @@ export function getCurrentSelectedLineLayerIds(activeRegionPmtiles = []) {
   return getRegionLayerIds(activeRegionPmtiles, 'selected-line');
 }
 
-export function setLocalBuildingFeatureStateById({
-  map,
-  activeRegionPmtiles = [],
-  sourceConfigs = null,
-  id,
-  state
-}) {
-  if (!map) return false;
-  if (!Number.isInteger(id) || id <= 0) return false;
-  const configs = Array.isArray(sourceConfigs)
-    ? sourceConfigs
-    : getCurrentBuildingSourceConfigs(activeRegionPmtiles);
-  let applied = false;
-  for (const sourceConfig of configs) {
-    if (!sourceConfig?.sourceLayer) continue;
-    try {
-      map.setFeatureState(
-        {
-          source: sourceConfig.sourceId,
-          sourceLayer: sourceConfig.sourceLayer,
-          id
-        },
-        state
-      );
-      applied = true;
-    } catch {
-      // Ignore setFeatureState errors for sources or features that are not ready.
-    }
-  }
-  return applied;
-}
-
 export function applyBuildingThemePaint({ map, theme, fillLayerIds = [], lineLayerIds = [] }) {
   if (!map) return;
   const paint = getBuildingThemePaint(theme);
@@ -294,18 +262,8 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       'source-layer': region.sourceLayer,
       minzoom: 13,
       paint: {
-        'fill-color': [
-          'case',
-          ['boolean', ['feature-state', 'isFiltered'], false],
-          ['to-color', ['feature-state', 'filterColor']],
-          'transparent'
-        ],
-        'fill-opacity': [
-          'case',
-          ['boolean', ['feature-state', 'isFiltered'], false],
-          0.4,
-          0
-        ]
+        'fill-color': 'transparent',
+        'fill-opacity': 0
       }
     });
   }
@@ -318,24 +276,9 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       'source-layer': region.sourceLayer,
       minzoom: 13,
       paint: {
-        'line-color': [
-          'case',
-          ['boolean', ['feature-state', 'isFiltered'], false],
-          ['to-color', ['feature-state', 'filterColor']],
-          'transparent'
-        ],
-        'line-width': [
-          'case',
-          ['boolean', ['feature-state', 'isFiltered'], false],
-          1.8,
-          0
-        ],
-        'line-opacity': [
-          'case',
-          ['boolean', ['feature-state', 'isFiltered'], false],
-          0.95,
-          0
-        ]
+        'line-color': 'transparent',
+        'line-width': 0,
+        'line-opacity': 0
       }
     });
   }

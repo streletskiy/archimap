@@ -1,11 +1,8 @@
 import {
-  buildFeatureStateEntryDiffPlan,
-  buildFeatureStateDiffPlan,
   computeRulesHash,
   isHeavyRule,
   normalizeFilterLayers,
-  normalizeFilterRules,
-  toFeatureIdSetFromMatches
+  normalizeFilterRules
 } from '$lib/components/map/filter-pipeline-utils';
 
 function isTrustedMessageOrigin(event) {
@@ -92,28 +89,5 @@ self.onmessage = (event) => {
       heavy: rules.some((rule) => isHeavyRule(rule))
     });
     return;
-  }
-
-  if (type === 'build-apply-plan') {
-    if (Array.isArray(payload.prevEntries) || Array.isArray(payload.nextEntries)) {
-      const plan = buildFeatureStateEntryDiffPlan(payload.prevEntries || [], payload.nextEntries || []);
-      self.postMessage({
-        type: 'build-apply-plan-result',
-        requestId,
-        ok: true,
-        ...plan
-      });
-      return;
-    }
-
-    const nextSet = toFeatureIdSetFromMatches(payload.matches || {});
-    const nextFeatureIds = [...nextSet];
-    const plan = buildFeatureStateDiffPlan(payload.prevFeatureIds || [], nextFeatureIds);
-    self.postMessage({
-      type: 'build-apply-plan-result',
-      requestId,
-      ok: true,
-      ...plan
-    });
   }
 };

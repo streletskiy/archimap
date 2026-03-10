@@ -2,7 +2,6 @@ import { writable } from 'svelte/store';
 import { EMPTY_LAYER_FILTER, hashFilterExpression } from '$lib/components/map/filter-highlight-utils';
 import { FILTER_LAYER_BASE_COLOR } from '$lib/constants/filter-presets';
 import {
-  buildFeatureStateEntry,
   computeRulesHash,
   normalizeFilterLayers,
   normalizeFilterRules,
@@ -22,7 +21,7 @@ import { createFilterFetcher } from './filter-fetcher';
 import { normalizeLayerIdsSnapshot } from './filter-utils';
 import { MapFilterService } from './map-filter.service';
 
-export const FILTER_HIGHLIGHT_MODE = 'feature-state';
+export const FILTER_HIGHLIGHT_MODE = 'paint-property';
 export const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
 
 const FILTER_REQUEST_DEBOUNCE_MS = 180;
@@ -35,16 +34,10 @@ const FILTER_MATCH_DEFAULT_LIMIT = 12_000;
 const FILTER_DATA_CACHE_TTL_MS = 45_000;
 const FILTER_DATA_CACHE_MAX_ITEMS = 25_000;
 const FILTER_DATA_REQUEST_CHUNK_SIZE = 5_000;
-const FILTER_FEATURE_STATE_CHUNK_SIZE = 540;
-const FILTER_DENSE_DIFF_THRESHOLD = 1_200;
-const FILTER_APPLY_FRAME_BUDGET_MS = 4.5;
-const FILTER_APPLY_DENSE_FRAME_BUDGET_MS = 8.5;
-const FILTER_APPLY_DENSE_MAX_OPS_PER_FRAME = 2_800;
 const FILTER_COVERAGE_MARGIN_MIN = 0.2;
 const FILTER_COVERAGE_MARGIN_MAX = 0.35;
 const FILTER_PREFETCH_ENABLED = true;
 const FILTER_PREFETCH_MIN_INTERVAL_MS = 900;
-const FILTER_CLEAR_COLOR = '#000000';
 
 function isLayerInput(input) {
   return Array.isArray(input) && input.some((item) => (
@@ -196,23 +189,29 @@ function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cacheHit = f
     }
   }
 
-  const featureStateEntries = [...resolvedEntriesById.entries()]
-    .map(([id, entry]) => buildFeatureStateEntry(id, {
-      isFiltered: true,
-      filterColor: entry.color
-    }))
-    .filter(Boolean);
+  const highlightGroupsByColor = new Map();
+  for (const [id, entry] of resolvedEntriesById.entries()) {
+    const color = String(entry?.color || FILTER_LAYER_BASE_COLOR).trim() || FILTER_LAYER_BASE_COLOR;
+    const bucket = highlightGroupsByColor.get(color) || [];
+    bucket.push(id);
+    highlightGroupsByColor.set(color, bucket);
+  }
+
+  const highlightColorGroups = [...highlightGroupsByColor.entries()].map(([color, ids]) => ({
+    color,
+    ids
+  }));
 
   const payloads = [...payloadsByRequestId.values()];
   return {
-    featureStateEntries,
+    highlightColorGroups,
+    matchedCount: resolvedEntriesById.size,
     meta: {
       rulesHash: String(prepared?.rulesHash || 'fnv1a-0'),
       bboxHash: '',
       truncated: payloads.some((payload) => Boolean(payload?.meta?.truncated)),
       elapsedMs: payloads.reduce((sum, payload) => sum + Number(payload?.meta?.elapsedMs || 0), 0),
-      cacheHit: cacheHit,
-      clearColor: FILTER_CLEAR_COLOR
+      cacheHit: cacheHit
     }
   };
 }
@@ -230,8 +229,8 @@ function createInitialState(mapDebug) {
     lastElapsedMs: 0,
     lastCount: 0,
     lastCacheHit: false,
-    setFeatureStateCallsLast: 0,
-    lastApplyDiffMs: 0,
+    setPaintPropertyCallsLast: 0,
+    lastPaintApplyMs: 0,
     debugActive: Boolean(debugState.active),
     debugExprHash: String(debugState.exprHash || hashFilterExpression(EMPTY_LAYER_FILTER))
   };
@@ -283,7 +282,6 @@ export function createFilterPipeline({
   let filterLastMoveEndAt = 0;
   let filterLastMapCenter = null;
   let filterLastMoveVector = { dx: 0, dy: 0 };
-  let filterDenseBurstEnabled = resolveFilterDenseBurstEnabled();
 
   function patchState(patch = {}) {
     currentState = {
@@ -306,7 +304,7 @@ export function createFilterPipeline({
     lastElapsedMs = currentState.lastElapsedMs,
     lastCount = currentState.lastCount,
     cacheHit = currentState.lastCacheHit,
-    setFeatureStateCalls = currentState.setFeatureStateCallsLast
+    setPaintPropertyCalls = currentState.setPaintPropertyCallsLast
   } = {}) {
     const nextDebugState = mapDebug?.updateHook?.({
       active,
@@ -316,7 +314,7 @@ export function createFilterPipeline({
       lastElapsedMs,
       lastCount,
       cacheHit,
-      setFeatureStateCalls
+      setPaintPropertyCalls
     }) || {
       active: Boolean(active),
       exprHash: hashFilterExpression(expr)
@@ -344,7 +342,7 @@ export function createFilterPipeline({
       lastCount: Number(status.count ?? currentState.lastCount ?? 0) || 0,
       lastElapsedMs: Number(status.elapsedMs ?? currentState.lastElapsedMs ?? 0) || 0,
       lastCacheHit: Boolean(status.cacheHit ?? currentState.lastCacheHit),
-      setFeatureStateCallsLast: Number(status.setFeatureStateCalls ?? currentState.setFeatureStateCallsLast ?? 0) || 0
+      setPaintPropertyCallsLast: Number(status.setPaintPropertyCalls ?? currentState.setPaintPropertyCallsLast ?? 0) || 0
     });
     handleStatusChange({
       phase: nextState.phase,
@@ -353,7 +351,7 @@ export function createFilterPipeline({
       count: nextState.lastCount,
       elapsedMs: nextState.lastElapsedMs,
       cacheHit: nextState.lastCacheHit,
-      setFeatureStateCalls: nextState.setFeatureStateCallsLast,
+      setPaintPropertyCalls: nextState.setPaintPropertyCallsLast,
       updatedAt: Date.now()
     });
   }
@@ -364,7 +362,7 @@ export function createFilterPipeline({
       statusCode: phase === 'idle' ? 'idle' : undefined
     });
     updateFilterDebugHook({
-      active: filterFeatureStateManager.getFilteredFeatureStateIdsSize() > 0,
+      active: filterFeatureStateManager.getFilteredFeatureCount() > 0,
       expr: ['literal', currentFilterRulesHash],
       mode: FILTER_HIGHLIGHT_MODE,
       phase,
@@ -391,27 +389,15 @@ export function createFilterPipeline({
 
   const filterFeatureStateManager = createFilterFeatureStateManager({
     resolveMap,
-    resolveBuildingSourceConfigs,
-    requestFilterWorker,
+    resolveLayerIds,
     getLatestFilterToken: () => latestFilterToken,
-    getFilterDenseBurstEnabled: () => filterDenseBurstEnabled,
-    getFilterMoveEndDelayMs: () => (
-      filterLastMoveEndAt > 0
-        ? Math.max(0, Date.now() - filterLastMoveEndAt)
-        : null
-    ),
     patchState,
     debugFilterLog,
     recordFilterTelemetry,
     updateFilterRuntimeStatus,
     updateFilterDebugHook,
     getCurrentPhase: () => currentState.phase,
-    highlightMode: FILTER_HIGHLIGHT_MODE,
-    featureStateChunkSize: FILTER_FEATURE_STATE_CHUNK_SIZE,
-    denseDiffThreshold: FILTER_DENSE_DIFF_THRESHOLD,
-    applyFrameBudgetMs: FILTER_APPLY_FRAME_BUDGET_MS,
-    applyDenseFrameBudgetMs: FILTER_APPLY_DENSE_FRAME_BUDGET_MS,
-    applyDenseMaxOpsPerFrame: FILTER_APPLY_DENSE_MAX_OPS_PER_FRAME
+    highlightMode: FILTER_HIGHLIGHT_MODE
   });
   const filterFetcher = createFilterFetcher({
     resolveMap,
@@ -424,17 +410,6 @@ export function createFilterPipeline({
     dataCacheMaxItems: FILTER_DATA_CACHE_MAX_ITEMS,
     dataRequestChunkSize: FILTER_DATA_REQUEST_CHUNK_SIZE
   });
-
-  function resolveFilterDenseBurstEnabled() {
-    if (typeof window === 'undefined') return true;
-    try {
-      const raw = String(new URL(window.location.href).searchParams.get('filterDenseBurst') || '').trim().toLowerCase();
-      if (raw === '0' || raw === 'false' || raw === 'off') return false;
-    } catch {
-      // Ignore malformed URL state and keep the default behavior enabled.
-    }
-    return true;
-  }
 
   function cancelPrefetchRequest() {
     if (prefetchFilterAbortController) {
@@ -474,6 +449,17 @@ export function createFilterPipeline({
 
   function buildPrefetchCoverageWindow(coverageWindow) {
     return buildPrefetchCoverageWindowSnapshot(coverageWindow, filterLastMoveVector);
+  }
+
+  function findReusableResolvedPayload({ viewportBbox, rulesHash, zoomBucket }) {
+    return filterCache.findCachedFilterMatches((payload) => {
+      const meta = payload?.meta || {};
+      const coverageWindow = meta.coverageWindow;
+      if (!coverageWindow) return false;
+      if (String(meta.rulesHash || '') !== String(rulesHash || '')) return false;
+      if (Number(meta.zoomBucket || 0) !== Number(zoomBucket || 0)) return false;
+      return isViewportInsideBbox(viewportBbox, coverageWindow);
+    });
   }
 
   async function prepareRulesForFiltering(input) {
@@ -705,11 +691,13 @@ export function createFilterPipeline({
       });
       resolvedPayload.meta = {
         ...(resolvedPayload.meta || {}),
-        bboxHash: context.bboxHash
+        bboxHash: context.bboxHash,
+        coverageHash: context.coverageHash,
+        coverageWindow: context.coverageWindow,
+        rulesHash: context.rulesHash,
+        zoomBucket: context.zoomBucket
       };
-      const matchedSize = Array.isArray(resolvedPayload.featureStateEntries)
-        ? resolvedPayload.featureStateEntries.length
-        : 0;
+      const matchedSize = Number(resolvedPayload?.matchedCount || 0);
       if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
         updateFilterRuntimeStatus({
           statusCode: 'too_many_matches',
@@ -723,8 +711,8 @@ export function createFilterPipeline({
         return;
       }
 
-      await filterFeatureStateManager.applyFilteredFeatureStateEntries(
-        resolvedPayload.featureStateEntries || [],
+      await filterFeatureStateManager.applyFilteredFeaturePaintGroups(
+        resolvedPayload.highlightColorGroups || [],
         token,
         { phase: 'authoritative' }
       );
@@ -758,15 +746,15 @@ export function createFilterPipeline({
         count: matchedSize,
         elapsedMs: currentState.lastElapsedMs,
         applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
-        setFeatureStateCalls: currentState.setFeatureStateCallsLast,
-        toEnable: filterFeatureStateManager.getFilteredFeatureStateIdsSize()
+        setPaintPropertyCalls: currentState.setPaintPropertyCallsLast,
+        highlightedCount: filterFeatureStateManager.getFilteredFeatureCount()
       });
       updateFilterRuntimeStatus({
         statusCode: resolvedPayload?.meta?.truncated ? 'truncated' : 'applied',
         count: currentState.lastCount,
         elapsedMs: currentState.lastElapsedMs,
         cacheHit: currentState.lastCacheHit,
-        setFeatureStateCalls: currentState.setFeatureStateCallsLast
+        setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
       });
       updateFilterDebugHook({
         active: matchedSize > 0,
@@ -795,7 +783,7 @@ export function createFilterPipeline({
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
     }
-    filterFeatureStateManager.clearFilteredFeatureState();
+    filterFeatureStateManager.clearFilteredHighlight();
     patchState({
       statusMessage: '',
       lastElapsedMs: 0,
@@ -811,7 +799,7 @@ export function createFilterPipeline({
       count: 0,
       elapsedMs: 0,
       cacheHit: false,
-      setFeatureStateCalls: 0
+      setPaintPropertyCalls: 0
     });
   }
 
@@ -826,7 +814,7 @@ export function createFilterPipeline({
         errorMessage: prepared.error || resolveInvalidMessage(),
         statusMessage: ''
       });
-      filterFeatureStateManager.clearFilteredFeatureState();
+      filterFeatureStateManager.clearFilteredHighlight();
       setFilterPhase('idle');
       updateFilterRuntimeStatus({
         statusCode: 'invalid',
@@ -898,8 +886,8 @@ export function createFilterPipeline({
           cacheHit: true
         }
       };
-      await filterFeatureStateManager.applyFilteredFeatureStateEntries(
-        Array.isArray(cachedPayload?.featureStateEntries) ? cachedPayload.featureStateEntries : [],
+      await filterFeatureStateManager.applyFilteredFeaturePaintGroups(
+        Array.isArray(cachedPayload?.highlightColorGroups) ? cachedPayload.highlightColorGroups : [],
         token,
         { phase: 'optimistic' }
       );
@@ -907,7 +895,7 @@ export function createFilterPipeline({
       patchState({
         lastElapsedMs: Number(cachedPayload?.meta?.elapsedMs || 0),
         lastCacheHit: Boolean(cachedPayload?.meta?.cacheHit),
-        lastCount: Array.isArray(cachedPayload?.featureStateEntries) ? cachedPayload.featureStateEntries.length : 0
+        lastCount: Number(cachedPayload?.matchedCount || 0)
       });
       activeFilterCoverageWindow = {
         ...coverageWindow,
@@ -920,7 +908,7 @@ export function createFilterPipeline({
         count: currentState.lastCount,
         elapsedMs: currentState.lastElapsedMs,
         cacheHit: currentState.lastCacheHit,
-        setFeatureStateCalls: currentState.setFeatureStateCallsLast
+        setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
       });
       updateFilterDebugHook({
         active: currentState.lastCount > 0,
@@ -931,6 +919,66 @@ export function createFilterPipeline({
         lastCount: currentState.lastCount,
         cacheHit: currentState.lastCacheHit
       });
+      setFilterPhase('authoritative');
+      recordFilterTelemetry('coverage_exact_cache_hit', {
+        bboxHash,
+        coverageHash
+      });
+      return;
+    }
+
+    const reusableResolvedPayload = findReusableResolvedPayload({
+      viewportBbox: bbox,
+      rulesHash: prepared.rulesHash,
+      zoomBucket
+    });
+    if (reusableResolvedPayload) {
+      const reusedPayload = {
+        ...reusableResolvedPayload,
+        meta: {
+          ...(reusableResolvedPayload?.meta || {}),
+          cacheHit: true
+        }
+      };
+      await filterFeatureStateManager.applyFilteredFeaturePaintGroups(
+        Array.isArray(reusedPayload?.highlightColorGroups) ? reusedPayload.highlightColorGroups : [],
+        token,
+        { phase: 'optimistic' }
+      );
+      if (token !== latestFilterToken) return;
+      patchState({
+        lastElapsedMs: Number(reusedPayload?.meta?.elapsedMs || 0),
+        lastCacheHit: true,
+        lastCount: Number(reusedPayload?.matchedCount || 0)
+      });
+      activeFilterCoverageWindow = {
+        ...(reusedPayload?.meta?.coverageWindow || coverageWindow),
+        rulesHash: prepared.rulesHash,
+        zoomBucket
+      };
+      activeFilterCoverageKey = String(reusedPayload?.meta?.coverageHash || coverageHash);
+      setFilterPhase('authoritative');
+      updateFilterRuntimeStatus({
+        statusCode: 'applied',
+        count: currentState.lastCount,
+        elapsedMs: currentState.lastElapsedMs,
+        cacheHit: true,
+        setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
+      });
+      updateFilterDebugHook({
+        active: currentState.lastCount > 0,
+        expr: ['literal', prepared.rulesHash],
+        mode: FILTER_HIGHLIGHT_MODE,
+        phase: currentState.phase,
+        lastElapsedMs: currentState.lastElapsedMs,
+        lastCount: currentState.lastCount,
+        cacheHit: true
+      });
+      recordFilterTelemetry('coverage_history_hit', {
+        bboxHash,
+        coverageHash: activeFilterCoverageKey
+      });
+      return;
     }
 
     updateFilterRuntimeStatus({
@@ -1026,7 +1074,7 @@ export function createFilterPipeline({
       activeFilterAbortController.abort();
       activeFilterAbortController = null;
     }
-    filterFeatureStateManager.clearFilteredFeatureState();
+    filterFeatureStateManager.clearFilteredHighlight();
     filterCache.clear();
     filterFetcher.clear();
     activeFilterCoverageWindow = null;
@@ -1046,7 +1094,7 @@ export function createFilterPipeline({
       count: 0,
       elapsedMs: 0,
       cacheHit: false,
-      setFeatureStateCalls: 0,
+      setPaintPropertyCalls: 0,
       updatedAt: Date.now()
     });
     if (filterWorkerService) {
@@ -1061,8 +1109,8 @@ export function createFilterPipeline({
       lastElapsedMs: 0,
       lastCount: 0,
       lastCacheHit: false,
-      setFeatureStateCallsLast: 0,
-      lastApplyDiffMs: 0
+      setPaintPropertyCallsLast: 0,
+      lastPaintApplyMs: 0
     });
     updateFilterDebugHook({
       active: false,
@@ -1074,12 +1122,12 @@ export function createFilterPipeline({
     state,
     applyBuildingFilters,
     clearFilterHighlight,
-    clearFilteredFeatureState: () => filterFeatureStateManager.clearFilteredFeatureState(),
+    clearFilteredHighlight: () => filterFeatureStateManager.clearFilteredHighlight(),
     destroy,
     getCoverageWindowForViewport,
     refreshDebugState,
     registerFilterMoveEnd,
-    reapplyFilteredFeatureState: () => filterFeatureStateManager.reapplyFilteredFeatureState(),
+    reapplyFilteredHighlight: () => filterFeatureStateManager.reapplyFilteredHighlight(),
     scheduleFilterRefresh,
     scheduleFilterRulesRefresh
   };

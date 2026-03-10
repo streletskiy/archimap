@@ -46,10 +46,17 @@ function fromBase64Url(text) {
   return `${normalized}${padding}`;
 }
 
+function getBufferCtor() {
+  return typeof globalThis !== 'undefined' && globalThis.Buffer
+    ? globalThis.Buffer
+    : null;
+}
+
 function encodeBase64UrlBytes(bytes) {
   const normalizedBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
-  if (typeof Buffer !== 'undefined') {
-    return toBase64Url(Buffer.from(normalizedBytes).toString('base64'));
+  const BufferCtor = getBufferCtor();
+  if (BufferCtor) {
+    return toBase64Url(BufferCtor.from(normalizedBytes).toString('base64'));
   }
   let binary = '';
   for (const byte of normalizedBytes) {
@@ -60,8 +67,9 @@ function encodeBase64UrlBytes(bytes) {
 
 function decodeBase64UrlBytes(text) {
   const base64 = fromBase64Url(text);
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(base64, 'base64'));
+  const BufferCtor = getBufferCtor();
+  if (BufferCtor) {
+    return new Uint8Array(BufferCtor.from(base64, 'base64'));
   }
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -75,8 +83,9 @@ function encodeUtf8(text) {
   if (typeof TextEncoder !== 'undefined') {
     return new TextEncoder().encode(String(text || ''));
   }
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(String(text || ''), 'utf8'));
+  const BufferCtor = getBufferCtor();
+  if (BufferCtor) {
+    return new Uint8Array(BufferCtor.from(String(text || ''), 'utf8'));
   }
   const encoded = unescape(encodeURIComponent(String(text || '')));
   const bytes = new Uint8Array(encoded.length);
@@ -91,8 +100,9 @@ function decodeUtf8(bytes) {
   if (typeof TextDecoder !== 'undefined') {
     return new TextDecoder().decode(normalizedBytes);
   }
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(normalizedBytes).toString('utf8');
+  const BufferCtor = getBufferCtor();
+  if (BufferCtor) {
+    return BufferCtor.from(normalizedBytes).toString('utf8');
   }
   let binary = '';
   for (const byte of normalizedBytes) {

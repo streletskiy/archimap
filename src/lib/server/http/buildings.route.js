@@ -373,7 +373,7 @@ function encodeOsmFeatureId(osmType, osmId) {
   return (Number(osmId) * 2) + typeBit;
 }
 
-function normalizeFilterRule(rule, options = {}) {
+function normalizeFilterRule(rule, _options = {}) {
   const key = String(rule?.key || '').trim();
   const op = String(rule?.op || 'contains').trim();
   const value = String(rule?.value || '').trim();

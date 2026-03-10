@@ -172,7 +172,7 @@ test('building filter uses highlight layers and does not apply setFilter to base
   await page.getByTestId('filter-value-input').first().fill('test');
   await page.getByTestId('filter-apply-button').click();
 
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('feature-state');
+  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('paint-property');
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
   await expect.poll(async () => page.evaluate(() => {
     const debug = globalThis.window.__MAP_DEBUG__ || {};

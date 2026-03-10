@@ -22,6 +22,21 @@ export function createFilterCache({
     return cached.payload;
   }
 
+  function findCachedFilterMatches(match) {
+    if (typeof match !== 'function') return null;
+    const entries = [...filterMatchesCache.entries()].reverse();
+    for (const [cacheKey, cached] of entries) {
+      if ((Date.now() - Number(cached?.cachedAt || 0)) > ttlMs) {
+        filterMatchesCache.delete(cacheKey);
+        continue;
+      }
+      if (match(cached?.payload, cacheKey)) {
+        return cached.payload;
+      }
+    }
+    return null;
+  }
+
   function putCachedFilterMatches(cacheKey, payload) {
     filterMatchesCache.set(cacheKey, {
       cachedAt: Date.now(),
@@ -36,6 +51,7 @@ export function createFilterCache({
 
   return {
     clear,
+    findCachedFilterMatches,
     getCachedFilterMatches,
     putCachedFilterMatches
   };

@@ -20,6 +20,7 @@ export default [
       'server.js',
       'server.sveltekit.js',
       'playwright.config.js',
+      'archimap-test-regex.js',
       'frontend/svelte.config.js',
       'src/**/*.js',
       'scripts/**/*.js',

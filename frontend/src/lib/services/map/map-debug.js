@@ -37,12 +37,12 @@ export function createMapDebugController({
   function updateHook({
     active = false,
     expr = EMPTY_LAYER_FILTER,
-    mode = 'feature-state',
+    mode = 'paint-property',
     phase = 'idle',
     lastElapsedMs = 0,
     lastCount = 0,
     cacheHit = false,
-    setFeatureStateCalls = 0
+    setPaintPropertyCalls = 0
   } = {}) {
     if (typeof document === 'undefined') {
       debugState = {
@@ -65,7 +65,7 @@ export function createMapDebugController({
     document.body.dataset.filterLastElapsedMs = String(Number(lastElapsedMs) || 0);
     document.body.dataset.filterLastCount = String(Number(lastCount) || 0);
     document.body.dataset.filterCacheHit = cacheHit ? 'true' : 'false';
-    document.body.dataset.filterSetFeatureStateCalls = String(Number(setFeatureStateCalls) || 0);
+    document.body.dataset.filterSetPaintPropertyCalls = String(Number(setPaintPropertyCalls) || 0);
 
     const globalDebug = ensureWindowDebugState();
     if (!globalDebug) return { ...debugState };
@@ -78,7 +78,7 @@ export function createMapDebugController({
       elapsedMs: Number(lastElapsedMs) || 0,
       count: Number(lastCount) || 0,
       cacheHit: Boolean(cacheHit),
-      setFeatureStateCalls: Number(setFeatureStateCalls) || 0
+      setPaintPropertyCalls: Number(setPaintPropertyCalls) || 0
     };
 
     const phaseHistory = Array.isArray(globalDebug.filterPhaseHistory)

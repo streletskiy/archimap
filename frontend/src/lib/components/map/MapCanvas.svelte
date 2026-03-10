@@ -30,6 +30,7 @@
   } from '$lib/services/map/map-layer-utils';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
+    SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
     SEARCH_RESULTS_CLUSTER_LAYER_ID,
     SEARCH_RESULTS_LAYER_ID,
     SEARCH_RESULTS_SOURCE_ID,
@@ -44,6 +45,7 @@
   } from '$lib/services/map/map-theme-utils';
   import { loadMapRuntime } from '$lib/services/map-runtime';
   import {
+    buildRegionSourceId,
     getActiveRegionPmtiles,
     pointInBounds
   } from '$lib/services/region-pmtiles';
@@ -112,6 +114,52 @@
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
+  }
+
+  function getMapLayerIdsForRegions(regions = []) {
+    return {
+      buildingFillLayerIds: getCurrentBuildingsFillLayerIds(regions),
+      buildingLineLayerIds: getCurrentBuildingsLineLayerIds(regions),
+      filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(regions),
+      filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(regions),
+      selectedFillLayerIds: getCurrentSelectedFillLayerIds(regions),
+      selectedLineLayerIds: getCurrentSelectedLineLayerIds(regions)
+    };
+  }
+
+  function areRegionSetsEqualById(left = [], right = []) {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      if (Number(left[index]?.id) !== Number(right[index]?.id)) return false;
+    }
+    return true;
+  }
+
+  function hasRegionLayersReady(regions = []) {
+    if (!map) return false;
+    const layerIds = getMapLayerIdsForRegions(regions);
+    const allLayerIds = [
+      ...layerIds.buildingFillLayerIds,
+      ...layerIds.buildingLineLayerIds,
+      ...layerIds.filterHighlightFillLayerIds,
+      ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.selectedFillLayerIds,
+      ...layerIds.selectedLineLayerIds
+    ];
+
+    for (const region of regions) {
+      if (!map.getSource(buildRegionSourceId(region.id))) return false;
+    }
+
+    return allLayerIds.every((layerId) => Boolean(map.getLayer(layerId)));
+  }
+
+  function hasSearchResultLayersReady() {
+    if (!map) return false;
+    return Boolean(map.getSource(SEARCH_RESULTS_SOURCE_ID))
+      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID))
+      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID))
+      && Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID));
   }
 
   const mapDebug = createMapDebugController({
@@ -516,26 +564,41 @@
     }, 80);
   }
 
-  function ensureMapSourcesAndLayers(config) {
+  function ensureMapSourcesAndLayers(config, { force = false } = {}) {
     if (!map) return;
     const theme = getCurrentTheme();
     const buildingPaint = getBuildingThemePaint(theme);
+    const nextActiveRegions = getViewportActiveRegionPmtiles(config);
+    const regionsChanged = !areRegionSetsEqualById(activeRegionPmtiles, nextActiveRegions);
+    const searchLayersReady = hasSearchResultLayersReady();
+    const regionLayersReady = hasRegionLayersReady(nextActiveRegions);
+
+    if (!force && !regionsChanged && searchLayersReady && regionLayersReady) {
+      return;
+    }
+
+    const searchLayersChanged = !searchLayersReady;
     ensureSearchResultsSourceAndLayers(map, $searchMapState.items);
 
-    const nextActiveRegions = getViewportActiveRegionPmtiles(config);
     const nextIds = new Set(nextActiveRegions.map((region) => region.id));
+    let regionLayersChanged = regionsChanged;
     for (const currentRegion of activeRegionPmtiles) {
       if (nextIds.has(currentRegion.id)) continue;
       removeRegionBuildingSourceAndLayers(map, currentRegion.id);
+      regionLayersChanged = true;
     }
     activeRegionPmtiles = nextActiveRegions;
     for (const region of nextActiveRegions) {
+      const hadRegionLayers = hasRegionLayersReady([region]);
       ensureRegionBuildingSourceAndLayers({
         map,
         region,
         buildingPaint,
         origin: window.location.origin
       });
+      if (!hadRegionLayers) {
+        regionLayersChanged = true;
+      }
     }
     bringSearchResultsLayersToFront(map);
 
@@ -545,8 +608,10 @@
     applyBuildingThemePaint(theme);
     applyLabelLayerVisibility($mapLabelsVisible);
     scheduleCoverageCheck();
-    filterPipeline.refreshDebugState(Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0);
-    filterPipeline.reapplyFilteredFeatureState();
+    if (force || searchLayersChanged || regionLayersChanged) {
+      filterPipeline.refreshDebugState(Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0);
+      filterPipeline.reapplyFilteredHighlight();
+    }
   }
 
   function syncMapRegionSources() {
@@ -559,7 +624,7 @@
     const tryRestore = () => {
       if (!map || !runtimeConfig) return;
       if (!map.isStyleLoaded()) return;
-      ensureMapSourcesAndLayers(runtimeConfig);
+      ensureMapSourcesAndLayers(runtimeConfig, { force: true });
       applyBuildingThemePaint(getCurrentTheme());
       filterPipeline.applyBuildingFilters($buildingFilterLayers, { reason: 'style' });
       clearStyleTransitionOverlaySoon();
@@ -681,7 +746,7 @@
       map.on('resize', scheduleCoverageCheck);
 
       map.on('style.load', () => {
-        ensureMapSourcesAndLayers(config);
+        ensureMapSourcesAndLayers(config, { force: true });
         if ($mapReadyStore) {
           filterPipeline.scheduleFilterRefresh($buildingFilterLayers);
         }
@@ -760,8 +825,8 @@
   data-filter-last-elapsed-ms={String($filterState.lastElapsedMs)}
   data-filter-last-count={String($filterState.lastCount)}
   data-filter-cache-hit={$filterState.lastCacheHit ? 'true' : 'false'}
-  data-filter-set-feature-state-calls={String($filterState.setFeatureStateCallsLast)}
-  data-filter-last-apply-diff-ms={String($filterState.lastApplyDiffMs)}
+  data-filter-set-paint-property-calls={String($filterState.setPaintPropertyCallsLast)}
+  data-filter-last-paint-apply-ms={String($filterState.lastPaintApplyMs)}
 ></div>
 <MapFeedbackOverlay
   filterStatusCode={$filterState.statusCode}
