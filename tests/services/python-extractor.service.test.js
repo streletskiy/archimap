@@ -3,14 +3,26 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const {
-  createPythonExtractResolver
+  createPythonExtractResolver,
+  ensurePythonImporterDeps
 } = require('../../scripts/region-sync/python-extractor');
 
 const resolver = createPythonExtractResolver({
   importerPath: path.resolve(__dirname, '..', '..', 'scripts', 'sync-osm-buildings.py')
 });
 
-test('searchExtractCandidates returns canonical candidates for free-form query', async () => {
+let pythonDepsSkipReason = null;
+try {
+  ensurePythonImporterDeps();
+} catch (error) {
+  pythonDepsSkipReason = String(error?.message || error || 'Python extractor dependencies are unavailable');
+}
+
+const pythonExtractorTestOptions = pythonDepsSkipReason
+  ? { skip: `python extractor deps unavailable: ${pythonDepsSkipReason}` }
+  : {};
+
+test('searchExtractCandidates returns canonical candidates for free-form query', pythonExtractorTestOptions, async () => {
   const result = await resolver.searchExtractCandidates('Antarctica', {
     source: 'any',
     limit: 10
@@ -21,7 +33,7 @@ test('searchExtractCandidates returns canonical candidates for free-form query',
   assert.ok(result.items.some((item) => item.extractId === 'geofabrik_antarctica'));
 });
 
-test('resolveExactExtract validates canonical extract id with source', async () => {
+test('resolveExactExtract validates canonical extract id with source', pythonExtractorTestOptions, async () => {
   const result = await resolver.resolveExactExtract('geofabrik_antarctica', {
     source: 'geofabrik'
   });
@@ -31,7 +43,7 @@ test('resolveExactExtract validates canonical extract id with source', async () 
   assert.equal(result.candidate.extractId, 'geofabrik_antarctica');
 });
 
-test('resolveExactExtract accepts path-style osmfr region ids from admin map data', async () => {
+test('resolveExactExtract accepts path-style osmfr region ids from admin map data', pythonExtractorTestOptions, async () => {
   const result = await resolver.resolveExactExtract('russia/central_federal_district/kostroma_oblast', {
     source: 'osmfr'
   });
@@ -41,7 +53,7 @@ test('resolveExactExtract accepts path-style osmfr region ids from admin map dat
   assert.equal(result.candidate.extractId, 'osmfr_russia_central_federal_district_kostroma_oblast');
 });
 
-test('resolveExactExtract accepts path-style geofabrik us state ids from admin map data', async () => {
+test('resolveExactExtract accepts path-style geofabrik us state ids from admin map data', pythonExtractorTestOptions, async () => {
   const result = await resolver.resolveExactExtract('us/california', {
     source: 'geofabrik'
   });
@@ -51,7 +63,7 @@ test('resolveExactExtract accepts path-style geofabrik us state ids from admin m
   assert.equal(result.candidate.extractId, 'geofabrik_north-america_us_us_california');
 });
 
-test('resolveExactExtract reports ambiguous exact-name matches instead of auto-selecting one', async () => {
+test('resolveExactExtract reports ambiguous exact-name matches instead of auto-selecting one', pythonExtractorTestOptions, async () => {
   const result = await resolver.resolveExactExtract('ceuta', {
     source: 'any'
   });
