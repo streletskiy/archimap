@@ -313,7 +313,7 @@ function createAppSettingsService(options = {}) {
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
     let metricsTokenToSave = next.metricsToken;
     if (!metricsTokenToSave) {
-      metricsTokenToSave = (await getEffectiveGeneralConfig()).config.metricsToken || crypto.randomBytes(32).toString('hex');
+      metricsTokenToSave = crypto.randomBytes(32).toString('hex');
     }
 
     await db.prepare(`
