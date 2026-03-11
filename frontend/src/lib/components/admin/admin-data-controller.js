@@ -145,6 +145,8 @@ export function createAdminDataController() {
   const regionRunsLoading = writable(false);
   const regionRunsStatus = writable('');
   const initialized = writable(false);
+  let nextOptimisticRegionId = -1;
+  const pendingOptimisticRegions = new Map();
 
   const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
     sortFilterTagKeys($dataSettings?.filterTags?.availableKeys, getSavedFilterTagAllowlist($dataSettings))
@@ -270,6 +272,218 @@ export function createAdminDataController() {
     return get(dataSettings).regions.find((item) => Number(item?.id || 0) === Number(regionId)) || null;
   }
 
+  function buildRegionSnapshot(region, fallback = null, overrides = {}) {
+    const source = region && typeof region === 'object' ? region : {};
+    const base = fallback && typeof fallback === 'object' ? fallback : {};
+
+    return {
+      ...source,
+      id: Number(source?.id || base?.id || 0) || null,
+      name: String(source?.name || base?.name || ''),
+      slug: String(source?.slug || base?.slug || ''),
+      searchQuery: String(source?.searchQuery || base?.searchQuery || ''),
+      extractSource: String(source?.extractSource || base?.extractSource || ''),
+      extractId: String(source?.extractId || base?.extractId || ''),
+      extractLabel: String(source?.extractLabel || base?.extractLabel || ''),
+      extractResolutionStatus: String(
+        source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved'
+      ),
+      extractResolutionError: source?.extractResolutionError ?? base?.extractResolutionError ?? null,
+      enabled: source?.enabled ?? base?.enabled ?? true,
+      autoSyncEnabled: source?.autoSyncEnabled ?? base?.autoSyncEnabled ?? true,
+      autoSyncOnStart: source?.autoSyncOnStart ?? base?.autoSyncOnStart ?? false,
+      autoSyncIntervalHours: Number(source?.autoSyncIntervalHours ?? base?.autoSyncIntervalHours ?? 168) || 0,
+      pmtilesMinZoom: Number(source?.pmtilesMinZoom ?? base?.pmtilesMinZoom ?? 13) || 0,
+      pmtilesMaxZoom: Number(source?.pmtilesMaxZoom ?? base?.pmtilesMaxZoom ?? 16) || 0,
+      sourceLayer: String(source?.sourceLayer || base?.sourceLayer || 'buildings'),
+      lastSyncStatus: String(source?.lastSyncStatus || base?.lastSyncStatus || 'idle'),
+      lastSyncError: source?.lastSyncError ?? base?.lastSyncError ?? null,
+      lastSuccessfulSyncAt: source?.lastSuccessfulSyncAt ?? base?.lastSuccessfulSyncAt ?? null,
+      lastSyncFinishedAt: source?.lastSyncFinishedAt ?? base?.lastSyncFinishedAt ?? null,
+      nextSyncAt: source?.nextSyncAt ?? base?.nextSyncAt ?? null,
+      pmtilesBytes: Number(source?.pmtilesBytes ?? base?.pmtilesBytes ?? 0) || 0,
+      dbBytes: Number(source?.dbBytes ?? base?.dbBytes ?? 0) || 0,
+      dbBytesApproximate: Boolean(source?.dbBytesApproximate ?? base?.dbBytesApproximate),
+      bounds: source?.bounds ?? base?.bounds ?? null,
+      __optimistic: Boolean(source?.__optimistic ?? base?.__optimistic),
+      ...overrides
+    };
+  }
+
+  function getRegionIdentityKey(region) {
+    const slug = String(region?.slug || '')
+      .trim()
+      .toLowerCase();
+    const extractSource = String(region?.extractSource || '')
+      .trim()
+      .toLowerCase();
+    const extractId = String(region?.extractId || '')
+      .trim()
+      .toLowerCase();
+
+    if (extractSource && extractId) return `extract:${extractSource}:${extractId}`;
+    if (slug) return `slug:${slug}`;
+    return '';
+  }
+
+  function isOptimisticRegion(region) {
+    return Boolean(region?.__optimistic) && Number(region?.id || 0) <= 0;
+  }
+
+  function compareRegions(left, right) {
+    const leftOptimistic = isOptimisticRegion(left);
+    const rightOptimistic = isOptimisticRegion(right);
+    if (leftOptimistic !== rightOptimistic) return leftOptimistic ? -1 : 1;
+
+    const leftId = Number(left?.id || 0);
+    const rightId = Number(right?.id || 0);
+    if (leftOptimistic && rightOptimistic && leftId !== rightId) {
+      return rightId - leftId;
+    }
+    if (leftId !== rightId) return leftId - rightId;
+    return String(left?.slug || '').localeCompare(String(right?.slug || ''), 'en', { sensitivity: 'base' });
+  }
+
+  function rememberOptimisticRegion(region) {
+    const snapshot = region && typeof region === 'object' ? region : null;
+    const numericRegionId = Number(snapshot?.id || 0);
+    if (!snapshot || !Number.isInteger(numericRegionId) || numericRegionId >= 0) return;
+    pendingOptimisticRegions.set(numericRegionId, snapshot);
+  }
+
+  function forgetOptimisticRegion(regionId) {
+    const numericRegionId = Number(regionId || 0);
+    if (!Number.isInteger(numericRegionId)) return;
+    pendingOptimisticRegions.delete(numericRegionId);
+  }
+
+  function mergePendingOptimisticRegions(regions = []) {
+    const nextRegions = Array.isArray(regions) ? [...regions] : [];
+    const existingKeys = new Set(nextRegions.map((item) => getRegionIdentityKey(item)).filter(Boolean));
+
+    for (const pendingRegion of pendingOptimisticRegions.values()) {
+      const identityKey = getRegionIdentityKey(pendingRegion);
+      if (!identityKey || existingKeys.has(identityKey)) continue;
+      nextRegions.push(pendingRegion);
+      existingKeys.add(identityKey);
+    }
+
+    return nextRegions.sort(compareRegions);
+  }
+
+  function upsertRegionSnapshot(region) {
+    const snapshot = region && typeof region === 'object' ? region : null;
+    const numericRegionId = Number(snapshot?.id || 0);
+    if (!snapshot || !Number.isInteger(numericRegionId)) return null;
+
+    let mergedRegion = null;
+    dataSettings.update((current) => {
+      const regions = Array.isArray(current?.regions) ? current.regions : [];
+      const existingRegion = regions.find((item) => Number(item?.id || 0) === numericRegionId) || null;
+      mergedRegion = {
+        ...(existingRegion && typeof existingRegion === 'object' ? existingRegion : {}),
+        ...snapshot
+      };
+
+      const nextRegions = [
+        ...regions.filter((item) => Number(item?.id || 0) !== numericRegionId),
+        mergedRegion
+      ].sort(compareRegions);
+
+      return {
+        ...current,
+        regions: nextRegions
+      };
+    });
+
+    return mergedRegion;
+  }
+
+  function removeRegionSnapshot(regionId) {
+    const numericRegionId = Number(regionId || 0);
+    if (!Number.isInteger(numericRegionId)) return false;
+
+    let removed = false;
+    dataSettings.update((current) => {
+      const regions = Array.isArray(current?.regions) ? current.regions : [];
+      const nextRegions = regions.filter((item) => {
+        const shouldKeep = Number(item?.id || 0) !== numericRegionId;
+        if (!shouldKeep) {
+          removed = true;
+        }
+        return shouldKeep;
+      });
+
+      if (!removed) return current;
+      return {
+        ...current,
+        regions: nextRegions
+      };
+    });
+
+    return removed;
+  }
+
+  function selectRegionLocally(region, options = {}) {
+    const nextRegion = region && typeof region === 'object' ? region : null;
+    const numericRegionId = Number(nextRegion?.id || 0);
+    const nextSelectedRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0 ? numericRegionId : null;
+    const resetRuns = options.resetRuns !== false;
+
+    selectedDataRegionId.set(nextSelectedRegionId);
+    regionDraft.set(createRegionDraft(nextRegion));
+    regionResolveBusy.set(false);
+    regionExtractCandidates.set([]);
+
+    if (!resetRuns) return;
+
+    regionRunsLoading.set(false);
+    regionRuns.set([]);
+    regionRunsStatus.set(nextSelectedRegionId ? dataT('history.empty') : '');
+  }
+
+  async function refreshDataSettingsInBackground(options = {}) {
+    const { selectedRegionId = null, preserveStatus = true, silent = true } = options;
+    const preservedStatus = get(dataStatus);
+
+    try {
+      const currentSettings = get(dataSettings);
+      const data = await apiJson('/api/admin/app-settings/data');
+      const nextSettings = normalizeDataSettings(data?.item, currentSettings);
+      nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions);
+
+      dataSettings.set(nextSettings);
+      seedFilterTagAllowlistDraft(nextSettings.filterTags);
+      initialized.set(true);
+
+      const numericSelectedRegionId = Number(selectedRegionId || 0);
+      if (Number.isInteger(numericSelectedRegionId) && numericSelectedRegionId > 0) {
+        const currentSelectedRegionId = Number(get(selectedDataRegionId) || 0);
+        const currentDraftRegionId = Number(get(regionDraft)?.id || 0);
+        if (currentSelectedRegionId === numericSelectedRegionId || currentDraftRegionId === numericSelectedRegionId) {
+          const refreshedRegion =
+            nextSettings.regions.find((item) => Number(item?.id || 0) === numericSelectedRegionId) || null;
+          if (refreshedRegion) {
+            selectRegionLocally(refreshedRegion, { resetRuns: false });
+            await loadRegionRuns(numericSelectedRegionId);
+          }
+        }
+      }
+
+      if (preserveStatus) {
+        dataStatus.set(preservedStatus);
+      }
+      return true;
+    } catch (error) {
+      if (!silent) {
+        dataStatus.set(msg(error, dataT('status.loadSettingsFailed')));
+      } else if (preserveStatus) {
+        dataStatus.set(preservedStatus);
+      }
+      return false;
+    }
+  }
+
   function confirmDiscardFilterTagChanges() {
     if (!get(filterTagAllowlistDirty)) return true;
     if (typeof window === 'undefined') return false;
@@ -327,6 +541,8 @@ export function createAdminDataController() {
   }
 
   async function selectDataRegion(region) {
+    if (isOptimisticRegion(region)) return;
+
     const numericRegionId = Number(region?.id || 0);
     const nextSelectedRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0 ? numericRegionId : null;
 
@@ -358,6 +574,7 @@ export function createAdminDataController() {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
+      nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions);
 
       dataSettings.set(nextSettings);
       seedFilterTagAllowlistDraft(nextSettings.filterTags);
@@ -368,7 +585,11 @@ export function createAdminDataController() {
           : preserveSelection
             ? Number(get(selectedDataRegionId) || 0)
             : 0;
-      const selectedRegion = getRegionById(nextSelectedRegionId) || nextSettings.regions[0] || null;
+      const selectedRegion =
+        getRegionById(nextSelectedRegionId)
+        || nextSettings.regions.find((item) => !isOptimisticRegion(item))
+        || nextSettings.regions[0]
+        || null;
 
       await selectDataRegion(selectedRegion);
       dataStatus.set('');
@@ -500,59 +721,137 @@ export function createAdminDataController() {
     event?.preventDefault?.();
     if (!ensureFilterTagChangesDiscarded()) return;
 
+    const currentDraft = get(regionDraft);
+    const isNewRegion = !currentDraft.id;
+    const payload = {
+      ...(currentDraft.id ? { id: currentDraft.id } : {}),
+      name: String(currentDraft.name || '').trim(),
+      slug: String(currentDraft.slug || '').trim(),
+      sourceType: 'extract',
+      searchQuery: String(currentDraft.searchQuery || '').trim(),
+      extractSource: String(currentDraft.extractSource || '').trim(),
+      extractId: String(currentDraft.extractId || '').trim(),
+      extractLabel: String(currentDraft.extractLabel || '').trim(),
+      enabled: Boolean(currentDraft.enabled),
+      autoSyncEnabled: Boolean(currentDraft.autoSyncEnabled),
+      autoSyncOnStart: Boolean(currentDraft.autoSyncOnStart),
+      autoSyncIntervalHours: Number(currentDraft.autoSyncIntervalHours || 0),
+      pmtilesMinZoom: Number(currentDraft.pmtilesMinZoom || 0),
+      pmtilesMaxZoom: Number(currentDraft.pmtilesMaxZoom || 0),
+      sourceLayer: String(currentDraft.sourceLayer || '').trim()
+    };
+
     regionSaving.set(true);
     dataStatus.set(dataT('status.savingRegion'));
 
+    let optimisticRegionId = null;
+
     try {
-      const currentDraft = get(regionDraft);
-      const isNewRegion = !currentDraft.id;
-      const payload = {
-        ...(currentDraft.id ? { id: currentDraft.id } : {}),
-        name: String(currentDraft.name || '').trim(),
-        slug: String(currentDraft.slug || '').trim(),
-        sourceType: 'extract',
-        searchQuery: String(currentDraft.searchQuery || '').trim(),
-        extractSource: String(currentDraft.extractSource || '').trim(),
-        extractId: String(currentDraft.extractId || '').trim(),
-        extractLabel: String(currentDraft.extractLabel || '').trim(),
-        enabled: Boolean(currentDraft.enabled),
-        autoSyncEnabled: Boolean(currentDraft.autoSyncEnabled),
-        autoSyncOnStart: Boolean(currentDraft.autoSyncOnStart),
-        autoSyncIntervalHours: Number(currentDraft.autoSyncIntervalHours || 0),
-        pmtilesMinZoom: Number(currentDraft.pmtilesMinZoom || 0),
-        pmtilesMaxZoom: Number(currentDraft.pmtilesMaxZoom || 0),
-        sourceLayer: String(currentDraft.sourceLayer || '').trim()
-      };
+      if (isNewRegion) {
+        const optimisticRegion = upsertRegionSnapshot(
+          buildRegionSnapshot(null, currentDraft, {
+            id: nextOptimisticRegionId--,
+            lastSyncStatus: 'queued',
+            lastSyncError: null,
+            __optimistic: true
+          })
+        );
+
+        if (optimisticRegion) {
+          optimisticRegionId = Number(optimisticRegion.id || 0);
+          rememberOptimisticRegion(optimisticRegion);
+        }
+
+        selectRegionLocally(null);
+        dataStatus.set(dataT('status.regionSavedQueued'));
+        regionSaving.set(false);
+
+        void (async () => {
+          try {
+            const data = await apiJson('/api/admin/app-settings/data/regions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ region: payload })
+            });
+            const savedRegion = data?.item || null;
+            const numericRegionId = Number(savedRegion?.id || 0);
+
+            if (optimisticRegionId != null) {
+              forgetOptimisticRegion(optimisticRegionId);
+              removeRegionSnapshot(optimisticRegionId);
+            }
+
+            const queuedRegion = upsertRegionSnapshot(
+              buildRegionSnapshot(savedRegion, currentDraft, {
+                lastSyncStatus: 'queued',
+                lastSyncError: null,
+                __optimistic: false
+              })
+            );
+
+            try {
+              if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+                throw new Error(dataT('status.regionSavedQueueFailed'));
+              }
+
+              await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+              });
+            } catch (error) {
+              const errorText = msg(error, dataT('status.regionSavedQueueFailed'));
+              const failedRegion = upsertRegionSnapshot(
+                buildRegionSnapshot(queuedRegion || getRegionById(numericRegionId), currentDraft, {
+                  lastSyncStatus: 'failed',
+                  lastSyncError: errorText,
+                  __optimistic: false
+                })
+              );
+              if (failedRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
+                selectRegionLocally(failedRegion, { resetRuns: false });
+              }
+              dataStatus.set(errorText);
+            } finally {
+              if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
+                void refreshDataSettingsInBackground({
+                  selectedRegionId: numericRegionId,
+                  preserveStatus: true
+                });
+              }
+            }
+          } catch (error) {
+            if (optimisticRegionId != null) {
+              forgetOptimisticRegion(optimisticRegionId);
+              removeRegionSnapshot(optimisticRegionId);
+            }
+            dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
+          }
+        })();
+
+        return;
+      }
+
       const data = await apiJson('/api/admin/app-settings/data/regions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ region: payload })
       });
       const savedRegion = data?.item || null;
-      let queuedAfterCreate = false;
-      let queuedSyncError = null;
+      const numericRegionId = Number(savedRegion?.id || currentDraft.id || 0);
+      const optimisticRegion = upsertRegionSnapshot(buildRegionSnapshot(savedRegion, currentDraft));
 
-      if (isNewRegion && Number(savedRegion?.id || 0) > 0) {
-        try {
-          await apiJson(`/api/admin/app-settings/data/regions/${Number(savedRegion.id)}/sync-now`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-          });
-          queuedAfterCreate = true;
-        } catch (error) {
-          queuedSyncError = error;
-        }
+      if (optimisticRegion) {
+        selectRegionLocally(optimisticRegion, { resetRuns: false });
       }
 
-      await loadDataSettings({
-        selectedRegionId: savedRegion?.id || currentDraft.id || null,
-        preserveSelection: false
-      });
-      if (queuedSyncError) {
-        dataStatus.set(msg(queuedSyncError, dataT('status.regionSavedQueueFailed')));
-      } else {
-        dataStatus.set(queuedAfterCreate ? dataT('status.regionSavedQueued') : dataT('status.regionSaved'));
+      dataStatus.set(dataT('status.regionSaved'));
+
+      if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
+        void refreshDataSettingsInBackground({
+          selectedRegionId: numericRegionId,
+          preserveStatus: true
+        });
       }
     } catch (error) {
       dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
@@ -602,18 +901,38 @@ export function createAdminDataController() {
     dataStatus.set(dataT('status.queueingSync'));
 
     try {
+      const optimisticRegion = upsertRegionSnapshot(
+        buildRegionSnapshot(getRegionById(numericRegionId), null, {
+          lastSyncStatus: 'queued',
+          lastSyncError: null
+        })
+      );
+      if (optimisticRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
+        selectRegionLocally(optimisticRegion, { resetRuns: false });
+      }
+
       await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
       });
-      await loadDataSettings({
-        selectedRegionId: numericRegionId,
-        preserveSelection: false
-      });
       dataStatus.set(dataT('status.queuedSync'));
+      void refreshDataSettingsInBackground({
+        selectedRegionId: numericRegionId,
+        preserveStatus: true
+      });
     } catch (error) {
-      dataStatus.set(msg(error, dataT('status.syncFailed')));
+      const errorText = msg(error, dataT('status.syncFailed'));
+      const failedRegion = upsertRegionSnapshot(
+        buildRegionSnapshot(getRegionById(numericRegionId), null, {
+          lastSyncStatus: 'failed',
+          lastSyncError: errorText
+        })
+      );
+      if (failedRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
+        selectRegionLocally(failedRegion, { resetRuns: false });
+      }
+      dataStatus.set(errorText);
     } finally {
       regionSyncBusy.set(false);
     }
