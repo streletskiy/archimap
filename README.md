@@ -70,6 +70,7 @@ docker compose up -d
 ```
 
 Pending PostgreSQL migrations are applied automatically on app startup.
+Storage-compaction PostgreSQL migrations are also applied automatically on startup after image updates; the first boot can take noticeably longer and may temporarily require extra free disk space while tables are rebuilt.
 
 Release image (multi-arch, registry push):
 

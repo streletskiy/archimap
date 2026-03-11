@@ -36,20 +36,29 @@ async function run() {
     try {
       await client.query(`
         INSERT INTO osm.building_contours (
-          osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat
+          osm_type, osm_id, tags_json, min_lon, min_lat, max_lon, max_lat, geom
         )
         VALUES (
           'way',
           9000000001,
           '{"name":"smoke polygon"}',
-          '{"type":"Polygon","coordinates":[[[44.0,56.0],[44.001,56.0],[44.001,56.001],[44.0,56.001],[44.0,56.0]]]}',
           44.0,
           56.0,
           44.001,
-          56.001
+          56.001,
+          ST_Multi(ST_SetSRID(
+            ST_GeomFromGeoJSON('{"type":"Polygon","coordinates":[[[44.0,56.0],[44.001,56.0],[44.001,56.001],[44.0,56.001],[44.0,56.0]]]}'),
+            4326
+          ))
         )
         ON CONFLICT (osm_type, osm_id) DO UPDATE
-        SET geometry_json = excluded.geometry_json
+        SET
+          tags_json = excluded.tags_json,
+          min_lon = excluded.min_lon,
+          min_lat = excluded.min_lat,
+          max_lon = excluded.max_lon,
+          max_lat = excluded.max_lat,
+          geom = excluded.geom
       `);
       const geo = await client.query(`
         SELECT

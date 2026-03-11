@@ -26,20 +26,101 @@ function createSearchIndexBoot(options = {}) {
   let searchIndexRebuildInProgress = false;
   let queuedSearchIndexRebuildReason = null;
   const pendingSearchIndexRefreshes = new Set();
+  const isPostgres = String(dbProvider || db?.provider || '').trim().toLowerCase() === 'postgres';
 
-  const selectSearchCounts = db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM osm.building_contours) AS contours_count,
-      (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
-      (SELECT COUNT(*) FROM building_search_fts) AS search_fts_count
-  `);
+  const selectSearchCounts = db.prepare(isPostgres
+    ? `
+      SELECT
+        (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
+        EXISTS (
+          SELECT 1
+          FROM osm.building_contours bc
+          LEFT JOIN local.architectural_info ai
+            ON ai.osm_type = bc.osm_type
+           AND ai.osm_id = bc.osm_id
+          CROSS JOIN LATERAL (
+            SELECT
+              CASE
+                WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
+                ELSE '{}'::jsonb
+              END AS tags_jsonb
+          ) tags
+          WHERE bc.osm_type IN ('way', 'relation')
+            AND bc.osm_id > 0
+            AND (
+              NULLIF(btrim(ai.name), '') IS NOT NULL
+              OR NULLIF(btrim(ai.address), '') IS NOT NULL
+              OR NULLIF(btrim(ai.style), '') IS NOT NULL
+              OR NULLIF(btrim(ai.architect), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'name'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'name:ru'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'official_name'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'addr:full'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'addr:postcode'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'addr:city'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'addr:place'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'addr:street'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'addr:housenumber'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'building:architecture'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'architecture'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'style'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'architect'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'architect_name'), '') IS NOT NULL
+            )
+          LIMIT 1
+        ) AS searchable_rows_expected,
+        EXISTS (
+          SELECT 1
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public'
+            AND c.relkind = 'i'
+            AND c.relname = 'idx_building_search_source_tsv'
+        ) AS search_tsv_index_present
+    `
+    : `
+      SELECT
+        (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
+        (SELECT COUNT(*) FROM building_search_fts) AS search_fts_count
+        ,
+        EXISTS (
+          SELECT 1
+          FROM osm.building_contours bc
+          LEFT JOIN local.architectural_info ai
+            ON ai.osm_type = bc.osm_type
+           AND ai.osm_id = bc.osm_id
+          WHERE bc.osm_type IN ('way', 'relation')
+            AND bc.osm_id > 0
+            AND (
+              NULLIF(trim(ai.name), '') IS NOT NULL
+              OR NULLIF(trim(ai.address), '') IS NOT NULL
+              OR NULLIF(trim(ai.style), '') IS NOT NULL
+              OR NULLIF(trim(ai.architect), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.name') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"name:ru\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.official_name') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:full\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:postcode\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:city\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:place\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:street\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:housenumber\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"building:architecture\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architecture') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.style') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect_name') END), '') IS NOT NULL
+            )
+          LIMIT 1
+        ) AS searchable_rows_expected
+    `);
   const selectRawSearchSourceByBuilding = db.prepare(buildRawSearchSourceQuery({
     where: 'WHERE bc.osm_type = ? AND bc.osm_id = ?'
   }));
   const upsertSearchSource = db.prepare(BUILDING_SEARCH_SOURCE_UPSERT_SQL);
   const deleteSearchSource = db.prepare(BUILDING_SEARCH_SOURCE_DELETE_SQL);
-  const deleteSearchFts = db.prepare(BUILDING_SEARCH_FTS_DELETE_SQL);
-  const insertSearchFts = db.prepare(BUILDING_SEARCH_FTS_INSERT_SQL);
+  const deleteSearchFts = !isPostgres ? db.prepare(BUILDING_SEARCH_FTS_DELETE_SQL) : null;
+  const insertSearchFts = !isPostgres ? db.prepare(BUILDING_SEARCH_FTS_INSERT_SQL) : null;
 
   async function getSearchIndexCountsSnapshot() {
     return selectSearchCounts.get();
@@ -47,16 +128,35 @@ function createSearchIndexBoot(options = {}) {
 
   async function getSearchRebuildDecision() {
     const countsSnapshot = await getSearchIndexCountsSnapshot();
-    const expectedSourceRows = Number(countsSnapshot?.contours_count || 0);
     const actualSourceRows = Number(countsSnapshot?.search_source_count || 0);
-    const actualFtsRows = Number(countsSnapshot?.search_fts_count || 0);
+    const searchableRowsExpected = Boolean(countsSnapshot?.searchable_rows_expected);
+    const missingOrStaleSource = searchableRowsExpected
+      ? actualSourceRows === 0
+      : actualSourceRows > 0;
 
-    const sourceMismatch = actualSourceRows !== expectedSourceRows;
+    if (isPostgres) {
+      const searchTsvIndexPresent = Boolean(countsSnapshot?.search_tsv_index_present);
+      const reasons = [];
+      if (missingOrStaleSource) reasons.push(`source ${actualSourceRows}/${searchableRowsExpected ? '>0 expected' : '0 expected'}`);
+      if (actualSourceRows > 0 && !searchTsvIndexPresent) reasons.push('missing idx_building_search_source_tsv');
+      if (reasons.length > 0) {
+        return {
+          shouldRebuild: true,
+          reason: reasons.join(', ')
+        };
+      }
+      return {
+        shouldRebuild: false,
+        reason: 'search source rows and PostgreSQL tsv index are consistent'
+      };
+    }
+
+    const actualFtsRows = Number(countsSnapshot?.search_fts_count || 0);
     const ftsMismatch = actualFtsRows !== actualSourceRows;
 
-    if (sourceMismatch || ftsMismatch) {
+    if (missingOrStaleSource || ftsMismatch) {
       const reasons = [];
-      if (sourceMismatch) reasons.push(`source ${actualSourceRows}/${expectedSourceRows}`);
+      if (missingOrStaleSource) reasons.push(`source ${actualSourceRows}/${searchableRowsExpected ? '>0 expected' : '0 expected'}`);
       if (ftsMismatch) reasons.push(`fts ${actualFtsRows}/${actualSourceRows}`);
       return {
         shouldRebuild: true,
@@ -72,14 +172,16 @@ function createSearchIndexBoot(options = {}) {
 
   async function applySearchSourceRow(sourceRow) {
     await upsertSearchSource.run(sourceRow);
-    await deleteSearchFts.run(sourceRow.osm_key);
-    await insertSearchFts.run(
-      sourceRow.osm_key,
-      sourceRow.name || '',
-      sourceRow.address || '',
-      sourceRow.style || '',
-      sourceRow.architect || ''
-    );
+    if (!isPostgres) {
+      await deleteSearchFts.run(sourceRow.osm_key);
+      await insertSearchFts.run(
+        sourceRow.osm_key,
+        sourceRow.name || '',
+        sourceRow.address || '',
+        sourceRow.style || '',
+        sourceRow.architect || ''
+      );
+    }
   }
 
   async function refreshSearchIndexForBuilding(osmType, osmId, options = {}) {
@@ -95,7 +197,9 @@ function createSearchIndexBoot(options = {}) {
 
     if (!sourceRow) {
       await deleteSearchSource.run(osmKey);
-      await deleteSearchFts.run(osmKey);
+      if (!isPostgres) {
+        await deleteSearchFts.run(osmKey);
+      }
       return;
     }
 

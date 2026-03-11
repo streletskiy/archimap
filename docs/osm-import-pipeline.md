@@ -171,6 +171,7 @@ flowchart TD
 
 - `osm.building_contours` is the global union dataset used by existing building, search, and filter APIs.
 - `data_region_memberships` keeps per-region ownership, which prevents one overlapping region sync from deleting objects still needed by another region.
+- PostgreSQL stores the authoritative contour geometry in PostGIS `geom`; GeoJSON is emitted on demand for building responses and `--pmtiles-only` exports instead of being persisted twice.
 - PostgreSQL keeps `osm.building_contours_summary` updated for runtime fast paths.
 - SQLite follows the same logical flow but uses local temp tables and file-backed DBs.
 
@@ -182,7 +183,8 @@ flowchart TD
 
 ### Search source normalization
 
-- `building_search_source` and `building_search_fts` are populated from raw `osm.building_contours.tags_json` plus `local.architectural_info`.
+- PostgreSQL keeps only searchable rows in `building_search_source` and derives `search_tsv` there through a generated column.
+- SQLite keeps `building_search_source` plus `building_search_fts`.
 - Parsing and fallback composition for `name`, `address`, `style`, and `architect` now happens in Node.js via `src/lib/server/services/search-index-source.service.js`.
 - The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 
@@ -224,7 +226,7 @@ flowchart TD
 ## Managed runtime follow-up after successful sync
 
 - In-app sync flow (scheduler/admin queue) runs follow-up jobs from `ServerRuntime` boot modules.
-- These jobs rebuild `building_search_source` and `building_search_fts` through `search-index.boot.js`, then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
+- These jobs rebuild the search read-model through `search-index.boot.js` (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite), then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
 - Direct standalone execution of `scripts/sync-osm-region.js` updates imported OSM data and PMTiles only; it does not run these wrapper jobs by itself.
 
 ## Failure handling and invariants

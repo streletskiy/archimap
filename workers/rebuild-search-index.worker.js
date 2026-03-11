@@ -5,7 +5,6 @@ const path = require('path');
 const { Client } = require('pg');
 const { getDbProvider, getPostgresConnectionString } = require('../scripts/lib/postgres-config');
 const {
-  BUILDING_SEARCH_FTS_INSERT_SQL,
   BUILDING_SEARCH_SOURCE_INSERT_SQL,
   buildRawSearchSourceQuery,
   normalizeSearchSourceRows
@@ -71,76 +70,79 @@ const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
       AND bc.osm_type IN ('way', 'relation')
       AND bc.osm_id > 0
   )
-  SELECT
-    base.osm_type || '/' || base.osm_id::text AS osm_key,
-    base.osm_type,
-    base.osm_id,
-    COALESCE(
-      base.local_name,
-      NULLIF(btrim(base.tags_jsonb ->> 'name'), ''),
-      NULLIF(btrim(base.tags_jsonb ->> 'name:ru'), ''),
-      NULLIF(btrim(base.tags_jsonb ->> 'official_name'), '')
-    ) AS name,
-    COALESCE(
-      base.local_address,
-      NULLIF(btrim(base.tags_jsonb ->> 'addr:full'), ''),
-      (
-        SELECT string_agg(address_parts.part, ', ' ORDER BY address_parts.ord)
-        FROM (
-          SELECT DISTINCT ON (lower(parts.part))
-            parts.ord,
-            parts.part
+  ,
+  resolved AS MATERIALIZED (
+    SELECT
+      base.osm_type || '/' || base.osm_id::text AS osm_key,
+      base.osm_type,
+      base.osm_id,
+      COALESCE(
+        base.local_name,
+        NULLIF(btrim(base.tags_jsonb ->> 'name'), ''),
+        NULLIF(btrim(base.tags_jsonb ->> 'name:ru'), ''),
+        NULLIF(btrim(base.tags_jsonb ->> 'official_name'), '')
+      ) AS name,
+      COALESCE(
+        base.local_address,
+        NULLIF(btrim(base.tags_jsonb ->> 'addr:full'), ''),
+        (
+          SELECT string_agg(address_parts.part, ', ' ORDER BY address_parts.ord)
           FROM (
-            VALUES
-              (1, NULLIF(btrim(base.tags_jsonb ->> 'addr:postcode'), '')),
-              (2, NULLIF(btrim(base.tags_jsonb ->> 'addr:city'), '')),
-              (3, NULLIF(btrim(base.tags_jsonb ->> 'addr:place'), '')),
-              (4, NULLIF(btrim(base.tags_jsonb ->> 'addr:street'), '')),
-              (5, NULLIF(btrim(base.tags_jsonb ->> 'addr:housenumber'), ''))
-          ) AS parts(ord, part)
-          WHERE parts.part IS NOT NULL
-          ORDER BY lower(parts.part), parts.ord
-        ) AS address_parts
-      )
-    ) AS address,
-    COALESCE(
-      base.local_style,
-      NULLIF(btrim(base.tags_jsonb ->> 'building:architecture'), ''),
-      NULLIF(btrim(base.tags_jsonb ->> 'architecture'), ''),
-      NULLIF(btrim(base.tags_jsonb ->> 'style'), '')
-    ) AS style,
-    COALESCE(
-      base.local_architect,
-      NULLIF(btrim(base.tags_jsonb ->> 'architect'), ''),
-      NULLIF(btrim(base.tags_jsonb ->> 'architect_name'), '')
-    ) AS architect,
-    base.local_priority,
-    base.center_lon,
-    base.center_lat,
-    NOW() AS updated_at
-  FROM base
-`;
-
-const POSTGRES_FTS_POPULATE_SQL = `
-  INSERT INTO building_search_fts (
-    osm_key,
-    name,
-    address,
-    style,
-    architect
+            SELECT DISTINCT ON (lower(parts.part))
+              parts.ord,
+              parts.part
+            FROM (
+              VALUES
+                (1, NULLIF(btrim(base.tags_jsonb ->> 'addr:postcode'), '')),
+                (2, NULLIF(btrim(base.tags_jsonb ->> 'addr:city'), '')),
+                (3, NULLIF(btrim(base.tags_jsonb ->> 'addr:place'), '')),
+                (4, NULLIF(btrim(base.tags_jsonb ->> 'addr:street'), '')),
+                (5, NULLIF(btrim(base.tags_jsonb ->> 'addr:housenumber'), ''))
+            ) AS parts(ord, part)
+            WHERE parts.part IS NOT NULL
+            ORDER BY lower(parts.part), parts.ord
+          ) AS address_parts
+        )
+      ) AS address,
+      COALESCE(
+        base.local_style,
+        NULLIF(btrim(base.tags_jsonb ->> 'building:architecture'), ''),
+        NULLIF(btrim(base.tags_jsonb ->> 'architecture'), ''),
+        NULLIF(btrim(base.tags_jsonb ->> 'style'), '')
+      ) AS style,
+      COALESCE(
+        base.local_architect,
+        NULLIF(btrim(base.tags_jsonb ->> 'architect'), ''),
+        NULLIF(btrim(base.tags_jsonb ->> 'architect_name'), '')
+      ) AS architect,
+      base.local_priority,
+      base.center_lon,
+      base.center_lat,
+      NOW() AS updated_at
+    FROM base
   )
   SELECT
-    osm_key,
-    COALESCE(name, '') AS name,
-    COALESCE(address, '') AS address,
-    COALESCE(style, '') AS style,
-    COALESCE(architect, '') AS architect
-  FROM building_search_source
+    resolved.osm_key,
+    resolved.osm_type,
+    resolved.osm_id,
+    resolved.name,
+    resolved.address,
+    resolved.style,
+    resolved.architect,
+    resolved.local_priority,
+    resolved.center_lon,
+    resolved.center_lat,
+    resolved.updated_at
+  FROM resolved
+  WHERE resolved.name IS NOT NULL
+     OR resolved.address IS NOT NULL
+     OR resolved.style IS NOT NULL
+     OR resolved.architect IS NOT NULL
 `;
 
-const POSTGRES_CREATE_FTS_INDEX_SQL = `
-  CREATE INDEX IF NOT EXISTS idx_building_search_fts_tsv
-    ON public.building_search_fts
+const POSTGRES_CREATE_SOURCE_TSV_INDEX_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_building_search_source_tsv
+    ON public.building_search_source
     USING GIN (search_tsv)
 `;
 
@@ -270,24 +272,8 @@ async function createPostgresClient() {
 async function clearPostgresIndexes(client) {
   await client.query('BEGIN');
   try {
-    await client.query('TRUNCATE TABLE building_search_fts, building_search_source;');
-    await client.query('DROP INDEX IF EXISTS idx_building_search_fts_tsv;');
-    await client.query('COMMIT');
-  } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // ignore rollback failures
-    }
-    throw error;
-  }
-}
-
-async function populatePostgresFts(client) {
-  await client.query('BEGIN');
-  try {
-    await client.query("SET LOCAL synchronous_commit = 'off'");
-    await client.query(POSTGRES_FTS_POPULATE_SQL);
+    await client.query('TRUNCATE TABLE building_search_source;');
+    await client.query('DROP INDEX IF EXISTS idx_building_search_source_tsv;');
     await client.query('COMMIT');
   } catch (error) {
     try {
@@ -327,14 +313,12 @@ async function getPostgresTotals(client) {
   const result = await client.query(`
     SELECT
       (SELECT COUNT(*)::bigint FROM osm.building_contours) AS contours_total,
-      (SELECT COUNT(*)::bigint FROM building_search_source) AS source_total,
-      (SELECT COUNT(*)::bigint FROM building_search_fts) AS fts_total
+      (SELECT COUNT(*)::bigint FROM building_search_source) AS source_total
   `);
   const row = result.rows[0] || {};
   return {
     contoursTotal: Number(row.contours_total || 0),
-    sourceTotal: Number(row.source_total || 0),
-    ftsTotal: Number(row.fts_total || 0)
+    sourceTotal: Number(row.source_total || 0)
   };
 }
 
@@ -374,13 +358,11 @@ async function rebuildPostgresInParallel() {
     const progressTracker = createProgressTracker(totalContours);
 
     await Promise.all(ranges.map((range) => processPostgresChunk(range, progressTracker)));
-    await populatePostgresFts(client);
-    await client.query(POSTGRES_CREATE_FTS_INDEX_SQL);
+    await client.query(POSTGRES_CREATE_SOURCE_TSV_INDEX_SQL);
     await client.query('ANALYZE building_search_source;');
-    await client.query('ANALYZE building_search_fts;');
 
     const totals = await getPostgresTotals(client);
-    console.log(`[search-worker] contours=${totals.contoursTotal} source=${totals.sourceTotal} fts=${totals.ftsTotal}`);
+    console.log(`[search-worker] contours=${totals.contoursTotal} source=${totals.sourceTotal}`);
     console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
   } finally {
     await client.end();
@@ -446,7 +428,7 @@ function createSqliteDriver() {
   const countContours = db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours');
   const selectRawBatch = db.prepare(RAW_SEARCH_SOURCE_BATCH_SQL);
   const insertSource = db.prepare(BUILDING_SEARCH_SOURCE_INSERT_SQL);
-  const insertFts = db.prepare(BUILDING_SEARCH_FTS_INSERT_SQL);
+  const insertFts = db.prepare('INSERT INTO building_search_fts (osm_key, name, address, style, architect) VALUES (?, ?, ?, ?, ?)');
   const countTotals = db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM osm.building_contours) AS contours_total,

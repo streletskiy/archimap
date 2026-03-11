@@ -113,26 +113,36 @@ async function upsertFilterFixtures(connectionString, fixtures) {
     for (const fixture of fixtures) {
       await client.query(`
         INSERT INTO osm.building_contours (
-          osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          osm_type, osm_id, tags_json, min_lon, min_lat, max_lon, max_lat, geom, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($8), 4326)),
+          NOW()
+        )
         ON CONFLICT (osm_type, osm_id) DO UPDATE SET
           tags_json = EXCLUDED.tags_json,
-          geometry_json = EXCLUDED.geometry_json,
           min_lon = EXCLUDED.min_lon,
           min_lat = EXCLUDED.min_lat,
           max_lon = EXCLUDED.max_lon,
           max_lat = EXCLUDED.max_lat,
+          geom = EXCLUDED.geom,
           updated_at = NOW()
       `, [
         fixture.osmType,
         fixture.osmId,
         JSON.stringify(fixture.tags || {}),
-        fixture.geometryJson,
         fixture.minLon,
         fixture.minLat,
         fixture.maxLon,
-        fixture.maxLat
+        fixture.maxLat,
+        fixture.geometryJson
       ]);
 
       if (fixture.archiInfo) {

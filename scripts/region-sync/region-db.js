@@ -160,7 +160,14 @@ async function exportRegionMembersToNdjson({
     await client.connect();
     try {
       const rows = await client.query(`
-        SELECT bc.osm_type, bc.osm_id, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
+        SELECT
+          bc.osm_type,
+          bc.osm_id,
+          ST_AsGeoJSON(bc.geom)::text AS geometry_json,
+          bc.min_lon,
+          bc.min_lat,
+          bc.max_lon,
+          bc.max_lat
         FROM public.data_region_memberships drm
         JOIN osm.building_contours bc
           ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id

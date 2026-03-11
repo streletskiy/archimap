@@ -138,24 +138,17 @@ function createSearchService(options = {}) {
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
     const lat = Number.isFinite(centerLat) ? centerLat : defaultLat;
     const bbox = normalizeSearchBbox(searchBbox);
-    const bboxWhereSql = bbox
+    const bboxSql = bbox
       ? `
-        WHERE s.center_lon >= ?
-          AND s.center_lon <= ?
-          AND s.center_lat >= ?
-          AND s.center_lat <= ?`
+        AND s.center_lon >= ?
+        AND s.center_lon <= ?
+        AND s.center_lat >= ?
+        AND s.center_lat <= ?`
       : '';
     const bboxParams = bbox ? [bbox.west, bbox.east, bbox.south, bbox.north] : [];
 
     const rows = db.provider === 'postgres'
       ? await db.prepare(`
-        WITH matched AS (
-          SELECT
-            osm_key,
-            ts_rank(search_tsv, plainto_tsquery('simple', ?)) AS rank
-          FROM building_search_fts
-          WHERE search_tsv @@ plainto_tsquery('simple', ?)
-        )
         SELECT
           s.osm_type,
           s.osm_id,
@@ -166,15 +159,15 @@ function createSearchService(options = {}) {
           s.center_lon,
           s.center_lat,
           s.local_priority,
-          m.rank,
+          ts_rank(s.search_tsv, plainto_tsquery('simple', ?)) AS rank,
           COUNT(*) OVER() AS total_count,
           ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
-        FROM matched m
-        JOIN building_search_source s ON s.osm_key = m.osm_key
-        ${bboxWhereSql}
-        ORDER BY s.local_priority DESC, m.rank DESC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
+        FROM building_search_source s
+        WHERE s.search_tsv @@ plainto_tsquery('simple', ?)
+        ${bboxSql}
+        ORDER BY s.local_priority DESC, rank DESC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
         LIMIT ? OFFSET ?
-      `).all(tokens.join(' '), tokens.join(' '), lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset)
+      `).all(tokens.join(' '), lon, lon, lat, lat, tokens.join(' '), ...bboxParams, cappedLimit + 1, offset)
       : await db.prepare(`
         WITH matched AS (
           SELECT osm_key, bm25(building_search_fts) AS rank
@@ -196,7 +189,11 @@ function createSearchService(options = {}) {
           ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
         FROM matched m
         JOIN building_search_source s ON s.osm_key = m.osm_key
-        ${bboxWhereSql}
+        ${bbox ? `
+        WHERE s.center_lon >= ?
+          AND s.center_lon <= ?
+          AND s.center_lat >= ?
+          AND s.center_lat <= ?` : ''}
         ORDER BY s.local_priority DESC, m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
         LIMIT ? OFFSET ?
       `).all(buildFtsMatchQuery(tokens), lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);

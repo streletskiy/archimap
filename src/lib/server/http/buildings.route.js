@@ -45,11 +45,21 @@ function registerBuildingsRoutes(deps) {
     applyPersonalEditsToFilterItems
   });
 
-  const selectBuildingById = db.prepare(`
-    SELECT osm_type, osm_id, tags_json, geometry_json
-    FROM osm.building_contours
-    WHERE osm_type = ? AND osm_id = ?
-  `);
+  const selectBuildingById = db.prepare(isPostgres
+    ? `
+      SELECT
+        osm_type,
+        osm_id,
+        tags_json,
+        ST_AsGeoJSON(geom)::text AS geometry_json
+      FROM osm.building_contours
+      WHERE osm_type = ? AND osm_id = ?
+    `
+    : `
+      SELECT osm_type, osm_id, tags_json, geometry_json
+      FROM osm.building_contours
+      WHERE osm_type = ? AND osm_id = ?
+    `);
 
   app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
     const result = await filtersService.getFilterDataByKeys(req.body?.keys, getSessionEditActorKey(req));
