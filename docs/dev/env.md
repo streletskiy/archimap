@@ -83,6 +83,7 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `LOCAL_EDITS_DB_PATH`, `USER_EDITS_DB_PATH`, `USER_AUTH_DB_PATH`
 - `PYTHON_BIN`
 - `TIPPECANOE_BIN`
+- `ADMIN_REGIONS_PMTILES_ON_START` - `auto` (default), `always`, or `never`; controls whether the container startup checks and optionally rebuilds `frontend/build/client/admin-regions.pmtiles`.
 - `SESSION_SECRET`, `APP_SETTINGS_SECRET`, SMTP credentials, Redis/session settings
 
 ## Map defaults

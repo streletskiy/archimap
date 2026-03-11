@@ -11,6 +11,7 @@
   const dataSettings = controller.dataSettings;
   const dataLoading = controller.dataLoading;
   const dataStatus = controller.dataStatus;
+  const storageSummary = controller.storageSummary;
   const regionDraft = controller.regionDraft;
   const regionSaving = controller.regionSaving;
   const regionDeleting = controller.regionDeleting;
@@ -206,6 +207,11 @@
       <article class="data-summary-card rounded-xl p-3 text-sm ui-text-body lg:col-span-2">
         <p><strong>{$t('admin.data.summary.syncModeLabel')}:</strong> {$t('admin.data.summary.syncModeValue')}</p>
         <p><strong>{$t('admin.data.summary.regionsCountLabel')}:</strong> {regions.length}</p>
+        <p><strong>{$t('admin.data.summary.totalPmtilesSizeLabel')}:</strong> {controller.formatStorageBytes($storageSummary.totalPmtilesBytes)}</p>
+        <p>
+          <strong>{$t('admin.data.summary.totalDbSizeLabel')}:</strong>
+          {$storageSummary.totalDbBytesApproximate ? '~' : ''}{controller.formatStorageBytes($storageSummary.totalDbBytes)}
+        </p>
         <p><strong>{$t('admin.data.summary.regionSourceLabel')}:</strong> {$t('admin.data.summary.regionSourceValue')}</p>
       </article>
     </div>

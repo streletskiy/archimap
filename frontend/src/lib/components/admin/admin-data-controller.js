@@ -102,6 +102,26 @@ function normalizeDataSettings(nextSettings, fallback) {
   };
 }
 
+function normalizeStorageBytes(value) {
+  const bytes = Number(value);
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+}
+
+function buildStorageSummary(regions = []) {
+  return (Array.isArray(regions) ? regions : []).reduce(
+    (summary, region) => ({
+      totalPmtilesBytes: summary.totalPmtilesBytes + normalizeStorageBytes(region?.pmtilesBytes),
+      totalDbBytes: summary.totalDbBytes + normalizeStorageBytes(region?.dbBytes),
+      totalDbBytesApproximate: summary.totalDbBytesApproximate || Boolean(region?.dbBytesApproximate)
+    }),
+    {
+      totalPmtilesBytes: 0,
+      totalDbBytes: 0,
+      totalDbBytesApproximate: false
+    }
+  );
+}
+
 function getSavedFilterTagAllowlist(dataSettings) {
   return Array.isArray(dataSettings?.filterTags?.allowlist) ? dataSettings.filterTags.allowlist : [];
 }
@@ -487,6 +507,8 @@ export function createAdminDataController() {
   const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
     sortFilterTagKeys($dataSettings?.filterTags?.availableKeys, getSavedFilterTagAllowlist($dataSettings))
   );
+
+  const storageSummary = derived(dataSettings, ($dataSettings) => buildStorageSummary($dataSettings?.regions));
 
   const filterTagDraftStateByKey = derived(
     [dataSettings, filterTagAllowlistDraft],
@@ -1206,6 +1228,7 @@ export function createAdminDataController() {
     dataStatus,
     filterTagAllowlistDraft,
     filterTagAllowlistSaving,
+    storageSummary,
     sortedAvailableFilterTagKeys,
     filterTagAllowlistDirty,
     filterTagDraftStateByKey,

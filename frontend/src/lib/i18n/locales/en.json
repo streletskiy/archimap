@@ -442,13 +442,15 @@
         "syncModeLabel": "Sync mode",
         "syncModeValue": "DB-backed regions only",
         "regionsCountLabel": "Regions in system",
+        "totalPmtilesSizeLabel": "Total tiles size",
+        "totalDbSizeLabel": "Total region DB size",
         "regionSourceLabel": "Region source",
-        "regionSourceValue": "Geofabrik countries, US states, and osmfr Russia regions"
+        "regionSourceValue": "Geofabrik countries with osmfr fallback extracts, Geofabrik US states, and osmfr Russia regions"
       },
       "map": {
         "badge": "Geofabrik + osmfr",
         "title": "Region map",
-        "description": "Countries use Geofabrik extracts, Russia uses osmfr regions, and the US uses Geofabrik states.",
+        "description": "The map uses Geofabrik extracts for most countries, osmfr for fallback country coverage and Russia regions, and Geofabrik states for the US.",
         "loading": "Loading map regions...",
         "loadFailed": "Failed to load map regions",
         "legendMissing": "Not added",

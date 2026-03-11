@@ -6,10 +6,12 @@ import unicodedata
 import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
+from functools import lru_cache
 from pathlib import Path
 
 import geopandas as gpd
 from shapely.geometry import MultiPolygon, Polygon, mapping, shape
+from shapely.ops import unary_union
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -17,11 +19,82 @@ OUTPUT_PATH = REPO_ROOT / 'frontend' / 'static' / 'admin-regions.geojson'
 NATURAL_EARTH_URL = 'https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_countries.zip'
 NATURAL_EARTH_ADMIN1_URL = 'https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_1_states_provinces.zip'
 GEOFABRIK_INDEX_URL = 'https://download.geofabrik.de/index-v1.json'
+OSMFR_POLYGONS_ROOT = 'https://download.openstreetmap.fr/polygons/'
 OSMFR_RUSSIA_ROOT = 'https://download.openstreetmap.fr/polygons/russia/'
 
 EXCLUDED_COUNTRY_IDS = {'us', 'russia', 'antarctica'}
-COUNTRY_GEOMETRY_FALLBACK_IDS = {'france'}
-US_TERRITORY_IDS = {'us/puerto-rico', 'us/us-virgin-islands'}
+COUNTRY_GEOMETRY_FALLBACK_IDS = set()
+COUNTRY_HOLE_FILL_IDS = {'kazakhstan'}
+COMBINED_COUNTRY_GEOMETRY_IDS = {
+    'haiti-and-domrep',
+    'israel-and-palestine',
+    'senegal-and-gambia',
+}
+EXTRA_GEOFABRIK_COUNTRY_EXTRACT_IDS = {
+    'guernsey-jersey',
+}
+COUNTRY_ID_ISO_OVERRIDES = {
+    'kosovo': 'XK',
+}
+US_TERRITORY_IDS = {'us/us-virgin-islands'}
+EXTRA_COUNTRY_EXTRACTS = {
+    'AX': {
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_europe_finland_aland',
+        'name': 'Aland Islands',
+    },
+    'KW': {
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_asia_kuwait',
+        'name': 'Kuwait',
+    },
+    'FK': {
+        'extract_source': 'geofabrik',
+        'extract_id': 'geofabrik_europe_united-kingdom_falklands',
+        'name': 'Falkland Islands',
+    },
+    'OM': {
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_asia_oman',
+        'name': 'Oman',
+    },
+    'SA': {
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_asia_saudi_arabia',
+        'name': 'Saudi Arabia',
+    },
+    'QA': {
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_asia_qatar',
+        'name': 'Qatar',
+    },
+    'TT': {
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_central-america_trinidad_and_tobago',
+        'name': 'Trinidad and Tobago',
+    },
+}
+EXTRA_POLY_EXTRACT_FEATURES = (
+    {
+        'slug': 'lesser-antilles',
+        'name': 'Lesser Antilles',
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_central-america_caribbean',
+        'poly_path': 'central-america/caribbean',
+        'region_kind': 'extract_region',
+        'geometry_source': 'osmfr-poly',
+    },
+    {
+        'slug': 'saint-denis-reunion',
+        'name': 'Saint-Denis, Reunion',
+        'extract_source': 'osmfr',
+        'extract_id': 'osmfr_africa_reunion',
+        'poly_path': 'africa/reunion',
+        'region_kind': 'extract_region',
+        'geometry_source': 'osmfr-poly',
+        'iso2': 'RE',
+    },
+)
 HTTP_HEADERS = {'User-Agent': 'archimap-admin-regions-builder/1.0'}
 HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
 SIMPLIFY_TOLERANCE = 0.01
@@ -90,7 +163,31 @@ def humanize_path(path: str) -> str:
 def simplify_geometry(geometry: dict | None) -> dict | None:
     if geometry is None:
         return None
-    return mapping(shape(geometry).simplify(SIMPLIFY_TOLERANCE, preserve_topology=True))
+    parsed = shape(geometry) if isinstance(geometry, dict) else geometry
+    return mapping(parsed.simplify(SIMPLIFY_TOLERANCE, preserve_topology=True))
+
+
+def fill_polygon_holes(geometry):
+    if geometry is None:
+        return None
+
+    parsed = shape(geometry) if isinstance(geometry, dict) else geometry
+    if isinstance(parsed, Polygon):
+        return Polygon(parsed.exterior)
+    if isinstance(parsed, MultiPolygon):
+        polygons = [Polygon(polygon.exterior) for polygon in parsed.geoms if not polygon.is_empty]
+        if not polygons:
+            return parsed
+        if len(polygons) == 1:
+            return polygons[0]
+        return MultiPolygon(polygons)
+    return parsed
+
+
+def maybe_fill_country_holes(extract_id: str, geometry):
+    if str(extract_id or '').strip().lower() not in COUNTRY_HOLE_FILL_IDS:
+        return geometry
+    return fill_polygon_holes(geometry)
 
 
 def parse_poly(text: str):
@@ -131,6 +228,7 @@ def parse_poly(text: str):
     return MultiPolygon([(rings[0], rings[1:]) for rings in polygons])
 
 
+@lru_cache(maxsize=1)
 def crawl_osmfr_russia_leaf_paths() -> list[str]:
     seen = set()
     queue = deque([OSMFR_RUSSIA_ROOT])
@@ -160,6 +258,12 @@ def crawl_osmfr_russia_leaf_paths() -> list[str]:
     return [
         path for path in unique_paths if not any(other != path and other.startswith(path + '/') for other in unique_set)
     ]
+
+
+@lru_cache(maxsize=None)
+def load_osmfr_poly_geometry(path: str):
+    poly_url = urllib.parse.urljoin(OSMFR_POLYGONS_ROOT, f'{path}.poly')
+    return parse_poly(fetch_text(poly_url))
 
 
 def load_natural_earth() -> gpd.GeoDataFrame:
@@ -204,6 +308,59 @@ def select_natural_earth_row(natural_earth: gpd.GeoDataFrame, iso_codes: list[st
     return candidates.loc[best_index] if best_index is not None else None
 
 
+def select_natural_earth_rows_by_iso_codes(natural_earth: gpd.GeoDataFrame, iso_codes: list[str]) -> gpd.GeoDataFrame:
+    normalized_iso_codes = [str(code).upper() for code in iso_codes if str(code or '').strip()]
+    if not normalized_iso_codes:
+        return natural_earth.iloc[0:0]
+
+    return natural_earth[
+        natural_earth['ISO_A2'].isin(normalized_iso_codes)
+        | natural_earth['ISO_A2_EH'].isin(normalized_iso_codes)
+    ]
+
+
+def union_natural_earth_rows(rows: gpd.GeoDataFrame):
+    geometries = [row.geometry for _, row in rows.iterrows() if row.geometry is not None and not row.geometry.is_empty]
+    if not geometries:
+        return None
+    return unary_union(geometries)
+
+
+def select_special_natural_earth_geometry(natural_earth: gpd.GeoDataFrame, extract_id: str):
+    normalized_extract_id = str(extract_id or '').strip().lower()
+    if normalized_extract_id == 'cyprus':
+        cyprus_rows = natural_earth[natural_earth['ADM0_A3_US'].astype(str).str.strip().eq('CYP')]
+        if cyprus_rows.empty:
+            return None
+        return union_natural_earth_rows(cyprus_rows)
+
+    if normalized_extract_id == 'senegal-and-gambia':
+        combined_rows = select_natural_earth_rows_by_iso_codes(natural_earth, ['SN', 'GM'])
+        if combined_rows.empty:
+            return None
+        return union_natural_earth_rows(combined_rows)
+
+    if normalized_extract_id == 'israel-and-palestine':
+        israel_palestine_rows = select_natural_earth_rows_by_iso_codes(natural_earth, ['IL', 'PS'])
+        if israel_palestine_rows.empty:
+            return None
+        return union_natural_earth_rows(israel_palestine_rows)
+
+    if normalized_extract_id == 'somalia':
+        somalia_rows = natural_earth[natural_earth['ADM0_A3_US'].astype(str).str.strip().eq('SOM')]
+        if somalia_rows.empty:
+            return None
+        return union_natural_earth_rows(somalia_rows)
+
+    if normalized_extract_id == 'guernsey-jersey':
+        channel_islands_rows = select_natural_earth_rows_by_iso_codes(natural_earth, ['GG', 'JE'])
+        if channel_islands_rows.empty:
+            return None
+        return union_natural_earth_rows(channel_islands_rows)
+
+    return None
+
+
 def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFrame) -> list[dict]:
     by_iso_code: defaultdict[str, list[dict]] = defaultdict(list)
     for feature in geofabrik_index.get('features', []):
@@ -212,6 +369,8 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
         if '/' in geofabrik_id or geofabrik_id in EXCLUDED_COUNTRY_IDS:
             continue
         iso_codes = [str(code).upper() for code in (properties.get('iso3166-1:alpha2') or []) if str(code).strip()]
+        if not iso_codes and geofabrik_id in COUNTRY_ID_ISO_OVERRIDES:
+            iso_codes = [COUNTRY_ID_ISO_OVERRIDES[geofabrik_id]]
         if not iso_codes:
             continue
         for iso_code in iso_codes:
@@ -219,6 +378,7 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
 
     output = []
     seen_extract_ids = set()
+    seen_iso_codes = set()
     for iso_code in sorted(by_iso_code):
         candidates = by_iso_code[iso_code]
         scored_candidates = []
@@ -241,12 +401,17 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
 
         geofabrik_name = str(properties.get('name') or extract_id).strip()
         iso_alpha2 = iso_code.lower()
+        is_combined_extract = extract_id in COMBINED_COUNTRY_GEOMETRY_IDS
+        special_natural_earth_geometry = select_special_natural_earth_geometry(natural_earth, extract_id)
 
-        if extract_id in COUNTRY_GEOMETRY_FALLBACK_IDS or matched_row is None:
-            geometry = simplify_geometry(chosen.get('geometry'))
+        if special_natural_earth_geometry is not None:
+            geometry = simplify_geometry(maybe_fill_country_holes(extract_id, special_natural_earth_geometry))
+            geometry_source = 'natural-earth'
+        elif is_combined_extract or extract_id in COUNTRY_GEOMETRY_FALLBACK_IDS or matched_row is None:
+            geometry = simplify_geometry(maybe_fill_country_holes(extract_id, chosen.get('geometry')))
             geometry_source = 'geofabrik-index'
         else:
-            geometry = simplify_geometry(mapping(matched_row.geometry))
+            geometry = simplify_geometry(maybe_fill_country_holes(extract_id, mapping(matched_row.geometry)))
             geometry_source = 'natural-earth'
 
         if geometry is None:
@@ -266,11 +431,86 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
             'geometry': geometry
         })
         seen_extract_ids.add(extract_id)
+        seen_iso_codes.add(iso_code)
+
+    for iso_code, config in sorted(EXTRA_COUNTRY_EXTRACTS.items()):
+        if iso_code in seen_iso_codes:
+            continue
+        matched_row = select_natural_earth_row(natural_earth, [iso_code], str(config.get('name') or iso_code))
+        if matched_row is None:
+            raise ValueError(f'No Natural Earth country match found for extra country {iso_code}')
+
+        geometry = simplify_geometry(maybe_fill_country_holes(str(config['extract_id']), mapping(matched_row.geometry)))
+        if geometry is None:
+            raise ValueError(f'Natural Earth geometry is empty for extra country {iso_code}')
+
+        country_name = str(config.get('name') or matched_row.get('NAME_EN') or matched_row.get('NAME') or iso_code).strip()
+        output.append({
+            'type': 'Feature',
+            'properties': {
+                'Slug': f'{iso_code.lower()}-{slugify(country_name)}',
+                'Name': f'{iso_code} {country_name}',
+                'ExtractId': str(config['extract_id']),
+                'ExtractSource': str(config['extract_source']),
+                'GeometrySource': 'natural-earth',
+                'RegionKind': 'country',
+                'Iso2': iso_code
+            },
+            'geometry': geometry
+        })
 
     return output
 
 
-def build_us_state_features(geofabrik_index: dict) -> list[dict]:
+def build_extra_geofabrik_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFrame) -> list[dict]:
+    geofabrik_features_by_id = {
+        str(feature.get('properties', {}).get('id') or '').strip(): feature
+        for feature in geofabrik_index.get('features', [])
+    }
+
+    output = []
+    for extract_id in sorted(EXTRA_GEOFABRIK_COUNTRY_EXTRACT_IDS):
+        geofabrik_feature = geofabrik_features_by_id.get(extract_id)
+        if geofabrik_feature is None:
+            raise ValueError(f'No Geofabrik feature found for extra country extract {extract_id}')
+
+        geofabrik_name = str(geofabrik_feature.get('properties', {}).get('name') or extract_id).strip()
+        special_natural_earth_geometry = select_special_natural_earth_geometry(natural_earth, extract_id)
+        if special_natural_earth_geometry is None:
+            raise ValueError(f'No Natural Earth union geometry found for extra country extract {extract_id}')
+
+        geometry = simplify_geometry(maybe_fill_country_holes(extract_id, special_natural_earth_geometry))
+        if geometry is None:
+            raise ValueError(f'Natural Earth geometry is empty for extra country extract {extract_id}')
+
+        output.append({
+            'type': 'Feature',
+            'properties': {
+                'Slug': slugify(extract_id),
+                'Name': geofabrik_name,
+                'ExtractId': extract_id,
+                'ExtractSource': 'geofabrik',
+                'GeometrySource': 'natural-earth',
+                'RegionKind': 'country',
+            },
+            'geometry': geometry
+        })
+
+    return output
+
+
+def build_us_state_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFrame, natural_earth_admin1: gpd.GeoDataFrame) -> list[dict]:
+    us_admin1 = natural_earth_admin1[
+        (natural_earth_admin1['adm0_a3'] == 'USA')
+        & natural_earth_admin1['iso_3166_2'].notna()
+    ].copy()
+    us_admin1_by_iso = {
+        str(row.get('iso_3166_2') or '').strip().upper(): row
+        for _, row in us_admin1.iterrows()
+        if str(row.get('iso_3166_2') or '').strip()
+    }
+    puerto_rico_row = select_natural_earth_row(natural_earth, ['PR'], 'Puerto Rico')
+
     output = []
     for feature in geofabrik_index.get('features', []):
         properties = feature.get('properties', {})
@@ -283,6 +523,20 @@ def build_us_state_features(geofabrik_index: dict) -> list[dict]:
         if not any(code.startswith('US-') for code in iso_codes):
             continue
 
+        iso_code = next((code for code in iso_codes if code.startswith('US-')), '')
+        matched_row = us_admin1_by_iso.get(iso_code)
+        geometry_source = 'natural-earth-admin1'
+        if matched_row is not None:
+            geometry = simplify_geometry(mapping(matched_row.geometry))
+        elif iso_code == 'US-PR' and puerto_rico_row is not None:
+            geometry = simplify_geometry(mapping(puerto_rico_row.geometry))
+            geometry_source = 'natural-earth'
+        else:
+            raise ValueError(f'No Natural Earth US state match found for {extract_id}: {iso_code or "missing ISO code"}')
+
+        if geometry is None:
+            raise ValueError(f'Natural Earth US state geometry is empty for {extract_id}')
+
         state_name = humanize_segment(extract_id.split('/', 1)[1])
         output.append({
             'type': 'Feature',
@@ -291,13 +545,40 @@ def build_us_state_features(geofabrik_index: dict) -> list[dict]:
                 'Name': f'US {state_name}',
                 'ExtractId': extract_id,
                 'ExtractSource': 'geofabrik',
-                'GeometrySource': 'geofabrik-index',
+                'GeometrySource': geometry_source,
                 'RegionKind': 'us_state',
                 'Iso2': 'US',
                 'Iso3166_2': iso_codes[0] if iso_codes else None
             },
-            'geometry': simplify_geometry(feature.get('geometry'))
+            'geometry': geometry
         })
+    return output
+
+
+def build_extra_poly_extract_features() -> list[dict]:
+    output = []
+    for config in EXTRA_POLY_EXTRACT_FEATURES:
+        geometry = simplify_geometry(load_osmfr_poly_geometry(str(config['poly_path'])))
+        if geometry is None:
+            raise ValueError(f"OSMFR poly geometry is empty for {config['poly_path']}")
+
+        properties = {
+            'Slug': str(config['slug']).strip(),
+            'Name': str(config['name']).strip(),
+            'ExtractId': str(config['extract_id']).strip(),
+            'ExtractSource': str(config['extract_source']).strip(),
+            'GeometrySource': str(config['geometry_source']).strip(),
+            'RegionKind': str(config['region_kind']).strip(),
+        }
+        if str(config.get('iso2') or '').strip():
+            properties['Iso2'] = str(config['iso2']).strip()
+
+        output.append({
+            'type': 'Feature',
+            'properties': properties,
+            'geometry': geometry
+        })
+
     return output
 
 
@@ -426,7 +707,7 @@ def build_russia_region_features(natural_earth_admin1: gpd.GeoDataFrame) -> list
         row = match_map[path]
         parts = [part for part in path.split('/') if part]
         region_name = humanize_segment(parts[-1])
-        geometry = mapping(row.geometry)
+        geometry = simplify_geometry(mapping(row.geometry))
         if geometry is None:
             raise ValueError(f'Natural Earth Admin 1 geometry is empty for {path}')
         output.append({
@@ -467,7 +748,9 @@ def main() -> None:
 
     features = []
     features.extend(build_country_features(geofabrik_index, natural_earth))
-    features.extend(build_us_state_features(geofabrik_index))
+    features.extend(build_extra_geofabrik_country_features(geofabrik_index, natural_earth))
+    features.extend(build_us_state_features(geofabrik_index, natural_earth, natural_earth_admin1))
+    features.extend(build_extra_poly_extract_features())
     features.extend(build_russia_region_features(natural_earth_admin1))
     features = assign_stable_ids(features)
 

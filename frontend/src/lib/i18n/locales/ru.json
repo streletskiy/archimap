@@ -442,13 +442,15 @@
         "syncModeLabel": "Режим синхронизации",
         "syncModeValue": "только DB-backed регионы",
         "regionsCountLabel": "Регионов в системе",
+        "totalPmtilesSizeLabel": "Общий размер всех тайлов",
+        "totalDbSizeLabel": "Общий размер БД регионов",
         "regionSourceLabel": "Источник региона",
-        "regionSourceValue": "страны и штаты из Geofabrik, регионы России из osmfr"
+        "regionSourceValue": "страны из Geofabrik с fallback extract'ами из osmfr, штаты США из Geofabrik, регионы России из osmfr"
       },
       "map": {
         "badge": "Geofabrik + osmfr",
         "title": "Карта регионов",
-        "description": "Для стран используются extract из Geofabrik, для России регионы из osmfr, для США штаты из Geofabrik.",
+        "description": "Для большинства стран используются extract из Geofabrik, для части покрытий и регионов России используются данные osmfr, для США штаты из Geofabrik.",
         "loading": "Загружаем регионы для карты...",
         "loadFailed": "Не удалось загрузить регионы для карты",
         "legendMissing": "Ещё не добавлен",

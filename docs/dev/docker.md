@@ -26,7 +26,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 4. `frontend-build`
 
-- Generates version metadata and builds frontend bundle.
+- Generates version metadata and builds frontend bundle from committed frontend assets.
 - Depends on frontend sources, not on backend dependency install layer.
 
 5. `runtime`
@@ -111,6 +111,8 @@ Docker downloads only changed layers during pull.
 
 - local source builds (`docker compose up --build`, default image tag `streletskiy/archimap:dev`)
 - registry deploys (`ARCHIMAP_IMAGE=streletskiy/archimap:<version> docker compose up -d`)
+
+`admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` only when the archive is missing or out of date.
 
 ## PostgreSQL + PostGIS (default in Compose)
 

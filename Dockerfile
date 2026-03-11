@@ -117,5 +117,5 @@ COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version
 
 EXPOSE 3252
 
-CMD ["node", "server.sveltekit.js"]
+CMD ["node", "scripts/runtime-start.js"]
 

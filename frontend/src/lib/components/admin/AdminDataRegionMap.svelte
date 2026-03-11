@@ -34,10 +34,13 @@
   let mapBootstrapRequested = false;
   let regionById = new Map();
   let featureById = new Map();
+  let featureAreaById = new Map();
   let featureIdsBySlug = new Map();
   let featureIdsByExtractKey = new Map();
   let toneStateByFeatureId = new Map();
   let selectedFeatureIds = [];
+  let hoveredFeatureId = null;
+  let hoveredFeatureMeta = null;
 
   function ensureMapRuntime() {
     if (!mapRuntimePromise) {
@@ -93,30 +96,106 @@
     return index + 1;
   }
 
+  function signedRingArea(ring = []) {
+    if (!Array.isArray(ring) || ring.length < 3) return 0;
+    let sum = 0;
+    for (let index = 0; index < ring.length; index += 1) {
+      const current = ring[index];
+      const next = ring[(index + 1) % ring.length];
+      const x1 = Number(current?.[0]);
+      const y1 = Number(current?.[1]);
+      const x2 = Number(next?.[0]);
+      const y2 = Number(next?.[1]);
+      if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+      sum += (x1 * y2) - (x2 * y1);
+    }
+    return sum / 2;
+  }
+
+  function polygonAreaFromCoordinates(coordinates = []) {
+    if (!Array.isArray(coordinates) || coordinates.length === 0) return 0;
+    const [outerRing, ...holeRings] = coordinates;
+    const outerArea = Math.abs(signedRingArea(outerRing));
+    const holeArea = holeRings.reduce((total, ring) => total + Math.abs(signedRingArea(ring)), 0);
+    return Math.max(0, outerArea - holeArea);
+  }
+
+  function geometryArea(geometry = null) {
+    const type = String(geometry?.type || '');
+    const coordinates = geometry?.coordinates;
+    if (type === 'Polygon') {
+      return polygonAreaFromCoordinates(coordinates);
+    }
+    if (type === 'MultiPolygon' && Array.isArray(coordinates)) {
+      return coordinates.reduce((total, polygonCoordinates) => total + polygonAreaFromCoordinates(polygonCoordinates), 0);
+    }
+    return 0;
+  }
+
+  function getFeatureInteractiveArea(feature = null) {
+    const featureId = Number(feature?.id || 0);
+    if (Number.isInteger(featureId) && featureId > 0) {
+      const cachedArea = Number(featureAreaById.get(featureId) || 0);
+      if (Number.isFinite(cachedArea) && cachedArea > 0) {
+        return cachedArea;
+      }
+    }
+    return geometryArea(feature?.geometry);
+  }
+
+  function sortFeaturesByInteractivePriority(features = []) {
+    return [...(Array.isArray(features) ? features : [])]
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftArea = getFeatureInteractiveArea(left);
+        const rightArea = getFeatureInteractiveArea(right);
+        if (leftArea !== rightArea) return leftArea - rightArea;
+        return Number(left?.id || 0) - Number(right?.id || 0);
+      });
+  }
+
+  function getInteractiveFeatureAtPoint(point = null) {
+    if (!map || !point) return null;
+    const renderedFeatures = map.queryRenderedFeatures(point, {
+      layers: [REGIONS_FILL_LAYER_ID]
+    });
+    return sortFeaturesByInteractivePriority(renderedFeatures)[0] || null;
+  }
+
   function createNormalizedGeoJson(data) {
     const features = Array.isArray(data?.features) ? data.features : [];
     const nextFeatureById = new Map();
+    const nextFeatureAreaById = new Map();
     const nextFeatureIdsBySlug = new Map();
     const nextFeatureIdsByExtractKey = new Map();
 
-    const normalizedFeatures = features.map((feature, index) => {
+    const normalizedFeatures = [...features]
+      .sort((left, right) => {
+        const leftArea = geometryArea(left?.geometry);
+        const rightArea = geometryArea(right?.geometry);
+        if (leftArea !== rightArea) return rightArea - leftArea;
+        return String(left?.properties?.ExtractId || '').localeCompare(String(right?.properties?.ExtractId || ''));
+      })
+      .map((feature, index) => {
       const meta = controller?.getMapRegionFeatureMeta?.(feature) || {};
       const featureId = buildFeatureId(index);
+      const featureArea = geometryArea(feature?.geometry);
       const normalizedFeature = {
         ...feature,
         id: featureId
       };
 
-      nextFeatureById.set(featureId, normalizedFeature);
-      addFeatureIdToLookup(nextFeatureIdsBySlug, normalizeLookupKey(meta.slug), featureId);
-      addFeatureIdToLookup(
-        nextFeatureIdsByExtractKey,
-        buildExtractLookupKey(meta.extractSource, meta.extractId),
-        featureId
-      );
+        nextFeatureById.set(featureId, normalizedFeature);
+        nextFeatureAreaById.set(featureId, featureArea);
+        addFeatureIdToLookup(nextFeatureIdsBySlug, normalizeLookupKey(meta.slug), featureId);
+        addFeatureIdToLookup(
+          nextFeatureIdsByExtractKey,
+          buildExtractLookupKey(meta.extractSource, meta.extractId),
+          featureId
+        );
 
-      return normalizedFeature;
-    });
+        return normalizedFeature;
+      });
 
     return {
       collection: {
@@ -124,6 +203,7 @@
         features: normalizedFeatures
       },
       featureById: nextFeatureById,
+      featureAreaById: nextFeatureAreaById,
       featureIdsBySlug: nextFeatureIdsBySlug,
       featureIdsByExtractKey: nextFeatureIdsByExtractKey
     };
@@ -250,14 +330,48 @@
     };
   }
 
+  function clearHoveredFeatureState() {
+    if (map?.getSource(REGIONS_SOURCE_ID) && Number.isInteger(hoveredFeatureId) && hoveredFeatureId > 0) {
+      map.removeFeatureState(getFeatureStateTarget(hoveredFeatureId), 'hovered');
+    }
+    hoveredFeatureId = null;
+    hoveredFeatureMeta = null;
+  }
+
+  function syncHoveredFeatureState(feature = null) {
+    if (!map?.getSource(REGIONS_SOURCE_ID)) return;
+
+    const nextFeatureId = Number(feature?.id || 0);
+    if (!Number.isInteger(nextFeatureId) || nextFeatureId <= 0) {
+      clearHoveredFeatureState();
+      return;
+    }
+
+    if (hoveredFeatureId === nextFeatureId) {
+      hoveredFeatureMeta = controller?.getMapRegionFeatureMeta?.(feature) || hoveredFeatureMeta;
+      return;
+    }
+
+    clearHoveredFeatureState();
+    map.setFeatureState(getFeatureStateTarget(nextFeatureId), {
+      hovered: true
+    });
+    hoveredFeatureId = nextFeatureId;
+    hoveredFeatureMeta = controller?.getMapRegionFeatureMeta?.(feature) || null;
+  }
+
   function resetTrackedFeatureStates() {
     toneStateByFeatureId = new Map();
     selectedFeatureIds = [];
+    featureAreaById = new Map();
+    hoveredFeatureId = null;
+    hoveredFeatureMeta = null;
   }
 
   function syncMapSource(collection = sourceGeoJson, options = {}) {
     if (!map?.getSource(REGIONS_SOURCE_ID)) return;
     if (options.resetFeatureState) {
+      clearHoveredFeatureState();
       resetTrackedFeatureStates();
     }
     map.getSource(REGIONS_SOURCE_ID).setData(collection);
@@ -359,12 +473,14 @@
           'fill-opacity': [
             'case',
             ['boolean', ['feature-state', 'selected'], false],
-            0.8,
+            0.82,
+            ['boolean', ['feature-state', 'hovered'], false],
+            0.68,
             ['==', ['feature-state', 'tone'], 'failed'],
-            0.5,
+            0.54,
             ['==', ['feature-state', 'tone'], 'ready'],
-            0.52,
-            0.38
+            0.56,
+            0.46
           ]
         }
       });
@@ -398,8 +514,15 @@
             '#9A6700',
             '#768195'
           ],
-          'line-opacity': 0.96,
-          'line-width': ['case', ['boolean', ['feature-state', 'selected'], false], 4.6, 1.4]
+          'line-opacity': 0.98,
+          'line-width': [
+            'case',
+            ['boolean', ['feature-state', 'selected'], false],
+            4.6,
+            ['boolean', ['feature-state', 'hovered'], false],
+            3,
+            1.8
+          ]
         }
       });
     }
@@ -427,12 +550,14 @@
       const normalized = createNormalizedGeoJson(data);
       sourceGeoJson = normalized.collection;
       featureById = normalized.featureById;
+      featureAreaById = normalized.featureAreaById;
       featureIdsBySlug = normalized.featureIdsBySlug;
       featureIdsByExtractKey = normalized.featureIdsByExtractKey;
       hasInitialFit = false;
     } catch (error) {
       sourceGeoJson = EMPTY_FEATURE_COLLECTION;
       featureById = new Map();
+      featureAreaById = new Map();
       featureIdsBySlug = new Map();
       featureIdsByExtractKey = new Map();
       resetTrackedFeatureStates();
@@ -445,7 +570,7 @@
   async function handleRegionClick(event) {
     if (disabled) return;
 
-    const feature = event?.features?.[0];
+    const feature = getInteractiveFeatureAtPoint(event?.point) || event?.features?.[0] || null;
     if (!feature) return;
 
     const matchedRegion = controller?.findRegionByMapFeature?.(feature, regions) || null;
@@ -497,8 +622,16 @@
     map.on('mouseenter', REGIONS_FILL_LAYER_ID, () => {
       map.getCanvas().style.cursor = disabled ? '' : 'pointer';
     });
+    map.on('mousemove', REGIONS_FILL_LAYER_ID, (event) => {
+      if (disabled) {
+        clearHoveredFeatureState();
+        return;
+      }
+      syncHoveredFeatureState(getInteractiveFeatureAtPoint(event?.point) || event?.features?.[0] || null);
+    });
     map.on('mouseleave', REGIONS_FILL_LAYER_ID, () => {
       map.getCanvas().style.cursor = '';
+      clearHoveredFeatureState();
     });
     map.on('click', REGIONS_FILL_LAYER_ID, handleRegionClick);
   }
@@ -595,7 +728,17 @@
     <p class="mt-3 text-sm ui-text-muted">{$t('admin.data.map.loading')}</p>
   {/if}
 
-  <div class="mt-4 overflow-hidden rounded-2xl border ui-border">
+  <div class="relative mt-4 overflow-hidden rounded-2xl border ui-border">
+    {#if hoveredFeatureMeta?.name || hoveredFeatureMeta?.extractId}
+      <div class="pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-xl border ui-border ui-surface-soft px-3 py-2 shadow-sm">
+        <p class="truncate text-sm font-semibold ui-text-strong">{hoveredFeatureMeta.name || hoveredFeatureMeta.extractId}</p>
+        {#if hoveredFeatureMeta?.extractId}
+          <p class="truncate text-xs ui-text-muted">
+            {hoveredFeatureMeta.extractSource || 'osmfr'} · {hoveredFeatureMeta.extractId}
+          </p>
+        {/if}
+      </div>
+    {/if}
     <div class="data-map-canvas h-[28rem] min-h-[420px] w-full" bind:this={mapEl}></div>
   </div>
 
