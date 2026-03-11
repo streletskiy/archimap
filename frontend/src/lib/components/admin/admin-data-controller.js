@@ -72,6 +72,16 @@ function slugifyLoose(value) {
     .replace(/^-+|-+$/g, '');
 }
 
+function normalizeLookupValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function buildRegionExtractIdentity(extractSource, extractId) {
+  const normalizedExtractId = normalizeLookupValue(extractId);
+  if (!normalizedExtractId) return '';
+  return `${normalizeLookupValue(extractSource) || 'osmfr'}:${normalizedExtractId}`;
+}
+
 function normalizeDataSettings(nextSettings, fallback) {
   const value = nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback;
   return {
@@ -128,60 +138,125 @@ function sortFilterTagKeys(keys = [], selected = []) {
   });
 }
 
-export function createAdminDataController() {
-  const dataSettings = writable(createEmptyDataSettings());
-  const dataLoading = writable(false);
-  const dataStatus = writable('');
-  const filterTagAllowlistDraft = writable([]);
-  const filterTagAllowlistSaving = writable(false);
-  const regionDraft = writable(createRegionDraft());
-  const regionSaving = writable(false);
-  const regionDeleting = writable(false);
-  const regionSyncBusy = writable(false);
-  const regionResolveBusy = writable(false);
-  const regionExtractCandidates = writable([]);
-  const selectedDataRegionId = writable(null);
-  const regionRuns = writable([]);
-  const regionRunsLoading = writable(false);
-  const regionRunsStatus = writable('');
-  const initialized = writable(false);
-  let nextOptimisticRegionId = -1;
-  const pendingOptimisticRegions = new Map();
-
-  const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
-    sortFilterTagKeys($dataSettings?.filterTags?.availableKeys, getSavedFilterTagAllowlist($dataSettings))
-  );
-
-  const filterTagDraftStateByKey = derived(
-    [dataSettings, filterTagAllowlistDraft],
-    ([$dataSettings, $filterTagAllowlistDraft]) =>
-      buildFilterTagDraftStateByKey(
-        $dataSettings?.filterTags?.availableKeys,
-        getSavedFilterTagAllowlist($dataSettings),
-        $filterTagAllowlistDraft
-      )
-  );
-
-  const filterTagAllowlistDirty = derived(
-    [dataSettings, filterTagAllowlistDraft],
-    ([$dataSettings, $filterTagAllowlistDraft]) => {
-      const saved = [...getSavedFilterTagAllowlist($dataSettings)].sort();
-      const draft = [...$filterTagAllowlistDraft].sort();
-      return JSON.stringify(saved) !== JSON.stringify(draft);
-    }
-  );
-
+function createFilterSettingsController({
+  dataSettings,
+  dataStatus,
+  filterTagAllowlistDraft,
+  filterTagAllowlistSaving,
+  filterTagAllowlistDirty,
+  dataT
+}) {
   function seedFilterTagAllowlistDraft(filterTags = null) {
     const current = filterTags && typeof filterTags === 'object' ? filterTags : {};
     filterTagAllowlistDraft.set(Array.isArray(current.allowlist) ? [...current.allowlist] : []);
   }
 
-  function patchRegionDraft(patch) {
-    regionDraft.update((current) => ({
-      ...current,
-      ...(patch && typeof patch === 'object' ? patch : {})
-    }));
+  function confirmDiscardFilterTagChanges() {
+    if (!get(filterTagAllowlistDirty)) return true;
+    if (typeof window === 'undefined') return false;
+    return window.confirm(dataT('filterTags.confirmDiscard'));
   }
+
+  function ensureFilterTagChangesDiscarded() {
+    return confirmDiscardFilterTagChanges();
+  }
+
+  function toggleFilterTagSelection(key, checked) {
+    const nextKey = String(key || '').trim();
+    if (!nextKey) return;
+
+    filterTagAllowlistDraft.update((current) => {
+      if (checked) {
+        return current.includes(nextKey) ? current : [...current, nextKey];
+      }
+      return current.filter((item) => item !== nextKey);
+    });
+  }
+
+  function resetFilterTagAllowlistToDefault() {
+    const currentSettings = get(dataSettings);
+    const defaults = Array.isArray(currentSettings?.filterTags?.defaultAllowlist)
+      ? currentSettings.filterTags.defaultAllowlist
+      : [];
+    const available = new Set(
+      Array.isArray(currentSettings?.filterTags?.availableKeys) ? currentSettings.filterTags.availableKeys : []
+    );
+    filterTagAllowlistDraft.set(defaults.filter((key) => available.has(key)));
+  }
+
+  async function saveFilterTagAllowlist() {
+    filterTagAllowlistSaving.set(true);
+    dataStatus.set(dataT('status.savingFilterTags'));
+
+    try {
+      const payload = {
+        allowlist: [...get(filterTagAllowlistDraft)]
+      };
+      const data = await apiJson('/api/admin/app-settings/data/filter-tag-allowlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const saved = data?.item && typeof data.item === 'object' ? data.item : null;
+
+      dataSettings.update((current) => ({
+        ...current,
+        filterTags: {
+          ...current.filterTags,
+          source: String(saved?.source || current.filterTags.source || 'default'),
+          allowlist: Array.isArray(saved?.allowlist) ? saved.allowlist : [...get(filterTagAllowlistDraft)],
+          defaultAllowlist: Array.isArray(saved?.defaultAllowlist)
+            ? saved.defaultAllowlist
+            : current.filterTags.defaultAllowlist,
+          updatedBy: saved?.updatedBy ? String(saved.updatedBy) : null,
+          updatedAt: saved?.updatedAt ? String(saved.updatedAt) : null
+        }
+      }));
+
+      seedFilterTagAllowlistDraft(get(dataSettings).filterTags);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('archimap:filter-tag-keys-changed'));
+      }
+      dataStatus.set(dataT('status.filterTagsSaved'));
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.saveFilterTagsFailed')));
+    } finally {
+      filterTagAllowlistSaving.set(false);
+    }
+  }
+
+  function getFilterTagDraftClass(state) {
+    if (state === 'enabled_pending') return 'filter-tag-option-enabled-pending';
+    if (state === 'disabled_pending') return 'filter-tag-option-disabled-pending';
+    return 'filter-tag-option-unchanged';
+  }
+
+  function isFilterTagSelected(key) {
+    return get(filterTagAllowlistDraft).includes(String(key || '').trim());
+  }
+
+  return {
+    seedFilterTagAllowlistDraft,
+    confirmDiscardFilterTagChanges,
+    ensureFilterTagChangesDiscarded,
+    toggleFilterTagSelection,
+    resetFilterTagAllowlistToDefault,
+    saveFilterTagAllowlist,
+    getFilterTagDraftClass,
+    isFilterTagSelected
+  };
+}
+
+function createMapRegionController({
+  dataSettings,
+  dataStatus,
+  regionDraft,
+  regionResolveBusy,
+  regionExtractCandidates,
+  patchRegionDraft,
+  dataT
+}) {
+  const regionLookupCache = new WeakMap();
 
   function getMapRegionFeatureMeta(feature) {
     const properties = feature?.properties && typeof feature.properties === 'object' ? feature.properties : {};
@@ -198,30 +273,75 @@ export function createAdminDataController() {
     };
   }
 
+  function getRegionLookup(regions = []) {
+    const items = Array.isArray(regions) ? regions : [];
+    const cached = regionLookupCache.get(items);
+    if (cached) return cached;
+
+    const bySlug = new Map();
+    const byExtractIdentity = new Map();
+    const byExtractId = new Map();
+
+    for (const region of items) {
+      const slug = normalizeLookupValue(region?.slug);
+      const extractId = normalizeLookupValue(region?.extractId);
+      const extractIdentity = buildRegionExtractIdentity(region?.extractSource, region?.extractId);
+
+      if (slug && !bySlug.has(slug)) {
+        bySlug.set(slug, region);
+      }
+
+      if (extractIdentity && !byExtractIdentity.has(extractIdentity)) {
+        byExtractIdentity.set(extractIdentity, region);
+      }
+
+      if (extractId) {
+        const current = byExtractId.get(extractId);
+        if (current) {
+          current.push(region);
+        } else {
+          byExtractId.set(extractId, [region]);
+        }
+      }
+    }
+
+    const nextLookup = {
+      bySlug,
+      byExtractIdentity,
+      byExtractId
+    };
+    regionLookupCache.set(items, nextLookup);
+    return nextLookup;
+  }
+
   function findRegionByMapFeature(feature, regions = null) {
     const items = Array.isArray(regions) ? regions : get(dataSettings).regions;
     const meta = getMapRegionFeatureMeta(feature);
-    const featureSlug = String(meta.slug || '').trim().toLowerCase();
-    const featureExtractSource = String(meta.extractSource || '').trim().toLowerCase();
-    const featureExtractId = String(meta.extractId || '').trim().toLowerCase();
+    const featureSlug = normalizeLookupValue(meta.slug);
+    const featureExtractSource = normalizeLookupValue(meta.extractSource);
+    const featureExtractId = normalizeLookupValue(meta.extractId);
+    const featureExtractIdentity = buildRegionExtractIdentity(meta.extractSource, meta.extractId);
+    const lookup = getRegionLookup(items);
 
-    return (
-      items.find((item) => {
-        const regionSlug = String(item?.slug || '').trim().toLowerCase();
-        const regionExtractSource = String(item?.extractSource || '').trim().toLowerCase();
-        const regionExtractId = String(item?.extractId || '').trim().toLowerCase();
+    if (featureSlug && lookup.bySlug.has(featureSlug)) {
+      return lookup.bySlug.get(featureSlug) || null;
+    }
 
-        if (featureSlug && regionSlug === featureSlug) return true;
-        if (
-          featureExtractId
-          && regionExtractId === featureExtractId
-          && (!featureExtractSource || !regionExtractSource || regionExtractSource === featureExtractSource)
-        ) {
-          return true;
+    if (featureExtractIdentity && lookup.byExtractIdentity.has(featureExtractIdentity)) {
+      return lookup.byExtractIdentity.get(featureExtractIdentity) || null;
+    }
+
+    if (featureExtractId) {
+      const candidates = lookup.byExtractId.get(featureExtractId) || [];
+      for (const region of candidates) {
+        const regionExtractSource = normalizeLookupValue(region?.extractSource);
+        if (!featureExtractSource || !regionExtractSource || regionExtractSource === featureExtractSource) {
+          return region;
         }
-        return false;
-      }) || null
-    );
+      }
+    }
+
+    return null;
   }
 
   function applyRegionDraftFromMapFeature(feature) {
@@ -266,6 +386,171 @@ export function createAdminDataController() {
     if (options.setStatus !== false) {
       dataStatus.set(dataT('status.extractSelected'));
     }
+  }
+
+  function handleRegionSearchQueryInput(event) {
+    const nextValue = String(event?.currentTarget?.value || '');
+    const currentDraft = get(regionDraft);
+    const searchChanged = nextValue !== String(currentDraft.searchQuery || '');
+
+    patchRegionDraft({
+      searchQuery: nextValue
+    });
+    if (searchChanged && (currentDraft.extractId || currentDraft.extractSource)) {
+      clearRegionExtractSelection();
+    }
+    regionExtractCandidates.set([]);
+  }
+
+  async function resolveRegionExtractCandidates() {
+    const query = String(get(regionDraft).searchQuery || '').trim();
+    if (!query) {
+      dataStatus.set(dataT('status.resolveExtractMissingQuery'));
+      regionExtractCandidates.set([]);
+      clearRegionExtractSelection();
+      return;
+    }
+
+    regionResolveBusy.set(true);
+    dataStatus.set(dataT('status.resolvingExtract'));
+
+    try {
+      const data = await apiJson('/api/admin/app-settings/data/regions/resolve-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      regionExtractCandidates.set(items);
+
+      if (items.length === 1) {
+        applyRegionExtractCandidate(items[0], { setStatus: false });
+        dataStatus.set(dataT('status.extractResolvedSingle'));
+        return;
+      }
+
+      clearRegionExtractSelection();
+      dataStatus.set(
+        items.length > 0 ? dataT('status.extractCandidatesLoaded', { count: items.length }) : dataT('status.resolveExtractNoMatches')
+      );
+    } catch (error) {
+      regionExtractCandidates.set([]);
+      clearRegionExtractSelection();
+      dataStatus.set(msg(error, dataT('status.resolveExtractFailed')));
+    } finally {
+      regionResolveBusy.set(false);
+    }
+  }
+
+  function getRegionSyncState(region) {
+    const code = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
+    if (code === 'running' || code === 'queued') return 'syncing';
+    if (code === 'success') return 'ready';
+    if (code === 'idle' && region?.lastSuccessfulSyncAt) return 'ready';
+    if (code === 'failed' || code === 'abandoned') return 'failed';
+    return 'pending';
+  }
+
+  return {
+    getMapRegionFeatureMeta,
+    findRegionByMapFeature,
+    applyRegionDraftFromMapFeature,
+    applyRegionExtractCandidate,
+    handleRegionSearchQueryInput,
+    resolveRegionExtractCandidates,
+    getRegionSyncState
+  };
+}
+
+export function createAdminDataController() {
+  const dataSettings = writable(createEmptyDataSettings());
+  const dataLoading = writable(false);
+  const dataStatus = writable('');
+  const filterTagAllowlistDraft = writable([]);
+  const filterTagAllowlistSaving = writable(false);
+  const regionDraft = writable(createRegionDraft());
+  const regionSaving = writable(false);
+  const regionDeleting = writable(false);
+  const regionSyncBusy = writable(false);
+  const regionResolveBusy = writable(false);
+  const regionExtractCandidates = writable([]);
+  const selectedDataRegionId = writable(null);
+  const regionRuns = writable([]);
+  const regionRunsLoading = writable(false);
+  const regionRunsStatus = writable('');
+  const initialized = writable(false);
+  let nextOptimisticRegionId = -1;
+  const pendingOptimisticRegions = new Map();
+
+  const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
+    sortFilterTagKeys($dataSettings?.filterTags?.availableKeys, getSavedFilterTagAllowlist($dataSettings))
+  );
+
+  const filterTagDraftStateByKey = derived(
+    [dataSettings, filterTagAllowlistDraft],
+    ([$dataSettings, $filterTagAllowlistDraft]) =>
+      buildFilterTagDraftStateByKey(
+        $dataSettings?.filterTags?.availableKeys,
+        getSavedFilterTagAllowlist($dataSettings),
+        $filterTagAllowlistDraft
+      )
+  );
+
+  const filterTagAllowlistDirty = derived(
+    [dataSettings, filterTagAllowlistDraft],
+    ([$dataSettings, $filterTagAllowlistDraft]) => {
+      const saved = [...getSavedFilterTagAllowlist($dataSettings)].sort();
+      const draft = [...$filterTagAllowlistDraft].sort();
+      return JSON.stringify(saved) !== JSON.stringify(draft);
+    }
+  );
+
+  function patchRegionDraft(patch) {
+    regionDraft.update((current) => ({
+      ...current,
+      ...(patch && typeof patch === 'object' ? patch : {})
+    }));
+  }
+
+  const filterSettingsController = createFilterSettingsController({
+    dataSettings,
+    dataStatus,
+    filterTagAllowlistDraft,
+    filterTagAllowlistSaving,
+    filterTagAllowlistDirty,
+    dataT
+  });
+
+  const mapRegionController = createMapRegionController({
+    dataSettings,
+    dataStatus,
+    regionDraft,
+    regionResolveBusy,
+    regionExtractCandidates,
+    patchRegionDraft,
+    dataT
+  });
+
+  function seedFilterTagAllowlistDraft(filterTags = null) {
+    return filterSettingsController.seedFilterTagAllowlistDraft(filterTags);
+  }
+
+  function getMapRegionFeatureMeta(feature) {
+    return mapRegionController.getMapRegionFeatureMeta(feature);
+  }
+
+  function findRegionByMapFeature(feature, regions = null) {
+    return mapRegionController.findRegionByMapFeature(feature, regions);
+  }
+
+  function applyRegionDraftFromMapFeature(feature) {
+    return mapRegionController.applyRegionDraftFromMapFeature(feature);
+  }
+
+  function applyRegionExtractCandidate(candidate, options = {}) {
+    return mapRegionController.applyRegionExtractCandidate(candidate, options);
   }
 
   function getRegionById(regionId) {
@@ -485,36 +770,19 @@ export function createAdminDataController() {
   }
 
   function confirmDiscardFilterTagChanges() {
-    if (!get(filterTagAllowlistDirty)) return true;
-    if (typeof window === 'undefined') return false;
-    return window.confirm(dataT('filterTags.confirmDiscard'));
+    return filterSettingsController.confirmDiscardFilterTagChanges();
   }
 
   function ensureFilterTagChangesDiscarded() {
-    return confirmDiscardFilterTagChanges();
+    return filterSettingsController.ensureFilterTagChangesDiscarded();
   }
 
   function toggleFilterTagSelection(key, checked) {
-    const nextKey = String(key || '').trim();
-    if (!nextKey) return;
-
-    filterTagAllowlistDraft.update((current) => {
-      if (checked) {
-        return current.includes(nextKey) ? current : [...current, nextKey];
-      }
-      return current.filter((item) => item !== nextKey);
-    });
+    return filterSettingsController.toggleFilterTagSelection(key, checked);
   }
 
   function resetFilterTagAllowlistToDefault() {
-    const currentSettings = get(dataSettings);
-    const defaults = Array.isArray(currentSettings?.filterTags?.defaultAllowlist)
-      ? currentSettings.filterTags.defaultAllowlist
-      : [];
-    const available = new Set(
-      Array.isArray(currentSettings?.filterTags?.availableKeys) ? currentSettings.filterTags.availableKeys : []
-    );
-    filterTagAllowlistDraft.set(defaults.filter((key) => available.has(key)));
+    return filterSettingsController.resetFilterTagAllowlistToDefault();
   }
 
   async function loadRegionRuns(regionId) {
@@ -609,44 +877,7 @@ export function createAdminDataController() {
   }
 
   async function saveFilterTagAllowlist() {
-    filterTagAllowlistSaving.set(true);
-    dataStatus.set(dataT('status.savingFilterTags'));
-
-    try {
-      const payload = {
-        allowlist: [...get(filterTagAllowlistDraft)]
-      };
-      const data = await apiJson('/api/admin/app-settings/data/filter-tag-allowlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const saved = data?.item && typeof data.item === 'object' ? data.item : null;
-
-      dataSettings.update((current) => ({
-        ...current,
-        filterTags: {
-          ...current.filterTags,
-          source: String(saved?.source || current.filterTags.source || 'default'),
-          allowlist: Array.isArray(saved?.allowlist) ? saved.allowlist : [...get(filterTagAllowlistDraft)],
-          defaultAllowlist: Array.isArray(saved?.defaultAllowlist)
-            ? saved.defaultAllowlist
-            : current.filterTags.defaultAllowlist,
-          updatedBy: saved?.updatedBy ? String(saved.updatedBy) : null,
-          updatedAt: saved?.updatedAt ? String(saved.updatedAt) : null
-        }
-      }));
-
-      seedFilterTagAllowlistDraft(get(dataSettings).filterTags);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('archimap:filter-tag-keys-changed'));
-      }
-      dataStatus.set(dataT('status.filterTagsSaved'));
-    } catch (error) {
-      dataStatus.set(msg(error, dataT('status.saveFilterTagsFailed')));
-    } finally {
-      filterTagAllowlistSaving.set(false);
-    }
+    return filterSettingsController.saveFilterTagAllowlist();
   }
 
   function startNewRegionDraft() {
@@ -664,57 +895,11 @@ export function createAdminDataController() {
   }
 
   function handleRegionSearchQueryInput(event) {
-    const nextValue = String(event?.currentTarget?.value || '');
-    const currentDraft = get(regionDraft);
-    const searchChanged = nextValue !== String(currentDraft.searchQuery || '');
-
-    patchRegionDraft({
-      searchQuery: nextValue
-    });
-    if (searchChanged && (currentDraft.extractId || currentDraft.extractSource)) {
-      clearRegionExtractSelection();
-    }
-    regionExtractCandidates.set([]);
+    return mapRegionController.handleRegionSearchQueryInput(event);
   }
 
   async function resolveRegionExtractCandidates() {
-    const query = String(get(regionDraft).searchQuery || '').trim();
-    if (!query) {
-      dataStatus.set(dataT('status.resolveExtractMissingQuery'));
-      regionExtractCandidates.set([]);
-      clearRegionExtractSelection();
-      return;
-    }
-
-    regionResolveBusy.set(true);
-    dataStatus.set(dataT('status.resolvingExtract'));
-
-    try {
-      const data = await apiJson('/api/admin/app-settings/data/regions/resolve-extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-      });
-      const items = Array.isArray(data?.items) ? data.items : [];
-      regionExtractCandidates.set(items);
-
-      if (items.length === 1) {
-        applyRegionExtractCandidate(items[0], { setStatus: false });
-        dataStatus.set(dataT('status.extractResolvedSingle'));
-        return;
-      }
-
-      clearRegionExtractSelection();
-      dataStatus.set(
-        items.length > 0 ? dataT('status.extractCandidatesLoaded', { count: items.length }) : dataT('status.resolveExtractNoMatches')
-      );
-    } catch (error) {
-      regionExtractCandidates.set([]);
-      clearRegionExtractSelection();
-      dataStatus.set(msg(error, dataT('status.resolveExtractFailed')));
-    } finally {
-      regionResolveBusy.set(false);
-    }
+    return mapRegionController.resolveRegionExtractCandidates();
   }
 
   async function saveDataRegion(event) {
@@ -950,14 +1135,7 @@ export function createAdminDataController() {
   }
 
   function getRegionSyncState(region) {
-    const code = String(region?.lastSyncStatus || '')
-      .trim()
-      .toLowerCase();
-    if (code === 'running' || code === 'queued') return 'syncing';
-    if (code === 'success') return 'ready';
-    if (code === 'idle' && region?.lastSuccessfulSyncAt) return 'ready';
-    if (code === 'failed' || code === 'abandoned') return 'failed';
-    return 'pending';
+    return mapRegionController.getRegionSyncState(region);
   }
 
   function getRegionStatusMeta(status, context = null) {
@@ -1015,13 +1193,11 @@ export function createAdminDataController() {
   }
 
   function getFilterTagDraftClass(state) {
-    if (state === 'enabled_pending') return 'filter-tag-option-enabled-pending';
-    if (state === 'disabled_pending') return 'filter-tag-option-disabled-pending';
-    return 'filter-tag-option-unchanged';
+    return filterSettingsController.getFilterTagDraftClass(state);
   }
 
   function isFilterTagSelected(key) {
-    return get(filterTagAllowlistDraft).includes(String(key || '').trim());
+    return filterSettingsController.isFilterTagSelected(key);
   }
 
   return {

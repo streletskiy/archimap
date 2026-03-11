@@ -16,12 +16,10 @@
   const LIGHT = '/styles/positron-custom.json';
   const DARK = '/styles/dark-matter-custom.json';
   const REGIONS_SOURCE_ID = 'admin-data-regions-source';
-  const SELECTED_SOURCE_ID = 'admin-data-regions-selected-source';
   const REGIONS_FILL_LAYER_ID = 'admin-data-regions-fill';
   const REGIONS_LINE_LAYER_ID = 'admin-data-regions-line';
-  const SELECTED_FILL_LAYER_ID = 'admin-data-regions-selected-fill';
-  const SELECTED_LINE_LAYER_ID = 'admin-data-regions-selected-line';
   const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
+  const DEFAULT_FEATURE_TONE = 'missing';
 
   let mapEl;
   let map = null;
@@ -29,13 +27,17 @@
   let mapRuntimePromise = null;
   let mapInitNonce = 0;
   let sourceGeoJson = EMPTY_FEATURE_COLLECTION;
-  let decoratedGeoJson = EMPTY_FEATURE_COLLECTION;
-  let selectedFeatureCollection = EMPTY_FEATURE_COLLECTION;
   let mapLoading = true;
   let mapError = '';
   let hasInitialFit = false;
   let lastFocusedDraftKey = '';
   let mapBootstrapRequested = false;
+  let regionById = new Map();
+  let featureById = new Map();
+  let featureIdsBySlug = new Map();
+  let featureIdsByExtractKey = new Map();
+  let toneStateByFeatureId = new Map();
+  let selectedFeatureIds = [];
 
   function ensureMapRuntime() {
     if (!mapRuntimePromise) {
@@ -67,6 +69,76 @@
     return `${slug}:${extractSource}:${extractId}`;
   }
 
+  function normalizeLookupKey(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function buildExtractLookupKey(extractSource, extractId) {
+    const normalizedExtractId = normalizeLookupKey(extractId);
+    if (!normalizedExtractId) return '';
+    return `${normalizeLookupKey(extractSource) || 'osmfr'}:${normalizedExtractId}`;
+  }
+
+  function addFeatureIdToLookup(mapRef, key, featureId) {
+    if (!key) return;
+    const current = mapRef.get(key);
+    if (current) {
+      current.push(featureId);
+      return;
+    }
+    mapRef.set(key, [featureId]);
+  }
+
+  function buildFeatureId(index) {
+    return index + 1;
+  }
+
+  function createNormalizedGeoJson(data) {
+    const features = Array.isArray(data?.features) ? data.features : [];
+    const nextFeatureById = new Map();
+    const nextFeatureIdsBySlug = new Map();
+    const nextFeatureIdsByExtractKey = new Map();
+
+    const normalizedFeatures = features.map((feature, index) => {
+      const meta = controller?.getMapRegionFeatureMeta?.(feature) || {};
+      const featureId = buildFeatureId(index);
+      const normalizedFeature = {
+        ...feature,
+        id: featureId
+      };
+
+      nextFeatureById.set(featureId, normalizedFeature);
+      addFeatureIdToLookup(nextFeatureIdsBySlug, normalizeLookupKey(meta.slug), featureId);
+      addFeatureIdToLookup(
+        nextFeatureIdsByExtractKey,
+        buildExtractLookupKey(meta.extractSource, meta.extractId),
+        featureId
+      );
+
+      return normalizedFeature;
+    });
+
+    return {
+      collection: {
+        type: 'FeatureCollection',
+        features: normalizedFeatures
+      },
+      featureById: nextFeatureById,
+      featureIdsBySlug: nextFeatureIdsBySlug,
+      featureIdsByExtractKey: nextFeatureIdsByExtractKey
+    };
+  }
+
+  function buildRegionIdLookup(currentRegions) {
+    const lookup = new Map();
+    for (const region of Array.isArray(currentRegions) ? currentRegions : []) {
+      const numericRegionId = Number(region?.id || 0);
+      if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) continue;
+      lookup.set(numericRegionId, region);
+    }
+    return lookup;
+  }
+
   function getMapTone(region) {
     const state = controller?.getRegionSyncState?.(region);
     if (state === 'syncing') return 'syncing';
@@ -74,69 +146,78 @@
     return 'missing';
   }
 
-  function featureMatchesDraft(feature, currentDraft) {
-    const meta = controller?.getMapRegionFeatureMeta?.(feature);
-    if (!meta) return false;
-
+  function resolveFeatureIdsByDraft(currentDraft) {
     const draftSlug = String(currentDraft?.slug || '').trim().toLowerCase();
     const draftExtractSource = String(currentDraft?.extractSource || '').trim().toLowerCase();
     const draftExtractId = String(currentDraft?.extractId || '').trim().toLowerCase();
+    const resolvedIds = new Set();
 
-    if (draftSlug && String(meta.slug || '').trim().toLowerCase() === draftSlug) return true;
-    if (
-      draftExtractId
-      && String(meta.extractId || '').trim().toLowerCase() === draftExtractId
-      && (
-        !draftExtractSource
-        || String(meta.extractSource || '').trim().toLowerCase() === draftExtractSource
-      )
-    ) {
-      return true;
+    if (draftSlug) {
+      for (const featureId of featureIdsBySlug.get(draftSlug) || []) {
+        resolvedIds.add(featureId);
+      }
     }
-    return false;
-  }
 
-  function featureMatchesSelection(feature, currentDraft, matchedRegion, currentSelectedRegionId) {
-    const numericSelectedRegionId = Number(currentSelectedRegionId || 0);
-    if (matchedRegion && Number(matchedRegion.id || 0) > 0 && Number(matchedRegion.id || 0) === numericSelectedRegionId) {
-      return true;
-    }
-    return featureMatchesDraft(feature, currentDraft);
-  }
-
-  function buildDecoratedGeoJson(collection, currentRegions, currentDraft, currentSelectedRegionId) {
-    const base = collection && typeof collection === 'object' ? collection : EMPTY_FEATURE_COLLECTION;
-    const features = Array.isArray(base.features) ? base.features : [];
-
-    return {
-      ...base,
-      type: 'FeatureCollection',
-      features: features.map((feature) => {
-        const matchedRegion = controller?.findRegionByMapFeature?.(feature, currentRegions) || null;
-        return {
-          ...feature,
-          properties: {
-            ...(feature?.properties && typeof feature.properties === 'object' ? feature.properties : {}),
-            __mapTone: matchedRegion ? getMapTone(matchedRegion) : 'missing',
-            __selected: featureMatchesSelection(feature, currentDraft, matchedRegion, currentSelectedRegionId)
+    if (draftExtractId) {
+      const exactIds = featureIdsByExtractKey.get(buildExtractLookupKey(draftExtractSource, draftExtractId)) || [];
+      if (exactIds.length > 0) {
+        for (const featureId of exactIds) {
+          resolvedIds.add(featureId);
+        }
+      } else if (!draftExtractSource) {
+        for (const [extractKey, featureIds] of featureIdsByExtractKey.entries()) {
+          if (!extractKey.endsWith(`:${draftExtractId}`)) continue;
+          for (const featureId of featureIds) {
+            resolvedIds.add(featureId);
           }
-        };
-      })
-    };
+        }
+      }
+    }
+
+    return [...resolvedIds];
   }
 
-  function getSelectedFeature(collection = decoratedGeoJson) {
-    const features = Array.isArray(collection?.features) ? collection.features : [];
-    return features.find((feature) => Boolean(feature?.properties?.__selected)) || null;
+  function resolveFeatureIdsByRegion(region) {
+    const nextRegion = region && typeof region === 'object' ? region : {};
+    const resolvedIds = new Set();
+    const slug = normalizeLookupKey(nextRegion.slug);
+    const extractKey = buildExtractLookupKey(nextRegion.extractSource, nextRegion.extractId);
+
+    if (slug) {
+      for (const featureId of featureIdsBySlug.get(slug) || []) {
+        resolvedIds.add(featureId);
+      }
+    }
+
+    if (extractKey) {
+      for (const featureId of featureIdsByExtractKey.get(extractKey) || []) {
+        resolvedIds.add(featureId);
+      }
+    }
+
+    return [...resolvedIds];
   }
 
-  function buildSelectedFeatureCollection(collection = decoratedGeoJson) {
-    const selectedFeature = getSelectedFeature(collection);
-    if (!selectedFeature) return EMPTY_FEATURE_COLLECTION;
-    return {
-      type: 'FeatureCollection',
-      features: [selectedFeature]
-    };
+  function resolveSelectedFeatureIds(currentDraft, currentSelectedRegionId) {
+    const resolvedIds = new Set(resolveFeatureIdsByDraft(currentDraft));
+    const numericSelectedRegionId = Number(currentSelectedRegionId || 0);
+    const selectedRegion = Number.isInteger(numericSelectedRegionId) && numericSelectedRegionId > 0
+      ? regionById.get(numericSelectedRegionId) || null
+      : null;
+
+    for (const featureId of resolveFeatureIdsByRegion(selectedRegion)) {
+      resolvedIds.add(featureId);
+    }
+
+    return [...resolvedIds];
+  }
+
+  function getSelectedFeature() {
+    for (const featureId of selectedFeatureIds) {
+      const selectedFeature = featureById.get(featureId);
+      if (selectedFeature) return selectedFeature;
+    }
+    return null;
   }
 
   function fitAllFeatures() {
@@ -161,14 +242,74 @@
     }
   }
 
-  function syncMapSource(collection = decoratedGeoJson) {
+  function getFeatureStateTarget(featureId) {
+    return {
+      source: REGIONS_SOURCE_ID,
+      id: featureId
+    };
+  }
+
+  function resetTrackedFeatureStates() {
+    toneStateByFeatureId = new Map();
+    selectedFeatureIds = [];
+  }
+
+  function syncMapSource(collection = sourceGeoJson, options = {}) {
     if (!map?.getSource(REGIONS_SOURCE_ID)) return;
+    if (options.resetFeatureState) {
+      resetTrackedFeatureStates();
+    }
     map.getSource(REGIONS_SOURCE_ID).setData(collection);
   }
 
-  function syncSelectedSource(collection = selectedFeatureCollection) {
-    if (!map?.getSource(SELECTED_SOURCE_ID)) return;
-    map.getSource(SELECTED_SOURCE_ID).setData(collection);
+  function syncRegionFeatureToneStates(currentRegions = regions) {
+    if (!map?.getSource(REGIONS_SOURCE_ID)) return;
+
+    const nextToneStateByFeatureId = new Map();
+    for (const feature of Array.isArray(sourceGeoJson?.features) ? sourceGeoJson.features : []) {
+      const featureId = feature?.id;
+      if (featureId == null) continue;
+
+      const matchedRegion = controller?.findRegionByMapFeature?.(feature, currentRegions) || null;
+      nextToneStateByFeatureId.set(featureId, matchedRegion ? getMapTone(matchedRegion) : DEFAULT_FEATURE_TONE);
+    }
+
+    for (const [featureId, previousTone] of toneStateByFeatureId.entries()) {
+      const nextTone = nextToneStateByFeatureId.get(featureId);
+      if (nextTone === previousTone) continue;
+      map.removeFeatureState(getFeatureStateTarget(featureId), 'tone');
+    }
+
+    for (const [featureId, tone] of nextToneStateByFeatureId.entries()) {
+      if (toneStateByFeatureId.get(featureId) === tone) continue;
+      map.setFeatureState(getFeatureStateTarget(featureId), {
+        tone
+      });
+    }
+
+    toneStateByFeatureId = nextToneStateByFeatureId;
+  }
+
+  function syncSelectedFeatureStates(currentDraft = draft, currentSelectedRegionId = selectedRegionId) {
+    if (!map?.getSource(REGIONS_SOURCE_ID)) return;
+
+    const nextSelectedFeatureIds = resolveSelectedFeatureIds(currentDraft, currentSelectedRegionId);
+    const previousSelectedIds = new Set(selectedFeatureIds);
+    const nextSelectedIds = new Set(nextSelectedFeatureIds);
+
+    for (const featureId of selectedFeatureIds) {
+      if (nextSelectedIds.has(featureId)) continue;
+      map.removeFeatureState(getFeatureStateTarget(featureId), 'selected');
+    }
+
+    for (const featureId of nextSelectedFeatureIds) {
+      if (previousSelectedIds.has(featureId)) continue;
+      map.setFeatureState(getFeatureStateTarget(featureId), {
+        selected: true
+      });
+    }
+
+    selectedFeatureIds = nextSelectedFeatureIds;
   }
 
   function ensureRegionLayers() {
@@ -177,15 +318,9 @@
     if (!map.getSource(REGIONS_SOURCE_ID)) {
       map.addSource(REGIONS_SOURCE_ID, {
         type: 'geojson',
-        data: decoratedGeoJson
+        data: sourceGeoJson
       });
-    }
-
-    if (!map.getSource(SELECTED_SOURCE_ID)) {
-      map.addSource(SELECTED_SOURCE_ID, {
-        type: 'geojson',
-        data: selectedFeatureCollection
-      });
+      resetTrackedFeatureStates();
     }
 
     if (!map.getLayer(REGIONS_FILL_LAYER_ID)) {
@@ -196,10 +331,10 @@
         paint: {
           'fill-color': [
             'case',
-            ['boolean', ['get', '__selected'], false],
+            ['boolean', ['feature-state', 'selected'], false],
             [
               'match',
-              ['get', '__mapTone'],
+              ['feature-state', 'tone'],
               'ready',
               '#3F9E57',
               'syncing',
@@ -208,7 +343,7 @@
             ],
             [
               'match',
-              ['get', '__mapTone'],
+              ['feature-state', 'tone'],
               'ready',
               '#5DAE6D',
               'syncing',
@@ -218,9 +353,9 @@
           ],
           'fill-opacity': [
             'case',
-            ['boolean', ['get', '__selected'], false],
+            ['boolean', ['feature-state', 'selected'], false],
             0.8,
-            ['==', ['get', '__mapTone'], 'ready'],
+            ['==', ['feature-state', 'tone'], 'ready'],
             0.52,
             0.38
           ]
@@ -236,55 +371,31 @@
         paint: {
           'line-color': [
             'case',
-            ['boolean', ['get', '__selected'], false],
+            ['boolean', ['feature-state', 'selected'], false],
             [
               'match',
-              ['get', '__mapTone'],
+              ['feature-state', 'tone'],
               'ready',
               '#14532D',
               'syncing',
               '#92400E',
               '#1D4ED8'
             ],
-            ['==', ['get', '__mapTone'], 'ready'],
+            ['==', ['feature-state', 'tone'], 'ready'],
             '#2F6B3C',
-            ['==', ['get', '__mapTone'], 'syncing'],
+            ['==', ['feature-state', 'tone'], 'syncing'],
             '#9A6700',
             '#768195'
           ],
           'line-opacity': 0.96,
-          'line-width': ['case', ['boolean', ['get', '__selected'], false], 4.6, 1.4]
+          'line-width': ['case', ['boolean', ['feature-state', 'selected'], false], 4.6, 1.4]
         }
       });
     }
 
-    syncMapSource(decoratedGeoJson);
-    if (!map.getLayer(SELECTED_FILL_LAYER_ID)) {
-      map.addLayer({
-        id: SELECTED_FILL_LAYER_ID,
-        type: 'fill',
-        source: SELECTED_SOURCE_ID,
-        paint: {
-          'fill-color': '#60A5FA',
-          'fill-opacity': 0.2
-        }
-      });
-    }
-
-    if (!map.getLayer(SELECTED_LINE_LAYER_ID)) {
-      map.addLayer({
-        id: SELECTED_LINE_LAYER_ID,
-        type: 'line',
-        source: SELECTED_SOURCE_ID,
-        paint: {
-          'line-color': '#1D4ED8',
-          'line-opacity': 1,
-          'line-width': 5.5
-        }
-      });
-    }
-
-    syncSelectedSource(selectedFeatureCollection);
+    syncMapSource(sourceGeoJson, { resetFeatureState: true });
+    syncRegionFeatureToneStates(regions);
+    syncSelectedFeatureStates(draft, selectedRegionId);
   }
 
   async function loadRegionsGeoJson() {
@@ -302,13 +413,18 @@
       }
 
       const data = await response.json();
-      sourceGeoJson = {
-        type: 'FeatureCollection',
-        features: Array.isArray(data?.features) ? data.features : []
-      };
+      const normalized = createNormalizedGeoJson(data);
+      sourceGeoJson = normalized.collection;
+      featureById = normalized.featureById;
+      featureIdsBySlug = normalized.featureIdsBySlug;
+      featureIdsByExtractKey = normalized.featureIdsByExtractKey;
       hasInitialFit = false;
     } catch (error) {
       sourceGeoJson = EMPTY_FEATURE_COLLECTION;
+      featureById = new Map();
+      featureIdsBySlug = new Map();
+      featureIdsByExtractKey = new Map();
+      resetTrackedFeatureStates();
       mapError = String(error?.message || translateNow('admin.data.map.loadFailed'));
     } finally {
       mapLoading = false;
@@ -381,20 +497,28 @@
     if (!map) return;
     map.remove();
     map = null;
+    resetTrackedFeatureStates();
   }
 
-  $: decoratedGeoJson = buildDecoratedGeoJson(sourceGeoJson, regions, draft, selectedRegionId);
-  $: selectedFeatureCollection = buildSelectedFeatureCollection(decoratedGeoJson);
+  $: regionById = buildRegionIdLookup(regions);
 
-  $: if (map?.getSource(REGIONS_SOURCE_ID) && decoratedGeoJson) {
-    syncMapSource(decoratedGeoJson);
+  $: if (map?.getSource(REGIONS_SOURCE_ID)) {
+    sourceGeoJson;
+    syncMapSource(sourceGeoJson, { resetFeatureState: true });
   }
 
-  $: if (map?.getSource(SELECTED_SOURCE_ID) && selectedFeatureCollection) {
-    syncSelectedSource(selectedFeatureCollection);
+  $: if (map?.getSource(REGIONS_SOURCE_ID)) {
+    sourceGeoJson;
+    syncRegionFeatureToneStates(regions);
   }
 
-  $: if (map && !hasInitialFit && decoratedGeoJson.features.length > 0) {
+  $: if (map?.getSource(REGIONS_SOURCE_ID)) {
+    sourceGeoJson;
+    regionById;
+    syncSelectedFeatureStates(draft, selectedRegionId);
+  }
+
+  $: if (map && !hasInitialFit && sourceGeoJson.features.length > 0) {
     fitAllFeatures();
   }
 

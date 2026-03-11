@@ -35,12 +35,136 @@ function convertNamedParams(sql, namedParams) {
   return { text, values };
 }
 
-function convertPositionalParams(sql, positionalParams) {
+function replaceSqlitePositionalPlaceholders(sql, replacer) {
+  const source = String(sql || '');
+  let out = '';
+  let index = 0;
   let cursor = 0;
-  const text = String(sql || '').replace(/\?/g, () => {
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let dollarQuoteTag = null;
+
+  while (cursor < source.length) {
+    const next = source[cursor + 1] || '';
+
+    if (inLineComment) {
+      out += source[cursor];
+      if (source[cursor] === '\n') {
+        inLineComment = false;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (source[cursor] === '*' && next === '/') {
+        out += '*/';
+        cursor += 2;
+        inBlockComment = false;
+        continue;
+      }
+      out += source[cursor];
+      cursor += 1;
+      continue;
+    }
+
+    if (dollarQuoteTag) {
+      if (source.startsWith(dollarQuoteTag, cursor)) {
+        out += dollarQuoteTag;
+        cursor += dollarQuoteTag.length;
+        dollarQuoteTag = null;
+        continue;
+      }
+      out += source[cursor];
+      cursor += 1;
+      continue;
+    }
+
+    if (inSingleQuote) {
+      out += source[cursor];
+      if (source[cursor] === '\'' && next === '\'') {
+        out += next;
+        cursor += 2;
+        continue;
+      }
+      if (source[cursor] === '\'') {
+        inSingleQuote = false;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if (inDoubleQuote) {
+      out += source[cursor];
+      if (source[cursor] === '"' && next === '"') {
+        out += next;
+        cursor += 2;
+        continue;
+      }
+      if (source[cursor] === '"') {
+        inDoubleQuote = false;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if (source[cursor] === '-' && next === '-') {
+      out += '--';
+      cursor += 2;
+      inLineComment = true;
+      continue;
+    }
+
+    if (source[cursor] === '/' && next === '*') {
+      out += '/*';
+      cursor += 2;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (source[cursor] === '\'') {
+      out += source[cursor];
+      cursor += 1;
+      inSingleQuote = true;
+      continue;
+    }
+
+    if (source[cursor] === '"') {
+      out += source[cursor];
+      cursor += 1;
+      inDoubleQuote = true;
+      continue;
+    }
+
+    if (source[cursor] === '$') {
+      const remainder = source.slice(cursor);
+      const dollarMatch = remainder.match(/^\$[a-zA-Z_][a-zA-Z0-9_]*\$/) || remainder.match(/^\$\$/);
+      if (dollarMatch) {
+        dollarQuoteTag = dollarMatch[0];
+        out += dollarQuoteTag;
+        cursor += dollarQuoteTag.length;
+        continue;
+      }
+    }
+
+    if (source[cursor] === '?') {
+      index += 1;
+      out += replacer(index);
+      cursor += 1;
+      continue;
+    }
+
+    out += source[cursor];
     cursor += 1;
-    return `$${cursor}`;
-  });
+  }
+
+  return out;
+}
+
+function convertPositionalParams(sql, positionalParams) {
+  const text = replaceSqlitePositionalPlaceholders(sql, (index) => `$${index}`);
   return { text, values: positionalParams };
 }
 
