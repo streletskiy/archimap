@@ -28,7 +28,9 @@ References:
 ## Architecture (Short)
 
 - SvelteKit (UI)
-- API layer (`server.js` internal app dispatched by `server.sveltekit.js` for `/api` and system endpoints)
+- API layer (`server.js` thin entrypoint + `src/lib/server/boot/server-runtime.boot.js` internal runtime dispatched by `server.sveltekit.js` for `/api` and system endpoints)
+  - internal runtime is built around `ServerRuntime` + `createServerRuntime(...)`
+  - runtime composition is split across `src/lib/server/boot/server-runtime.{config,middleware,routes}.js` and other `*.boot.js` modules
   - HTTP route modules live in `src/lib/server/http/**`
 - PostgreSQL + PostGIS / SQLite (switchable runtime)
 - PMTiles
@@ -153,12 +155,15 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - `build`
 - `start`
 - `test`
+- `test:e2e`
 - `lint`
+- `frontend:check`
 - `perf:smoke`
 - `analyze`
 - `db:seed`
 - `admin:create-master`
 - `tiles:build`
+- `admin:regions:pmtiles`
 - `i18n:extract`
 - `i18n:validate`
 - `i18n:check`
@@ -177,6 +182,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - Docs index -> [docs/README.md](docs/README.md)
 - Architecture -> [docs/architecture.md](docs/architecture.md)
 - API -> [docs/api.md](docs/api.md)
+- OSM import pipeline -> [docs/osm-import-pipeline.md](docs/osm-import-pipeline.md)
 - Security -> [docs/security.md](docs/security.md)
 - Performance -> [docs/performance/](docs/performance/)
 - Runbook -> [docs/runbook.md](docs/runbook.md)
@@ -187,16 +193,20 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 ## Deep Links (URL state)
 
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
+- Shareable filter state: `?f=<encodedFilterLayers>`
 - Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
 - Open admin edit details: `?edit=<id>` (`adminEdit=<id>` is still supported for backward compatibility)
-- Open legal docs directly:
-  - `?tab=legal&doc=terms`
-  - `?tab=legal&doc=privacy`
+- Canonical info/legal routes:
+  - `/info/about`, `/info/terms`, `/info/privacy`
+  - `/app/info/about`, `/app/info/terms`, `/app/info/privacy`
 
 Notes:
 
 - Camera updates use history replace (no history spam while panning/zooming).
+- Shareable map links can combine camera, building, and filter state in one URL, for example `?lat=55.751244&lng=37.618423&z=15.2&f=...`.
+- `f` is a compact versioned payload for filter layers and should be treated as opaque; it stores layer order, mode, color, and rules.
 - Legacy legal params remain compatible (`tab=user-agreement`, `tab=privacy-policy`).
+- Section root routes such as `/app/info` and `/info` still honor legacy query aliases and normalize back to canonical tab state.
 
 ## License
 

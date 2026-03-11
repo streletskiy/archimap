@@ -58,10 +58,12 @@
 
 ## Data refresh
 
-1. Update OSM source settings.
-2. Run `npm run tiles:build`.
-3. Verify PMTiles:
-   - `curl -I -H "Range: bytes=0-1023" http://host/api/buildings.pmtiles`
+1. Update region settings in `Admin -> Data`.
+2. Run `Sync now` for the target region or `npm run tiles:build -- --region-id=<id>`.
+3. Optional maintenance rebuild without re-import:
+   - `node scripts/sync-osm-region.js --region-id=<id> --pmtiles-only`
+4. Verify PMTiles:
+   - `curl -I -H "Range: bytes=0-1023" http://host/api/data/regions/<id>/pmtiles`
    - Expect `206`, `Accept-Ranges`, `Content-Range`.
 
 ## First master admin setup
@@ -76,8 +78,8 @@
 
 ### Map tiles not loading
 
-- Check PMTiles file exists in `data/`.
-- Check `/api/buildings.pmtiles` returns `200` or `206`.
+- Check region PMTiles file exists in `data/regions/`.
+- Check `/api/data/regions/<id>/pmtiles` returns `200` or `206`.
 - Check CSP `connect-src`/`worker-src` and browser console.
 
 ### Search degraded
@@ -96,7 +98,15 @@
 ### Runtime mode and entrypoint
 
 - Public HTTP runtime entrypoint is `server.sveltekit.js`.
-- API/system routes are dispatched by `server.sveltekit.js` directly to internal app runtime (`server.js`).
+- `server.js` is a thin backend entrypoint that creates and exports the internal app runtime.
+- API/system routes are dispatched by `server.sveltekit.js` to the internal runtime assembled by `ServerRuntime` in `src/lib/server/boot/server-runtime.boot.js`.
+- Runtime assembly is further split into `server-runtime.config.js`, `server-runtime.middleware.js`, and `server-runtime.routes.js`.
+
+### Region sync CLI fails immediately
+
+- Check `PYTHON_BIN` or system Python availability.
+- Verify Python packages `quackosm` and `duckdb` are installed for the interpreter used by the app.
+- If the failure is later in PMTiles build, verify `tippecanoe` or `TIPPECANOE_BIN`.
 
 ### Building selection in map UI
 

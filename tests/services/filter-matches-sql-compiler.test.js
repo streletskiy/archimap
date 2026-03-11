@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildFilterMatchBatchResults,
   compilePostgresFilterRulePredicate,
   compilePostgresFilterRulesPredicate,
   compilePostgresFilterRuleGuardPredicate,
@@ -56,6 +57,15 @@ test('compilePostgresFilterRulePredicate: compiles supported operators with stab
   });
   assert.match(notExists.sql, /COALESCE\(length\(btrim\(CASE WHEN jsonb_exists\(src\.tags_jsonb, \?\) THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE src\.name END\)\), 0\) = 0/);
   assert.deepEqual(notExists.params, ['name', 'name']);
+
+  const greaterOrEquals = compilePostgresFilterRulePredicate({
+    key: 'levels',
+    op: 'greater_or_equals',
+    value: '5',
+    numericValue: 5
+  });
+  assert.match(greaterOrEquals.sql, /double precision ELSE NULL END >= \?/);
+  assert.deepEqual(greaterOrEquals.params, ['levels', 'levels', 'levels', 'levels', 5]);
 });
 
 test('compilePostgresFilterRulesPredicate: combines predicates and preserves params order', () => {
@@ -111,6 +121,15 @@ test('compilePostgresFilterRuleGuardPredicate: keeps fallback semantics safe and
   });
   assert.match(fallbackNotExists.sql, /NOT \(jsonb_exists\(base\.tags_jsonb, \?\) AND COALESCE\(length\(btrim\(jsonb_extract_path_text\(base\.tags_jsonb, \?\)\)\), 0\) > 0\)/);
   assert.deepEqual(fallbackNotExists.params, ['archi.style', 'archi.style']);
+
+  const fallbackGreaterOrEquals = compilePostgresFilterRuleGuardPredicate({
+    key: 'archi.levels',
+    op: 'greater_or_equals',
+    value: '9',
+    numericValue: 9
+  });
+  assert.match(fallbackGreaterOrEquals.sql, /IS NULL OR CASE WHEN .* < \?/);
+  assert.deepEqual(fallbackGreaterOrEquals.params, ['archi.levels', 'archi.levels', 'archi.levels', 'archi.levels', 'archi.levels', 9]);
 });
 
 test('compilePostgresFilterRulesGuardPredicate: combines guard predicates and preserves params order', () => {
@@ -126,4 +145,59 @@ test('compilePostgresFilterRulesGuardPredicate: combines guard predicates and pr
     'foo', 'bar',
     'style', 'style'
   ]);
+});
+
+test('buildFilterMatchBatchResults evaluates multiple requests against the same candidate set', () => {
+  const items = [
+    {
+      osmKey: 'way/101',
+      sourceTags: { 'building:levels': '1' },
+      archiInfo: null
+    },
+    {
+      osmKey: 'way/102',
+      sourceTags: { 'building:levels': '4' },
+      archiInfo: null
+    },
+    {
+      osmKey: 'way/103',
+      sourceTags: { 'building:levels': '9' },
+      archiInfo: null
+    }
+  ];
+
+  const results = buildFilterMatchBatchResults(items, [
+    {
+      id: 'levels-1',
+      rulesHash: 'hash-1',
+      maxResults: 100,
+      rules: [
+        { key: 'building:levels', op: 'equals', value: '1', valueNormalized: '1', numericValue: null }
+      ]
+    },
+    {
+      id: 'levels-3-8',
+      rulesHash: 'hash-2',
+      maxResults: 100,
+      rules: [
+        { key: 'building:levels', op: 'greater_or_equals', value: '3', valueNormalized: '3', numericValue: 3 },
+        { key: 'building:levels', op: 'less_than', value: '9', valueNormalized: '9', numericValue: 9 }
+      ]
+    }
+  ], {
+    bboxHash: 'bbox:demo',
+    elapsedMs: 123
+  });
+
+  assert.equal(results.length, 2);
+  assert.equal(results[0].id, 'levels-1');
+  assert.deepEqual(results[0].matchedKeys, ['way/101']);
+  assert.equal(results[0].meta.rulesHash, 'hash-1');
+  assert.equal(results[0].meta.bboxHash, 'bbox:demo');
+  assert.equal(results[0].meta.elapsedMs, 123);
+
+  assert.equal(results[1].id, 'levels-3-8');
+  assert.deepEqual(results[1].matchedKeys, ['way/102']);
+  assert.equal(results[1].meta.rulesHash, 'hash-2');
+  assert.equal(results[1].meta.truncated, false);
 });

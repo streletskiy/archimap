@@ -3,8 +3,18 @@
 ## Runtime components
 
 - `server.sveltekit.js`: main public HTTP runtime (SvelteKit Node handler + internal app dispatch for API/system paths).
-- `server.js`: internal app runtime module (`prepareRuntime`, `app`, `stopRuntime`) without Express dependency.
+- `server.js`: thin backend entrypoint that loads env, creates runtime, and re-exports lifecycle hooks.
+- `src/lib/server/boot/server-runtime.boot.js`: internal app runtime class/factory (`ServerRuntime`, `createServerRuntime`) used by `server.js`.
+- `src/lib/server/boot/server-runtime.config.js`: runtime config/env/path normalization.
+- `src/lib/server/boot/server-runtime.middleware.js`: middleware/security/session wiring for the internal app.
+- `src/lib/server/boot/server-runtime.routes.js`: route registration for API/system endpoints.
+- `src/lib/server/boot/*.boot.js`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
 - `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
+- `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
+- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
+- `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
+- `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
+- `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
 - SQLite:
   - `data/archimap.db` (main app DB)
   - `data/osm.db` (OSM contours/search source)
@@ -12,22 +22,58 @@
   - `data/user-edits.db` (moderation queue)
   - `data/users.db` (auth/users)
 - Redis (optional): session store backend.
-- PMTiles: local vector tiles file served as `/api/buildings.pmtiles`.
+- PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`.
 
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
+- Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
+- Building filter backend decomposition:
+  - `src/lib/server/http/buildings.route.js`: thin HTTP wiring for building/filter endpoints
+  - `src/lib/server/services/building-filters.service.js`: filter-data/filter-matches orchestration, cache policy, request normalization
+  - `src/lib/server/services/building-filter-query.service.js`: bbox/key query selection for SQLite RTREE/plain paths and PostGIS paths
+  - `src/lib/server/utils/filter-sql-builder.js`: isolated Postgres predicate/guard SQL builder for filter rules
+- Building edit backend decomposition:
+  - `src/lib/server/services/building-edits.service.js`: service assembly entrypoint for runtime wiring
+  - `src/lib/server/services/building-edits/shared.js`: shared edit context, row mapping, reusable SQL fragments, info normalization
+  - `src/lib/server/services/building-edits/history.js`: edit list/details queries and response shaping
+  - `src/lib/server/services/building-edits/moderation.js`: reassignment/delete flows and merged-local-state safety checks
+  - `src/lib/server/services/building-edits/personal-overlays.js`: pending/rejected personal overlay lookup for feature info and filter payloads
+- Auth backend decomposition:
+  - `src/lib/server/auth/index.js`: auth bootstrap and route registration entrypoint
+  - `src/lib/server/auth/schema.js`: auth schema bootstrap for SQLite
+  - `src/lib/server/auth/auth.route.js`: thin HTTP wiring for auth/session/password/admin-user endpoints
+  - `src/lib/server/auth/auth.service.js`: login/session/registration/password-reset workflows and admin auth guards
+  - `src/lib/server/auth/user-profile.service.js`: current-profile updates and admin user-management queries/mutations
+- Admin backend decomposition:
+  - `src/lib/server/http/admin.route.js`: thin HTTP wiring for admin/settings/moderation endpoints
+  - `src/lib/server/services/admin/shared.js`: shared admin guards, parsers, and typed error helpers
+  - `src/lib/server/services/admin/admin-settings.service.js`: email-preview, app-settings, data-settings, and region-sync orchestration
+  - `src/lib/server/services/admin/admin-edits.service.js`: admin edit moderation, merge flows, and admin user detail queries
+- Frontend map filter decomposition:
+  - `frontend/src/lib/services/map/map-filter-pipeline.js`: filter lifecycle orchestration entrypoint for viewport events and status transitions
+  - `frontend/src/lib/services/map/filter-request-planner.js`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping
+  - `frontend/src/lib/services/map/filter-match-cache-strategy.js`: optimistic cache reuse, authoritative request caching, and prefetch coordination
+  - `frontend/src/lib/services/map/filter-worker-dispatcher.js`: lazy `MapFilterService` worker lifecycle and request dispatch
+  - `frontend/src/lib/services/map/filter-diff-apply-strategy.js`: highlight diff/apply strategy over MapLibre paint properties
+- Frontend map canvas decomposition:
+  - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
+  - `frontend/src/lib/components/map/map-selection-controller.js`: map selection, selected-feature highlight, and search-result click routing
+  - `frontend/src/lib/components/map/map-region-layers-controller.js`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
+- Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
-- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`.
+- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/filterUrlState.js`, `frontend/src/lib/client/section-routes.js`.
+- Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and filter-tag management is isolated into a dedicated `Filters` tab instead of being embedded inside `Data`.
 
 ## Security and auth points
 
 - Security headers/CSP:
   - internal app runtime: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`
   - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
-- Auth/session routes: `src/lib/server/auth/index.js`.
+- Auth/session routes: `src/lib/server/auth/auth.route.js` via facade `src/lib/server/auth/index.js`.
 - CSRF enforcement: `src/lib/server/services/csrf.service.js`.
 - Error normalization: `src/lib/server/infra/error-handling.infra.js`.
 
@@ -35,7 +81,8 @@
 
 - HTTP cache helpers (ETag/Last-Modified/304 + JSON compression): `src/lib/server/infra/http-cache.infra.js`.
 - PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.js`.
-- In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search and bbox hot-paths).
+- In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search hot-paths plus building filter bbox/match caches via `building-filters.service.js`).
+- Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.js`.
 
 ## i18n
 
@@ -47,15 +94,32 @@
 
 ## Map filter highlight
 
-- Building base layers (`local-buildings-fill`, `local-buildings-line`) are always visible and are no longer filtered out by custom rules.
-- Custom building filter now renders through dedicated highlight layers:
-  - `buildings-filter-highlight-fill`
-  - `buildings-filter-highlight-outline`
+- Building base layers are region-scoped PMTiles layers (`<region>-fill`, `<region>-line`) and remain visible; custom rules do not hide or re-filter them directly.
+- UI filter state is layer-based (`buildingFilterLayers[]`): each layer carries `color`, `priority`, `mode` (`and|or|layer`), and `rules[]`.
+- Custom building filter renders through dedicated region-scoped highlight layers:
+  - `<region>-filter-highlight-fill`
+  - `<region>-filter-highlight-line`
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
   - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
+- Multi-layer execution stays client-side:
+  - all `and` and `or` layers are resolved as one combined logical group;
+  - each `layer` mode layer is fetched independently;
+  - endpoint contract stays backward-compatible because each request still contains flat `rules[]`.
+- Combined group semantics:
+  - all `and` layers must pass;
+  - if any `or` layers exist, at least one `or` layer must pass;
+  - rules inside one layer are ANDed.
+- Client filter pipeline is decomposed into dedicated modules under `frontend/src/lib/services/map/`:
+  - `map-filter-pipeline.js`: top-level orchestration and runtime status
+  - `filter-request-planner.js`: layer normalization, request planning, and resolved highlight payload shaping
+  - `filter-match-cache-strategy.js`: authoritative request caching, optimistic reuse, and prefetch coordination
+  - `filter-worker-dispatcher.js`: lazy worker lifecycle for `prepare-rules` and `build-apply-plan`
+  - `filter-diff-apply-strategy.js`: chunked highlight diff/apply over MapLibre paint properties
+  - supporting utilities remain split into `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js`
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
-- Matched buildings are marked with `setFeatureState({ isFiltered: true })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- Matched buildings are marked with `setFeatureState({ isFiltered: true, filterColor: '#rrggbb' })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- When one building matches multiple layers, the highest-priority layer wins and provides the visible `filterColor`.
 - Feature-state updates are diff-based (`toEnable` / `toDisable`) via worker apply-plan and are chunked per frame for smoothness.
 - Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.
 - Filter prefetch (optional) warms neighbor windows in background with strict throttling and cancellation.
@@ -72,13 +136,20 @@ SvelteKit Node runtime (server.sveltekit.js)
       * /api/**, /healthz, /readyz, /metrics, /app-config.js, /favicon.ico, /.well-known/*, /ui/** -> internal app
       * everything else -> Svelte handler/pages
        v
-    Internal app runtime (server.js)
+    server.js (thin entrypoint)
+       v
+    Internal app runtime boot (src/lib/server/boot/server-runtime.boot.js)
+      |- ServerRuntime + createServerRuntime(...)
+      |- server-runtime.config / middleware / routes
+      |- rate limiters + runtime settings caches
       |- security headers + CSP + request-id + logging
       |- auth/session + CSRF
       |- route handlers (src/lib/server/http/*, auth/*)
+      |- building filter services/query/sql builder
       |- cached JSON + PMTiles streaming
+      |- sync hooks + PMTiles/search/filter maintenance jobs
   |
   +--> SQLite (main + osm + local/user edits + auth)
   +--> Redis session store (optional, prod)
-  +--> workers/scripts (sync, search index rebuild, tag cache rebuild)
+  +--> workers/scripts (region-sync pipeline, search index rebuild, tag cache rebuild)
 ```

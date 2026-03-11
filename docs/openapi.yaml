@@ -98,6 +98,75 @@ paths:
           description: Invalid identifier
         '404':
           description: Building info not found
+  /api/building-info:
+    post:
+      summary: Submit or update a user building edit
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [osmType, osmId]
+              properties:
+                osmType:
+                  type: string
+                  enum: [way, relation]
+                osmId:
+                  type: integer
+                name:
+                  type: string
+                style:
+                  type: string
+                levels:
+                  type: integer
+                yearBuilt:
+                  type: integer
+                architect:
+                  type: string
+                address:
+                  type: string
+                archimapDescription:
+                  type: string
+                editedFields:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Edit accepted
+        '400':
+          description: Invalid payload or building identifier
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden or CSRF failed
+        '409':
+          description: No effective changes to submit
+  /api/data/regions/{regionId}/pmtiles:
+    get:
+      summary: Region-specific PMTiles stream
+      parameters:
+        - in: path
+          name: regionId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Full PMTiles payload
+        '206':
+          description: Partial content for valid byte range
+        '400':
+          description: Invalid region id
+        '404':
+          description: Region PMTiles file not found
   /api/login:
     post:
       summary: Login with email and password
@@ -252,9 +321,24 @@ paths:
           description: Invalid or expired token
         '404':
           description: User not found
-  /api/building-info:
+  /api/admin/app-settings/data:
+    get:
+      summary: Get DB-backed data settings summary
+      responses:
+        '200':
+          description: Data settings payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/data/regions:
+    get:
+      summary: List managed data regions
+      responses:
+        '200':
+          description: Region list
     post:
-      summary: Submit building edit (CSRF required)
+      summary: Create or update a managed data region
       parameters:
         - in: header
           name: x-csrf-token
@@ -267,34 +351,76 @@ paths:
           application/json:
             schema:
               type: object
-              required: [osmType, osmId]
               properties:
-                osmType:
-                  type: string
-                  enum: [way, relation]
-                osmId:
-                  type: integer
-                name:
-                  type: string
-                style:
-                  type: string
-                levels:
-                  type: integer
-                yearBuilt:
-                  type: integer
-                architect:
-                  type: string
-                address:
-                  type: string
-                archimapDescription:
-                  type: string
+                region:
+                  type: object
       responses:
         '200':
-          description: Edit accepted
-        '401':
-          description: Unauthorized
+          description: Saved region
+        '400':
+          description: Validation failed
         '403':
-          description: Forbidden or CSRF failed
+          description: Master admin required
+  /api/admin/app-settings/data/regions/{regionId}:
+    delete:
+      summary: Delete a managed data region
+      parameters:
+        - in: path
+          name: regionId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Region deleted
+        '400':
+          description: Invalid region id or region cannot be deleted
+        '403':
+          description: Master admin required
+        '404':
+          description: Region not found
+  /api/admin/app-settings/data/regions/{regionId}/runs:
+    get:
+      summary: Get recent sync runs for a region
+      parameters:
+        - in: path
+          name: regionId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Region run history
+        '400':
+          description: Invalid region id
+        '404':
+          description: Region not found
+  /api/admin/app-settings/data/regions/{regionId}/sync-now:
+    post:
+      summary: Queue a managed sync run for a region
+      parameters:
+        - in: path
+          name: regionId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Region sync queued
+        '400':
+          description: Invalid region id or region cannot be queued
+        '403':
+          description: Master admin required
   /api/buildings/filter-data-bbox:
     get:
       summary: Get filter payload for visible bbox
@@ -331,6 +457,9 @@ paths:
   /api/buildings/filter-matches:
     post:
       summary: Match filter rules against bbox
+      description: |
+        The endpoint accepts a flat `rules[]` array per request.
+        Client-side filter layers, priorities, colors, and AND/OR/layer composition are resolved before calling this endpoint.
       requestBody:
         required: true
         content:
@@ -358,6 +487,7 @@ paths:
                   type: integer
                 rules:
                   type: array
+                  description: Flat rule list for one request. Supported operators are `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, and `less_or_equals`.
                   items:
                     type: object
                     properties:
@@ -365,8 +495,23 @@ paths:
                         type: string
                       op:
                         type: string
+                        enum:
+                          [
+                            contains,
+                            equals,
+                            not_equals,
+                            starts_with,
+                            exists,
+                            not_exists,
+                            greater_than,
+                            greater_or_equals,
+                            less_than,
+                            less_or_equals
+                          ]
+                        description: '`exists` and `not_exists` do not require `value`. Numeric operators expect a numeric string in `value`.'
                       value:
                         type: string
+                        description: Optional for `exists` and `not_exists`.
       responses:
         '200':
           description: Match result

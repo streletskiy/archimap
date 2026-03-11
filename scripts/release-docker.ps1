@@ -2,6 +2,8 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$Version,
 
+  [switch]$Latest,
+
   [string]$Image = "streletskiy/archimap",
 
   [string]$Platforms = "linux/amd64,linux/arm64",
@@ -39,6 +41,10 @@ $env:DOCKER_BUILDKIT = "1"
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
   throw "Version is required. Example: .\scripts\release-docker.ps1 -Version 1.2.3"
+}
+
+if ($Latest -and $Version.Trim().ToLowerInvariant() -eq "dev") {
+  throw "Publishing :latest requires a concrete release version, not 'dev'."
 }
 
 if ([string]::IsNullOrWhiteSpace($CacheRef)) {
@@ -264,7 +270,7 @@ if ($targetPlatforms.Count -eq 0) {
 Ensure-BuildxBuilder -BuilderName $Builder -TargetPlatforms $targetPlatforms -AllowBinfmtRepair (-not $SkipBinfmtRepair)
 
 $gitBuild = Get-GitBuildMetadata
-$publishLatest = ($Version.Trim().ToLowerInvariant() -ne "dev")
+$publishLatest = $Latest.IsPresent
 
 $tags = @(
   "-t", "${Image}:${Version}"
@@ -349,6 +355,7 @@ if (-not $SkipRuntimeBase) {
 Write-Host "Publishing app image..." -ForegroundColor Cyan
 Write-Host "Image: $Image" -ForegroundColor Gray
 Write-Host "Version tag: $Version" -ForegroundColor Gray
+Write-Host "Publish latest tag: $(if ($publishLatest) { 'yes' } else { 'no' })" -ForegroundColor Gray
 Write-Host "Runtime base image: $RuntimeBaseImage" -ForegroundColor Gray
 Write-Host "Platforms: $Platforms" -ForegroundColor Gray
 Write-Host "Tippecanoe ref: $TippecanoeRef" -ForegroundColor Gray

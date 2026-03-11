@@ -1,5 +1,18 @@
 # Testing
 
+## Recommended final gate
+
+- `npm run lint`
+- `npm run frontend:check`
+- `npm test`
+- `npm run test:e2e`
+
+Notes:
+
+- `npm test` is the main non-E2E gate: it runs frontend build, unit, integration, syntax, security, and smoke checks.
+- PostgreSQL-specific integration coverage inside `npm run test:integration` is skipped automatically when `DATABASE_URL` is not set.
+- `npm run test:integration:postgres` is the explicit full PostgreSQL/PostGIS gate and requires a working `DATABASE_URL`.
+
 ## Unit
 
 - `npm run test:unit`
@@ -30,7 +43,10 @@
   - opens `/app`
   - waits for map canvas
   - checks runtime console/page errors
+  - verifies legal/info deep links
   - verifies language switch updates visible UI strings
+  - verifies map camera/deep-link preservation across navigation
+  - verifies filter highlight pipeline behavior and request throttling
 
 ## i18n checks
 

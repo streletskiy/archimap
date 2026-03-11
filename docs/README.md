@@ -6,6 +6,7 @@
 - [API](api.md)
 - [OpenAPI](openapi.yaml)
 - [Data Flow](data-flow.md)
+- [OSM Import Pipeline](osm-import-pipeline.md)
 - [Runbook](runbook.md)
 - [Security](security.md)
 - [Edits Workflow](EDITS_WORKFLOW.md)

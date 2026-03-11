@@ -1,206 +1,300 @@
-const fs = require('fs');
-
 const MAX_NODE_TIMER_MS = 2_147_483_647;
 
-function initSyncWorkersInfra(options = {}) {
+function initManagedSyncWorkers(options = {}) {
   const {
     spawn,
     processExecPath,
-    syncScriptPath,
+    syncRegionScriptPath,
     cwd,
     env,
-    autoSyncEnabled,
-    autoSyncOnStart,
-    autoSyncIntervalHours,
-    buildingsPmtilesPath,
+    dataSettingsService,
     isShuttingDown,
-    getContoursTotal,
     onSyncSuccess,
     log = console
   } = options;
 
-  let syncInProgress = false;
-  let scheduledSkipLogged = false;
+  const queue = [];
+  const queuedRegionIds = new Set();
+  const regionTimers = new Map();
+  let currentRun = null;
   let currentSyncChild = null;
-  let currentPmtilesBuildChild = null;
-  let nextSyncTimer = null;
+  let initialized = false;
+  let draining = false;
 
-  async function readContoursTotal() {
-    try {
-      return Number(await getContoursTotal()) || 0;
-    } catch {
-      return 0;
+  function clearRegionTimers() {
+    for (const timer of regionTimers.values()) {
+      clearTimeout(timer);
     }
+    regionTimers.clear();
   }
 
-  function runCitySync(reason = 'interval') {
-    if (syncInProgress) {
-      if (reason !== 'scheduled' || !scheduledSkipLogged) {
-        log.log(`[auto-sync] skipped (${reason}): previous sync still running`);
-        if (reason === 'scheduled') scheduledSkipLogged = true;
-      }
+  function scheduleTimer(region) {
+    if (!region?.enabled || !region?.autoSyncEnabled || !region?.nextSyncAt) {
+      return;
+    }
+    const targetTs = Date.parse(String(region.nextSyncAt || ''));
+    if (!Number.isFinite(targetTs)) {
+      return;
+    }
+    if (queuedRegionIds.has(region.id) || currentRun?.regionId === region.id) {
+      return;
+    }
+    if (targetTs <= Date.now()) {
+      requestRegionSync(region.id, {
+        triggerReason: 'scheduled',
+        requestedBy: 'system'
+      }).catch((error) => {
+        log.error(`[region-sync] failed to enqueue scheduled sync for region ${region.id}: ${String(error?.message || error)}`);
+      });
       return;
     }
 
-    scheduledSkipLogged = false;
-    syncInProgress = true;
-    log.log(`[auto-sync] started (${reason})`);
+    const remaining = Math.max(0, targetTs - Date.now());
+    const delay = Math.min(remaining, MAX_NODE_TIMER_MS);
+    const timer = setTimeout(() => {
+      regionTimers.delete(region.id);
+      if (Date.now() >= targetTs) {
+        requestRegionSync(region.id, {
+          triggerReason: 'scheduled',
+          requestedBy: 'system'
+        }).catch((error) => {
+          log.error(`[region-sync] failed to enqueue scheduled sync for region ${region.id}: ${String(error?.message || error)}`);
+        });
+        return;
+      }
+      scheduleTimer(region);
+    }, delay);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    regionTimers.set(region.id, timer);
+  }
 
-    const child = spawn(processExecPath, [syncScriptPath], {
+  async function reloadSchedules() {
+    clearRegionTimers();
+    const regions = await dataSettingsService.refreshAllNextSyncAt();
+    for (const region of regions) {
+      scheduleTimer(region);
+    }
+  }
+
+  function buildFailureMessage({ code, signal, outputTail, error }) {
+    if (error) {
+      return String(error?.message || error);
+    }
+    if (outputTail) {
+      return outputTail.slice(-4000);
+    }
+    if (signal) {
+      return `Sync stopped by signal ${signal}`;
+    }
+    return `Sync failed with exit code ${code}`;
+  }
+
+  async function finalizeRun(runId, result) {
+    try {
+      if (result.success) {
+        const saved = await dataSettingsService.markRunSucceeded(runId, result.summary || {});
+        if (typeof onSyncSuccess === 'function') {
+          await Promise.resolve(onSyncSuccess({
+            region: saved.region,
+            run: saved.run,
+            summary: result.summary || {}
+          }));
+        }
+      } else {
+        await dataSettingsService.markRunFailed(runId, result.error || 'Sync failed', {
+          status: result.status || 'failed'
+        });
+      }
+    } finally {
+      await reloadSchedules();
+      void drainQueue();
+    }
+  }
+
+  function startChildForRun(run, region) {
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    let outputTail = '';
+    let parsedSummary = null;
+
+    const child = spawn(processExecPath, [syncRegionScriptPath, `--region-id=${region.id}`], {
       cwd,
       env,
-      stdio: 'inherit'
+      stdio: ['ignore', 'pipe', 'pipe']
     });
     currentSyncChild = child;
 
-    child.on('error', (error) => {
-      syncInProgress = false;
-      scheduledSkipLogged = false;
-      currentSyncChild = null;
-      log.error(`[auto-sync] failed to start: ${String(error.message || error)}`);
-    });
-
-    child.on('close', (code, signal) => {
-      syncInProgress = false;
-      scheduledSkipLogged = false;
-      currentSyncChild = null;
-      if (isShuttingDown() && (signal === 'SIGTERM' || signal === 'SIGINT')) {
-        log.log('[auto-sync] stopped due to shutdown');
-        return;
-      }
-      if (code === 0) {
-        log.log('[auto-sync] finished successfully');
-        if (typeof onSyncSuccess === 'function') {
-          Promise.resolve(onSyncSuccess()).catch((error) => {
-            log.error(`[auto-sync] post-sync hook failed: ${String(error?.message || error)}`);
-          });
+    function appendOutput(chunkText, isError = false) {
+      const text = String(chunkText || '');
+      outputTail = `${outputTail}${text}`.slice(-8000);
+      const lines = text.split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('SYNC_RESULT_JSON=')) {
+          try {
+            parsedSummary = JSON.parse(trimmed.slice('SYNC_RESULT_JSON='.length));
+          } catch {
+            // ignore malformed summary line
+          }
+          continue;
         }
-      } else {
-        log.error(`[auto-sync] failed with code ${code}`);
+        if (isError) {
+          log.error(`[region-sync:${region.id}] ${trimmed}`);
+        } else {
+          log.log(`[region-sync:${region.id}] ${trimmed}`);
+        }
       }
-    });
-  }
-
-  function runPmtilesBuild(reason = 'startup-missing') {
-    if (currentPmtilesBuildChild) {
-      log.log(`[pmtiles] skipped (${reason}): generation already running`);
-      return;
-    }
-    if (syncInProgress) {
-      log.log(`[pmtiles] skipped (${reason}): full sync is running`);
-      return;
     }
 
-    log.log(`[pmtiles] generation started (${reason})`);
-    const child = spawn(processExecPath, [syncScriptPath, '--pmtiles-only'], {
-      cwd,
-      env,
-      stdio: 'inherit'
+    child.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk.toString();
+      appendOutput(chunk, false);
     });
-    currentPmtilesBuildChild = child;
+    child.stderr.on('data', (chunk) => {
+      stderrBuffer += chunk.toString();
+      appendOutput(chunk, true);
+    });
 
     child.on('error', (error) => {
-      currentPmtilesBuildChild = null;
-      log.error(`[pmtiles] failed to start: ${String(error.message || error)}`);
+      currentSyncChild = null;
+      currentRun = null;
+      finalizeRun(run.id, {
+        success: false,
+        error: buildFailureMessage({
+          outputTail: `${stdoutBuffer}\n${stderrBuffer}`,
+          error
+        })
+      }).catch(() => {});
     });
 
     child.on('close', (code, signal) => {
-      currentPmtilesBuildChild = null;
+      currentSyncChild = null;
+      currentRun = null;
       if (isShuttingDown() && (signal === 'SIGTERM' || signal === 'SIGINT')) {
-        log.log('[pmtiles] generation stopped due to shutdown');
+        finalizeRun(run.id, {
+          success: false,
+          status: 'abandoned',
+          error: 'Sync interrupted by shutdown'
+        }).catch(() => {});
         return;
       }
-      if (code === 0) {
-        log.log('[pmtiles] generation finished successfully');
-      } else {
-        log.error(`[pmtiles] generation failed with code ${code}`);
-        log.error('[pmtiles] Hint: run "docker compose run --rm archimap node scripts/sync-osm-buildings.js --pmtiles-only" to build tiles in Docker.');
+      if (code === 0 && parsedSummary) {
+        finalizeRun(run.id, {
+          success: true,
+          summary: parsedSummary
+        }).catch(() => {});
+        return;
       }
+      finalizeRun(run.id, {
+        success: false,
+        error: buildFailureMessage({
+          code,
+          signal,
+          outputTail: `${stdoutBuffer}\n${stderrBuffer}`
+        })
+      }).catch(() => {});
     });
   }
 
-  async function shouldRunStartupSync() {
-    const hasPmtiles = fs.existsSync(buildingsPmtilesPath);
-    const hasContours = (await readContoursTotal()) > 0;
-    if (hasContours && hasPmtiles) {
-      log.log('[auto-sync] startup skipped: contours and PMTiles already exist');
-      return false;
-    }
-    return true;
-  }
-
-  async function maybeGeneratePmtilesOnStartup() {
-    if (autoSyncEnabled && autoSyncOnStart) return;
-
-    const hasPmtiles = fs.existsSync(buildingsPmtilesPath);
-    if (hasPmtiles) return;
-
-    if ((await readContoursTotal()) <= 0) {
-      log.log('[pmtiles] startup generation skipped: building_contours is empty');
+  async function drainQueue() {
+    if (draining || currentSyncChild || queue.length === 0) {
       return;
     }
+    draining = true;
+    try {
+      if (currentSyncChild || queue.length === 0) return;
+      const next = queue.shift();
+      queuedRegionIds.delete(next.regionId);
+      currentRun = next;
+      const run = await dataSettingsService.markRunStarted(next.runId);
+      const region = await dataSettingsService.getRegionById(next.regionId);
+      if (!region) {
+        await finalizeRun(run.id, {
+          success: false,
+          error: 'Region not found before sync start'
+        });
+        return;
+      }
+      startChildForRun(run, region);
+    } finally {
+      draining = false;
+    }
+  }
 
-    runPmtilesBuild('startup-missing');
+  async function requestRegionSync(regionId, options = {}) {
+    const numericRegionId = Number(regionId);
+    const region = await dataSettingsService.getRegionById(numericRegionId);
+    if (!region) {
+      throw new Error('Регион не найден');
+    }
+    if (!region.enabled) {
+      throw new Error('Синхронизация доступна только для enabled региона');
+    }
+
+    if (currentRun?.regionId === numericRegionId) {
+      return {
+        queued: false,
+        run: await dataSettingsService.getRunById(currentRun.runId),
+        region: await dataSettingsService.getRegionById(numericRegionId)
+      };
+    }
+    if (queuedRegionIds.has(numericRegionId)) {
+      const runs = await dataSettingsService.getRecentRuns(numericRegionId, 5);
+      const queuedRun = runs.find((item) => item.status === 'queued');
+      return {
+        queued: true,
+        run: queuedRun || null,
+        region: await dataSettingsService.getRegionById(numericRegionId)
+      };
+    }
+
+    const run = await dataSettingsService.createQueuedRun(
+      numericRegionId,
+      options.triggerReason || 'manual',
+      options.requestedBy || null
+    );
+    queue.push({
+      runId: run.id,
+      regionId: numericRegionId
+    });
+    queuedRegionIds.add(numericRegionId);
+    await reloadSchedules();
+    await drainQueue();
+    return {
+      queued: true,
+      run: await dataSettingsService.getRunById(run.id),
+      region: await dataSettingsService.getRegionById(numericRegionId)
+    };
   }
 
   async function initAutoSync() {
-    const contoursTotal = await readContoursTotal();
-    const needsBootstrapSync = contoursTotal <= 0;
+    if (initialized) return;
+    initialized = true;
 
-    if (needsBootstrapSync) {
-      if (!autoSyncEnabled) {
-        log.log('[auto-sync] bootstrap run: building_contours is empty (AUTO_SYNC_ENABLED ignored for first sync)');
-      } else if (!autoSyncOnStart) {
-        log.log('[auto-sync] bootstrap run: building_contours is empty (AUTO_SYNC_ON_START ignored for first sync)');
-      }
-      runCitySync('bootstrap-first-run');
-    }
+    await dataSettingsService.bootstrapFromEnvIfNeeded('startup');
+    await dataSettingsService.recoverInterruptedRuns();
+    await reloadSchedules();
 
-    if (!autoSyncEnabled) {
-      log.log('[auto-sync] disabled by AUTO_SYNC_ENABLED=false');
-      if (!needsBootstrapSync) {
-        await maybeGeneratePmtilesOnStartup();
-      }
-      return;
-    }
-
-    if (!needsBootstrapSync && autoSyncOnStart) {
-      if (await shouldRunStartupSync()) {
-        runCitySync('startup');
-      }
-    } else if (!needsBootstrapSync) {
-      await maybeGeneratePmtilesOnStartup();
-    }
-
-    if (Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0) {
-      const intervalMs = Math.max(60_000, Math.round(autoSyncIntervalHours * 60 * 60 * 1000));
-      const scheduleNext = (targetTs) => {
-        const now = Date.now();
-        const remaining = Math.max(0, targetTs - now);
-        const delay = Math.min(remaining, MAX_NODE_TIMER_MS);
-
-        nextSyncTimer = setTimeout(() => {
-          if (Date.now() >= targetTs) {
-            runCitySync('scheduled');
-            scheduleNext(Date.now() + intervalMs);
-            return;
-          }
-          scheduleNext(targetTs);
-        }, delay);
-
-        if (typeof nextSyncTimer.unref === 'function') {
-          nextSyncTimer.unref();
-        }
-      };
-
-      scheduleNext(Date.now() + intervalMs);
-      log.log(`[auto-sync] scheduled every ${autoSyncIntervalHours}h`);
-    } else {
-      log.log('[auto-sync] periodic updates disabled (AUTO_SYNC_INTERVAL_HOURS <= 0)');
+    const regions = await dataSettingsService.listRegions({ includeDisabled: false });
+    for (const region of regions) {
+      if (!region.enabled) continue;
+      const dueNow = Boolean(region.autoSyncEnabled && region.nextSyncAt && Date.parse(String(region.nextSyncAt || '')) <= Date.now());
+      const shouldRunOnStart = Boolean(region.autoSyncOnStart);
+      if (!dueNow && !shouldRunOnStart) continue;
+      await requestRegionSync(region.id, {
+        triggerReason: shouldRunOnStart ? 'startup' : 'scheduled',
+        requestedBy: 'system'
+      });
     }
   }
 
   function stop() {
+    clearRegionTimers();
+    queue.length = 0;
+    queuedRegionIds.clear();
     if (currentSyncChild && !currentSyncChild.killed) {
       try {
         currentSyncChild.kill('SIGTERM');
@@ -208,25 +302,82 @@ function initSyncWorkersInfra(options = {}) {
         // ignore
       }
     }
-    if (currentPmtilesBuildChild && !currentPmtilesBuildChild.killed) {
-      try {
-        currentPmtilesBuildChild.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
-    }
-    if (nextSyncTimer) {
-      clearTimeout(nextSyncTimer);
-      nextSyncTimer = null;
-    }
   }
 
   return {
     initAutoSync,
-    runCitySync,
-    runPmtilesBuild,
+    requestRegionSync,
+    reloadSchedules,
     stop,
-    isSyncInProgress: () => syncInProgress
+    isSyncInProgress: () => Boolean(currentSyncChild)
+  };
+}
+
+function initSyncWorkersInfra(options = {}) {
+  const {
+    dataSettingsService,
+    syncRegionScriptPath
+  } = options;
+
+  if (!dataSettingsService || !syncRegionScriptPath) {
+    return {
+      initAutoSync: async () => {},
+      requestRegionSync: async () => {
+        throw new Error('DB-backed region sync is not configured in the current runtime mode');
+      },
+      reloadSchedules: async () => {},
+      stop() {},
+      isSyncInProgress: () => false
+    };
+  }
+
+  const managedWorkers = initManagedSyncWorkers(options);
+  let resolvedMode = null;
+
+  async function resolveMode(force = false) {
+    if (force) {
+      resolvedMode = null;
+    }
+    if (resolvedMode) return resolvedMode;
+    try {
+      await dataSettingsService.bootstrapFromEnvIfNeeded('startup');
+      const regions = await dataSettingsService.listRegions();
+      resolvedMode = regions.length > 0 ? 'managed' : 'none';
+    } catch {
+      resolvedMode = 'none';
+    }
+    return resolvedMode;
+  }
+
+  return {
+    async initAutoSync() {
+      const mode = await resolveMode(true);
+      if (mode === 'managed') {
+        return managedWorkers.initAutoSync();
+      }
+    },
+    async requestRegionSync(regionId, options = {}) {
+      let mode = await resolveMode();
+      if (mode !== 'managed') {
+        mode = await resolveMode(true);
+      }
+      if (mode !== 'managed') {
+        throw new Error('DB-backed region sync is not configured in the current runtime mode');
+      }
+      return managedWorkers.requestRegionSync(regionId, options);
+    },
+    async reloadSchedules() {
+      const mode = await resolveMode(true);
+      if (mode === 'managed') {
+        return managedWorkers.reloadSchedules();
+      }
+    },
+    stop() {
+      managedWorkers.stop();
+    },
+    isSyncInProgress() {
+      return managedWorkers.isSyncInProgress();
+    }
   };
 }
 

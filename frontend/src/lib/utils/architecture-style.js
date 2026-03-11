@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { locale as activeLocale, translateNow } from '$lib/i18n/index';
 import en from '$lib/i18n/locales/en.json' with { type: 'json' };
 import ru from '$lib/i18n/locales/ru.json' with { type: 'json' };
+import { EMPTY_TEXT_TOKENS } from '$lib/utils/text';
 
 const STYLE_KEYS = Object.freeze([
   'islamic',
@@ -54,7 +55,7 @@ const STYLE_KEYS = Object.freeze([
 ]);
 
 const STYLE_KEY_SET = new Set(STYLE_KEYS);
-const EMPTY_STYLE_TOKENS = new Set(['-', '--', '—', 'none', 'unknown', 'n/a', 'na', 'null']);
+const EMPTY_STYLE_TOKENS = new Set([...EMPTY_TEXT_TOKENS, 'none', 'unknown']);
 
 const ARCHITECTURE_STYLE_ALIASES = Object.freeze({
   brutalism: 'brutalist',

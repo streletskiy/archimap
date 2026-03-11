@@ -63,7 +63,6 @@ test.beforeAll(async () => {
       LOCAL_EDITS_DB_PATH: path.join(tmpRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tmpRoot, 'user-edits.db'),
       USER_AUTH_DB_PATH: path.join(tmpRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: 'buildings.pmtiles',
       MAP_SELECTION_ATOMIC_DEBUG: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -128,12 +127,38 @@ test('language switch updates visible UI content', async ({ page }) => {
   await expect(page.locator('.menu .menu-btn', { hasText: 'Sign in' })).toBeVisible({ timeout: 10000 });
 });
 
+test('auth modal accepts clicks, switches tabs, and closes with shared close button', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await page.locator('.menu-btn-trigger').click();
+  await page.locator('.menu-auth-actions .menu-btn').first().click();
+
+  const authModal = page.locator('.auth-modal');
+  await expect(authModal).toBeVisible({ timeout: 10000 });
+
+  await page.locator('.auth-modal .ui-tab-btn').nth(1).click();
+  await expect(page.locator('.auth-modal .ui-tab-btn-active')).toHaveCount(1);
+
+  const firstRegisterInput = page.locator('.auth-modal .stack input').first();
+  await firstRegisterInput.click();
+  await firstRegisterInput.fill('Test');
+  await expect(firstRegisterInput).toHaveValue('Test');
+
+  await page.locator('.auth-modal .ui-btn-close').click();
+  await expect(authModal).toBeHidden({ timeout: 10000 });
+});
+
 test('keeps map deep link params and renders map', async ({ page }) => {
   await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
   await expect(page).toHaveURL(/[?&]lat=/);
   await expect(page).toHaveURL(/[?&]lng=/);
   await expect(page).toHaveURL(/[?&]z=/);
+});
+
+test('map attribution includes archimap', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.maplibregl-ctrl-attrib')).toContainText('archimap');
 });
 
 test('building filter uses highlight layers and does not apply setFilter to base building layers', async ({ page }) => {
@@ -147,7 +172,7 @@ test('building filter uses highlight layers and does not apply setFilter to base
   await page.getByTestId('filter-value-input').first().fill('test');
   await page.getByTestId('filter-apply-button').click();
 
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('feature-state');
+  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('paint-property');
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
   await expect.poll(async () => page.evaluate(() => {
     const debug = globalThis.window.__MAP_DEBUG__ || {};

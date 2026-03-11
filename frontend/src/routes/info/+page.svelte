@@ -1,7 +1,9 @@
 <script>
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { goto } from '$app/navigation';
-  import { parseUrlState, patchUrlState } from '$lib/client/urlState';
+  import { page } from '$app/stores';
+  import { buildInfoUrl, resolveInfoTabFromUrl } from '$lib/client/section-routes';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { t } from '$lib/i18n/index';
   import { marked } from 'marked';
@@ -9,7 +11,7 @@
   import agreementMarkdownSource from '../../../../legal/user-agreement.ru.md?raw';
   import privacyMarkdownSource from '../../../../legal/privacy-policy.ru.md?raw';
 
-  let activeTab = 'about';
+  let activeTab = resolveInfoTabFromUrl(get(page).url);
   let infoUrlSyncBusy = false;
   let agreementHtml = '';
   let privacyHtml = '';
@@ -25,28 +27,17 @@
   agreementHtml = markdownToHtml(agreementMarkdownSource);
   privacyHtml = markdownToHtml(privacyMarkdownSource);
 
-  function resolveActiveTabFromInfoState(info) {
-    if (info?.tab === 'legal' && info?.doc === 'privacy') return 'privacy';
-    if (info?.tab === 'legal') return 'agreement';
-    return 'about';
+  async function setTab(nextTab) {
+    if (activeTab !== nextTab) {
+      activeTab = nextTab;
+    }
+    await replaceInfoUrl(nextTab);
   }
 
-  function toInfoStateFromActiveTab(tab) {
-    if (tab === 'privacy') return { tab: 'legal', doc: 'privacy' };
-    if (tab === 'agreement') return { tab: 'legal', doc: 'terms' };
-    return { tab: 'about', doc: null };
-  }
-
-  function setTab(nextTab) {
-    if (activeTab === nextTab) return;
-    activeTab = nextTab;
-    replaceInfoUrlFromState(nextTab);
-  }
-
-  async function replaceInfoUrlFromState(tab) {
+  async function replaceInfoUrl(tab) {
     if (typeof window === 'undefined') return;
+    const next = buildInfoUrl(window.location.href, tab);
     const current = new URL(window.location.href);
-    const next = patchUrlState(current, { info: toInfoStateFromActiveTab(tab) });
     if (next.toString() === current.toString()) return;
     infoUrlSyncBusy = true;
     try {
@@ -63,17 +54,18 @@
   }
 
   onMount(() => {
-    const syncFromLocation = () => {
-      if (infoUrlSyncBusy || typeof window === 'undefined') return;
-      const state = parseUrlState(window.location.href);
-      const nextTab = resolveActiveTabFromInfoState(state.info);
+    const syncFromPage = async ($pageState) => {
+      if (infoUrlSyncBusy) return;
+      const nextTab = resolveInfoTabFromUrl($pageState.url);
       if (nextTab !== activeTab) activeTab = nextTab;
+      await replaceInfoUrl(nextTab);
     };
-    syncFromLocation();
-    window.addEventListener('popstate', syncFromLocation);
+    const unsubscribePage = page.subscribe(($pageState) => {
+      void syncFromPage($pageState);
+    });
 
     return () => {
-      window.removeEventListener('popstate', syncFromLocation);
+      unsubscribePage();
     };
   });
 </script>
@@ -81,7 +73,7 @@
 <PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
   <svelte:fragment slot="meta">
     <span class="ui-chip"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</span>
-    <a class="ui-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
+    <a class="ui-chip repo-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
   </svelte:fragment>
 
   <div>
@@ -111,11 +103,11 @@
     </section>
   {:else if activeTab === 'agreement'}
     <section class="legal-shell mt-4">
-      <div class="legal-markdown text-sm leading-7 text-slate-700">{@html agreementHtml}</div>
+      <div class="legal-markdown text-sm leading-7 ui-text-body">{@html agreementHtml}</div>
     </section>
   {:else}
     <section class="legal-shell mt-4">
-      <div class="legal-markdown text-sm leading-7 text-slate-700">{@html privacyHtml}</div>
+      <div class="legal-markdown text-sm leading-7 ui-text-body">{@html privacyHtml}</div>
     </section>
   {/if}
 </PortalFrame>
@@ -164,6 +156,19 @@
     box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
   }
 
+  .repo-chip {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .legal-markdown {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .legal-markdown :global(h1),
   .legal-markdown :global(h2),
   .legal-markdown :global(h3),
@@ -207,6 +212,8 @@
     color: var(--accent-ink);
     text-decoration: underline;
     text-underline-offset: 2px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .legal-markdown :global(blockquote) {
@@ -255,6 +262,16 @@
     border: 0;
     border-top: 1px solid var(--panel-border);
     margin: 0.85rem 0;
+  }
+
+  @media (max-width: 768px) {
+    .legal-shell {
+      padding: 1rem 0.95rem;
+    }
+
+    .repo-chip {
+      width: 100%;
+    }
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(h1),

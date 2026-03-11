@@ -35,10 +35,6 @@ async function main() {
   }
 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-csp-'));
-  const pmtilesFileName = `check-csp-${Date.now()}.pmtiles`;
-  const pmtilesPath = path.join(process.cwd(), 'data', pmtilesFileName);
-  fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
-  fs.writeFileSync(pmtilesPath, Buffer.alloc(2048, 1));
 
   const server = spawn(process.execPath, ['server.sveltekit.js'], {
     cwd: process.cwd(),
@@ -58,8 +54,7 @@ async function main() {
       ARCHIMAP_DB_PATH: path.join(tmpRoot, 'archimap.db'),
       LOCAL_EDITS_DB_PATH: path.join(tmpRoot, 'local-edits.db'),
       USER_EDITS_DB_PATH: path.join(tmpRoot, 'user-edits.db'),
-      USER_AUTH_DB_PATH: path.join(tmpRoot, 'users.db'),
-      BUILDINGS_PMTILES_FILE: pmtilesFileName
+      USER_AUTH_DB_PATH: path.join(tmpRoot, 'users.db')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -90,7 +85,6 @@ async function main() {
       await new Promise((resolve) => server.once('exit', resolve));
     }
     fs.rmSync(tmpRoot, { recursive: true, force: true });
-    fs.rmSync(pmtilesPath, { force: true });
   }
 
   if (server.exitCode && server.exitCode !== 0) {

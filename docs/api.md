@@ -3,7 +3,7 @@
 ## Runtime routing
 
 - Public HTTP runtime is `server.sveltekit.js`.
-- API/system endpoints are dispatched directly to the internal app runtime in `server.js` for:
+- API/system endpoints are dispatched to the internal app runtime created by `src/lib/server/boot/server-runtime.boot.js` and exported through thin `server.js` entrypoint for:
   - `/api/**`
   - `/healthz`, `/readyz`, `/metrics`
   - `/app-config.js`, `/favicon.ico`, `/.well-known/appspecific/com.chrome.devtools.json`, `/ui/**`
@@ -22,7 +22,7 @@ System notes:
   - Returns paginated building search results.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`
-  - Returns cached list of OSM tag keys plus `warmingUp`.
+  - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`, plus `warmingUp`.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
 - `POST /api/buildings/filter-data`
   - Body: `{ keys: ["way/123", "relation/456", ...] }`.
@@ -32,6 +32,9 @@ System notes:
   - Cache: `Cache-Control: public, max-age=10`, `ETag`.
 - `POST /api/buildings/filter-matches`
   - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, rules[], rulesHash?, maxResults? }`.
+  - `rules[]` remains a flat per-request contract. Layer modes, priorities, presets, and color resolution are handled client-side by issuing one or more requests against this endpoint.
+  - Supported operators: `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, `less_or_equals`.
+  - Numeric operators expect a numeric `value`; `exists` / `not_exists` ignore `value`.
   - Returns `{ matchedKeys[], matchedFeatureIds[], meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
   - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket`), per-request `meta.cacheHit`.
 - `GET /api/building/:osmType/:osmId`
@@ -40,10 +43,9 @@ System notes:
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).
-- `GET /api/buildings.pmtiles`
-  - PMTiles binary stream.
+- `GET /api/data/regions/:regionId/pmtiles`
+  - Region-specific PMTiles binary stream.
   - Supports `Range`, `If-None-Match`, `If-Modified-Since`.
-  - Returns `206` for valid byte ranges and `416` for invalid ranges.
 - `GET /api/contours-status`
   - Total contours + last update timestamp.
   - Cache: `Cache-Control: public, max-age=60`, `ETag`, `Last-Modified` (if available).
@@ -59,9 +61,61 @@ System notes:
 - `POST /api/admin/users/edit-permission`, `POST /api/admin/users/role`
 - `GET/POST /api/admin/app-settings/general`
 - `GET/POST /api/admin/app-settings/smtp`, `POST /api/admin/app-settings/smtp/test`
+- `GET /api/admin/app-settings/data`
+  - Returns DB-backed data settings summary, bootstrap state, and current regions.
+  - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
+  - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`) and storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`).
+  - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
+- `POST /api/admin/app-settings/data/filter-tag-allowlist`
+  - Master-admin only.
+  - Body: `{ allowlist: ["building", "height", ...] }`.
+  - Saves the explicit allowlist used by public filter-tag suggestions and server-side filter-key validation.
+- `GET /api/admin/app-settings/data/regions`
+  - Returns region list for admin UI.
+  - Region payload mirrors admin data summary items, including extract-resolution fields plus cached storage stats `pmtilesBytes`, `dbBytes`, `dbBytesApproximate`.
+- `POST /api/admin/app-settings/data/regions/resolve-extract`
+  - Master-admin only.
+  - Body: `{ query: "Moscow", source?: "any|..." }`.
+  - Returns `{ ok, query, items[] }`, where each candidate contains `extractSource`, `extractId`, `extractLabel`, and may also include `downloadUrl`, `matchKind`, `exact`.
+- `POST /api/admin/app-settings/data/regions`
+  - Creates or updates a region.
+  - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
+  - Supported source type: `sourceType=extract`.
+  - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`) and rejects legacy `sourceType=extract_query`.
+  - On save, server re-validates the selected canonical extract via exact resolver lookup. Ambiguous or missing canonical extract selection returns `400` with a manual-resolution message; managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
+- `DELETE /api/admin/app-settings/data/regions/:regionId`
+  - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
+  - Regions in `queued` or `running` state cannot be deleted.
+- `GET /api/admin/app-settings/data/regions/:regionId/runs`
+  - Returns recent sync runs for the region.
+  - Run items include storage metadata captured during sync (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`) plus feature counters (`importedFeatureCount`, `activeFeatureCount`, `orphanDeletedCount`).
+  - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
+- `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
+  - Queues region sync in the single managed queue.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
+- `POST /api/admin/building-edits/:editId/reassign`
+- `DELETE /api/admin/building-edits/:editId`
+  - Master-admin only.
+  - `pending`, `rejected`, `superseded`: deletes only the edit history row.
+  - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit still points to the same building.
+  - Returns `409 EDIT_DELETE_SHARED_MERGED_STATE` when merged local data is already shared with other accepted edits for the same OSM object.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
+
+## Runtime config payload
+
+- `GET /app-config.js`
+  - Returns `window.__ARCHIMAP_CONFIG`.
+  - Multi-region payload adds `buildingRegionsPmtiles[]`, each item containing:
+    - `id`
+    - `slug`
+    - `name`
+    - `url`
+    - `sourceLayer`
+    - `bounds`
+    - `pmtilesMinZoom`
+    - `pmtilesMaxZoom`
+    - `lastSuccessfulSyncAt`
 
 ## Cache semantics
 
