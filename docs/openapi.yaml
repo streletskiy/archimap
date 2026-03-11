@@ -495,8 +495,20 @@ paths:
                         type: string
                       op:
                         type: string
-                        enum: [contains, equals, not_equals, starts_with, exists, not_exists, greater_than, greater_or_equals, less_than, less_or_equals]
-                        description: `exists` and `not_exists` do not require `value`. Numeric operators expect a numeric string in `value`.
+                        enum:
+                          [
+                            contains,
+                            equals,
+                            not_equals,
+                            starts_with,
+                            exists,
+                            not_exists,
+                            greater_than,
+                            greater_or_equals,
+                            less_than,
+                            less_or_equals
+                          ]
+                        description: '`exists` and `not_exists` do not require `value`. Numeric operators expect a numeric string in `value`.'
                       value:
                         type: string
                         description: Optional for `exists` and `not_exists`.

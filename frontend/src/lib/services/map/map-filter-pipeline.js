@@ -93,7 +93,6 @@ export function createFilterPipeline({
     maxItems: FILTER_MATCH_CACHE_MAX_ITEMS
   });
   let latestFilterToken = 0;
-  let filterRulesDebounceTimer = null;
   let filterAuthoritativeTimer = null;
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
@@ -711,10 +710,6 @@ export function createFilterPipeline({
       clearTimeout(mapMoveDebounceTimer);
       mapMoveDebounceTimer = null;
     }
-    if (filterRulesDebounceTimer) {
-      clearTimeout(filterRulesDebounceTimer);
-      filterRulesDebounceTimer = null;
-    }
     mapMoveDebounceTimer = setTimeout(() => {
       mapMoveDebounceTimer = null;
       applyBuildingFilters(input, { reason: 'viewport' });
@@ -744,10 +739,6 @@ export function createFilterPipeline({
   }
 
   function scheduleFilterRulesRefresh(input) {
-    if (filterRulesDebounceTimer) {
-      clearTimeout(filterRulesDebounceTimer);
-      filterRulesDebounceTimer = null;
-    }
     applyBuildingFilters(input, { reason: 'rules' });
   }
 
@@ -763,10 +754,6 @@ export function createFilterPipeline({
     if (mapMoveDebounceTimer) {
       clearTimeout(mapMoveDebounceTimer);
       mapMoveDebounceTimer = null;
-    }
-    if (filterRulesDebounceTimer) {
-      clearTimeout(filterRulesDebounceTimer);
-      filterRulesDebounceTimer = null;
     }
     if (filterAuthoritativeTimer) {
       clearTimeout(filterAuthoritativeTimer);
