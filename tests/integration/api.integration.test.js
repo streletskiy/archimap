@@ -4,6 +4,14 @@ const path = require('path');
 const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
+
+let pythonExtractorDepsSkipReason = null;
+try {
+  ensurePythonImporterDeps();
+} catch (error) {
+  pythonExtractorDepsSkipReason = String(error?.message || error || 'Python extractor dependencies are unavailable');
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -282,7 +290,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.ok(Array.isArray(mapSearchBody.items));
     });
 
-    await t.test('admin data settings endpoints support create/rename/delete flow for regions', async () => {
+    await t.test('admin data settings endpoints support create/rename/delete flow for regions', async (t) => {
+      if (pythonExtractorDepsSkipReason) {
+        t.skip(`python extractor deps unavailable: ${pythonExtractorDepsSkipReason}`);
+      }
+
       const dataSettings = await callApi('/api/admin/app-settings/data');
       assert.equal(dataSettings.status, 200);
       const dataSettingsBody = await dataSettings.json();
