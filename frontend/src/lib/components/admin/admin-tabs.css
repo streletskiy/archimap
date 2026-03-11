@@ -8,15 +8,26 @@
 }
 
 .data-map-card {
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-soft) 72%, transparent), transparent 42%),
-    color-mix(in srgb, var(--panel-solid) 84%, transparent);
+  background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
 }
 
 .data-region-card {
   border: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--panel-solid) 78%, transparent);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.data-region-card-compact {
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.data-region-list-scroll {
+  max-height: 34rem;
+  scrollbar-gutter: stable;
+}
+
+.data-region-list-sentinel {
+  min-height: 1px;
 }
 
 .data-region-card:hover {
@@ -62,6 +73,10 @@
 
 :global(html[data-theme='dark']) .data-region-card {
   box-shadow: 0 14px 32px rgba(2, 6, 23, 0.28);
+}
+
+:global(html[data-theme='dark']) .data-region-card-compact {
+  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.22);
 }
 
 :global(html[data-theme='dark']) .data-region-card[data-selected='true'] {

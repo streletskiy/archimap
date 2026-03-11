@@ -1,4 +1,6 @@
 <script>
+  import { onDestroy } from 'svelte';
+
   import AdminDataRegionMap from './AdminDataRegionMap.svelte';
   import { t } from '$lib/i18n/index';
   import { formatUiDate } from '$lib/utils/edit-ui';
@@ -20,10 +22,18 @@
   const regionRunsLoading = controller.regionRunsLoading;
   const regionRunsStatus = controller.regionRunsStatus;
   const initialized = controller.initialized;
+  const REGION_LIST_BATCH_SIZE = 24;
 
+  let regions = [];
   let selectedRegion = null;
   let draftHasValues = false;
   let initialLoadRequested = false;
+  let visibleRegionCount = REGION_LIST_BATCH_SIZE;
+  let visibleRegions = [];
+  let regionListScroller;
+  let regionListSentinel;
+  let regionListObserver = null;
+  let lastRegionListKey = '';
 
   function updateRegionDraftField(field, value) {
     controller.patchRegionDraft({ [field]: value });
@@ -34,8 +44,83 @@
     return `${bounds.west.toFixed(4)}, ${bounds.south.toFixed(4)} .. ${bounds.east.toFixed(4)}, ${bounds.north.toFixed(4)}`;
   }
 
+  function buildRegionListKey(items) {
+    return (Array.isArray(items) ? items : []).map((region) => Number(region?.id || 0)).join(':');
+  }
+
+  function resetVisibleRegionCount(total) {
+    const numericTotal = Math.max(0, Number(total || 0));
+    visibleRegionCount = numericTotal > 0 ? Math.min(REGION_LIST_BATCH_SIZE, numericTotal) : REGION_LIST_BATCH_SIZE;
+  }
+
+  function clampVisibleRegionCount(total) {
+    const numericTotal = Math.max(0, Number(total || 0));
+    if (numericTotal === 0) {
+      if (visibleRegionCount !== REGION_LIST_BATCH_SIZE) {
+        visibleRegionCount = REGION_LIST_BATCH_SIZE;
+      }
+      return;
+    }
+
+    if (visibleRegionCount < REGION_LIST_BATCH_SIZE) {
+      visibleRegionCount = Math.min(REGION_LIST_BATCH_SIZE, numericTotal);
+      return;
+    }
+
+    if (visibleRegionCount > numericTotal) {
+      visibleRegionCount = numericTotal;
+    }
+  }
+
+  function ensureSelectedRegionVisible(selectedRegionId, items) {
+    const numericSelectedRegionId = Number(selectedRegionId || 0);
+    if (!Number.isInteger(numericSelectedRegionId) || numericSelectedRegionId <= 0) return;
+
+    const selectedIndex = (Array.isArray(items) ? items : []).findIndex((item) => Number(item?.id || 0) === numericSelectedRegionId);
+    if (selectedIndex < 0 || selectedIndex < visibleRegionCount) return;
+
+    visibleRegionCount = Math.min(
+      items.length,
+      Math.ceil((selectedIndex + 1) / REGION_LIST_BATCH_SIZE) * REGION_LIST_BATCH_SIZE
+    );
+  }
+
+  function loadMoreRegions() {
+    if (visibleRegionCount >= regions.length) return;
+    visibleRegionCount = Math.min(regions.length, visibleRegionCount + REGION_LIST_BATCH_SIZE);
+  }
+
+  function destroyRegionListObserver() {
+    if (!regionListObserver) return;
+    regionListObserver.disconnect();
+    regionListObserver = null;
+  }
+
+  function setupRegionListObserver() {
+    destroyRegionListObserver();
+
+    if (!regionListScroller || !regionListSentinel || typeof IntersectionObserver === 'undefined') return;
+
+    regionListObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMoreRegions();
+        }
+      },
+      {
+        root: regionListScroller,
+        rootMargin: '0px 0px 180px 0px',
+        threshold: 0.1
+      }
+    );
+
+    regionListObserver.observe(regionListSentinel);
+  }
+
+  $: regions = Array.isArray($dataSettings?.regions) ? $dataSettings.regions : [];
+
   $: selectedRegion = $regionDraft.id
-    ? $dataSettings.regions.find((item) => Number(item?.id || 0) === Number($regionDraft.id)) || null
+    ? regions.find((item) => Number(item?.id || 0) === Number($regionDraft.id)) || null
     : null;
 
   $: draftHasValues = Boolean(
@@ -50,6 +135,34 @@
     initialLoadRequested = true;
     void controller.ensureLoaded({ preserveSelection: true });
   }
+
+  $: {
+    const nextRegionListKey = buildRegionListKey(regions);
+    if (nextRegionListKey !== lastRegionListKey) {
+      lastRegionListKey = nextRegionListKey;
+      resetVisibleRegionCount(regions.length);
+    }
+  }
+
+  $: clampVisibleRegionCount(regions.length);
+  $: ensureSelectedRegionVisible($selectedDataRegionId, regions);
+  $: visibleRegions = regions.slice(0, visibleRegionCount);
+
+  $: if (!regionListScroller || !regionListSentinel) {
+    destroyRegionListObserver();
+  }
+
+  $: if (regionListScroller && regionListSentinel && visibleRegions.length > 0 && visibleRegionCount < regions.length) {
+    setupRegionListObserver();
+  }
+
+  $: if (visibleRegionCount >= regions.length || regions.length === 0) {
+    destroyRegionListObserver();
+  }
+
+  onDestroy(() => {
+    destroyRegionListObserver();
+  });
 </script>
 
 {#if !isMasterAdmin}
@@ -92,14 +205,14 @@
       </article>
       <article class="data-summary-card rounded-xl p-3 text-sm ui-text-body lg:col-span-2">
         <p><strong>{$t('admin.data.summary.syncModeLabel')}:</strong> {$t('admin.data.summary.syncModeValue')}</p>
-        <p><strong>{$t('admin.data.summary.regionsCountLabel')}:</strong> {$dataSettings.regions.length}</p>
+        <p><strong>{$t('admin.data.summary.regionsCountLabel')}:</strong> {regions.length}</p>
         <p><strong>{$t('admin.data.summary.regionSourceLabel')}:</strong> {$t('admin.data.summary.regionSourceValue')}</p>
       </article>
     </div>
 
     <AdminDataRegionMap
       {controller}
-      regions={$dataSettings.regions}
+      {regions}
       draft={$regionDraft}
       selectedRegionId={$selectedDataRegionId}
       disabled={$regionSaving || $regionDeleting || $regionSyncBusy}
@@ -109,97 +222,35 @@
       <p class="text-sm ui-text-muted">{$dataStatus}</p>
     {/if}
 
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-      <section class="space-y-3 min-w-0">
-        <div class="flex items-center justify-between gap-2">
-          <h4 class="text-sm font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.list.title')}</h4>
-          <span class="text-xs ui-text-subtle">{$dataSettings.regions.length}</span>
+    <form class="data-form-card space-y-4 rounded-2xl p-4 min-w-0" on:submit={controller.saveDataRegion}>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="space-y-1">
+          <h4 class="text-base font-bold ui-text-strong">
+            {$regionDraft.id ? $t('admin.data.form.editTitle') : $t('admin.data.form.newTitle')}
+          </h4>
+          <p class="text-sm ui-text-muted">{$t('admin.data.form.description')}</p>
         </div>
-
-        {#if $dataLoading}
-          <p class="data-summary-card rounded-xl px-3 py-2 text-sm ui-text-subtle">{$t('admin.data.list.loading')}</p>
-        {:else if $dataSettings.regions.length === 0}
-          <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">
-            {$t('admin.data.list.empty')}
-          </p>
-        {:else}
-          <div class="space-y-2">
-            {#each $dataSettings.regions as region (`data-region-${region.id}`)}
-              {@const statusMeta = controller.getRegionStatusMeta(region.lastSyncStatus, region)}
-              <button
-                type="button"
-                class="data-region-card w-full rounded-xl px-3 py-3 text-left transition"
-                data-selected={$selectedDataRegionId === region.id ? 'true' : 'false'}
-                on:click={() => controller.selectDataRegion(region)}
-              >
-                <div class="flex flex-wrap items-start justify-between gap-2">
-                  <div class="min-w-0 flex-1">
-                    <p class="font-semibold ui-text-strong break-words">{region.name}</p>
-                    <p class="text-xs ui-text-subtle break-words">#{region.id} · {region.slug}</p>
-                  </div>
-                  <span
-                    class="badge-pill data-status-pill shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
-                    data-tone={statusMeta.tone}>{statusMeta.text}</span
-                  >
-                </div>
-                <p class="mt-2 text-sm ui-text-body break-all">{controller.getRegionExtractPrimaryText(region)}</p>
-                {#if controller.getRegionExtractSecondaryText(region)}
-                  <p class="mt-1 text-xs ui-text-subtle break-all">{controller.getRegionExtractSecondaryText(region)}</p>
-                {/if}
-                <div class="mt-2 grid gap-1 text-xs ui-text-subtle sm:grid-cols-2">
-                  <p>{$t('admin.data.list.lastSync')}: {formatUiDate(region.lastSuccessfulSyncAt) || '---'}</p>
-                  <p>{$t('admin.data.list.nextSync')}: {formatUiDate(region.nextSyncAt) || '---'}</p>
-                  <p>{$t('admin.data.list.pmtilesSize')}: {controller.formatStorageBytes(region.pmtilesBytes)}</p>
-                  <p>
-                    {$t('admin.data.list.dbSize')}:
-                    {region.dbBytesApproximate ? '~' : ''}{controller.formatStorageBytes(region.dbBytes)}
-                  </p>
-                </div>
-                <div class="mt-2 flex flex-wrap gap-2 text-xs">
-                  <span class="rounded-full ui-surface-soft px-2 py-1 ui-text-muted"
-                    >{controller.getRegionEnabledLabel(region.enabled)}</span
-                  >
-                  <span class="rounded-full ui-surface-soft px-2 py-1 ui-text-muted"
-                    >{controller.getRegionSyncModeLabel(region)}</span
-                  >
-                </div>
-                {#if region.lastSyncError}
-                  <p class="mt-2 text-xs ui-text-danger break-words">{region.lastSyncError}</p>
-                {/if}
-              </button>
-            {/each}
-          </div>
+        {#if $regionDraft.id}
+          <span class="rounded-full ui-surface-soft px-3 py-1 text-xs font-semibold ui-text-muted">#{$regionDraft.id}</span>
         {/if}
-      </section>
+        {#if draftHasValues}
+          <button
+            type="button"
+            class="ui-btn ui-btn-secondary ui-btn-xs"
+            on:click={controller.startNewRegionDraft}
+            disabled={$regionSaving || $regionDeleting || $regionSyncBusy}>{$t('admin.data.form.resetSelection')}</button
+          >
+        {/if}
+      </div>
 
-      <section class="space-y-4 min-w-0">
-        <form class="data-form-card space-y-4 rounded-2xl p-4" on:submit={controller.saveDataRegion}>
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="space-y-1">
-              <h4 class="text-base font-bold ui-text-strong">
-                {$regionDraft.id ? $t('admin.data.form.editTitle') : $t('admin.data.form.newTitle')}
-              </h4>
-              <p class="text-sm ui-text-muted">{$t('admin.data.form.description')}</p>
-            </div>
-            {#if $regionDraft.id}
-              <span class="rounded-full ui-surface-soft px-3 py-1 text-xs font-semibold ui-text-muted">#{$regionDraft.id}</span>
-            {/if}
-            {#if draftHasValues}
-              <button
-                type="button"
-                class="ui-btn ui-btn-secondary ui-btn-xs"
-                on:click={controller.startNewRegionDraft}
-                disabled={$regionSaving || $regionDeleting || $regionSyncBusy}>{$t('admin.data.form.resetSelection')}</button
-              >
-            {/if}
-          </div>
+      {#if !$regionDraft.id && !$regionDraft.extractId}
+        <div class="rounded-xl border ui-border ui-surface-brand px-3 py-3 text-sm ui-text-body">
+          {$t('admin.data.form.mapHint')}
+        </div>
+      {/if}
 
-          {#if !$regionDraft.id && !$regionDraft.extractId}
-            <div class="rounded-xl border ui-border ui-surface-brand px-3 py-3 text-sm ui-text-body">
-              {$t('admin.data.form.mapHint')}
-            </div>
-          {/if}
-
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
+        <div class="space-y-4 min-w-0">
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1 text-sm ui-text-body">
               <span>{$t('admin.data.form.regionName')}</span>
@@ -335,7 +386,7 @@
                 </label>
               </div>
 
-              <div class="grid gap-2 md:grid-cols-2">
+              <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 <label class="flex items-center gap-2 text-sm ui-text-body"
                   ><input
                     type="checkbox"
@@ -363,7 +414,9 @@
               </div>
             </div>
           </details>
+        </div>
 
+        <div class="space-y-4 min-w-0">
           {#if $regionDraft.id}
             {@const selectedStatusMeta = controller.getRegionStatusMeta(selectedRegion?.lastSyncStatus, selectedRegion)}
             <div class="rounded-xl border ui-border ui-surface-base px-3 py-3 text-sm ui-text-body">
@@ -374,7 +427,7 @@
                   data-tone={selectedStatusMeta.tone}>{selectedStatusMeta.text}</span
                 >
               </div>
-              <div class="mt-2 grid gap-1 text-xs ui-text-subtle sm:grid-cols-2">
+              <div class="mt-2 grid gap-1 text-xs ui-text-subtle">
                 <p>{$t('admin.data.form.lastSync')}: {formatUiDate(selectedRegion?.lastSuccessfulSyncAt) || '---'}</p>
                 <p>{$t('admin.data.form.nextSync')}: {formatUiDate(selectedRegion?.nextSyncAt) || '---'}</p>
                 <p>{$t('admin.data.form.lastFinished')}: {formatUiDate(selectedRegion?.lastSyncFinishedAt) || '---'}</p>
@@ -419,64 +472,127 @@
               >
             {/if}
           </div>
-        </form>
+        </div>
+      </div>
+    </form>
 
-        <section class="data-history-card rounded-2xl p-4 min-w-0">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <h4 class="text-base font-bold ui-text-strong">{$t('admin.data.history.title')}</h4>
-            {#if $regionRunsLoading}
-              <span class="text-sm ui-text-subtle">{$t('admin.data.history.loading')}</span>
-            {/if}
-          </div>
+    <section class="space-y-3 min-w-0">
+      <div class="flex items-center justify-between gap-2">
+        <h4 class="text-sm font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.list.title')}</h4>
+        <span class="text-xs ui-text-subtle">{Math.min(visibleRegions.length, regions.length)} / {regions.length}</span>
+      </div>
 
-          {#if $regionRunsStatus}
-            <p class="mt-2 text-sm ui-text-muted">{$regionRunsStatus}</p>
+      {#if $dataLoading}
+        <p class="data-summary-card rounded-xl px-3 py-2 text-sm ui-text-subtle">{$t('admin.data.list.loading')}</p>
+      {:else if regions.length === 0}
+        <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">
+          {$t('admin.data.list.empty')}
+        </p>
+      {:else}
+        <div class="data-region-list-scroll space-y-2 overflow-y-auto pr-1" bind:this={regionListScroller}>
+          {#each visibleRegions as region (`data-region-${region.id}`)}
+            {@const statusMeta = controller.getRegionStatusMeta(region.lastSyncStatus, region)}
+            <button
+              type="button"
+              class="data-region-card data-region-card-compact w-full rounded-xl px-3 py-2.5 text-left transition"
+              data-selected={$selectedDataRegionId === region.id ? 'true' : 'false'}
+              on:click={() => controller.selectDataRegion(region)}
+            >
+              <div class="flex flex-wrap items-start justify-between gap-2">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <p class="font-semibold ui-text-strong break-words">{region.name}</p>
+                    <span class="text-xs ui-text-subtle break-words">#{region.id} · {region.slug}</span>
+                  </div>
+                  <p class="mt-1 text-sm ui-text-body break-all">{controller.getRegionExtractPrimaryText(region)}</p>
+                  {#if controller.getRegionExtractSecondaryText(region)}
+                    <p class="mt-1 text-xs ui-text-subtle break-all">{controller.getRegionExtractSecondaryText(region)}</p>
+                  {/if}
+                </div>
+                <span
+                  class="badge-pill data-status-pill shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
+                  data-tone={statusMeta.tone}>{statusMeta.text}</span
+                >
+              </div>
+
+              <div class="data-region-meta mt-2 flex flex-wrap gap-2 text-xs ui-text-subtle">
+                <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.lastSync')}: {formatUiDate(region.lastSuccessfulSyncAt) || '---'}</span>
+                <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.nextSync')}: {formatUiDate(region.nextSyncAt) || '---'}</span>
+                <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.pmtilesSize')}: {controller.formatStorageBytes(region.pmtilesBytes)}</span>
+                <span class="rounded-full ui-surface-soft px-2 py-1">
+                  {$t('admin.data.list.dbSize')}: {region.dbBytesApproximate ? '~' : ''}{controller.formatStorageBytes(region.dbBytes)}
+                </span>
+                <span class="rounded-full ui-surface-soft px-2 py-1">{controller.getRegionEnabledLabel(region.enabled)}</span>
+                <span class="rounded-full ui-surface-soft px-2 py-1">{controller.getRegionSyncModeLabel(region)}</span>
+              </div>
+
+              {#if region.lastSyncError}
+                <p class="mt-2 text-xs ui-text-danger break-words">{region.lastSyncError}</p>
+              {/if}
+            </button>
+          {/each}
+
+          {#if visibleRegionCount < regions.length}
+            <div class="data-region-list-sentinel" bind:this={regionListSentinel} aria-hidden="true"></div>
           {/if}
+        </div>
+      {/if}
+    </section>
 
-          {#if $selectedDataRegionId && $regionRuns.length > 0}
-            <div class="mt-3 overflow-x-auto rounded-xl border ui-border">
-              <table class="min-w-full text-sm">
-                <thead>
-                  <tr class="border-b ui-border text-left ui-text-muted">
-                    <th class="px-3 py-2">{$t('admin.data.history.run')}</th>
-                    <th class="px-3 py-2">{$t('admin.data.history.trigger')}</th>
-                    <th class="px-3 py-2">{$t('admin.data.history.status')}</th>
-                    <th class="px-3 py-2">{$t('admin.data.history.requested')}</th>
-                    <th class="px-3 py-2">{$t('admin.data.history.finished')}</th>
-                    <th class="px-3 py-2">{$t('admin.data.history.features')}</th>
+    <section class="data-history-card rounded-2xl p-4 min-w-0">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h4 class="text-base font-bold ui-text-strong">{$t('admin.data.history.title')}</h4>
+        {#if $regionRunsLoading}
+          <span class="text-sm ui-text-subtle">{$t('admin.data.history.loading')}</span>
+        {/if}
+      </div>
+
+      {#if $regionRunsStatus}
+        <p class="mt-2 text-sm ui-text-muted">{$regionRunsStatus}</p>
+      {/if}
+
+      {#if $selectedDataRegionId && $regionRuns.length > 0}
+        <div class="mt-3 overflow-x-auto rounded-xl border ui-border">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="border-b ui-border text-left ui-text-muted">
+                <th class="px-3 py-2">{$t('admin.data.history.run')}</th>
+                <th class="px-3 py-2">{$t('admin.data.history.trigger')}</th>
+                <th class="px-3 py-2">{$t('admin.data.history.status')}</th>
+                <th class="px-3 py-2">{$t('admin.data.history.requested')}</th>
+                <th class="px-3 py-2">{$t('admin.data.history.finished')}</th>
+                <th class="px-3 py-2">{$t('admin.data.history.features')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each $regionRuns as run (`region-run-${run.id}`)}
+                {@const runStatusMeta = controller.getRegionStatusMeta(run.status, run)}
+                <tr class="border-b ui-border-soft">
+                  <td class="px-3 py-2 font-medium ui-text-strong">#{run.id}</td>
+                  <td class="px-3 py-2 ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</td>
+                  <td class="px-3 py-2"
+                    ><span
+                      class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
+                      data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
+                    ></td
+                  >
+                  <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</td>
+                  <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</td>
+                  <td class="px-3 py-2 ui-text-muted">{run.activeFeatureCount ?? run.importedFeatureCount ?? '---'}</td>
+                </tr>
+                {#if run.error}
+                  <tr class="border-b ui-border-soft ui-surface-danger-soft">
+                    <td colspan="6" class="px-3 py-2 text-xs ui-text-danger">{run.error}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {#each $regionRuns as run (`region-run-${run.id}`)}
-                    {@const runStatusMeta = controller.getRegionStatusMeta(run.status, run)}
-                    <tr class="border-b ui-border-soft">
-                      <td class="px-3 py-2 font-medium ui-text-strong">#{run.id}</td>
-                      <td class="px-3 py-2 ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</td>
-                      <td class="px-3 py-2"
-                        ><span
-                          class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
-                          data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
-                        ></td
-                      >
-                      <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</td>
-                      <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</td>
-                      <td class="px-3 py-2 ui-text-muted">{run.activeFeatureCount ?? run.importedFeatureCount ?? '---'}</td>
-                    </tr>
-                    {#if run.error}
-                      <tr class="border-b ui-border-soft ui-surface-danger-soft">
-                        <td colspan="6" class="px-3 py-2 text-xs ui-text-danger">{run.error}</td>
-                      </tr>
-                    {/if}
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {:else if !$selectedDataRegionId}
-            <p class="mt-3 text-sm ui-text-subtle">{$t('admin.data.history.selectRegionHint')}</p>
-          {/if}
-        </section>
-      </section>
-    </div>
+                {/if}
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else if !$selectedDataRegionId}
+        <p class="mt-3 text-sm ui-text-subtle">{$t('admin.data.history.selectRegionHint')}</p>
+      {/if}
+    </section>
   </section>
 {/if}
 

@@ -453,6 +453,7 @@
         "loadFailed": "Failed to load map regions",
         "legendMissing": "Not added",
         "legendSyncing": "Syncing",
+        "legendFailed": "Import failed",
         "legendReady": "Synced",
         "selectionLabel": "Selected on map: {name}",
         "selectionHint": "Click a region on the map to prepare a new draft."

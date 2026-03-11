@@ -143,6 +143,7 @@
     const state = controller?.getRegionSyncState?.(region);
     if (state === 'syncing') return 'syncing';
     if (state === 'ready') return 'ready';
+    if (state === 'failed') return 'failed';
     return 'missing';
   }
 
@@ -335,6 +336,8 @@
             [
               'match',
               ['feature-state', 'tone'],
+              'failed',
+              '#DC2626',
               'ready',
               '#3F9E57',
               'syncing',
@@ -344,6 +347,8 @@
             [
               'match',
               ['feature-state', 'tone'],
+              'failed',
+              '#FCA5A5',
               'ready',
               '#5DAE6D',
               'syncing',
@@ -355,6 +360,8 @@
             'case',
             ['boolean', ['feature-state', 'selected'], false],
             0.8,
+            ['==', ['feature-state', 'tone'], 'failed'],
+            0.5,
             ['==', ['feature-state', 'tone'], 'ready'],
             0.52,
             0.38
@@ -375,12 +382,16 @@
             [
               'match',
               ['feature-state', 'tone'],
+              'failed',
+              '#7F1D1D',
               'ready',
               '#14532D',
               'syncing',
               '#92400E',
               '#1D4ED8'
             ],
+            ['==', ['feature-state', 'tone'], 'failed'],
+            '#B91C1C',
             ['==', ['feature-state', 'tone'], 'ready'],
             '#2F6B3C',
             ['==', ['feature-state', 'tone'], 'syncing'],
@@ -573,6 +584,7 @@
     <div class="flex flex-wrap gap-2 text-xs ui-text-body">
       <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="missing">{$t('admin.data.map.legendMissing')}</span>
       <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="syncing">{$t('admin.data.map.legendSyncing')}</span>
+      <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="failed">{$t('admin.data.map.legendFailed')}</span>
       <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="ready">{$t('admin.data.map.legendReady')}</span>
     </div>
   </div>
@@ -619,6 +631,11 @@
     color: #92400e;
   }
 
+  .data-map-legend[data-tone='failed'] {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+
   .data-map-legend[data-tone='ready'] {
     background: #dcfce7;
     color: #166534;
@@ -632,6 +649,11 @@
   :global(html[data-theme='dark']) .data-map-legend[data-tone='syncing'] {
     background: #3f2a05;
     color: #fcd34d;
+  }
+
+  :global(html[data-theme='dark']) .data-map-legend[data-tone='failed'] {
+    background: #4c1212;
+    color: #fca5a5;
   }
 
   :global(html[data-theme='dark']) .data-map-legend[data-tone='ready'] {

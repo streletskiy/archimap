@@ -453,6 +453,7 @@
         "loadFailed": "Не удалось загрузить регионы для карты",
         "legendMissing": "Ещё не добавлен",
         "legendSyncing": "Синхронизируется",
+        "legendFailed": "Ошибка импорта",
         "legendReady": "Синхронизирован",
         "selectionLabel": "Выбрано на карте: {name}",
         "selectionHint": "Кликните по региону на карте, чтобы подготовить новый draft."

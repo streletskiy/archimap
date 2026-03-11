@@ -36,8 +36,8 @@ public/app/
 tmp/
 playwright-report/
 test-results/
-LOCAL_CONTEXT.md
 src/lib/version.generated.json
 frontend/src/lib/version.generated.json
 files/
 .benchmarks
+.skills
