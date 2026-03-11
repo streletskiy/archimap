@@ -53,11 +53,12 @@
     generalStatus = translateNow('admin.settings.saving');
 
     try {
-      await apiJson('/api/admin/app-settings/general', {
+      const data = await apiJson('/api/admin/app-settings/general', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ general })
       });
+      general = data?.item?.general || general;
       generalStatus = translateNow('admin.settings.saved');
     } catch (error) {
       generalStatus = msg(error, translateNow('admin.settings.saveGeneralFailed'));
