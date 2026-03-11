@@ -15,6 +15,9 @@
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
+- PostgreSQL runtime storage:
+  - `osm.building_contours`: PostGIS `geom` + bbox/tags metadata; GeoJSON is rendered on demand for API/PMTiles export.
+  - `public.building_search_source`: searchable subset with generated `search_tsv`.
 - SQLite:
   - `data/archimap.db` (main app DB)
   - `data/osm.db` (OSM contours/search source)

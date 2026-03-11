@@ -265,31 +265,31 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
           osm_type,
           osm_id,
           tags_json,
-          geometry_json,
           min_lon,
           min_lat,
           max_lon,
           max_lat,
+          geom,
           updated_at
         )
         SELECT
           osm_type,
           osm_id,
           tags_json,
-          geometry_json,
           min_lon,
           min_lat,
           max_lon,
           max_lat,
+          ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(geometry_json), 4326)),
           $1::timestamptz
         FROM region_import_tmp
         ON CONFLICT (osm_type, osm_id) DO UPDATE SET
           tags_json = excluded.tags_json,
-          geometry_json = excluded.geometry_json,
           min_lon = excluded.min_lon,
           min_lat = excluded.min_lat,
           max_lon = excluded.max_lon,
           max_lat = excluded.max_lat,
+          geom = excluded.geom,
           updated_at = excluded.updated_at
       `, [runMarker]);
 
@@ -297,20 +297,15 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
         INSERT INTO public.data_region_memberships (
           region_id,
           osm_type,
-          osm_id,
-          created_at,
-          updated_at
+          osm_id
         )
         SELECT
           $1::bigint,
           osm_type,
-          osm_id,
-          $2::timestamptz,
-          $2::timestamptz
+          osm_id
         FROM region_import_tmp
-        ON CONFLICT (region_id, osm_type, osm_id) DO UPDATE SET
-          updated_at = excluded.updated_at
-      `, [region.id, runMarker]);
+        ON CONFLICT (region_id, osm_type, osm_id) DO NOTHING
+      `, [region.id]);
 
       await client.query(`
         DELETE FROM public.data_region_memberships drm

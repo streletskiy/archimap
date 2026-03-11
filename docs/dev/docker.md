@@ -129,6 +129,8 @@ docker compose exec archimap npm run db:pg:migrate
 docker compose exec archimap npm run db:pg:smoke
 ```
 
+When an updated image contains storage-compaction PostgreSQL migrations, the first container start applies them automatically to the existing database. Expect a longer first boot and keep extra free disk space available temporarily while large tables are rebuilt.
+
 Avoid bind-mounting local `./db` into `/app/db` on deployment hosts. The runtime image already contains `db/postgres/migrations`, and masking that path can make the app start against an empty schema.
 
 ## Validate Layer Sizes

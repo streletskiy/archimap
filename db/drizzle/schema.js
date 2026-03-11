@@ -1,5 +1,5 @@
 const { sql } = require('drizzle-orm');
-const { pgSchema, text, bigint, integer, doublePrecision, timestamp, index } = require('drizzle-orm/pg-core');
+const { pgSchema, text, bigint, integer, doublePrecision, timestamp } = require('drizzle-orm/pg-core');
 const { sqliteTable, integer: sqliteInteger, text: sqliteText, real: sqliteReal } = require('drizzle-orm/sqlite-core');
 
 const osm = pgSchema('osm');
@@ -11,15 +11,14 @@ const pgBuildingContours = osm.table('building_contours', {
   osmType: text('osm_type').notNull(),
   osmId: bigint('osm_id', { mode: 'number' }).notNull(),
   tagsJson: text('tags_json'),
-  geometryJson: text('geometry_json').notNull(),
   minLon: doublePrecision('min_lon').notNull(),
   minLat: doublePrecision('min_lat').notNull(),
   maxLon: doublePrecision('max_lon').notNull(),
   maxLat: doublePrecision('max_lat').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  geom: sql`geometry(MultiPolygon, 4326)`
+  geom: sql`geometry(MultiPolygon, 4326)`,
+  buildingLevelsNum: doublePrecision('building_levels_num')
 }, (table) => ({
-  bboxIdx: index('idx_building_contours_bbox').on(table.minLon, table.maxLon, table.minLat, table.maxLat),
   pk: sql`PRIMARY KEY (${table.osmType}, ${table.osmId})`
 }));
 

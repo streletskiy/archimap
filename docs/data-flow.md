@@ -32,7 +32,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - a refreshed PMTiles archive for the target region
    - updated region sync metadata and bounds for runtime clients
 7. For managed in-app syncs, the runtime then runs post-sync maintenance through `ServerRuntime` boot modules:
-   - `search-index.boot.js` rebuilds `building_search_source` and `building_search_fts`
+   - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite)
    - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
 
 ## Safety invariants

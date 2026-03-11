@@ -159,6 +159,15 @@ function buildAddressFromTags(tags = {}) {
   return parts.length > 0 ? parts.join(', ') : null;
 }
 
+function hasSearchSourceValues(sourceRow) {
+  return Boolean(
+    normalizeNullableSearchText(sourceRow?.name)
+    || normalizeNullableSearchText(sourceRow?.address)
+    || normalizeNullableSearchText(sourceRow?.style)
+    || normalizeNullableSearchText(sourceRow?.architect)
+  );
+}
+
 function normalizeSearchSourceRow(rawRow) {
   if (!rawRow) return null;
   const osmType = normalizeNullableSearchText(rawRow.osm_type);
@@ -192,7 +201,7 @@ function normalizeSearchSourceRow(rawRow) {
   const centerLon = Number(rawRow.center_lon);
   const centerLat = Number(rawRow.center_lat);
 
-  return {
+  const normalized = {
     osm_key: `${osmType}/${osmId}`,
     osm_type: osmType,
     osm_id: osmId,
@@ -204,6 +213,7 @@ function normalizeSearchSourceRow(rawRow) {
     center_lon: Number.isFinite(centerLon) ? centerLon : 0,
     center_lat: Number.isFinite(centerLat) ? centerLat : 0
   };
+  return hasSearchSourceValues(normalized) ? normalized : null;
 }
 
 function normalizeSearchSourceRows(rows = []) {
@@ -221,6 +231,7 @@ module.exports = {
   SEARCH_SOURCE_RAW_SELECT_FIELDS,
   SEARCH_SOURCE_BASE_FROM_SQL,
   buildRawSearchSourceQuery,
+  hasSearchSourceValues,
   normalizeNullableSearchText,
   normalizeSearchSourceRow,
   normalizeSearchSourceRows
