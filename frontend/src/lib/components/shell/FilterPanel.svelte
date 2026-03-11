@@ -406,12 +406,14 @@
               <div class="layer-meta">
                 <span class="drag-handle" aria-hidden="true">☰</span>
                 <span class="layer-index">{String(index + 1).padStart(2, '0')}</span>
-                <label class="color-swatch" aria-label={getFilterModeLabel(layer.mode)}>
+                <label class="color-swatch" style={`--swatch-color:${layer.color};`}>
                   <input
                     type="color"
                     value={layer.color}
+                    aria-label={getFilterModeLabel(layer.mode)}
                     on:input={(event) => updateLayer(layer.id, { color: event.currentTarget.value })}
                   />
+                  <span class="color-swatch-dot" aria-hidden="true"></span>
                 </label>
               </div>
               <div class="layer-actions">
@@ -669,22 +671,43 @@
   }
 
   .color-swatch {
+    position: relative;
+    flex: 0 0 auto;
+    display: inline-grid;
+    place-items: center;
     width: 1.3rem;
     height: 1.3rem;
-    border-radius: 999px;
-    overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
     cursor: pointer;
   }
 
   .color-swatch input {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
+    margin: 0;
     border: 0;
     padding: 0;
     background: transparent;
+    opacity: 0;
+    appearance: none;
+    -webkit-appearance: none;
     cursor: pointer;
+  }
+
+  .color-swatch-dot {
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
+    background: var(--swatch-color, var(--accent));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+    pointer-events: none;
+  }
+
+  .color-swatch input:focus-visible + .color-swatch-dot {
+    outline: 2px solid color-mix(in srgb, var(--accent) 72%, white);
+    outline-offset: 2px;
   }
 
   .rule-list {
