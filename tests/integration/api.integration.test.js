@@ -13,6 +13,10 @@ try {
   pythonExtractorDepsSkipReason = String(error?.message || error || 'Python extractor dependencies are unavailable');
 }
 
+const pythonExtractorIntegrationTestOptions = pythonExtractorDepsSkipReason
+  ? { skip: `python extractor deps unavailable: ${pythonExtractorDepsSkipReason}` }
+  : {};
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -290,11 +294,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.ok(Array.isArray(mapSearchBody.items));
     });
 
-    await t.test('admin data settings endpoints support create/rename/delete flow for regions', async (t) => {
-      if (pythonExtractorDepsSkipReason) {
-        t.skip(`python extractor deps unavailable: ${pythonExtractorDepsSkipReason}`);
-      }
-
+    await t.test('admin data settings endpoints support create/rename/delete flow for regions', pythonExtractorIntegrationTestOptions, async () => {
       const dataSettings = await callApi('/api/admin/app-settings/data');
       assert.equal(dataSettings.status, 200);
       const dataSettingsBody = await dataSettings.json();
