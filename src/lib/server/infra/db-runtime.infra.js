@@ -374,5 +374,11 @@ async function createDbRuntime(options = {}) {
 
 module.exports = {
   createDbRuntime,
-  resolvePostgresConnectionString
+  resolvePostgresConnectionString,
+  _test_: {
+    replaceSqlitePositionalPlaceholders,
+    convertNamedParams,
+    convertPositionalParams,
+    createPostgresCompatDb
+  }
 };

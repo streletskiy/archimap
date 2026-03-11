@@ -10,9 +10,6 @@ function validateSecurityConfig({
   const allowMemoryStoreFallback = Boolean(sessionAllowMemoryFallback);
 
   if (!isProduction) {
-    if (weakSessionSecret) {
-      console.warn('[security] SESSION_SECRET uses default value (allowed in non-production, unsafe for production)');
-    }
     if (!hasAppBaseUrl) {
       console.warn('[security] APP_BASE_URL is empty, password reset links will be unavailable');
     }
