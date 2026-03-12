@@ -32,7 +32,7 @@ async function exportImportRowsToGeojson(importPath, geojsonPath) {
   let bounds = null;
 
   try {
-    for await (const row of readImportRows(importPath)) {
+    for await (const row of readImportRows(importPath, { requireGeometryJson: true })) {
       const geometry = JSON.parse(row.geometry_json);
       const feature = {
         type: 'Feature',
@@ -65,6 +65,33 @@ async function exportImportRowsToGeojson(importPath, geojsonPath) {
         return resolve();
       });
     });
+  }
+
+  return {
+    importedFeatureCount,
+    bounds
+  };
+}
+
+async function summarizeImportRows(importPath, options = {}) {
+  let importedFeatureCount = 0;
+  let bounds = null;
+
+  for await (const row of readImportRows(importPath, options)) {
+    importedFeatureCount += 1;
+    bounds = bounds
+      ? {
+        west: Math.min(bounds.west, row.min_lon),
+        south: Math.min(bounds.south, row.min_lat),
+        east: Math.max(bounds.east, row.max_lon),
+        north: Math.max(bounds.north, row.max_lat)
+      }
+      : {
+        west: row.min_lon,
+        south: row.min_lat,
+        east: row.max_lon,
+        north: row.max_lat
+      };
   }
 
   return {
@@ -112,5 +139,6 @@ function buildPmtilesFromGeojson({
 
 module.exports = {
   buildPmtilesFromGeojson,
-  exportImportRowsToGeojson
+  exportImportRowsToGeojson,
+  summarizeImportRows
 };

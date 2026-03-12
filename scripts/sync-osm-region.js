@@ -16,7 +16,8 @@ const {
 } = require('./region-sync/db-ingester');
 const {
   buildPmtilesFromGeojson,
-  exportImportRowsToGeojson
+  exportImportRowsToGeojson,
+  summarizeImportRows
 } = require('./region-sync/pmtiles-builder');
 
 const DB_PROVIDER = getDbProvider(process.env);
@@ -192,14 +193,26 @@ async function runRegionSync(region, runtimeOptions) {
   const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
 
   try {
-    exportRegionExtractToNdjson({
-      importerPath,
-      region,
-      outputPath: importPath,
-      env: process.env
-    });
+    let exported = null;
+    if (runtimeOptions.dbProvider === 'postgres') {
+      exportRegionExtractToNdjson({
+        importerPath,
+        region,
+        dbOutputPath: importPath,
+        geojsonOutputPath: geojsonPath,
+        env: process.env
+      });
+      exported = await summarizeImportRows(importPath, { requireGeometryWkbHex: true });
+    } else {
+      exportRegionExtractToNdjson({
+        importerPath,
+        region,
+        outputPath: importPath,
+        env: process.env
+      });
+      exported = await exportImportRowsToGeojson(importPath, geojsonPath);
+    }
 
-    const exported = await exportImportRowsToGeojson(importPath, geojsonPath);
     if (exported.importedFeatureCount <= 0) {
       throw new Error('Sync returned 0 features; keeping previous PMTiles and current data untouched');
     }

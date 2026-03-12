@@ -17,11 +17,21 @@ function encodeOsmFeatureId(osmType, osmId) {
   return (Number(osmId) * 2) + typeBit;
 }
 
-function parseRowPayload(line) {
+function normalizeGeometryWkbHex(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  if ((text.length % 2) !== 0 || !/^[0-9a-fA-F]+$/.test(text)) {
+    return null;
+  }
+  return text.toUpperCase();
+}
+
+function parseRowPayload(line, options = {}) {
   const payload = JSON.parse(line);
   const osmType = String(payload?.osm_type || '').trim();
   const osmId = Number(payload?.osm_id);
   const geometryJson = String(payload?.geometry_json || '').trim();
+  const geometryWkbHex = normalizeGeometryWkbHex(payload?.geometry_wkb_hex);
   const minLon = Number(payload?.min_lon);
   const minLat = Number(payload?.min_lat);
   const maxLon = Number(payload?.max_lon);
@@ -29,7 +39,15 @@ function parseRowPayload(line) {
   if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
     throw new Error('Importer produced invalid OSM identity');
   }
-  if (!geometryJson) {
+  const requireGeometryJson = Boolean(options.requireGeometryJson);
+  const requireGeometryWkbHex = Boolean(options.requireGeometryWkbHex);
+  if (requireGeometryJson && !geometryJson) {
+    throw new Error(`Importer produced empty GeoJSON geometry for ${osmType}/${osmId}`);
+  }
+  if (requireGeometryWkbHex && !geometryWkbHex) {
+    throw new Error(`Importer produced empty WKB geometry for ${osmType}/${osmId}`);
+  }
+  if (!geometryJson && !geometryWkbHex) {
     throw new Error(`Importer produced empty geometry for ${osmType}/${osmId}`);
   }
   if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
@@ -39,7 +57,8 @@ function parseRowPayload(line) {
     osm_type: osmType,
     osm_id: osmId,
     tags_json: payload?.tags_json == null ? null : String(payload.tags_json),
-    geometry_json: geometryJson,
+    geometry_json: geometryJson || null,
+    geometry_wkb_hex: geometryWkbHex,
     min_lon: minLon,
     min_lat: minLat,
     max_lon: maxLon,
@@ -47,13 +66,13 @@ function parseRowPayload(line) {
   };
 }
 
-async function* readImportRows(ndjsonPath) {
+async function* readImportRows(ndjsonPath, options = {}) {
   const stream = fs.createReadStream(ndjsonPath, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   for await (const line of rl) {
     const trimmed = String(line || '').trim();
     if (!trimmed) continue;
-    yield parseRowPayload(trimmed);
+    yield parseRowPayload(trimmed, options);
   }
 }
 
@@ -115,6 +134,7 @@ module.exports = {
   createWorkspace,
   encodeOsmFeatureId,
   ensureDir,
+  normalizeGeometryWkbHex,
   parseRowPayload,
   readImportRows,
   writeRowsToNdjsonFile

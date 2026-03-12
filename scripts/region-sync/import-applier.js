@@ -20,7 +20,7 @@ async function insertImportRowsIntoPostgres(client, ndjsonPath) {
         row.osm_type,
         row.osm_id,
         row.tags_json,
-        row.geometry_json,
+        row.geometry_wkb_hex,
         row.min_lon,
         row.min_lat,
         row.max_lon,
@@ -32,7 +32,7 @@ async function insertImportRowsIntoPostgres(client, ndjsonPath) {
         osm_type,
         osm_id,
         tags_json,
-        geometry_json,
+        geometry_wkb_hex,
         min_lon,
         min_lat,
         max_lon,
@@ -44,7 +44,7 @@ async function insertImportRowsIntoPostgres(client, ndjsonPath) {
     rows.length = 0;
   }
 
-  for await (const row of readImportRows(ndjsonPath)) {
+  for await (const row of readImportRows(ndjsonPath, { requireGeometryWkbHex: true })) {
     rows.push(row);
     if (rows.length >= batchSize) {
       await flush();
@@ -86,7 +86,7 @@ function insertImportRowsIntoSqlite(db, ndjsonPath) {
   return (async () => {
     let importedFeatureCount = 0;
     let batch = [];
-    for await (const row of readImportRows(ndjsonPath)) {
+    for await (const row of readImportRows(ndjsonPath, { requireGeometryJson: true })) {
       batch.push(row);
       if (batch.length >= 1000) {
         insertBatch(batch);
@@ -249,7 +249,7 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
           osm_type text NOT NULL,
           osm_id bigint NOT NULL,
           tags_json text,
-          geometry_json text NOT NULL,
+          geometry_wkb_hex text NOT NULL,
           min_lon double precision NOT NULL,
           min_lat double precision NOT NULL,
           max_lon double precision NOT NULL,
@@ -280,7 +280,7 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
           min_lat,
           max_lon,
           max_lat,
-          ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(geometry_json), 4326)),
+          ST_Multi(ST_GeomFromWKB(decode(geometry_wkb_hex, 'hex'), 4326)),
           $1::timestamptz
         FROM region_import_tmp
         ON CONFLICT (osm_type, osm_id) DO UPDATE SET

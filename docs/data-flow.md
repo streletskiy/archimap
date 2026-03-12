@@ -21,10 +21,10 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - `db-ingester.js`: facade for region loading/export and DB import publishing
    - `region-db.js`: region config loading + current-members export
    - `import-applier.js`: transactional DB apply + protected PMTiles swap
-   - `pmtiles-builder.js`: NDJSON -> GeoJSON conversion and `tippecanoe` wrapper
+   - `pmtiles-builder.js`: GeoJSON handoff + `tippecanoe` wrapper, including NDJSON -> GeoJSON conversion when the importer does not already emit a dedicated build stream
 5. The region sync script runs the full OSM import pipeline described in [OSM Import Pipeline](osm-import-pipeline.md):
    - extract resolution through `quackosm`
-   - transformation/export through `duckdb`
+   - provider-specific transformation/export through `duckdb` (`WKB` for PostgreSQL DB import, `GeoJSON` for SQLite and PMTiles build)
    - transactional import into `osm.building_contours` and `data_region_memberships`
    - region-specific PMTiles build and protected swap
 6. The result is:
