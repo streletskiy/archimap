@@ -97,15 +97,15 @@ function createSearchIndexBoot(options = {}) {
               OR NULLIF(trim(ai.style), '') IS NOT NULL
               OR NULLIF(trim(ai.architect), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.name') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"name:ru\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."name:ru"') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.official_name') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:full\"') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:postcode\"') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:city\"') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:place\"') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:street\"') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"addr:housenumber\"') END), '') IS NOT NULL
-              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.\"building:architecture\"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."addr:full"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."addr:postcode"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."addr:city"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."addr:place"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."addr:street"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."addr:housenumber"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."building:architecture"') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architecture') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.style') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect') END), '') IS NOT NULL

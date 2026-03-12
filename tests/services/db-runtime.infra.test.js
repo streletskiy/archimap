@@ -8,7 +8,7 @@ const {
   createPostgresCompatDb
 } = _test_;
 
-test('replaceSqlitePositionalPlaceholders correctly replaces ? with $n ignoring strings/comments', (t) => {
+test('replaceSqlitePositionalPlaceholders correctly replaces ? with $n ignoring strings/comments', () => {
   const sql = `
     SELECT * FROM users
     WHERE id = ? /* comment ? */ AND name = 'user?'
@@ -23,7 +23,7 @@ test('replaceSqlitePositionalPlaceholders correctly replaces ? with $n ignoring 
   assert.equal(result.includes('-- another ?'), true);
 });
 
-test('convertNamedParams replaces @name with $n and returns array of values', (t) => {
+test('convertNamedParams replaces @name with $n and returns array of values', () => {
   const sql = 'SELECT * FROM users WHERE id = @id AND age > @age OR user_id = @id';
   const params = { id: 123, age: 18 };
   const { text, values } = convertNamedParams(sql, params);
@@ -32,9 +32,9 @@ test('convertNamedParams replaces @name with $n and returns array of values', (t
   assert.deepEqual(values, [123, 18]);
 });
 
-test('createPostgresCompatDb wraps pg pool in sqlite-compatible API', async (t) => {
+test('createPostgresCompatDb wraps pg pool in sqlite-compatible API', async () => {
   const mockPool = {
-    query: async (text, values) => {
+    query: async (text, _values) => {
       if (text.includes('INSERT')) {
         return { rowCount: 1, rows: [{ id: 456 }] };
       }

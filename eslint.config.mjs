@@ -17,6 +17,7 @@ export default [
   js.configs.recommended,
   {
     files: [
+      'commitlint.config.js',
       'server.js',
       'server.sveltekit.js',
       'playwright.config.js',

@@ -253,7 +253,7 @@ function createAppSettingsService(options = {}) {
       try {
         await db.prepare('UPDATE app_general_settings SET metrics_token = ? WHERE id = 1').run(newToken);
         effective = await getEffectiveGeneralConfig();
-      } catch (e) {
+      } catch {
         // fallback if table is not migrated yet
       }
     }
