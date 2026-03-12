@@ -70,6 +70,7 @@ docker compose up -d
 ```
 
 Pending PostgreSQL migrations are applied automatically on app startup.
+Storage-compaction PostgreSQL migrations are also applied automatically on startup after image updates; the first boot can take noticeably longer and may temporarily require extra free disk space while tables are rebuilt.
 
 Release image (multi-arch, registry push):
 
@@ -168,6 +169,8 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - `i18n:validate`
 - `i18n:check`
 - `version:print`
+
+`npm run tiles:build -- --region-id=<id>` and direct `node scripts/sync-osm-region.js --region-id=<id>` now rebuild search and filter-tag read-models after a successful full region sync. `--pmtiles-only` still rebuilds only the archive.
 
 ## Build Version
 

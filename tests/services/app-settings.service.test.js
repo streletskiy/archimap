@@ -92,3 +92,67 @@ test('buildSmtpConfigFromInput clears password when pass is empty and keepPasswo
 
   assert.equal(candidate.pass, '');
 });
+
+test('getGeneralSettingsForAdmin reads legacy schema without metrics_token', async () => {
+  const db = createTestDb();
+  const service = createAppSettingsService({
+    db,
+    settingsSecret: 'test-secret',
+    fallbackGeneral: {}
+  });
+
+  db.prepare(`
+    INSERT INTO app_general_settings (
+      id,
+      app_display_name,
+      app_base_url,
+      registration_enabled,
+      user_edit_requires_permission,
+      updated_by,
+      updated_at
+    )
+    VALUES (1, ?, ?, ?, ?, ?, datetime('now'))
+  `).run('legacy-archimap', 'https://example.com', 1, 0, 'admin@example.com');
+
+  const settings = await service.getGeneralSettingsForAdmin();
+
+  assert.equal(settings.general.appDisplayName, 'legacy-archimap');
+  assert.equal(settings.general.appBaseUrl, 'https://example.com');
+  assert.equal(settings.general.registrationEnabled, true);
+  assert.equal(settings.general.userEditRequiresPermission, false);
+  assert.equal(settings.general.metricsToken, '');
+});
+
+test('saveGeneralSettings updates legacy schema without metrics_token', async () => {
+  const db = createTestDb();
+  const service = createAppSettingsService({
+    db,
+    settingsSecret: 'test-secret',
+    fallbackGeneral: {}
+  });
+
+  const settings = await service.saveGeneralSettings({
+    appDisplayName: 'legacy-save',
+    appBaseUrl: 'https://legacy.example.com',
+    registrationEnabled: false,
+    userEditRequiresPermission: true
+  }, 'admin@example.com');
+
+  const row = db.prepare(`
+    SELECT
+      app_display_name,
+      app_base_url,
+      registration_enabled,
+      user_edit_requires_permission,
+      updated_by
+    FROM app_general_settings
+    WHERE id = 1
+  `).get();
+
+  assert.equal(row.app_display_name, 'legacy-save');
+  assert.equal(row.app_base_url, 'https://legacy.example.com');
+  assert.equal(row.registration_enabled, 0);
+  assert.equal(row.user_edit_requires_permission, 1);
+  assert.equal(row.updated_by, 'admin@example.com');
+  assert.equal(settings.general.metricsToken, '');
+});

@@ -20,7 +20,7 @@ async function insertImportRowsIntoPostgres(client, ndjsonPath) {
         row.osm_type,
         row.osm_id,
         row.tags_json,
-        row.geometry_json,
+        row.geometry_wkb_hex,
         row.min_lon,
         row.min_lat,
         row.max_lon,
@@ -32,7 +32,7 @@ async function insertImportRowsIntoPostgres(client, ndjsonPath) {
         osm_type,
         osm_id,
         tags_json,
-        geometry_json,
+        geometry_wkb_hex,
         min_lon,
         min_lat,
         max_lon,
@@ -44,7 +44,7 @@ async function insertImportRowsIntoPostgres(client, ndjsonPath) {
     rows.length = 0;
   }
 
-  for await (const row of readImportRows(ndjsonPath)) {
+  for await (const row of readImportRows(ndjsonPath, { requireGeometryWkbHex: true })) {
     rows.push(row);
     if (rows.length >= batchSize) {
       await flush();
@@ -86,7 +86,7 @@ function insertImportRowsIntoSqlite(db, ndjsonPath) {
   return (async () => {
     let importedFeatureCount = 0;
     let batch = [];
-    for await (const row of readImportRows(ndjsonPath)) {
+    for await (const row of readImportRows(ndjsonPath, { requireGeometryJson: true })) {
       batch.push(row);
       if (batch.length >= 1000) {
         insertBatch(batch);
@@ -249,7 +249,7 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
           osm_type text NOT NULL,
           osm_id bigint NOT NULL,
           tags_json text,
-          geometry_json text NOT NULL,
+          geometry_wkb_hex text NOT NULL,
           min_lon double precision NOT NULL,
           min_lat double precision NOT NULL,
           max_lon double precision NOT NULL,
@@ -265,31 +265,31 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
           osm_type,
           osm_id,
           tags_json,
-          geometry_json,
           min_lon,
           min_lat,
           max_lon,
           max_lat,
+          geom,
           updated_at
         )
         SELECT
           osm_type,
           osm_id,
           tags_json,
-          geometry_json,
           min_lon,
           min_lat,
           max_lon,
           max_lat,
+          ST_Multi(ST_GeomFromWKB(decode(geometry_wkb_hex, 'hex'), 4326)),
           $1::timestamptz
         FROM region_import_tmp
         ON CONFLICT (osm_type, osm_id) DO UPDATE SET
           tags_json = excluded.tags_json,
-          geometry_json = excluded.geometry_json,
           min_lon = excluded.min_lon,
           min_lat = excluded.min_lat,
           max_lon = excluded.max_lon,
           max_lat = excluded.max_lat,
+          geom = excluded.geom,
           updated_at = excluded.updated_at
       `, [runMarker]);
 
@@ -297,20 +297,15 @@ async function applyRegionImportToPostgres({ region, ndjsonPath, builtPmtilesPat
         INSERT INTO public.data_region_memberships (
           region_id,
           osm_type,
-          osm_id,
-          created_at,
-          updated_at
+          osm_id
         )
         SELECT
           $1::bigint,
           osm_type,
-          osm_id,
-          $2::timestamptz,
-          $2::timestamptz
+          osm_id
         FROM region_import_tmp
-        ON CONFLICT (region_id, osm_type, osm_id) DO UPDATE SET
-          updated_at = excluded.updated_at
-      `, [region.id, runMarker]);
+        ON CONFLICT (region_id, osm_type, osm_id) DO NOTHING
+      `, [region.id]);
 
       await client.query(`
         DELETE FROM public.data_region_memberships drm

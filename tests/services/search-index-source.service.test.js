@@ -74,6 +74,7 @@ test('normalizeSearchSourceRows filters malformed rows without throwing', () => 
       osm_type: 'way',
       osm_id: 1,
       tags_json: '{invalid json',
+      local_name: 'Локальное имя',
       local_priority: 0,
       center_lon: 1,
       center_lat: 2
@@ -90,5 +91,22 @@ test('normalizeSearchSourceRows filters malformed rows without throwing', () => 
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].osm_key, 'way/1');
-  assert.equal(rows[0].name, null);
+  assert.equal(rows[0].name, 'Локальное имя');
+});
+
+test('normalizeSearchSourceRow drops entries without searchable text', () => {
+  const row = normalizeSearchSourceRow({
+    osm_type: 'way',
+    osm_id: 11,
+    tags_json: '{}',
+    local_name: null,
+    local_address: null,
+    local_style: null,
+    local_architect: null,
+    local_priority: 0,
+    center_lon: 1,
+    center_lat: 2
+  });
+
+  assert.equal(row, null);
 });

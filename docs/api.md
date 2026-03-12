@@ -10,8 +10,8 @@
 
 System notes:
 
-- `GET /metrics` returns Prometheus-style text payload when `METRICS_ENABLED=true`.
-- `GET /metrics` returns `404` when metrics are disabled.
+- `GET /metrics` returns Prometheus-style text payload when `METRICS_ENABLED=true` and an HTTP `Authorization: Bearer <token>` header is provided. The token can be generated in the Admin Settings UI.
+- `GET /metrics` returns `404` when metrics are disabled, and `401` if an invalid token is provided.
 
 ## Core endpoints
 

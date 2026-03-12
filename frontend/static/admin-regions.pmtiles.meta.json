@@ -1,0 +1,14 @@
+{
+  "input": "frontend/static/admin-regions.geojson",
+  "output": "frontend/static/admin-regions.pmtiles",
+  "inputBytes": 8084643,
+  "inputSha256": "715ce347961d749a9c0bf59ed101485751f48fad5a969d526c3deb29b920e9ef",
+  "outputBytes": 4423668,
+  "layer": "regions",
+  "minZoom": 0,
+  "maxZoom": 7,
+  "image": "archimap-runtime-base:admin-regions",
+  "tippecanoeBin": null,
+  "mode": "docker-runtime-base",
+  "generatedAt": "2026-03-12T07:42:57.026Z"
+}

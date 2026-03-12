@@ -72,9 +72,19 @@ function initObservabilityInfra(app, options = {}) {
     return res.status(ready ? 200 : 503).json(payload);
   });
 
-  app.get('/metrics', (req, res) => {
+  app.get('/metrics', async (req, res) => {
     if (!metricsEnabled) {
       return res.status(404).json({ error: 'Metrics disabled' });
+    }
+    if (typeof options.getMetricsToken === 'function') {
+      const validToken = await options.getMetricsToken();
+      if (validToken) {
+        const authHeader = req.get('Authorization') || '';
+        const providedToken = authHeader.replace(/^Bearer\\s+/i, '').trim();
+        if (providedToken !== validToken) {
+          return res.status(401).json({ error: 'Unauthorized metrics access' });
+        }
+      }
     }
     const uptimeSec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
     const heapUsed = Number(process.memoryUsage?.().heapUsed || 0);

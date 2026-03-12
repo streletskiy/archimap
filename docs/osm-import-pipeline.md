@@ -49,20 +49,27 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 5. The orchestrator delegates the extract stage to `scripts/region-sync/python-extractor.js`, which resolves Python and calls the importer with:
    - `--extract-query <region.extractId>`
    - `--extract-source <region.extractSource>`
-   - `--out-ndjson <workspace>/region-import.ndjson`
+   - PostgreSQL full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
+   - SQLite full sync: `--out-ndjson <workspace>/region-import.ndjson`
 6. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query and materialize the result into a DuckDB file under `data/quackosm/`.
 7. The Python importer opens that DuckDB file, loads the `spatial` extension, and runs SQL over `quackosm_raw` to:
    - keep only OSM `way` and `relation`
    - keep only `POLYGON` and `MULTIPOLYGON`
    - serialize tags to JSON
-   - serialize geometry to GeoJSON
+   - serialize geometry as WKB hex for PostgreSQL DB import handoff
+   - serialize geometry as GeoJSON for SQLite import handoff and PMTiles build input
    - compute `min_lon`, `min_lat`, `max_lon`, `max_lat`
-8. Filtered rows are exported as NDJSON into the workspace file `region-import.ndjson`.
-9. `scripts/region-sync/pmtiles-builder.js` converts that NDJSON stream into newline-delimited GeoJSON features for `tippecanoe`.
+8. Filtered rows are exported as workspace artifacts:
+   - PostgreSQL full sync: `region-import.ndjson` (WKB hex + bbox + tags), `region-build.ndjson` (GeoJSON features for `tippecanoe`), and `region-export-summary.json` (feature count + bounds)
+   - SQLite full sync: `region-import.ndjson` (GeoJSON + bbox + tags)
+9. The PMTiles input is prepared as newline-delimited GeoJSON features for `tippecanoe`:
+   - PostgreSQL full sync: reuses the already exported `region-build.ndjson`
+   - SQLite full sync: `scripts/region-sync/pmtiles-builder.js` converts import NDJSON into `region-build.ndjson`
+   - `--pmtiles-only`: `scripts/region-sync/region-db.js` streams current region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file
 10. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`.
-11. The same imported NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.js`:
-    - PostgreSQL: `region_import_tmp`
-    - SQLite: `temp.region_import_tmp`
+11. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.js`:
+    - PostgreSQL: `region_import_tmp` with `geometry_wkb_hex`
+    - SQLite: `temp.region_import_tmp` with `geometry_json`
 12. Inside one DB transaction the sync:
     - upserts all imported rows into `osm.building_contours`
     - upserts `(region_id, osm_type, osm_id)` into `data_region_memberships`
@@ -74,7 +81,8 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 15. If the DB transaction commits, the backup is dropped and the new archive becomes current.
 16. If any step fails after swap staging, the DB transaction is rolled back and the previous PMTiles file is restored.
 17. Runtime clients later receive the region PMTiles metadata via `/app-config.js` and fetch the archive through `/api/data/regions/:regionId/pmtiles`.
-18. For managed in-app syncs, `ServerRuntime` boot modules then rebuild search index tables and schedule filter-tag cache refresh; direct standalone CLI runs do not add this wrapper step.
+18. For managed in-app syncs, `ServerRuntime` boot modules then rebuild search index tables and schedule filter-tag cache refresh.
+19. Direct standalone full sync execution (`node scripts/sync-osm-region.js --region-id=<id>` and wrappers such as `npm run tiles:build -- --region-id=<id>`) now runs the same search-index and filter-tag follow-up workers before exiting; `--pmtiles-only` still skips them because it does not change imported DB rows.
 
 ## Mermaid diagram
 
@@ -88,7 +96,8 @@ flowchart TD
   F --> G["QuackOSM extract query resolution"]
   G --> H["DuckDB file in data/quackosm"]
   H --> I["DuckDB spatial SQL over quackosm_raw"]
-  I --> J["region-import.ndjson"]
+  I --> J["region-import.ndjson (WKB for PostgreSQL / GeoJSON for SQLite)"]
+  I --> L["region-build.ndjson (GeoJSON for PostgreSQL full sync)"]
   J --> K["scripts/region-sync/pmtiles-builder.js"]
   K --> L["GeoJSON NDJSON for tippecanoe"]
   L --> M["tippecanoe"]
@@ -136,7 +145,7 @@ flowchart TD
 
 - Loads region config from PostgreSQL or SQLite.
 - Validates managed-sync prerequisites for a region.
-- Exports current region members back to NDJSON for `--pmtiles-only` rebuilds.
+- Exports current region members directly to GeoJSON feature NDJSON for `--pmtiles-only` rebuilds.
 
 ### `quackosm`
 
@@ -163,14 +172,15 @@ flowchart TD
 
 - Acts as the transformation stage between raw OSM extract data and ArchiMap import rows.
 - Runs spatial SQL to normalize geometry and derive bbox columns.
-- Produces a compact NDJSON stream used by both:
-  - DB import
-  - PMTiles generation
+- Produces provider-specific handoff artifacts:
+  - PostgreSQL full sync: WKB-based NDJSON for DB import, GeoJSON feature NDJSON for PMTiles, and summary metadata in one DuckDB pass
+  - SQLite full sync: one GeoJSON-based NDJSON reused by DB import and PMTiles generation
 
 ### PostgreSQL / SQLite
 
 - `osm.building_contours` is the global union dataset used by existing building, search, and filter APIs.
 - `data_region_memberships` keeps per-region ownership, which prevents one overlapping region sync from deleting objects still needed by another region.
+- PostgreSQL stores the authoritative contour geometry in PostGIS `geom`; GeoJSON is emitted on demand for building responses and `--pmtiles-only` exports instead of being persisted twice.
 - PostgreSQL keeps `osm.building_contours_summary` updated for runtime fast paths.
 - SQLite follows the same logical flow but uses local temp tables and file-backed DBs.
 
@@ -178,11 +188,13 @@ flowchart TD
 
 - Streams NDJSON rows into the provider-specific staging table.
 - Applies the authoritative transactional upsert/cleanup logic for PostgreSQL and SQLite.
+- PostgreSQL consumes WKB hex rows and materializes PostGIS `geom` directly with `ST_GeomFromWKB(...)`, avoiding a GeoJSON roundtrip during full sync.
 - Performs the protected PMTiles publish/swap so DB commit and archive promotion stay in sync.
 
 ### Search source normalization
 
-- `building_search_source` and `building_search_fts` are populated from raw `osm.building_contours.tags_json` plus `local.architectural_info`.
+- PostgreSQL keeps only searchable rows in `building_search_source` and derives `search_tsv` there through a generated column.
+- SQLite keeps `building_search_source` plus `building_search_fts`.
 - Parsing and fallback composition for `name`, `address`, `style`, and `architect` now happens in Node.js via `src/lib/server/services/search-index-source.service.js`.
 - The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 
@@ -194,15 +206,17 @@ flowchart TD
 
 ### `scripts/region-sync/pmtiles-builder.js`
 
-- Converts import NDJSON rows into newline-delimited GeoJSON features for `tippecanoe`.
+- Converts import NDJSON rows into newline-delimited GeoJSON features for `tippecanoe` when the importer did not already emit a dedicated GeoJSON build artifact.
 - Detects `tippecanoe` from `TIPPECANOE_BIN` or `PATH`.
-- Computes region bounds during export and returns them to the orchestrator summary.
+- Computes region bounds during export for Node-side conversions; PostgreSQL full sync now reuses importer-produced summary metadata instead of re-reading `region-import.ndjson`.
 
 ## Why the pipeline is split this way
 
 - `quackosm` is responsible for extract acquisition and initial OSM filtering.
 - `duckdb` is the transformation layer that can run spatial SQL cheaply on the extracted data.
 - NDJSON is the handoff format between importer, DB upsert logic, and PMTiles generation.
+- PostgreSQL full sync now keeps DB import and PMTiles build artifacts separate so the DB path can use WKB instead of serializing GeoJSON only to parse it back into PostGIS later.
+- PostgreSQL full sync now writes both artifacts and summary metadata in one DuckDB scan, so the orchestrator does not need a second exporter pass or a post-export NDJSON summary pass.
 - The runtime DB stores the authoritative union dataset used by all building/search/filter APIs.
 - Region membership tracking makes overlapping regional syncs safe.
 - PMTiles are region-local read models optimized for map delivery, not the source of truth for search/building endpoints.
@@ -211,7 +225,14 @@ flowchart TD
 
 - Temporary workspace:
   - `region-import.ndjson`
+    - PostgreSQL full sync: WKB hex + bbox + tags
+    - SQLite full sync: GeoJSON + bbox + tags
   - `region-build.ndjson`
+    - PostgreSQL full sync: exported directly by the importer
+    - SQLite full sync: generated by `pmtiles-builder.js`
+    - `--pmtiles-only`: streamed directly from the runtime DB by `region-db.js`
+  - `region-export-summary.json`
+    - PostgreSQL full sync: feature count + bounds emitted directly by the importer
   - `region.pmtiles`
 - Persistent intermediate extraction cache:
   - `data/quackosm/*.duckdb`
@@ -224,8 +245,9 @@ flowchart TD
 ## Managed runtime follow-up after successful sync
 
 - In-app sync flow (scheduler/admin queue) runs follow-up jobs from `ServerRuntime` boot modules.
-- These jobs rebuild `building_search_source` and `building_search_fts` through `search-index.boot.js`, then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
-- Direct standalone execution of `scripts/sync-osm-region.js` updates imported OSM data and PMTiles only; it does not run these wrapper jobs by itself.
+- These jobs rebuild the search read-model through `search-index.boot.js` (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite), then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
+- Direct standalone full sync execution of `scripts/sync-osm-region.js` now invokes the same rebuild workers itself, so search/filter read-models stay aligned after new region imports and normal region updates even without the in-app runtime wrapper.
+- `--pmtiles-only` still rebuilds only the archive from current DB rows and intentionally skips search/filter follow-up because imported OSM rows are unchanged.
 
 ## Failure handling and invariants
 

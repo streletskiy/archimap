@@ -15,11 +15,17 @@ const envSchema = z.object({
 function parseRuntimeEnv(rawEnv = process.env) {
   const parsed = envSchema.parse(rawEnv);
   const isProd = parsed.NODE_ENV === 'production';
+  const weakSecret = parsed.SESSION_SECRET === 'dev-secret-change-me' || parsed.SESSION_SECRET.length < 16;
 
-  if (isProd) {
-    if (parsed.SESSION_SECRET === 'dev-secret-change-me' || parsed.SESSION_SECRET.length < 16) {
-      throw new Error('[env] SESSION_SECRET must be set to a strong value in production');
-    }
+  if (weakSecret) {
+    console.warn('\\n=======================================================================');
+    console.warn('⚠️  WARNING: SESSION_SECRET is set to a default or weak value!');
+    console.warn('   This is unsafe. Please set SESSION_SECRET environment variable.');
+    console.warn('=======================================================================\\n');
+  }
+
+  if (isProd && weakSecret) {
+    throw new Error('[env] SESSION_SECRET must be set to a strong value in production');
   }
 
   const rawDbProvider = String(parsed.DB_PROVIDER || '').trim().toLowerCase();

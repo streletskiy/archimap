@@ -1,6 +1,6 @@
 const { spawn } = require('child_process');
 const { ensureAuthSchema } = require('../auth');
-const { createSimpleRateLimiter } = require('../services/rate-limiter.service');
+const { createRateLimiterFactory } = require('../services/rate-limiter.service');
 const { createSearchService } = require('../services/search.service');
 const { createBuildingEditsService } = require('../services/building-edits.service');
 const { createAppSettingsService } = require('../services/app-settings.service');
@@ -72,7 +72,7 @@ class ServerRuntime {
       this.app.set('trust proxy', 1);
     }
 
-    this.createSimpleRateLimiter = createSimpleRateLimiter;
+    // createSimpleRateLimiter is lazily initialized with Redis config
     this.normalizeUserEditStatus = normalizeUserEditStatus;
     this.sanitizeFieldText = sanitizeFieldText;
     this.sanitizeYearBuilt = sanitizeYearBuilt;
@@ -106,6 +106,12 @@ class ServerRuntime {
   }
 
   initializeSubsystems() {
+    const rateLimiterFactory = createRateLimiterFactory({
+      redisUrl: this.config.redisUrl,
+      logger: this.logger
+    });
+    this.createSimpleRateLimiter = rateLimiterFactory.createSimpleRateLimiter;
+
     this.rateLimiters = createRateLimiters({
       createSimpleRateLimiter: this.createSimpleRateLimiter
     });

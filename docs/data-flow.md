@@ -19,12 +19,12 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 4. The sync script acts as an orchestrator and delegates the real stages to `scripts/region-sync/**`:
    - `python-extractor.js`: Python detection/dependency checks + `sync-osm-buildings.py` invocation
    - `db-ingester.js`: facade for region loading/export and DB import publishing
-   - `region-db.js`: region config loading + current-members export
+   - `region-db.js`: region config loading + current-members export, including direct GeoJSON feature streaming for `--pmtiles-only`
    - `import-applier.js`: transactional DB apply + protected PMTiles swap
-   - `pmtiles-builder.js`: NDJSON -> GeoJSON conversion and `tippecanoe` wrapper
+   - `pmtiles-builder.js`: `tippecanoe` wrapper plus NDJSON -> GeoJSON conversion when the importer does not already emit a dedicated build stream
 5. The region sync script runs the full OSM import pipeline described in [OSM Import Pipeline](osm-import-pipeline.md):
    - extract resolution through `quackosm`
-   - transformation/export through `duckdb`
+   - provider-specific transformation/export through `duckdb` (`WKB` + GeoJSON feature NDJSON + summary metadata in one pass for PostgreSQL DB import/PMTiles, `GeoJSON` for SQLite and PMTiles build)
    - transactional import into `osm.building_contours` and `data_region_memberships`
    - region-specific PMTiles build and protected swap
 6. The result is:
@@ -32,7 +32,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - a refreshed PMTiles archive for the target region
    - updated region sync metadata and bounds for runtime clients
 7. For managed in-app syncs, the runtime then runs post-sync maintenance through `ServerRuntime` boot modules:
-   - `search-index.boot.js` rebuilds `building_search_source` and `building_search_fts`
+   - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite)
    - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
 
 ## Safety invariants

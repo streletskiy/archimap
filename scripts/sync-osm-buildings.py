@@ -27,6 +27,55 @@ from quackosm.osm_extracts import (  # type: ignore
 BATCH_SIZE = 20000
 
 
+def encode_osm_feature_id(osm_type: str, osm_id: int) -> int:
+    type_bit = 1 if str(osm_type or '').strip() == 'relation' else 0
+    return (int(osm_id) * 2) + type_bit
+
+
+def merge_bounds(
+    bounds: dict[str, float] | None,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+) -> dict[str, float]:
+    if bounds is None:
+        return {
+            'west': float(min_lon),
+            'south': float(min_lat),
+            'east': float(max_lon),
+            'north': float(max_lat),
+        }
+    return {
+        'west': min(bounds['west'], float(min_lon)),
+        'south': min(bounds['south'], float(min_lat)),
+        'east': max(bounds['east'], float(max_lon)),
+        'north': max(bounds['north'], float(max_lat)),
+    }
+
+
+def build_geojson_feature_line(osm_type: str, osm_id: int, geometry_json: str) -> str:
+    normalized_geometry_json = str(geometry_json or '').strip()
+    if not normalized_geometry_json:
+        raise ValueError(f'Missing GeoJSON geometry for {str(osm_type or "").strip()}/{int(osm_id)}')
+    return (
+        f'{{"type":"Feature","id":{encode_osm_feature_id(osm_type, int(osm_id))},'
+        f'"properties":{{"osm_id":{int(osm_id)}}},"geometry":{normalized_geometry_json}}}\n'
+    )
+
+
+def write_export_summary(summary_path: Path, processed: int, imported: int, bounds: dict[str, float] | None) -> None:
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps({
+            'processed': int(processed),
+            'importedFeatureCount': int(imported),
+            'bounds': bounds,
+        }, ensure_ascii=False),
+        encoding='utf-8',
+    )
+
+
 def normalize_extract_source(value: str) -> str:
     raw = str(value or 'any').strip() or 'any'
     try:
@@ -496,9 +545,7 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
     return duckdb_path
 
 
-def _import_select_sql(
-    import_limit: int,
-) -> str:
+def _filtered_rows_cte_sql(import_limit: int) -> str:
     limit_sql = f'LIMIT {int(import_limit)}' if import_limit > 0 else ''
 
     return f'''
@@ -521,10 +568,42 @@ WITH src AS (
   ORDER BY feature_id
   {limit_sql}
 )
+'''
+
+
+def _export_select_sql(import_limit: int, geometry_mode: str = 'geojson') -> str:
+    geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
+    if geometry_mode_normalized == 'wkb_hex':
+        geometry_sql = 'ST_AsHEXWKB(geometry) AS geometry_wkb_hex'
+    elif geometry_mode_normalized in ('geojson', 'geojson_feature'):
+        geometry_sql = 'ST_AsGeoJSON(geometry) AS geometry_json'
+    else:
+        raise ValueError(f'Unsupported geometry export mode: {geometry_mode}')
+
+    return f'''
+{_filtered_rows_cte_sql(import_limit)}
 SELECT
   split_part(feature_id, '/', 1) AS osm_type,
   try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
   CAST(to_json(tags) AS VARCHAR) AS tags_json,
+  {geometry_sql},
+  min_lon,
+  min_lat,
+  max_lon,
+  max_lat
+FROM filtered
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
+'''
+
+
+def _export_dual_select_sql(import_limit: int) -> str:
+    return f'''
+{_filtered_rows_cte_sql(import_limit)}
+SELECT
+  split_part(feature_id, '/', 1) AS osm_type,
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
+  CAST(to_json(tags) AS VARCHAR) AS tags_json,
+  ST_AsHEXWKB(geometry) AS geometry_wkb_hex,
   ST_AsGeoJSON(geometry) AS geometry_json,
   min_lon,
   min_lat,
@@ -551,7 +630,7 @@ def import_rows_direct_duckdb_sqlite(
     run_marker: str,
 ) -> Tuple[int, int]:
     started_at = time.time()
-    select_sql = _import_select_sql(import_limit)
+    select_sql = _export_select_sql(import_limit, 'geojson')
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con)
@@ -635,12 +714,15 @@ def export_rows_duckdb_ndjson(
     duckdb_path: Path,
     out_path: Path,
     import_limit: int,
+    geometry_mode: str = 'geojson',
     append: bool = False,
-) -> Tuple[int, int]:
-    select_sql = _import_select_sql(import_limit)
+) -> Tuple[int, int, dict[str, float] | None]:
+    geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
+    select_sql = _export_select_sql(import_limit, geometry_mode_normalized)
     mode = 'a' if append else 'w'
     processed = 0
     imported = 0
+    bounds: dict[str, float] | None = None
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con)
@@ -651,22 +733,89 @@ def export_rows_duckdb_ndjson(
                 if not chunk:
                     break
                 for row in chunk:
-                    payload = {
-                        'osm_type': row[0],
-                        'osm_id': int(row[1]),
-                        'tags_json': row[2],
-                        'geometry_json': row[3],
-                        'min_lon': float(row[4]),
-                        'min_lat': float(row[5]),
-                        'max_lon': float(row[6]),
-                        'max_lat': float(row[7]),
-                    }
-                    out.write(json.dumps(payload, ensure_ascii=False))
-                    out.write('\n')
+                    if geometry_mode_normalized == 'wkb_hex':
+                        payload = {
+                            'osm_type': row[0],
+                            'osm_id': int(row[1]),
+                            'tags_json': row[2],
+                            'min_lon': float(row[4]),
+                            'min_lat': float(row[5]),
+                            'max_lon': float(row[6]),
+                            'max_lat': float(row[7]),
+                        }
+                        payload['geometry_wkb_hex'] = str(row[3])
+                        out.write(json.dumps(payload, ensure_ascii=False))
+                        out.write('\n')
+                    elif geometry_mode_normalized == 'geojson_feature':
+                        out.write(build_geojson_feature_line(str(row[0]), int(row[1]), str(row[3])))
+                    else:
+                        payload = {
+                            'osm_type': row[0],
+                            'osm_id': int(row[1]),
+                            'tags_json': row[2],
+                            'min_lon': float(row[4]),
+                            'min_lat': float(row[5]),
+                            'max_lon': float(row[6]),
+                            'max_lat': float(row[7]),
+                        }
+                        payload['geometry_json'] = row[3]
+                        out.write(json.dumps(payload, ensure_ascii=False))
+                        out.write('\n')
                     processed += 1
                     imported += 1
+                    bounds = merge_bounds(bounds, float(row[4]), float(row[5]), float(row[6]), float(row[7]))
 
-    return processed, imported
+    return processed, imported, bounds
+
+
+def export_rows_duckdb_dual_ndjson(
+    duckdb_path: Path,
+    db_out_path: Path,
+    geojson_out_path: Path,
+    import_limit: int,
+    append: bool = False,
+) -> Tuple[int, int, dict[str, float] | None]:
+    select_sql = _export_dual_select_sql(import_limit)
+    mode = 'a' if append else 'w'
+    processed = 0
+    imported = 0
+    bounds: dict[str, float] | None = None
+
+    with duckdb.connect(str(duckdb_path)) as con:
+        _load_duckdb_extensions(con)
+        cursor = con.execute(select_sql)
+        with db_out_path.open(mode, encoding='utf-8') as db_out, geojson_out_path.open(mode, encoding='utf-8') as geojson_out:
+            while True:
+                chunk = cursor.fetchmany(BATCH_SIZE)
+                if not chunk:
+                    break
+                for row in chunk:
+                    osm_type = str(row[0])
+                    osm_id = int(row[1])
+                    min_lon = float(row[5])
+                    min_lat = float(row[6])
+                    max_lon = float(row[7])
+                    max_lat = float(row[8])
+
+                    db_out.write(json.dumps({
+                        'osm_type': osm_type,
+                        'osm_id': osm_id,
+                        'tags_json': row[2],
+                        'geometry_wkb_hex': str(row[3]),
+                        'min_lon': min_lon,
+                        'min_lat': min_lat,
+                        'max_lon': max_lon,
+                        'max_lat': max_lat,
+                    }, ensure_ascii=False))
+                    db_out.write('\n')
+
+                    geojson_out.write(build_geojson_feature_line(osm_type, osm_id, str(row[4])))
+
+                    processed += 1
+                    imported += 1
+                    bounds = merge_bounds(bounds, min_lon, min_lat, max_lon, max_lat)
+
+    return processed, imported, bounds
 
 
 def cleanup_stale(conn: sqlite3.Connection, import_limit: int, run_marker: str) -> int:
@@ -695,6 +844,9 @@ def main() -> None:
     parser.add_argument('--resolve-exact-extract', required=False)
     parser.add_argument('--no-count-pass', action='store_true')
     parser.add_argument('--out-ndjson', required=False)
+    parser.add_argument('--out-db-ndjson', required=False)
+    parser.add_argument('--out-geojson-ndjson', required=False)
+    parser.add_argument('--out-summary-json', required=False)
     parser.add_argument('--limit', type=int, default=12)
     args = parser.parse_args()
 
@@ -738,9 +890,20 @@ def main() -> None:
         with_count_pass = False
 
     out_ndjson = str(args.out_ndjson or '').strip()
+    out_db_ndjson = str(args.out_db_ndjson or '').strip()
+    out_geojson_ndjson = str(args.out_geojson_ndjson or '').strip()
+    out_summary_json = str(args.out_summary_json or '').strip()
+    if out_ndjson and (out_db_ndjson or out_geojson_ndjson):
+        raise ValueError('Use either --out-ndjson or --out-db-ndjson/--out-geojson-ndjson')
+    if out_db_ndjson and out_geojson_ndjson:
+        db_candidate = Path(out_db_ndjson).expanduser().resolve()
+        geojson_candidate = Path(out_geojson_ndjson).expanduser().resolve()
+        if db_candidate == geojson_candidate:
+            raise ValueError('--out-db-ndjson and --out-geojson-ndjson must point to different files')
+
     conn = None
     run_marker = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
-    if not out_ndjson:
+    if not out_ndjson and not out_db_ndjson and not out_geojson_ndjson:
         db_path = str((Path(os.getenv('OSM_DB_PATH', '')).expanduser().resolve()) if os.getenv('OSM_DB_PATH') else (Path(os.path.dirname(__file__)) / '..' / 'data' / 'osm.db').resolve())
         conn = sqlite3.connect(db_path)
         ensure_sqlite_schema(conn)
@@ -757,11 +920,16 @@ def main() -> None:
 
     processed = 0
     imported = 0
+    export_bounds: dict[str, float] | None = None
     ndjson_path = Path(out_ndjson).expanduser().resolve() if out_ndjson else None
-    if ndjson_path is not None:
-        ndjson_path.parent.mkdir(parents=True, exist_ok=True)
-        if ndjson_path.exists():
-            ndjson_path.unlink()
+    db_ndjson_path = Path(out_db_ndjson).expanduser().resolve() if out_db_ndjson else None
+    geojson_ndjson_path = Path(out_geojson_ndjson).expanduser().resolve() if out_geojson_ndjson else None
+    summary_json_path = Path(out_summary_json).expanduser().resolve() if out_summary_json else None
+    for candidate_path in (ndjson_path, db_ndjson_path, geojson_ndjson_path, summary_json_path):
+        if candidate_path is not None:
+            candidate_path.parent.mkdir(parents=True, exist_ok=True)
+            if candidate_path.exists():
+                candidate_path.unlink()
 
     if extract_queries:
         print(f'Extract import started (QuackOSM + DuckDB): source={extract_source}, queries={extract_queries}', flush=True)
@@ -773,12 +941,38 @@ def main() -> None:
             duckdb_path = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx)
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
             if ndjson_path is not None:
-                p, i = export_rows_duckdb_ndjson(
+                p, i, bounds = export_rows_duckdb_ndjson(
                     duckdb_path=duckdb_path,
                     out_path=ndjson_path,
                     import_limit=per_query_limit,
+                    geometry_mode='geojson',
                     append=(idx > 1),
                 )
+            elif db_ndjson_path is not None or geojson_ndjson_path is not None:
+                if db_ndjson_path is not None and geojson_ndjson_path is not None:
+                    p, i, bounds = export_rows_duckdb_dual_ndjson(
+                        duckdb_path=duckdb_path,
+                        db_out_path=db_ndjson_path,
+                        geojson_out_path=geojson_ndjson_path,
+                        import_limit=per_query_limit,
+                        append=(idx > 1),
+                    )
+                elif db_ndjson_path is not None:
+                    p, i, bounds = export_rows_duckdb_ndjson(
+                        duckdb_path=duckdb_path,
+                        out_path=db_ndjson_path,
+                        import_limit=per_query_limit,
+                        geometry_mode='wkb_hex',
+                        append=(idx > 1),
+                    )
+                else:
+                    p, i, bounds = export_rows_duckdb_ndjson(
+                        duckdb_path=duckdb_path,
+                        out_path=geojson_ndjson_path,
+                        import_limit=per_query_limit,
+                        geometry_mode='geojson_feature',
+                        append=(idx > 1),
+                    )
             else:
                 p, i = import_rows_direct_duckdb_sqlite(
                     duckdb_path=duckdb_path,
@@ -786,18 +980,53 @@ def main() -> None:
                     import_limit=per_query_limit,
                     run_marker=run_marker,
                 )
+                bounds = None
             processed += p
             imported += i
+            if bounds is not None:
+                export_bounds = merge_bounds(
+                    export_bounds,
+                    bounds['west'],
+                    bounds['south'],
+                    bounds['east'],
+                    bounds['north'],
+                )
     else:
         print(f'PBF import started (QuackOSM + DuckDB): {pbf_path}', flush=True)
         duckdb_path = run_quackosm_to_duckdb(pbf_path, work_dir)
         if ndjson_path is not None:
-            processed, imported = export_rows_duckdb_ndjson(
+            processed, imported, export_bounds = export_rows_duckdb_ndjson(
                 duckdb_path=duckdb_path,
                 out_path=ndjson_path,
                 import_limit=import_limit,
+                geometry_mode='geojson',
                 append=False,
             )
+        elif db_ndjson_path is not None or geojson_ndjson_path is not None:
+            if db_ndjson_path is not None and geojson_ndjson_path is not None:
+                processed, imported, export_bounds = export_rows_duckdb_dual_ndjson(
+                    duckdb_path=duckdb_path,
+                    db_out_path=db_ndjson_path,
+                    geojson_out_path=geojson_ndjson_path,
+                    import_limit=import_limit,
+                    append=False,
+                )
+            elif db_ndjson_path is not None:
+                processed, imported, export_bounds = export_rows_duckdb_ndjson(
+                    duckdb_path=duckdb_path,
+                    out_path=db_ndjson_path,
+                    import_limit=import_limit,
+                    geometry_mode='wkb_hex',
+                    append=False,
+                )
+            else:
+                processed, imported, export_bounds = export_rows_duckdb_ndjson(
+                    duckdb_path=duckdb_path,
+                    out_path=geojson_ndjson_path,
+                    import_limit=import_limit,
+                    geometry_mode='geojson_feature',
+                    append=False,
+                )
         else:
             processed, imported = import_rows_direct_duckdb_sqlite(
                 duckdb_path=duckdb_path,
@@ -806,9 +1035,13 @@ def main() -> None:
                 run_marker=run_marker,
             )
 
-    if ndjson_path is not None:
+    if ndjson_path is not None or db_ndjson_path is not None or geojson_ndjson_path is not None:
+        if summary_json_path is not None:
+            write_export_summary(summary_json_path, processed, imported, export_bounds)
         print(
-            f'Export done. processed={processed}, exported={imported}, ndjson={ndjson_path}',
+            'Export done. '
+            f'processed={processed}, exported={imported}, '
+            f'db_ndjson={db_ndjson_path}, geojson_ndjson={geojson_ndjson_path}, ndjson={ndjson_path}',
             flush=True,
         )
         return

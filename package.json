@@ -25,7 +25,9 @@
     "perf:smoke": "node scripts/perf-smoke.js",
     "analyze": "npm --prefix frontend run analyze",
     "depcheck": "depcheck --ignores=\"@eslint/js,globals,eslint-config-prettier,eslint-plugin-svelte,svelte\"",
-    "dev": "npm run frontend:build && node server.sveltekit.js",
+    "dev": "npm run dev:full",
+    "dev:server": "node server.sveltekit.js",
+    "dev:full": "npm run frontend:build && node server.sveltekit.js",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:preview": "npm --prefix frontend run preview",
@@ -48,9 +50,9 @@
     "version:print": "node -e \"console.log(JSON.stringify(require('./src/lib/version.generated.json'), null, 2))\""
   },
   "keywords": [],
-  "author": "",
+  "author": "Archimap Contributors",
   "license": "Apache-2.0",
-  "description": "",
+  "description": "Archimap map editing service",
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "connect-redis": "^9.0.0",
@@ -63,6 +65,8 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.4.3",
+    "@commitlint/config-conventional": "^20.4.3",
     "@eslint/js": "^9.21.0",
     "@playwright/test": "^1.54.2",
     "depcheck": "^1.4.7",
@@ -71,6 +75,7 @@
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-svelte": "^3.12.4",
     "globals": "^17.4.0",
+    "husky": "^9.1.7",
     "prettier": "^3.5.3",
     "svelte": "^5.20.0"
   }

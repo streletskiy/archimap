@@ -1,9 +1,12 @@
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 const {
-  encodeOsmFeatureId,
+  closeWriteStream,
   ensureDir,
-  readImportRows
+  formatGeojsonFeatureLine,
+  readImportRows,
+  updateBounds,
+  writeStreamLine
 } = require('./common');
 
 function runCommand(exe, args, options = {}) {
@@ -27,44 +30,36 @@ function detectTippecanoeExecutable(env = process.env) {
 
 async function exportImportRowsToGeojson(importPath, geojsonPath) {
   ensureDir(geojsonPath);
-  const out = fs.createWriteStream(geojsonPath, { encoding: 'utf8' });
+  const out = fs.createWriteStream(geojsonPath, {
+    encoding: 'utf8',
+    highWaterMark: 1024 * 1024
+  });
   let importedFeatureCount = 0;
   let bounds = null;
 
   try {
-    for await (const row of readImportRows(importPath)) {
-      const geometry = JSON.parse(row.geometry_json);
-      const feature = {
-        type: 'Feature',
-        id: encodeOsmFeatureId(row.osm_type, row.osm_id),
-        properties: {
-          osm_id: Number(row.osm_id)
-        },
-        geometry
-      };
-      out.write(`${JSON.stringify(feature)}\n`);
+    for await (const row of readImportRows(importPath, { requireGeometryJson: true })) {
+      await writeStreamLine(out, formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json));
       importedFeatureCount += 1;
-      bounds = bounds
-        ? {
-          west: Math.min(bounds.west, row.min_lon),
-          south: Math.min(bounds.south, row.min_lat),
-          east: Math.max(bounds.east, row.max_lon),
-          north: Math.max(bounds.north, row.max_lat)
-        }
-        : {
-          west: row.min_lon,
-          south: row.min_lat,
-          east: row.max_lon,
-          north: row.max_lat
-        };
+      bounds = updateBounds(bounds, row);
     }
   } finally {
-    await new Promise((resolve, reject) => {
-      out.end((error) => {
-        if (error) return reject(error);
-        return resolve();
-      });
-    });
+    await closeWriteStream(out);
+  }
+
+  return {
+    importedFeatureCount,
+    bounds
+  };
+}
+
+async function summarizeImportRows(importPath, options = {}) {
+  let importedFeatureCount = 0;
+  let bounds = null;
+
+  for await (const row of readImportRows(importPath, options)) {
+    importedFeatureCount += 1;
+    bounds = updateBounds(bounds, row);
   }
 
   return {
@@ -112,5 +107,6 @@ function buildPmtilesFromGeojson({
 
 module.exports = {
   buildPmtilesFromGeojson,
-  exportImportRowsToGeojson
+  exportImportRowsToGeojson,
+  summarizeImportRows
 };

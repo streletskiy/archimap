@@ -18,6 +18,8 @@ function createAppSettingsService(options = {}) {
   }
 
   const secretKey = crypto.createHash('sha256').update(secret).digest();
+  const dbProvider = String(db.provider || '').trim().toLowerCase();
+  let generalSettingsSchema = null;
 
   function normalizeBoolean(value, fallback = false) {
     if (typeof value === 'boolean') return value;
@@ -44,11 +46,13 @@ function createAppSettingsService(options = {}) {
     const appBaseUrl = String(raw.appBaseUrl || raw.app_base_url || '').trim();
     const registrationEnabled = normalizeBoolean(raw.registrationEnabled ?? raw.registration_enabled, true);
     const userEditRequiresPermission = normalizeBoolean(raw.userEditRequiresPermission ?? raw.user_edit_requires_permission, true);
+    const metricsToken = String(raw.metricsToken || raw.metrics_token || '').trim();
     return {
       appDisplayName,
       appBaseUrl,
       registrationEnabled,
-      userEditRequiresPermission
+      userEditRequiresPermission,
+      metricsToken
     };
   }
 
@@ -79,6 +83,34 @@ function createAppSettingsService(options = {}) {
     }
   }
 
+  async function getGeneralSettingsSchema() {
+    if (generalSettingsSchema) return generalSettingsSchema;
+
+    let hasMetricsToken = false;
+    try {
+      if (dbProvider === 'postgres') {
+        const row = await db.prepare(`
+          SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'app_general_settings'
+              AND column_name = 'metrics_token'
+          ) AS has_metrics_token
+        `).get();
+        hasMetricsToken = Boolean(row?.has_metrics_token || row?.hasMetricsToken);
+      } else {
+        const rows = await db.prepare('PRAGMA table_info(app_general_settings)').all();
+        hasMetricsToken = rows.some((row) => String(row?.name || '').trim().toLowerCase() === 'metrics_token');
+      }
+    } catch {
+      hasMetricsToken = false;
+    }
+
+    generalSettingsSchema = { hasMetricsToken };
+    return generalSettingsSchema;
+  }
+
   async function readStoredSmtpRow() {
     try {
       return await db.prepare(`
@@ -103,12 +135,15 @@ function createAppSettingsService(options = {}) {
 
   async function readStoredGeneralRow() {
     try {
+      const schema = await getGeneralSettingsSchema();
+      const metricsTokenSelect = schema.hasMetricsToken ? 'metrics_token,' : 'NULL AS metrics_token,';
       return await db.prepare(`
         SELECT
           app_display_name,
           app_base_url,
           registration_enabled,
           user_edit_requires_permission,
+          ${metricsTokenSelect}
           updated_by,
           updated_at
         FROM app_general_settings
@@ -164,7 +199,8 @@ function createAppSettingsService(options = {}) {
         app_display_name: row.app_display_name,
         app_base_url: row.app_base_url,
         registration_enabled: Number(row.registration_enabled || 0) > 0,
-        user_edit_requires_permission: Number(row.user_edit_requires_permission || 0) > 0
+        user_edit_requires_permission: Number(row.user_edit_requires_permission || 0) > 0,
+        metrics_token: row.metrics_token
       })
       : null;
 
@@ -210,14 +246,25 @@ function createAppSettingsService(options = {}) {
   }
 
   async function getGeneralSettingsForAdmin() {
-    const effective = await getEffectiveGeneralConfig();
+    let effective = await getEffectiveGeneralConfig();
+    const schema = await getGeneralSettingsSchema();
+    if (schema.hasMetricsToken && !effective.config.metricsToken) {
+      const newToken = crypto.randomBytes(32).toString('hex');
+      try {
+        await db.prepare('UPDATE app_general_settings SET metrics_token = ? WHERE id = 1').run(newToken);
+        effective = await getEffectiveGeneralConfig();
+      } catch {
+        // fallback if table is not migrated yet
+      }
+    }
     return {
       source: effective.source,
       general: {
         appDisplayName: effective.config.appDisplayName,
         appBaseUrl: effective.config.appBaseUrl,
         registrationEnabled: effective.config.registrationEnabled,
-        userEditRequiresPermission: effective.config.userEditRequiresPermission
+        userEditRequiresPermission: effective.config.userEditRequiresPermission,
+        metricsToken: effective.config.metricsToken
       },
       updatedBy: effective.updatedBy,
       updatedAt: effective.updatedAt
@@ -297,32 +344,68 @@ function createAppSettingsService(options = {}) {
   async function saveGeneralSettings(input = {}, actor = null) {
     const next = normalizeGeneralShape(input);
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
+    let metricsTokenToSave = next.metricsToken;
+    if (!metricsTokenToSave) {
+      metricsTokenToSave = crypto.randomBytes(32).toString('hex');
+    }
+    const schema = await getGeneralSettingsSchema();
 
-    await db.prepare(`
-      INSERT INTO app_general_settings (
-        id,
-        app_display_name,
-        app_base_url,
-        registration_enabled,
-        user_edit_requires_permission,
-        updated_by,
-        updated_at
-      )
-      VALUES (1, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        app_display_name = excluded.app_display_name,
-        app_base_url = excluded.app_base_url,
-        registration_enabled = excluded.registration_enabled,
-        user_edit_requires_permission = excluded.user_edit_requires_permission,
-        updated_by = excluded.updated_by,
-        updated_at = datetime('now')
-    `).run(
-      next.appDisplayName,
-      next.appBaseUrl || null,
-      next.registrationEnabled ? 1 : 0,
-      next.userEditRequiresPermission ? 1 : 0,
-      updatedBy
-    );
+    if (schema.hasMetricsToken) {
+      await db.prepare(`
+        INSERT INTO app_general_settings (
+          id,
+          app_display_name,
+          app_base_url,
+          registration_enabled,
+          user_edit_requires_permission,
+          metrics_token,
+          updated_by,
+          updated_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(id) DO UPDATE SET
+          app_display_name = excluded.app_display_name,
+          app_base_url = excluded.app_base_url,
+          registration_enabled = excluded.registration_enabled,
+          user_edit_requires_permission = excluded.user_edit_requires_permission,
+          metrics_token = excluded.metrics_token,
+          updated_by = excluded.updated_by,
+          updated_at = datetime('now')
+      `).run(
+        next.appDisplayName,
+        next.appBaseUrl || null,
+        next.registrationEnabled ? 1 : 0,
+        next.userEditRequiresPermission ? 1 : 0,
+        metricsTokenToSave || null,
+        updatedBy
+      );
+    } else {
+      await db.prepare(`
+        INSERT INTO app_general_settings (
+          id,
+          app_display_name,
+          app_base_url,
+          registration_enabled,
+          user_edit_requires_permission,
+          updated_by,
+          updated_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(id) DO UPDATE SET
+          app_display_name = excluded.app_display_name,
+          app_base_url = excluded.app_base_url,
+          registration_enabled = excluded.registration_enabled,
+          user_edit_requires_permission = excluded.user_edit_requires_permission,
+          updated_by = excluded.updated_by,
+          updated_at = datetime('now')
+      `).run(
+        next.appDisplayName,
+        next.appBaseUrl || null,
+        next.registrationEnabled ? 1 : 0,
+        next.userEditRequiresPermission ? 1 : 0,
+        updatedBy
+      );
+    }
 
     return getGeneralSettingsForAdmin();
   }

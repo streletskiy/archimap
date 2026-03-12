@@ -18,6 +18,7 @@ function initManagedSyncWorkers(options = {}) {
   const regionTimers = new Map();
   let currentRun = null;
   let currentSyncChild = null;
+  let deferredSyncSuccessPayload = null;
   let initialized = false;
   let draining = false;
 
@@ -91,16 +92,36 @@ function initManagedSyncWorkers(options = {}) {
     return `Sync failed with exit code ${code}`;
   }
 
+  async function flushDeferredSyncSuccess() {
+    if (typeof onSyncSuccess !== 'function') {
+      deferredSyncSuccessPayload = null;
+      return;
+    }
+    if (currentSyncChild || queue.length > 0 || !deferredSyncSuccessPayload) {
+      return;
+    }
+
+    const payload = deferredSyncSuccessPayload;
+    deferredSyncSuccessPayload = null;
+    await Promise.resolve(onSyncSuccess(payload));
+  }
+
   async function finalizeRun(runId, result) {
     try {
       if (result.success) {
         const saved = await dataSettingsService.markRunSucceeded(runId, result.summary || {});
+        const successPayload = {
+          region: saved.region,
+          run: saved.run,
+          summary: result.summary || {}
+        };
         if (typeof onSyncSuccess === 'function') {
-          await Promise.resolve(onSyncSuccess({
-            region: saved.region,
-            run: saved.run,
-            summary: result.summary || {}
-          }));
+          if (queue.length > 0) {
+            deferredSyncSuccessPayload = successPayload;
+          } else {
+            deferredSyncSuccessPayload = null;
+            await Promise.resolve(onSyncSuccess(successPayload));
+          }
         }
       } else {
         await dataSettingsService.markRunFailed(runId, result.error || 'Sync failed', {
@@ -109,7 +130,11 @@ function initManagedSyncWorkers(options = {}) {
       }
     } finally {
       await reloadSchedules();
-      void drainQueue();
+      try {
+        await flushDeferredSyncSuccess();
+      } finally {
+        void drainQueue();
+      }
     }
   }
 
@@ -121,7 +146,10 @@ function initManagedSyncWorkers(options = {}) {
 
     const child = spawn(processExecPath, [syncRegionScriptPath, `--region-id=${region.id}`], {
       cwd,
-      env,
+      env: {
+        ...env,
+        REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true'
+      },
       stdio: ['ignore', 'pipe', 'pipe']
     });
     currentSyncChild = child;

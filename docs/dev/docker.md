@@ -26,7 +26,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 4. `frontend-build`
 
-- Generates version metadata and builds frontend bundle.
+- Generates version metadata and builds frontend bundle from committed frontend assets.
 - Depends on frontend sources, not on backend dependency install layer.
 
 5. `runtime`
@@ -112,6 +112,8 @@ Docker downloads only changed layers during pull.
 - local source builds (`docker compose up --build`, default image tag `streletskiy/archimap:dev`)
 - registry deploys (`ARCHIMAP_IMAGE=streletskiy/archimap:<version> docker compose up -d`)
 
+`admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` only when the archive is missing or out of date.
+
 ## PostgreSQL + PostGIS (default in Compose)
 
 `docker-compose.yml` now starts `db-postgres` by default.
@@ -126,6 +128,8 @@ Pending PostgreSQL migrations are applied automatically on app startup. Manual m
 docker compose exec archimap npm run db:pg:migrate
 docker compose exec archimap npm run db:pg:smoke
 ```
+
+When an updated image contains storage-compaction PostgreSQL migrations, the first container start applies them automatically to the existing database. Expect a longer first boot and keep extra free disk space available temporarily while large tables are rebuilt.
 
 Avoid bind-mounting local `./db` into `/app/db` on deployment hosts. The runtime image already contains `db/postgres/migrations`, and masking that path can make the app start against an empty schema.
 

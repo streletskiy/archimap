@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createMiniApp } = require('../../src/lib/server/infra/mini-app.infra');
+const { createMiniApp, jsonMiddleware } = require('../../src/lib/server/infra/mini-app.infra');
 
 async function startServer(app) {
   return await new Promise((resolve, reject) => {
@@ -56,4 +56,43 @@ test('createMiniApp listen fallback hides unhandled app.handle details from clie
     code: 'ERR_INTERNAL',
     error: 'Internal server error'
   });
+});
+
+test('createMiniApp handles simple route matching and parameters', async (t) => {
+  const app = createMiniApp();
+  app.get('/users/:id', (req, res) => {
+    res.json({ id: req.params.id, query: req.query });
+  });
+
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/users/123?q=search`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload, { id: '123', query: { q: 'search' } });
+});
+
+test('createMiniApp handles jsonMiddleware', async (t) => {
+  const app = createMiniApp();
+  app.use(jsonMiddleware());
+  app.post('/data', (req, res) => {
+    res.json({ received: req.body });
+  });
+
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/data`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'value' })
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload, { received: { key: 'value' } });
 });

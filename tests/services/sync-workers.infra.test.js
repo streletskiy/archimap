@@ -156,6 +156,122 @@ test('managed sync workers execute region jobs through a single queue', async ()
   assert.deepEqual(spawnCalls[1], ['managed.js', '--region-id=2']);
 });
 
+test('managed sync workers defer post-sync maintenance until the queue drains', async () => {
+  const children = [];
+  const successEvents = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 1,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 2,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.js',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async (payload) => {
+      successEvents.push(payload);
+    },
+    log: { log() {}, error() {} }
+  });
+
+  await workers.requestRegionSync(1, { triggerReason: 'manual', requestedBy: 'tester' });
+  await workers.requestRegionSync(2, { triggerReason: 'manual', requestedBy: 'tester' });
+
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  assert.equal(successEvents.length, 0);
+
+  children[1].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":20}\n'));
+  children[1].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  assert.equal(successEvents.length, 1);
+  assert.equal(successEvents[0]?.region?.id, 2);
+  assert.equal(successEvents[0]?.summary?.activeFeatureCount, 20);
+});
+
+test('managed sync workers flush deferred maintenance after the queue drains on failure', async () => {
+  const children = [];
+  const successEvents = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 1,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 2,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.js',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async (payload) => {
+      successEvents.push(payload);
+    },
+    log: { log() {}, error() {} }
+  });
+
+  await workers.requestRegionSync(1, { triggerReason: 'manual', requestedBy: 'tester' });
+  await workers.requestRegionSync(2, { triggerReason: 'manual', requestedBy: 'tester' });
+
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  assert.equal(successEvents.length, 0);
+
+  children[1].stderr.emit('data', Buffer.from('second run failed\n'));
+  children[1].emit('close', 1, null);
+  await waitForMicrotasks();
+
+  assert.equal(successEvents.length, 1);
+  assert.equal(successEvents[0]?.region?.id, 1);
+  assert.equal(successEvents[0]?.summary?.activeFeatureCount, 10);
+});
+
 test('sync workers can switch from none mode to managed mode after regions appear', async () => {
   const dataSettingsService = createManagedDataSettingsService([
     {
@@ -194,4 +310,44 @@ test('sync workers can switch from none mode to managed mode after regions appea
   });
   assert.equal(result.region.id, 7);
   assert.equal(result.queued, true);
+});
+
+test('managed sync workers disable standalone runtime followup in child env', async () => {
+  const spawnCalls = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 3,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: (_execPath, _args, options = {}) => {
+      spawnCalls.push(options);
+      return createChildProcessStub();
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.js',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  await workers.requestRegionSync(3, {
+    triggerReason: 'manual',
+    requestedBy: 'tester'
+  });
+
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0]?.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP, 'true');
+
+  workers.stop();
+  await waitForMicrotasks();
 });

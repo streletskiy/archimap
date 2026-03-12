@@ -27,6 +27,9 @@ function createAuthService({
   smtp,
   getSmtpConfig
 }) {
+  const sessionUserCache = new Map();
+  const SESSION_USER_TTL_MS = 60000;
+
   function normalizeEmail(value) {
     return String(value || '').trim().toLowerCase();
   }
@@ -196,10 +199,29 @@ function createAuthService({
 
     const email = normalizeEmail(sessionUser.email);
     if (!isValidEmail(email)) return null;
+
+    const now = Date.now();
+    const cached = sessionUserCache.get(email);
+    if (cached && now < cached.expiresAt) {
+      req.session.user = cached.user;
+      return cached.user;
+    }
+
     const row = await db.prepare('SELECT email, first_name, last_name, can_edit, is_admin, is_master_admin FROM auth.users WHERE email = ?').get(email);
-    if (!row) return null;
+    if (!row) {
+      sessionUserCache.delete(email);
+      return null;
+    }
     const user = buildSessionUserFromRow(row);
     req.session.user = user;
+    sessionUserCache.set(email, { user, expiresAt: now + SESSION_USER_TTL_MS });
+
+    if (sessionUserCache.size > 1000) {
+      for (const [key, entry] of sessionUserCache.entries()) {
+        if (now >= entry.expiresAt) sessionUserCache.delete(key);
+      }
+    }
+
     return user;
   }
 
@@ -577,6 +599,7 @@ function createAuthService({
 
     const passwordHash = hashPassword(newPassword);
     await db.prepare('UPDATE auth.users SET password_hash = ? WHERE id = ?').run(passwordHash, user.id);
+    sessionUserCache.delete(email);
     return { payload: { ok: true } };
   }
 

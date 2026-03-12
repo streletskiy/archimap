@@ -12,7 +12,8 @@
     appDisplayName: 'archimap',
     appBaseUrl: '',
     registrationEnabled: true,
-    userEditRequiresPermission: true
+    userEditRequiresPermission: true,
+    metricsToken: ''
   };
   let generalLoading = false;
   let generalStatus = '';
@@ -52,11 +53,12 @@
     generalStatus = translateNow('admin.settings.saving');
 
     try {
-      await apiJson('/api/admin/app-settings/general', {
+      const data = await apiJson('/api/admin/app-settings/general', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ general })
       });
+      general = data?.item?.general || general;
       generalStatus = translateNow('admin.settings.saved');
     } catch (error) {
       generalStatus = msg(error, translateNow('admin.settings.saveGeneralFailed'));
@@ -154,7 +156,14 @@
         ><input type="checkbox" bind:checked={general.userEditRequiresPermission} />
         {$t('admin.settings.editRequiresPermission')}</label
       >
-      <button type="submit" class="ui-btn ui-btn-primary" disabled={generalLoading}>{$t('common.save')}</button>
+      <div class="mt-2 text-sm text-gray-500">
+        <div class="font-semibold text-gray-700">{$t('admin.settings.metricsToken')}:</div>
+        <div class="flex items-center gap-2 mt-1">
+          <input type="text" class="ui-field font-mono text-xs flex-1" readonly value={general.metricsToken || $t('admin.settings.metricsTokenGenerating')} />
+          <button type="button" class="ui-btn ui-btn-secondary" on:click={() => { general.metricsToken = ''; saveGeneral({preventDefault: () => {}}); }}>{$t('admin.settings.metricsTokenRegenerate')}</button>
+        </div>
+      </div>
+      <button type="submit" class="ui-btn ui-btn-primary mt-4" disabled={generalLoading}>{$t('common.save')}</button>
       {#if generalStatus}
         <p class="text-sm ui-text-muted">{generalStatus}</p>
       {/if}

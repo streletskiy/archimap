@@ -137,6 +137,9 @@ function exportRegionExtractToNdjson({
   importerPath,
   region,
   outputPath,
+  dbOutputPath,
+  geojsonOutputPath,
+  summaryOutputPath,
   env = process.env
 }) {
   const pythonCandidate = ensurePythonImporterDeps(env);
@@ -146,12 +149,37 @@ function exportRegionExtractToNdjson({
     throw new Error('Managed region sync requires canonical extract id');
   }
 
-  const result = runPython([
+  const legacyOutputPath = String(outputPath || '').trim();
+  const nextDbOutputPath = String(dbOutputPath || '').trim();
+  const nextGeojsonOutputPath = String(geojsonOutputPath || '').trim();
+  const nextSummaryOutputPath = String(summaryOutputPath || '').trim();
+  if (legacyOutputPath && (nextDbOutputPath || nextGeojsonOutputPath)) {
+    throw new Error('Use either outputPath or dbOutputPath/geojsonOutputPath for region extract export');
+  }
+  if (!legacyOutputPath && !nextDbOutputPath && !nextGeojsonOutputPath) {
+    throw new Error('Region extract export requires at least one output path');
+  }
+
+  const args = [
     importerPath,
     '--extract-query', extractId,
-    '--extract-source', extractSource,
-    '--out-ndjson', outputPath
-  ], 'inherit', pythonCandidate, {
+    '--extract-source', extractSource
+  ];
+  if (legacyOutputPath) {
+    args.push('--out-ndjson', legacyOutputPath);
+  } else {
+    if (nextDbOutputPath) {
+      args.push('--out-db-ndjson', nextDbOutputPath);
+    }
+    if (nextGeojsonOutputPath) {
+      args.push('--out-geojson-ndjson', nextGeojsonOutputPath);
+    }
+  }
+  if (nextSummaryOutputPath) {
+    args.push('--out-summary-json', nextSummaryOutputPath);
+  }
+
+  const result = runPython(args, 'inherit', pythonCandidate, {
     ...env,
     IMPORT_LIMIT: '0'
   });

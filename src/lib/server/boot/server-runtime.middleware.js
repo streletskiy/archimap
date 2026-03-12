@@ -19,7 +19,11 @@ function applyServerRuntimeMiddleware(runtime) {
     getReadinessChecks: () => ({
       sessionStoreReady: Boolean(runtime.sessionMiddleware),
       dbReady: runtime.isDbRuntimeReady()
-    })
+    }),
+    getMetricsToken: async () => {
+      const g = await runtime.appSettingsService.getEffectiveGeneralConfig();
+      return g.config.metricsToken;
+    }
   });
 
   runtime.app.use((req, res, next) => {

@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS app_general_settings (
   app_base_url TEXT,
   registration_enabled INTEGER NOT NULL DEFAULT 1,
   user_edit_requires_permission INTEGER NOT NULL DEFAULT 1,
+  metrics_token TEXT,
   updated_by TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
