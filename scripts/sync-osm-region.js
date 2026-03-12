@@ -2,6 +2,7 @@ require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { createWorkspace } = require('./region-sync/common');
@@ -27,9 +28,14 @@ const ARCHIMAP_DB_PATH = String(
   || path.join(__dirname, '..', 'data', 'archimap.db')
 ).trim() || path.join(__dirname, '..', 'data', 'archimap.db');
 const OSM_DB_PATH = String(process.env.OSM_DB_PATH || path.join(__dirname, '..', 'data', 'osm.db')).trim() || path.join(__dirname, '..', 'data', 'osm.db');
+const LOCAL_EDITS_DB_PATH = String(
+  process.env.LOCAL_EDITS_DB_PATH
+  || path.join(__dirname, '..', 'data', 'local-edits.db')
+).trim() || path.join(__dirname, '..', 'data', 'local-edits.db');
 const DATA_DIR = String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() || path.join(__dirname, '..', 'data');
 const TIPPECANOE_PROGRESS_JSON = String(process.env.TIPPECANOE_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
 const TIPPECANOE_PROGRESS_INTERVAL_SEC = Math.max(1, Math.min(300, Number(process.env.TIPPECANOE_PROGRESS_INTERVAL_SEC || 5)));
+const ROOT_DIR = path.join(__dirname, '..');
 
 function parseArgs(argv) {
   const out = {
@@ -63,8 +69,70 @@ function createRuntimeOptions() {
     databaseUrl: DATABASE_URL,
     archimapDbPath: ARCHIMAP_DB_PATH,
     osmDbPath: OSM_DB_PATH,
+    localEditsDbPath: LOCAL_EDITS_DB_PATH,
     dataDir: DATA_DIR
   };
+}
+
+function shouldRunRuntimeFollowup(options = {}) {
+  if (options.pmtilesOnly) return false;
+  return String(options.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP || '').trim().toLowerCase() !== 'true';
+}
+
+function buildRuntimeFollowupEnv(runtimeOptions = {}, env = process.env) {
+  return {
+    ...env,
+    DB_PROVIDER: String(runtimeOptions.dbProvider || env.DB_PROVIDER || DB_PROVIDER).trim() || DB_PROVIDER,
+    DATABASE_URL: String(runtimeOptions.databaseUrl || env.DATABASE_URL || DATABASE_URL).trim() || DATABASE_URL,
+    ARCHIMAP_DB_PATH: String(runtimeOptions.archimapDbPath || env.ARCHIMAP_DB_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
+    DATABASE_PATH: String(runtimeOptions.archimapDbPath || env.DATABASE_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
+    OSM_DB_PATH: String(runtimeOptions.osmDbPath || env.OSM_DB_PATH || OSM_DB_PATH).trim() || OSM_DB_PATH,
+    LOCAL_EDITS_DB_PATH: String(runtimeOptions.localEditsDbPath || env.LOCAL_EDITS_DB_PATH || LOCAL_EDITS_DB_PATH).trim() || LOCAL_EDITS_DB_PATH
+  };
+}
+
+function runWorkerScript({ label, scriptPath, env, rootDir = ROOT_DIR, spawnSyncRef = spawnSync, processExecPath = process.execPath }) {
+  const result = spawnSyncRef(processExecPath, [scriptPath], {
+    cwd: rootDir,
+    env,
+    stdio: 'inherit',
+    shell: false
+  });
+  if (result?.error) {
+    throw result.error;
+  }
+  if ((result?.status ?? 1) !== 0) {
+    throw new Error(`${label} failed with exit code ${result?.status ?? 1}`);
+  }
+}
+
+function runRuntimeFollowups({ region, runtimeOptions, env = process.env, rootDir = ROOT_DIR, spawnSyncRef = spawnSync, processExecPath = process.execPath }) {
+  const followupEnv = buildRuntimeFollowupEnv(runtimeOptions, env);
+  const reason = `region-sync:${Number(region?.id || 0) || 'unknown'}`;
+
+  runWorkerScript({
+    label: 'search rebuild worker',
+    scriptPath: path.join(rootDir, 'workers', 'rebuild-search-index.worker.js'),
+    env: {
+      ...followupEnv,
+      SEARCH_REBUILD_REASON: reason
+    },
+    rootDir,
+    spawnSyncRef,
+    processExecPath
+  });
+
+  runWorkerScript({
+    label: 'filter tag keys rebuild worker',
+    scriptPath: path.join(rootDir, 'workers', 'rebuild-filter-tag-keys-cache.worker.js'),
+    env: {
+      ...followupEnv,
+      FILTER_TAG_KEYS_REBUILD_REASON: reason
+    },
+    rootDir,
+    spawnSyncRef,
+    processExecPath
+  });
 }
 
 function buildPmtilesStep(region, geojsonPath, outputPath) {
@@ -143,6 +211,12 @@ async function runRegionSync(region, runtimeOptions) {
       ndjsonPath: importPath,
       builtPmtilesPath
     });
+    if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
+      runRuntimeFollowups({
+        region,
+        runtimeOptions
+      });
+    }
 
     return {
       ...dbResult,
@@ -187,9 +261,12 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildRuntimeFollowupEnv,
   buildRegionPmtilesOnly,
   createRuntimeOptions,
   main,
   parseArgs,
-  runRegionSync
+  runRuntimeFollowups,
+  runRegionSync,
+  shouldRunRuntimeFollowup
 };

@@ -170,6 +170,8 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - `i18n:check`
 - `version:print`
 
+`npm run tiles:build -- --region-id=<id>` and direct `node scripts/sync-osm-region.js --region-id=<id>` now rebuild search and filter-tag read-models after a successful full region sync. `--pmtiles-only` still rebuilds only the archive.
+
 ## Build Version
 
 - Runtime build version is generated from Git metadata by `scripts/generate-version.js`.

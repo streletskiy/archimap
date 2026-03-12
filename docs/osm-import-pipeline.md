@@ -74,7 +74,8 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 15. If the DB transaction commits, the backup is dropped and the new archive becomes current.
 16. If any step fails after swap staging, the DB transaction is rolled back and the previous PMTiles file is restored.
 17. Runtime clients later receive the region PMTiles metadata via `/app-config.js` and fetch the archive through `/api/data/regions/:regionId/pmtiles`.
-18. For managed in-app syncs, `ServerRuntime` boot modules then rebuild search index tables and schedule filter-tag cache refresh; direct standalone CLI runs do not add this wrapper step.
+18. For managed in-app syncs, `ServerRuntime` boot modules then rebuild search index tables and schedule filter-tag cache refresh.
+19. Direct standalone full sync execution (`node scripts/sync-osm-region.js --region-id=<id>` and wrappers such as `npm run tiles:build -- --region-id=<id>`) now runs the same search-index and filter-tag follow-up workers before exiting; `--pmtiles-only` still skips them because it does not change imported DB rows.
 
 ## Mermaid diagram
 
@@ -227,7 +228,8 @@ flowchart TD
 
 - In-app sync flow (scheduler/admin queue) runs follow-up jobs from `ServerRuntime` boot modules.
 - These jobs rebuild the search read-model through `search-index.boot.js` (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite), then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
-- Direct standalone execution of `scripts/sync-osm-region.js` updates imported OSM data and PMTiles only; it does not run these wrapper jobs by itself.
+- Direct standalone full sync execution of `scripts/sync-osm-region.js` now invokes the same rebuild workers itself, so search/filter read-models stay aligned after new region imports and normal region updates even without the in-app runtime wrapper.
+- `--pmtiles-only` still rebuilds only the archive from current DB rows and intentionally skips search/filter follow-up because imported OSM rows are unchanged.
 
 ## Failure handling and invariants
 

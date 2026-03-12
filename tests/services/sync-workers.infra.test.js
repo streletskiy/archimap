@@ -311,3 +311,43 @@ test('sync workers can switch from none mode to managed mode after regions appea
   assert.equal(result.region.id, 7);
   assert.equal(result.queued, true);
 });
+
+test('managed sync workers disable standalone runtime followup in child env', async () => {
+  const spawnCalls = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 3,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: (_execPath, _args, options = {}) => {
+      spawnCalls.push(options);
+      return createChildProcessStub();
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.js',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  await workers.requestRegionSync(3, {
+    triggerReason: 'manual',
+    requestedBy: 'tester'
+  });
+
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0]?.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP, 'true');
+
+  workers.stop();
+  await waitForMicrotasks();
+});

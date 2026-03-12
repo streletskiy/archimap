@@ -146,7 +146,10 @@ function initManagedSyncWorkers(options = {}) {
 
     const child = spawn(processExecPath, [syncRegionScriptPath, `--region-id=${region.id}`], {
       cwd,
-      env,
+      env: {
+        ...env,
+        REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true'
+      },
       stdio: ['ignore', 'pipe', 'pipe']
     });
     currentSyncChild = child;
