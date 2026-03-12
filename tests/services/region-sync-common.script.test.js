@@ -1,14 +1,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
 const {
   createWorkspace,
+  formatGeojsonFeatureLine,
   parseRowPayload,
   writeRowsToNdjsonFile
 } = require('../../scripts/region-sync/common');
-const { summarizeImportRows } = require('../../scripts/region-sync/pmtiles-builder');
+const { exportImportRowsToGeojson, summarizeImportRows } = require('../../scripts/region-sync/pmtiles-builder');
+const { exportRegionMembersToGeojsonNdjson } = require('../../scripts/region-sync/region-db');
 
 test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () => {
   const row = parseRowPayload(JSON.stringify({
@@ -85,6 +88,127 @@ test('summarizeImportRows counts WKB-only import rows and computes bounds', asyn
       east: 38.2,
       north: 56.0
     });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('formatGeojsonFeatureLine preserves geometry json and encoded OSM feature id', () => {
+  const line = formatGeojsonFeatureLine('relation', 123, '{"type":"Point","coordinates":[37.6,55.7]}');
+
+  assert.equal(
+    line,
+    '{"type":"Feature","id":247,"properties":{"osm_id":123},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+  );
+});
+
+test('exportImportRowsToGeojson writes feature NDJSON and computes bounds', async () => {
+  const workspace = createWorkspace(1001);
+  const importPath = path.join(workspace, 'region-import.ndjson');
+  const geojsonPath = path.join(workspace, 'region-build.ndjson');
+
+  try {
+    await writeRowsToNdjsonFile(importPath, [
+      {
+        osm_type: 'way',
+        osm_id: 10,
+        geometry_json: '{"type":"Point","coordinates":[37.61,55.75]}',
+        min_lon: 37.61,
+        min_lat: 55.75,
+        max_lon: 37.61,
+        max_lat: 55.75
+      },
+      {
+        osm_type: 'relation',
+        osm_id: 11,
+        geometry_json: '{"type":"Point","coordinates":[38.2,56.0]}',
+        min_lon: 38.2,
+        min_lat: 56.0,
+        max_lon: 38.2,
+        max_lat: 56.0
+      }
+    ]);
+
+    const summary = await exportImportRowsToGeojson(importPath, geojsonPath);
+    const lines = fs.readFileSync(geojsonPath, 'utf8').trim().split('\n');
+
+    assert.equal(summary.importedFeatureCount, 2);
+    assert.deepEqual(summary.bounds, {
+      west: 37.61,
+      south: 55.75,
+      east: 38.2,
+      north: 56.0
+    });
+    assert.deepEqual(lines, [
+      formatGeojsonFeatureLine('way', 10, '{"type":"Point","coordinates":[37.61,55.75]}').trim(),
+      formatGeojsonFeatureLine('relation', 11, '{"type":"Point","coordinates":[38.2,56.0]}').trim()
+    ]);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('exportRegionMembersToGeojsonNdjson streams sqlite region members directly to feature NDJSON', async () => {
+  const workspace = createWorkspace(1002);
+  const archimapDbPath = path.join(workspace, 'archimap.db');
+  const osmDbPath = path.join(workspace, 'osm.db');
+  const outputPath = path.join(workspace, 'region-build.ndjson');
+
+  try {
+    const archimapDb = new Database(archimapDbPath);
+    archimapDb.exec(`
+      CREATE TABLE data_region_memberships (
+        region_id INTEGER NOT NULL,
+        osm_type TEXT NOT NULL,
+        osm_id INTEGER NOT NULL
+      );
+      INSERT INTO data_region_memberships (region_id, osm_type, osm_id)
+      VALUES
+        (7, 'way', 21),
+        (7, 'relation', 22),
+        (8, 'way', 99);
+    `);
+    archimapDb.close();
+
+    const osmDb = new Database(osmDbPath);
+    osmDb.exec(`
+      CREATE TABLE building_contours (
+        osm_type TEXT NOT NULL,
+        osm_id INTEGER NOT NULL,
+        geometry_json TEXT NOT NULL,
+        min_lon REAL NOT NULL,
+        min_lat REAL NOT NULL,
+        max_lon REAL NOT NULL,
+        max_lat REAL NOT NULL
+      );
+      INSERT INTO building_contours (osm_type, osm_id, geometry_json, min_lon, min_lat, max_lon, max_lat)
+      VALUES
+        ('way', 21, '{"type":"Point","coordinates":[30.0,60.0]}', 30.0, 60.0, 30.0, 60.0),
+        ('relation', 22, '{"type":"Point","coordinates":[31.5,61.2]}', 31.5, 61.2, 31.5, 61.2),
+        ('way', 99, '{"type":"Point","coordinates":[99.0,99.0]}', 99.0, 99.0, 99.0, 99.0);
+    `);
+    osmDb.close();
+
+    const summary = await exportRegionMembersToGeojsonNdjson({
+      dbProvider: 'sqlite',
+      archimapDbPath,
+      osmDbPath,
+      regionId: 7,
+      outputPath
+    });
+    const lines = fs.readFileSync(outputPath, 'utf8').trim().split('\n');
+
+    assert.equal(summary.importedFeatureCount, 2);
+    assert.deepEqual(summary.bounds, {
+      west: 30.0,
+      south: 60.0,
+      east: 31.5,
+      north: 61.2
+    });
+    assert.deepEqual(lines, [
+      formatGeojsonFeatureLine('relation', 22, '{"type":"Point","coordinates":[31.5,61.2]}').trim(),
+      formatGeojsonFeatureLine('way', 21, '{"type":"Point","coordinates":[30.0,60.0]}').trim()
+    ]);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

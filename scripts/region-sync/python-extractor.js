@@ -139,6 +139,7 @@ function exportRegionExtractToNdjson({
   outputPath,
   dbOutputPath,
   geojsonOutputPath,
+  summaryOutputPath,
   env = process.env
 }) {
   const pythonCandidate = ensurePythonImporterDeps(env);
@@ -151,6 +152,7 @@ function exportRegionExtractToNdjson({
   const legacyOutputPath = String(outputPath || '').trim();
   const nextDbOutputPath = String(dbOutputPath || '').trim();
   const nextGeojsonOutputPath = String(geojsonOutputPath || '').trim();
+  const nextSummaryOutputPath = String(summaryOutputPath || '').trim();
   if (legacyOutputPath && (nextDbOutputPath || nextGeojsonOutputPath)) {
     throw new Error('Use either outputPath or dbOutputPath/geojsonOutputPath for region extract export');
   }
@@ -172,6 +174,9 @@ function exportRegionExtractToNdjson({
     if (nextGeojsonOutputPath) {
       args.push('--out-geojson-ndjson', nextGeojsonOutputPath);
     }
+  }
+  if (nextSummaryOutputPath) {
+    args.push('--out-summary-json', nextSummaryOutputPath);
   }
 
   const result = runPython(args, 'inherit', pythonCandidate, {

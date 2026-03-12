@@ -49,7 +49,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 5. The orchestrator delegates the extract stage to `scripts/region-sync/python-extractor.js`, which resolves Python and calls the importer with:
    - `--extract-query <region.extractId>`
    - `--extract-source <region.extractSource>`
-   - PostgreSQL full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson`
+   - PostgreSQL full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
    - SQLite full sync: `--out-ndjson <workspace>/region-import.ndjson`
 6. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query and materialize the result into a DuckDB file under `data/quackosm/`.
 7. The Python importer opens that DuckDB file, loads the `spatial` extension, and runs SQL over `quackosm_raw` to:
@@ -59,12 +59,13 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - serialize geometry as WKB hex for PostgreSQL DB import handoff
    - serialize geometry as GeoJSON for SQLite import handoff and PMTiles build input
    - compute `min_lon`, `min_lat`, `max_lon`, `max_lat`
-8. Filtered rows are exported as NDJSON artifacts in the workspace:
-   - PostgreSQL full sync: `region-import.ndjson` (WKB hex + bbox + tags) and `region-build.ndjson` (GeoJSON features for `tippecanoe`)
+8. Filtered rows are exported as workspace artifacts:
+   - PostgreSQL full sync: `region-import.ndjson` (WKB hex + bbox + tags), `region-build.ndjson` (GeoJSON features for `tippecanoe`), and `region-export-summary.json` (feature count + bounds)
    - SQLite full sync: `region-import.ndjson` (GeoJSON + bbox + tags)
-9. `scripts/region-sync/pmtiles-builder.js` prepares the `tippecanoe` input:
+9. The PMTiles input is prepared as newline-delimited GeoJSON features for `tippecanoe`:
    - PostgreSQL full sync: reuses the already exported `region-build.ndjson`
-   - SQLite full sync and `--pmtiles-only`: converts import NDJSON into newline-delimited GeoJSON features
+   - SQLite full sync: `scripts/region-sync/pmtiles-builder.js` converts import NDJSON into `region-build.ndjson`
+   - `--pmtiles-only`: `scripts/region-sync/region-db.js` streams current region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file
 10. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`.
 11. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.js`:
     - PostgreSQL: `region_import_tmp` with `geometry_wkb_hex`
@@ -144,7 +145,7 @@ flowchart TD
 
 - Loads region config from PostgreSQL or SQLite.
 - Validates managed-sync prerequisites for a region.
-- Exports current region members back to NDJSON for `--pmtiles-only` rebuilds.
+- Exports current region members directly to GeoJSON feature NDJSON for `--pmtiles-only` rebuilds.
 
 ### `quackosm`
 
@@ -172,7 +173,7 @@ flowchart TD
 - Acts as the transformation stage between raw OSM extract data and ArchiMap import rows.
 - Runs spatial SQL to normalize geometry and derive bbox columns.
 - Produces provider-specific handoff artifacts:
-  - PostgreSQL full sync: WKB-based NDJSON for DB import plus separate GeoJSON NDJSON for PMTiles
+  - PostgreSQL full sync: WKB-based NDJSON for DB import, GeoJSON feature NDJSON for PMTiles, and summary metadata in one DuckDB pass
   - SQLite full sync: one GeoJSON-based NDJSON reused by DB import and PMTiles generation
 
 ### PostgreSQL / SQLite
@@ -207,7 +208,7 @@ flowchart TD
 
 - Converts import NDJSON rows into newline-delimited GeoJSON features for `tippecanoe` when the importer did not already emit a dedicated GeoJSON build artifact.
 - Detects `tippecanoe` from `TIPPECANOE_BIN` or `PATH`.
-- Computes region bounds during export or by summarizing import rows and returns them to the orchestrator summary.
+- Computes region bounds during export for Node-side conversions; PostgreSQL full sync now reuses importer-produced summary metadata instead of re-reading `region-import.ndjson`.
 
 ## Why the pipeline is split this way
 
@@ -215,6 +216,7 @@ flowchart TD
 - `duckdb` is the transformation layer that can run spatial SQL cheaply on the extracted data.
 - NDJSON is the handoff format between importer, DB upsert logic, and PMTiles generation.
 - PostgreSQL full sync now keeps DB import and PMTiles build artifacts separate so the DB path can use WKB instead of serializing GeoJSON only to parse it back into PostGIS later.
+- PostgreSQL full sync now writes both artifacts and summary metadata in one DuckDB scan, so the orchestrator does not need a second exporter pass or a post-export NDJSON summary pass.
 - The runtime DB stores the authoritative union dataset used by all building/search/filter APIs.
 - Region membership tracking makes overlapping regional syncs safe.
 - PMTiles are region-local read models optimized for map delivery, not the source of truth for search/building endpoints.
@@ -227,7 +229,10 @@ flowchart TD
     - SQLite full sync: GeoJSON + bbox + tags
   - `region-build.ndjson`
     - PostgreSQL full sync: exported directly by the importer
-    - SQLite full sync and `--pmtiles-only`: generated by `pmtiles-builder.js`
+    - SQLite full sync: generated by `pmtiles-builder.js`
+    - `--pmtiles-only`: streamed directly from the runtime DB by `region-db.js`
+  - `region-export-summary.json`
+    - PostgreSQL full sync: feature count + bounds emitted directly by the importer
   - `region.pmtiles`
 - Persistent intermediate extraction cache:
   - `data/quackosm/*.duckdb`

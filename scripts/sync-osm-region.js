@@ -10,7 +10,7 @@ const { exportRegionExtractToNdjson } = require('./region-sync/python-extractor'
 const {
   applyRegionImport,
   assertRegionSupportsManagedSync,
-  exportRegionMembersToNdjson,
+  exportRegionMembersToGeojsonNdjson,
   loadRegion,
   publishPmtilesArchive
 } = require('./region-sync/db-ingester');
@@ -147,20 +147,54 @@ function buildPmtilesStep(region, geojsonPath, outputPath) {
   });
 }
 
+function readExportSummary(summaryPath) {
+  const normalizedPath = String(summaryPath || '').trim();
+  if (!normalizedPath || !fs.existsSync(normalizedPath)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(fs.readFileSync(normalizedPath, 'utf8'));
+    const importedFeatureCount = Number(payload?.importedFeatureCount);
+    const bounds = payload?.bounds && typeof payload.bounds === 'object'
+      ? {
+        west: Number(payload.bounds.west),
+        south: Number(payload.bounds.south),
+        east: Number(payload.bounds.east),
+        north: Number(payload.bounds.north)
+      }
+      : null;
+
+    if (!Number.isInteger(importedFeatureCount) || importedFeatureCount < 0) {
+      return null;
+    }
+    if (
+      bounds
+      && ![bounds.west, bounds.south, bounds.east, bounds.north].every(Number.isFinite)
+    ) {
+      return null;
+    }
+
+    return {
+      importedFeatureCount,
+      bounds
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function buildRegionPmtilesOnly(region, runtimeOptions) {
   const workspace = createWorkspace(region.id);
-  const exportedNdjsonPath = path.join(workspace, 'current-region-export.ndjson');
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
   try {
-    await exportRegionMembersToNdjson({
+    const exported = await exportRegionMembersToGeojsonNdjson({
       ...runtimeOptions,
       regionId: region.id,
-      outputPath: exportedNdjsonPath
+      outputPath: geojsonPath
     });
-
-    const exported = await exportImportRowsToGeojson(exportedNdjsonPath, geojsonPath);
     if (exported.importedFeatureCount <= 0) {
       throw new Error('Region has no features, PMTiles rebuild aborted');
     }
@@ -189,6 +223,7 @@ async function runRegionSync(region, runtimeOptions) {
   const workspace = createWorkspace(region.id);
   const importPath = path.join(workspace, 'region-import.ndjson');
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
+  const summaryPath = path.join(workspace, 'region-export-summary.json');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
   const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
 
@@ -200,9 +235,10 @@ async function runRegionSync(region, runtimeOptions) {
         region,
         dbOutputPath: importPath,
         geojsonOutputPath: geojsonPath,
+        summaryOutputPath: summaryPath,
         env: process.env
       });
-      exported = await summarizeImportRows(importPath, { requireGeometryWkbHex: true });
+      exported = readExportSummary(summaryPath) || await summarizeImportRows(importPath, { requireGeometryWkbHex: true });
     } else {
       exportRegionExtractToNdjson({
         importerPath,
@@ -279,6 +315,7 @@ module.exports = {
   createRuntimeOptions,
   main,
   parseArgs,
+  readExportSummary,
   runRuntimeFollowups,
   runRegionSync,
   shouldRunRuntimeFollowup

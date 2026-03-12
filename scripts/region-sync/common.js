@@ -2,7 +2,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const readline = require('readline');
+const { once } = require('events');
 const { moveFileSync } = require('../../src/lib/server/utils/fs');
+
+const NDJSON_STREAM_HIGH_WATER_MARK = 1024 * 1024;
 
 function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -15,6 +18,35 @@ function createWorkspace(regionId) {
 function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
   return (Number(osmId) * 2) + typeBit;
+}
+
+function updateBounds(bounds, row) {
+  if (!row) return bounds;
+  if (!bounds) {
+    return {
+      west: row.min_lon,
+      south: row.min_lat,
+      east: row.max_lon,
+      north: row.max_lat
+    };
+  }
+  return {
+    west: Math.min(bounds.west, row.min_lon),
+    south: Math.min(bounds.south, row.min_lat),
+    east: Math.max(bounds.east, row.max_lon),
+    north: Math.max(bounds.north, row.max_lat)
+  };
+}
+
+function formatGeojsonFeatureLine(osmType, osmId, geometryJson) {
+  const normalizedGeometryJson = String(geometryJson || '').trim();
+  if (!normalizedGeometryJson) {
+    throw new Error(`Missing GeoJSON geometry for ${String(osmType || '').trim()}/${Number(osmId) || 0}`);
+  }
+  return (
+    `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
+    `"properties":{"osm_id":${Number(osmId)}},"geometry":${normalizedGeometryJson}}\n`
+  );
 }
 
 function normalizeGeometryWkbHex(value) {
@@ -67,7 +99,10 @@ function parseRowPayload(line, options = {}) {
 }
 
 async function* readImportRows(ndjsonPath, options = {}) {
-  const stream = fs.createReadStream(ndjsonPath, { encoding: 'utf8' });
+  const stream = fs.createReadStream(ndjsonPath, {
+    encoding: 'utf8',
+    highWaterMark: NDJSON_STREAM_HIGH_WATER_MARK
+  });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   for await (const line of rl) {
     const trimmed = String(line || '').trim();
@@ -76,18 +111,32 @@ async function* readImportRows(ndjsonPath, options = {}) {
   }
 }
 
-async function writeRowsToNdjsonFile(filePath, rows) {
-  ensureDir(filePath);
-  const writer = fs.createWriteStream(filePath, { encoding: 'utf8' });
-  for (const row of rows) {
-    writer.write(`${JSON.stringify(row)}\n`);
+async function writeStreamLine(writer, line) {
+  if (writer.write(line)) {
+    return;
   }
+  await once(writer, 'drain');
+}
+
+async function closeWriteStream(writer) {
   await new Promise((resolve, reject) => {
     writer.end((error) => {
       if (error) return reject(error);
       return resolve();
     });
   });
+}
+
+async function writeRowsToNdjsonFile(filePath, rows) {
+  ensureDir(filePath);
+  const writer = fs.createWriteStream(filePath, {
+    encoding: 'utf8',
+    highWaterMark: NDJSON_STREAM_HIGH_WATER_MARK
+  });
+  for (const row of rows) {
+    await writeStreamLine(writer, `${JSON.stringify(row)}\n`);
+  }
+  await closeWriteStream(writer);
 }
 
 function buildPmtilesSwap(finalPath, newBuiltPath) {
@@ -131,11 +180,15 @@ function buildPmtilesSwap(finalPath, newBuiltPath) {
 
 module.exports = {
   buildPmtilesSwap,
+  closeWriteStream,
   createWorkspace,
   encodeOsmFeatureId,
   ensureDir,
+  formatGeojsonFeatureLine,
   normalizeGeometryWkbHex,
   parseRowPayload,
   readImportRows,
+  updateBounds,
+  writeStreamLine,
   writeRowsToNdjsonFile
 };

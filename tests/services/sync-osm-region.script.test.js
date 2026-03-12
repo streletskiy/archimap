@@ -1,9 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const {
   buildRuntimeFollowupEnv,
+  readExportSummary,
   runRuntimeFollowups,
   shouldRunRuntimeFollowup
 } = require('../../scripts/sync-osm-region');
@@ -64,4 +67,56 @@ test('runRuntimeFollowups executes search and filter workers for standalone sync
 
   assert.equal(calls[1].args[0], path.join(rootDir, 'workers', 'rebuild-filter-tag-keys-cache.worker.js'));
   assert.equal(calls[1].options.env.FILTER_TAG_KEYS_REBUILD_REASON, 'region-sync:42');
+});
+
+test('readExportSummary returns normalized summary for valid exporter metadata', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-export-summary-'));
+  const summaryPath = path.join(workspace, 'region-export-summary.json');
+
+  try {
+    fs.writeFileSync(summaryPath, JSON.stringify({
+      importedFeatureCount: 123,
+      bounds: {
+        west: 37.5,
+        south: 55.5,
+        east: 37.7,
+        north: 55.7
+      }
+    }));
+
+    assert.deepEqual(readExportSummary(summaryPath), {
+      importedFeatureCount: 123,
+      bounds: {
+        west: 37.5,
+        south: 55.5,
+        east: 37.7,
+        north: 55.7
+      }
+    });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('readExportSummary returns null for missing or malformed exporter metadata', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-export-summary-'));
+  const missingPath = path.join(workspace, 'missing.json');
+  const invalidPath = path.join(workspace, 'invalid.json');
+
+  try {
+    fs.writeFileSync(invalidPath, JSON.stringify({
+      importedFeatureCount: 'NaN',
+      bounds: {
+        west: 37.5,
+        south: 55.5,
+        east: 'bad',
+        north: 55.7
+      }
+    }));
+
+    assert.equal(readExportSummary(missingPath), null);
+    assert.equal(readExportSummary(invalidPath), null);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });

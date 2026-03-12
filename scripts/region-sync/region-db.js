@@ -1,6 +1,16 @@
+const fs = require('fs');
 const Database = require('better-sqlite3');
 const { Client } = require('pg');
-const { ensureDir, writeRowsToNdjsonFile } = require('./common');
+const {
+  closeWriteStream,
+  ensureDir,
+  formatGeojsonFeatureLine,
+  updateBounds,
+  writeRowsToNdjsonFile,
+  writeStreamLine
+} = require('./common');
+
+const POSTGRES_REGION_EXPORT_BATCH_SIZE = 20000;
 
 function openSqliteRegionDb(archimapDbPath, osmDbPath) {
   ensureDir(archimapDbPath);
@@ -219,8 +229,113 @@ async function exportRegionMembersToNdjson({
   }
 }
 
+async function exportRegionMembersToGeojsonNdjson({
+  dbProvider,
+  databaseUrl,
+  archimapDbPath,
+  osmDbPath,
+  regionId,
+  outputPath
+}) {
+  ensureDir(outputPath);
+  const writer = fs.createWriteStream(outputPath, {
+    encoding: 'utf8',
+    highWaterMark: 1024 * 1024
+  });
+  let importedFeatureCount = 0;
+  let bounds = null;
+
+  async function writeRow(row) {
+    await writeStreamLine(writer, formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json));
+    importedFeatureCount += 1;
+    bounds = updateBounds(bounds, row);
+  }
+
+  try {
+    if (dbProvider === 'postgres') {
+      const normalizedRegionId = Number(regionId);
+      if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
+        throw new Error('Region export requires a positive integer regionId');
+      }
+
+      const client = new Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        await client.query('BEGIN READ ONLY');
+        await client.query(`
+          DECLARE region_pmtiles_export_cursor NO SCROLL CURSOR FOR
+          SELECT
+            bc.osm_type,
+            bc.osm_id,
+            ST_AsGeoJSON(bc.geom)::text AS geometry_json,
+            bc.min_lon,
+            bc.min_lat,
+            bc.max_lon,
+            bc.max_lat
+          FROM public.data_region_memberships drm
+          JOIN osm.building_contours bc
+            ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+          WHERE drm.region_id = ${normalizedRegionId}
+          ORDER BY bc.osm_type, bc.osm_id
+        `);
+
+        while (true) {
+          const result = await client.query(`
+            FETCH FORWARD ${POSTGRES_REGION_EXPORT_BATCH_SIZE}
+            FROM region_pmtiles_export_cursor
+          `);
+          if ((result.rowCount || 0) <= 0) {
+            break;
+          }
+          for (const row of result.rows) {
+            await writeRow(row);
+          }
+        }
+
+        await client.query('CLOSE region_pmtiles_export_cursor');
+        await client.query('COMMIT');
+      } catch (error) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          // ignore rollback failure
+        }
+        throw error;
+      } finally {
+        await client.end();
+      }
+    } else {
+      const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
+      try {
+        const rows = db.prepare(`
+          SELECT bc.osm_type, bc.osm_id, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
+          FROM data_region_memberships drm
+          JOIN osm.building_contours bc
+            ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+          WHERE drm.region_id = ?
+          ORDER BY bc.osm_type, bc.osm_id
+        `).iterate(regionId);
+
+        for (const row of rows) {
+          await writeRow(row);
+        }
+      } finally {
+        db.close();
+      }
+    }
+  } finally {
+    await closeWriteStream(writer);
+  }
+
+  return {
+    importedFeatureCount,
+    bounds
+  };
+}
+
 module.exports = {
   assertRegionSupportsManagedSync,
+  exportRegionMembersToGeojsonNdjson,
   exportRegionMembersToNdjson,
   loadRegion,
   openSqliteRegionDb
