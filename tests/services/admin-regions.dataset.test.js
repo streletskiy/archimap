@@ -12,6 +12,8 @@ const JERUSALEM_POINT = [35.2137, 31.7683];
 const GAZA_POINT = [34.4668, 31.5017];
 const JERSEY_POINT = [-2.122384300684492, 49.21832916900004];
 const GUERNSEY_POINT = [-2.5684653396292636, 49.47284577050007];
+const CRIMEA_INTERIOR_POINT = [34.248991705571925, 45.299261786000045];
+const SEVASTOPOL_INTERIOR_POINT = [33.64469276720039, 44.62659332900006];
 
 function getFeatureByExtractId(extractId) {
   return adminRegions.features.find((feature) => feature?.properties?.ExtractId === extractId) || null;
@@ -97,4 +99,16 @@ test('guernsey-jersey admin region uses Natural Earth contours for both islands'
   assert.equal(feature.properties.GeometrySource, 'natural-earth');
   assert.ok(geometryContainsPoint(feature.geometry, JERSEY_POINT), 'guernsey-jersey contour should include Jersey');
   assert.ok(geometryContainsPoint(feature.geometry, GUERNSEY_POINT), 'guernsey-jersey contour should include Guernsey');
+});
+
+test('crimean-fed-district admin region uses one combined Natural Earth Admin 1 contour', () => {
+  const feature = getFeatureByExtractId('russia/crimean-fed-district');
+
+  assert.ok(feature, 'crimean-fed-district feature should exist');
+  assert.equal(feature.properties.ExtractSource, 'geofabrik');
+  assert.equal(feature.properties.GeometrySource, 'natural-earth-admin1-union');
+  assert.ok(geometryContainsPoint(feature.geometry, CRIMEA_INTERIOR_POINT), 'crimean-fed-district contour should include Crimea');
+  assert.ok(geometryContainsPoint(feature.geometry, SEVASTOPOL_INTERIOR_POINT), 'crimean-fed-district contour should include Sevastopol');
+  assert.equal(getFeatureByExtractId('russia/southern_federal_district/crimea_republic'), null);
+  assert.equal(getFeatureByExtractId('russia/southern_federal_district/sevastopol'), null);
 });

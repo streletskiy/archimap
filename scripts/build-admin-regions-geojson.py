@@ -104,6 +104,26 @@ RUSSIA_ADMIN1_OVERRIDES = {
     'russia/central_federal_district/moscow': 'RU-MOS',
     'russia/central_federal_district/moscow_oblast': 'RU-MOW',
 }
+RUSSIA_ADMIN1_COMBINED_FEATURES = (
+    {
+        'slug': 'ru-crimean-fed-district',
+        'name': 'RU Russia Crimean Federal District',
+        'extract_source': 'geofabrik',
+        'extract_id': 'russia/crimean-fed-district',
+        'geometry_source': 'natural-earth-admin1-union',
+        'region_kind': 'ru_region',
+        'iso2': 'RU',
+        'match_paths': (
+            'russia/southern_federal_district/crimea_republic',
+            'russia/southern_federal_district/sevastopol',
+        ),
+    },
+)
+RUSSIA_ADMIN1_COMBINED_MATCH_PATHS = {
+    path
+    for feature in RUSSIA_ADMIN1_COMBINED_FEATURES
+    for path in feature['match_paths']
+}
 
 
 def fetch_json(url: str) -> dict:
@@ -703,7 +723,29 @@ def build_russia_admin1_match_map(natural_earth_admin1: gpd.GeoDataFrame) -> dic
 def build_russia_region_features(natural_earth_admin1: gpd.GeoDataFrame) -> list[dict]:
     match_map = build_russia_admin1_match_map(natural_earth_admin1)
     output = []
+    for config in RUSSIA_ADMIN1_COMBINED_FEATURES:
+        rows = [match_map[path] for path in config['match_paths']]
+        geometry = simplify_geometry(unary_union([row.geometry for row in rows]))
+        if geometry is None:
+            raise ValueError(f"Natural Earth Admin 1 union geometry is empty for {config['extract_id']}")
+
+        output.append({
+            'type': 'Feature',
+            'properties': {
+                'Slug': str(config['slug']).strip(),
+                'Name': str(config['name']).strip(),
+                'ExtractId': str(config['extract_id']).strip(),
+                'ExtractSource': str(config['extract_source']).strip(),
+                'GeometrySource': str(config['geometry_source']).strip(),
+                'RegionKind': str(config['region_kind']).strip(),
+                'Iso2': str(config['iso2']).strip(),
+            },
+            'geometry': geometry
+        })
+
     for path in crawl_osmfr_russia_leaf_paths():
+        if path in RUSSIA_ADMIN1_COMBINED_MATCH_PATHS:
+            continue
         row = match_map[path]
         parts = [part for part in path.split('/') if part]
         region_name = humanize_segment(parts[-1])
