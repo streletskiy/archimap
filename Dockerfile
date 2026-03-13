@@ -104,14 +104,13 @@ ENV PYTHON_BIN=/opt/pyosm/bin/python
 
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
-RUN npm prune --omit=dev
+COPY --from=frontend-runtime-deps /app/frontend/node_modules ./frontend/node_modules
 COPY server.js ./server.js
 COPY server.sveltekit.js ./server.sveltekit.js
-COPY src ./src
 COPY db ./db
 COPY scripts ./scripts
 COPY workers ./workers
-COPY --from=frontend-runtime-deps /app/frontend/node_modules ./frontend/node_modules
+COPY src ./src
 COPY --from=frontend-build /app/frontend/build ./frontend/build
 COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version.generated.json
 
