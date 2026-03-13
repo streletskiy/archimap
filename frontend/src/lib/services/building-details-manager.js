@@ -75,6 +75,7 @@ function normalizeArchiInfo(payload) {
 
 function createFallbackBuildingDetails() {
   return {
+    region_slugs: [],
     properties: {
       archiInfo: {
         name: null,
@@ -171,6 +172,7 @@ export function createBuildingDetailsManager() {
       if (token !== activeBuildingDetailsToken) return;
       updateState({
         buildingDetails: {
+          region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
           properties: {
             archiInfo: normalizeArchiInfo({
               ...data,
@@ -191,6 +193,7 @@ export function createBuildingDetailsManager() {
         if (token !== activeBuildingDetailsToken) return;
         updateState({
           buildingDetails: {
+            region_slugs: [],
             properties: {
               archiInfo: normalizeArchiInfo({
                 ...archiInfo,
@@ -298,6 +301,9 @@ export function createBuildingDetailsManager() {
           ...current,
           buildingDetails: isSameSelection
             ? {
+                region_slugs: Array.isArray(current.buildingDetails?.region_slugs)
+                  ? current.buildingDetails.region_slugs
+                  : [],
                 properties: {
                   archiInfo: toDisplayArchiInfoFromPayload(
                     current.buildingDetails?.properties?.archiInfo,

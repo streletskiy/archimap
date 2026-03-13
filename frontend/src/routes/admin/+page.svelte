@@ -10,6 +10,7 @@
   import AdminEditsTab from '$lib/components/admin/AdminEditsTab.svelte';
   import AdminFiltersTab from '$lib/components/admin/AdminFiltersTab.svelte';
   import AdminSettingsTab from '$lib/components/admin/AdminSettingsTab.svelte';
+  import AdminStylesTab from '$lib/components/admin/AdminStylesTab.svelte';
   import AdminUsersTab from '$lib/components/admin/AdminUsersTab.svelte';
   import { createAdminDataController } from '$lib/components/admin/admin-data-controller.js';
   import { buildAdminUrl, resolveAdminTabFromUrl } from '$lib/client/section-routes';
@@ -44,6 +45,7 @@
     if (tab === 'settings') return translateNow('admin.tabs.settings');
     if (tab === 'data') return translateNow('admin.tabs.data');
     if (tab === 'filters') return translateNow('admin.tabs.filters');
+    if (tab === 'styles') return translateNow('admin.tabs.styles');
     return translateNow('admin.tabs.edits');
   }
 
@@ -200,6 +202,7 @@
         { value: 'users', label: $t('admin.tabs.users') },
         { value: 'data', label: $t('admin.tabs.data') },
         { value: 'filters', label: $t('admin.tabs.filters') },
+        { value: 'styles', label: $t('admin.tabs.styles') },
         { value: 'settings', label: $t('admin.tabs.settings') }
       ]}
       onchange={handleTabNavChange}
@@ -211,6 +214,8 @@
       <AdminDataTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'filters'}
       <AdminFiltersTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
+    {:else if activeTab === 'styles'}
+      <AdminStylesTab />
     {:else if activeTab === 'settings'}
       <AdminSettingsTab isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else}

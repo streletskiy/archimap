@@ -50,6 +50,7 @@ function registerAdminRoutes(deps) {
   // Route file stays focused on HTTP wiring while the admin domain lives in dedicated services.
   const adminSettingsService = createAdminSettingsService(deps);
   const adminEditsService = createAdminEditsService(deps);
+  const styleRegionOverridesService = deps.styleRegionOverridesService;
 
   app.use('/api/admin', adminApiRateLimiter);
   app.use('/api/ui/email-previews', adminApiRateLimiter);
@@ -213,6 +214,27 @@ function registerAdminRoutes(deps) {
   app.get('/api/admin/building-edits/:editId', requireAuth, requireAdmin, withAdminError(async (req, res) => {
     const item = await adminEditsService.getBuildingEditDetails(req.params.editId);
     return sendPrivateJson(req, res, { item }, item.updatedAt || undefined);
+  }));
+
+  app.get('/api/admin/style-overrides', requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    return sendPrivateJson(req, res, {
+      ok: true,
+      items: await styleRegionOverridesService.listOverridesForAdmin()
+    });
+  }));
+
+  app.post('/api/admin/style-overrides', requireCsrfSession, requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await styleRegionOverridesService.saveOverride(req.body?.override, getSessionEditActorKey(req) || 'admin')
+    });
+  }));
+
+  app.delete('/api/admin/style-overrides/:id', requireCsrfSession, requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await styleRegionOverridesService.deleteOverride(req.params.id)
+    });
   }));
 
   app.get('/api/admin/users/:email', requireAuth, requireAdmin, withAdminError(async (req, res) => {

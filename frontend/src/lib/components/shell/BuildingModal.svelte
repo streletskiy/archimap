@@ -8,6 +8,7 @@
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
   import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
+  import { styleRegionOverrides } from '$lib/stores/style-overrides';
   import {
     buildAddressFromBuildingForm,
     buildBuildingComparableSnapshot,
@@ -123,10 +124,21 @@
   $: displayAddress = pickFirstText(buildAddressFromForm(), archiInfo.address);
   $: displayStyle = resolveDisplayStyle(form.style || archiInfo.styleRaw || archiInfo.style, $locale);
   $: displayDescription = pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
-  $: architectureStyleItems = getArchitectureStyleOptions($locale).map((option) => ({
+  $: currentRegionSlugs = Array.isArray(buildingDetails?.region_slugs) ? buildingDetails.region_slugs : [];
+  $: availableArchitectureStyleItems = getArchitectureStyleOptions($locale, currentRegionSlugs, $styleRegionOverrides).map((option) => ({
     value: option.value,
     label: option.label
   }));
+  $: currentArchitectureStyleItem = form.style
+    ? (getArchitectureStyleOptions($locale).find((option) => option.value === form.style) || {
+      value: form.style,
+      label: resolveDisplayStyle(form.style, $locale) || form.style
+    })
+    : null;
+  $: architectureStyleItems = currentArchitectureStyleItem
+    && !availableArchitectureStyleItems.some((option) => option.value === currentArchitectureStyleItem.value)
+    ? [currentArchitectureStyleItem, ...availableArchitectureStyleItems]
+    : availableArchitectureStyleItems;
   $: summaryItems = [
     { label: $t('buildingModal.style'), value: displayStyle },
     { label: $t('buildingModal.levels'), value: pickFirstText(form.levels, archiInfo.levels) },

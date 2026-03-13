@@ -13,7 +13,7 @@
 - `frontend/src/lib/components/ui/**`: generated `shadcn-svelte` primitives kept close to upstream.
 - `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
-- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
+- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
@@ -58,6 +58,7 @@
   - `src/lib/server/services/admin/shared.js`: shared admin guards, parsers, and typed error helpers
   - `src/lib/server/services/admin/admin-settings.service.js`: email-preview, app-settings, data-settings, and region-sync orchestration
   - `src/lib/server/services/admin/admin-edits.service.js`: admin edit moderation, merge flows, and admin user detail queries
+  - `src/lib/server/services/style-region-overrides.service.js`: public/admin style-region override rule persistence and validation
 - Frontend map filter decomposition:
   - `frontend/src/lib/services/map/map-filter-pipeline.js`: filter lifecycle orchestration entrypoint for viewport events and status transitions
   - `frontend/src/lib/services/map/filter-request-planner.js`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping

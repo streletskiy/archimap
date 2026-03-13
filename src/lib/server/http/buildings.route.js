@@ -61,6 +61,15 @@ function registerBuildingsRoutes(deps) {
       WHERE osm_type = ? AND osm_id = ?
     `);
 
+  const selectBuildingRegionSlugsById = db.prepare(`
+    SELECT region.slug
+    FROM data_region_memberships membership
+    INNER JOIN data_sync_regions region
+      ON region.id = membership.region_id
+    WHERE membership.osm_type = ? AND membership.osm_id = ?
+    ORDER BY LENGTH(region.slug) DESC, region.slug ASC
+  `);
+
   app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
     const result = await filtersService.getFilterDataByKeys(req.body?.keys, getSessionEditActorKey(req));
     if (result.error) {
@@ -122,29 +131,34 @@ function registerBuildingsRoutes(deps) {
     const actorKey = getSessionEditActorKey(req);
     const personal = actorKey ? await getLatestUserEditRow(osmType, osmId, actorKey, ['pending', 'rejected']) : null;
     const row = personal ? applyUserEditRowToInfo(merged, personal) : merged;
-    if (!row) {
+    const contour = !row ? await getOsmContourRow(osmType, osmId) : null;
+    if (!row && !contour) {
       return res.status(404).json({ error: 'Информация не найдена' });
     }
+    const regionSlugs = (await selectBuildingRegionSlugsById.all(osmType, osmId))
+      .map((item) => String(item?.slug || '').trim())
+      .filter(Boolean);
 
     return sendCachedJson(req, res, {
       osm_type: osmType,
       osm_id: osmId,
-      name: row.name ?? null,
-      style: row.style ?? null,
-      levels: row.levels ?? null,
-      year_built: row.year_built ?? null,
-      architect: row.architect ?? null,
-      address: row.address ?? null,
-      description: row.description ?? null,
-      archimap_description: row.archimap_description ?? row.description ?? null,
-      updated_by: row.updated_by ?? row.created_by ?? null,
-      updated_at: row.updated_at ?? null,
+      name: row?.name ?? null,
+      style: row?.style ?? null,
+      levels: row?.levels ?? null,
+      year_built: row?.year_built ?? null,
+      architect: row?.architect ?? null,
+      address: row?.address ?? null,
+      description: row?.description ?? null,
+      archimap_description: row?.archimap_description ?? row?.description ?? null,
+      updated_by: row?.updated_by ?? row?.created_by ?? null,
+      updated_at: row?.updated_at ?? null,
       review_status: personal ? normalizeUserEditStatus(personal.status) : 'accepted',
       admin_comment: personal?.admin_comment ?? null,
-      user_edit_id: personal ? Number(personal.id || 0) : null
+      user_edit_id: personal ? Number(personal.id || 0) : null,
+      region_slugs: regionSlugs
     }, {
       cacheControl: 'private, no-cache',
-      lastModified: row.updated_at || undefined
+      lastModified: row?.updated_at || contour?.updated_at || undefined
     });
   });
 

@@ -42,7 +42,12 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
+  - Includes `region_slugs[]` for the building's current region memberships.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).
+- `GET /api/style-overrides`
+  - Public list of active style-region override rules used by the frontend style picker.
+  - Returns `{ items[] }`, where each item contains `id`, `region_pattern`, `style_key`, `is_allowed`.
+  - Cache: `Cache-Control: public, max-age=60`.
 - `GET /api/data/regions/:regionId/pmtiles`
   - Region-specific PMTiles binary stream.
   - Supports `Range`, `If-None-Match`, `If-Modified-Since`.
@@ -100,6 +105,13 @@ System notes:
   - `pending`, `rejected`, `superseded`: deletes only the edit history row.
   - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit still points to the same building.
   - Returns `409 EDIT_DELETE_SHARED_MERGED_STATE` when merged local data is already shared with other accepted edits for the same OSM object.
+- `GET /api/admin/style-overrides`
+  - Admin-only list of style-region override rules.
+- `POST /api/admin/style-overrides`
+  - Admin-only create/update for a style-region override rule.
+  - Body: `{ override: { region_pattern, style_key, is_allowed } }`.
+- `DELETE /api/admin/style-overrides/:id`
+  - Admin-only delete for a style-region override rule.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
 
 ## Runtime config payload

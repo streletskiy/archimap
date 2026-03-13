@@ -3,9 +3,11 @@
   import '../app.css';
   import AppHeader from '$lib/components/shell/AppHeader.svelte';
   import { initLocaleFromEnvironment, t } from '$lib/i18n/index';
+  import { loadStyleRegionOverrides } from '$lib/stores/style-overrides';
 
   onMount(() => {
     initLocaleFromEnvironment();
+    void loadStyleRegionOverrides().catch(() => {});
   });
 </script>
 

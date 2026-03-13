@@ -44,6 +44,7 @@ function registerAppRoutes(deps) {
     registrationEnabled,
     getRegistrationEnabled,
     dataSettingsService,
+    styleRegionOverridesService,
     getFilterTagKeysCached,
     getAllFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress
@@ -155,6 +156,19 @@ function registerAppRoutes(deps) {
       });
     } catch {
       return res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
+    }
+  });
+
+  app.get('/api/style-overrides', publicApiRateLimiter, async (req, res) => {
+    try {
+      const items = styleRegionOverridesService
+        ? await styleRegionOverridesService.listPublicOverrides()
+        : [];
+      return sendCachedJson(req, res, { items }, {
+        cacheControl: 'public, max-age=60'
+      });
+    } catch {
+      return res.status(500).json({ error: 'Не удалось получить публичные ограничения архитектурных стилей' });
     }
   });
 

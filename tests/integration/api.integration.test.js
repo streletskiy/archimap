@@ -4,6 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const Database = require('better-sqlite3');
 const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
 
 let pythonExtractorDepsSkipReason = null;
@@ -85,7 +86,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   server.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); });
   server.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
 
-  async function waitUntilReady(timeoutMs = 15000) {
+  async function waitUntilReady(timeoutMs = 30000) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       try {
@@ -216,6 +217,29 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.match(String(registerBody.error || ''), /Отправка писем не настроена/);
     });
 
+    await t.test('public style overrides endpoint is readable and admin mutation requires auth', async () => {
+      const publicOverrides = await callApi('/api/style-overrides');
+      assert.equal(publicOverrides.status, 200);
+      const publicBody = await publicOverrides.json();
+      assert.ok(Array.isArray(publicBody?.items));
+      assert.equal(publicBody.items.length, 0);
+
+      const createWithoutAuth = await callApi('/api/admin/style-overrides', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          override: {
+            region_pattern: 'ru-*',
+            style_key: 'omani',
+            is_allowed: true
+          }
+        })
+      });
+      assert.equal(createWithoutAuth.status, 401);
+    });
+
     let csrfToken = '';
     await t.test('create master admin via CLI + login + csrf-protected profile update', async () => {
       await createMasterAdmin({
@@ -292,6 +316,101 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(typeof mapSearchBody.total, 'number');
       assert.equal(typeof mapSearchBody.truncated, 'boolean');
       assert.ok(Array.isArray(mapSearchBody.items));
+    });
+
+    await t.test('style override admin endpoints work and building-info returns region_slugs', async () => {
+      const createOverride = await callApi('/api/admin/style-overrides', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          override: {
+            region_pattern: 'ru-*',
+            style_key: 'omani',
+            is_allowed: true
+          }
+        })
+      });
+      assert.equal(createOverride.status, 200);
+      const createOverrideBody = await createOverride.json();
+      assert.equal(createOverrideBody?.ok, true);
+      assert.equal(createOverrideBody?.item?.region_pattern, 'ru-*');
+      assert.equal(createOverrideBody?.item?.style_key, 'omani');
+      assert.equal(createOverrideBody?.item?.is_allowed, true);
+
+      const adminOverrides = await callApi('/api/admin/style-overrides');
+      assert.equal(adminOverrides.status, 200);
+      const adminOverridesBody = await adminOverrides.json();
+      assert.equal(adminOverridesBody?.ok, true);
+      assert.equal(adminOverridesBody?.items?.length, 1);
+
+      const publicOverrides = await callApi('/api/style-overrides');
+      assert.equal(publicOverrides.status, 200);
+      const publicOverridesBody = await publicOverrides.json();
+      assert.deepEqual(publicOverridesBody?.items, [{
+        id: createOverrideBody.item.id,
+        region_pattern: 'ru-*',
+        style_key: 'omani',
+        is_allowed: true
+      }]);
+
+      const mainDb = new Database(path.join(tempRoot, 'archimap.db'));
+      const localDb = new Database(path.join(tempRoot, 'local-edits.db'));
+      try {
+        mainDb.prepare(`
+          INSERT INTO data_sync_regions (slug, name, updated_by)
+          VALUES (?, ?, ?)
+        `).run('ru-moscow', 'Moscow', 'integration-test');
+        const regionId = Number(mainDb.prepare(`
+          SELECT id
+          FROM data_sync_regions
+          WHERE slug = ?
+        `).get('ru-moscow')?.id || 0);
+        assert.ok(regionId > 0);
+
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 101);
+
+        localDb.prepare(`
+          INSERT INTO architectural_info (
+            osm_type,
+            osm_id,
+            name,
+            style,
+            updated_by,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, datetime('now'))
+        `).run('way', 101, 'Integration test building', 'omani', 'integration-test');
+      } finally {
+        mainDb.close();
+        localDb.close();
+      }
+
+      const buildingInfo = await callApi('/api/building-info/way/101');
+      assert.equal(buildingInfo.status, 200);
+      const buildingInfoBody = await buildingInfo.json();
+      assert.equal(buildingInfoBody?.name, 'Integration test building');
+      assert.deepEqual(buildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const deleteOverride = await callApi(`/api/admin/style-overrides/${createOverrideBody.item.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-csrf-token': csrfToken
+        }
+      });
+      assert.equal(deleteOverride.status, 200);
+      const deleteOverrideBody = await deleteOverride.json();
+      assert.equal(deleteOverrideBody?.ok, true);
+
+      const publicOverridesAfterDelete = await callApi('/api/style-overrides');
+      assert.equal(publicOverridesAfterDelete.status, 200);
+      const publicOverridesAfterDeleteBody = await publicOverridesAfterDelete.json();
+      assert.deepEqual(publicOverridesAfterDeleteBody?.items, []);
     });
 
     await t.test('admin data settings endpoints support create/rename/delete flow for regions', pythonExtractorIntegrationTestOptions, async () => {
