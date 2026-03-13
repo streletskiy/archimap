@@ -1,11 +1,13 @@
 <script>
   export let imageUrl = '';
-
-  $: authVisualImage = imageUrl ? `url("${imageUrl}")` : 'none';
 </script>
 
 <div class="bg-muted relative hidden md:block" aria-hidden="true">
-  <div class="auth-visual-fill" style={`--auth-visual-image: ${authVisualImage};`}></div>
+  <div class="auth-visual-fill">
+    {#if imageUrl}
+      <img class="auth-visual-image" src={imageUrl} alt="" loading="lazy" decoding="async" />
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -19,6 +21,17 @@
       linear-gradient(145deg, color-mix(in srgb, var(--panel-solid) 84%, transparent) 0%, rgba(8, 17, 31, 0.12) 100%);
   }
 
+  .auth-visual-image {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+
   .auth-visual-fill::before,
   .auth-visual-fill::after {
     content: '';
@@ -28,14 +41,12 @@
 
   .auth-visual-fill::before {
     background:
-      var(--auth-visual-image) center / cover no-repeat,
       repeating-linear-gradient(90deg, transparent 0 2.15rem, rgba(255, 255, 255, 0.08) 2.15rem 2.23rem),
       repeating-linear-gradient(0deg, transparent 0 2.15rem, rgba(255, 255, 255, 0.06) 2.15rem 2.23rem),
       linear-gradient(128deg, transparent 10%, rgba(255, 255, 255, 0.12) 10.8%, transparent 11.6%),
       linear-gradient(34deg, transparent 31%, rgba(255, 255, 255, 0.12) 31.8%, transparent 32.6%),
       linear-gradient(168deg, transparent 58%, rgba(255, 255, 255, 0.08) 58.8%, transparent 59.6%);
-    filter: blur(5px);
-    opacity: 0.7;
+    opacity: 0.42;
     transform: scale(1.04);
   }
 
