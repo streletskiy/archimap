@@ -293,16 +293,18 @@
       tabindex="-1"
       on:keydown={closeOnKeydown}
     >
-      <UiButton
-        type="button"
-        variant="secondary"
-        size="close"
-        className="auth-modal-close"
-        onclick={closeAuth}
-        aria-label={$t('common.close')}
-      >
-        <CloseIcon class="ui-close-icon" />
-      </UiButton>
+      {#if registerPendingEmail || resetMode}
+        <UiButton
+          type="button"
+          variant="secondary"
+          size="close"
+          className="auth-modal-close"
+          onclick={closeAuth}
+          aria-label={$t('common.close')}
+        >
+          <CloseIcon class="ui-close-icon" />
+        </UiButton>
+      {/if}
 
       {#if registerPendingEmail}
         <AuthCardShell
@@ -380,6 +382,7 @@
             {privacyHref}
             pending={registerStartInFlight}
             onsubmit={submitRegisterStart}
+            onclose={closeAuth}
             onswitch={() => showAuthTab('login')}
           />
         </div>
@@ -393,6 +396,7 @@
             {privacyHref}
             onsubmit={submitLogin}
             onforgot={openResetMode}
+            onclose={closeAuth}
             onswitch={() => showAuthTab('register')}
           />
         </div>

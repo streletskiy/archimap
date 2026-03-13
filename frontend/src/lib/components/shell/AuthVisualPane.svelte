@@ -1,10 +1,5 @@
-<script>
-  import { t } from '$lib/i18n/index';
-</script>
-
 <div class="bg-muted relative hidden md:block" aria-hidden="true">
   <div class="auth-visual-fill"></div>
-  <span class="auth-visual-badge">{$t('common.appName')}</span>
 </div>
 
 <style>
@@ -44,24 +39,5 @@
       radial-gradient(circle at 42% 46%, rgba(255, 255, 255, 0.12) 0%, transparent 14%);
     filter: blur(24px);
     opacity: 0.84;
-  }
-
-  .auth-visual-badge {
-    position: absolute;
-    left: 1.5rem;
-    bottom: 1.5rem;
-    z-index: 1;
-    display: inline-flex;
-    align-items: center;
-    padding: 0.45rem 0.8rem;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 999px;
-    background: rgba(8, 17, 31, 0.22);
-    color: var(--fg-strong);
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    backdrop-filter: blur(16px);
   }
 </style>

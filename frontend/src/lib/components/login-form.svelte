@@ -1,5 +1,6 @@
 <script>
   import { UiButton, UiCard, UiInput, UiLabel } from '$lib/components/base';
+  import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import { t } from '$lib/i18n/index';
   import AuthVisualPane from '$lib/components/shell/AuthVisualPane.svelte';
 
@@ -9,6 +10,7 @@
   export let privacyHref = '/info?tab=legal&doc=privacy';
   export let onsubmit = undefined;
   export let onforgot = undefined;
+  export let onclose = undefined;
   export let onswitch = undefined;
 
   function handleSubmit(event) {
@@ -17,7 +19,18 @@
 </script>
 
 <div class="flex flex-col gap-6">
-  <UiCard className="overflow-hidden border-0 p-0 shadow-[0_28px_60px_rgba(8,17,31,0.24)]">
+  <UiCard className="relative overflow-hidden border-0 p-0 shadow-[0_28px_60px_rgba(8,17,31,0.24)]">
+    <UiButton
+      type="button"
+      variant="secondary"
+      size="close"
+      className="absolute right-3.5 top-3.5 z-[2]"
+      onclick={() => onclose?.()}
+      aria-label={$t('common.close')}
+    >
+      <CloseIcon class="ui-close-icon" />
+    </UiButton>
+
     <div class="grid p-0 md:min-h-[35rem] md:grid-cols-2">
       <form class="auth-form-pane" on:submit={handleSubmit}>
         <div class="auth-form-stack">
@@ -79,9 +92,13 @@
 
   <p class="auth-legal-note px-6 text-center text-sm">
     {$t('header.authLegalPrefix')}
-    <a href={termsHref}>{$t('header.termsLink')}</a>
+    <a class="auth-legal-link" href={termsHref} target="_blank" rel="noopener noreferrer">
+      {$t('header.termsLink')}
+    </a>
     {$t('header.authLegalAnd')}
-    <a href={privacyHref}>{$t('header.privacyLink')}</a>.
+    <a class="auth-legal-link" href={privacyHref} target="_blank" rel="noopener noreferrer">
+      {$t('header.privacyLink')}
+    </a>.
   </p>
 </div>
 
@@ -148,6 +165,13 @@
     text-align: center;
     font-size: 0.875rem;
     color: var(--muted);
+  }
+
+  .auth-legal-link {
+    color: var(--fg-strong);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
   }
 
   @media (min-width: 768px) {
