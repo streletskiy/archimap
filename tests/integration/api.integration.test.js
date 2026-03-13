@@ -214,7 +214,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       // The key expectation: no "bootstrap admin disabled" style block (403).
       assert.equal(registerStart.status, 503);
       const registerBody = await registerStart.json();
-      assert.match(String(registerBody.error || ''), /Отправка писем не настроена/);
+      assert.match(String(registerBody.error || ''), /Email delivery is not configured/i);
     });
 
     await t.test('public style overrides endpoint is readable and admin mutation requires auth', async () => {
@@ -293,7 +293,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const shortQuery = await callApi('/api/search-buildings?q=a');
       assert.equal(shortQuery.status, 400);
       const searchBody = await shortQuery.json();
-      assert.match(String(searchBody.error || ''), /Минимальная длина/);
+      assert.match(String(searchBody.error || ''), /Minimum query length/i);
 
       const invalidBbox = await callApi('/api/search-buildings?q=test&west=44&south=56&east=44.1');
       assert.equal(invalidBbox.status, 400);

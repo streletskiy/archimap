@@ -33,11 +33,11 @@ function createAdminEditsService(options = {}) {
   async function getBuildingEditDetails(editIdRaw) {
     const editId = parsePositiveId(editIdRaw);
     if (!editId) {
-      throw createAdminError(400, 'Некорректный идентификатор правки');
+      throw createAdminError(400, 'Invalid edit id');
     }
     const item = await getUserEditDetailsById(editId);
     if (!item) {
-      throw createAdminError(404, 'Правка не найдена');
+      throw createAdminError(404, 'Edit not found');
     }
     return item;
   }
@@ -45,7 +45,7 @@ function createAdminEditsService(options = {}) {
   async function getUserByEmail(emailRaw) {
     const email = String(emailRaw || '').trim().toLowerCase();
     if (!isLikelyEmail(email)) {
-      throw createAdminError(400, 'Некорректный email');
+      throw createAdminError(400, 'Invalid email');
     }
 
     const row = await db.prepare(`
@@ -73,7 +73,7 @@ function createAdminEditsService(options = {}) {
       LIMIT 1
     `).get(email);
     if (!row) {
-      throw createAdminError(404, 'Пользователь не найден');
+      throw createAdminError(404, 'User not found');
     }
 
     return {
@@ -95,7 +95,7 @@ function createAdminEditsService(options = {}) {
   async function getUserEditsByEmail(emailRaw, limitRaw) {
     const email = String(emailRaw || '').trim().toLowerCase();
     if (!isLikelyEmail(email)) {
-      throw createAdminError(400, 'Некорректный email');
+      throw createAdminError(400, 'Invalid email');
     }
     const limit = parseLimit(limitRaw, 200, 1, 1000);
     return getUserEditsList({ createdBy: email, limit, summary: true });
@@ -104,7 +104,7 @@ function createAdminEditsService(options = {}) {
   async function rejectBuildingEdit(editIdRaw, { comment, reviewer } = {}) {
     const row = await getBuildingEditDetails(editIdRaw);
     if (normalizeUserEditStatus(row.status) !== 'pending') {
-      throw createAdminError(409, 'Правка уже обработана');
+      throw createAdminError(409, 'Edit has already been processed');
     }
 
     const editId = parsePositiveId(editIdRaw);
@@ -123,7 +123,7 @@ function createAdminEditsService(options = {}) {
       WHERE id = ? AND status = 'pending'
     `).run(adminComment, reviewer || 'admin', editId);
     if (Number(result?.changes || 0) === 0) {
-      throw createAdminError(409, 'Правка уже обработана другим администратором');
+      throw createAdminError(409, 'Edit has already been processed by another administrator');
     }
 
     return {
@@ -136,17 +136,17 @@ function createAdminEditsService(options = {}) {
   async function reassignBuildingEdit(editIdRaw, { target, actor, force } = {}) {
     const editId = parsePositiveId(editIdRaw);
     if (!editId) {
-      throw createAdminError(400, 'Некорректный идентификатор правки');
+      throw createAdminError(400, 'Invalid edit id');
     }
 
     const parsedTarget = parseOsmTarget(target);
     if (!parsedTarget) {
-      throw createAdminError(400, 'Укажите корректный идентификатор целевого здания');
+      throw createAdminError(400, 'Provide a valid target building id');
     }
 
     const before = await getUserEditDetailsById(editId);
     if (!before) {
-      throw createAdminError(404, 'Правка не найдена');
+      throw createAdminError(404, 'Edit not found');
     }
 
     try {
@@ -162,11 +162,11 @@ function createAdminEditsService(options = {}) {
       }
       return updated;
     } catch (error) {
-      const message = String(error?.message || error || 'Не удалось переназначить правку');
-      if (message.includes('не найдена')) {
+      const message = String(error?.message || error || 'Failed to reassign edit');
+      if (message.includes('not found')) {
         throw createAdminError(404, message);
       }
-      if (message.includes('конфликтующие локальные поля')) {
+      if (message.includes('conflicting local fields')) {
         throw createAdminError(409, message, { code: 'REASSIGN_TARGET_CONFLICT' });
       }
       throw createAdminError(400, message);
@@ -176,7 +176,7 @@ function createAdminEditsService(options = {}) {
   async function deleteBuildingEdit(editIdRaw) {
     const editId = parsePositiveId(editIdRaw);
     if (!editId) {
-      throw createAdminError(400, 'Некорректный идентификатор правки');
+      throw createAdminError(400, 'Invalid edit id');
     }
 
     try {
@@ -186,8 +186,8 @@ function createAdminEditsService(options = {}) {
       }
       return deleted;
     } catch (error) {
-      const message = String(error?.message || error || 'Не удалось удалить правку');
-      if (error?.code === 'EDIT_NOT_FOUND' || message.includes('не найдена')) {
+      const message = String(error?.message || error || 'Failed to delete edit');
+      if (error?.code === 'EDIT_NOT_FOUND' || message.includes('not found')) {
         throw createAdminError(404, message);
       }
       if (error?.code === 'EDIT_DELETE_SHARED_MERGED_STATE') {
@@ -206,7 +206,7 @@ function createAdminEditsService(options = {}) {
       if (key === 'year_built') {
         const parsedYearBuilt = sanitizeYearBuilt(source[key]);
         if (parsedYearBuilt == null && String(source[key] ?? '').trim() !== '') {
-          throw createAdminError(400, 'Год постройки должен быть целым числом от 1000 до 2100');
+          throw createAdminError(400, 'Year built must be an integer between 1000 and 2100');
         }
         sanitizedValues[key] = parsedYearBuilt;
         continue;
@@ -214,7 +214,7 @@ function createAdminEditsService(options = {}) {
       if (key === 'levels') {
         const parsedLevels = sanitizeLevels(source[key]);
         if (parsedLevels == null && String(source[key] ?? '').trim() !== '') {
-          throw createAdminError(400, 'Этажность должна быть целым числом от 0 до 300');
+          throw createAdminError(400, 'Levels must be an integer between 0 and 300');
         }
         sanitizedValues[key] = parsedLevels;
         continue;
@@ -255,18 +255,18 @@ function createAdminEditsService(options = {}) {
   async function mergeBuildingEdit(editIdRaw, { force, fields, values, comment, reviewer } = {}) {
     const item = await getBuildingEditDetails(editIdRaw);
     if (normalizeUserEditStatus(item.status) !== 'pending') {
-      throw createAdminError(409, 'Правка уже обработана');
+      throw createAdminError(409, 'Edit has already been processed');
     }
 
     const forceMerge = Boolean(force === true);
     const currentContour = await getOsmContourRow(item.osmType, item.osmId);
     if (!currentContour) {
-      throw createAdminError(409, 'Исходное OSM-здание больше не существует в локальной базе контуров. Сначала переназначьте правку на актуальное здание.', {
+      throw createAdminError(409, 'Source OSM building no longer exists in the local contours database. Reassign the edit to a current building first.', {
         code: 'EDIT_TARGET_MISSING'
       });
     }
     if (!forceMerge && item.sourceOsmChanged) {
-      throw createAdminError(409, 'Правка устарела: OSM-данные здания изменились после её создания. Обновите правку, переназначьте её или выполните merge с force.', {
+      throw createAdminError(409, 'Edit is outdated because the building OSM data changed after the edit was created. Refresh the edit, reassign it, or run merge with force.', {
         code: 'EDIT_OUTDATED_OSM',
         details: {
           currentUpdatedAt: item.currentOsmUpdatedAt || null,
@@ -277,7 +277,7 @@ function createAdminEditsService(options = {}) {
 
     const allowedFields = new Set((item.changes || []).map((change) => String(change.field || '')));
     if (allowedFields.size === 0) {
-      throw createAdminError(409, 'В правке нет отличий от текущих данных');
+      throw createAdminError(409, 'Edit does not contain changes');
     }
 
     const requestedFields = Array.isArray(fields)
@@ -297,7 +297,7 @@ function createAdminEditsService(options = {}) {
     } = await buildMergedCandidate(item, editId);
 
     if (!forceMerge && Number.isFinite(editCreatedTs) && Number.isFinite(currentMergedTs) && currentMergedTs > editCreatedTs) {
-      throw createAdminError(409, 'Правка устарела: данные здания были изменены после её создания. Обновите правку или выполните merge с force.', {
+      throw createAdminError(409, 'Edit is outdated because the building data changed after the edit was created. Refresh the edit or run merge with force.', {
         code: 'EDIT_OUTDATED',
         details: {
           currentUpdatedAt: currentMerged.updated_at || null,
@@ -370,13 +370,13 @@ function createAdminEditsService(options = {}) {
     try {
       await tx();
     } catch {
-      throw createAdminError(409, 'Не удалось применить merge: правка была изменена параллельно');
+      throw createAdminError(409, 'Failed to apply merge because the edit was modified concurrently');
     }
 
     const updated = await db.prepare('SELECT status FROM user_edits.building_user_edits WHERE id = ?').get(editId);
     const normalizedStatus = normalizeUserEditStatus(updated?.status);
     if (!updated || (normalizedStatus !== 'accepted' && normalizedStatus !== 'partially_accepted')) {
-      throw createAdminError(409, 'Правка уже обработана другим администратором');
+      throw createAdminError(409, 'Edit has already been processed by another administrator');
     }
 
     enqueueSearchIndexRefresh(item.osmType, item.osmId);

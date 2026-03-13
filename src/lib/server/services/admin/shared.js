@@ -1,9 +1,16 @@
 function createAdminError(status, message, options = {}) {
   const error = new Error(String(message || 'Admin request failed'));
   error.status = Number(status) || 400;
-  if (options.code) {
-    error.code = String(options.code);
-  }
+  const fallbackCode = error.status === 401
+    ? 'ERR_AUTH_REQUIRED'
+    : error.status === 403
+      ? 'ERR_ACCESS_DENIED'
+      : error.status === 404
+        ? 'ERR_NOT_FOUND'
+        : error.status >= 500
+          ? 'ERR_INTERNAL'
+          : 'ERR_REQUEST_FAILED';
+  error.code = String(options.code || fallbackCode);
   if (options.details && typeof options.details === 'object') {
     error.details = options.details;
   }
@@ -26,10 +33,10 @@ function resolveAppBaseUrl({ appBaseUrl, getAppBaseUrl } = {}) {
 
 function requireMasterAdmin(req, res, next) {
   if (!req?.session?.user) {
-    return res.status(401).json({ error: 'Требуется авторизация' });
+    return res.status(401).json({ code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' });
   }
   if (!req.session.user.isMasterAdmin) {
-    return res.status(403).json({ error: 'Требуются права master admin' });
+    return res.status(403).json({ code: 'ERR_MASTER_ADMIN_REQUIRED', error: 'Master admin privileges are required' });
   }
   return next();
 }

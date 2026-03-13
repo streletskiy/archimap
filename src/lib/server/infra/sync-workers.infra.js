@@ -256,10 +256,10 @@ function initManagedSyncWorkers(options = {}) {
     const numericRegionId = Number(regionId);
     const region = await dataSettingsService.getRegionById(numericRegionId);
     if (!region) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
     if (!region.enabled) {
-      throw new Error('Синхронизация доступна только для enabled региона');
+      throw new Error('Sync is only available for enabled regions');
     }
 
     if (currentRun?.regionId === numericRegionId) {

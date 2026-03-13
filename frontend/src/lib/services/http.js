@@ -29,9 +29,18 @@ export async function apiJson(input, init = {}) {
   if (!resp.ok) {
     const code = String(data?.code || '').trim();
     const codeMessage = code ? translateNow(`errors.codes.${code}`) : '';
+    const statusMessage = resp.status === 401
+      ? translateNow('errors.authRequired')
+      : resp.status === 403
+        ? translateNow('errors.accessDenied')
+        : resp.status === 404
+          ? translateNow('errors.notFound')
+          : resp.status >= 500
+            ? translateNow('errors.internal')
+            : '';
     const errorMessage = String(
       (codeMessage && codeMessage !== `errors.codes.${code}` ? codeMessage : '')
-      || data?.error
+      || statusMessage
       || translateNow('errors.requestFailed', { status: resp.status })
     );
     throw new Error(errorMessage);

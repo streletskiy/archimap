@@ -14,7 +14,10 @@ function sendJsonResult(res, result, fallback = {}) {
     applyResultHeaders(res, result.headers);
   }
   if (result?.error) {
-    return res.status(result.status || 400).json({ error: result.error });
+    return res.status(result.status || 400).json({
+      code: result.code || (Number(result.status || 400) >= 500 ? 'ERR_INTERNAL' : 'ERR_REQUEST_FAILED'),
+      error: result.error
+    });
   }
   return res.json(result?.payload || fallback);
 }
@@ -36,37 +39,37 @@ function registerAuthRoutes(options = {}) {
   const loginRateLimiter = createSimpleRateLimiter({
     windowMs: 10 * 60 * 1000,
     maxRequests: 20,
-    message: 'Слишком много попыток входа, попробуйте позже'
+    message: 'Too many login attempts, please try again later'
   });
 
   const registrationCodeRequestRateLimiter = createSimpleRateLimiter({
     windowMs: 10 * 60 * 1000,
     maxRequests: 12,
-    message: 'Слишком много запросов кода подтверждения, попробуйте позже'
+    message: 'Too many registration code requests, please try again later'
   });
 
   const registrationConfirmRateLimiter = createSimpleRateLimiter({
     windowMs: 10 * 60 * 1000,
     maxRequests: 20,
-    message: 'Слишком много попыток подтверждения, попробуйте позже'
+    message: 'Too many registration confirmation attempts, please try again later'
   });
 
   const changePasswordRateLimiter = createSimpleRateLimiter({
     windowMs: 10 * 60 * 1000,
     maxRequests: 15,
-    message: 'Слишком много попыток смены пароля, попробуйте позже'
+    message: 'Too many password change attempts, please try again later'
   });
 
   const passwordResetRequestRateLimiter = createSimpleRateLimiter({
     windowMs: 10 * 60 * 1000,
     maxRequests: 12,
-    message: 'Слишком много запросов сброса пароля, попробуйте позже'
+    message: 'Too many password reset requests, please try again later'
   });
 
   const passwordResetConfirmRateLimiter = createSimpleRateLimiter({
     windowMs: 10 * 60 * 1000,
     maxRequests: 20,
-    message: 'Слишком много попыток сброса пароля, попробуйте позже'
+    message: 'Too many password reset attempts, please try again later'
   });
 
   app.get('/api/me', async (req, res) => {

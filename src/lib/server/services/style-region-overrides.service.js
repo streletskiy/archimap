@@ -1,9 +1,8 @@
 function createStyleRegionOverrideError(status, message, options = {}) {
   const error = new Error(String(message || 'Style region override request failed'));
   error.status = Number(status) || 400;
-  if (options.code) {
-    error.code = String(options.code);
-  }
+  const fallbackCode = error.status === 404 ? 'ERR_STYLE_OVERRIDE_NOT_FOUND' : 'ERR_INVALID_INPUT';
+  error.code = String(options.code || fallbackCode);
   return error;
 }
 
@@ -16,13 +15,13 @@ function parseOverrideId(value) {
 function normalizeRegionPattern(value) {
   const text = String(value || '').trim().toLowerCase();
   if (!text) {
-    throw createStyleRegionOverrideError(400, 'Укажите маску региона');
+    throw createStyleRegionOverrideError(400, 'Region pattern is required');
   }
   if (text.length > 160) {
-    throw createStyleRegionOverrideError(400, 'Маска региона слишком длинная');
+    throw createStyleRegionOverrideError(400, 'Region pattern is too long');
   }
   if (!/^[a-z0-9*][a-z0-9*_-]*$/.test(text)) {
-    throw createStyleRegionOverrideError(400, 'Маска региона может содержать только латиницу, цифры, "-", "_" и "*"');
+    throw createStyleRegionOverrideError(400, 'Region pattern may contain only latin letters, digits, "-", "_" and "*"');
   }
   return text;
 }
@@ -30,13 +29,13 @@ function normalizeRegionPattern(value) {
 function normalizeStyleKey(value) {
   const text = String(value || '').trim().toLowerCase();
   if (!text) {
-    throw createStyleRegionOverrideError(400, 'Укажите ключ архитектурного стиля');
+    throw createStyleRegionOverrideError(400, 'Architecture style key is required');
   }
   if (text.length > 120) {
-    throw createStyleRegionOverrideError(400, 'Ключ архитектурного стиля слишком длинный');
+    throw createStyleRegionOverrideError(400, 'Architecture style key is too long');
   }
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(text)) {
-    throw createStyleRegionOverrideError(400, 'Ключ архитектурного стиля имеет некорректный формат');
+    throw createStyleRegionOverrideError(400, 'Architecture style key has an invalid format');
   }
   return text;
 }
@@ -45,7 +44,7 @@ function normalizeIsAllowed(value) {
   if (typeof value === 'boolean') return value;
   if (value === 1 || value === '1' || value === 'true') return true;
   if (value === 0 || value === '0' || value === 'false') return false;
-  throw createStyleRegionOverrideError(400, 'Укажите действие правила: разрешить или запретить');
+  throw createStyleRegionOverrideError(400, 'Rule action must be either allow or deny');
 }
 
 function mapOverrideRow(row, { publicOnly = false } = {}) {
@@ -159,12 +158,12 @@ function createStyleRegionOverridesService(options = {}) {
   async function deleteOverride(idRaw) {
     const overrideId = parseOverrideId(idRaw);
     if (!overrideId) {
-      throw createStyleRegionOverrideError(400, 'Некорректный идентификатор правила');
+      throw createStyleRegionOverrideError(400, 'Invalid override id');
     }
 
     const existing = await selectOverrideById.get(overrideId);
     if (!existing) {
-      throw createStyleRegionOverrideError(404, 'Правило ограничения стиля не найдено');
+      throw createStyleRegionOverrideError(404, 'Style region override not found');
     }
 
     await deleteOverrideById.run(overrideId);

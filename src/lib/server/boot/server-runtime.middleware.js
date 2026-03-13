@@ -28,10 +28,10 @@ function applyServerRuntimeMiddleware(runtime) {
 
   runtime.app.use((req, res, next) => {
     if (!runtime.isDbRuntimeReady()) {
-      return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
+      return res.status(503).json({ code: 'ERR_SERVICE_INITIALIZING', error: 'Service is initializing, please try again' });
     }
     if (!runtime.sessionMiddleware) {
-      return res.status(503).json({ error: 'Сервис инициализируется, попробуйте ещё раз' });
+      return res.status(503).json({ code: 'ERR_SERVICE_INITIALIZING', error: 'Service is initializing, please try again' });
     }
     return runtime.sessionMiddleware(req, res, next);
   });

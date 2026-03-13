@@ -144,6 +144,9 @@ System notes:
 - Not found: `404`.
 - Rate limit: `429` + `Retry-After`.
 - Internal errors: `500` with sanitized message (no stack trace leak in prod).
+- JSON error responses use the normalized shape `{ code, error }`.
+- `code` is the stable integration contract for frontend i18n and client logic.
+- `error` is sanitized backend text and should be treated as a fallback/debug field, not as the primary user-facing localization source.
 
 ## CSRF scope
 

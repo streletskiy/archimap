@@ -73,7 +73,7 @@ function registerBuildingsRoutes(deps) {
   app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
     const result = await filtersService.getFilterDataByKeys(req.body?.keys, getSessionEditActorKey(req));
     if (result.error) {
-      return res.status(result.status || 400).json({ error: result.error });
+      return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
     return res.json({ items: result.items || [] });
   });
@@ -81,7 +81,7 @@ function registerBuildingsRoutes(deps) {
   app.get('/api/buildings/filter-data-bbox', filterDataBboxRateLimiter, async (req, res) => {
     const result = await filtersService.getFilterDataByBbox(req.query, getSessionEditActorKey(req));
     if (result.error) {
-      return res.status(result.status || 400).json({ error: result.error });
+      return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
     return sendCachedJson(req, res, result.payload || { items: [], truncated: false }, {
       cacheControl: 'public, max-age=10'
@@ -91,7 +91,7 @@ function registerBuildingsRoutes(deps) {
   app.post('/api/buildings/filter-matches-batch', filterMatchesRateLimiter, async (req, res) => {
     const result = await filtersService.getBatchFilterMatches(req.body || {}, getSessionEditActorKey(req));
     if (result.error) {
-      return res.status(result.status || 400).json({ error: result.error });
+      return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
     return res.json(result.payload || {
       items: [],
@@ -105,7 +105,7 @@ function registerBuildingsRoutes(deps) {
   app.post('/api/buildings/filter-matches', filterMatchesRateLimiter, async (req, res) => {
     const result = await filtersService.getFilterMatches(req.body || {}, getSessionEditActorKey(req));
     if (result.error) {
-      return res.status(result.status || 400).json({ error: result.error });
+      return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
     return res.json(result.payload || {
       matchedKeys: [],
@@ -124,7 +124,7 @@ function registerBuildingsRoutes(deps) {
     const osmType = req.params.osmType;
     const osmId = Number(req.params.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-      return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+      return res.status(400).json({ code: 'ERR_INVALID_BUILDING_ID', error: 'Invalid building id' });
     }
 
     const merged = await getMergedInfoRow(osmType, osmId);
@@ -133,7 +133,7 @@ function registerBuildingsRoutes(deps) {
     const row = personal ? applyUserEditRowToInfo(merged, personal) : merged;
     const contour = !row ? await getOsmContourRow(osmType, osmId) : null;
     if (!row && !contour) {
-      return res.status(404).json({ error: 'Информация не найдена' });
+      return res.status(404).json({ code: 'ERR_BUILDING_INFO_NOT_FOUND', error: 'Building info was not found' });
     }
     const regionSlugs = (await selectBuildingRegionSlugsById.all(osmType, osmId))
       .map((item) => String(item?.slug || '').trim())
@@ -168,24 +168,24 @@ function registerBuildingsRoutes(deps) {
     const osmId = Number(body.osmId);
 
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-      return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+      return res.status(400).json({ code: 'ERR_INVALID_BUILDING_ID', error: 'Invalid building id' });
     }
 
     const validated = sanitizeArchiPayload(body);
     if (validated.error) {
-      return res.status(400).json({ error: validated.error });
+      return res.status(400).json({ code: validated.code || 'ERR_INVALID_INPUT', error: validated.error });
     }
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
-      return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
+      return res.status(400).json({ code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve current user' });
     }
     const currentContour = await getOsmContourRow(osmType, osmId);
     if (!currentContour) {
-      return res.status(404).json({ error: 'Здание не найдено в локальной базе контуров' });
+      return res.status(404).json({ code: 'ERR_BUILDING_NOT_FOUND', error: 'Building was not found in the local contours database' });
     }
     const requestedEditedFields = sanitizeEditedFields(body.editedFields);
     if (requestedEditedFields.length === 0) {
-      return res.status(409).json({ error: 'В правке нет отличий от текущих данных' });
+      return res.status(409).json({ code: 'ERR_EDIT_NO_CHANGES', error: 'Edit payload does not contain changes' });
     }
 
     const tx = db.transaction(async () => {
@@ -284,13 +284,13 @@ function registerBuildingsRoutes(deps) {
     const osmType = req.params.osmType;
     const osmId = Number(req.params.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) {
-      return res.status(400).json({ error: 'Некорректный идентификатор здания' });
+      return res.status(400).json({ code: 'ERR_INVALID_BUILDING_ID', error: 'Invalid building id' });
     }
 
     const row = await selectBuildingById.get(osmType, osmId);
 
     if (!row) {
-      return res.status(404).json({ error: 'Здание не найдено в локальной базе контуров' });
+      return res.status(404).json({ code: 'ERR_BUILDING_NOT_FOUND', error: 'Building was not found in the local contours database' });
     }
 
     const feature = rowToFeature(row);

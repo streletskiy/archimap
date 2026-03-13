@@ -18,10 +18,10 @@ function parseSearchBbox(query = {}) {
     north: Number(query.north)
   };
   if (![bbox.west, bbox.south, bbox.east, bbox.north].every(Number.isFinite)) {
-    return { bbox: null, error: 'Некорректный bbox' };
+    return { bbox: null, error: 'Invalid bbox' };
   }
   if (bbox.west >= bbox.east || bbox.south >= bbox.north) {
-    return { bbox: null, error: 'Некорректный bbox' };
+    return { bbox: null, error: 'Invalid bbox' };
   }
   return { bbox, error: '' };
 }
@@ -33,10 +33,10 @@ function registerSearchRoutes({ app, searchRateLimiter, getBuildingSearchResults
   app.get('/api/search-buildings', searchRateLimiter, async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) {
-      return res.status(400).json({ error: 'Минимальная длина запроса: 2 символа' });
+      return res.status(400).json({ code: 'ERR_QUERY_TOO_SHORT', error: 'Minimum query length is 2 characters' });
     }
     if (q.length > 120) {
-      return res.status(400).json({ error: 'Максимальная длина запроса: 120 символов' });
+      return res.status(400).json({ code: 'ERR_QUERY_TOO_LONG', error: 'Maximum query length is 120 characters' });
     }
 
     const lon = Number(req.query.lon);
@@ -44,11 +44,11 @@ function registerSearchRoutes({ app, searchRateLimiter, getBuildingSearchResults
     const limit = Math.max(1, Math.min(500, Number(req.query.limit || 30)));
     const cursor = Number(req.query.cursor || 0);
     if (!Number.isFinite(cursor) || cursor < 0) {
-      return res.status(400).json({ error: 'Некорректный cursor' });
+      return res.status(400).json({ code: 'ERR_INVALID_CURSOR', error: 'Invalid cursor' });
     }
     const { bbox, error: bboxError } = parseSearchBbox(req.query);
     if (bboxError) {
-      return res.status(400).json({ error: bboxError });
+      return res.status(400).json({ code: 'ERR_INVALID_BBOX', error: bboxError });
     }
 
     const bboxCacheKey = bbox
@@ -79,15 +79,15 @@ function registerSearchRoutes({ app, searchRateLimiter, getBuildingSearchResults
   app.get('/api/search-buildings-map', searchRateLimiter, async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) {
-      return res.status(400).json({ error: 'Минимальная длина запроса: 2 символа' });
+      return res.status(400).json({ code: 'ERR_QUERY_TOO_SHORT', error: 'Minimum query length is 2 characters' });
     }
     if (q.length > 120) {
-      return res.status(400).json({ error: 'Максимальная длина запроса: 120 символов' });
+      return res.status(400).json({ code: 'ERR_QUERY_TOO_LONG', error: 'Maximum query length is 120 characters' });
     }
 
     const { bbox, error: bboxError } = parseSearchBbox(req.query);
     if (bboxError || !bbox) {
-      return res.status(400).json({ error: bboxError || 'Для карты нужен bbox' });
+      return res.status(400).json({ code: bboxError ? 'ERR_INVALID_BBOX' : 'ERR_BBOX_REQUIRED', error: bboxError || 'bbox is required for map search' });
     }
 
     const lon = Number(req.query.lon);

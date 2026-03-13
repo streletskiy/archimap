@@ -244,7 +244,7 @@ function applyResponseHelpers(req, res) {
       fs.stat(resolved, (error, stat) => {
         if (error || !stat || !stat.isFile()) {
           if (!res.headersSent) {
-            res.status(404).json({ error: 'File not found' });
+            res.status(404).json({ code: 'ERR_FILE_NOT_FOUND', error: 'File not found' });
           } else {
             res.end();
           }
@@ -263,7 +263,7 @@ function applyResponseHelpers(req, res) {
         const stream = fs.createReadStream(resolved);
         stream.on('error', () => {
           if (!res.headersSent) {
-            res.status(500).json({ error: 'Unable to stream file' });
+            res.status(500).json({ code: 'ERR_FILE_STREAM_FAILED', error: 'Unable to stream file' });
             return;
           }
           res.destroy();
@@ -553,7 +553,7 @@ function jsonMiddleware(options = {}) {
         req.body = JSON.parse(raw);
         return next();
       } catch {
-        return res.status(400).json({ error: 'Некорректный JSON payload' });
+        return res.status(400).json({ code: 'ERR_INVALID_JSON_PAYLOAD', error: 'Invalid JSON payload' });
       }
     });
 

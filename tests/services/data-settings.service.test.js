@@ -393,7 +393,7 @@ test('legacy unresolved regions stay unresolved until manual extract selection',
 
   await assert.rejects(
     service.createQueuedRun(legacy.id, 'manual', 'tester'),
-    /ручной выбор canonical extract/i
+    /manual canonical extract selection/i
   );
 });
 

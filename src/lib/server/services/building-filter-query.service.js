@@ -55,10 +55,10 @@ function parseBboxInput(source, fields) {
   const maxLon = Number(source?.[fields.maxLon]);
   const maxLat = Number(source?.[fields.maxLat]);
   if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
-    return { bbox: null, error: 'Некорректные координаты bbox' };
+    return { bbox: null, error: 'Invalid bbox coordinates' };
   }
   if (minLon > maxLon || minLat > maxLat) {
-    return { bbox: null, error: 'Некорректные границы bbox' };
+    return { bbox: null, error: 'Invalid bbox boundaries' };
   }
   return {
     bbox: {

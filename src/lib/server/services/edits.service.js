@@ -45,10 +45,10 @@ function sanitizeArchiPayload(body) {
   const yearBuilt = sanitizeYearBuilt(yearRaw);
   const levels = sanitizeLevels(levelsRaw);
   if ((yearRaw !== null && yearRaw !== undefined && String(yearRaw).trim() !== '') && yearBuilt == null) {
-    return { error: 'Год постройки должен быть целым числом от 1000 до 2100' };
+    return { code: 'ERR_INVALID_YEAR_BUILT', error: 'Year built must be an integer between 1000 and 2100' };
   }
   if ((levelsRaw !== null && levelsRaw !== undefined && String(levelsRaw).trim() !== '') && levels == null) {
-    return { error: 'Этажность должна быть целым числом от 0 до 300' };
+    return { code: 'ERR_INVALID_LEVELS', error: 'Levels must be an integer between 0 and 300' };
   }
   return {
     value: {

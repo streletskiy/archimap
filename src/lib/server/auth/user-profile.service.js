@@ -6,11 +6,11 @@ function createUserProfileService({
 }) {
   async function updateCurrentProfile(req) {
     if (!req.session?.user) {
-      return { status: 401, error: 'Требуется авторизация' };
+      return { status: 401, code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' };
     }
     const email = normalizeEmail(req.session.user.email);
     if (!isValidEmail(email)) {
-      return { status: 400, error: 'Не удалось определить email текущего пользователя' };
+      return { status: 400, code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve the current user email' };
     }
 
     const firstName = normalizeProfileName(req.body?.firstName);
@@ -30,12 +30,12 @@ function createUserProfileService({
     const email = normalizeEmail(body?.email);
     const canEdit = Boolean(body?.canEdit);
     if (!isValidEmail(email)) {
-      return { status: 400, error: 'Укажите корректный email пользователя' };
+      return { status: 400, code: 'ERR_INVALID_EMAIL', error: 'Provide a valid user email' };
     }
 
     const result = await db.prepare('UPDATE auth.users SET can_edit = ? WHERE email = ?').run(canEdit ? 1 : 0, email);
     if (Number(result?.changes || 0) === 0) {
-      return { status: 404, error: 'Пользователь не найден' };
+      return { status: 404, code: 'ERR_USER_NOT_FOUND', error: 'User not found' };
     }
 
     return {
@@ -132,16 +132,16 @@ function createUserProfileService({
     const email = normalizeEmail(body?.email);
     const isAdmin = Boolean(body?.isAdmin);
     if (!isValidEmail(email)) {
-      return { status: 400, error: 'Укажите корректный email пользователя' };
+      return { status: 400, code: 'ERR_INVALID_EMAIL', error: 'Provide a valid user email' };
     }
 
     const target = await db.prepare('SELECT is_master_admin FROM auth.users WHERE email = ?').get(email);
     if (!target) {
-      return { status: 404, error: 'Пользователь не найден' };
+      return { status: 404, code: 'ERR_USER_NOT_FOUND', error: 'User not found' };
     }
     const targetIsMasterAdmin = Number(target?.is_master_admin || 0) > 0;
     if (targetIsMasterAdmin && !isAdmin) {
-      return { status: 403, error: 'Мастер-админ не может быть понижен до обычного пользователя' };
+      return { status: 403, code: 'ERR_MASTER_ADMIN_DEMOTION_FORBIDDEN', error: 'A master admin cannot be demoted to a regular user' };
     }
 
     await db.prepare('UPDATE auth.users SET is_admin = ? WHERE email = ?').run(isAdmin ? 1 : 0, email);

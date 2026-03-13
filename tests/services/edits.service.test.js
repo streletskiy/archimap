@@ -29,7 +29,7 @@ test('sanitizeArchiPayload validates bounds and normalizes text', () => {
   assert.equal(ok.value.levels, 5);
 
   const bad = sanitizeArchiPayload({ yearBuilt: '3000' });
-  assert.match(String(bad.error || ''), /Год постройки/);
+  assert.match(String(bad.error || ''), /Year built/i);
 });
 
 test('sanitizeFieldText trims and limits length', () => {
