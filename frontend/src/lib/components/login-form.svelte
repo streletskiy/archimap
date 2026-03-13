@@ -86,7 +86,7 @@
         </div>
       </form>
 
-      <AuthVisualPane />
+      <AuthVisualPane imageUrl="/images/auth/login.webp" />
     </div>
   </UiCard>
 

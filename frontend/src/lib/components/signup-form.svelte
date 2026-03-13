@@ -119,7 +119,7 @@
         </div>
       </form>
 
-      <AuthVisualPane />
+      <AuthVisualPane imageUrl="/images/auth/register.webp" />
     </div>
   </UiCard>
 

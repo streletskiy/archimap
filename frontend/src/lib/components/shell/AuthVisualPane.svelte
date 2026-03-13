@@ -1,5 +1,11 @@
+<script>
+  export let imageUrl = '';
+
+  $: authVisualImage = imageUrl ? `url("${imageUrl}")` : 'none';
+</script>
+
 <div class="bg-muted relative hidden md:block" aria-hidden="true">
-  <div class="auth-visual-fill"></div>
+  <div class="auth-visual-fill" style={`--auth-visual-image: ${authVisualImage};`}></div>
 </div>
 
 <style>
@@ -22,13 +28,14 @@
 
   .auth-visual-fill::before {
     background:
+      var(--auth-visual-image) center / cover no-repeat,
       repeating-linear-gradient(90deg, transparent 0 2.15rem, rgba(255, 255, 255, 0.08) 2.15rem 2.23rem),
       repeating-linear-gradient(0deg, transparent 0 2.15rem, rgba(255, 255, 255, 0.06) 2.15rem 2.23rem),
       linear-gradient(128deg, transparent 10%, rgba(255, 255, 255, 0.12) 10.8%, transparent 11.6%),
       linear-gradient(34deg, transparent 31%, rgba(255, 255, 255, 0.12) 31.8%, transparent 32.6%),
       linear-gradient(168deg, transparent 58%, rgba(255, 255, 255, 0.08) 58.8%, transparent 59.6%);
-    filter: blur(9px);
-    opacity: 0.82;
+    filter: blur(5px);
+    opacity: 0.7;
     transform: scale(1.04);
   }
 
