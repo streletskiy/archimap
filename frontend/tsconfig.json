@@ -6,6 +6,7 @@
     "module": "ESNext",
     "allowJs": true,
     "checkJs": false,
+    "skipLibCheck": true,
     "strict": false,
     "types": ["node"]
   },

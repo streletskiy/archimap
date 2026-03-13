@@ -2,7 +2,22 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
 
-  import { t, translateNow } from '$lib/i18n/index';
+  import {
+    UiButton,
+    UiCheckbox,
+    UiDateRangePicker,
+    UiInput,
+    UiScrollArea,
+    UiSelect,
+    UiTable,
+    UiTableBody,
+    UiTableCell,
+    UiTableHead,
+    UiTableHeader,
+    UiTableRow,
+    UiTextarea
+  } from '$lib/components/base';
+  import { locale, t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
   import { getGeometryCenter } from '$lib/utils/map-geometry';
   import {
@@ -11,6 +26,7 @@
     getEditAddress,
     getEditKey,
     getStatusBadgeMeta,
+    matchesUiDateRange,
     parseEditKey
   } from '$lib/utils/edit-ui';
 
@@ -31,9 +47,20 @@
   let editsFilter = 'all';
   let editsLimit = 200;
   let editsQuery = '';
-  let editsDate = '';
+  let editsDateRange = undefined;
   let editsUser = '';
   let editsUsers = [];
+  let editsUserItems = [];
+  let editsFilterItems = [];
+  const editsLimitItems = [
+    { value: 100, label: '100' },
+    { value: 200, label: '200' },
+    { value: 500, label: '500' }
+  ];
+  const reassignTargetTypeItems = [
+    { value: 'way', label: 'way' },
+    { value: 'relation', label: 'relation' }
+  ];
 
   let selectedEdit = null;
   let selectedFeature = EMPTY_FEATURE_COLLECTION;
@@ -52,6 +79,19 @@
 
   let centerByKey = new Map();
   let editIdByKey = new Map();
+
+  $: editsUserItems = [
+    { value: '', label: $t('admin.edits.userAll') },
+    ...editsUsers.map((user) => ({ value: user, label: user }))
+  ];
+  $: editsFilterItems = [
+    { value: 'all', label: $t('admin.edits.statusAll') },
+    { value: 'pending', label: $t('admin.edits.statusPending') },
+    { value: 'accepted', label: $t('admin.edits.statusAccepted') },
+    { value: 'partially_accepted', label: $t('admin.edits.statusPartiallyAccepted') },
+    { value: 'rejected', label: $t('admin.edits.statusRejected') },
+    { value: 'superseded', label: $t('admin.edits.statusSuperseded') }
+  ];
 
   function normalizeEditId(value) {
     const numeric = Number(value || 0);
@@ -365,7 +405,6 @@
     const query = String(editsQuery || '')
       .trim()
       .toLowerCase();
-    const date = String(editsDate || '').trim();
     const user = String(editsUser || '')
       .trim()
       .toLowerCase();
@@ -379,9 +418,8 @@
       const author = String(item?.updatedBy || '')
         .trim()
         .toLowerCase();
-      const updatedAt = String(item?.updatedAt || '');
       if (query && !address.includes(query) && !osmKey.includes(query)) return false;
-      if (date && !updatedAt.startsWith(date)) return false;
+      if (!matchesUiDateRange(item?.updatedAt, editsDateRange)) return false;
       if (user && author !== user) return false;
       if (status !== 'all' && String(item?.status || '').trim().toLowerCase() !== status) return false;
       return true;
@@ -435,28 +473,36 @@
   class:lg:grid-cols-1={!adminPaneOpen}
 >
   <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3">
-    <div class="grid gap-2 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]">
-      <input class="ui-field" type="search" placeholder={$t('admin.edits.search')} bind:value={editsQuery} />
-      <input class="ui-field" type="date" bind:value={editsDate} />
-      <select class="ui-field" bind:value={editsUser}
-        ><option value="">{$t('admin.edits.userAll')}</option>{#each editsUsers as user (user)}<option value={user}
-            >{user}</option
-          >{/each}</select
-      >
-      <select class="ui-field ui-field-xs" bind:value={editsFilter}
-        ><option value="all">{$t('admin.edits.statusAll')}</option><option value="pending"
-          >{$t('admin.edits.statusPending')}</option
-        ><option value="accepted">{$t('admin.edits.statusAccepted')}</option><option value="partially_accepted"
-          >{$t('admin.edits.statusPartiallyAccepted')}</option
-        ><option value="rejected">{$t('admin.edits.statusRejected')}</option><option value="superseded"
-          >{$t('admin.edits.statusSuperseded')}</option
-        ></select
-      >
-      <div class="flex gap-2">
-        <select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}
-          ><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select
+    <div class="ui-filter-toolbar ui-filter-toolbar--admin-edits">
+      <UiInput type="search" placeholder={$t('admin.edits.search')} bind:value={editsQuery} />
+      <UiDateRangePicker
+        value={editsDateRange}
+        locale={$locale}
+        placeholder={$t('admin.edits.dateRangePlaceholder')}
+        calendarLabel={$t('admin.edits.dateRangeLabel')}
+        clearLabel={$t('common.clear')}
+        onchange={(event) => (editsDateRange = event.detail.value)}
+      />
+      <UiSelect
+        items={editsUserItems}
+        bind:value={editsUser}
+        contentClassName="max-h-72"
+      />
+      <UiSelect items={editsFilterItems} bind:value={editsFilter} />
+      <div class="ui-filter-toolbar__group ui-filter-toolbar__group--limit">
+        <UiSelect
+          items={editsLimitItems}
+          bind:value={editsLimit}
+          onchange={loadEdits}
+        />
+        <UiButton
+          type="button"
+          variant="secondary"
+          className="w-full min-h-11 rounded-[1rem] px-4 py-3 text-sm sm:w-auto"
+          onclick={loadEdits}
         >
-        <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>{$t('common.refresh')}</button>
+          {$t('common.refresh')}
+        </UiButton>
       </div>
     </div>
 
@@ -470,76 +516,81 @@
       on:openedit={(event) => openEdit(event.detail?.editId)}
     />
 
-    <div class="overflow-x-auto rounded-xl border ui-border">
-      <table class="min-w-full text-sm">
-        <thead>
-          <tr class="border-b ui-border text-left ui-text-muted">
-            <th class="px-3 py-2">{$t('admin.edits.tableBuilding')}</th>
-            <th class="px-3 py-2">{$t('admin.edits.tableAuthor')}</th>
-            <th class="px-3 py-2">{$t('admin.edits.tableStatus')}</th>
-            <th class="px-3 py-2">{$t('admin.edits.tableChanges')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#if editsLoading}
-            <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('admin.loading')}</td></tr>
-          {:else if visibleEdits.length === 0}
-            <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('admin.empty')}</td></tr>
-          {:else}
-            {#each visibleEdits as edit (`${edit.id || edit.editId}`)}
-              {@const statusMeta = getStatusBadgeMeta(edit.status, translateNow)}
-              {@const counters = getChangeCounters(edit.changes)}
-              <tr class="cursor-pointer border-b ui-border-soft ui-hover-surface" on:click={() => openEdit(edit.id || edit.editId)}>
-                <td class="px-3 py-2">
-                  <p class="font-semibold ui-text-strong">{getEditAddress(edit)}</p>
-                  <p class="text-xs ui-text-subtle">ID: {edit.osmType}/{edit.osmId}</p>
-                  <div class="mt-1 flex flex-wrap gap-1">
-                    {#if edit.orphaned}
-                      <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger"
-                        >{$t('admin.edits.orphaned')}</span
-                      >
-                    {/if}
-                    {#if !edit.osmPresent && !edit.orphaned}
-                      <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning"
-                        >{$t('admin.edits.missingTarget')}</span
-                      >
-                    {/if}
-                    {#if edit.sourceOsmChanged}
-                      <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info"
-                        >{$t('admin.edits.osmChanged')}</span
-                      >
-                    {/if}
-                  </div>
-                </td>
-                <td class="px-3 py-2">{edit.updatedBy || '-'}</td>
-                <td class="px-3 py-2"
-                  ><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}"
-                    >{statusMeta.text}</span
-                  ></td
-                >
-                <td class="px-3 py-2">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted"
-                      >{counters.total} {$t('admin.edits.changesTotal')}</span
+    <UiTable>
+      <UiTableHeader>
+        <UiTableRow className="hover:[&>th]:bg-transparent">
+          <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
+          <UiTableHead>{$t('admin.edits.tableAuthor')}</UiTableHead>
+          <UiTableHead>{$t('admin.edits.tableStatus')}</UiTableHead>
+          <UiTableHead>{$t('admin.edits.tableChanges')}</UiTableHead>
+        </UiTableRow>
+      </UiTableHeader>
+      <UiTableBody>
+        {#if editsLoading}
+          <UiTableRow>
+            <UiTableCell colspan="4" className="ui-text-subtle">{$t('admin.loading')}</UiTableCell>
+          </UiTableRow>
+        {:else if visibleEdits.length === 0}
+          <UiTableRow>
+            <UiTableCell colspan="4" className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
+          </UiTableRow>
+        {:else}
+          {#each visibleEdits as edit (`${edit.id || edit.editId}`)}
+            {@const statusMeta = getStatusBadgeMeta(edit.status, translateNow)}
+            {@const counters = getChangeCounters(edit.changes)}
+            <UiTableRow
+              className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
+              on:click={() => openEdit(edit.id || edit.editId)}
+            >
+              <UiTableCell>
+                <p class="font-semibold ui-text-strong">{getEditAddress(edit)}</p>
+                <p class="text-xs ui-text-subtle">ID: {edit.osmType}/{edit.osmId}</p>
+                <div class="mt-1 flex flex-wrap gap-1">
+                  {#if edit.orphaned}
+                    <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger"
+                      >{$t('admin.edits.orphaned')}</span
                     >
-                    {#if counters.created > 0}
-                      <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft"
-                        >+{counters.created} {$t('admin.edits.changesCreated')}</span
-                      >
-                    {/if}
-                    {#if counters.modified > 0}
-                      <span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body"
-                        >~{counters.modified} {$t('admin.edits.changesModified')}</span
-                      >
-                    {/if}
-                  </div>
-                </td>
-              </tr>
-            {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+                  {/if}
+                  {#if !edit.osmPresent && !edit.orphaned}
+                    <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning"
+                      >{$t('admin.edits.missingTarget')}</span
+                    >
+                  {/if}
+                  {#if edit.sourceOsmChanged}
+                    <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info"
+                      >{$t('admin.edits.osmChanged')}</span
+                    >
+                  {/if}
+                </div>
+              </UiTableCell>
+              <UiTableCell>{edit.updatedBy || '-'}</UiTableCell>
+              <UiTableCell
+                ><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}"
+                  >{statusMeta.text}</span
+                ></UiTableCell
+              >
+              <UiTableCell>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted"
+                    >{counters.total} {$t('admin.edits.changesTotal')}</span
+                  >
+                  {#if counters.created > 0}
+                    <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft"
+                      >+{counters.created} {$t('admin.edits.changesCreated')}</span
+                    >
+                  {/if}
+                  {#if counters.modified > 0}
+                    <span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body"
+                      >~{counters.modified} {$t('admin.edits.changesModified')}</span
+                    >
+                  {/if}
+                </div>
+              </UiTableCell>
+            </UiTableRow>
+          {/each}
+        {/if}
+      </UiTableBody>
+    </UiTable>
   </section>
 
   {#if detailPaneVisible}
@@ -551,11 +602,12 @@
     >
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-base font-bold ui-text-strong">{$t('admin.edits.detailTitle')}</h3>
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
+          variant="secondary"
+          size="close"
           aria-label={$t('admin.edits.closeDetail')}
-          on:click={() => closeEditPanel()}
+          onclick={() => closeEditPanel()}
           ><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"
             ><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path
               d="M18 6L6 18"
@@ -563,7 +615,7 @@
               stroke-width="2.25"
               stroke-linecap="round"
             /></svg
-          ></button
+          ></UiButton
         >
       </div>
 
@@ -594,7 +646,10 @@
           </div>
         {/if}
 
-        <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border ui-border p-2">
+        <UiScrollArea
+          className="max-h-[42vh] rounded-xl border ui-border"
+          contentClassName="space-y-2 p-2"
+        >
           {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
             <p class="text-sm ui-text-subtle">{$t('admin.edits.noChanges')}</p>
           {:else}
@@ -603,21 +658,19 @@
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <p class="text-sm font-semibold ui-text-strong">{change.label || change.field}</p>
                   <div class="flex items-center gap-1">
-                    <button
+                    <UiButton
                       type="button"
-                      class="ui-btn ui-btn-xs"
-                      class:ui-btn-primary={fieldDecisions[change.field] !== 'reject'}
-                      class:ui-btn-secondary={fieldDecisions[change.field] === 'reject'}
-                      on:click={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'accept' })}
-                      >{$t('admin.edits.accept')}</button
+                      size="xs"
+                      variant={fieldDecisions[change.field] !== 'reject' ? 'primary' : 'secondary'}
+                      onclick={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'accept' })}
+                      >{$t('admin.edits.accept')}</UiButton
                     >
-                    <button
+                    <UiButton
                       type="button"
-                      class="ui-btn ui-btn-xs"
-                      class:ui-btn-primary={fieldDecisions[change.field] === 'reject'}
-                      class:ui-btn-secondary={fieldDecisions[change.field] !== 'reject'}
-                      on:click={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'reject' })}
-                      >{$t('admin.edits.reject')}</button
+                      size="xs"
+                      variant={fieldDecisions[change.field] === 'reject' ? 'primary' : 'secondary'}
+                      onclick={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'reject' })}
+                      >{$t('admin.edits.reject')}</UiButton
                     >
                   </div>
                 </div>
@@ -626,8 +679,8 @@
                   <strong>{String(change.localValue ?? $t('admin.edits.emptyValue'))}</strong>
                 </p>
                 {#if fieldDecisions[change.field] !== 'reject'}
-                  <input
-                    class="ui-field mt-2"
+                  <UiInput
+                    className="mt-2"
                     value={fieldValues[change.field] ?? ''}
                     on:input={(event) => (fieldValues = { ...fieldValues, [change.field]: event.currentTarget.value })}
                   />
@@ -635,39 +688,35 @@
               </div>
             {/each}
           {/if}
-        </div>
+        </UiScrollArea>
 
-        <textarea
-          class="ui-field min-h-[84px]"
+        <UiTextarea
+          className="min-h-[84px]"
           placeholder={$t('admin.edits.moderatorComment')}
           bind:value={moderationComment}
-        ></textarea>
+        ></UiTextarea>
 
         {#if selectedEdit.canReassign}
           <div class="space-y-2 rounded-xl border ui-border ui-surface-muted p-3">
             <p class="text-sm font-semibold ui-text-strong">{$t('admin.edits.reassignTitle')}</p>
             <p class="text-xs ui-text-muted">{$t('admin.edits.reassignHelp')}</p>
             <div class="grid gap-2 sm:grid-cols-[120px_1fr_auto]">
-              <select class="ui-field" bind:value={reassignTargetType}>
-                <option value="way">way</option>
-                <option value="relation">relation</option>
-              </select>
-              <input
-                class="ui-field"
+              <UiSelect items={reassignTargetTypeItems} bind:value={reassignTargetType} />
+              <UiInput
                 type="number"
                 min="1"
                 bind:value={reassignTargetId}
                 placeholder={$t('admin.edits.reassignTargetId')}
               />
-              <button
+              <UiButton
                 type="button"
-                class="ui-btn ui-btn-secondary"
+                variant="secondary"
                 disabled={moderationBusy}
-                on:click={reassignSelectedEdit}>{$t('admin.edits.reassignAction')}</button
+                onclick={reassignSelectedEdit}>{$t('admin.edits.reassignAction')}</UiButton
               >
             </div>
             <label class="flex items-center gap-2 text-xs ui-text-body"
-              ><input type="checkbox" bind:checked={reassignForce} />
+              ><UiCheckbox bind:checked={reassignForce} />
               {$t('admin.edits.reassignForce')}</label
             >
           </div>
@@ -683,33 +732,32 @@
             {:else}
               <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlocked')}</p>
             {/if}
-            <button
+            <UiButton
               type="button"
-              class="ui-btn ui-btn-danger"
+              variant="danger"
               disabled={moderationBusy || !selectedEdit.canHardDelete}
-              on:click={deleteSelectedEdit}>{$t('admin.edits.deleteAction')}</button
+              onclick={deleteSelectedEdit}>{$t('admin.edits.deleteAction')}</UiButton
             >
           </div>
         {/if}
 
         <div class="flex flex-wrap gap-2">
-          <button type="button" class="ui-btn ui-btn-secondary" on:click={() => setAll('accept')}
-            >{$t('admin.edits.acceptAll')}</button
+          <UiButton type="button" variant="secondary" onclick={() => setAll('accept')}
+            >{$t('admin.edits.acceptAll')}</UiButton
           >
-          <button type="button" class="ui-btn ui-btn-secondary" on:click={() => setAll('reject')}
-            >{$t('admin.edits.rejectAll')}</button
+          <UiButton type="button" variant="secondary" onclick={() => setAll('reject')}
+            >{$t('admin.edits.rejectAll')}</UiButton
           >
-          <button
+          <UiButton
             type="button"
-            class="ui-btn ui-btn-primary"
             disabled={moderationBusy}
-            on:click={() => applyDecision('apply')}>{$t('admin.edits.applyDecision')}</button
+            onclick={() => applyDecision('apply')}>{$t('admin.edits.applyDecision')}</UiButton
           >
-          <button
+          <UiButton
             type="button"
-            class="ui-btn ui-btn-danger"
+            variant="danger"
             disabled={moderationBusy}
-            on:click={() => applyDecision('reject')}>{$t('admin.edits.rejectEdit')}</button
+            onclick={() => applyDecision('reject')}>{$t('admin.edits.rejectEdit')}</UiButton
           >
         </div>
 

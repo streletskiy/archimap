@@ -5,7 +5,7 @@ import prettier from 'eslint-config-prettier';
 
 export default [
   {
-    ignores: ['.svelte-kit/**', 'build/**', 'dist/**']
+    ignores: ['.svelte-kit/**', 'build/**', 'dist/**', 'src/lib/components/ui/**']
   },
   js.configs.recommended,
   ...svelte.configs['flat/recommended'],

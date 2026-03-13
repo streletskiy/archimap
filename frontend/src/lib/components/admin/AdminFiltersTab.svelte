@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
+  import { UiButton, UiCheckbox, UiScrollArea } from '$lib/components/base';
   import { t } from '$lib/i18n/index';
   import { formatUiDate } from '$lib/utils/edit-ui';
 
@@ -32,11 +33,12 @@
         <p class="text-sm ui-text-muted">{$t('admin.data.filterTags.description')}</p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs"
-          on:click={() => controller.loadDataSettings({ preserveSelection: true })}
-          disabled={$dataLoading || $filterTagAllowlistSaving}>{$t('common.refresh')}</button
+          variant="secondary"
+          size="xs"
+          onclick={() => controller.loadDataSettings({ preserveSelection: true })}
+          disabled={$dataLoading || $filterTagAllowlistSaving}>{$t('common.refresh')}</UiButton
         >
       </div>
     </div>
@@ -76,42 +78,103 @@
         {$t('admin.data.filterTags.empty')}
       </p>
     {:else}
-      <div class="max-h-[28rem] overflow-auto rounded-xl border ui-border ui-surface-base p-3">
-        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      <UiScrollArea
+        className="max-h-[28rem] rounded-xl border ui-border ui-surface-base p-3"
+        contentClassName="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
+      >
           {#each $sortedAvailableFilterTagKeys as key (key)}
             {@const draftState = $filterTagDraftStateByKey[key] || 'unchanged'}
             <label
-              class={`filter-tag-option ${controller.getFilterTagDraftClass(draftState)} flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm`}
+              class="filter-tag-option flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+              data-draft-state={draftState}
             >
-              <input
-                type="checkbox"
+              <UiCheckbox
                 checked={$filterTagAllowlistDraft.includes(key)}
-                on:change={(event) => controller.toggleFilterTagSelection(key, event.currentTarget.checked)}
+                onchange={(event) => controller.toggleFilterTagSelection(key, event.detail.checked)}
               />
               <span class="break-all">{key}</span>
             </label>
           {/each}
-        </div>
-      </div>
+      </UiScrollArea>
     {/if}
 
     <div class="flex flex-wrap gap-2">
-      <button
+      <UiButton
         type="button"
-        class="ui-btn ui-btn-secondary"
+        variant="secondary"
         disabled={$dataLoading || $filterTagAllowlistSaving}
-        on:click={controller.resetFilterTagAllowlistToDefault}>{$t('admin.data.filterTags.resetDefaults')}</button
+        onclick={controller.resetFilterTagAllowlistToDefault}>{$t('admin.data.filterTags.resetDefaults')}</UiButton
       >
-      <button
+      <UiButton
         type="button"
-        class="ui-btn ui-btn-primary"
         disabled={$dataLoading || $filterTagAllowlistSaving}
-        on:click={controller.saveFilterTagAllowlist}>{$t('admin.data.filterTags.save')}</button
+        onclick={controller.saveFilterTagAllowlist}>{$t('admin.data.filterTags.save')}</UiButton
       >
     </div>
   </section>
 {/if}
 
 <style>
-  @import './admin-tabs.css';
+  .filter-tag-unsaved-warning {
+    border: 1px solid #fcd34d;
+    background: #fffbeb;
+    color: #92400e;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-unsaved-warning {
+    border-color: #b45309;
+    background: #3f2a05;
+    color: #fcd34d;
+  }
+
+  .filter-tag-option {
+    border-color: var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    color: var(--fg);
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  .filter-tag-option[data-draft-state='unchanged'] {
+    border-color: var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    color: var(--fg);
+    box-shadow: none;
+  }
+
+  .filter-tag-option[data-draft-state='enabled_pending'] {
+    border-color: #34d399;
+    background: #dcfce7;
+    box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.22);
+    color: #065f46;
+  }
+
+  .filter-tag-option[data-draft-state='disabled_pending'] {
+    border-color: #fb7185;
+    background: #ffe4e6;
+    box-shadow: inset 0 0 0 1px rgba(225, 29, 72, 0.16);
+    color: #9f1239;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-option[data-draft-state='enabled_pending'] {
+    border-color: #34d399;
+    background: #0b3b2e;
+    box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.24);
+    color: #a7f3d0;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-option[data-draft-state='disabled_pending'] {
+    border-color: #fb7185;
+    background: #4a1524;
+    box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.22);
+    color: #fecdd3;
+  }
+
+  :global(html[data-theme='dark']) .filter-tag-option[data-draft-state='unchanged'] {
+    border-color: var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    color: var(--fg);
+  }
 </style>

@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
+  import { UiButton, UiCheckbox, UiInput } from '$lib/components/base';
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
 
@@ -146,24 +147,24 @@
   <div class="mt-3 grid gap-4 lg:grid-cols-2">
     <form class="space-y-2 rounded-2xl border ui-border ui-surface-muted p-4" on:submit={saveGeneral}>
       <h3 class="text-base font-bold ui-text-strong">{$t('admin.settings.generalTitle')}</h3>
-      <input class="ui-field" bind:value={general.appDisplayName} placeholder={$t('admin.settings.appNamePlaceholder')} />
-      <input class="ui-field" bind:value={general.appBaseUrl} placeholder={$t('admin.settings.baseUrlPlaceholder')} />
+      <UiInput bind:value={general.appDisplayName} placeholder={$t('admin.settings.appNamePlaceholder')} />
+      <UiInput bind:value={general.appBaseUrl} placeholder={$t('admin.settings.baseUrlPlaceholder')} />
       <label class="flex items-center gap-2 text-sm ui-text-body"
-        ><input type="checkbox" bind:checked={general.registrationEnabled} />
+        ><UiCheckbox bind:checked={general.registrationEnabled} />
         {$t('admin.settings.registrationEnabled')}</label
       >
       <label class="flex items-center gap-2 text-sm ui-text-body"
-        ><input type="checkbox" bind:checked={general.userEditRequiresPermission} />
+        ><UiCheckbox bind:checked={general.userEditRequiresPermission} />
         {$t('admin.settings.editRequiresPermission')}</label
       >
       <div class="mt-2 text-sm text-gray-500">
         <div class="font-semibold text-gray-700">{$t('admin.settings.metricsToken')}:</div>
         <div class="flex items-center gap-2 mt-1">
-          <input type="text" class="ui-field font-mono text-xs flex-1" readonly value={general.metricsToken || $t('admin.settings.metricsTokenGenerating')} />
-          <button type="button" class="ui-btn ui-btn-secondary" on:click={() => { general.metricsToken = ''; saveGeneral({preventDefault: () => {}}); }}>{$t('admin.settings.metricsTokenRegenerate')}</button>
+          <UiInput type="text" className="flex-1 font-mono text-xs" readonly value={general.metricsToken || $t('admin.settings.metricsTokenGenerating')} />
+          <UiButton type="button" variant="secondary" onclick={() => { general.metricsToken = ''; saveGeneral({preventDefault: () => {}}); }}>{$t('admin.settings.metricsTokenRegenerate')}</UiButton>
         </div>
       </div>
-      <button type="submit" class="ui-btn ui-btn-primary mt-4" disabled={generalLoading}>{$t('common.save')}</button>
+      <UiButton type="submit" className="mt-4" disabled={generalLoading}>{$t('common.save')}</UiButton>
       {#if generalStatus}
         <p class="text-sm ui-text-muted">{generalStatus}</p>
       {/if}
@@ -171,28 +172,27 @@
 
     <form class="space-y-2 rounded-2xl border ui-border ui-surface-muted p-4" on:submit={saveSmtp}>
       <h3 class="text-base font-bold ui-text-strong">{$t('admin.settings.smtpTitle')}</h3>
-      <input class="ui-field" bind:value={smtp.url} placeholder={$t('admin.settings.smtpUrl')} />
+      <UiInput bind:value={smtp.url} placeholder={$t('admin.settings.smtpUrl')} />
       <div class="grid gap-2 sm:grid-cols-2">
-        <input class="ui-field" bind:value={smtp.host} placeholder={$t('admin.settings.host')} />
-        <input class="ui-field" type="number" min="1" max="65535" bind:value={smtp.port} placeholder={$t('admin.settings.port')} />
+        <UiInput bind:value={smtp.host} placeholder={$t('admin.settings.host')} />
+        <UiInput type="number" min="1" max="65535" bind:value={smtp.port} placeholder={$t('admin.settings.port')} />
       </div>
-      <input class="ui-field" bind:value={smtp.user} placeholder={$t('admin.settings.user')} />
-      <input
-        class="ui-field"
+      <UiInput bind:value={smtp.user} placeholder={$t('admin.settings.user')} />
+      <UiInput
         type="password"
         bind:value={smtp.pass}
         placeholder={smtp.hasPassword ? $t('admin.settings.passwordKeep') : $t('admin.settings.password')}
       />
-      <input class="ui-field" bind:value={smtp.from} placeholder={$t('admin.settings.from')} />
+      <UiInput bind:value={smtp.from} placeholder={$t('admin.settings.from')} />
       <label class="flex items-center gap-2 text-sm ui-text-body"
-        ><input type="checkbox" bind:checked={smtp.secure} /> {$t('admin.settings.secure')}</label
+        ><UiCheckbox bind:checked={smtp.secure} /> {$t('admin.settings.secure')}</label
       >
       <div class="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-        <input class="ui-field" type="email" bind:value={smtpTestEmail} placeholder={$t('admin.settings.testEmail')} />
-        <button type="button" class="ui-btn ui-btn-secondary" on:click={testSmtp} disabled={smtpLoading}
-          >{$t('admin.settings.smtpTest')}</button
+        <UiInput type="email" bind:value={smtpTestEmail} placeholder={$t('admin.settings.testEmail')} />
+        <UiButton type="button" variant="secondary" onclick={testSmtp} disabled={smtpLoading}
+          >{$t('admin.settings.smtpTest')}</UiButton
         >
-        <button type="submit" class="ui-btn ui-btn-primary" disabled={smtpLoading}>{$t('admin.settings.smtpSave')}</button>
+        <UiButton type="submit" disabled={smtpLoading}>{$t('admin.settings.smtpSave')}</UiButton>
       </div>
       {#if smtpStatus}
         <p class="text-sm ui-text-muted">{smtpStatus}</p>

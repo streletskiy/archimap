@@ -10,6 +10,8 @@
 - `src/lib/server/boot/server-runtime.routes.js`: route registration for API/system endpoints.
 - `src/lib/server/boot/*.boot.js`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
 - `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
+- `frontend/src/lib/components/ui/**`: generated `shadcn-svelte` primitives kept close to upstream.
+- `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
 - `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
@@ -30,6 +32,7 @@
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
+- Shared UI composition follows `ui/** -> base/** -> shell/routes`; product code should not consume generated primitives directly.
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.

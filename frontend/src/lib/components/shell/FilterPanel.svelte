@@ -1,8 +1,13 @@
 <script>
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { fly } from 'svelte/transition';
+  import { UiButton, UiColorPicker, UiInput, UiSelect } from '$lib/components/base';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
-  import { FILTER_PRESETS } from '$lib/constants/filter-presets';
+  import {
+    FILTER_LAYER_BASE_COLOR,
+    FILTER_LAYER_COLOR_PALETTE,
+    FILTER_PRESETS
+  } from '$lib/constants/filter-presets';
   import {
     APPEARANCE_FILTER_TAG_KEYS,
     APPEARANCE_FILTER_TAG_PREFIXES,
@@ -34,6 +39,13 @@
   let filterTagKeysRetryTimer = null;
   let dragLayerId = '';
   let panelWasOpen = false;
+  let filterModeItems = [];
+  let filterOpItems = [];
+  let filterTagItems = [];
+  const filterLayerColorSwatches = [
+    FILTER_LAYER_BASE_COLOR,
+    ...FILTER_LAYER_COLOR_PALETTE
+  ].filter((color, index, colors) => colors.indexOf(color) === index);
 
   $: if (open && !panelWasOpen) {
     draftLayers = buildDraftLayers($buildingFilterLayers);
@@ -48,6 +60,31 @@
   $: draftFilterCount = draftLayers.filter((layer) => hasActiveLayerRules(layer)).length;
   $: visibleCount = open ? draftFilterCount : activeFilterCount;
   $: filterPreviewLayers = Array.isArray($buildingFilterLayers) ? $buildingFilterLayers.slice(0, 3) : [];
+  $: filterModeItems = [
+    { value: 'and', label: $t('header.filterLayerMode.and') },
+    { value: 'or', label: $t('header.filterLayerMode.or') },
+    { value: 'layer', label: $t('header.filterLayerMode.layer') }
+  ];
+  $: filterOpItems = [
+    { value: 'contains', label: $t('header.op.contains') },
+    { value: 'equals', label: $t('header.op.equals') },
+    { value: 'not_equals', label: $t('header.op.not_equals') },
+    { value: 'starts_with', label: $t('header.op.starts_with') },
+    { value: 'greater_than', label: $t('header.op.greater_than') },
+    { value: 'greater_or_equals', label: $t('header.op.greater_or_equals') },
+    { value: 'less_than', label: $t('header.op.less_than') },
+    { value: 'less_or_equals', label: $t('header.op.less_or_equals') },
+    { value: 'exists', label: $t('header.op.exists') },
+    { value: 'not_exists', label: $t('header.op.not_exists') }
+  ];
+  $: filterTagItems = sortFilterTagKeys([
+    ...Object.keys(FILTER_TAG_LABEL_KEYS),
+    ...filterTagKeys,
+    ...collectDraftRuleKeys(draftLayers)
+  ]).map((key) => ({
+    value: key,
+    label: getFilterTagOptionLabel(key)
+  }));
 
   function buildDraftLayers(layers) {
     const sourceLayers = Array.isArray(layers) && layers.length > 0 ? layers : [{}];
@@ -79,6 +116,14 @@
 
   function hasActiveLayerRules(layer) {
     return Array.isArray(layer?.rules) && layer.rules.some((rule) => hasActiveRule(rule));
+  }
+
+  function collectDraftRuleKeys(layers) {
+    return (Array.isArray(layers) ? layers : []).flatMap((layer) => (
+      Array.isArray(layer?.rules)
+        ? layer.rules.map((rule) => String(rule?.key || '').trim()).filter(Boolean)
+        : []
+    ));
   }
 
   function closePanel() {
@@ -256,6 +301,13 @@
     return translateNow(labelKey);
   }
 
+  function getFilterTagOptionLabel(tagKey) {
+    const key = String(tagKey || '').trim();
+    if (!key) return '';
+    const displayName = getFilterTagDisplayName(key);
+    return displayName === key ? key : `${key} - ${displayName}`;
+  }
+
   function getFilterTagGroupRank(tagKey) {
     const key = String(tagKey || '').trim();
     if (!key) return 2;
@@ -336,14 +388,15 @@
         <p class="ui-kicker">OSM</p>
         <h4>{$t('header.filterTitle')}</h4>
       </div>
-      <button
+      <UiButton
         type="button"
-        class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
+        variant="secondary"
+        size="close"
         aria-label={$t('header.closeFilter')}
-        on:click={closePanel}
+        onclick={closePanel}
       >
         <CloseIcon class="ui-close-icon" />
-      </button>
+      </UiButton>
     </div>
 
     <div class="filter-runtime" data-filter-runtime-status={$buildingFilterRuntime.statusCode}>
@@ -352,7 +405,7 @@
       {#if activeFilterCount > 0}
         <div class="filter-preview-list">
           {#each filterPreviewLayers as layer (layer.id)}
-            <span class="ui-chip layer-pill" style={`--layer-color:${layer.color};`}>
+            <span class="ui-chip layer-pill" style:--layer-color={layer.color}>
               {describeLayer(layer)}
             </span>
           {/each}
@@ -366,24 +419,26 @@
     <div class="preset-section">
       <div class="preset-head">
         <span class="section-label">{$t('header.presets.title')}</span>
-        <button
+        <UiButton
           type="button"
           data-testid="filter-add-layer-button"
-          class="ui-btn ui-btn-secondary ui-btn-xs"
-          on:click={addLayer}
+          variant="secondary"
+          size="xs"
+          onclick={addLayer}
         >
           {$t('header.addLayer')}
-        </button>
+        </UiButton>
       </div>
       <div class="preset-list">
         {#each FILTER_PRESETS as preset (preset.id)}
-          <button
+          <UiButton
             type="button"
-            class="ui-btn ui-btn-secondary ui-btn-xs preset-chip"
-            on:click={() => applyPreset(preset)}
+            variant="secondary"
+            size="xs"
+            onclick={() => applyPreset(preset)}
           >
             {getPresetLabel(preset)}
-          </button>
+          </UiButton>
         {/each}
       </div>
     </div>
@@ -393,6 +448,7 @@
         <section
           data-testid="filter-layer-card"
           class="layer-card"
+          style:--layer-color={layer.color}
           role="listitem"
           draggable="true"
           on:dragstart={(event) => handleDragStart(event, layer.id)}
@@ -400,130 +456,130 @@
           on:drop={(event) => handleDrop(event, layer.id)}
           on:dragend={handleDragEnd}
         >
-          <div class="layer-accent" style={`background:${layer.color};`}></div>
+          <div class="layer-accent"></div>
           <div class="layer-body">
             <div class="layer-head">
               <div class="layer-meta">
                 <span class="drag-handle" aria-hidden="true">☰</span>
                 <span class="layer-index">{String(index + 1).padStart(2, '0')}</span>
-                <label class="color-swatch" style={`--swatch-color:${layer.color};`}>
-                  <input
-                    type="color"
-                    value={layer.color}
-                    aria-label={getFilterModeLabel(layer.mode)}
-                    on:input={(event) => updateLayer(layer.id, { color: event.currentTarget.value })}
-                  />
-                  <span class="color-swatch-dot" aria-hidden="true"></span>
-                </label>
+                <UiColorPicker
+                  value={layer.color}
+                  label={$t('header.layerColor')}
+                  swatches={filterLayerColorSwatches}
+                  contentClassName="ui-floating-layer-map-filter"
+                  onchange={(event) => updateLayer(layer.id, { color: event.detail.value })}
+                />
               </div>
               <div class="layer-actions">
-                <select
-                  class="ui-field ui-field-xs mode-select"
+                <UiSelect
                   value={layer.mode}
-                  on:change={(event) => updateLayer(layer.id, { mode: event.currentTarget.value })}
-                >
-                  <option value="and">{getFilterModeLabel('and')}</option>
-                  <option value="or">{getFilterModeLabel('or')}</option>
-                  <option value="layer">{getFilterModeLabel('layer')}</option>
-                </select>
-                <button
+                  items={filterModeItems}
+                  size="xs"
+                  className="min-w-[5.25rem]"
+                  contentClassName="ui-floating-layer-map-filter"
+                  onchange={(event) => updateLayer(layer.id, { mode: event.detail.value })}
+                />
+                <UiButton
                   type="button"
-                  class="ui-btn ui-btn-secondary ui-btn-xs filter-remove-btn"
+                  variant="secondary"
+                  size="square-sm"
+                  className="inline-flex h-8 w-8 min-h-8 min-w-8 items-center justify-center rounded-[0.65rem] p-0 text-[0]"
                   aria-label={$t('common.close')}
-                  on:click={() => removeLayer(layer.id)}
+                  onclick={() => removeLayer(layer.id)}
                 >
                   <CloseIcon width="14" height="14" />
-                </button>
+                </UiButton>
               </div>
             </div>
 
             <div class="rule-list">
-              {#each layer.rules as rule (rule.id)}
-                <div class="rule-row">
-                  <div class="rule-fields">
-                    <input
-                      data-testid="filter-key-input"
-                      class="ui-field ui-field-xs"
-                      list="filter-tag-keys"
-                      placeholder={$t('header.tagKey')}
-                      value={rule.key}
-                      on:input={(event) => updateRule(layer.id, rule.id, { key: event.currentTarget.value })}
-                    />
-                    <select
-                      data-testid="filter-op-select"
-                      class="ui-field ui-field-xs"
-                      value={rule.op}
-                      on:change={(event) => updateRule(layer.id, rule.id, { op: event.currentTarget.value })}
-                    >
-                      <option value="contains">{$t('header.op.contains')}</option>
-                      <option value="equals">{$t('header.op.equals')}</option>
-                      <option value="not_equals">{$t('header.op.not_equals')}</option>
-                      <option value="starts_with">{$t('header.op.starts_with')}</option>
-                      <option value="greater_than">{$t('header.op.greater_than')}</option>
-                      <option value="greater_or_equals">{$t('header.op.greater_or_equals')}</option>
-                      <option value="less_than">{$t('header.op.less_than')}</option>
-                      <option value="less_or_equals">{$t('header.op.less_or_equals')}</option>
-                      <option value="exists">{$t('header.op.exists')}</option>
-                      <option value="not_exists">{$t('header.op.not_exists')}</option>
-                    </select>
-                    <input
-                      data-testid="filter-value-input"
-                      class="ui-field ui-field-xs"
-                      placeholder={$t('header.tagValue')}
-                      value={rule.value}
-                      inputmode={isNumericFilterOp(rule.op) ? 'decimal' : 'text'}
-                      on:input={(event) => updateRule(layer.id, rule.id, { value: event.currentTarget.value })}
-                      disabled={isValuelessFilterOp(rule.op)}
-                    />
+              {#each layer.rules as rule, ruleIndex (rule.id)}
+                <div class="rule-item">
+                  <div class="rule-item-head">
+                    <span class="rule-item-index">{String(ruleIndex + 1).padStart(2, '0')}</span>
+                    <span class="rule-item-label">{$t('header.ruleItem')}</span>
                   </div>
-                  <button
-                    type="button"
-                    class="ui-btn ui-btn-secondary ui-btn-xs filter-remove-btn rule-remove-btn"
-                    aria-label={$t('common.close')}
-                    on:click={() => removeRule(layer.id, rule.id)}
-                  >
-                    <CloseIcon width="14" height="14" />
-                  </button>
+                  <div class="rule-row">
+                    <div class="rule-fields">
+                      <div data-testid="filter-key-input">
+                        <UiSelect
+                          items={filterTagItems}
+                          value={rule.key || null}
+                          size="xs"
+                          placeholder={$t('header.tagKey')}
+                          contentClassName="ui-floating-layer-map-filter max-h-72"
+                          disabled={filterTagItems.length === 0}
+                          onchange={(event) => updateRule(layer.id, rule.id, { key: String(event.detail.value || '').trim() })}
+                        />
+                      </div>
+                      <UiSelect
+                        data-testid="filter-op-select"
+                        items={filterOpItems}
+                        value={rule.op}
+                        size="xs"
+                        className="min-w-[9rem]"
+                        contentClassName="ui-floating-layer-map-filter"
+                        onchange={(event) => updateRule(layer.id, rule.id, { op: event.detail.value })}
+                      />
+                      <UiInput
+                        data-testid="filter-value-input"
+                        size="xs"
+                        placeholder={$t('header.tagValue')}
+                        value={rule.value}
+                        inputmode={isNumericFilterOp(rule.op) ? 'decimal' : 'text'}
+                        oninput={(event) => updateRule(layer.id, rule.id, { value: event.currentTarget.value })}
+                        disabled={isValuelessFilterOp(rule.op)}
+                      />
+                    </div>
+                    <UiButton
+                      type="button"
+                      variant="secondary"
+                      size="square-sm"
+                      className="inline-flex h-8 w-8 min-h-8 min-w-8 items-center justify-center rounded-[0.65rem] p-0 text-[0]"
+                      aria-label={$t('common.close')}
+                      onclick={() => removeRule(layer.id, rule.id)}
+                    >
+                      <CloseIcon width="14" height="14" />
+                    </UiButton>
+                  </div>
                 </div>
               {/each}
             </div>
 
-            <button
+            <UiButton
               type="button"
-              class="ui-btn ui-btn-secondary ui-btn-xs layer-add-rule"
-              on:click={() => addRule(layer.id)}
+              variant="secondary"
+              size="xs"
+              className="justify-self-start"
+              onclick={() => addRule(layer.id)}
             >
               {$t('header.addRule')}
-            </button>
+            </UiButton>
           </div>
         </section>
       {/each}
     </div>
 
     <div class="filter-actions">
-      <button
+      <UiButton
         type="button"
         data-testid="filter-reset-button"
-        class="ui-btn ui-btn-secondary ui-btn-xs"
-        on:click={resetFilters}
+        variant="secondary"
+        size="xs"
+        onclick={resetFilters}
       >
         {$t('header.resetRules')}
-      </button>
-      <button
+      </UiButton>
+      <UiButton
         type="button"
         data-testid="filter-apply-button"
-        class="ui-btn ui-btn-primary ui-btn-xs"
-        on:click={applyFilters}
+        size="xs"
+        onclick={applyFilters}
       >
         {$t('header.applyRules')}
-      </button>
+      </UiButton>
     </div>
 
-    <datalist id="filter-tag-keys">
-      {#each filterTagKeys as key (key)}
-        <option value={key} label={getFilterTagDisplayName(key)}>{getFilterTagDisplayName(key)}</option>
-      {/each}
-    </datalist>
   </div>
 {/if}
 
@@ -634,6 +690,7 @@
 
   .layer-accent {
     min-height: 100%;
+    background: var(--layer-color, var(--accent));
   }
 
   .layer-body {
@@ -643,9 +700,9 @@
   }
 
   .layer-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
     gap: 0.75rem;
   }
 
@@ -654,6 +711,20 @@
     display: flex;
     align-items: center;
     gap: 0.45rem;
+  }
+
+  .layer-meta {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .layer-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: start;
+    justify-content: end;
+    justify-self: end;
   }
 
   .drag-handle,
@@ -670,84 +741,52 @@
     user-select: none;
   }
 
-  .color-swatch {
-    position: relative;
-    flex: 0 0 auto;
-    display: inline-grid;
-    place-items: center;
-    width: 1.3rem;
-    height: 1.3rem;
-    cursor: pointer;
-  }
-
-  .color-swatch input {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    border: 0;
-    padding: 0;
-    background: transparent;
-    opacity: 0;
-    appearance: none;
-    -webkit-appearance: none;
-    cursor: pointer;
-  }
-
-  .color-swatch-dot {
-    width: 100%;
-    height: 100%;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
-    background: var(--swatch-color, var(--accent));
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
-    pointer-events: none;
-  }
-
-  .color-swatch input:focus-visible + .color-swatch-dot {
-    outline: 2px solid color-mix(in srgb, var(--accent) 72%, white);
-    outline-offset: 2px;
-  }
-
   .rule-list {
     display: grid;
     gap: 0.55rem;
   }
 
+  .rule-item {
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.65rem;
+    border: 1px solid color-mix(in srgb, var(--panel-border) 86%, transparent);
+    border-radius: 0.9rem;
+    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+  }
+
+  .rule-item-head {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .rule-item-index,
+  .rule-item-label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
   .rule-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.45rem;
-    align-items: start;
+    gap: 0.5rem;
+    align-items: center;
   }
 
   .rule-fields {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 1.15fr);
+    grid-template-columns: minmax(0, 1.15fr) minmax(8.75rem, 0.9fr) minmax(0, 1.15fr);
     gap: 0.5rem;
-  }
-
-  .mode-select {
-    min-width: 5rem;
-  }
-
-  .filter-remove-btn {
-    width: 2rem;
-    height: 2rem;
-    min-width: 2rem;
-    min-height: 2rem;
-    padding: 0;
-    border-radius: 0.65rem;
-    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    font-size: 0;
-    line-height: 0;
   }
 
-  .layer-add-rule {
-    justify-self: flex-start;
+  .rule-fields > * {
+    min-width: 0;
   }
 
   @media (max-width: 720px) {
@@ -765,10 +804,22 @@
       grid-template-columns: 1fr;
     }
 
-    .preset-head,
-    .layer-head {
+    .rule-item {
+      padding: 0.6rem;
+    }
+
+    .preset-head {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .layer-head {
+      grid-template-columns: 1fr;
+    }
+
+    .layer-actions {
+      justify-content: start;
+      justify-self: start;
     }
   }
 </style>

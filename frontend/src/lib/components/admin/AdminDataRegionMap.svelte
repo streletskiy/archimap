@@ -757,7 +757,11 @@
 </section>
 
 <style>
-  @import './admin-tabs.css';
+  .data-map-card {
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    box-shadow: var(--shadow-soft);
+  }
 
   .data-map-legend {
     border: 1px solid transparent;

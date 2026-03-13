@@ -5,6 +5,45 @@ export function formatUiDate(value) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : text;
 }
 
+export function resolveUiLocaleTag(locale) {
+  const normalized = String(locale || '').trim().toLowerCase();
+  return normalized.startsWith('ru') ? 'ru-RU' : 'en-US';
+}
+
+export function formatUiDateRangeLabel(range, locale = 'en-US') {
+  const start = range?.start?.toString?.() || '';
+  if (!start) return '';
+
+  const end = range?.end?.toString?.() || start;
+  const formatter = new Intl.DateTimeFormat(resolveUiLocaleTag(locale), {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  const formatIsoDate = (isoDate) => {
+    const date = new Date(`${String(isoDate).slice(0, 10)}T00:00:00`);
+    return Number.isFinite(date.getTime()) ? formatter.format(date) : String(isoDate);
+  };
+
+  if (start === end) {
+    return formatIsoDate(start);
+  }
+
+  return `${formatIsoDate(start)} - ${formatIsoDate(end)}`;
+}
+
+export function matchesUiDateRange(value, range) {
+  const start = range?.start?.toString?.() || '';
+  if (!start) return true;
+
+  const end = range?.end?.toString?.() || start;
+  const isoDate = String(value || '').trim().slice(0, 10);
+  if (!isoDate) return false;
+
+  return isoDate >= start && isoDate <= end;
+}
+
 export function getStatusBadgeMeta(status, translate) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'accepted') return { text: translate('admin.status.accepted'), cls: 'ui-surface-success ui-text-success' };

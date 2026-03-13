@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
+  import { UiBadge, UiButton, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
   import { selectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
@@ -122,6 +123,10 @@
   $: displayAddress = pickFirstText(buildAddressFromForm(), archiInfo.address);
   $: displayStyle = resolveDisplayStyle(form.style || archiInfo.styleRaw || archiInfo.style, $locale);
   $: displayDescription = pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
+  $: architectureStyleItems = getArchitectureStyleOptions($locale).map((option) => ({
+    value: option.value,
+    label: option.label
+  }));
   $: summaryItems = [
     { label: $t('buildingModal.style'), value: displayStyle },
     { label: $t('buildingModal.levels'), value: pickFirstText(form.levels, archiInfo.levels) },
@@ -161,21 +166,27 @@
           <p class="ui-kicker">{$t('buildingModal.overview')}</p>
           <h3 id="building-modal-title">{displayName}</h3>
           <div class="modal-header-meta">
-            <span class="identity-pill">{buildingKey}</span>
+            <UiBadge
+              variant="accent"
+              className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
+            >
+              {buildingKey}
+            </UiBadge>
             {#if displayAddress}
               <span class="modal-address">{displayAddress}</span>
             {/if}
           </div>
         </div>
 
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
-          on:click={closeModal}
+          variant="secondary"
+          size="close"
+          onclick={closeModal}
           aria-label={$t('common.close')}
         >
           <CloseIcon class="ui-close-icon" />
-        </button>
+        </UiButton>
       </header>
 
       {#if buildingDetails}
@@ -209,34 +220,34 @@
               </div>
 
               <FormRow forId="building-name" label={$t('buildingModal.name')}>
-                <input id="building-name" class="ui-field" type="text" bind:value={form.name} />
+                <UiInput id="building-name" type="text" bind:value={form.name} />
               </FormRow>
 
               <div class="grid2">
                 <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
-                  <input id="building-levels" class="ui-field" type="number" min="0" max="300" bind:value={form.levels} />
+                  <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
                 </FormRow>
 
                 <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
-                  <input id="building-year" class="ui-field" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
                 </FormRow>
               </div>
 
               <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
-                <input id="building-architect" class="ui-field" type="text" bind:value={form.architect} />
+                <UiInput id="building-architect" type="text" bind:value={form.architect} />
               </FormRow>
 
               <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
-                <select id="building-style-select" class="ui-field" bind:value={form.style}>
-                  <option value="">{$t('buildingModal.notSpecified')}</option>
-                  {#each getArchitectureStyleOptions($locale) as option}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
+                <UiSelect
+                  items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
+                  bind:value={form.style}
+                  placeholder={$t('buildingModal.notSpecified')}
+                  contentClassName="ui-floating-layer-building-modal"
+                />
               </FormRow>
 
               <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
-                <textarea id="building-archimap-description" class="ui-field" rows="4" bind:value={form.archimapDescription}></textarea>
+                <UiTextarea id="building-archimap-description" rows="4" bind:value={form.archimapDescription}></UiTextarea>
               </FormRow>
             </section>
 
@@ -247,7 +258,7 @@
 
               {#if canEditAddressFull}
                 <FormRow forId="building-addr-full" label={$t('buildingModal.addressFull')}>
-                  <input id="building-addr-full" class="ui-field" type="text" bind:value={form.addressFull} />
+                  <UiInput id="building-addr-full" type="text" bind:value={form.addressFull} />
                 </FormRow>
               {:else}
                 <FormRow note={$t('buildingModal.addressFullDerived')} />
@@ -255,38 +266,38 @@
 
               <div class="grid2">
                 <FormRow forId="building-addr-postcode" label={$t('buildingModal.postcode')}>
-                  <input id="building-addr-postcode" class="ui-field" type="text" bind:value={form.addressPostcode} />
+                  <UiInput id="building-addr-postcode" type="text" bind:value={form.addressPostcode} />
                 </FormRow>
 
                 <FormRow forId="building-addr-city" label={$t('buildingModal.city')}>
-                  <input id="building-addr-city" class="ui-field" type="text" bind:value={form.addressCity} />
+                  <UiInput id="building-addr-city" type="text" bind:value={form.addressCity} />
                 </FormRow>
 
                 <FormRow forId="building-addr-place" label={$t('buildingModal.place')}>
-                  <input id="building-addr-place" class="ui-field" type="text" bind:value={form.addressPlace} />
+                  <UiInput id="building-addr-place" type="text" bind:value={form.addressPlace} />
                 </FormRow>
 
                 <FormRow forId="building-addr-street" label={$t('buildingModal.street')}>
-                  <input id="building-addr-street" class="ui-field" type="text" bind:value={form.addressStreet} />
+                  <UiInput id="building-addr-street" type="text" bind:value={form.addressStreet} />
                 </FormRow>
               </div>
 
               <FormRow forId="building-addr-housenumber" label={$t('buildingModal.houseNumber')}>
-                <input id="building-addr-housenumber" class="ui-field" type="text" bind:value={form.addressHouseNumber} />
+                <UiInput id="building-addr-housenumber" type="text" bind:value={form.addressHouseNumber} />
               </FormRow>
             </section>
 
             <details class="osm-tags">
               <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
               {#if osmTagEntries.length > 0}
-                <div class="osm-tags-list">
+                <UiScrollArea className="max-h-[18rem]" contentClassName="mt-[0.8rem] grid gap-[0.55rem] pr-[0.15rem]">
                   {#each osmTagEntries as item (item.key)}
                     <div class="osm-tag-row">
                       <code class="osm-tag-key">{item.key}</code>
                       <code class="osm-tag-value">{item.value || '-'}</code>
                     </div>
                   {/each}
-                </div>
+                </UiScrollArea>
               {:else}
                 <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
               {/if}
@@ -294,9 +305,9 @@
 
             <div class="form-footer">
               <p class="status" data-filled={saveStatus ? 'true' : 'false'}>{saveStatus || ''}</p>
-              <button type="submit" class="ui-btn ui-btn-primary" disabled={savePending || !hasEditedFields}>
+              <UiButton type="submit" disabled={savePending || !hasEditedFields}>
                 {savePending ? $t('buildingModal.saving') : $t('buildingModal.save')}
-              </button>
+              </UiButton>
             </div>
           </form>
         {:else}
@@ -331,14 +342,14 @@
           <details class="osm-tags">
             <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
             {#if osmTagEntries.length > 0}
-              <div class="osm-tags-list">
+              <UiScrollArea className="max-h-[18rem]" contentClassName="mt-[0.8rem] grid gap-[0.55rem] pr-[0.15rem]">
                 {#each osmTagEntries as item (item.key)}
                   <div class="osm-tag-row">
                     <code class="osm-tag-key">{item.key}</code>
                     <code class="osm-tag-value">{item.value || '-'}</code>
                   </div>
                 {/each}
-              </div>
+              </UiScrollArea>
             {:else}
               <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
             {/if}
@@ -418,17 +429,6 @@
     flex-wrap: wrap;
     gap: 0.55rem;
     align-items: center;
-  }
-
-  .identity-pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.42rem 0.72rem;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-    font-size: 0.78rem;
-    font-weight: 700;
   }
 
   .modal-address {
@@ -586,15 +586,6 @@
     font-weight: 700;
     color: var(--fg-strong);
     user-select: none;
-  }
-
-  .osm-tags-list {
-    margin-top: 0.8rem;
-    display: grid;
-    gap: 0.55rem;
-    max-height: 18rem;
-    overflow: auto;
-    padding-right: 0.15rem;
   }
 
   .osm-tag-row {

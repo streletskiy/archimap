@@ -1,6 +1,7 @@
 <script>
   import { browser } from '$app/environment';
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
+  import { UiBadge, UiButton, UiInput, UiScrollArea } from '$lib/components/base';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import SearchIcon from '$lib/components/icons/SearchIcon.svelte';
   import {
@@ -182,27 +183,29 @@
           <p class="ui-kicker">{$t('common.search')}</p>
           <h3>{$t('search.modalTitle')}</h3>
         </div>
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
-          on:click={closeSearchModal}
+          variant="secondary"
+          size="close"
+          className="shrink-0"
+          onclick={closeSearchModal}
           aria-label={$t('common.close')}
         >
           <CloseIcon class="ui-close-icon" />
-        </button>
+        </UiButton>
       </header>
 
       <form class="search-form" on:submit={onSearchSubmit}>
         <div class="search-field-shell">
           <SearchIcon width="16" height="16" />
-          <input
+          <UiInput
             id="search-modal-input"
             bind:this={searchInputEl}
-            class="ui-field"
             type="search"
             placeholder={$t('search.inputPlaceholder')}
             value={$searchState.query}
-            on:input={onSearchInput}
+            className="border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+            oninput={onSearchInput}
           />
         </div>
       </form>
@@ -228,7 +231,11 @@
         {/if}
       </div>
 
-      <div id="search-results-list" class="search-results-list">
+      <UiScrollArea
+        id="search-results-list"
+        className="min-h-0 [overscroll-behavior:contain]"
+        contentClassName="grid content-start gap-[0.65rem] pr-[0.2rem]"
+      >
         {#if $searchState.loading}
           <div class="search-empty search-empty-loading">{$t('search.loading')}</div>
         {:else if displayedResults.length === 0}
@@ -241,7 +248,12 @@
                   <div class="search-item-title">{entry.item.name || $t('search.untitled')}</div>
                   <div class="search-item-key">{entry.item.osmType}/{entry.item.osmId}</div>
                 </div>
-                <span class="search-item-cta">{$t('search.toBuilding')}</span>
+                <UiBadge
+                  variant="accent"
+                  className="whitespace-nowrap rounded-full px-[0.72rem] py-[0.42rem] text-[0.76rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
+                >
+                  {$t('search.toBuilding')}
+                </UiBadge>
               </div>
 
               <div class="search-item-body">
@@ -254,41 +266,51 @@
 
                 <div class="search-badges">
                   {#if entry.visibleOnMap}
-                    <span class="search-badge search-badge-map-visible">
-                      <strong>{$t('search.visibleOnMap')}</strong>
-                    </span>
+                    <UiBadge
+                      variant="accent"
+                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:color-mix(in_srgb,var(--accent)_26%,var(--panel-border))] [background:var(--accent-soft)] [color:var(--accent-ink)]"
+                    >
+                      <strong class="[color:var(--fg-strong)]">{$t('search.visibleOnMap')}</strong>
+                    </UiBadge>
                   {/if}
 
                   {#if entry.item.style}
-                    <span class="search-badge">
-                      <strong>{$t('search.style')}</strong>
+                    <UiBadge
+                      variant="default"
+                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:color-mix(in_srgb,var(--panel-solid)_76%,transparent)] [color:var(--muted-strong)]"
+                    >
+                      <strong class="[color:var(--fg-strong)]">{$t('search.style')}</strong>
                       {toHumanArchitectureStyle(entry.item.style, $locale) || entry.item.style}
-                    </span>
+                    </UiBadge>
                   {/if}
 
                   {#if entry.item.architect}
-                    <span class="search-badge">
-                      <strong>{$t('search.architect')}</strong>
+                    <UiBadge
+                      variant="default"
+                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:color-mix(in_srgb,var(--panel-solid)_76%,transparent)] [color:var(--muted-strong)]"
+                    >
+                      <strong class="[color:var(--fg-strong)]">{$t('search.architect')}</strong>
                       {entry.item.architect}
-                    </span>
+                    </UiBadge>
                   {/if}
                 </div>
               </div>
             </button>
           {/each}
         {/if}
-      </div>
+      </UiScrollArea>
 
       {#if $searchState.hasMore}
-        <button
+        <UiButton
           id="search-load-more-btn"
           type="button"
-          class="ui-btn ui-btn-secondary search-load-more"
-          on:click={loadMore}
+          variant="secondary"
+          className="w-full justify-center"
+          onclick={loadMore}
           disabled={$searchState.loadingMore}
         >
           {$searchState.loadingMore ? $t('search.loadingMore') : $t('search.loadMore')}
-        </button>
+        </UiButton>
       {/if}
     </div>
   </div>
@@ -374,14 +396,6 @@
     color: var(--muted);
   }
 
-  .search-field-shell :global(.ui-field) {
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    padding-left: 0;
-    padding-right: 0;
-  }
-
   .search-meta {
     display: flex;
     align-items: center;
@@ -431,16 +445,6 @@
     font-weight: 700;
   }
 
-  .search-results-list {
-    display: grid;
-    gap: 0.65rem;
-    min-height: 0;
-    overflow: auto;
-    align-content: start;
-    padding-right: 0.2rem;
-    overscroll-behavior: contain;
-  }
-
   .search-item {
     width: 100%;
     text-align: left;
@@ -482,16 +486,6 @@
     font-size: 0.73rem;
   }
 
-  .search-item-cta {
-    white-space: nowrap;
-    padding: 0.42rem 0.72rem;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-    font-size: 0.76rem;
-    font-weight: 700;
-  }
-
   .search-item-body {
     display: grid;
     gap: 0.55rem;
@@ -518,29 +512,6 @@
     gap: 0.45rem;
   }
 
-  .search-badge {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    padding: 0.42rem 0.62rem;
-    border-radius: 999px;
-    border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
-    color: var(--muted-strong);
-    font-size: 0.76rem;
-    line-height: 1.25;
-  }
-
-  .search-badge-map-visible {
-    border-color: color-mix(in srgb, var(--accent) 26%, var(--panel-border));
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-  }
-
-  .search-badge strong {
-    color: var(--fg-strong);
-  }
-
   .search-empty {
     padding: 1rem;
     border-radius: 1rem;
@@ -552,11 +523,6 @@
 
   .search-empty-loading {
     border-style: solid;
-  }
-
-  .search-load-more {
-    width: 100%;
-    justify-content: center;
   }
 
   @media (min-width: 768px) {
@@ -583,8 +549,5 @@
       flex-direction: column;
     }
 
-    .search-item-cta {
-      align-self: flex-start;
-    }
   }
 </style>

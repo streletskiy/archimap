@@ -3,6 +3,7 @@
 ## Core
 
 - [Architecture](architecture.md)
+- [UI Architecture](ui-architecture.md)
 - [API](api.md)
 - [OpenAPI](openapi.yaml)
 - [Data Flow](data-flow.md)

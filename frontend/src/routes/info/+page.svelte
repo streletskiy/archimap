@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { buildInfoUrl, resolveInfoTabFromUrl } from '$lib/client/section-routes';
+  import { UiBadge, UiTabsNav } from '$lib/components/base';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { t } from '$lib/i18n/index';
   import { marked } from 'marked';
@@ -15,6 +16,12 @@
   let infoUrlSyncBusy = false;
   let agreementHtml = '';
   let privacyHtml = '';
+  let lastHandledTab = activeTab;
+  $: infoTabs = [
+    { value: 'about', label: $t('info.tabAbout') },
+    { value: 'agreement', label: $t('info.tabAgreement') },
+    { value: 'privacy', label: $t('info.tabPrivacy') }
+  ];
 
   marked.setOptions({
     gfm: true,
@@ -26,12 +33,9 @@
   }
   agreementHtml = markdownToHtml(agreementMarkdownSource);
   privacyHtml = markdownToHtml(privacyMarkdownSource);
-
-  async function setTab(nextTab) {
-    if (activeTab !== nextTab) {
-      activeTab = nextTab;
-    }
-    await replaceInfoUrl(nextTab);
+  $: if (activeTab !== lastHandledTab) {
+    lastHandledTab = activeTab;
+    void replaceInfoUrl(activeTab);
   }
 
   async function replaceInfoUrl(tab) {
@@ -72,17 +76,19 @@
 
 <PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
   <svelte:fragment slot="meta">
-    <span class="ui-chip"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</span>
-    <a class="ui-chip repo-chip" href={APP_REPO_URL} target="_blank" rel="noopener noreferrer">{APP_REPO_URL}</a>
+    <UiBadge variant="accent"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</UiBadge>
+    <UiBadge
+      variant="outline"
+      href={APP_REPO_URL}
+      className="max-w-full whitespace-normal break-words"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {APP_REPO_URL}
+    </UiBadge>
   </svelte:fragment>
 
-  <div>
-    <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
-      <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'about'} on:click={() => setTab('about')}>{$t('info.tabAbout')}</button></li>
-      <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'agreement'} on:click={() => setTab('agreement')}>{$t('info.tabAgreement')}</button></li>
-      <li role="presentation"><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'privacy'} on:click={() => setTab('privacy')}>{$t('info.tabPrivacy')}</button></li>
-    </ul>
-  </div>
+  <UiTabsNav bind:value={activeTab} items={infoTabs} />
 
   {#if activeTab === 'about'}
     <section class="mt-4">
@@ -154,13 +160,6 @@
     border-radius: 1.35rem;
     background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
     box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
-  }
-
-  .repo-chip {
-    max-width: 100%;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
   }
 
   .legal-markdown {
@@ -269,9 +268,6 @@
       padding: 1rem 0.95rem;
     }
 
-    .repo-chip {
-      width: 100%;
-    }
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(h1),

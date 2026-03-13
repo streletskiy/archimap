@@ -3,10 +3,14 @@
 ## Core
 
 - `npm run dev`: build frontend then run server.
+- `npm run frontend:dev`: run the frontend Vite dev server only.
 - `npm run build`: production frontend build.
+- `npm run frontend:build`: production frontend build only.
 - `npm run start`: run server.
 - `npm run lint`: backend + frontend lint.
+- `npm run frontend:lint`: frontend ESLint only.
 - `npm run frontend:check`: Svelte/type-level frontend validation.
+- `npm run frontend:preview`: preview the built frontend locally.
 - `npm run test`: CI-like non-E2E local gate (`frontend:build` + unit + integration + syntax + security + smoke).
 - [`node scripts/generate-version.js`](../../scripts/generate-version.js): generate backend/frontend build version files.
 - `npm run version:print`: print generated version payload.
@@ -45,3 +49,4 @@ Notes:
 - `scripts/sync-osm-region.js` is intentionally thin; implementation stages now live in `scripts/region-sync/python-extractor.js`, `db-ingester.js`, `region-db.js`, `import-applier.js`, and `pmtiles-builder.js`.
 - Docker containers start through `scripts/runtime-start.js`, which runs `scripts/ensure-admin-regions-pmtiles.js` before booting `server.sveltekit.js`.
 - `npm test` does not run Playwright; use `npm run test:e2e` separately when finalizing UI-impacting changes.
+- For shared UI work, `npm run frontend:check`, `npm run frontend:build`, and `npm run test:e2e` are the minimum practical frontend contour.

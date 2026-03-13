@@ -1,6 +1,18 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
 
+  import {
+    UiBadge,
+    UiButton,
+    UiInput,
+    UiSelect,
+    UiTable,
+    UiTableBody,
+    UiTableCell,
+    UiTableHead,
+    UiTableHeader,
+    UiTableRow
+  } from '$lib/components/base';
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
   import { formatUiDate } from '$lib/utils/edit-ui';
@@ -19,6 +31,39 @@
   let usersHasEdits = 'all';
   let usersSortBy = 'createdAt';
   let usersSortDir = 'desc';
+  let usersRoleItems = [];
+  let usersCanEditItems = [];
+  let usersHasEditsItems = [];
+  let usersSortByItems = [];
+  let usersSortDirItems = [];
+
+  $: usersRoleItems = [
+    { value: 'all', label: $t('admin.users.roleAll') },
+    { value: 'admin', label: $t('admin.users.roleAdmins') },
+    { value: 'user', label: $t('admin.users.roleUsers') }
+  ];
+  $: usersCanEditItems = [
+    { value: 'all', label: $t('admin.users.permAll') },
+    { value: 'yes', label: $t('admin.users.permYes') },
+    { value: 'no', label: $t('admin.users.permNo') }
+  ];
+  $: usersHasEditsItems = [
+    { value: 'all', label: $t('admin.users.editsAll') },
+    { value: 'yes', label: $t('admin.users.editsYes') },
+    { value: 'no', label: $t('admin.users.editsNo') }
+  ];
+  $: usersSortByItems = [
+    { value: 'createdAt', label: $t('admin.users.sortRegistered') },
+    { value: 'email', label: $t('admin.users.sortEmail') },
+    { value: 'editsCount', label: $t('admin.users.sortEditsCount') },
+    { value: 'lastEditAt', label: $t('admin.users.sortLastEdit') },
+    { value: 'firstName', label: $t('admin.users.sortFirstName') },
+    { value: 'lastName', label: $t('admin.users.sortLastName') }
+  ];
+  $: usersSortDirItems = [
+    { value: 'desc', label: $t('common.desc') },
+    { value: 'asc', label: $t('common.asc') }
+  ];
 
   async function loadUsers() {
     usersLoading = true;
@@ -91,108 +136,95 @@
 </script>
 
 <div class="mt-3 space-y-3">
-  <form class="grid gap-2 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]" on:submit|preventDefault={loadUsers}>
-    <input class="ui-field" type="search" placeholder={$t('admin.users.search')} bind:value={usersQuery} />
-    <select class="ui-field" bind:value={usersRole}
-      ><option value="all">{$t('admin.users.roleAll')}</option><option value="admin"
-        >{$t('admin.users.roleAdmins')}</option
-      ><option value="user">{$t('admin.users.roleUsers')}</option></select
-    >
-    <select class="ui-field" bind:value={usersCanEdit}
-      ><option value="all">{$t('admin.users.permAll')}</option><option value="yes"
-        >{$t('admin.users.permYes')}</option
-      ><option value="no">{$t('admin.users.permNo')}</option></select
-    >
-    <select class="ui-field" bind:value={usersHasEdits}
-      ><option value="all">{$t('admin.users.editsAll')}</option><option value="yes"
-        >{$t('admin.users.editsYes')}</option
-      ><option value="no">{$t('admin.users.editsNo')}</option></select
-    >
-    <div class="flex gap-2">
-      <select class="ui-field" bind:value={usersSortBy}
-        ><option value="createdAt">{$t('admin.users.sortRegistered')}</option><option value="email"
-          >{$t('admin.users.sortEmail')}</option
-        ><option value="editsCount">{$t('admin.users.sortEditsCount')}</option><option value="lastEditAt"
-          >{$t('admin.users.sortLastEdit')}</option
-        ><option value="firstName">{$t('admin.users.sortFirstName')}</option><option value="lastName"
-          >{$t('admin.users.sortLastName')}</option
-        ></select
-      ><select class="ui-field ui-field-xs" bind:value={usersSortDir}
-        ><option value="desc">{$t('common.desc')}</option><option value="asc">{$t('common.asc')}</option></select
-      ><button type="submit" class="ui-btn ui-btn-secondary">{$t('common.refresh')}</button>
+  <form class="ui-filter-toolbar ui-filter-toolbar--admin-users" on:submit|preventDefault={loadUsers}>
+    <UiInput type="search" placeholder={$t('admin.users.search')} bind:value={usersQuery} />
+    <UiSelect items={usersRoleItems} bind:value={usersRole} />
+    <UiSelect items={usersCanEditItems} bind:value={usersCanEdit} />
+    <UiSelect items={usersHasEditsItems} bind:value={usersHasEdits} />
+    <div class="ui-filter-toolbar__group sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div class="sm:col-span-2">
+        <UiSelect items={usersSortByItems} bind:value={usersSortBy} />
+      </div>
+      <UiSelect items={usersSortDirItems} bind:value={usersSortDir} />
+      <UiButton
+        type="submit"
+        variant="secondary"
+        className="w-full min-h-11 rounded-[1rem] px-4 py-3 text-sm sm:w-auto"
+      >
+        {$t('common.refresh')}
+      </UiButton>
     </div>
   </form>
 
   <p class="text-sm ui-text-muted">{usersStatus}</p>
 
-  <div class="overflow-x-auto rounded-2xl border ui-border ui-surface-base">
-    <table class="min-w-full text-sm">
-      <thead>
-        <tr class="border-b ui-border text-left ui-text-muted">
-          <th class="px-3 py-2">{$t('admin.users.table.email')}</th>
-          <th class="px-3 py-2">{$t('admin.users.table.role')}</th>
-          <th class="px-3 py-2">{$t('admin.users.table.edits')}</th>
-          <th class="px-3 py-2">{$t('admin.users.table.registration')}</th>
-          <th class="px-3 py-2">{$t('admin.users.table.lastEdit')}</th>
-          <th class="px-3 py-2">{$t('admin.users.table.actions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#if usersLoading}
-          <tr><td colspan="6" class="px-3 py-3 ui-text-subtle">{$t('admin.loading')}</td></tr>
-        {:else if users.length === 0}
-          <tr><td colspan="6" class="px-3 py-3 ui-text-subtle">{$t('admin.empty')}</td></tr>
-        {:else}
-          {#each users as user (`${user.email}`)}
-            <tr class="border-b ui-border-soft">
-              <td class="px-3 py-2">
-                <p class="font-semibold ui-text-strong">{user.email}</p>
-                {#if user.firstName || user.lastName}
-                  <p class="text-xs ui-text-subtle">
-                    {String(user.firstName || '').trim()}
-                    {String(user.lastName || '').trim()}
-                  </p>
-                {/if}
-              </td>
-              <td class="px-3 py-2">
+  <UiTable containerClassName="rounded-2xl ui-surface-base">
+    <UiTableHeader>
+      <UiTableRow className="hover:[&>th]:bg-transparent">
+        <UiTableHead>{$t('admin.users.table.email')}</UiTableHead>
+        <UiTableHead>{$t('admin.users.table.role')}</UiTableHead>
+        <UiTableHead>{$t('admin.users.table.edits')}</UiTableHead>
+        <UiTableHead>{$t('admin.users.table.registration')}</UiTableHead>
+        <UiTableHead>{$t('admin.users.table.lastEdit')}</UiTableHead>
+        <UiTableHead>{$t('admin.users.table.actions')}</UiTableHead>
+      </UiTableRow>
+    </UiTableHeader>
+    <UiTableBody>
+      {#if usersLoading}
+        <UiTableRow>
+          <UiTableCell colspan="6" className="ui-text-subtle">{$t('admin.loading')}</UiTableCell>
+        </UiTableRow>
+      {:else if users.length === 0}
+        <UiTableRow>
+          <UiTableCell colspan="6" className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
+        </UiTableRow>
+      {:else}
+        {#each users as user (`${user.email}`)}
+          <UiTableRow>
+            <UiTableCell>
+              <p class="font-semibold ui-text-strong">{user.email}</p>
+              {#if user.firstName || user.lastName}
+                <p class="text-xs ui-text-subtle">
+                  {String(user.firstName || '').trim()}
+                  {String(user.lastName || '').trim()}
+                </p>
+              {/if}
+            </UiTableCell>
+            <UiTableCell>
+              <div class="flex flex-wrap gap-1">
                 {#if user.isMasterAdmin}
-                  <span
-                    class="badge-pill mr-1 rounded-full ui-surface-warning px-2.5 py-1 text-xs font-semibold ui-text-warning"
-                    >{$t('admin.users.masterAdmin')}</span
-                  >
+                  <UiBadge variant="warning">{$t('admin.users.masterAdmin')}</UiBadge>
                 {/if}
-                <span
-                  class="badge-pill mr-1 rounded-full px-2.5 py-1 text-xs font-semibold {user.isAdmin
-                    ? 'ui-surface-emphasis ui-text-emphasis'
-                    : 'ui-surface-soft ui-text-body'}"
-                  >{user.isAdmin ? $t('admin.users.admin') : $t('admin.users.user')}</span
-                >
-                <span
-                  class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {user.canEdit
-                    ? 'ui-surface-success ui-text-success'
-                    : 'ui-surface-soft ui-text-body'}"
-                  >{user.canEdit ? $t('admin.users.canEdit') : $t('admin.users.readOnly')}</span
-                >
-              </td>
-              <td class="px-3 py-2">{user.editsCount || 0}</td>
-              <td class="px-3 py-2">{formatUiDate(user.createdAt)}</td>
-              <td class="px-3 py-2">{formatUiDate(user.lastEditAt)}</td>
-              <td class="px-3 py-2">
-                <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={() => toggleCanEdit(user)}
-                  >{user.canEdit ? $t('admin.users.disableEdit') : $t('admin.users.enableEdit')}</button
-                >
-                <button
+                <UiBadge variant={user.isAdmin ? 'accent' : 'default'}>
+                  {user.isAdmin ? $t('admin.users.admin') : $t('admin.users.user')}
+                </UiBadge>
+                <UiBadge variant={user.canEdit ? 'success' : 'default'}>
+                  {user.canEdit ? $t('admin.users.canEdit') : $t('admin.users.readOnly')}
+                </UiBadge>
+              </div>
+            </UiTableCell>
+            <UiTableCell>{user.editsCount || 0}</UiTableCell>
+            <UiTableCell>{formatUiDate(user.createdAt)}</UiTableCell>
+            <UiTableCell>{formatUiDate(user.lastEditAt)}</UiTableCell>
+            <UiTableCell>
+              <div class="flex flex-wrap gap-2">
+                <UiButton type="button" variant="secondary" size="xs" onclick={() => toggleCanEdit(user)}>
+                  {user.canEdit ? $t('admin.users.disableEdit') : $t('admin.users.enableEdit')}
+                </UiButton>
+                <UiButton
                   type="button"
-                  class="ui-btn ui-btn-secondary ui-btn-xs"
-                  on:click={() => toggleAdmin(user)}
+                  variant="secondary"
+                  size="xs"
+                  onclick={() => toggleAdmin(user)}
                   disabled={!isMasterAdmin || Boolean(user.isMasterAdmin)}
-                  >{user.isAdmin ? $t('admin.users.demoteAdmin') : $t('admin.users.promoteAdmin')}</button
                 >
-              </td>
-            </tr>
-          {/each}
-        {/if}
-      </tbody>
-    </table>
-  </div>
+                  {user.isAdmin ? $t('admin.users.demoteAdmin') : $t('admin.users.promoteAdmin')}
+                </UiButton>
+              </div>
+            </UiTableCell>
+          </UiTableRow>
+        {/each}
+      {/if}
+    </UiTableBody>
+  </UiTable>
 </div>

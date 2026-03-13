@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { fly } from 'svelte/transition';
+  import { UiButton, UiSelect, UiSwitch } from '$lib/components/base';
   import ArchitectureIcon from '$lib/components/icons/ArchitectureIcon.svelte';
   import MoonIcon from '$lib/components/icons/MoonIcon.svelte';
   import SunIcon from '$lib/components/icons/SunIcon.svelte';
@@ -17,10 +18,15 @@
 
   let darkTheme = false;
   let themeObserver = null;
+  let localeItems = [];
 
   $: userInitials = getUserInitials($session.user);
   $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');
   $: menuIdentityMeta = $session.authenticated ? String($session.user?.email || '').trim() : $t('header.authTitle');
+  $: localeItems = availableLocales.map((item) => ({
+    value: item,
+    label: $t(`locale.${item}`)
+  }));
 
   function closePanel() {
     dispatch('close');
@@ -105,12 +111,9 @@
 
     {#if !$session.authenticated}
       <div class="menu-auth-actions">
-        <button type="button" class="ui-btn ui-btn-primary menu-btn" on:click={() => requestAuth('login')}>
-          {$t('header.login')}
-        </button>
-        <button type="button" class="ui-btn ui-btn-secondary menu-btn" on:click={() => requestAuth('register')}>
-          {$t('header.register')}
-        </button>
+        <UiButton type="button" className="w-full" onclick={() => requestAuth('login')}>
+          {$t('header.loginRegister')}
+        </UiButton>
       </div>
     {/if}
 
@@ -122,58 +125,53 @@
 
     <div class="theme-row">
       <span>{$t('locale.label')}</span>
-      <select
-        class="ui-field ui-field-xs locale-select"
-        bind:value={$locale}
-        on:change={(event) => setLocale(event.currentTarget.value)}
-      >
-        {#each availableLocales as item}
-          <option value={item}>{$t(`locale.${item}`)}</option>
-        {/each}
-      </select>
+      <div data-testid="locale-select" class="ml-auto min-w-[6.8rem]">
+        <UiSelect
+          value={$locale}
+          items={localeItems}
+          className="w-full"
+          contentClassName="ui-floating-layer-user-menu"
+          onchange={(event) => setLocale(event.detail.value)}
+        />
+      </div>
     </div>
 
     <div class="theme-row">
       <span>{$t('header.labels')}</span>
-      <label
-        class="switch switch-icons switch-labels"
-        aria-label={$mapLabelsVisible ? $t('header.labelsHide') : $t('header.labelsShow')}
-      >
-        <input
-          type="checkbox"
-          checked={$mapLabelsVisible}
-          on:change={(event) => applyLabelsVisibility(event.currentTarget.checked)}
-        />
-        <span class="icon-center" aria-hidden="true">
+      <div class="switch-row">
+        <span class="switch-icon" aria-hidden="true">
           <ArchitectureIcon width="12" height="12" />
         </span>
-        <span class="slider"></span>
-      </label>
+        <UiSwitch
+          checked={$mapLabelsVisible}
+          aria-label={$mapLabelsVisible ? $t('header.labelsHide') : $t('header.labelsShow')}
+          onchange={(event) => applyLabelsVisibility(event.detail.checked)}
+        />
+      </div>
     </div>
 
     <div class="theme-row">
       <span>{$t('header.theme')}</span>
-      <label class="switch switch-icons" aria-label={$t('header.toggleTheme')}>
-        <input
-          type="checkbox"
-          checked={darkTheme}
-          on:change={(event) => applyTheme(event.currentTarget.checked ? 'dark' : 'light')}
-        />
-        <span class="icon-center" aria-hidden="true">
+      <div class="switch-row">
+        <span class="switch-icon" aria-hidden="true">
           {#if darkTheme}
             <MoonIcon width="14" height="14" />
           {:else}
             <SunIcon width="14" height="14" />
           {/if}
         </span>
-        <span class="slider"></span>
-      </label>
+        <UiSwitch
+          checked={darkTheme}
+          aria-label={$t('header.toggleTheme')}
+          onchange={(event) => applyTheme(event.detail.checked ? 'dark' : 'light')}
+        />
+      </div>
     </div>
 
     {#if $session.authenticated}
-      <button type="button" class="ui-btn ui-btn-danger menu-btn" on:click={logout}>
+      <UiButton type="button" variant="danger" className="menu-btn" onclick={logout}>
         {$t('header.logout')}
-      </button>
+      </UiButton>
     {/if}
   </div>
 {/if}
@@ -271,10 +269,6 @@
     color: var(--accent-ink);
   }
 
-  .menu-btn {
-    width: 100%;
-  }
-
   .theme-row {
     display: flex;
     align-items: center;
@@ -289,86 +283,19 @@
     color: var(--muted-strong);
   }
 
-  .locale-select {
-    margin-left: auto;
-    min-width: 6.8rem;
-  }
-
-  .switch {
-    position: relative;
-    --switch-width: 3.15rem;
-    --switch-height: 1.5rem;
-    --switch-pad: 0.12rem;
-    --knob-size: 1.25rem;
-    --switch-knob-icon: #0f172a;
-    width: var(--switch-width);
-    height: var(--switch-height);
+  .switch-row {
     display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
-  .switch-icons {
-    --switch-width: 3.15rem;
-    width: var(--switch-width);
-  }
-
-  .switch-icons .icon-center {
-    position: absolute;
-    top: 50%;
-    left: calc(var(--switch-pad) + 0.03rem);
-    z-index: 2;
+  .switch-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--knob-size);
-    height: var(--knob-size);
-    transform: translateY(-50%);
-    color: var(--switch-knob-icon);
-    transition: color 0.2s, transform 0.2s;
-    pointer-events: none;
-  }
-
-  .switch-icons input:checked ~ .icon-center {
-    transform: translate(calc(var(--switch-width) - var(--knob-size) - (var(--switch-pad) * 2)), -50%);
-  }
-
-  .switch input {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    cursor: pointer;
-  }
-
-  .slider {
-    position: absolute;
-    inset: 0;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--muted) 40%, transparent);
-    transition: 0.2s;
-  }
-
-  .slider::before {
-    content: '';
-    position: absolute;
-    width: var(--knob-size);
-    height: var(--knob-size);
-    left: var(--switch-pad);
-    top: 50%;
-    border-radius: 50%;
-    background: #fff;
-    transform: translateY(-50%);
-    transition: 0.2s;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
-  }
-
-  .switch-icons input:checked ~ .slider {
-    background: var(--accent);
-  }
-
-  .switch-icons input:checked ~ .slider::before {
-    transform: translate(calc(var(--switch-width) - var(--knob-size) - (var(--switch-pad) * 2)), -50%);
+    width: 1.4rem;
+    height: 1.4rem;
+    color: var(--muted-strong);
   }
 
   @media (max-width: 768px) {
@@ -381,11 +308,6 @@
     .theme-row {
       align-items: flex-start;
       flex-direction: column;
-    }
-
-    .locale-select {
-      width: 100%;
-      min-width: 0;
     }
   }
 </style>

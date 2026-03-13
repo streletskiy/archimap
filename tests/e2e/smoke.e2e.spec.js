@@ -41,6 +41,25 @@ async function closeFilterPanel(page) {
   }
 }
 
+async function selectMenuOption(page, wrapperTestId, label) {
+  const wrapper = page.getByTestId(wrapperTestId);
+  await wrapper.locator('[data-slot="select-trigger"]').click();
+  await page.locator('[data-slot="select-item"]', { hasText: label }).last().click();
+}
+
+async function selectFilterTag(page, labels) {
+  const field = page.getByTestId('filter-key-input').first();
+  await field.locator('[data-slot="select-trigger"]').click();
+  for (const label of Array.isArray(labels) ? labels : [labels]) {
+    const option = page.locator('[data-slot="select-item"]', { hasText: label }).last();
+    if (await option.count()) {
+      await option.click();
+      return;
+    }
+  }
+  throw new Error(`Filter tag option not found: ${JSON.stringify(labels)}`);
+}
+
 test.beforeAll(async () => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-e2e-'));
 
@@ -123,27 +142,27 @@ test('opens legal info deep link on terms tab', async ({ page }) => {
 test('language switch updates visible UI content', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await page.locator('.menu-btn-trigger').click();
-  await page.locator('.locale-select').selectOption('en');
-  await expect(page.locator('.menu .menu-btn', { hasText: 'Sign in' })).toBeVisible({ timeout: 10000 });
+  await selectMenuOption(page, 'locale-select', 'English');
+  await expect(page.getByRole('button', { name: 'Sign in / Register' })).toBeVisible({ timeout: 10000 });
 });
 
 test('auth modal accepts clicks, switches tabs, and closes with shared close button', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await page.locator('.menu-btn-trigger').click();
-  await page.locator('.menu-auth-actions .menu-btn').first().click();
+  await page.locator('.menu-auth-actions [data-slot="button"]').click();
 
   const authModal = page.locator('.auth-modal');
   await expect(authModal).toBeVisible({ timeout: 10000 });
 
-  await page.locator('.auth-modal .ui-tab-btn').nth(1).click();
-  await expect(page.locator('.auth-modal .ui-tab-btn-active')).toHaveCount(1);
+  await authModal.getByRole('button', { name: /Регистрация|Register/ }).click();
+  const firstRegisterInput = authModal.locator('#auth-register-first-name');
+  await expect(firstRegisterInput).toBeVisible({ timeout: 10000 });
 
-  const firstRegisterInput = page.locator('.auth-modal .stack input').first();
   await firstRegisterInput.click();
   await firstRegisterInput.fill('Test');
   await expect(firstRegisterInput).toHaveValue('Test');
 
-  await page.locator('.auth-modal .ui-btn-close').click();
+  await authModal.getByRole('button', { name: /Закрыть|Close/ }).click();
   await expect(authModal).toBeHidden({ timeout: 10000 });
 });
 
@@ -168,17 +187,22 @@ test('building filter uses highlight layers and does not apply setFilter to base
 
   await openFilterPanel(page);
 
-  await page.getByTestId('filter-key-input').first().fill('name');
+  await selectFilterTag(page, 'name - ');
   await page.getByTestId('filter-value-input').first().fill('test');
   await page.getByTestId('filter-apply-button').click();
 
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('paint-property');
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
+  await expect.poll(async () => page.evaluate(() => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const stats = debug.filterRequests || {};
+    return Number(stats.finish || 0);
+  }), { timeout: 10000 }).toBeGreaterThan(0);
+  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || ''), { timeout: 10000 }).toBe('authoritative');
   await expect.poll(async () => page.evaluate(() => {
     const debug = globalThis.window.__MAP_DEBUG__ || {};
     const history = Array.isArray(debug.filterPhaseHistory) ? debug.filterPhaseHistory : [];
     return history.includes('optimistic') && history.includes('authoritative');
-  })).toBe(true);
+  }), { timeout: 10000 }).toBe(true);
   await expect.poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || '')).toBe('way/1');
 
   const setFilterLayers = await page.evaluate(() => {
@@ -194,11 +218,10 @@ test('building filter handles fast rule updates and reaches authoritative state'
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await openFilterPanel(page);
 
-  const keyInput = page.getByTestId('filter-key-input').first();
   const valueInput = page.getByTestId('filter-value-input').first();
   const applyBtn = page.getByTestId('filter-apply-button');
 
-  await keyInput.fill('name');
+  await selectFilterTag(page, 'name - ');
   await valueInput.fill('first');
   await applyBtn.click();
   await page.waitForTimeout(140);
@@ -220,7 +243,7 @@ test('pan/zoom updates filter without request spam', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
   await openFilterPanel(page);
-  await page.getByTestId('filter-key-input').first().fill('name');
+  await selectFilterTag(page, 'name - ');
   await page.getByTestId('filter-value-input').first().fill('a');
   await page.getByTestId('filter-apply-button').click();
   await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');

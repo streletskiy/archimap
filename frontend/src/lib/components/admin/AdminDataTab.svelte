@@ -1,6 +1,21 @@
 <script>
   import { onDestroy } from 'svelte';
 
+  import {
+    UiButton,
+    UiCheckbox,
+    UiInput,
+    UiPressableCard,
+    UiRadioGroup,
+    UiRadioGroupItem,
+    UiScrollArea,
+    UiTable,
+    UiTableBody,
+    UiTableCell,
+    UiTableHead,
+    UiTableHeader,
+    UiTableRow
+  } from '$lib/components/base';
   import AdminDataRegionMap from './AdminDataRegionMap.svelte';
   import { t } from '$lib/i18n/index';
   import { formatUiDate } from '$lib/utils/edit-ui';
@@ -35,9 +50,23 @@
   let regionListSentinel;
   let regionListObserver = null;
   let lastRegionListKey = '';
+  let selectedExtractCandidateValue = '';
 
   function updateRegionDraftField(field, value) {
     controller.patchRegionDraft({ [field]: value });
+  }
+
+  function getExtractCandidateValue(candidate) {
+    return `${String(candidate?.extractSource || '').trim()}::${String(candidate?.extractId || '').trim()}`;
+  }
+
+  function handleExtractCandidateChange(event) {
+    const nextValue = String(event.detail?.value || '').trim();
+    if (!nextValue) return;
+    const candidate = $regionExtractCandidates.find((item) => getExtractCandidateValue(item) === nextValue);
+    if (candidate) {
+      controller.applyRegionExtractCandidate(candidate);
+    }
   }
 
   function formatBounds(bounds) {
@@ -148,6 +177,12 @@
   $: clampVisibleRegionCount(regions.length);
   $: ensureSelectedRegionVisible($selectedDataRegionId, regions);
   $: visibleRegions = regions.slice(0, visibleRegionCount);
+  $: selectedExtractCandidateValue = $regionDraft.extractSource && $regionDraft.extractId
+    ? getExtractCandidateValue({
+      extractSource: $regionDraft.extractSource,
+      extractId: $regionDraft.extractId
+    })
+    : '';
 
   $: if (!regionListScroller || !regionListSentinel) {
     destroyRegionListObserver();
@@ -176,17 +211,19 @@
         <p class="text-sm ui-text-muted">{$t('admin.data.subtitle')}</p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs"
-          on:click={() => controller.loadDataSettings({ preserveSelection: true })}
-          disabled={$dataLoading || $regionSaving || $regionDeleting || $regionSyncBusy}>{$t('common.refresh')}</button
+          variant="secondary"
+          size="xs"
+          onclick={() => controller.loadDataSettings({ preserveSelection: true })}
+          disabled={$dataLoading || $regionSaving || $regionDeleting || $regionSyncBusy}>{$t('common.refresh')}</UiButton
         >
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs"
-          on:click={controller.startNewRegionDraft}
-          disabled={$regionSaving || $regionDeleting || $regionSyncBusy}>{$t('admin.data.newRegion')}</button
+          variant="secondary"
+          size="xs"
+          onclick={controller.startNewRegionDraft}
+          disabled={$regionSaving || $regionDeleting || $regionSyncBusy}>{$t('admin.data.newRegion')}</UiButton
         >
       </div>
     </div>
@@ -240,11 +277,12 @@
           <span class="rounded-full ui-surface-soft px-3 py-1 text-xs font-semibold ui-text-muted">#{$regionDraft.id}</span>
         {/if}
         {#if draftHasValues}
-          <button
+          <UiButton
             type="button"
-            class="ui-btn ui-btn-secondary ui-btn-xs"
-            on:click={controller.startNewRegionDraft}
-            disabled={$regionSaving || $regionDeleting || $regionSyncBusy}>{$t('admin.data.form.resetSelection')}</button
+            variant="secondary"
+            size="xs"
+            onclick={controller.startNewRegionDraft}
+            disabled={$regionSaving || $regionDeleting || $regionSyncBusy}>{$t('admin.data.form.resetSelection')}</UiButton
           >
         {/if}
       </div>
@@ -260,8 +298,7 @@
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1 text-sm ui-text-body">
               <span>{$t('admin.data.form.regionName')}</span>
-              <input
-                class="ui-field"
+              <UiInput
                 value={$regionDraft.name}
                 on:input={(event) => updateRegionDraftField('name', event.currentTarget.value)}
                 placeholder={$t('admin.data.form.regionNamePlaceholder')}
@@ -269,8 +306,7 @@
             </label>
             <label class="space-y-1 text-sm ui-text-body">
               <span>{$t('admin.data.form.slug')}</span>
-              <input
-                class="ui-field"
+              <UiInput
                 value={$regionDraft.slug}
                 on:input={(event) => updateRegionDraftField('slug', event.currentTarget.value)}
                 placeholder={$t('admin.data.form.slugPlaceholder')}
@@ -300,20 +336,20 @@
                 <label class="space-y-1 block">
                   <span>{$t('admin.data.form.searchQuery')}</span>
                   <div class="flex flex-col gap-2 sm:flex-row">
-                    <input
-                      class="ui-field flex-1"
+                    <UiInput
+                      className="flex-1"
                       value={$regionDraft.searchQuery}
                       on:input={controller.handleRegionSearchQueryInput}
                       placeholder={$t('admin.data.form.searchQueryPlaceholder')}
                     />
-                    <button
+                    <UiButton
                       type="button"
-                      class="ui-btn ui-btn-secondary"
-                      on:click={controller.resolveRegionExtractCandidates}
+                      variant="secondary"
+                      onclick={controller.resolveRegionExtractCandidates}
                       disabled={$regionResolveBusy || $regionSaving || $regionDeleting}
                     >
                       {$regionResolveBusy ? $t('admin.data.form.resolvingExtract') : $t('admin.data.form.resolveExtract')}
-                    </button>
+                    </UiButton>
                   </div>
                 </label>
 
@@ -325,17 +361,15 @@
               {#if $regionExtractCandidates.length > 0}
                 <div class="space-y-2 rounded-xl border ui-border px-3 py-3">
                   <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.form.extractCandidates')}</p>
-                  <div class="space-y-2">
+                  <UiRadioGroup
+                    value={selectedExtractCandidateValue}
+                    onchange={handleExtractCandidateChange}
+                    className="space-y-2"
+                  >
                     {#each $regionExtractCandidates as candidate (`extract-candidate-${candidate.extractSource}-${candidate.extractId}`)}
                       <label class="block cursor-pointer rounded-lg border ui-border px-3 py-2">
                         <div class="flex items-start gap-3">
-                          <input
-                            type="radio"
-                            name="region-extract-candidate"
-                            checked={String($regionDraft.extractSource || '').trim() === String(candidate.extractSource || '').trim()
-                              && String($regionDraft.extractId || '').trim() === String(candidate.extractId || '').trim()}
-                            on:change={() => controller.applyRegionExtractCandidate(candidate)}
-                          />
+                          <UiRadioGroupItem value={getExtractCandidateValue(candidate)} name="region-extract-candidate" />
                           <div class="min-w-0">
                             <p class="font-medium ui-text-strong break-words">{candidate.extractLabel}</p>
                             <p class="text-xs ui-text-subtle break-all">{candidate.extractSource} · {candidate.extractId}</p>
@@ -343,15 +377,14 @@
                         </div>
                       </label>
                     {/each}
-                  </div>
+                  </UiRadioGroup>
                 </div>
               {/if}
 
               <div class="grid gap-3 md:grid-cols-2">
                 <label class="space-y-1 text-sm ui-text-body">
                   <span>{$t('admin.data.form.sourceLayer')}</span>
-                  <input
-                    class="ui-field"
+                  <UiInput
                     value={$regionDraft.sourceLayer}
                     on:input={(event) => updateRegionDraftField('sourceLayer', event.currentTarget.value)}
                     placeholder={$t('admin.data.form.sourceLayerPlaceholder')}
@@ -359,8 +392,7 @@
                 </label>
                 <label class="space-y-1 text-sm ui-text-body">
                   <span>{$t('admin.data.form.autoSyncIntervalHours')}</span>
-                  <input
-                    class="ui-field"
+                  <UiInput
                     type="number"
                     min="0"
                     max="8760"
@@ -370,8 +402,7 @@
                 </label>
                 <label class="space-y-1 text-sm ui-text-body">
                   <span>{$t('admin.data.form.pmtilesMinZoom')}</span>
-                  <input
-                    class="ui-field"
+                  <UiInput
                     type="number"
                     min="0"
                     max="22"
@@ -381,8 +412,7 @@
                 </label>
                 <label class="space-y-1 text-sm ui-text-body">
                   <span>{$t('admin.data.form.pmtilesMaxZoom')}</span>
-                  <input
-                    class="ui-field"
+                  <UiInput
                     type="number"
                     min="0"
                     max="22"
@@ -394,26 +424,23 @@
 
               <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 <label class="flex items-center gap-2 text-sm ui-text-body"
-                  ><input
-                    type="checkbox"
+                  ><UiCheckbox
                     checked={$regionDraft.enabled}
-                    on:change={(event) => updateRegionDraftField('enabled', event.currentTarget.checked)}
+                    onchange={(event) => updateRegionDraftField('enabled', event.detail.checked)}
                   />
                   {$t('admin.data.form.enabled')}</label
                 >
                 <label class="flex items-center gap-2 text-sm ui-text-body"
-                  ><input
-                    type="checkbox"
+                  ><UiCheckbox
                     checked={$regionDraft.autoSyncEnabled}
-                    on:change={(event) => updateRegionDraftField('autoSyncEnabled', event.currentTarget.checked)}
+                    onchange={(event) => updateRegionDraftField('autoSyncEnabled', event.detail.checked)}
                   />
                   {$t('admin.data.form.autoSyncEnabled')}</label
                 >
                 <label class="flex items-center gap-2 text-sm ui-text-body"
-                  ><input
-                    type="checkbox"
+                  ><UiCheckbox
                     checked={$regionDraft.autoSyncOnStart}
-                    on:change={(event) => updateRegionDraftField('autoSyncOnStart', event.currentTarget.checked)}
+                    onchange={(event) => updateRegionDraftField('autoSyncOnStart', event.detail.checked)}
                   />
                   {$t('admin.data.form.autoSyncOnStart')}</label
                 >
@@ -448,33 +475,32 @@
                 <p class="mt-2 text-xs ui-text-danger break-words">{selectedRegion.lastSyncError}</p>
               {/if}
             </div>
-          {/if}
+        {/if}
 
-          <div class="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              class="ui-btn ui-btn-primary"
-              disabled={$regionSaving
-                || $regionDeleting
-                || !String($regionDraft.extractId || '').trim()
-                || !String($regionDraft.extractSource || '').trim()
-                || !String($regionDraft.name || '').trim()
-                || !String($regionDraft.slug || '').trim()}
-              >{$regionDraft.id ? $t('admin.data.form.saveRegion') : $t('admin.data.form.createRegion')}</button
+        <div class="flex flex-wrap gap-2">
+          <UiButton
+            type="submit"
+            disabled={$regionSaving
+              || $regionDeleting
+              || !String($regionDraft.extractId || '').trim()
+              || !String($regionDraft.extractSource || '').trim()
+              || !String($regionDraft.name || '').trim()
+              || !String($regionDraft.slug || '').trim()}
+              >{$regionDraft.id ? $t('admin.data.form.saveRegion') : $t('admin.data.form.createRegion')}</UiButton
             >
             {#if $regionDraft.id}
-              <button
+              <UiButton
                 type="button"
-                class="ui-btn ui-btn-secondary"
+                variant="secondary"
                 disabled={$regionSaving || $regionDeleting || $regionSyncBusy}
-                on:click={() => controller.syncRegionNow($regionDraft.id)}>{$t('admin.data.form.syncNow')}</button
+                onclick={() => controller.syncRegionNow($regionDraft.id)}>{$t('admin.data.form.syncNow')}</UiButton
               >
-              <button
+              <UiButton
                 type="button"
-                class="ui-btn ui-btn-danger"
+                variant="danger"
                 disabled={$regionSaving || $regionDeleting || $regionSyncBusy}
-                on:click={() => controller.deleteDataRegion($regionDraft.id)}
-                >{$regionDeleting ? $t('admin.data.form.deleting') : $t('admin.data.form.deleteRegion')}</button
+                onclick={() => controller.deleteDataRegion($regionDraft.id)}
+                >{$regionDeleting ? $t('admin.data.form.deleting') : $t('admin.data.form.deleteRegion')}</UiButton
               >
             {/if}
           </div>
@@ -495,14 +521,17 @@
           {$t('admin.data.list.empty')}
         </p>
       {:else}
-        <div class="data-region-list-scroll space-y-2 overflow-y-auto pr-1" bind:this={regionListScroller}>
+        <UiScrollArea
+          className="rounded-xl max-h-[34rem] [scrollbar-gutter:stable]"
+          contentClassName="space-y-2 pr-3"
+          bind:viewportRef={regionListScroller}
+        >
           {#each visibleRegions as region (`data-region-${region.id}`)}
             {@const statusMeta = controller.getRegionStatusMeta(region.lastSyncStatus, region)}
-            <button
-              type="button"
-              class="data-region-card data-region-card-compact w-full rounded-xl px-3 py-2.5 text-left transition"
-              data-selected={$selectedDataRegionId === region.id ? 'true' : 'false'}
-              on:click={() => controller.selectDataRegion(region)}
+            <UiPressableCard
+              selected={$selectedDataRegionId === region.id}
+              className="data-region-card"
+              onclick={() => controller.selectDataRegion(region)}
             >
               <div class="flex flex-wrap items-start justify-between gap-2">
                 <div class="min-w-0 flex-1">
@@ -535,13 +564,13 @@
               {#if region.lastSyncError}
                 <p class="mt-2 text-xs ui-text-danger break-words">{region.lastSyncError}</p>
               {/if}
-            </button>
+            </UiPressableCard>
           {/each}
 
           {#if visibleRegionCount < regions.length}
             <div class="data-region-list-sentinel" bind:this={regionListSentinel} aria-hidden="true"></div>
           {/if}
-        </div>
+        </UiScrollArea>
       {/if}
     </section>
 
@@ -558,42 +587,42 @@
       {/if}
 
       {#if $selectedDataRegionId && $regionRuns.length > 0}
-        <div class="mt-3 overflow-x-auto rounded-xl border ui-border">
-          <table class="min-w-full text-sm">
-            <thead>
-              <tr class="border-b ui-border text-left ui-text-muted">
-                <th class="px-3 py-2">{$t('admin.data.history.run')}</th>
-                <th class="px-3 py-2">{$t('admin.data.history.trigger')}</th>
-                <th class="px-3 py-2">{$t('admin.data.history.status')}</th>
-                <th class="px-3 py-2">{$t('admin.data.history.requested')}</th>
-                <th class="px-3 py-2">{$t('admin.data.history.finished')}</th>
-                <th class="px-3 py-2">{$t('admin.data.history.features')}</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div class="mt-3">
+          <UiTable>
+            <UiTableHeader>
+              <UiTableRow className="hover:[&>th]:bg-transparent">
+                <UiTableHead>{$t('admin.data.history.run')}</UiTableHead>
+                <UiTableHead>{$t('admin.data.history.trigger')}</UiTableHead>
+                <UiTableHead>{$t('admin.data.history.status')}</UiTableHead>
+                <UiTableHead>{$t('admin.data.history.requested')}</UiTableHead>
+                <UiTableHead>{$t('admin.data.history.finished')}</UiTableHead>
+                <UiTableHead>{$t('admin.data.history.features')}</UiTableHead>
+              </UiTableRow>
+            </UiTableHeader>
+            <UiTableBody>
               {#each $regionRuns as run (`region-run-${run.id}`)}
                 {@const runStatusMeta = controller.getRegionStatusMeta(run.status, run)}
-                <tr class="border-b ui-border-soft">
-                  <td class="px-3 py-2 font-medium ui-text-strong">#{run.id}</td>
-                  <td class="px-3 py-2 ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</td>
-                  <td class="px-3 py-2"
+                <UiTableRow>
+                  <UiTableCell className="font-medium ui-text-strong">#{run.id}</UiTableCell>
+                  <UiTableCell className="ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</UiTableCell>
+                  <UiTableCell
                     ><span
                       class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
                       data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
-                    ></td
+                    ></UiTableCell
                   >
-                  <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</td>
-                  <td class="px-3 py-2 ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</td>
-                  <td class="px-3 py-2 ui-text-muted">{run.activeFeatureCount ?? run.importedFeatureCount ?? '---'}</td>
-                </tr>
+                  <UiTableCell className="ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</UiTableCell>
+                  <UiTableCell className="ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</UiTableCell>
+                  <UiTableCell className="ui-text-muted">{run.activeFeatureCount ?? run.importedFeatureCount ?? '---'}</UiTableCell>
+                </UiTableRow>
                 {#if run.error}
-                  <tr class="border-b ui-border-soft ui-surface-danger-soft">
-                    <td colspan="6" class="px-3 py-2 text-xs ui-text-danger">{run.error}</td>
-                  </tr>
+                  <UiTableRow className="ui-surface-danger-soft">
+                    <UiTableCell colspan="6" className="text-xs ui-text-danger">{run.error}</UiTableCell>
+                  </UiTableRow>
                 {/if}
               {/each}
-            </tbody>
-          </table>
+            </UiTableBody>
+          </UiTable>
         </div>
       {:else if !$selectedDataRegionId}
         <p class="mt-3 text-sm ui-text-subtle">{$t('admin.data.history.selectRegionHint')}</p>
@@ -603,5 +632,69 @@
 {/if}
 
 <style>
-  @import './admin-tabs.css';
+  .data-summary-card,
+  .data-form-card,
+  .data-history-card {
+    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .data-region-list-sentinel {
+    min-height: 1px;
+  }
+
+  .data-status-pill {
+    border: 1px solid transparent;
+  }
+
+  .data-status-pill[data-tone='idle'] {
+    background: #e2e8f0;
+    color: #334155;
+  }
+
+  .data-status-pill[data-tone='queued'] {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  .data-status-pill[data-tone='running'] {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  .data-status-pill[data-tone='success'] {
+    background: #d1fae5;
+    color: #047857;
+  }
+
+  .data-status-pill[data-tone='failed'] {
+    background: #ffe4e6;
+    color: #be123c;
+  }
+
+  :global(html[data-theme='dark']) .data-status-pill[data-tone='idle'] {
+    background: #18233a;
+    color: #dbe5f2;
+  }
+
+  :global(html[data-theme='dark']) .data-status-pill[data-tone='queued'] {
+    background: #10213b;
+    color: #93c5fd;
+  }
+
+  :global(html[data-theme='dark']) .data-status-pill[data-tone='running'] {
+    background: #3f2a05;
+    color: #fcd34d;
+  }
+
+  :global(html[data-theme='dark']) .data-status-pill[data-tone='success'] {
+    background: #064e3b;
+    color: #6ee7b7;
+  }
+
+  :global(html[data-theme='dark']) .data-status-pill[data-tone='failed'] {
+    background: #4c1024;
+    color: #fda4af;
+  }
 </style>
