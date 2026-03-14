@@ -275,7 +275,7 @@
 </script>
 
 {#if open}
-  <div class="auth-backdrop">
+  <div class:auth-backdrop-mobile-top={registerPendingEmail || resetMode || authTab === 'register'} class="auth-backdrop">
     <button
       type="button"
       class="auth-dismiss-layer"
@@ -417,6 +417,9 @@
     display: grid;
     place-items: center;
     padding: 1rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     background: rgba(8, 17, 31, 0.44);
     backdrop-filter: blur(10px);
     pointer-events: auto;
@@ -482,6 +485,21 @@
     .auth-modal-close {
       top: 1rem;
       right: 1rem;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .auth-backdrop-mobile-top {
+      place-items: start center;
+      padding-top: 1rem;
+    }
+
+    .auth-backdrop {
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    .auth-modal {
+      width: 100%;
     }
   }
 </style>

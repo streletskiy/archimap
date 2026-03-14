@@ -123,9 +123,9 @@
       {/each}
     </div>
 
-    <div class="theme-row">
-      <span>{$t('locale.label')}</span>
-      <div data-testid="locale-select" class="ml-auto min-w-[6.8rem]">
+    <div class="theme-row theme-row-locale">
+      <span class="theme-row-label">{$t('locale.label')}</span>
+      <div data-testid="locale-select" class="locale-select">
         <UiSelect
           value={$locale}
           items={localeItems}
@@ -182,9 +182,13 @@
     top: calc(100% + 0.5rem);
     right: 0.75rem;
     width: min(21rem, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 6rem);
     padding: 0.75rem;
     display: grid;
     gap: 0.75rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     border: 1px solid var(--panel-border);
     border-radius: 1.2rem;
     background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
@@ -283,6 +287,22 @@
     color: var(--muted-strong);
   }
 
+  .theme-row-label {
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .theme-row-locale {
+    align-items: center;
+  }
+
+  .locale-select {
+    min-width: 6.8rem;
+    max-width: 9.5rem;
+    margin-left: auto;
+    flex: 0 0 auto;
+  }
+
   .switch-row {
     display: inline-flex;
     align-items: center;
@@ -303,11 +323,18 @@
       left: 0.75rem;
       right: 0.75rem;
       width: auto;
+      max-height: calc(100dvh - 6.5rem - env(safe-area-inset-bottom, 0px));
+      margin-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
     }
 
     .theme-row {
-      align-items: flex-start;
-      flex-direction: column;
+      gap: 0.6rem;
+      align-items: center;
+      flex-direction: row;
+    }
+
+    .locale-select {
+      max-width: min(9.5rem, 48vw);
     }
   }
 </style>
