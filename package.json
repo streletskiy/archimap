@@ -54,29 +54,29 @@
   "license": "Apache-2.0",
   "description": "Archimap map editing service",
   "dependencies": {
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.8.0",
     "connect-redis": "^9.0.0",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
     "express-session": "^1.19.0",
-    "nodemailer": "^8.0.1",
+    "nodemailer": "^8.0.2",
     "pg": "^8.20.0",
     "redis": "^5.8.2",
     "zod": "^4.1.11"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.4.3",
-    "@commitlint/config-conventional": "^20.4.3",
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^9.21.0",
     "@playwright/test": "^1.54.2",
     "depcheck": "^1.4.7",
-    "drizzle-kit": "1.0.0-beta.16-2ffd1a5",
+    "drizzle-kit": "1.0.0-beta.18-5ffac6d",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.0.1",
-    "eslint-plugin-svelte": "^3.12.4",
+    "eslint-plugin-svelte": "^3.15.2",
     "globals": "^17.4.0",
     "husky": "^9.1.7",
     "prettier": "^3.5.3",
-    "svelte": "^5.20.0"
+    "svelte": "^5.53.12"
   }
 }
