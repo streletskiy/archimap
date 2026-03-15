@@ -54,7 +54,7 @@
   "license": "Apache-2.0",
   "description": "Archimap map editing service",
   "dependencies": {
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.8.0",
     "connect-redis": "^9.0.0",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
