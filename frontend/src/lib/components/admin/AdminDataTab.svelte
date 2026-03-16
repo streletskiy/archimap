@@ -204,7 +204,7 @@
 {#if !isMasterAdmin}
   <p class="mt-3 text-sm ui-text-muted">{$t('admin.settings.masterOnly')}</p>
 {:else}
-  <section class="mt-3 space-y-4 rounded-2xl border ui-border ui-surface-base p-4 min-w-0">
+  <section class="mt-3 flex flex-col space-y-4 rounded-2xl border ui-border ui-surface-base p-4 min-w-0 min-h-0 overflow-hidden">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="space-y-1">
         <h3 class="text-base font-bold ui-text-strong">{$t('admin.data.title')}</h3>
@@ -317,10 +317,10 @@
           <div class="rounded-xl border ui-border ui-surface-base px-3 py-3">
             <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.form.selectedExtract')}</p>
             {#if $regionDraft.extractId && $regionDraft.extractSource}
-              <p class="mt-2 text-sm font-medium ui-text-strong break-words">
-                {$regionDraft.extractLabel || $regionDraft.name || $regionDraft.extractId}
+              <p class="mt-2 text-sm font-medium ui-text-strong break-words line-clamp-3">
+                {String($regionDraft.extractLabel || $regionDraft.name || $regionDraft.extractId || '').trim()}
               </p>
-              <p class="mt-1 text-xs ui-text-subtle break-all">{$regionDraft.extractSource} · {$regionDraft.extractId}</p>
+              <p class="mt-1 text-xs ui-text-subtle break-all line-clamp-2">{$regionDraft.extractSource} · {$regionDraft.extractId}</p>
             {:else}
               <p class="mt-2 text-sm ui-text-subtle">{$t('admin.data.form.selectedExtractEmpty')}</p>
             {/if}
@@ -535,13 +535,13 @@
             >
               <div class="flex flex-wrap items-start justify-between gap-2">
                 <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <p class="font-semibold ui-text-strong break-words">{region.name}</p>
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                    <p class="font-semibold ui-text-strong break-words truncate">{region.name}</p>
                     <span class="text-xs ui-text-subtle break-words">#{region.id} · {region.slug}</span>
                   </div>
-                  <p class="mt-1 text-sm ui-text-body break-all">{controller.getRegionExtractPrimaryText(region)}</p>
+                  <p class="mt-1 text-sm ui-text-body break-all line-clamp-2">{controller.getRegionExtractPrimaryText(region)}</p>
                   {#if controller.getRegionExtractSecondaryText(region)}
-                    <p class="mt-1 text-xs ui-text-subtle break-all">{controller.getRegionExtractSecondaryText(region)}</p>
+                    <p class="mt-1 text-xs ui-text-subtle break-all line-clamp-1">{controller.getRegionExtractSecondaryText(region)}</p>
                   {/if}
                 </div>
                 <span

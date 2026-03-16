@@ -468,11 +468,11 @@
 </script>
 
 <div
-  class="mt-3 grid gap-4 overflow-x-hidden"
+  class="mt-3 grid gap-4 overflow-hidden min-h-0"
   class:lg:grid-cols-[1.1fr_1fr]={adminPaneOpen}
   class:lg:grid-cols-1={!adminPaneOpen}
 >
-  <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3">
+  <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden">
     <div class="ui-filter-toolbar ui-filter-toolbar--admin-edits">
       <UiInput type="search" placeholder={$t('admin.edits.search')} bind:value={editsQuery} />
       <UiDateRangePicker
@@ -542,9 +542,9 @@
               className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
               on:click={() => openEdit(edit.id || edit.editId)}
             >
-              <UiTableCell>
-                <p class="font-semibold ui-text-strong">{getEditAddress(edit)}</p>
-                <p class="text-xs ui-text-subtle">ID: {edit.osmType}/{edit.osmId}</p>
+              <UiTableCell className="min-w-0">
+                <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(edit)}</p>
+                <p class="text-xs ui-text-subtle truncate">ID: {edit.osmType}/{edit.osmId}</p>
                 <div class="mt-1 flex flex-wrap gap-1">
                   {#if edit.orphaned}
                     <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger"
@@ -595,7 +595,7 @@
 
   {#if detailPaneVisible}
     <section
-      class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3"
+      class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden"
       in:fade={{ duration: 180 }}
       out:fade={{ duration: 180 }}
       on:outroend={onDetailPaneOutroEnd}

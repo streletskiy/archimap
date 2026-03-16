@@ -15,7 +15,7 @@
   bind:ref
   bind:viewportRef
   {orientation}
-  class={cn('min-h-0 rounded-[inherit]', className)}
+  class={cn('relative flex flex-col min-h-0 min-w-0 overflow-hidden rounded-[inherit]', className)}
   scrollbarXClasses={scrollbarXClassName}
   scrollbarYClasses={scrollbarYClassName}
   {...$$restProps}

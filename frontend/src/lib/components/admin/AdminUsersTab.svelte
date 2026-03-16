@@ -135,7 +135,7 @@
   });
 </script>
 
-<div class="mt-3 space-y-3">
+<div class="mt-3 flex flex-col space-y-3 min-h-0 overflow-hidden">
   <form class="ui-filter-toolbar ui-filter-toolbar--admin-users" on:submit|preventDefault={loadUsers}>
     <UiInput type="search" placeholder={$t('admin.users.search')} bind:value={usersQuery} />
     <UiSelect items={usersRoleItems} bind:value={usersRole} />
@@ -158,7 +158,8 @@
 
   <p class="text-sm ui-text-muted">{usersStatus}</p>
 
-  <UiTable containerClassName="rounded-2xl ui-surface-base">
+  <UiScrollArea className="flex-1 min-h-0 rounded-2xl border ui-border">
+    <UiTable containerClassName="ui-surface-base">
     <UiTableHeader>
       <UiTableRow className="hover:[&>th]:bg-transparent">
         <UiTableHead>{$t('admin.users.table.email')}</UiTableHead>
@@ -181,8 +182,8 @@
       {:else}
         {#each users as user (`${user.email}`)}
           <UiTableRow>
-            <UiTableCell>
-              <p class="font-semibold ui-text-strong">{user.email}</p>
+            <UiTableCell className="min-w-0">
+              <p class="font-semibold ui-text-strong break-all line-clamp-1">{user.email}</p>
               {#if user.firstName || user.lastName}
                 <p class="text-xs ui-text-subtle">
                   {String(user.firstName || '').trim()}
@@ -226,5 +227,6 @@
         {/each}
       {/if}
     </UiTableBody>
-  </UiTable>
+    </UiTable>
+  </UiScrollArea>
 </div>

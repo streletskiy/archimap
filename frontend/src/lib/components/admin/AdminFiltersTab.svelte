@@ -26,7 +26,7 @@
 {#if !isMasterAdmin}
   <p class="mt-3 text-sm ui-text-muted">{$t('admin.settings.masterOnly')}</p>
 {:else}
-  <section class="mt-3 space-y-4 rounded-2xl border ui-border ui-surface-base p-4 min-w-0">
+  <section class="mt-3 flex flex-col space-y-4 rounded-2xl border ui-border ui-surface-base p-4 min-w-0 min-h-0 overflow-hidden">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="space-y-1">
         <h3 class="text-base font-bold ui-text-strong">{$t('admin.data.filterTags.title')}</h3>
@@ -92,7 +92,7 @@
                 checked={$filterTagAllowlistDraft.includes(key)}
                 onchange={(event) => controller.toggleFilterTagSelection(key, event.detail.checked)}
               />
-              <span class="break-all">{key}</span>
+              <span class="min-w-0 flex-1 break-all whitespace-normal">{key}</span>
             </label>
           {/each}
       </UiScrollArea>

@@ -616,8 +616,8 @@
           </section>
       </div>
     {:else}
-      <div class="mt-4 grid gap-4 overflow-x-hidden" class:lg:grid-cols-[1.1fr_1fr]={accountPaneOpen} class:lg:grid-cols-1={!accountPaneOpen}>
-        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3">
+      <div class="mt-4 grid gap-4 overflow-hidden min-h-0" class:lg:grid-cols-[1.1fr_1fr]={accountPaneOpen} class:lg:grid-cols-1={!accountPaneOpen}>
+        <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden">
           <div class="ui-filter-toolbar ui-filter-toolbar--account-edits">
             <UiInput type="search" placeholder={$t('account.edits.searchPlaceholder')} bind:value={editsQuery} />
             <UiDateRangePicker
@@ -642,8 +642,9 @@
             </div>
           </div>
           <p class="text-sm ui-text-muted">{editsStatus}</p>
-          <div class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
-          <UiTable>
+          <div class="h-[36vh] min-h-[260px] flex-shrink-0 overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
+          <UiScrollArea className="flex-1 min-h-0 rounded-xl border ui-border">
+            <UiTable containerClassName="ui-surface-base">
             <UiTableHeader>
               <UiTableRow className="hover:[&>th]:bg-transparent">
                 <UiTableHead>{$t('account.edits.tableObject')}</UiTableHead>
@@ -669,9 +670,9 @@
                     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
                     on:click={() => openEdit(it.id || it.editId)}
                   >
-                    <UiTableCell>
-                      <p class="font-semibold ui-text-strong">{getEditAddress(it)}</p>
-                      <p class="text-xs ui-text-subtle">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>
+                    <UiTableCell className="min-w-0">
+                      <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(it)}</p>
+                      <p class="text-xs ui-text-subtle truncate">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>
                       <div class="mt-1 flex flex-wrap gap-1">
                         {#if it.orphaned}
                           <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>
@@ -707,9 +708,10 @@
               {/if}
             </UiTableBody>
           </UiTable>
+          </UiScrollArea>
         </section>
         {#if detailPaneVisible}
-        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
+        <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.edits.detailTitle')}</h3>
             <UiButton type="button" variant="secondary" size="close" aria-label={$t('account.edits.closeDetail')} onclick={closeEditPanel}><CloseIcon class="ui-close-icon" /></UiButton>
