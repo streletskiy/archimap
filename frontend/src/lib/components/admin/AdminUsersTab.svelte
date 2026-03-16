@@ -6,6 +6,7 @@
     UiButton,
     UiInput,
     UiSelect,
+    UiScrollArea,
     UiTable,
     UiTableBody,
     UiTableCell,
