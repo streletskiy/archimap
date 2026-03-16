@@ -25,6 +25,7 @@ const STYLE_KEYS = Object.freeze([
   'neoclassicism',
   'empire',
   'moorish_revival',
+  'oldrussian',
   'pseudo-russian',
   'eclectic',
   'georgian',

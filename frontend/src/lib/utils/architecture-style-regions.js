@@ -47,6 +47,7 @@ export const STYLE_ALLOWED_REGIONS = Object.freeze({
   mamluk: [...MAMLUK_CORE],
   ottoman: [...OTTOMAN_LEGACY],
   'pseudo-russian': [...EX_USSR],
+  oldrussian: ['by', 'ru', 'ua'],
   georgian: [...ANGLOPHONE_GEORGIAN],
   victorian: [...VICTORIAN_CORE],
   russian_gothic: ['by', 'ru', 'ua'],
