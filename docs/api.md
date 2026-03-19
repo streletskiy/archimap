@@ -47,6 +47,7 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
+  - Editable merged fields include `name`, `style`, `material`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
   - Includes `region_slugs[]` for the building's current region memberships.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).
 - `GET /api/style-overrides`

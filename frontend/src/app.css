@@ -1421,10 +1421,36 @@ html[data-theme='dark'],
   .ui-color-picker-trigger-swatch,
   .ui-color-picker-preview-swatch {
     display: block;
+    position: relative;
+    overflow: hidden;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
     background: var(--ui-color-picker-swatch, var(--accent));
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  }
+
+  .ui-color-picker-trigger-swatch[data-empty='true'],
+  .ui-color-picker-preview-swatch[data-empty='true'] {
+    background: repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--panel-border-strong) 36%, transparent) 0 0.26rem,
+      color-mix(in srgb, var(--panel-solid) 72%, transparent) 0.26rem 0.52rem
+    );
+  }
+
+  .ui-color-picker-trigger-swatch[data-empty='true']::after,
+  .ui-color-picker-preview-swatch[data-empty='true']::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      135deg,
+      transparent calc(50% - 0.065rem),
+      color-mix(in srgb, var(--muted-strong) 84%, transparent) calc(50% - 0.065rem),
+      color-mix(in srgb, var(--muted-strong) 84%, transparent) calc(50% + 0.065rem),
+      transparent calc(50% + 0.065rem)
+    );
+    pointer-events: none;
   }
 
   .ui-color-picker-trigger-swatch {
@@ -1491,7 +1517,7 @@ html[data-theme='dark'],
     width: var(--ui-color-picker-panel-width);
     min-width: 0;
     justify-items: stretch;
-    overflow: hidden;
+    overflow: visible;
     --cp-bg-color: transparent;
     --cp-border-color: transparent;
     --cp-input-color: var(--ui-field-bg);
@@ -1576,7 +1602,9 @@ html[data-theme='dark'],
     justify-content: flex-start;
     margin: 0;
     gap: 0.28rem;
-    overflow: hidden;
+    overflow: visible;
+    padding: 0.14rem 0.2rem;
+    margin-inline: -0.2rem;
   }
 
   .ui-color-picker-shell .swatch {

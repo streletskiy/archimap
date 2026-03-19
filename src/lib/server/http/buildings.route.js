@@ -149,6 +149,7 @@ function registerBuildingsRoutes(deps) {
       feature_kind: featureKind,
       name: row?.name ?? null,
       style: row?.style ?? null,
+      material: row?.material ?? null,
       colour: row?.colour ?? null,
       levels: row?.levels ?? null,
       year_built: row?.year_built ?? null,
@@ -195,14 +196,14 @@ function registerBuildingsRoutes(deps) {
       return res.status(409).json({ code: 'ERR_EDIT_NO_CHANGES', error: 'Edit payload does not contain changes' });
     }
     if (featureKind === 'building_part') {
-      const allowedFields = new Set(['levels', 'colour', 'style', 'year_built']);
+      const allowedFields = new Set(['levels', 'colour', 'style', 'material', 'year_built']);
       const hasDisallowedRequestedFields = requestedEditedFields.some((field) => !allowedFields.has(field));
       const hasDisallowedPayloadFields = ['name', 'architect', 'address', 'archimap_description']
         .some((field) => validated.value?.[field] != null);
       if (hasDisallowedRequestedFields || hasDisallowedPayloadFields) {
         return res.status(400).json({
           code: 'ERR_BUILDING_PART_EDIT_RESTRICTED',
-          error: 'Building parts can only edit levels, colour, style, and year built'
+          error: 'Building parts can only edit levels, colour, style, material, and year built'
         });
       }
     }
@@ -221,6 +222,7 @@ function registerBuildingsRoutes(deps) {
           SET
             name = @name,
             style = @style,
+            material = @material,
             colour = @colour,
             levels = @levels,
             year_built = @year_built,
@@ -254,12 +256,12 @@ function registerBuildingsRoutes(deps) {
         const inserted = await db.prepare(`
           INSERT INTO user_edits.building_user_edits (
             osm_type, osm_id, created_by,
-            name, style, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+            name, style, material, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
             status, created_at, updated_at
           )
           VALUES (
             @osm_type, @osm_id, @created_by,
-            @name, @style, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+            @name, @style, @material, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
             'pending', datetime('now'), datetime('now')
           )
           RETURNING id
@@ -277,12 +279,12 @@ function registerBuildingsRoutes(deps) {
       const inserted = await db.prepare(`
       INSERT INTO user_edits.building_user_edits (
         osm_type, osm_id, created_by,
-        name, style, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+        name, style, material, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
         status, created_at, updated_at
       )
       VALUES (
         @osm_type, @osm_id, @created_by,
-        @name, @style, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+        @name, @style, @material, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
         'pending', datetime('now'), datetime('now')
       )
       `).run({

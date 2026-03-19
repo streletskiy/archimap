@@ -235,7 +235,7 @@ function createAdminEditsService(options = {}) {
       editCreatedTs,
       currentMergedTs,
       editSource: await db.prepare(`
-        SELECT name, style, levels, year_built, architect, address, archimap_description
+        SELECT name, style, material, colour, levels, year_built, architect, address, archimap_description
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
@@ -243,6 +243,8 @@ function createAdminEditsService(options = {}) {
       mergedCandidate: {
         name: currentMerged.name ?? null,
         style: currentMerged.style ?? null,
+        material: currentMerged.material ?? null,
+        colour: currentMerged.colour ?? null,
         levels: currentMerged.levels ?? null,
         year_built: currentMerged.year_built ?? null,
         architect: currentMerged.architect ?? null,
@@ -319,12 +321,14 @@ function createAdminEditsService(options = {}) {
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
+          material = excluded.material,
+          colour = excluded.colour,
           levels = excluded.levels,
           year_built = excluded.year_built,
           architect = excluded.architect,
@@ -337,6 +341,8 @@ function createAdminEditsService(options = {}) {
         item.osmId,
         mergedCandidate.name,
         mergedCandidate.style,
+        mergedCandidate.material,
+        mergedCandidate.colour,
         mergedCandidate.levels,
         mergedCandidate.year_built,
         mergedCandidate.architect,

@@ -68,6 +68,10 @@ function getRuleValue(item, key) {
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:colour')) return sourceTags['building:colour'];
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'colour')) return sourceTags.colour;
   }
+  if (key === 'material') {
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material')) return sourceTags['building:material'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'material')) return sourceTags.material;
+  }
   if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
   if (key.startsWith('archi.')) {

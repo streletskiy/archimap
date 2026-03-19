@@ -12,13 +12,16 @@ const FILTER_RULE_OPS = new Set([
 ]);
 
 const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
-const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
 
 function getPostgresRuleTagKeys(ruleKey) {
   const key = String(ruleKey || '');
   if (key === 'colour' || key === 'archi.colour') {
     return ['building:colour', 'colour'];
+  }
+  if (key === 'material' || key === 'archi.material') {
+    return ['building:material', 'material'];
   }
   return [key];
 }
@@ -42,6 +45,7 @@ function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
   const alias = String(rowAlias || 'src').trim() || 'src';
   if (key === 'name') return `${alias}.name`;
   if (key === 'style') return `${alias}.style`;
+  if (key === 'material') return `${alias}.material`;
   if (key === 'colour') return `${alias}.colour`;
   if (key === 'levels') return `${alias}.levels::text`;
   if (key === 'year_built') return `${alias}.year_built::text`;

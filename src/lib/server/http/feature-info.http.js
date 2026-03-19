@@ -66,7 +66,7 @@ function createFeatureInfoSupport(options = {}) {
         params.push(type, Number(id));
       }
       const rows = await db.prepare(`
-        SELECT osm_type, osm_id, name, style, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+        SELECT osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
         FROM local.architectural_info
         WHERE ${clauses}
       `).all(...params);

@@ -3,6 +3,7 @@
 User-side:
 
 - User submits building changes via `POST /api/building-info`.
+- Supported editable fields: `name`, `style`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;
   - stale extra `pending` rows are marked as `superseded`.

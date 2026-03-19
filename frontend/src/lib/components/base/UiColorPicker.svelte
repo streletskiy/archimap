@@ -21,7 +21,8 @@
 
   let open = false;
   let currentHex = normalizeHexColor(value, '#000000');
-  let hexInputValue = currentHex;
+  let hasExplicitValue = Boolean(normalizeHexColor(value, ''));
+  let hexInputValue = hasExplicitValue ? currentHex : '';
 
   function normalizeHexColor(rawColor, fallback = '') {
     let color = String(rawColor || '').trim();
@@ -66,13 +67,13 @@
   }
 
   function handleHexBlur() {
-    hexInputValue = currentHex;
+    hexInputValue = hasExplicitValue ? currentHex : '';
   }
 
   function handleHexKeydown(event) {
     if (event.key === 'Escape') {
       event.preventDefault();
-      hexInputValue = currentHex;
+      hexInputValue = hasExplicitValue ? currentHex : '';
       open = false;
       event.currentTarget.blur();
       return;
@@ -84,10 +85,17 @@
   }
 
   $: {
-    const normalizedValue = normalizeHexColor(value, currentHex || '#000000');
-    if (normalizedValue && normalizedValue !== currentHex) {
-      currentHex = normalizedValue;
-      hexInputValue = normalizedValue;
+    const normalizedValue = normalizeHexColor(value, '');
+    hasExplicitValue = Boolean(normalizedValue);
+    if (normalizedValue) {
+      if (normalizedValue !== currentHex) {
+        currentHex = normalizedValue;
+      }
+      if (hexInputValue !== normalizedValue) {
+        hexInputValue = normalizedValue;
+      }
+    } else if (hexInputValue !== '') {
+      hexInputValue = '';
     }
   }
 </script>
@@ -97,15 +105,16 @@
     <Popover.Trigger
       disabled={disabled}
       aria-label={label}
-      title={currentHex}
+      title={hasExplicitValue ? currentHex : ''}
       class={cn('ui-color-picker-trigger', triggerClassName)}
     >
       <span
         class="ui-color-picker-trigger-swatch"
         aria-hidden="true"
-        style:--ui-color-picker-swatch={currentHex}
+        data-empty={hasExplicitValue ? 'false' : 'true'}
+        style:--ui-color-picker-swatch={hasExplicitValue ? currentHex : 'transparent'}
       ></span>
-      <span class="sr-only">{label}: {currentHex}</span>
+      <span class="sr-only">{label}: {hasExplicitValue ? currentHex : 'not set'}</span>
     </Popover.Trigger>
 
     <Popover.Content
@@ -113,12 +122,12 @@
       align="start"
       class={cn('ui-color-picker-content', contentClassName)}
     >
-      <div class="ui-color-picker-header" style:--ui-color-picker-swatch={currentHex}>
+      <div class="ui-color-picker-header" style:--ui-color-picker-swatch={hasExplicitValue ? currentHex : 'transparent'}>
         <div class="ui-color-picker-preview">
-          <span class="ui-color-picker-preview-swatch" aria-hidden="true"></span>
+          <span class="ui-color-picker-preview-swatch" data-empty={hasExplicitValue ? 'false' : 'true'} aria-hidden="true"></span>
           <div class="ui-color-picker-preview-copy">
             <span class="ui-color-picker-label">{label}</span>
-            <strong class="ui-color-picker-value">{currentHex}</strong>
+            <strong class="ui-color-picker-value">{hasExplicitValue ? currentHex : '—'}</strong>
           </div>
         </div>
       </div>

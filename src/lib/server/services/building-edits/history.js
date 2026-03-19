@@ -83,6 +83,7 @@ function createBuildingEditHistoryService(context) {
       ? {
         name: mergedInfoRow.name ?? null,
         style: mergedInfoRow.style ?? null,
+        material: mergedInfoRow.material ?? null,
         colour: mergedInfoRow.colour ?? null,
         levels: mergedInfoRow.levels ?? null,
         year_built: mergedInfoRow.year_built ?? null,

@@ -2,6 +2,7 @@ const USER_EDIT_STATUS_VALUES = new Set(['pending', 'accepted', 'rejected', 'par
 const ARCHI_EDITED_FIELD_ALIASES = new Map([
   ['name', 'name'],
   ['style', 'style'],
+  ['material', 'material'],
   ['levels', 'levels'],
   ['yearbuilt', 'year_built'],
   ['year_built', 'year_built'],
@@ -56,6 +57,7 @@ function sanitizeArchiPayload(body) {
     value: {
       name: sanitizeFieldText(body?.name, 250),
       style: sanitizeFieldText(body?.style, 200),
+      material: sanitizeFieldText(body?.material, 120),
       colour: sanitizeFieldText(body?.colour ?? body?.color, 120),
       levels,
       year_built: yearBuilt,

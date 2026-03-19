@@ -2,6 +2,7 @@ import {
   normalizeArchitectureStyleKey,
   toHumanArchitectureStyle
 } from './architecture-style.js';
+import { normalizeBuildingMaterialKey } from './building-material.js';
 import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from './building-address.js';
 import { normalizeIntegerField, pickFirstText } from './text.js';
 
@@ -12,6 +13,7 @@ export function createEmptyBuildingForm() {
     yearBuilt: '',
     architect: '',
     style: '',
+    material: '',
     colour: '',
     archimapDescription: '',
     addressFull: '',
@@ -30,6 +32,7 @@ export function createEmptyBuildingComparable() {
     yearBuilt: '',
     architect: '',
     style: '',
+    material: '',
     colour: '',
     archimapDescription: '',
     address: ''
@@ -56,6 +59,7 @@ export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingF
   return {
     name: pickFirstText(formValue.name),
     style: normalizeArchitectureStyleKey(formValue.style),
+    material: normalizeBuildingMaterialKey(formValue.material),
     colour: pickFirstText(formValue.colour).toLowerCase(),
     levels: pickFirstText(formValue.levels),
     yearBuilt: pickFirstText(formValue.yearBuilt),
@@ -103,6 +107,9 @@ export function hydrateBuildingForm(details) {
     architect: pickFirstText(info.architect, sourceTags?.architect, sourceTags?.architect_name),
     style: normalizeStyleForBuildingForm(
       info.styleRaw ?? info.style ?? sourceTags?.['building:architecture'] ?? sourceTags?.architecture ?? sourceTags?.style
+    ),
+    material: normalizeBuildingMaterialKey(
+      info.material ?? sourceTags?.['building:material'] ?? sourceTags?.material
     ),
     colour: pickFirstText(info.colour, sourceTags?.['building:colour'], sourceTags?.colour),
     archimapDescription: pickFirstText(info.archimap_description, info.description),

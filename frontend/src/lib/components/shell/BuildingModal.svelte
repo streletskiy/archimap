@@ -1,13 +1,14 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { UiBadge, UiButton, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
+  import { UiBadge, UiButton, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
   import { selectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
   import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
+  import { getBuildingMaterialOptions, toHumanBuildingMaterial } from '$lib/utils/building-material';
   import { styleRegionOverrides } from '$lib/stores/style-overrides';
   import {
     buildAddressFromBuildingForm,
@@ -30,6 +31,26 @@
   export let saveStatus = '';
 
   const dispatch = createEventDispatcher();
+  const buildingColourSwatches = [
+    '#ffffff',
+    '#e96b39',
+    '#cf2f2f',
+    '#7f0c0c',
+    '#f6f0d0',
+    '#7a7d80',
+    '#cabc91',
+    '#f3d36d',
+    '#d8d8d8',
+    '#81c476',
+    '#7d5252',
+    '#79abcb',
+    '#d9d2c3',
+    '#b5653b',
+    '#a58a6a',
+    '#8f9f8a',
+    '#6b5b4b',
+    '#4f4f4f'
+  ];
 
   let lastBuildingKey = null;
   let form = createEmptyBuildingForm();
@@ -74,6 +95,7 @@
       osmId: Number(selection.osmId),
       name: snapshot.name,
       style: snapshot.style,
+      material: snapshot.material,
       colour: snapshot.colour,
       levels: snapshot.levels,
       yearBuilt: snapshot.yearBuilt,
@@ -125,6 +147,10 @@
   $: displayName = pickFirstText(form.name, archiInfo.name) || buildingKey;
   $: displayAddress = pickFirstText(buildAddressFromForm(), archiInfo.address);
   $: displayStyle = resolveDisplayStyle(form.style || archiInfo.styleRaw || archiInfo.style, $locale);
+  $: displayMaterialRaw = pickFirstText(form.material, archiInfo.material);
+  $: displayMaterial = displayMaterialRaw
+    ? (toHumanBuildingMaterial(displayMaterialRaw, $locale) || displayMaterialRaw)
+    : '';
   $: displayColour = pickFirstText(form.colour, archiInfo.colour);
   $: displayDescription = pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
   $: currentRegionSlugs = Array.isArray(buildingDetails?.region_slugs) ? buildingDetails.region_slugs : [];
@@ -142,8 +168,20 @@
     && !availableArchitectureStyleItems.some((option) => option.value === currentArchitectureStyleItem.value)
     ? [currentArchitectureStyleItem, ...availableArchitectureStyleItems]
     : availableArchitectureStyleItems;
+  $: availableBuildingMaterialItems = getBuildingMaterialOptions($locale);
+  $: currentBuildingMaterialItem = form.material
+    ? (availableBuildingMaterialItems.find((option) => option.value === form.material) || {
+      value: form.material,
+      label: toHumanBuildingMaterial(form.material, $locale) || form.material
+    })
+    : null;
+  $: buildingMaterialItems = currentBuildingMaterialItem
+    && !availableBuildingMaterialItems.some((option) => option.value === currentBuildingMaterialItem.value)
+    ? [currentBuildingMaterialItem, ...availableBuildingMaterialItems]
+    : availableBuildingMaterialItems;
   $: summaryItems = [
     { label: $t('buildingModal.style'), value: displayStyle },
+    { label: $t('buildingModal.material'), value: displayMaterial },
     { label: $t('buildingModal.colour'), value: displayColour },
     { label: $t('buildingModal.levels'), value: pickFirstText(form.levels, archiInfo.levels) },
     { label: $t('buildingModal.yearBuilt'), value: pickFirstText(form.yearBuilt, archiInfo.year_built) },
@@ -255,8 +293,34 @@
                   />
                 </FormRow>
 
+                <FormRow forId="building-material-select" label={$t('buildingModal.material')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...buildingMaterialItems]}
+                    bind:value={form.material}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
+                </FormRow>
+
                 <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
-                  <UiInput id="building-colour" type="text" bind:value={form.colour} />
+                  <div class="colour-picker-row">
+                    <UiColorPicker
+                      value={form.colour}
+                      label={$t('buildingModal.colour')}
+                      swatches={buildingColourSwatches}
+                      contentClassName="ui-floating-layer-building-modal"
+                      onchange={(event) => (form.colour = String(event?.detail?.value || ''))}
+                    />
+                    <UiButton
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      disabled={!form.colour}
+                      onclick={() => (form.colour = '')}
+                    >
+                      {$t('common.clear')}
+                    </UiButton>
+                  </div>
                 </FormRow>
               {:else}
                 <FormRow forId="building-name" label={$t('buildingModal.name')}>
@@ -286,8 +350,34 @@
                   />
                 </FormRow>
 
+                <FormRow forId="building-material-select" label={$t('buildingModal.material')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...buildingMaterialItems]}
+                    bind:value={form.material}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
+                </FormRow>
+
                 <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
-                  <UiInput id="building-colour" type="text" bind:value={form.colour} />
+                  <div class="colour-picker-row">
+                    <UiColorPicker
+                      value={form.colour}
+                      label={$t('buildingModal.colour')}
+                      swatches={buildingColourSwatches}
+                      contentClassName="ui-floating-layer-building-modal"
+                      onchange={(event) => (form.colour = String(event?.detail?.value || ''))}
+                    />
+                    <UiButton
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      disabled={!form.colour}
+                      onclick={() => (form.colour = '')}
+                    >
+                      {$t('common.clear')}
+                    </UiButton>
+                  </div>
                 </FormRow>
 
                 <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
@@ -591,6 +681,12 @@
     display: grid;
     gap: 0.75rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .colour-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
   }
 
   .form-footer {
