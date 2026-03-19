@@ -15,6 +15,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 
 1. Scheduler recalculates `nextSyncAt` per enabled region.
 2. Each region can have its own schedule, but execution always goes through one in-process queue.
+   - Queue requests are deduplicated per region (`queued`/`running`) to prevent duplicate run rows from concurrent startup/scheduler/manual triggers.
 3. Queue launches [`scripts/sync-osm-region.js`](../scripts/sync-osm-region.js) for a concrete `regionId`.
 4. The sync script acts as an orchestrator and delegates the real stages to `scripts/region-sync/**`:
    - `python-extractor.js`: Python detection/dependency checks + `sync-osm-buildings.py` invocation
@@ -38,6 +39,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 ## Safety invariants
 
 - No parallel sync jobs.
+- No duplicate active runs per region: enqueue checks return the existing `queued`/`running` run instead of creating a new one.
 - Neighboring or overlapping extract bounds are allowed; shared OSM objects stay safe because membership is tracked per region and cleanup deletes only true orphans.
 - If a region import produces `0` features, the sync fails and the previous successful PMTiles file is kept.
 - If PMTiles build/swap fails, the previous successful PMTiles file is restored and region data cleanup is not silently committed.

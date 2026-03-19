@@ -15,6 +15,7 @@ function initManagedSyncWorkers(options = {}) {
 
   const queue = [];
   const queuedRegionIds = new Set();
+  const enqueueLocksByRegionId = new Map();
   const regionTimers = new Map();
   let currentRun = null;
   let currentSyncChild = null;
@@ -254,48 +255,74 @@ function initManagedSyncWorkers(options = {}) {
 
   async function requestRegionSync(regionId, options = {}) {
     const numericRegionId = Number(regionId);
-    const region = await dataSettingsService.getRegionById(numericRegionId);
-    if (!region) {
-      throw new Error('Region not found');
-    }
-    if (!region.enabled) {
-      throw new Error('Sync is only available for enabled regions');
-    }
+    const previousLock = enqueueLocksByRegionId.get(numericRegionId) || Promise.resolve();
+    let releaseLock;
+    const lockWait = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+    const lockRef = previousLock.then(() => lockWait);
+    enqueueLocksByRegionId.set(numericRegionId, lockRef);
 
-    if (currentRun?.regionId === numericRegionId) {
-      return {
-        queued: false,
-        run: await dataSettingsService.getRunById(currentRun.runId),
-        region: await dataSettingsService.getRegionById(numericRegionId)
-      };
-    }
-    if (queuedRegionIds.has(numericRegionId)) {
-      const runs = await dataSettingsService.getRecentRuns(numericRegionId, 5);
-      const queuedRun = runs.find((item) => item.status === 'queued');
+    await previousLock;
+    try {
+      const region = await dataSettingsService.getRegionById(numericRegionId);
+      if (!region) {
+        throw new Error('Region not found');
+      }
+      if (!region.enabled) {
+        throw new Error('Sync is only available for enabled regions');
+      }
+
+      if (currentRun?.regionId === numericRegionId) {
+        return {
+          queued: false,
+          run: await dataSettingsService.getRunById(currentRun.runId),
+          region: await dataSettingsService.getRegionById(numericRegionId)
+        };
+      }
+      if (queuedRegionIds.has(numericRegionId)) {
+        const runs = await dataSettingsService.getRecentRuns(numericRegionId, 5);
+        const queuedRun = runs.find((item) => item.status === 'queued');
+        return {
+          queued: true,
+          run: queuedRun || null,
+          region: await dataSettingsService.getRegionById(numericRegionId)
+        };
+      }
+
+      const recentRuns = await dataSettingsService.getRecentRuns(numericRegionId, 10);
+      const activeRun = recentRuns.find((item) => item.status === 'queued' || item.status === 'running');
+      if (activeRun) {
+        return {
+          queued: activeRun.status === 'queued',
+          run: activeRun,
+          region: await dataSettingsService.getRegionById(numericRegionId)
+        };
+      }
+
+      const run = await dataSettingsService.createQueuedRun(
+        numericRegionId,
+        options.triggerReason || 'manual',
+        options.requestedBy || null
+      );
+      queue.push({
+        runId: run.id,
+        regionId: numericRegionId
+      });
+      queuedRegionIds.add(numericRegionId);
+      await reloadSchedules();
+      await drainQueue();
       return {
         queued: true,
-        run: queuedRun || null,
+        run: await dataSettingsService.getRunById(run.id),
         region: await dataSettingsService.getRegionById(numericRegionId)
       };
+    } finally {
+      releaseLock();
+      if (enqueueLocksByRegionId.get(numericRegionId) === lockRef) {
+        enqueueLocksByRegionId.delete(numericRegionId);
+      }
     }
-
-    const run = await dataSettingsService.createQueuedRun(
-      numericRegionId,
-      options.triggerReason || 'manual',
-      options.requestedBy || null
-    );
-    queue.push({
-      runId: run.id,
-      regionId: numericRegionId
-    });
-    queuedRegionIds.add(numericRegionId);
-    await reloadSchedules();
-    await drainQueue();
-    return {
-      queued: true,
-      run: await dataSettingsService.getRunById(run.id),
-      region: await dataSettingsService.getRegionById(numericRegionId)
-    };
   }
 
   async function initAutoSync() {
@@ -304,8 +331,6 @@ function initManagedSyncWorkers(options = {}) {
 
     await dataSettingsService.bootstrapFromEnvIfNeeded('startup');
     await dataSettingsService.recoverInterruptedRuns();
-    await reloadSchedules();
-
     const regions = await dataSettingsService.listRegions({ includeDisabled: false });
     for (const region of regions) {
       if (!region.enabled) continue;
@@ -317,6 +342,7 @@ function initManagedSyncWorkers(options = {}) {
         requestedBy: 'system'
       });
     }
+    await reloadSchedules();
   }
 
   function stop() {
