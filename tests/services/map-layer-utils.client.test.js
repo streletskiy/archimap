@@ -113,6 +113,39 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-line').paint['line-opacity'], 1);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').paint['fill-opacity'], 0);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').paint['line-opacity'], 0);
+  assert.equal(map.layers.get('region-buildings-7-part-fill').layout.visibility, 'visible');
+  assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'visible');
+  assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').layout.visibility, 'none');
+});
+
+test('ensureRegionBuildingSourceAndLayers applies initial hidden state for building parts', async () => {
+  const { ensureRegionBuildingSourceAndLayers } = await loadMapLayerUtils();
+  const map = createMapStub();
+
+  ensureRegionBuildingSourceAndLayers({
+    map,
+    region: {
+      id: 9,
+      url: '/regions/demo.pmtiles',
+      sourceLayer: 'buildings'
+    },
+    buildingPaint: {
+      fillColor: '#a3a3a3',
+      fillOpacity: 1,
+      lineColor: '#bcbcbc',
+      lineWidth: 0.9,
+      lineOpacity: 1
+    },
+    origin: 'http://localhost',
+    buildingPartsVisible: false,
+    buildingPartHighlightVisible: false
+  });
+
+  assert.equal(map.layers.get('region-buildings-9-part-fill').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-9-part-line').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-9-part-filter-highlight-fill').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-9-part-filter-highlight-line').layout.visibility, 'none');
 });
 
 test('buildRegionBuildingHighlightFilterExpression excludes building parts when hidden', async () => {
@@ -150,5 +183,31 @@ test('applyBuildingPartsLayerVisibility toggles part layer visibility together',
     { layerId: 'region-buildings-7-part-line', name: 'visibility', value: 'none' },
     { layerId: 'region-buildings-7-part-filter-highlight-fill', name: 'visibility', value: 'none' },
     { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'none' }
+  ]);
+});
+
+test('applyBuildingPartsLayerVisibility keeps part highlight layers visible for active filters', async () => {
+  const { applyBuildingPartsLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub();
+  map.addLayer({ id: 'region-buildings-7-part-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-filter-highlight-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-filter-highlight-line', type: 'line', paint: {} });
+
+  applyBuildingPartsLayerVisibility({
+    map,
+    visible: false,
+    forceHighlightVisible: true,
+    partFillLayerIds: ['region-buildings-7-part-fill'],
+    partLineLayerIds: ['region-buildings-7-part-line'],
+    partFilterHighlightFillLayerIds: ['region-buildings-7-part-filter-highlight-fill'],
+    partFilterHighlightLineLayerIds: ['region-buildings-7-part-filter-highlight-line']
+  });
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'region-buildings-7-part-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-part-line', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-part-filter-highlight-fill', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'visible' }
   ]);
 });

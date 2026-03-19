@@ -132,7 +132,9 @@
     onUpdateSearchMarkers: (items) => updateSearchMarkers(items),
     onApplyBuildingThemePaint: (theme) => applyBuildingThemePaint(theme),
     onApplyLabelLayerVisibility: (visible) => applyLabelLayerVisibility(visible),
-    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility(),
+    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
+      forceHighlightVisible: Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0
+    }),
     onRefreshFilterDebugState: (active) => filterPipeline.refreshDebugState(active),
     onReapplyFilteredHighlight: () => filterPipeline.reapplyFilteredHighlight()
   });
@@ -195,11 +197,12 @@
     });
   }
 
-  function applyBuildingPartsLayerVisibility(visible = $mapBuildingPartsVisible) {
+  function applyBuildingPartsLayerVisibility(visible = $mapBuildingPartsVisible, { forceHighlightVisible = false } = {}) {
     const activeRegions = regionLayersController.getActiveRegionPmtiles();
     applyBuildingPartsLayerVisibilityToLayers({
       map,
       visible,
+      forceHighlightVisible,
       partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
       partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
       partFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegions),
@@ -330,7 +333,8 @@
 
   $: if (map) {
     const buildingPartsVisible = $mapBuildingPartsVisible;
-    applyBuildingPartsLayerVisibility(buildingPartsVisible);
+    const forceHighlightVisible = Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0;
+    applyBuildingPartsLayerVisibility(buildingPartsVisible, { forceHighlightVisible });
     filterPipeline.reapplyFilteredHighlight();
   }
 

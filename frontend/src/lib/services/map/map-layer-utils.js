@@ -304,7 +304,14 @@ export function bringSearchResultsLayersToFront(map) {
   }
 }
 
-export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint, origin }) {
+export function ensureRegionBuildingSourceAndLayers({
+  map,
+  region,
+  buildingPaint,
+  origin,
+  buildingPartsVisible = true,
+  buildingPartHighlightVisible = false
+}) {
   if (!map || !region) return;
   const sourceId = buildRegionSourceId(region.id);
   const fillLayerId = buildRegionLayerId(region.id, 'fill');
@@ -367,6 +374,9 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       filter: buildRegionBuildingLayerFilterExpression({
         featureKind: BUILDING_PART_FEATURE_KIND
       }),
+      layout: {
+        visibility: buildingPartsVisible ? 'visible' : 'none'
+      },
       paint: {
         'fill-color': buildingPaint.fillColor,
         'fill-opacity': buildingPaint.fillOpacity
@@ -384,6 +394,9 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       filter: buildRegionBuildingLayerFilterExpression({
         featureKind: BUILDING_PART_FEATURE_KIND
       }),
+      layout: {
+        visibility: buildingPartsVisible ? 'visible' : 'none'
+      },
       paint: {
         'line-color': buildingPaint.lineColor,
         'line-width': buildingPaint.lineWidth,
@@ -431,6 +444,9 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: buildingPartHighlightVisible ? 'visible' : 'none'
+      },
       paint: {
         'fill-color': 'transparent',
         'fill-opacity': 0
@@ -446,6 +462,9 @@ export function ensureRegionBuildingSourceAndLayers({ map, region, buildingPaint
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: buildingPartHighlightVisible ? 'visible' : 'none'
+      },
       paint: {
         'line-color': 'transparent',
         'line-width': 0,
@@ -513,20 +532,27 @@ export function removeRegionBuildingSourceAndLayers(map, regionId) {
 export function applyBuildingPartsLayerVisibility({
   map,
   visible,
+  forceHighlightVisible = false,
   partFillLayerIds = [],
   partLineLayerIds = [],
   partFilterHighlightFillLayerIds = [],
   partFilterHighlightLineLayerIds = []
 }) {
   if (!map || !map.isStyleLoaded()) return;
-  const nextVisibility = visible ? 'visible' : 'none';
+  const partLayerVisibility = visible ? 'visible' : 'none';
+  const partHighlightVisibility = (visible || forceHighlightVisible) ? 'visible' : 'none';
   for (const layerId of [...new Set([
     ...partFillLayerIds,
-    ...partLineLayerIds,
+    ...partLineLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', partLayerVisibility);
+  }
+  for (const layerId of [...new Set([
     ...partFilterHighlightFillLayerIds,
     ...partFilterHighlightLineLayerIds
   ])]) {
     if (!map.getLayer(layerId)) continue;
-    map.setLayoutProperty(layerId, 'visibility', nextVisibility);
+    map.setLayoutProperty(layerId, 'visibility', partHighlightVisibility);
   }
 }

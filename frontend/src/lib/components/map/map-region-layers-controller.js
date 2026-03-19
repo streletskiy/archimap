@@ -38,6 +38,7 @@ export function createMapRegionLayersController({
   getSearchItems,
   getSelectedBuilding,
   getMapLabelsVisible,
+  getBuildingPartsVisible,
   getBuildingFilterLayers,
   getWindowOrigin,
   onBindStyleInteractionHandlers,
@@ -271,13 +272,18 @@ export function createMapRegionLayersController({
       regionLayersChanged = true;
     }
     activeRegionPmtiles = nextActiveRegions;
+    const currentBuildingFilters = getBuildingFilterLayers?.() || [];
+    const hasActiveBuildingFilters = Array.isArray(currentBuildingFilters) && currentBuildingFilters.length > 0;
+    const partsVisible = Boolean(getBuildingPartsVisible?.() ?? true);
     for (const region of nextActiveRegions) {
       const hadRegionLayers = hasRegionLayersReady([region]);
       ensureRegionBuildingSourceAndLayers({
         map,
         region,
         buildingPaint,
-        origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : ''
+        origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : '',
+        buildingPartsVisible: partsVisible,
+        buildingPartHighlightVisible: partsVisible || hasActiveBuildingFilters
       });
       if (!hadRegionLayers) {
         regionLayersChanged = true;
