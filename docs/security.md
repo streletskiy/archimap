@@ -29,6 +29,14 @@
 - `Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()`
 - `Strict-Transport-Security` enabled for HTTPS production deployments.
 
+## Search crawler policy
+
+- `robots.txt` is served from `frontend/static/robots.txt`.
+- Default policy targets public deployments: `User-agent: *` + `Allow: /`.
+- Sensitive/technical paths are disallowed by default (`/admin`, `/account`, `/setup`, `/api/`, `/ui/`, health/metrics endpoints, and auth helper routes).
+- For private deployments, tighten policy to `Disallow: /`.
+- This is advisory for crawlers and does not replace authentication/authorization.
+
 ## Cookies/session
 
 - `httpOnly=true`
