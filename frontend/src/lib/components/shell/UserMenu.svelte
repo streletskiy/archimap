@@ -3,12 +3,18 @@
   import { fly } from 'svelte/transition';
   import { UiButton, UiSelect, UiSwitch } from '$lib/components/base';
   import ArchitectureIcon from '$lib/components/icons/ArchitectureIcon.svelte';
+  import BuildingPartsIcon from '$lib/components/icons/BuildingPartsIcon.svelte';
   import MoonIcon from '$lib/components/icons/MoonIcon.svelte';
   import SunIcon from '$lib/components/icons/SunIcon.svelte';
   import { apiJson } from '$lib/services/http';
   import { availableLocales, locale, setLocale, t, translateNow } from '$lib/i18n/index';
   import { clearSession, session } from '$lib/stores/auth';
-  import { mapLabelsVisible, setMapLabelsVisible } from '$lib/stores/map';
+  import {
+    mapBuildingPartsVisible,
+    mapLabelsVisible,
+    setMapBuildingPartsVisible,
+    setMapLabelsVisible
+  } from '$lib/stores/map';
   import { getUserInitials, getUserLabel } from '$lib/utils/user-display';
 
   export let open = false;
@@ -61,6 +67,16 @@
     }
   }
 
+  function applyBuildingPartsVisibility(visible) {
+    const next = Boolean(visible);
+    setMapBuildingPartsVisible(next);
+    try {
+      localStorage.setItem('archimap-map-building-parts-visible', next ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }
+
   async function logout() {
     try {
       await apiJson('/api/logout', { method: 'POST' });
@@ -77,6 +93,10 @@
       const storedLabels = localStorage.getItem('archimap-map-labels-visible');
       if (storedLabels === '0' || storedLabels === '1') {
         setMapLabelsVisible(storedLabels === '1');
+      }
+      const storedParts = localStorage.getItem('archimap-map-building-parts-visible');
+      if (storedParts === '0' || storedParts === '1') {
+        setMapBuildingPartsVisible(storedParts === '1');
       }
     } catch {
       // ignore
@@ -123,8 +143,8 @@
       {/each}
     </div>
 
-    <div class="theme-row theme-row-locale">
-      <span class="theme-row-label">{$t('locale.label')}</span>
+    <div class="toggle-row toggle-row-locale">
+      <span class="toggle-row-label">{$t('locale.label')}</span>
       <div data-testid="locale-select" class="locale-select">
         <UiSelect
           value={$locale}
@@ -136,11 +156,11 @@
       </div>
     </div>
 
-    <div class="theme-row">
+    <div class="toggle-row">
       <span>{$t('header.labels')}</span>
       <div class="switch-row">
         <span class="switch-icon" aria-hidden="true">
-          <ArchitectureIcon width="12" height="12" />
+          <ArchitectureIcon width="24" height="24" />
         </span>
         <UiSwitch
           checked={$mapLabelsVisible}
@@ -150,14 +170,28 @@
       </div>
     </div>
 
-    <div class="theme-row">
+    <div class="toggle-row">
+      <span>{$t('header.buildingParts')}</span>
+      <div class="switch-row">
+        <span class="switch-icon" aria-hidden="true">
+          <BuildingPartsIcon width="24" height="24" />
+        </span>
+        <UiSwitch
+          checked={$mapBuildingPartsVisible}
+          aria-label={$mapBuildingPartsVisible ? $t('header.buildingPartsHide') : $t('header.buildingPartsShow')}
+          onchange={(event) => applyBuildingPartsVisibility(event.detail.checked)}
+        />
+      </div>
+    </div>
+
+    <div class="toggle-row">
       <span>{$t('header.theme')}</span>
       <div class="switch-row">
         <span class="switch-icon" aria-hidden="true">
           {#if darkTheme}
-            <MoonIcon width="14" height="14" />
+            <MoonIcon width="28" height="28" />
           {:else}
-            <SunIcon width="14" height="14" />
+            <SunIcon width="28" height="28" />
           {/if}
         </span>
         <UiSwitch
@@ -273,12 +307,12 @@
     color: var(--accent-ink);
   }
 
-  .theme-row {
+  .toggle-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.7rem 0.8rem;
+    gap: 0.65rem;
+    padding: 0.5rem 0.7rem;
     border: 1px solid var(--panel-border);
     border-radius: 1rem;
     background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
@@ -287,12 +321,12 @@
     color: var(--muted-strong);
   }
 
-  .theme-row-label {
+  .toggle-row-label {
     min-width: 0;
     white-space: nowrap;
   }
 
-  .theme-row-locale {
+  .toggle-row-locale {
     align-items: center;
   }
 
@@ -313,8 +347,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.4rem;
-    height: 1.4rem;
+    width: 2.8rem;
+    height: 2.8rem;
     color: var(--muted-strong);
   }
 
@@ -327,7 +361,7 @@
       margin-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
     }
 
-    .theme-row {
+    .toggle-row {
       gap: 0.6rem;
       align-items: center;
       flex-direction: row;

@@ -14,7 +14,7 @@ The UI is multilingual (`en` + `ru`) with runtime locale switching.
 
 - Architectural data is sourced from OpenStreetMap.
 - Data is imported, normalized, and stored in PostgreSQL + PostGIS or SQLite (depending on `DB_PROVIDER`).
-- A PMTiles file is generated from building contours for efficient map delivery.
+- A PMTiles file is generated from building contours and building parts for efficient map delivery, with render metadata that lets the client split normal buildings and pure `building:part` features into separate layers. If an object has both `building` and `building:part=yes`, it is treated as a normal building.
 - The SvelteKit UI loads tiles and renders them through MapLibre.
 - Users can submit building info edits.
 - Administrators moderate and merge approved changes into the local layer.

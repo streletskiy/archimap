@@ -110,3 +110,46 @@ test('normalizeSearchSourceRow drops entries without searchable text', () => {
 
   assert.equal(row, null);
 });
+
+test('normalizeSearchSourceRow drops building parts from the search source', () => {
+  const row = normalizeSearchSourceRow({
+    osm_type: 'way',
+    osm_id: 12,
+    tags_json: JSON.stringify({
+      'building:part': 'yes',
+      name: 'Part of a building'
+    }),
+    local_name: null,
+    local_address: null,
+    local_style: null,
+    local_architect: null,
+    local_priority: 0,
+    center_lon: 1,
+    center_lat: 2
+  });
+
+  assert.equal(row, null);
+});
+
+test('normalizeSearchSourceRow keeps buildings that also declare building:part', () => {
+  const row = normalizeSearchSourceRow({
+    osm_type: 'way',
+    osm_id: 13,
+    tags_json: JSON.stringify({
+      building: 'yes',
+      'building:part': 'yes',
+      name: 'Mixed building'
+    }),
+    local_name: null,
+    local_address: null,
+    local_style: null,
+    local_architect: null,
+    local_priority: 0,
+    center_lon: 1,
+    center_lat: 2
+  });
+
+  assert.ok(row);
+  assert.equal(row.osm_key, 'way/13');
+  assert.equal(row.name, 'Mixed building');
+});

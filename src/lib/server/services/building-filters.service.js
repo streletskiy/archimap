@@ -64,6 +64,10 @@ function normalizeTagValue(value) {
 
 function getRuleValue(item, key) {
   const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
+  if (key === 'colour') {
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:colour')) return sourceTags['building:colour'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'colour')) return sourceTags.colour;
+  }
   if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
   if (key.startsWith('archi.')) {

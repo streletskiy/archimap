@@ -1,9 +1,9 @@
 import {
   normalizeArchitectureStyleKey,
   toHumanArchitectureStyle
-} from '$lib/utils/architecture-style';
-import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from '$lib/utils/building-address';
-import { normalizeIntegerField, pickFirstText } from '$lib/utils/text';
+} from './architecture-style.js';
+import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from './building-address.js';
+import { normalizeIntegerField, pickFirstText } from './text.js';
 
 export function createEmptyBuildingForm() {
   return {
@@ -12,6 +12,7 @@ export function createEmptyBuildingForm() {
     yearBuilt: '',
     architect: '',
     style: '',
+    colour: '',
     archimapDescription: '',
     addressFull: '',
     addressPostcode: '',
@@ -29,6 +30,7 @@ export function createEmptyBuildingComparable() {
     yearBuilt: '',
     architect: '',
     style: '',
+    colour: '',
     archimapDescription: '',
     address: ''
   };
@@ -54,6 +56,7 @@ export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingF
   return {
     name: pickFirstText(formValue.name),
     style: normalizeArchitectureStyleKey(formValue.style),
+    colour: pickFirstText(formValue.colour).toLowerCase(),
     levels: pickFirstText(formValue.levels),
     yearBuilt: pickFirstText(formValue.yearBuilt),
     architect: pickFirstText(formValue.architect),
@@ -101,6 +104,7 @@ export function hydrateBuildingForm(details) {
     style: normalizeStyleForBuildingForm(
       info.styleRaw ?? info.style ?? sourceTags?.['building:architecture'] ?? sourceTags?.architecture ?? sourceTags?.style
     ),
+    colour: pickFirstText(info.colour, sourceTags?.['building:colour'], sourceTags?.colour),
     archimapDescription: pickFirstText(info.archimap_description, info.description),
     addressFull: nextAddressFields.full,
     addressPostcode: nextAddressFields.postcode,

@@ -7,6 +7,8 @@ const ARCHI_EDITED_FIELD_ALIASES = new Map([
   ['year_built', 'year_built'],
   ['architect', 'architect'],
   ['address', 'address'],
+  ['colour', 'colour'],
+  ['color', 'colour'],
   ['archimapdescription', 'archimap_description'],
   ['archimap_description', 'archimap_description'],
   ['description', 'archimap_description']
@@ -54,6 +56,7 @@ function sanitizeArchiPayload(body) {
     value: {
       name: sanitizeFieldText(body?.name, 250),
       style: sanitizeFieldText(body?.style, 200),
+      colour: sanitizeFieldText(body?.colour ?? body?.color, 120),
       levels,
       year_built: yearBuilt,
       architect: sanitizeFieldText(body?.architect, 200),

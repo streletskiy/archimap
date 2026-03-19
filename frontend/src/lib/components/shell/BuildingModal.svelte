@@ -74,6 +74,7 @@
       osmId: Number(selection.osmId),
       name: snapshot.name,
       style: snapshot.style,
+      colour: snapshot.colour,
       levels: snapshot.levels,
       yearBuilt: snapshot.yearBuilt,
       architect: snapshot.architect,
@@ -117,12 +118,14 @@
   }
 
   $: archiInfo = buildingDetails?.properties?.archiInfo || {};
+  $: isBuildingPartFeature = buildingDetails?.feature_kind === 'building_part';
   $: buildingKey = $selectedBuilding?.osmType && $selectedBuilding?.osmId
     ? `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`
     : '-';
   $: displayName = pickFirstText(form.name, archiInfo.name) || buildingKey;
   $: displayAddress = pickFirstText(buildAddressFromForm(), archiInfo.address);
   $: displayStyle = resolveDisplayStyle(form.style || archiInfo.styleRaw || archiInfo.style, $locale);
+  $: displayColour = pickFirstText(form.colour, archiInfo.colour);
   $: displayDescription = pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
   $: currentRegionSlugs = Array.isArray(buildingDetails?.region_slugs) ? buildingDetails.region_slugs : [];
   $: availableArchitectureStyleItems = getArchitectureStyleOptions($locale, currentRegionSlugs, $styleRegionOverrides).map((option) => ({
@@ -141,6 +144,7 @@
     : availableArchitectureStyleItems;
   $: summaryItems = [
     { label: $t('buildingModal.style'), value: displayStyle },
+    { label: $t('buildingModal.colour'), value: displayColour },
     { label: $t('buildingModal.levels'), value: pickFirstText(form.levels, archiInfo.levels) },
     { label: $t('buildingModal.yearBuilt'), value: pickFirstText(form.yearBuilt, archiInfo.year_built) },
     { label: $t('buildingModal.architect'), value: pickFirstText(form.architect, archiInfo.architect) }
@@ -231,73 +235,104 @@
                 <h4>{$t('buildingModal.primarySection')}</h4>
               </div>
 
-              <FormRow forId="building-name" label={$t('buildingModal.name')}>
-                <UiInput id="building-name" type="text" bind:value={form.name} />
-              </FormRow>
+              {#if isBuildingPartFeature}
+                <div class="grid2">
+                  <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
+                    <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  </FormRow>
 
-              <div class="grid2">
-                <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
-                  <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
+                    <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  </FormRow>
+                </div>
+
+                <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
+                    bind:value={form.style}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
                 </FormRow>
 
-                <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
-                  <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
-                </FormRow>
-              </div>
-
-              <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
-                <UiInput id="building-architect" type="text" bind:value={form.architect} />
-              </FormRow>
-
-              <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
-                <UiSelect
-                  items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
-                  bind:value={form.style}
-                  placeholder={$t('buildingModal.notSpecified')}
-                  contentClassName="ui-floating-layer-building-modal"
-                />
-              </FormRow>
-
-              <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
-                <UiTextarea id="building-archimap-description" rows="4" bind:value={form.archimapDescription}></UiTextarea>
-              </FormRow>
-            </section>
-
-            <section class="form-section">
-              <div class="section-head">
-                <h4>{$t('buildingModal.addressSection')}</h4>
-              </div>
-
-              {#if canEditAddressFull}
-                <FormRow forId="building-addr-full" label={$t('buildingModal.addressFull')}>
-                  <UiInput id="building-addr-full" type="text" bind:value={form.addressFull} />
+                <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
+                  <UiInput id="building-colour" type="text" bind:value={form.colour} />
                 </FormRow>
               {:else}
-                <FormRow note={$t('buildingModal.addressFullDerived')} />
+                <FormRow forId="building-name" label={$t('buildingModal.name')}>
+                  <UiInput id="building-name" type="text" bind:value={form.name} />
+                </FormRow>
+
+                <div class="grid2">
+                  <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
+                    <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  </FormRow>
+
+                  <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
+                    <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  </FormRow>
+                </div>
+
+                <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
+                  <UiInput id="building-architect" type="text" bind:value={form.architect} />
+                </FormRow>
+
+                <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
+                    bind:value={form.style}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
+                </FormRow>
+
+                <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
+                  <UiInput id="building-colour" type="text" bind:value={form.colour} />
+                </FormRow>
+
+                <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
+                  <UiTextarea id="building-archimap-description" rows="4" bind:value={form.archimapDescription}></UiTextarea>
+                </FormRow>
               {/if}
-
-              <div class="grid2">
-                <FormRow forId="building-addr-postcode" label={$t('buildingModal.postcode')}>
-                  <UiInput id="building-addr-postcode" type="text" bind:value={form.addressPostcode} />
-                </FormRow>
-
-                <FormRow forId="building-addr-city" label={$t('buildingModal.city')}>
-                  <UiInput id="building-addr-city" type="text" bind:value={form.addressCity} />
-                </FormRow>
-
-                <FormRow forId="building-addr-place" label={$t('buildingModal.place')}>
-                  <UiInput id="building-addr-place" type="text" bind:value={form.addressPlace} />
-                </FormRow>
-
-                <FormRow forId="building-addr-street" label={$t('buildingModal.street')}>
-                  <UiInput id="building-addr-street" type="text" bind:value={form.addressStreet} />
-                </FormRow>
-              </div>
-
-              <FormRow forId="building-addr-housenumber" label={$t('buildingModal.houseNumber')}>
-                <UiInput id="building-addr-housenumber" type="text" bind:value={form.addressHouseNumber} />
-              </FormRow>
             </section>
+
+            {#if !isBuildingPartFeature}
+              <section class="form-section">
+                <div class="section-head">
+                  <h4>{$t('buildingModal.addressSection')}</h4>
+                </div>
+
+                {#if canEditAddressFull}
+                  <FormRow forId="building-addr-full" label={$t('buildingModal.addressFull')}>
+                    <UiInput id="building-addr-full" type="text" bind:value={form.addressFull} />
+                  </FormRow>
+                {:else}
+                  <FormRow note={$t('buildingModal.addressFullDerived')} />
+                {/if}
+
+                <div class="grid2">
+                  <FormRow forId="building-addr-postcode" label={$t('buildingModal.postcode')}>
+                    <UiInput id="building-addr-postcode" type="text" bind:value={form.addressPostcode} />
+                  </FormRow>
+
+                  <FormRow forId="building-addr-city" label={$t('buildingModal.city')}>
+                    <UiInput id="building-addr-city" type="text" bind:value={form.addressCity} />
+                  </FormRow>
+
+                  <FormRow forId="building-addr-place" label={$t('buildingModal.place')}>
+                    <UiInput id="building-addr-place" type="text" bind:value={form.addressPlace} />
+                  </FormRow>
+
+                  <FormRow forId="building-addr-street" label={$t('buildingModal.street')}>
+                    <UiInput id="building-addr-street" type="text" bind:value={form.addressStreet} />
+                  </FormRow>
+                </div>
+
+                <FormRow forId="building-addr-housenumber" label={$t('buildingModal.houseNumber')}>
+                  <UiInput id="building-addr-housenumber" type="text" bind:value={form.addressHouseNumber} />
+                </FormRow>
+              </section>
+            {/if}
 
             <details class="osm-tags">
               <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>

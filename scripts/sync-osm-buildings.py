@@ -32,6 +32,29 @@ def encode_osm_feature_id(osm_type: str, osm_id: int) -> int:
     return (int(osm_id) * 2) + type_bit
 
 
+def normalize_feature_kind(value: Any) -> str:
+    kind = str(value or '').strip().lower()
+    return 'building_part' if kind == 'building_part' else 'building'
+
+
+def derive_feature_kind_from_tags_json(tags_json: str | None) -> str:
+    text = str(tags_json or '').strip()
+    if not text:
+        return 'building'
+    try:
+        tags = json.loads(text)
+    except Exception:
+        return 'building'
+    if not isinstance(tags, dict):
+        return 'building'
+    if 'building' in tags:
+        return 'building'
+    raw_value = str(tags.get('building:part') or tags.get('building_part') or '').strip().lower()
+    if raw_value in {'yes', 'true', '1'}:
+        return 'building_part'
+    return 'building'
+
+
 def merge_bounds(
     bounds: dict[str, float] | None,
     min_lon: float,
@@ -54,13 +77,20 @@ def merge_bounds(
     }
 
 
-def build_geojson_feature_line(osm_type: str, osm_id: int, geometry_json: str) -> str:
+def build_geojson_feature_line(
+    osm_type: str,
+    osm_id: int,
+    geometry_json: str,
+    tags_json: str | None = None,
+    feature_kind: str | None = None,
+) -> str:
     normalized_geometry_json = str(geometry_json or '').strip()
     if not normalized_geometry_json:
         raise ValueError(f'Missing GeoJSON geometry for {str(osm_type or "").strip()}/{int(osm_id)}')
+    normalized_feature_kind = normalize_feature_kind(feature_kind or derive_feature_kind_from_tags_json(tags_json))
     return (
         f'{{"type":"Feature","id":{encode_osm_feature_id(osm_type, int(osm_id))},'
-        f'"properties":{{"osm_id":{int(osm_id)}}},"geometry":{normalized_geometry_json}}}\n'
+        f'"properties":{{"osm_id":{int(osm_id)},"feature_kind":"{normalized_feature_kind}"}},"geometry":{normalized_geometry_json}}}\n'
     )
 
 
@@ -503,7 +533,7 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
         duckdb_path.unlink()
 
     reader = PbfFileReader(
-        tags_filter={'building': True},
+        tags_filter={'building': True, 'building:part': True},
         working_directory=work_dir,
         verbosity_mode='transient'
     )
@@ -535,7 +565,7 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
     convert_osm_extract_to_duckdb(
         osm_extract_query=resolved_query,
         osm_extract_source=normalize_extract_source(extract_source),
-        tags_filter={'building': True},
+        tags_filter={'building': True, 'building:part': True},
         result_file_path=duckdb_path,
         keep_all_tags=True,
         explode_tags=False,
@@ -738,6 +768,7 @@ def export_rows_duckdb_ndjson(
                             'osm_type': row[0],
                             'osm_id': int(row[1]),
                             'tags_json': row[2],
+                            'feature_kind': derive_feature_kind_from_tags_json(row[2]),
                             'min_lon': float(row[4]),
                             'min_lat': float(row[5]),
                             'max_lon': float(row[6]),
@@ -747,12 +778,13 @@ def export_rows_duckdb_ndjson(
                         out.write(json.dumps(payload, ensure_ascii=False))
                         out.write('\n')
                     elif geometry_mode_normalized == 'geojson_feature':
-                        out.write(build_geojson_feature_line(str(row[0]), int(row[1]), str(row[3])))
+                        out.write(build_geojson_feature_line(str(row[0]), int(row[1]), str(row[3]), str(row[2])))
                     else:
                         payload = {
                             'osm_type': row[0],
                             'osm_id': int(row[1]),
                             'tags_json': row[2],
+                            'feature_kind': derive_feature_kind_from_tags_json(row[2]),
                             'min_lon': float(row[4]),
                             'min_lat': float(row[5]),
                             'max_lon': float(row[6]),
@@ -801,6 +833,7 @@ def export_rows_duckdb_dual_ndjson(
                         'osm_type': osm_type,
                         'osm_id': osm_id,
                         'tags_json': row[2],
+                        'feature_kind': derive_feature_kind_from_tags_json(row[2]),
                         'geometry_wkb_hex': str(row[3]),
                         'min_lon': min_lon,
                         'min_lat': min_lat,
@@ -809,7 +842,7 @@ def export_rows_duckdb_dual_ndjson(
                     }, ensure_ascii=False))
                     db_out.write('\n')
 
-                    geojson_out.write(build_geojson_feature_line(osm_type, osm_id, str(row[4])))
+                    geojson_out.write(build_geojson_feature_line(osm_type, osm_id, str(row[4]), str(row[2])))
 
                     processed += 1
                     imported += 1

@@ -3,6 +3,7 @@ const Database = require('better-sqlite3');
 const { Client } = require('pg');
 const {
   closeWriteStream,
+  deriveFeatureKindFromTagsJson,
   ensureDir,
   formatGeojsonFeatureLine,
   updateBounds,
@@ -173,6 +174,7 @@ async function exportRegionMembersToNdjson({
         SELECT
           bc.osm_type,
           bc.osm_id,
+          bc.tags_json,
           ST_AsGeoJSON(bc.geom)::text AS geometry_json,
           bc.min_lon,
           bc.min_lat,
@@ -189,6 +191,8 @@ async function exportRegionMembersToNdjson({
         rows.rows.map((row) => ({
           osm_type: row.osm_type,
           osm_id: row.osm_id,
+          tags_json: row.tags_json,
+          feature_kind: deriveFeatureKindFromTagsJson(row.tags_json),
           geometry_json: row.geometry_json,
           min_lon: row.min_lon,
           min_lat: row.min_lat,
@@ -205,7 +209,7 @@ async function exportRegionMembersToNdjson({
   const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
   try {
     const rows = db.prepare(`
-      SELECT bc.osm_type, bc.osm_id, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
+      SELECT bc.osm_type, bc.osm_id, bc.tags_json, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
       FROM data_region_memberships drm
       JOIN osm.building_contours bc
         ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
@@ -217,6 +221,8 @@ async function exportRegionMembersToNdjson({
       rows.map((row) => ({
         osm_type: row.osm_type,
         osm_id: row.osm_id,
+        tags_json: row.tags_json,
+        feature_kind: deriveFeatureKindFromTagsJson(row.tags_json),
         geometry_json: row.geometry_json,
         min_lon: row.min_lon,
         min_lat: row.min_lat,
@@ -246,7 +252,10 @@ async function exportRegionMembersToGeojsonNdjson({
   let bounds = null;
 
   async function writeRow(row) {
-    await writeStreamLine(writer, formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json));
+    await writeStreamLine(
+      writer,
+      formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json, row.tags_json, row.feature_kind)
+    );
     importedFeatureCount += 1;
     bounds = updateBounds(bounds, row);
   }
@@ -267,6 +276,7 @@ async function exportRegionMembersToGeojsonNdjson({
           SELECT
             bc.osm_type,
             bc.osm_id,
+            bc.tags_json,
             ST_AsGeoJSON(bc.geom)::text AS geometry_json,
             bc.min_lon,
             bc.min_lat,
@@ -308,7 +318,7 @@ async function exportRegionMembersToGeojsonNdjson({
       const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
       try {
         const rows = db.prepare(`
-          SELECT bc.osm_type, bc.osm_id, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
+          SELECT bc.osm_type, bc.osm_id, bc.tags_json, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
           FROM data_region_memberships drm
           JOIN osm.building_contours bc
             ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id

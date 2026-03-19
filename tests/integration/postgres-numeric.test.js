@@ -10,7 +10,7 @@ test('compilePostgresFilterRulePredicate parses decimal comma values for postgre
     value: '2,5'
   });
 
-  assert.match(compiled.sql, /replace\(btrim\(CASE WHEN jsonb_exists\(src\.tags_jsonb, \?\) THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE NULL::text END\), ',', '\.'\)/);
+  assert.match(compiled.sql, /replace\(btrim\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE NULL::text END\), ',', '\.'\)/);
   assert.match(compiled.sql, /> \?$/);
   assert.deepEqual(compiled.params, ['building:levels', 'building:levels', 'building:levels', 'building:levels', 2.5]);
 });

@@ -32,8 +32,12 @@ export function normalizeLayerIdsSnapshot(layerIds) {
   return {
     buildingFillLayerIds: Array.isArray(source.buildingFillLayerIds) ? source.buildingFillLayerIds : [],
     buildingLineLayerIds: Array.isArray(source.buildingLineLayerIds) ? source.buildingLineLayerIds : [],
+    buildingPartFillLayerIds: Array.isArray(source.buildingPartFillLayerIds) ? source.buildingPartFillLayerIds : [],
+    buildingPartLineLayerIds: Array.isArray(source.buildingPartLineLayerIds) ? source.buildingPartLineLayerIds : [],
     filterHighlightFillLayerIds: Array.isArray(source.filterHighlightFillLayerIds) ? source.filterHighlightFillLayerIds : [],
     filterHighlightLineLayerIds: Array.isArray(source.filterHighlightLineLayerIds) ? source.filterHighlightLineLayerIds : [],
+    buildingPartFilterHighlightFillLayerIds: Array.isArray(source.buildingPartFilterHighlightFillLayerIds) ? source.buildingPartFilterHighlightFillLayerIds : [],
+    buildingPartFilterHighlightLineLayerIds: Array.isArray(source.buildingPartFilterHighlightLineLayerIds) ? source.buildingPartFilterHighlightLineLayerIds : [],
     selectedFillLayerIds: Array.isArray(source.selectedFillLayerIds) ? source.selectedFillLayerIds : [],
     selectedLineLayerIds: Array.isArray(source.selectedLineLayerIds) ? source.selectedLineLayerIds : []
   };

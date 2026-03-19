@@ -1,6 +1,6 @@
-import { apiJson } from '$lib/services/http';
-import { matchesFilterRules } from '$lib/components/map/filter-pipeline-utils';
-import { encodeOsmFeatureId, parseOsmKey, resolveFeatureIdentity } from './filter-utils';
+import { apiJson } from '../http.js';
+import { matchesFilterRules } from '../../components/map/filter-pipeline-utils.js';
+import { encodeOsmFeatureId, parseOsmKey, resolveFeatureIdentity } from './filter-utils.js';
 
 export function createFilterFetcher({
   resolveMap,
@@ -21,7 +21,9 @@ export function createFilterFetcher({
     const layerIds = resolveLayerIds();
     const buildingLayerIds = [
       ...layerIds.buildingFillLayerIds,
-      ...layerIds.buildingLineLayerIds
+      ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartFillLayerIds,
+      ...layerIds.buildingPartLineLayerIds
     ];
     if (buildingLayerIds.length === 0) return [];
     const features = currentMap.queryRenderedFeatures({ layers: buildingLayerIds });

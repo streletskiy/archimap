@@ -1,8 +1,8 @@
 import { get } from 'svelte/store';
-import { locale as activeLocale, translateNow } from '$lib/i18n/index';
-import en from '$lib/i18n/locales/en.json' with { type: 'json' };
-import ru from '$lib/i18n/locales/ru.json' with { type: 'json' };
-import { EMPTY_TEXT_TOKENS } from '$lib/utils/text';
+import { locale as activeLocale, translateNow } from '../i18n/index.js';
+import en from '../i18n/locales/en.json' with { type: 'json' };
+import ru from '../i18n/locales/ru.json' with { type: 'json' };
+import { EMPTY_TEXT_TOKENS } from './text.js';
 import {
   STYLE_ALLOWED_REGION_PATTERNS,
   STYLE_ALLOWED_REGIONS,

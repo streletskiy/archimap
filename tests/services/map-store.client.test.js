@@ -4,10 +4,13 @@ const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
 const LAST_MAP_CAMERA_STORAGE_KEY = 'archimap-last-map-camera';
+const MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY = 'archimap-map-building-parts-visible';
+
+let mapStoreImportCounter = 0;
 
 async function loadMapStoreModule() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'stores', 'map.js');
-  return import(pathToFileURL(modulePath).href);
+  return import(`${pathToFileURL(modulePath).href}?v=${mapStoreImportCounter += 1}`);
 }
 
 function createStorage(initial = {}) {
@@ -93,4 +96,77 @@ test('requestMapFocus does not coerce missing zoom to zero', async () => {
 
   unsubscribe();
   assert.equal(currentValue?.zoom, null);
+});
+
+test('mapBuildingPartsVisible reads persisted value and writes back to storage', async () => {
+  const previousWindow = global.window;
+  const previousLocalStorage = global.localStorage;
+  const storage = createStorage({
+    [MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY]: '0'
+  });
+
+  global.window = {};
+  global.localStorage = storage;
+
+  try {
+    const { mapBuildingPartsVisible, setMapBuildingPartsVisible } = await loadMapStoreModule();
+    let currentValue = null;
+    const unsubscribe = mapBuildingPartsVisible.subscribe((value) => {
+      currentValue = value;
+    });
+
+    assert.equal(currentValue, false);
+
+    setMapBuildingPartsVisible(true);
+    assert.equal(storage.getItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY), '1');
+
+    setMapBuildingPartsVisible(false);
+    assert.equal(storage.getItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY), '0');
+
+    unsubscribe();
+  } finally {
+    if (previousWindow === undefined) {
+      delete global.window;
+    } else {
+      global.window = previousWindow;
+    }
+
+    if (previousLocalStorage === undefined) {
+      delete global.localStorage;
+    } else {
+      global.localStorage = previousLocalStorage;
+    }
+  }
+});
+
+test('mapBuildingPartsVisible defaults to false when no stored preference', async () => {
+  const previousWindow = global.window;
+  const previousLocalStorage = global.localStorage;
+  const storage = createStorage();
+
+  global.window = {};
+  global.localStorage = storage;
+
+  try {
+    const { mapBuildingPartsVisible } = await loadMapStoreModule();
+    let currentValue = null;
+    const unsubscribe = mapBuildingPartsVisible.subscribe((value) => {
+      currentValue = value;
+    });
+
+    assert.equal(currentValue, false);
+    unsubscribe();
+  } finally {
+    if (previousWindow === undefined) {
+      delete global.window;
+    } else {
+      global.window = previousWindow;
+    }
+
+    if (previousLocalStorage === undefined) {
+      delete global.localStorage;
+    } else {
+      global.localStorage = previousLocalStorage;
+    }
+  }
 });

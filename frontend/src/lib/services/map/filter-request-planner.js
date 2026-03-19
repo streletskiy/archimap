@@ -179,6 +179,7 @@ export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cache
   const payloads = [...payloadsByRequestId.values()];
   return {
     highlightColorGroups,
+    matchedFeatureIds: [...resolvedEntriesById.keys()].sort((left, right) => left - right),
     matchedCount: resolvedEntriesById.size,
     meta: {
       rulesHash: String(prepared?.rulesHash || 'fnv1a-0'),

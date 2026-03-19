@@ -420,7 +420,12 @@ export function createFilterPipeline({
       await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
         resolvedPayload.highlightColorGroups || [],
         token,
-        { phase: 'authoritative' }
+        {
+          phase: 'authoritative',
+          matchedFeatureIds: Array.isArray(resolvedPayload?.matchedFeatureIds)
+            ? resolvedPayload.matchedFeatureIds
+            : []
+        }
       );
       if (token !== latestFilterToken) return;
       filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
@@ -591,7 +596,12 @@ export function createFilterPipeline({
       await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
         Array.isArray(cachedPayload?.highlightColorGroups) ? cachedPayload.highlightColorGroups : [],
         token,
-        { phase: 'optimistic' }
+        {
+          phase: 'optimistic',
+          matchedFeatureIds: Array.isArray(cachedPayload?.matchedFeatureIds)
+            ? cachedPayload.matchedFeatureIds
+            : []
+        }
       );
       if (token !== latestFilterToken) return;
       patchState({
@@ -645,7 +655,12 @@ export function createFilterPipeline({
       await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
         Array.isArray(reusedPayload?.highlightColorGroups) ? reusedPayload.highlightColorGroups : [],
         token,
-        { phase: 'optimistic' }
+        {
+          phase: 'optimistic',
+          matchedFeatureIds: Array.isArray(reusedPayload?.matchedFeatureIds)
+            ? reusedPayload.matchedFeatureIds
+            : []
+        }
       );
       if (token !== latestFilterToken) return;
       patchState({

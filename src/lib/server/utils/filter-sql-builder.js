@@ -12,13 +12,37 @@ const FILTER_RULE_OPS = new Set([
 ]);
 
 const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
-const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+
+function getPostgresRuleTagKeys(ruleKey) {
+  const key = String(ruleKey || '');
+  if (key === 'colour' || key === 'archi.colour') {
+    return ['building:colour', 'colour'];
+  }
+  return [key];
+}
+
+function buildPostgresTagValueSql(tagsAlias, tagKeys = []) {
+  const normalizedKeys = Array.isArray(tagKeys) ? tagKeys.filter(Boolean) : [];
+  if (normalizedKeys.length === 0) {
+    return {
+      sql: 'NULL::text',
+      params: []
+    };
+  }
+  const parts = normalizedKeys.map(() => `jsonb_extract_path_text(${tagsAlias}, ?)`);
+  return {
+    sql: parts.length === 1 ? parts[0] : `COALESCE(${parts.join(', ')})`,
+    params: normalizedKeys
+  };
+}
 
 function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
   const alias = String(rowAlias || 'src').trim() || 'src';
   if (key === 'name') return `${alias}.name`;
   if (key === 'style') return `${alias}.style`;
+  if (key === 'colour') return `${alias}.colour`;
   if (key === 'levels') return `${alias}.levels::text`;
   if (key === 'year_built') return `${alias}.year_built::text`;
   if (key === 'architect') return `${alias}.architect`;
@@ -37,9 +61,10 @@ function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${r
     fallbackKey = key;
   }
   const fallbackSql = fallbackKey ? getPostgresArchiFallbackSql(fallbackKey, rowAlias) : 'NULL::text';
+  const tagValueSql = buildPostgresTagValueSql(tagsAlias, getPostgresRuleTagKeys(fallbackKey || key));
   return {
-    sql: `CASE WHEN jsonb_exists(${tagsAlias}, ?) THEN jsonb_extract_path_text(${tagsAlias}, ?) ELSE ${fallbackSql} END`,
-    params: [key, key]
+    sql: `CASE WHEN COALESCE(length(btrim(${tagValueSql.sql})), 0) > 0 THEN ${tagValueSql.sql} ELSE ${fallbackSql} END`,
+    params: [...tagValueSql.params, ...tagValueSql.params]
   };
 }
 
@@ -202,134 +227,76 @@ function compilePostgresFilterRuleGuardPredicate(rule, options = {}) {
 
   const tagsAlias = String(options.tagsAlias || `${String(options.rowAlias || 'base')}.tags_jsonb`).trim();
   const key = String(rule.key || '');
-  const right = String(rule.valueNormalized || '').toLowerCase();
-  const tagExistsSql = `jsonb_exists(${tagsAlias}, ?)`;
-  const tagValueSql = `jsonb_extract_path_text(${tagsAlias}, ?)`;
-  const tagNumericExpr = buildPostgresNumericValueSql(tagValueSql, [key]);
-
-  if (!usesArchiFallbackRuleKey(key)) {
-    if (op === 'exists') {
-      return {
-        sql: `COALESCE(length(btrim(${tagValueSql})), 0) > 0`,
-        params: [key]
-      };
-    }
-    if (op === 'not_exists') {
-      return {
-        sql: `COALESCE(length(btrim(${tagValueSql})), 0) = 0`,
-        params: [key]
-      };
-    }
-    if (op === 'equals') {
-      return {
-        sql: `lower(${tagValueSql}) = ?`,
-        params: [key, right]
-      };
-    }
-    if (op === 'not_equals') {
-      return {
-        sql: `lower(${tagValueSql}) <> ?`,
-        params: [key, right]
-      };
-    }
-    if (op === 'starts_with') {
-      return {
-        sql: `lower(${tagValueSql}) LIKE (? || '%')`,
-        params: [key, right]
-      };
-    }
-    if (NUMERIC_FILTER_RULE_OPS.has(op)) {
-      const numericValue = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
-      const numericParams = [...tagNumericExpr.params, numericValue];
-      if (op === 'greater_than') {
-        return {
-          sql: `${tagNumericExpr.sql} > ?`,
-          params: numericParams
-        };
-      }
-      if (op === 'greater_or_equals') {
-        return {
-          sql: `${tagNumericExpr.sql} >= ?`,
-          params: numericParams
-        };
-      }
-      if (op === 'less_than') {
-        return {
-          sql: `${tagNumericExpr.sql} < ?`,
-          params: numericParams
-        };
-      }
-      return {
-        sql: `${tagNumericExpr.sql} <= ?`,
-        params: numericParams
-      };
-    }
+  if (usesArchiFallbackRuleKey(key)) {
     return {
-      sql: `strpos(lower(${tagValueSql}), ?) > 0`,
-      params: [key, right]
+      sql: 'TRUE',
+      params: []
     };
   }
 
+  const right = String(rule.valueNormalized || '').toLowerCase();
+  const tagKeys = getPostgresRuleTagKeys(key);
+  const tagValueExpr = buildPostgresTagValueSql(tagsAlias, tagKeys);
+  const tagNumericExpr = buildPostgresNumericValueSql(tagValueExpr.sql, tagKeys);
+
   if (op === 'exists') {
     return {
-      sql: `NOT (${tagExistsSql} AND COALESCE(length(btrim(${tagValueSql})), 0) = 0)`,
-      params: [key, key]
+      sql: `COALESCE(length(btrim(${tagValueExpr.sql})), 0) > 0`,
+      params: tagKeys
     };
   }
   if (op === 'not_exists') {
     return {
-      sql: `NOT (${tagExistsSql} AND COALESCE(length(btrim(${tagValueSql})), 0) > 0)`,
-      params: [key, key]
+      sql: `COALESCE(length(btrim(${tagValueExpr.sql})), 0) = 0`,
+      params: tagKeys
     };
   }
   if (op === 'equals') {
     return {
-      sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) <> ?))`,
-      params: [key, key, key, right]
+      sql: `lower(${tagValueExpr.sql}) = ?`,
+      params: [...tagKeys, right]
     };
   }
   if (op === 'not_equals') {
     return {
-      sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) = ?))`,
-      params: [key, key, key, right]
+      sql: `lower(${tagValueExpr.sql}) <> ?`,
+      params: [...tagKeys, right]
     };
   }
   if (op === 'starts_with') {
     return {
-      sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR lower(${tagValueSql}) NOT LIKE (? || '%')))`,
-      params: [key, key, key, right]
+      sql: `lower(${tagValueExpr.sql}) LIKE (? || '%')`,
+      params: [...tagKeys, right]
     };
   }
   if (NUMERIC_FILTER_RULE_OPS.has(op)) {
     const numericValue = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
-    const leftSql = tagNumericExpr.sql;
-    const leftParams = tagNumericExpr.params;
     if (op === 'greater_than') {
       return {
-        sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} <= ?))`,
-        params: [key, ...leftParams, ...leftParams, numericValue]
+        sql: `${tagNumericExpr.sql} > ?`,
+        params: [...tagNumericExpr.params, numericValue]
       };
     }
     if (op === 'greater_or_equals') {
       return {
-        sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} < ?))`,
-        params: [key, ...leftParams, ...leftParams, numericValue]
+        sql: `${tagNumericExpr.sql} >= ?`,
+        params: [...tagNumericExpr.params, numericValue]
       };
     }
     if (op === 'less_than') {
       return {
-        sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} >= ?))`,
-        params: [key, ...leftParams, ...leftParams, numericValue]
+        sql: `${tagNumericExpr.sql} < ?`,
+        params: [...tagNumericExpr.params, numericValue]
       };
     }
     return {
-      sql: `NOT (${tagExistsSql} AND (${leftSql} IS NULL OR ${leftSql} > ?))`,
-      params: [key, ...leftParams, ...leftParams, numericValue]
+      sql: `${tagNumericExpr.sql} <= ?`,
+      params: [...tagNumericExpr.params, numericValue]
     };
   }
   return {
-    sql: `NOT (${tagExistsSql} AND (${tagValueSql} IS NULL OR strpos(lower(${tagValueSql}), ?) = 0))`,
-    params: [key, key, key, right]
+    sql: `strpos(lower(${tagValueExpr.sql}), ?) > 0`,
+    params: [...tagKeys, right]
   };
 }
 

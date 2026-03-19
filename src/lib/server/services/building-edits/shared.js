@@ -40,6 +40,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         ${MERGED_EDITS_FOR_TARGET_SQL},
         ai.name AS merged_name,
         ai.style AS merged_style,
+        ai.colour AS merged_colour,
         ai.levels AS merged_levels,
         ai.year_built AS merged_year_built,
         ai.architect AS merged_architect,
@@ -83,6 +84,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       }
       return text;
     }
+    if (key === 'colour') {
+      return String(normalized).trim().toLowerCase();
+    }
 
     return normalized;
   }
@@ -122,6 +126,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
     { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
     { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
+    { key: 'colour', label: 'Цвет', osmTag: 'building:colour | colour' },
     { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
   ]);
 
@@ -161,7 +166,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   async function getMergedInfoRow(osmType, osmId) {
     return await db.prepare(`
-      SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+      SELECT osm_type, osm_id, name, style, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
@@ -248,6 +253,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     const osmBaseline = {
       name: pickTagValue(tags, ['name', 'name:ru', 'official_name']),
       style: pickTagValue(tags, ['building:architecture', 'architecture', 'style']),
+      colour: pickTagValue(tags, ['building:colour', 'colour']),
       levels: pickTagValue(tags, ['building:levels', 'levels']),
       year_built: pickTagValue(tags, ['building:year', 'start_date', 'construction_date', 'year_built']),
       architect: pickTagValue(tags, ['architect', 'architect_name']),
@@ -259,6 +265,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       ? {
         name: normalizeInfoForDiff(mergedRow.name),
         style: normalizeInfoForDiff(mergedRow.style),
+        colour: normalizeInfoForDiff(mergedRow.colour),
         levels: normalizeInfoForDiff(mergedRow.levels),
         year_built: normalizeInfoForDiff(mergedRow.year_built),
         architect: normalizeInfoForDiff(mergedRow.architect),
@@ -332,6 +339,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     if (!row) return null;
     const hasMergedValue = row.name != null
       || row.style != null
+      || row.colour != null
       || row.levels != null
       || row.year_built != null
       || row.architect != null
@@ -343,6 +351,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return {
       name: row.name ?? null,
       style: row.style ?? null,
+      colour: row.colour ?? null,
       levels: row.levels ?? null,
       year_built: row.year_built ?? null,
       architect: row.architect ?? null,
@@ -358,6 +367,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return normalizeMergedInfoRow({
       name: row?.merged_name,
       style: row?.merged_style,
+      colour: row?.merged_colour,
       levels: row?.merged_levels,
       year_built: row?.merged_year_built,
       architect: row?.merged_architect,
@@ -441,8 +451,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       mergedFields,
       values: {
         name: row.name ?? null,
-        style: row.style ?? null,
-        levels: row.levels ?? null,
+      style: row.style ?? null,
+      colour: row.colour ?? null,
+      levels: row.levels ?? null,
         year_built: row.year_built ?? null,
         architect: row.architect ?? null,
         address: row.address ?? null,

@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
-import { session } from '$lib/stores/auth';
-import { translateNow } from '$lib/i18n/index';
+import { session } from '../stores/auth.js';
+import { translateNow } from '../i18n/index.js';
 
 function isStateChangingMethod(method) {
   const m = String(method || 'GET').toUpperCase();

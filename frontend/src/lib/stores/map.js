@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import { parseUrlState } from '../client/urlState.js';
 
 const LAST_MAP_CAMERA_STORAGE_KEY = 'archimap-last-map-camera';
+const MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY = 'archimap-map-building-parts-visible';
 
 function getStorageHost(storageHost = null) {
   if (storageHost) return storageHost;
@@ -114,6 +115,18 @@ function getInitialLabelsVisibility() {
   return true;
 }
 
+function getInitialBuildingPartsVisibility() {
+  if (typeof window === 'undefined') return true;
+  try {
+    const stored = localStorage.getItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY);
+    if (stored === '0') return false;
+    if (stored === '1') return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 export const selectedBuilding = writable(null);
 export const mapReady = writable(false);
 export const mapCenter = writable(null);
@@ -121,6 +134,7 @@ export const mapZoom = writable(null);
 export const mapViewport = writable(null);
 export const mapFocusRequest = writable(null);
 export const mapLabelsVisible = writable(getInitialLabelsVisibility());
+export const mapBuildingPartsVisible = writable(getInitialBuildingPartsVisibility());
 export const lastMapCamera = writable(getInitialLastMapCamera());
 
 export function setSelectedBuilding(item) {
@@ -192,4 +206,14 @@ export function requestMapFocus(payload = {}) {
 
 export function setMapLabelsVisible(value) {
   mapLabelsVisible.set(Boolean(value));
+}
+
+export function setMapBuildingPartsVisible(value) {
+  const next = Boolean(value);
+  mapBuildingPartsVisible.set(next);
+  try {
+    localStorage.setItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY, next ? '1' : '0');
+  } catch {
+    // ignore
+  }
 }

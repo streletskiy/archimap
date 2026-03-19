@@ -67,6 +67,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       SESSION_SECRET: 'integration-test-secret',
       APP_BASE_URL: baseUrl,
       DB_PROVIDER: 'sqlite',
+      OSM_DB_PATH: path.join(tempRoot, 'osm.db'),
       SMTP_URL: '',
       SMTP_HOST: '',
       SMTP_PORT: '587',
@@ -358,6 +359,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
 
       const mainDb = new Database(path.join(tempRoot, 'archimap.db'));
       const localDb = new Database(path.join(tempRoot, 'local-edits.db'));
+      const osmDb = new Database(path.join(tempRoot, 'osm.db'));
       try {
         mainDb.prepare(`
           INSERT INTO data_sync_regions (slug, name, updated_by)
@@ -374,6 +376,114 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
           VALUES (?, ?, ?, datetime('now'), datetime('now'))
         `).run(regionId, 'way', 101);
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 102);
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 103);
+
+        osmDb.exec(`
+          CREATE TABLE IF NOT EXISTS building_contours (
+            osm_type TEXT NOT NULL,
+            osm_id INTEGER NOT NULL,
+            tags_json TEXT,
+            geometry_json TEXT NOT NULL,
+            min_lon REAL NOT NULL,
+            min_lat REAL NOT NULL,
+            max_lon REAL NOT NULL,
+            max_lat REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (osm_type, osm_id)
+          );
+        `);
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          101,
+          JSON.stringify({
+            building: 'yes',
+            name: 'Integration test building'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.6, 55.7],
+              [37.61, 55.7],
+              [37.61, 55.71],
+              [37.6, 55.71],
+              [37.6, 55.7]
+            ]]
+          }),
+          37.6,
+          55.7,
+          37.61,
+          55.71
+        );
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          102,
+          JSON.stringify({
+            'building:part': 'yes',
+            name: 'Integration test part'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.62, 55.72],
+              [37.63, 55.72],
+              [37.63, 55.73],
+              [37.62, 55.73],
+              [37.62, 55.72]
+            ]]
+          }),
+          37.62,
+          55.72,
+          37.63,
+          55.73
+        );
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          103,
+          JSON.stringify({
+            building: 'yes',
+            'building:part': 'yes',
+            name: 'Integration test mixed building'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.64, 55.74],
+              [37.65, 55.74],
+              [37.65, 55.75],
+              [37.64, 55.75],
+              [37.64, 55.74]
+            ]]
+          }),
+          37.64,
+          55.74,
+          37.65,
+          55.75
+        );
 
         localDb.prepare(`
           INSERT INTO architectural_info (
@@ -386,16 +496,105 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           )
           VALUES (?, ?, ?, ?, ?, datetime('now'))
         `).run('way', 101, 'Integration test building', 'omani', 'integration-test');
+
+        localDb.prepare(`
+          INSERT INTO architectural_info (
+            osm_type,
+            osm_id,
+            style,
+            colour,
+            levels,
+            year_built,
+            updated_by,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run('way', 102, 'omani', '#8f6b3d', 3, 1988, 'integration-test');
       } finally {
         mainDb.close();
         localDb.close();
+        osmDb.close();
       }
 
       const buildingInfo = await callApi('/api/building-info/way/101');
       assert.equal(buildingInfo.status, 200);
       const buildingInfoBody = await buildingInfo.json();
       assert.equal(buildingInfoBody?.name, 'Integration test building');
+      assert.equal(buildingInfoBody?.feature_kind, 'building');
       assert.deepEqual(buildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const partBuildingInfo = await callApi('/api/building-info/way/102');
+      assert.equal(partBuildingInfo.status, 200);
+      const partBuildingInfoBody = await partBuildingInfo.json();
+      assert.equal(partBuildingInfoBody?.feature_kind, 'building_part');
+      assert.equal(partBuildingInfoBody?.colour, '#8f6b3d');
+      assert.deepEqual(partBuildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const mixedBuildingInfo = await callApi('/api/building-info/way/103');
+      assert.equal(mixedBuildingInfo.status, 200);
+      const mixedBuildingInfoBody = await mixedBuildingInfo.json();
+      assert.equal(mixedBuildingInfoBody?.feature_kind, 'building');
+      assert.deepEqual(mixedBuildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const partEdit = await callApi('/api/building-info', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          osmType: 'way',
+          osmId: 102,
+          style: 'omani',
+          colour: '#7f6a52',
+          levels: '4',
+          yearBuilt: '1989',
+          editedFields: ['style', 'colour', 'levels', 'year_built']
+        })
+      });
+      assert.equal(partEdit.status, 200);
+      const partEditBody = await partEdit.json();
+      assert.equal(partEditBody?.ok, true);
+      assert.equal(partEditBody?.status, 'pending');
+      assert.equal(typeof partEditBody?.editId, 'number');
+
+      const userEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
+      try {
+        const pendingPartEdit = userEditsDb.prepare(`
+          SELECT *
+          FROM building_user_edits
+          WHERE id = ?
+        `).get(partEditBody.editId);
+        assert.equal(pendingPartEdit?.colour, '#7f6a52');
+        assert.equal(pendingPartEdit?.style, 'omani');
+        assert.equal(pendingPartEdit?.levels, 4);
+        assert.equal(pendingPartEdit?.year_built, 1989);
+        assert.equal(pendingPartEdit?.name, null);
+        assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"yes"/);
+      } finally {
+        userEditsDb.close();
+      }
+
+      const disallowedPartEdit = await callApi('/api/building-info', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          osmType: 'way',
+          osmId: 102,
+          name: 'Not allowed',
+          style: 'omani',
+          colour: '#7f6a52',
+          levels: '4',
+          yearBuilt: '1989',
+          editedFields: ['name', 'style']
+        })
+      });
+      assert.equal(disallowedPartEdit.status, 400);
+      const disallowedPartEditBody = await disallowedPartEdit.json();
+      assert.equal(disallowedPartEditBody?.code, 'ERR_BUILDING_PART_EDIT_RESTRICTED');
 
       const deleteOverride = await callApi(`/api/admin/style-overrides/${createOverrideBody.item.id}`, {
         method: 'DELETE',

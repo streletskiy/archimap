@@ -49,6 +49,7 @@ function updateSelectionDebugHook(selection) {
 
 function normalizeArchiInfo(payload) {
   const info = payload || {};
+  const sourceTags = info._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {};
   const styleRaw = pickNullableText(
     info.style,
     info.architecture,
@@ -66,6 +67,7 @@ function normalizeArchiInfo(payload) {
       2100
     ),
     architect: pickNullableText(info.architect, info['building:architect']),
+    colour: pickNullableText(info.colour, info['building:colour'], sourceTags?.['building:colour'], sourceTags?.colour),
     address: resolveAddressText(info, pickNullableText, info.address),
     description: pickNullableText(info.description),
     archimap_description: pickNullableText(info.archimap_description, info.description),
@@ -75,6 +77,7 @@ function normalizeArchiInfo(payload) {
 
 function createFallbackBuildingDetails() {
   return {
+    feature_kind: null,
     region_slugs: [],
     properties: {
       archiInfo: {
@@ -84,6 +87,7 @@ function createFallbackBuildingDetails() {
         levels: null,
         year_built: null,
         architect: null,
+        colour: null,
         address: null,
         _sourceTags: {}
       }
@@ -117,6 +121,7 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload, editedFields = []) 
     next.styleRaw = rawStyle;
     next.style = rawStyle;
   }
+  if (applyAll || editedFieldSet.has('colour')) next.colour = coerceNullableText(payload?.colour);
   if (applyAll || editedFieldSet.has('levels')) next.levels = coerceNullableIntegerText(payload?.levels, 0, 300);
   if (applyAll || editedFieldSet.has('yearBuilt')) next.year_built = coerceNullableIntegerText(payload?.yearBuilt, 1000, 2100);
   if (applyAll || editedFieldSet.has('architect')) next.architect = coerceNullableText(payload?.architect);
@@ -156,11 +161,12 @@ export function createBuildingDetailsManager() {
       selectionKey: `${detail.osmType}/${detail.osmId}`
     });
 
+    let feature = null;
     try {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
       let sourceTags = {};
       try {
-        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
+        feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         sourceTags = feature?.properties?.source_tags || {};
       } catch (featureError) {
         if (!isAbortError(featureError)) {
@@ -172,6 +178,7 @@ export function createBuildingDetailsManager() {
       if (token !== activeBuildingDetailsToken) return;
       updateState({
         buildingDetails: {
+          feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.feature?.properties?.feature_kind || null,
           region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
           properties: {
             archiInfo: normalizeArchiInfo({
@@ -193,6 +200,7 @@ export function createBuildingDetailsManager() {
         if (token !== activeBuildingDetailsToken) return;
         updateState({
           buildingDetails: {
+            feature_kind: feature?.properties?.feature_kind || detail?.feature?.properties?.feature_kind || null,
             region_slugs: [],
             properties: {
               archiInfo: normalizeArchiInfo({
@@ -255,6 +263,9 @@ export function createBuildingDetailsManager() {
   async function saveEdit(detail) {
     const normalized = normalizeBuildingSelection(detail);
     if (!normalized) return;
+    const currentState = get(state);
+    const isBuildingPartFeature = currentState.buildingDetails?.feature_kind === 'building_part';
+    const allowedPartFields = new Set(['levels', 'colour', 'style', 'yearBuilt']);
 
     if (!get(session).authenticated) {
       updateState({ saveStatus: translateNow('mapPage.authRequired') });
@@ -262,7 +273,10 @@ export function createBuildingDetailsManager() {
     }
 
     const editedFields = normalizeEditedBuildingFields(detail.editedFields);
-    if (editedFields.length === 0) {
+    const outgoingEditedFields = isBuildingPartFeature
+      ? editedFields.filter((field) => allowedPartFields.has(field))
+      : editedFields;
+    if (outgoingEditedFields.length === 0) {
       updateState({ saveStatus: translateNow('buildingModal.noChanges') });
       return;
     }
@@ -275,14 +289,15 @@ export function createBuildingDetailsManager() {
     const payload = {
       osmType: normalized.osmType,
       osmId: normalized.osmId,
-      name: coerceNullableText(detail.name),
+      name: isBuildingPartFeature ? null : coerceNullableText(detail.name),
       style: coerceNullableText(normalizeArchitectureStyleKey(detail.style)),
+      colour: coerceNullableText(detail.colour),
       levels: coerceNullableIntegerText(detail.levels, 0, 300),
       yearBuilt: coerceNullableIntegerText(detail.yearBuilt, 1000, 2100),
-      architect: coerceNullableText(detail.architect),
-      address: coerceNullableText(detail.address),
-      archimapDescription: coerceNullableText(detail.archimapDescription),
-      editedFields
+      architect: isBuildingPartFeature ? null : coerceNullableText(detail.architect),
+      address: isBuildingPartFeature ? null : coerceNullableText(detail.address),
+      archimapDescription: isBuildingPartFeature ? null : coerceNullableText(detail.archimapDescription),
+      editedFields: outgoingEditedFields
     };
 
     try {
@@ -301,6 +316,8 @@ export function createBuildingDetailsManager() {
           ...current,
           buildingDetails: isSameSelection
             ? {
+                ...current.buildingDetails,
+                feature_kind: current.buildingDetails?.feature_kind || null,
                 region_slugs: Array.isArray(current.buildingDetails?.region_slugs)
                   ? current.buildingDetails.region_slugs
                   : [],
@@ -308,7 +325,7 @@ export function createBuildingDetailsManager() {
                   archiInfo: toDisplayArchiInfoFromPayload(
                     current.buildingDetails?.properties?.archiInfo,
                     payload,
-                    editedFields
+                    outgoingEditedFields
                   )
                 }
               }
