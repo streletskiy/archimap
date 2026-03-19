@@ -43,7 +43,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 - Neighboring or overlapping extract bounds are allowed; shared OSM objects stay safe because membership is tracked per region and cleanup deletes only true orphans.
 - If a region import produces `0` features, the sync fails and the previous successful PMTiles file is kept.
 - If PMTiles build/swap fails, the previous successful PMTiles file is restored and region data cleanup is not silently committed.
-- Interrupted `queued/running` runs are recovered on restart as failed/abandoned and `nextSyncAt` is recalculated.
+- Interrupted `queued/running` runs are recovered on restart as failed/abandoned and then automatically re-queued once during startup.
 
 ## Runtime request flow
 

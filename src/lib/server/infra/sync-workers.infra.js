@@ -330,8 +330,21 @@ function initManagedSyncWorkers(options = {}) {
     initialized = true;
 
     await dataSettingsService.bootstrapFromEnvIfNeeded('startup');
-    await dataSettingsService.recoverInterruptedRuns();
+    const recoveredRuns = await dataSettingsService.recoverInterruptedRuns();
+    const recoveredRegionIds = new Set(
+      (Array.isArray(recoveredRuns) ? recoveredRuns : [])
+        .map((run) => Number(run?.regionId || 0))
+        .filter((regionId) => Number.isInteger(regionId) && regionId > 0)
+    );
     const regions = await dataSettingsService.listRegions({ includeDisabled: false });
+
+    for (const regionId of recoveredRegionIds) {
+      await requestRegionSync(regionId, {
+        triggerReason: 'startup',
+        requestedBy: 'system'
+      });
+    }
+
     for (const region of regions) {
       if (!region.enabled) continue;
       const dueNow = Boolean(region.autoSyncEnabled && region.nextSyncAt && Date.parse(String(region.nextSyncAt || '')) <= Date.now());
