@@ -116,7 +116,7 @@ function getInitialLabelsVisibility() {
 }
 
 function getInitialBuildingPartsVisibility() {
-  if (typeof window === 'undefined') return true;
+  if (typeof window === 'undefined') return false;
   try {
     const stored = localStorage.getItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY);
     if (stored === '0') return false;

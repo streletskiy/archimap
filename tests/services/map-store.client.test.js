@@ -170,3 +170,38 @@ test('mapBuildingPartsVisible defaults to false when no stored preference', asyn
     }
   }
 });
+
+test('mapBuildingPartsVisible defaults to false during SSR when window is unavailable', async () => {
+  const previousWindow = global.window;
+  const previousLocalStorage = global.localStorage;
+
+  if (typeof global.window !== 'undefined') {
+    delete global.window;
+  }
+  if (typeof global.localStorage !== 'undefined') {
+    delete global.localStorage;
+  }
+
+  try {
+    const { mapBuildingPartsVisible } = await loadMapStoreModule();
+    let currentValue = null;
+    const unsubscribe = mapBuildingPartsVisible.subscribe((value) => {
+      currentValue = value;
+    });
+
+    assert.equal(currentValue, false);
+    unsubscribe();
+  } finally {
+    if (previousWindow === undefined) {
+      delete global.window;
+    } else {
+      global.window = previousWindow;
+    }
+
+    if (previousLocalStorage === undefined) {
+      delete global.localStorage;
+    } else {
+      global.localStorage = previousLocalStorage;
+    }
+  }
+});
