@@ -24,6 +24,11 @@ System notes:
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`, plus `warmingUp`.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
+- `GET /api/filter-presets`
+  - Returns runtime map filter presets from DB-backed admin settings storage.
+  - Each item contains `id`, stable `key`, `name`, `nameI18n`, optional `description`, and runtime-compatible `layers[]`.
+  - `layers[]` is fully compatible with `normalizeFilterLayers(...)` and map filter pipeline execution.
+  - Cache: `Cache-Control: public, max-age=60`, `ETag`.
 - `POST /api/buildings/filter-data`
   - Body: `{ keys: ["way/123", "relation/456", ...] }`.
   - Returns merged filter payload for explicit building keys.
@@ -69,12 +74,26 @@ System notes:
 - `GET /api/admin/app-settings/data`
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
+  - Also returns filter presets config for admin (`filterPresets.source`, `filterPresets.items[]`).
   - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`) and storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`).
   - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
+  - `filterPresets.items[]` includes `id`, `key`, `name`, `nameI18n`, `description`, `layers[]`, `createdAt`, `updatedAt`, `updatedBy`.
 - `POST /api/admin/app-settings/data/filter-tag-allowlist`
   - Master-admin only.
   - Body: `{ allowlist: ["building", "height", ...] }`.
   - Saves the explicit allowlist used by public filter-tag suggestions and server-side filter-key validation.
+- `GET /api/admin/app-settings/data/filter-presets`
+  - Master-admin only.
+  - Returns `{ ok, source, items[] }` where each item is a persisted filter preset.
+- `POST /api/admin/app-settings/data/filter-presets`
+  - Master-admin only.
+  - Upserts one filter preset.
+  - Body: `{ preset: { id?, key, name?, nameI18n?, description?, layers[] } }`.
+  - `nameI18n` is an object like `{ en: "Building levels", ru: "Этажность" }`; at least one name value must be provided (`name` or `nameI18n.*`).
+  - `layers[]` uses the same structure as map `buildingFilterLayers[]`: `id`, `color`, `priority`, `mode`, `rules[]`.
+- `DELETE /api/admin/app-settings/data/filter-presets/:id`
+  - Master-admin only.
+  - Deletes one persisted filter preset by id.
 - `GET /api/admin/app-settings/data/regions`
   - Returns region list for admin UI.
   - Region payload mirrors admin data summary items, including extract-resolution fields plus cached storage stats `pmtilesBytes`, `dbBytes`, `dbBytesApproximate`.

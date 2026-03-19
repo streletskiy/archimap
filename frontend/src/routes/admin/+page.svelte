@@ -19,7 +19,7 @@
   import { session } from '$lib/stores/auth';
 
   const dataController = createAdminDataController();
-  const filterTagAllowlistDirty = dataController.filterTagAllowlistDirty;
+  const filtersDirty = dataController.filtersDirty;
 
   let activeTab = resolveAdminTabFromUrl(get(page).url);
   let tabNavValue = activeTab;
@@ -124,7 +124,7 @@
   }
 
   beforeNavigate((navigation) => {
-    if (!get(filterTagAllowlistDirty)) return;
+    if (!get(filtersDirty)) return;
     const nextPathname = String(navigation?.to?.url?.pathname || '').trim();
     if (!nextPathname) return;
     if (typeof window !== 'undefined' && nextPathname !== window.location.pathname && !dataController.confirmDiscardFilterTagChanges()) {
@@ -145,7 +145,7 @@
     });
 
     const onBeforeUnload = (event) => {
-      if (!get(filterTagAllowlistDirty)) return;
+      if (!get(filtersDirty)) return;
       event.preventDefault();
       event.returnValue = '';
     };

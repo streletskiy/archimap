@@ -197,7 +197,10 @@
     "presets": {
       "title": "Presets",
       "buildingLevels": "Building levels",
-      "buildingMaterial": "Building material"
+      "buildingMaterial": "Building material",
+      "loading": "Loading presets...",
+      "empty": "No presets available.",
+      "loadFailed": "Failed to load presets."
     },
     "filterLabels": {
       "architect": "Architect",
@@ -267,7 +270,11 @@
       "resetFailed": "Password change failed",
       "registerLinkConfirming": "Confirming registration...",
       "registerLinkFailed": "Registration confirmation failed"
-    }
+    },
+    "noLayers": "No filter layers yet. Add a layer to start.",
+    "filterTagKeysLoading": "Loading available tag keys...",
+    "filterTagKeysEmpty": "No tag keys available yet.",
+    "filterTagKeysLoadFailed": "Failed to load tag keys."
   },
   "account": {
     "authRequiredTitle": "Sign in required",
@@ -684,7 +691,52 @@
         "saveFilterTagsFailed": "Failed to save tag allowlist",
         "queueingSync": "Queueing region sync...",
         "queuedSync": "Region sync queued",
-        "syncFailed": "Failed to start region sync"
+        "syncFailed": "Failed to start region sync",
+        "loadingFilterPresets": "Loading filter presets...",
+        "loadFilterPresetsFailed": "Failed to load filter presets",
+        "savingFilterPreset": "Saving filter preset...",
+        "filterPresetSaved": "Filter preset saved",
+        "saveFilterPresetFailed": "Failed to save filter preset",
+        "deletingFilterPreset": "Deleting filter preset...",
+        "filterPresetDeleted": "Filter preset deleted",
+        "deleteFilterPresetFailed": "Failed to delete filter preset"
+      },
+      "filterPresets": {
+        "title": "Filter presets",
+        "description": "Manage map filter presets with the same visual layer editor used in the map panel.",
+        "source": "Source",
+        "count": "Presets: {count}",
+        "updatedAt": "Updated",
+        "updatedBy": "Updated by",
+        "unsavedWarning": "There are unsaved preset changes.",
+        "listTitle": "Presets list",
+        "loading": "Loading presets...",
+        "empty": "No presets yet. Create the first preset.",
+        "create": "New preset",
+        "save": "Save preset",
+        "saving": "Saving preset...",
+        "delete": "Delete preset",
+        "deleting": "Deleting preset...",
+        "confirmDiscard": "There are unsaved filter preset changes. Leave without saving?",
+        "confirmDelete": "Delete preset \"{label}\"?",
+        "visualEditorTitle": "Visual preset editor",
+        "rawTitle": "Stored JSON preview",
+        "tagKeysLoading": "Loading available tag keys...",
+        "tagKeysEmpty": "No tag keys available yet.",
+        "fields": {
+          "nameI18nTitle": "Localized names",
+          "nameLocale": "Name ({locale})",
+          "nameLocalePlaceholder": "Name ({locale})",
+          "key": "Key",
+          "keyPlaceholder": "building-levels",
+          "description": "Description",
+          "descriptionPlaceholder": "Optional description"
+        },
+        "errors": {
+          "keyRequired": "Preset key is required.",
+          "nameRequired": "Provide a preset name in at least one language.",
+          "emptyLayers": "Preset must contain at least one layer."
+        }
       }
     },
     "edits": {
@@ -825,7 +877,8 @@
       "ERR_METRICS_UNAUTHORIZED": "Metrics access is unauthorized",
       "ERR_NOT_FOUND": "Not found",
       "ERR_INTERNAL": "Internal server error",
-      "ERR_REQUEST_FAILED": "Request failed"
+      "ERR_REQUEST_FAILED": "Request failed",
+      "ERR_FILTER_PRESETS_LOAD_FAILED": "Failed to load filter presets"
     }
   },
   "architectureStyles": {

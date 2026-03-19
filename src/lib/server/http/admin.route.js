@@ -129,6 +129,38 @@ function registerAdminRoutes(deps) {
     message: 'Data settings service is unavailable'
   }));
 
+  app.get('/api/admin/app-settings/data/filter-presets', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    const result = await adminSettingsService.listFilterPresets();
+    return sendPrivateJson(req, res, {
+      ok: true,
+      source: result?.source || 'db',
+      items: Array.isArray(result?.items) ? result.items : []
+    });
+  }, {
+    status: 500,
+    message: 'Data settings service is unavailable'
+  }));
+
+  app.post('/api/admin/app-settings/data/filter-presets', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await adminSettingsService.saveFilterPreset(req.body?.preset, getSessionEditActorKey(req) || 'admin')
+    });
+  }, {
+    status: 500,
+    message: 'Data settings service is unavailable'
+  }));
+
+  app.delete('/api/admin/app-settings/data/filter-presets/:id', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await adminSettingsService.deleteFilterPreset(req.params.id)
+    });
+  }, {
+    status: 500,
+    message: 'Data settings service is unavailable'
+  }));
+
   app.get('/api/admin/app-settings/data/regions', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
     return sendPrivateJson(req, res, {
       ok: true,

@@ -795,6 +795,132 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(regionsAfterDeleteBody.items.some((item) => Number(item?.id || 0) === Number(region.id)), false);
     });
 
+    await t.test('filter preset admin/runtime endpoints support create/update/delete flow', async () => {
+      const runtimeDefaults = await callApi('/api/filter-presets');
+      assert.equal(runtimeDefaults.status, 200);
+      const runtimeDefaultsBody = await runtimeDefaults.json();
+      assert.ok(Array.isArray(runtimeDefaultsBody?.items));
+      const defaultKeys = new Set(runtimeDefaultsBody.items.map((item) => String(item?.key || '').trim()));
+      assert.equal(defaultKeys.has('building-levels'), true);
+      assert.equal(defaultKeys.has('building-material'), true);
+      const buildingLevelsDefault = runtimeDefaultsBody.items.find((item) => String(item?.key || '') === 'building-levels');
+      assert.equal(buildingLevelsDefault?.nameI18n?.en, 'Building levels');
+      assert.equal(buildingLevelsDefault?.nameI18n?.ru, 'Этажность');
+
+      const adminList = await callApi('/api/admin/app-settings/data/filter-presets');
+      assert.equal(adminList.status, 200);
+      const adminListBody = await adminList.json();
+      assert.equal(adminListBody?.ok, true);
+      assert.ok(Array.isArray(adminListBody?.items));
+
+      const createPreset = await callApi('/api/admin/app-settings/data/filter-presets', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          preset: {
+            key: 'integration-preset',
+            name: 'Integration preset',
+            nameI18n: {
+              en: 'Integration preset',
+              ru: 'Интеграционный пресет'
+            },
+            description: 'Created in integration test',
+            layers: [
+              {
+                id: 'layer-integration-a',
+                color: '#93c5fd',
+                mode: 'layer',
+                rules: [
+                  {
+                    key: 'building:material',
+                    op: 'equals',
+                    value: 'brick'
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      });
+      assert.equal(createPreset.status, 200);
+      const createPresetBody = await createPreset.json();
+      assert.equal(createPresetBody?.ok, true);
+      assert.ok(Number(createPresetBody?.item?.id || 0) > 0);
+      assert.equal(createPresetBody?.item?.key, 'integration-preset');
+
+      const updatePreset = await callApi('/api/admin/app-settings/data/filter-presets', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          preset: {
+            id: createPresetBody.item.id,
+            key: 'integration-preset',
+            nameI18n: {
+              en: 'Integration preset updated',
+              ru: 'Интеграционный пресет обновлен'
+            },
+            description: '',
+            layers: [
+              {
+                id: 'layer-integration-b',
+                color: '#86efac',
+                mode: 'layer',
+                rules: [
+                  {
+                    key: 'building:levels',
+                    op: 'greater_or_equals',
+                    value: '5'
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      });
+      assert.equal(updatePreset.status, 200);
+      const updatePresetBody = await updatePreset.json();
+      assert.equal(updatePresetBody?.ok, true);
+      assert.equal(updatePresetBody?.item?.id, createPresetBody.item.id);
+      assert.equal(updatePresetBody?.item?.name, 'Integration preset updated');
+      assert.equal(updatePresetBody?.item?.nameI18n?.en, 'Integration preset updated');
+      assert.equal(updatePresetBody?.item?.nameI18n?.ru, 'Интеграционный пресет обновлен');
+      assert.equal(updatePresetBody?.item?.layers?.length, 1);
+
+      const runtimeWithCustom = await callApi('/api/filter-presets');
+      assert.equal(runtimeWithCustom.status, 200);
+      const runtimeWithCustomBody = await runtimeWithCustom.json();
+      const custom = runtimeWithCustomBody?.items?.find((item) => String(item?.key || '') === 'integration-preset');
+      assert.ok(custom);
+      assert.equal(custom?.name, 'Integration preset updated');
+      assert.equal(custom?.nameI18n?.en, 'Integration preset updated');
+      assert.equal(custom?.nameI18n?.ru, 'Интеграционный пресет обновлен');
+
+      const deletePreset = await callApi(`/api/admin/app-settings/data/filter-presets/${createPresetBody.item.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-csrf-token': csrfToken
+        }
+      });
+      assert.equal(deletePreset.status, 200);
+      const deletePresetBody = await deletePreset.json();
+      assert.equal(deletePresetBody?.ok, true);
+      assert.equal(deletePresetBody?.item?.id, createPresetBody.item.id);
+
+      const runtimeAfterDelete = await callApi('/api/filter-presets');
+      assert.equal(runtimeAfterDelete.status, 200);
+      const runtimeAfterDeleteBody = await runtimeAfterDelete.json();
+      assert.equal(
+        runtimeAfterDeleteBody?.items?.some((item) => String(item?.key || '') === 'integration-preset'),
+        false
+      );
+    });
+
     await t.test('filter-matches endpoint validates input, returns meta and uses cache', async () => {
       const invalid = await callApi('/api/buildings/filter-matches', {
         method: 'POST',

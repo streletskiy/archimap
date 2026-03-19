@@ -69,11 +69,11 @@
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
   - `frontend/src/lib/components/map/map-selection-controller.js`: map selection, selected-feature highlight, and search-result click routing
   - `frontend/src/lib/components/map/map-region-layers-controller.js`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
-- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.js`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
 - Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/filterUrlState.js`, `frontend/src/lib/client/section-routes.js`.
-- Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and filter-tag management is isolated into a dedicated `Filters` tab instead of being embedded inside `Data`.
+- Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and the `Filters` tab contains both filter-tag allowlist management and DB-backed filter-preset CRUD.
 
 ## Security and auth points
 
@@ -103,6 +103,9 @@
 
 - Building base layers are region-scoped PMTiles layers (`<region>-fill`, `<region>-line`) and remain visible; custom rules do not hide or re-filter them directly.
 - UI filter state is layer-based (`buildingFilterLayers[]`): each layer carries `color`, `priority`, `mode` (`and|or|layer`), and `rules[]`.
+- Persisted preset state is DB-backed (`data_filter_presets`) and reuses the same layer/rule model as runtime map filters.
+- Runtime preset source of truth is backend-managed storage exposed through `GET /api/filter-presets`; frontend constants no longer store preset definitions.
+- Preset names support persisted localized values (`nameI18n`); map/admin UI resolves labels by active locale with `name` fallback.
 - Custom building filter renders through dedicated region-scoped highlight layers:
   - `<region>-filter-highlight-fill`
   - `<region>-filter-highlight-line`

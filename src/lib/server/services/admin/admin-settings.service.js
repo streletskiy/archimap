@@ -22,6 +22,7 @@ function createAdminSettingsService(options = {}) {
     onSmtpSettingsSaved,
     onDataRegionsSaved,
     onRegionSyncRequested,
+    onFilterPresetsSaved,
     registrationCodeHtmlTemplate,
     registrationCodeTextTemplate,
     passwordResetHtmlTemplate,
@@ -198,6 +199,45 @@ function createAdminSettingsService(options = {}) {
     }
   }
 
+  async function listFilterPresets() {
+    try {
+      return ensureDataSettingsService().getFilterPresetsForAdmin();
+    } catch (error) {
+      if (error?.status) throw error;
+      throw createAdminError(400, String(error?.message || error || 'Failed to load filter presets'));
+    }
+  }
+
+  async function saveFilterPreset(preset, actor) {
+    try {
+      const saved = await ensureDataSettingsService().saveFilterPreset(normalizeObject(preset), actor);
+      if (typeof onFilterPresetsSaved === 'function') {
+        await Promise.resolve(onFilterPresetsSaved({
+          action: 'save',
+          saved
+        }));
+      }
+      return saved;
+    } catch (error) {
+      throw createAdminError(400, String(error?.message || error || 'Failed to save filter preset'));
+    }
+  }
+
+  async function deleteFilterPreset(id) {
+    try {
+      const deleted = await ensureDataSettingsService().deleteFilterPresetById(id);
+      if (typeof onFilterPresetsSaved === 'function') {
+        await Promise.resolve(onFilterPresetsSaved({
+          action: 'delete',
+          deleted
+        }));
+      }
+      return deleted;
+    } catch (error) {
+      throw createAdminError(400, String(error?.message || error || 'Failed to delete filter preset'));
+    }
+  }
+
   async function listRegions(includeDisabledRaw) {
     const includeDisabled = String(includeDisabledRaw ?? 'true').trim().toLowerCase() !== 'false';
     return ensureDataSettingsService().listRegions({
@@ -311,6 +351,9 @@ function createAdminSettingsService(options = {}) {
     sendSmtpTest,
     getDataSettingsItem,
     saveFilterTagAllowlist,
+    listFilterPresets,
+    saveFilterPreset,
+    deleteFilterPreset,
     listRegions,
     resolveExtractCandidates,
     getRegionRuns,

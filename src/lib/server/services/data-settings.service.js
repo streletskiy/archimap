@@ -8,6 +8,7 @@ const { createBootstrapDomain } = require('./data-settings/bootstrap');
 const { createExtractsDomain } = require('./data-settings/extracts');
 const { createRegionsDomain } = require('./data-settings/regions');
 const { createSyncRunsDomain } = require('./data-settings/sync-runs');
+const { createPresetsDomain } = require('./data-settings/presets');
 const { createPythonExtractResolver } = require('../../../../scripts/region-sync/python-extractor');
 
 function normalizeRegionPmtilesSlug(regionOrSlug) {
@@ -221,17 +222,20 @@ function createDataSettingsService(options = {}) {
   Object.assign(context, regionsDomain);
 
   const syncRunsDomain = createSyncRunsDomain(context);
+  const presetsDomain = createPresetsDomain(context);
 
   async function getDataSettingsForAdmin() {
     await bootstrapDomain.ensureBootstrapped();
     const bootstrap = await bootstrapDomain.getBootstrapState();
     const regions = await regionsDomain.listRegions({ includeStorageStats: true });
     const filterTags = await getFilterTagAllowlistForAdmin();
+    const filterPresets = await presetsDomain.getFilterPresetsForAdmin();
     return {
       source: 'db',
       bootstrap,
       regions,
-      filterTags
+      filterTags,
+      filterPresets
     };
   }
 
@@ -252,6 +256,10 @@ function createDataSettingsService(options = {}) {
     getEffectiveFilterTagAllowlistConfig,
     saveFilterTagAllowlist,
     listRuntimePmtilesRegions: regionsDomain.listRuntimePmtilesRegions,
+    getFilterPresetsForAdmin: presetsDomain.getFilterPresetsForAdmin,
+    getFilterPresetsForRuntime: presetsDomain.getFilterPresetsForRuntime,
+    saveFilterPreset: presetsDomain.saveFilterPreset,
+    deleteFilterPresetById: presetsDomain.deleteFilterPresetById,
     getRecentRuns: syncRunsDomain.getRecentRuns,
     getRunById: syncRunsDomain.getRunById,
     createQueuedRun: syncRunsDomain.createQueuedRun,

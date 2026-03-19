@@ -1,13 +1,18 @@
 import { derived, get, writable } from 'svelte/store';
 
-import { translateNow } from '$lib/i18n/index';
+import { locale, translateNow } from '$lib/i18n/index';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '$lib/i18n/config';
 import { apiJson } from '$lib/services/http';
+import { createBuildingFilterLayerDraft } from '$lib/stores/filters';
+import { normalizeFilterLayers } from '$lib/components/map/filter-pipeline-utils';
 
 const DATA_I18N_PREFIX = 'admin.data';
 const MAP_REGION_NAME_KEYS = Object.freeze(['Name', 'name']);
 const MAP_REGION_SLUG_KEYS = Object.freeze(['Slug', 'slug']);
 const MAP_REGION_EXTRACT_ID_KEYS = Object.freeze(['ExtractId', 'extractId', 'extract_id']);
 const MAP_REGION_EXTRACT_SOURCE_KEYS = Object.freeze(['ExtractSource', 'extractSource', 'extract_source']);
+const FILTER_PRESET_LOCALE_RE = /^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i;
+const FILTER_PRESET_NAME_LOCALES = Object.freeze([...(Array.isArray(SUPPORTED_LOCALES) ? SUPPORTED_LOCALES : [])]);
 
 const msg = (error, fallback) => String(error?.message || fallback);
 const dataT = (key, params = {}) => translateNow(`${DATA_I18N_PREFIX}.${key}`, params);
@@ -24,7 +29,8 @@ function createEmptyDataSettings() {
       availableKeys: [],
       updatedBy: null,
       updatedAt: null
-    }
+    },
+    filterPresets: createEmptyFilterPresetState()
   };
 }
 
@@ -47,6 +53,160 @@ function createRegionDraft(region = null) {
     pmtilesMaxZoom: Number(region?.pmtilesMaxZoom ?? 16) || 0,
     sourceLayer: String(region?.sourceLayer || 'buildings')
   };
+}
+
+function normalizeFilterPresetKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function normalizeFilterPresetLocale(locale) {
+  const normalized = String(locale || '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .slice(0, 32);
+  if (!normalized) return '';
+  if (!FILTER_PRESET_LOCALE_RE.test(normalized)) return '';
+  return normalized;
+}
+
+function normalizeFilterPresetName(value) {
+  return String(value || '').trim().slice(0, 160);
+}
+
+function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
+  const source = nameI18n && typeof nameI18n === 'object' && !Array.isArray(nameI18n) ? nameI18n : {};
+  const normalized = {};
+  for (const [rawLocale, rawName] of Object.entries(source)) {
+    const locale = normalizeFilterPresetLocale(rawLocale);
+    if (!locale) continue;
+    const name = normalizeFilterPresetName(rawName);
+    if (!name) continue;
+    normalized[locale] = name;
+  }
+
+  const fallback = normalizeFilterPresetName(fallbackName);
+  if (fallback && !normalized[DEFAULT_LOCALE]) {
+    normalized[DEFAULT_LOCALE] = fallback;
+  }
+  return normalized;
+}
+
+function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
+  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n : {};
+  const defaultName = normalizeFilterPresetName(source?.[DEFAULT_LOCALE]);
+  if (defaultName) return defaultName;
+
+  for (const locale of FILTER_PRESET_NAME_LOCALES) {
+    const name = normalizeFilterPresetName(source?.[locale]);
+    if (name) return name;
+  }
+
+  for (const value of Object.values(source)) {
+    const name = normalizeFilterPresetName(value);
+    if (name) return name;
+  }
+
+  return normalizeFilterPresetName(fallback);
+}
+
+function normalizeFilterPresetRule(rule = {}) {
+  return {
+    key: String(rule?.key || '').trim(),
+    op: String(rule?.op || 'contains').trim(),
+    value: String(rule?.value || '').trim()
+  };
+}
+
+function normalizeFilterPresetLayersForDraft(layers = []) {
+  const source = Array.isArray(layers) ? layers : [];
+  if (source.length === 0) {
+    return [createBuildingFilterLayerDraft()];
+  }
+  return source.map((layer, index, list) => createBuildingFilterLayerDraft({
+    ...layer,
+    priority: Number.isFinite(Number(layer?.priority)) ? Number(layer.priority) : index,
+    rules: Array.isArray(layer?.rules) && layer.rules.length > 0
+      ? layer.rules.map((rule) => normalizeFilterPresetRule(rule))
+      : [normalizeFilterPresetRule()]
+  }, list.slice(0, index)));
+}
+
+function normalizeFilterPresetLayersForSave(layers = []) {
+  const normalized = normalizeFilterLayers(Array.isArray(layers) ? layers : [], { preserveEmpty: false });
+  if (normalized.invalidReason) {
+    return {
+      layers: [],
+      error: normalized.invalidReason
+    };
+  }
+  if (normalized.layers.length === 0) {
+    return {
+      layers: [],
+      error: dataT('filterPresets.errors.emptyLayers')
+    };
+  }
+  return {
+    layers: normalized.layers.map((layer, index) => ({
+      id: String(layer?.id || `filter-layer-${index + 1}`),
+      color: String(layer?.color || '').trim(),
+      priority: index,
+      mode: String(layer?.mode || 'layer').trim(),
+      rules: (Array.isArray(layer?.rules) ? layer.rules : []).map((rule) => normalizeFilterPresetRule(rule))
+    })),
+    error: null
+  };
+}
+
+function normalizeFilterPresetItem(preset = null) {
+  const source = preset && typeof preset === 'object' ? preset : {};
+  const id = Number(source?.id || 0);
+  const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
+  const name = normalizeFilterPresetName(source?.name) || getPreferredFilterPresetName(nameI18n);
+  return {
+    id: Number.isInteger(id) && id > 0 ? id : null,
+    key: normalizeFilterPresetKey(source?.key || ''),
+    name,
+    nameI18n,
+    description: source?.description == null ? '' : String(source.description),
+    layers: normalizeFilterPresetLayersForDraft(source?.layers),
+    createdAt: source?.createdAt ? String(source.createdAt) : null,
+    updatedAt: source?.updatedAt ? String(source.updatedAt) : null,
+    updatedBy: source?.updatedBy ? String(source.updatedBy) : null
+  };
+}
+
+function buildFilterPresetDraftRecord(draft = null) {
+  const source = draft && typeof draft === 'object' ? draft : {};
+  return normalizeFilterPresetItem({
+    ...source,
+    layers: source.layers
+  });
+}
+
+function createFilterPresetDraft(preset = null) {
+  return buildFilterPresetDraftRecord(preset);
+}
+
+function createEmptyFilterPresetState() {
+  return {
+    source: 'db',
+    items: []
+  };
+}
+
+function getFilterPresetDisplayName(preset = null, locale = DEFAULT_LOCALE) {
+  const source = preset && typeof preset === 'object' ? preset : {};
+  const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
+  const targetLocale = normalizeFilterPresetLocale(locale) || DEFAULT_LOCALE;
+  return normalizeFilterPresetName(nameI18n[targetLocale])
+    || normalizeFilterPresetName(source?.name)
+    || getPreferredFilterPresetName(nameI18n);
 }
 
 function getRecordTextValue(record, keys = []) {
@@ -98,6 +258,12 @@ function normalizeDataSettings(nextSettings, fallback) {
       availableKeys: Array.isArray(value?.filterTags?.availableKeys) ? value.filterTags.availableKeys : [],
       updatedBy: value?.filterTags?.updatedBy ? String(value.filterTags.updatedBy) : null,
       updatedAt: value?.filterTags?.updatedAt ? String(value.filterTags.updatedAt) : null
+    },
+    filterPresets: {
+      source: String(value?.filterPresets?.source || 'db'),
+      items: Array.isArray(value?.filterPresets?.items)
+        ? value.filterPresets.items.map((item) => normalizeFilterPresetItem(item)).filter((item) => item.id != null)
+        : []
     }
   };
 }
@@ -155,6 +321,16 @@ function sortFilterTagKeys(keys = [], selected = []) {
     const rightSelected = selectedSet.has(right);
     if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
     return String(left || '').localeCompare(String(right || ''), 'en', { sensitivity: 'base' });
+  });
+}
+
+function sortFilterPresetItems(items = []) {
+  return [...(Array.isArray(items) ? items : [])].sort((left, right) => {
+    const leftName = String(getFilterPresetDisplayName(left, DEFAULT_LOCALE) || left?.key || '').trim();
+    const rightName = String(getFilterPresetDisplayName(right, DEFAULT_LOCALE) || right?.key || '').trim();
+    const byName = leftName.localeCompare(rightName, 'en', { sensitivity: 'base' });
+    if (byName !== 0) return byName;
+    return Number(left?.id || 0) - Number(right?.id || 0);
   });
 }
 
@@ -264,6 +440,296 @@ function createFilterSettingsController({
     saveFilterTagAllowlist,
     getFilterTagDraftClass,
     isFilterTagSelected
+  };
+}
+
+function createFilterPresetController({
+  dataSettings,
+  dataStatus,
+  filterPresetItems,
+  selectedFilterPresetId,
+  filterPresetDraft,
+  filterPresetLoading,
+  filterPresetSaving,
+  filterPresetDeleting,
+  filterPresetDirty,
+  dataT
+}) {
+  function applyFilterPresetItems(items = [], source = 'db') {
+    const normalizedItems = sortFilterPresetItems(
+      (Array.isArray(items) ? items : [])
+        .map((item) => normalizeFilterPresetItem(item))
+        .filter((item) => item.id != null)
+    );
+    filterPresetItems.set(normalizedItems);
+    dataSettings.update((current) => ({
+      ...current,
+      filterPresets: {
+        source: String(source || current?.filterPresets?.source || 'db'),
+        items: normalizedItems
+      }
+    }));
+    return normalizedItems;
+  }
+
+  function getFilterPresetById(id) {
+    const numericId = Number(id || 0);
+    if (!Number.isInteger(numericId) || numericId <= 0) return null;
+    return get(filterPresetItems).find((item) => Number(item?.id || 0) === numericId) || null;
+  }
+
+  function selectFilterPresetLocally(preset) {
+    const next = preset && typeof preset === 'object' ? preset : null;
+    selectedFilterPresetId.set(next?.id ? Number(next.id) : null);
+    filterPresetDraft.set(createFilterPresetDraft(next));
+  }
+
+  function confirmDiscardFilterPresetChanges() {
+    if (!get(filterPresetDirty)) return true;
+    if (typeof window === 'undefined') return false;
+    return window.confirm(dataT('filterPresets.confirmDiscard'));
+  }
+
+  function ensureFilterPresetChangesDiscarded() {
+    return confirmDiscardFilterPresetChanges();
+  }
+
+  function seedFilterPresetItems(filterPresets = null, options = {}) {
+    const current = filterPresets && typeof filterPresets === 'object' ? filterPresets : {};
+    const preserveSelection = options.preserveSelection !== false;
+    const skipDraftSync = options.skipDraftSync === true;
+
+    const items = applyFilterPresetItems(current.items, current.source || 'db');
+    const currentSelectedId = preserveSelection ? Number(get(selectedFilterPresetId) || 0) : 0;
+    const selected = items.find((item) => Number(item?.id || 0) === currentSelectedId)
+      || items[0]
+      || null;
+
+    if (!selected) {
+      selectedFilterPresetId.set(null);
+      if (!skipDraftSync) {
+        filterPresetDraft.set(createFilterPresetDraft());
+      }
+      return;
+    }
+
+    selectedFilterPresetId.set(Number(selected.id || 0));
+    if (!skipDraftSync) {
+      filterPresetDraft.set(createFilterPresetDraft(selected));
+    }
+  }
+
+  function buildFilterPresetPayload(draft = null, options = {}) {
+    const candidate = buildFilterPresetDraftRecord(draft || get(filterPresetDraft));
+    const requireName = options.requireName !== false;
+    const nameI18n = normalizeFilterPresetNameI18n(candidate.nameI18n, candidate.name);
+    const name = normalizeFilterPresetName(candidate.name) || getPreferredFilterPresetName(nameI18n);
+    const key = normalizeFilterPresetKey(candidate.key || name || getPreferredFilterPresetName(nameI18n));
+    if (!key) {
+      return {
+        preset: null,
+        error: dataT('filterPresets.errors.keyRequired')
+      };
+    }
+    if (requireName && !name) {
+      return {
+        preset: null,
+        error: dataT('filterPresets.errors.nameRequired')
+      };
+    }
+    const normalizedLayers = normalizeFilterPresetLayersForSave(candidate.layers);
+    if (normalizedLayers.error) {
+      return {
+        preset: null,
+        error: normalizedLayers.error
+      };
+    }
+    return {
+      preset: {
+        ...(candidate.id ? { id: candidate.id } : {}),
+        key,
+        name,
+        nameI18n,
+        description: String(candidate.description || '').trim() || null,
+        layers: normalizedLayers.layers
+      },
+      error: null
+    };
+  }
+
+  function getFilterPresetDraftCanonical() {
+    const draft = get(filterPresetDraft);
+    const nameI18n = normalizeFilterPresetNameI18n(draft?.nameI18n, draft?.name);
+    const resolvedName = normalizeFilterPresetName(draft?.name) || getPreferredFilterPresetName(nameI18n);
+    const payload = buildFilterPresetPayload(draft, { requireName: false });
+    const item = payload.preset || {
+      ...(draft?.id ? { id: draft.id } : {}),
+      key: normalizeFilterPresetKey(draft?.key || resolvedName || ''),
+      name: resolvedName,
+      nameI18n,
+      description: String(draft?.description || '').trim() || null,
+      layers: []
+    };
+    return {
+      ...item,
+      createdAt: draft?.createdAt || null,
+      updatedAt: draft?.updatedAt || null,
+      updatedBy: draft?.updatedBy || null
+    };
+  }
+
+  function getFilterPresetDraftJsonPreview() {
+    return JSON.stringify(getFilterPresetDraftCanonical(), null, 2);
+  }
+
+  function patchFilterPresetDraft(patch = {}) {
+    filterPresetDraft.update((current) => {
+      const nextPatch = patch && typeof patch === 'object' ? patch : {};
+      return {
+        ...current,
+        ...nextPatch
+      };
+    });
+  }
+
+  function setFilterPresetDraftLayers(layers = []) {
+    patchFilterPresetDraft({
+      layers: normalizeFilterPresetLayersForDraft(layers)
+    });
+  }
+
+  function startNewFilterPresetDraft() {
+    if (!ensureFilterPresetChangesDiscarded()) return false;
+    selectedFilterPresetId.set(null);
+    filterPresetDraft.set(createFilterPresetDraft());
+    return true;
+  }
+
+  function selectFilterPresetById(id) {
+    if (!ensureFilterPresetChangesDiscarded()) return false;
+    const selected = getFilterPresetById(id);
+    if (!selected) return false;
+    selectFilterPresetLocally(selected);
+    return true;
+  }
+
+  async function loadFilterPresets(options = {}) {
+    const preserveSelection = options.preserveSelection !== false;
+    const ignoreUnsaved = options.ignoreUnsaved === true;
+    if (!ignoreUnsaved && !ensureFilterPresetChangesDiscarded()) {
+      return false;
+    }
+
+    filterPresetLoading.set(true);
+    dataStatus.set(dataT('status.loadingFilterPresets'));
+    try {
+      const data = await apiJson('/api/admin/app-settings/data/filter-presets');
+      seedFilterPresetItems({
+        source: String(data?.source || 'db'),
+        items: Array.isArray(data?.items) ? data.items : []
+      }, {
+        preserveSelection
+      });
+      dataStatus.set('');
+      return true;
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.loadFilterPresetsFailed')));
+      return false;
+    } finally {
+      filterPresetLoading.set(false);
+    }
+  }
+
+  async function saveFilterPreset() {
+    const payload = buildFilterPresetPayload();
+    if (payload.error || !payload.preset) {
+      dataStatus.set(payload.error || dataT('status.saveFilterPresetFailed'));
+      return false;
+    }
+
+    filterPresetSaving.set(true);
+    dataStatus.set(dataT('status.savingFilterPreset'));
+    try {
+      const data = await apiJson('/api/admin/app-settings/data/filter-presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: payload.preset })
+      });
+      const saved = normalizeFilterPresetItem(data?.item || {});
+      if (!saved.id) {
+        throw new Error(dataT('status.saveFilterPresetFailed'));
+      }
+
+      const nextItems = sortFilterPresetItems([
+        ...get(filterPresetItems).filter((item) => Number(item?.id || 0) !== Number(saved.id || 0)),
+        saved
+      ]);
+      applyFilterPresetItems(nextItems, 'db');
+      selectFilterPresetLocally(saved);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('archimap:filter-presets-changed'));
+      }
+      dataStatus.set(dataT('status.filterPresetSaved'));
+      return true;
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.saveFilterPresetFailed')));
+      return false;
+    } finally {
+      filterPresetSaving.set(false);
+    }
+  }
+
+  async function deleteFilterPreset(id = null) {
+    const targetId = Number(id || get(selectedFilterPresetId) || 0);
+    if (!Number.isInteger(targetId) || targetId <= 0 || get(filterPresetDeleting)) return false;
+
+    const existing = getFilterPresetById(targetId);
+    const label = String(getFilterPresetDisplayName(existing, get(locale)) || existing?.key || `#${targetId}`).trim();
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(dataT('filterPresets.confirmDelete', { label }));
+      if (!confirmed) return false;
+    }
+
+    filterPresetDeleting.set(true);
+    dataStatus.set(dataT('status.deletingFilterPreset'));
+    try {
+      await apiJson(`/api/admin/app-settings/data/filter-presets/${targetId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const nextItems = get(filterPresetItems).filter((item) => Number(item?.id || 0) !== targetId);
+      applyFilterPresetItems(nextItems, 'db');
+      const nextSelected = nextItems[0] || null;
+      selectFilterPresetLocally(nextSelected);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('archimap:filter-presets-changed'));
+      }
+      dataStatus.set(dataT('status.filterPresetDeleted'));
+      return true;
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.deleteFilterPresetFailed')));
+      return false;
+    } finally {
+      filterPresetDeleting.set(false);
+    }
+  }
+
+  return {
+    seedFilterPresetItems,
+    confirmDiscardFilterPresetChanges,
+    ensureFilterPresetChangesDiscarded,
+    getFilterPresetById,
+    buildFilterPresetPayload,
+    getFilterPresetDraftCanonical,
+    getFilterPresetDraftJsonPreview,
+    patchFilterPresetDraft,
+    setFilterPresetDraftLayers,
+    startNewFilterPresetDraft,
+    selectFilterPresetById,
+    loadFilterPresets,
+    saveFilterPreset,
+    deleteFilterPreset
   };
 }
 
@@ -490,6 +956,12 @@ export function createAdminDataController() {
   const dataStatus = writable('');
   const filterTagAllowlistDraft = writable([]);
   const filterTagAllowlistSaving = writable(false);
+  const filterPresetItems = writable([]);
+  const selectedFilterPresetId = writable(null);
+  const filterPresetDraft = writable(createFilterPresetDraft());
+  const filterPresetLoading = writable(false);
+  const filterPresetSaving = writable(false);
+  const filterPresetDeleting = writable(false);
   const regionDraft = writable(createRegionDraft());
   const regionSaving = writable(false);
   const regionDeleting = writable(false);
@@ -529,6 +1001,74 @@ export function createAdminDataController() {
     }
   );
 
+  const selectedFilterPreset = derived(
+    [filterPresetItems, selectedFilterPresetId],
+    ([$filterPresetItems, $selectedFilterPresetId]) => (
+      (Array.isArray($filterPresetItems) ? $filterPresetItems : [])
+        .find((item) => Number(item?.id || 0) === Number($selectedFilterPresetId || 0))
+      || null
+    )
+  );
+
+  const filterPresetDraftCanonical = derived(filterPresetDraft, ($filterPresetDraft) => {
+    const nameI18n = normalizeFilterPresetNameI18n($filterPresetDraft?.nameI18n, $filterPresetDraft?.name);
+    const name = normalizeFilterPresetName($filterPresetDraft?.name) || getPreferredFilterPresetName(nameI18n);
+    const payload = normalizeFilterPresetLayersForSave($filterPresetDraft?.layers);
+    return {
+      ...($filterPresetDraft?.id ? { id: Number($filterPresetDraft.id) } : {}),
+      key: normalizeFilterPresetKey($filterPresetDraft?.key || name || ''),
+      name,
+      nameI18n,
+      description: String($filterPresetDraft?.description || '').trim() || null,
+      layers: payload.layers,
+      createdAt: $filterPresetDraft?.createdAt || null,
+      updatedAt: $filterPresetDraft?.updatedAt || null,
+      updatedBy: $filterPresetDraft?.updatedBy || null
+    };
+  });
+
+  const filterPresetDraftJsonPreview = derived(
+    filterPresetDraftCanonical,
+    ($filterPresetDraftCanonical) => JSON.stringify($filterPresetDraftCanonical, null, 2)
+  );
+
+  const filterPresetDirty = derived(
+    [selectedFilterPreset, filterPresetDraftCanonical],
+    ([$selectedFilterPreset, $filterPresetDraftCanonical]) => {
+      const left = $selectedFilterPreset
+        ? {
+          id: Number($selectedFilterPreset.id || 0),
+          key: String($selectedFilterPreset.key || '').trim(),
+          name: normalizeFilterPresetName($selectedFilterPreset.name),
+          nameI18n: normalizeFilterPresetNameI18n($selectedFilterPreset.nameI18n, $selectedFilterPreset.name),
+          description: String($selectedFilterPreset.description || '').trim() || null,
+          layers: normalizeFilterPresetLayersForSave($selectedFilterPreset.layers).layers
+        }
+        : {
+          id: null,
+          key: '',
+          name: '',
+          nameI18n: {},
+          description: null,
+          layers: []
+        };
+      const right = {
+        id: Number($filterPresetDraftCanonical?.id || 0) || null,
+        key: String($filterPresetDraftCanonical?.key || '').trim(),
+        name: normalizeFilterPresetName($filterPresetDraftCanonical?.name),
+        nameI18n: normalizeFilterPresetNameI18n($filterPresetDraftCanonical?.nameI18n, $filterPresetDraftCanonical?.name),
+        description: String($filterPresetDraftCanonical?.description || '').trim() || null,
+        layers: normalizeFilterPresetLayersForSave($filterPresetDraftCanonical?.layers).layers
+      };
+      return JSON.stringify(left) !== JSON.stringify(right);
+    }
+  );
+
+  const filtersDirty = derived(
+    [filterTagAllowlistDirty, filterPresetDirty],
+    ([$filterTagAllowlistDirty, $filterPresetDirty]) => Boolean($filterTagAllowlistDirty || $filterPresetDirty)
+  );
+
   function patchRegionDraft(patch) {
     regionDraft.update((current) => ({
       ...current,
@@ -545,6 +1085,19 @@ export function createAdminDataController() {
     dataT
   });
 
+  const filterPresetController = createFilterPresetController({
+    dataSettings,
+    dataStatus,
+    filterPresetItems,
+    selectedFilterPresetId,
+    filterPresetDraft,
+    filterPresetLoading,
+    filterPresetSaving,
+    filterPresetDeleting,
+    filterPresetDirty,
+    dataT
+  });
+
   const mapRegionController = createMapRegionController({
     dataSettings,
     dataStatus,
@@ -557,6 +1110,10 @@ export function createAdminDataController() {
 
   function seedFilterTagAllowlistDraft(filterTags = null) {
     return filterSettingsController.seedFilterTagAllowlistDraft(filterTags);
+  }
+
+  function seedFilterPresetItems(filterPresets = null, options = {}) {
+    return filterPresetController.seedFilterPresetItems(filterPresets, options);
   }
 
   function getMapRegionFeatureMeta(feature) {
@@ -761,6 +1318,10 @@ export function createAdminDataController() {
 
       dataSettings.set(nextSettings);
       seedFilterTagAllowlistDraft(nextSettings.filterTags);
+      seedFilterPresetItems(nextSettings.filterPresets, {
+        preserveSelection: true,
+        skipDraftSync: get(filterPresetDirty)
+      });
       initialized.set(true);
 
       const numericSelectedRegionId = Number(selectedRegionId || 0);
@@ -792,11 +1353,12 @@ export function createAdminDataController() {
   }
 
   function confirmDiscardFilterTagChanges() {
-    return filterSettingsController.confirmDiscardFilterTagChanges();
+    if (!filterSettingsController.confirmDiscardFilterTagChanges()) return false;
+    return filterPresetController.confirmDiscardFilterPresetChanges();
   }
 
   function ensureFilterTagChangesDiscarded() {
-    return filterSettingsController.ensureFilterTagChangesDiscarded();
+    return confirmDiscardFilterTagChanges();
   }
 
   function toggleFilterTagSelection(key, checked) {
@@ -868,6 +1430,9 @@ export function createAdminDataController() {
 
       dataSettings.set(nextSettings);
       seedFilterTagAllowlistDraft(nextSettings.filterTags);
+      seedFilterPresetItems(nextSettings.filterPresets, {
+        preserveSelection: true
+      });
 
       const nextSelectedRegionId =
         selectedRegionId != null
@@ -900,6 +1465,38 @@ export function createAdminDataController() {
 
   async function saveFilterTagAllowlist() {
     return filterSettingsController.saveFilterTagAllowlist();
+  }
+
+  function getFilterPresetById(id) {
+    return filterPresetController.getFilterPresetById(id);
+  }
+
+  function patchFilterPresetDraft(patch = {}) {
+    return filterPresetController.patchFilterPresetDraft(patch);
+  }
+
+  function setFilterPresetDraftLayers(layers = []) {
+    return filterPresetController.setFilterPresetDraftLayers(layers);
+  }
+
+  function startNewFilterPresetDraft() {
+    return filterPresetController.startNewFilterPresetDraft();
+  }
+
+  function selectFilterPresetById(id) {
+    return filterPresetController.selectFilterPresetById(id);
+  }
+
+  async function loadFilterPresets(options = {}) {
+    return filterPresetController.loadFilterPresets(options);
+  }
+
+  async function saveFilterPreset() {
+    return filterPresetController.saveFilterPreset();
+  }
+
+  async function deleteFilterPreset(id = null) {
+    return filterPresetController.deleteFilterPreset(id);
   }
 
   function startNewRegionDraft() {
@@ -1231,7 +1828,18 @@ export function createAdminDataController() {
     storageSummary,
     sortedAvailableFilterTagKeys,
     filterTagAllowlistDirty,
+    filtersDirty,
     filterTagDraftStateByKey,
+    filterPresetItems,
+    selectedFilterPresetId,
+    selectedFilterPreset,
+    filterPresetDraft,
+    filterPresetDraftCanonical,
+    filterPresetDraftJsonPreview,
+    filterPresetDirty,
+    filterPresetLoading,
+    filterPresetSaving,
+    filterPresetDeleting,
     regionDraft,
     regionSaving,
     regionDeleting,
@@ -1251,6 +1859,7 @@ export function createAdminDataController() {
     formatStorageBytes,
     getBootstrapStatusLabel,
     getFilterTagDraftClass,
+    getFilterPresetById,
     getRegionById,
     getRegionEnabledLabel,
     getRegionExtractPrimaryText,
@@ -1261,18 +1870,25 @@ export function createAdminDataController() {
     getMapRegionFeatureMeta,
     handleRegionSearchQueryInput,
     isFilterTagSelected,
+    loadFilterPresets,
     loadDataSettings,
+    patchFilterPresetDraft,
     patchRegionDraft,
     findRegionByMapFeature,
     applyRegionDraftFromMapFeature,
     resetFilterTagAllowlistToDefault,
     resolveRegionExtractCandidates,
     saveDataRegion,
+    saveFilterPreset,
     saveFilterTagAllowlist,
+    selectFilterPresetById,
     selectDataRegion,
+    setFilterPresetDraftLayers,
+    startNewFilterPresetDraft,
     startNewRegionDraft,
     syncRegionNow,
     toggleFilterTagSelection,
-    deleteDataRegion
+    deleteDataRegion,
+    deleteFilterPreset
   };
 }

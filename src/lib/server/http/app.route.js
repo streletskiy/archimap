@@ -159,6 +159,21 @@ function registerAppRoutes(deps) {
     }
   });
 
+  app.get('/api/filter-presets', publicApiRateLimiter, async (req, res) => {
+    try {
+      const items = dataSettingsService
+        ? await dataSettingsService.getFilterPresetsForRuntime()
+        : [];
+      return sendCachedJson(req, res, {
+        items: Array.isArray(items) ? items : []
+      }, {
+        cacheControl: 'public, max-age=60'
+      });
+    } catch {
+      return res.status(500).json({ code: 'ERR_FILTER_PRESETS_LOAD_FAILED', error: 'Failed to load filter presets' });
+    }
+  });
+
   app.get('/api/style-overrides', publicApiRateLimiter, async (req, res) => {
     try {
       const items = styleRegionOverridesService

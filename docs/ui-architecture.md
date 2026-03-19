@@ -118,6 +118,8 @@ When a new control is needed:
 - Option labels must keep the raw tag key visible together with the human-readable label.
 - Each filter layer is a group.
 - Each criterion inside a layer is its own visually separated item, not an undifferentiated raw row. The layer card defines the group; the criterion item defines the editable unit.
+- Layer/rule editing UI is shared between map and admin preset management through one reusable component (`FilterLayersEditor.svelte`), and map/admin surfaces should compose it instead of duplicating layer editor markup/logic.
+- Map preset buttons are runtime data-driven (`/api/filter-presets`), while admin preset labels are editable persisted data with per-locale `nameI18n` values (not locale keys).
 
 ### Date Range
 

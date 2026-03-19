@@ -73,10 +73,11 @@ function normalizedPriorityFromLayers(layers) {
 }
 
 export function createBuildingFilterLayersFromPreset(preset) {
+  const presetIdentity = String(preset?.key || preset?.id || 'filter');
   const layers = Array.isArray(preset?.layers)
     ? preset.layers.map((layer, index) => ({
       ...layer,
-      id: createFilterLayerId(`preset-${String(preset?.id || 'filter')}`),
+      id: createFilterLayerId(`preset-${presetIdentity}`),
       priority: index
     }))
     : [];
