@@ -90,6 +90,12 @@
     firstName = String($session.user?.firstName || '');
     lastName = String($session.user?.lastName || '');
     email = String($session.user?.email || '');
+    
+    // Ensure edits are loaded if we reload directly on the edits tab 
+    // and session hydrates after mount.
+    if (activeTab === 'edits' && !editsLoading && edits.length === 0) {
+      loadEdits();
+    }
   }
 
   const msg = (e, f) => String(e?.message || f);
@@ -489,7 +495,12 @@
         await replaceAccountUrl(nextTab);
       })();
     });
-    if ($session.authenticated) loadEdits();
+    if (activeTab === 'edits') {
+      ensureMap();
+      if ($session.authenticated && !editsLoading && edits.length === 0) {
+        loadEdits();
+      }
+    }
     const obs = new MutationObserver(() => { if (map) map.setStyle(styleByTheme()); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => {
