@@ -4,6 +4,8 @@ User-side:
 
 - User submits building changes via `POST /api/building-info`.
 - Supported editable fields: `name`, `style`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
+- `material` accepts the concrete variants `concrete_panels`, `concrete_blocks`, and `concrete_monolith` in addition to the regular material list.
+- When `material` is one of the concrete variants, the server persists `building:material=concrete` plus `building:material:concrete=<panels|blocks|monolith>` in the local merged state and user edit rows.
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;
   - stale extra `pending` rows are marked as `superseded`.

@@ -6,7 +6,10 @@ import { session } from '$lib/stores/auth';
 import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
 import { closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
 import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
-import { normalizeBuildingMaterialKey } from '$lib/utils/building-material';
+import {
+  normalizeBuildingMaterialSelection,
+  splitBuildingMaterialSelection
+} from '$lib/utils/building-material';
 import { resolveAddressText } from '$lib/utils/building-address';
 import { isAbortError } from '$lib/utils/error';
 import {
@@ -68,7 +71,22 @@ function normalizeArchiInfo(payload) {
       2100
     ),
     architect: pickNullableText(info.architect, info['building:architect']),
-    material: pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+    material: normalizeBuildingMaterialSelection(
+      pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+      pickNullableText(
+        info.material_concrete,
+        info['building:material:concrete'],
+        sourceTags?.['building:material:concrete'],
+        sourceTags?.material_concrete
+      )
+    ),
+    materialRaw: pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+    materialConcrete: pickNullableText(
+      info.material_concrete,
+      info['building:material:concrete'],
+      sourceTags?.['building:material:concrete'],
+      sourceTags?.material_concrete
+    ),
     colour: pickNullableText(info.colour, info['building:colour'], sourceTags?.['building:colour'], sourceTags?.colour),
     address: resolveAddressText(info, pickNullableText, info.address),
     description: pickNullableText(info.description),
@@ -90,6 +108,8 @@ function createFallbackBuildingDetails() {
         year_built: null,
         architect: null,
         material: null,
+        materialRaw: null,
+        materialConcrete: null,
         colour: null,
         address: null,
         _sourceTags: {}
@@ -116,6 +136,8 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload, editedFields = []) 
     ? { ...currentInfo }
     : { _sourceTags: {} };
   const rawStyle = coerceNullableText(payload?.style);
+  const materialSelection = normalizeBuildingMaterialSelection(payload?.material);
+  const splitMaterial = splitBuildingMaterialSelection(materialSelection);
   const editedFieldSet = new Set(normalizeEditedBuildingFields(editedFields));
   const applyAll = editedFieldSet.size === 0;
 
@@ -124,7 +146,10 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload, editedFields = []) 
     next.styleRaw = rawStyle;
     next.style = rawStyle;
   }
-  if (applyAll || editedFieldSet.has('material')) next.material = coerceNullableText(payload?.material);
+  if (applyAll || editedFieldSet.has('material')) {
+    next.material = coerceNullableText(splitMaterial.material);
+    next.material_concrete = coerceNullableText(splitMaterial.materialConcrete);
+  }
   if (applyAll || editedFieldSet.has('colour')) next.colour = coerceNullableText(payload?.colour);
   if (applyAll || editedFieldSet.has('levels')) next.levels = coerceNullableIntegerText(payload?.levels, 0, 300);
   if (applyAll || editedFieldSet.has('yearBuilt')) next.year_built = coerceNullableIntegerText(payload?.yearBuilt, 1000, 2100);
@@ -295,7 +320,7 @@ export function createBuildingDetailsManager() {
       osmId: normalized.osmId,
       name: isBuildingPartFeature ? null : coerceNullableText(detail.name),
       style: coerceNullableText(normalizeArchitectureStyleKey(detail.style)),
-      material: coerceNullableText(normalizeBuildingMaterialKey(detail.material)),
+      material: coerceNullableText(normalizeBuildingMaterialSelection(detail.material)),
       colour: coerceNullableText(detail.colour),
       levels: coerceNullableIntegerText(detail.levels, 0, 300),
       yearBuilt: coerceNullableIntegerText(detail.yearBuilt, 1000, 2100),

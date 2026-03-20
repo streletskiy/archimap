@@ -384,6 +384,10 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
           VALUES (?, ?, ?, datetime('now'), datetime('now'))
         `).run(regionId, 'way', 103);
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 104);
 
         osmDb.exec(`
           CREATE TABLE IF NOT EXISTS building_contours (
@@ -485,6 +489,36 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           55.75
         );
 
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          104,
+          JSON.stringify({
+            building: 'yes',
+            'building:material': 'concrete',
+            'building:material:concrete': 'panels',
+            name: 'Integration test concrete building'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.66, 55.76],
+              [37.67, 55.76],
+              [37.67, 55.77],
+              [37.66, 55.77],
+              [37.66, 55.76]
+            ]]
+          }),
+          37.66,
+          55.76,
+          37.67,
+          55.77
+        );
+
         localDb.prepare(`
           INSERT INTO architectural_info (
             osm_type,
@@ -510,6 +544,18 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         `).run('way', 102, 'omani', '#8f6b3d', 3, 1988, 'integration-test');
+
+        localDb.prepare(`
+          INSERT INTO architectural_info (
+            osm_type,
+            osm_id,
+            material,
+            material_concrete,
+            updated_by,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, datetime('now'))
+        `).run('way', 104, 'concrete', 'panels', 'integration-test');
       } finally {
         mainDb.close();
         localDb.close();
@@ -536,6 +582,44 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(mixedBuildingInfoBody?.feature_kind, 'building');
       assert.deepEqual(mixedBuildingInfoBody?.region_slugs, ['ru-moscow']);
 
+      const concreteBuildingInfo = await callApi('/api/building-info/way/104');
+      assert.equal(concreteBuildingInfo.status, 200);
+      const concreteBuildingInfoBody = await concreteBuildingInfo.json();
+      assert.equal(concreteBuildingInfoBody?.material, 'concrete');
+      assert.equal(concreteBuildingInfoBody?.material_concrete, 'panels');
+      assert.equal(concreteBuildingInfoBody?.feature_kind, 'building');
+      assert.deepEqual(concreteBuildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const concreteEdit = await callApi('/api/building-info', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          osmType: 'way',
+          osmId: 104,
+          material: 'concrete_blocks',
+          editedFields: ['material']
+        })
+      });
+      assert.equal(concreteEdit.status, 200);
+      const concreteEditBody = await concreteEdit.json();
+      assert.equal(concreteEditBody?.ok, true);
+
+      const concreteUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
+      try {
+        const pendingConcreteEdit = concreteUserEditsDb.prepare(`
+          SELECT material, material_concrete
+          FROM building_user_edits
+          WHERE id = ?
+        `).get(concreteEditBody.editId);
+        assert.equal(pendingConcreteEdit?.material, 'concrete');
+        assert.equal(pendingConcreteEdit?.material_concrete, 'blocks');
+      } finally {
+        concreteUserEditsDb.close();
+      }
+
       const partEdit = await callApi('/api/building-info', {
         method: 'POST',
         headers: {
@@ -558,9 +642,9 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(partEditBody?.status, 'pending');
       assert.equal(typeof partEditBody?.editId, 'number');
 
-      const userEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
+      const partUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
       try {
-        const pendingPartEdit = userEditsDb.prepare(`
+        const pendingPartEdit = partUserEditsDb.prepare(`
           SELECT *
           FROM building_user_edits
           WHERE id = ?
@@ -572,7 +656,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         assert.equal(pendingPartEdit?.name, null);
         assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"yes"/);
       } finally {
-        userEditsDb.close();
+        partUserEditsDb.close();
       }
 
       const disallowedPartEdit = await callApi('/api/building-info', {

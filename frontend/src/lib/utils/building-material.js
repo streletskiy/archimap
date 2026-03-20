@@ -36,12 +36,32 @@ const BUILDING_MATERIAL_KEYS = Object.freeze([
   'adobe',
   'rammed_earth',
   'solar_panels',
-  'tyres'
+  'tyres',
+  'concrete_panels',
+  'concrete_blocks',
+  'concrete_monolith'
 ]);
 
 const BUILDING_MATERIAL_KEY_SET = new Set(BUILDING_MATERIAL_KEYS);
 const EMPTY_BUILDING_MATERIAL_TOKENS = new Set([...EMPTY_TEXT_TOKENS, 'none', 'unknown']);
-
+const CONCRETE_BUILDING_MATERIAL_VARIANTS = new Map([
+  ['concrete_panels', 'panels'],
+  ['concrete_blocks', 'blocks'],
+  ['concrete_monolith', 'monolith']
+]);
+const CONCRETE_BUILDING_MATERIAL_VARIANT_VALUES = new Set(CONCRETE_BUILDING_MATERIAL_VARIANTS.values());
+const CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS = Object.freeze({
+  en: {
+    concrete_panels: 'Concrete panels',
+    concrete_blocks: 'Concrete blocks',
+    concrete_monolith: 'Concrete monolith'
+  },
+  ru: {
+    concrete_panels: 'Бетонные панели',
+    concrete_blocks: 'Бетонные блоки',
+    concrete_monolith: 'Бетонный монолит'
+  }
+});
 const BUILDING_MATERIAL_LABELS = Object.freeze({
   en: en?.buildingMaterials || {},
   ru: ru?.buildingMaterials || {}
@@ -73,7 +93,12 @@ function normalizeBuildingMaterialSearchText(value) {
 const BUILDING_MATERIAL_KEY_BY_LABEL_NORMALIZED = (() => {
   const map = new Map();
   for (const key of BUILDING_MATERIAL_KEYS) {
-    const labels = [BUILDING_MATERIAL_LABELS.en[key], BUILDING_MATERIAL_LABELS.ru[key]].filter(Boolean);
+    const labels = [
+      BUILDING_MATERIAL_LABELS.en[key],
+      BUILDING_MATERIAL_LABELS.ru[key],
+      CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en[key],
+      CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.ru[key]
+    ].filter(Boolean);
     for (const label of labels) {
       const normalizedLabel = normalizeBuildingMaterialSearchText(label);
       if (normalizedLabel) map.set(normalizedLabel, key);
@@ -89,6 +114,59 @@ const BUILDING_MATERIAL_KEY_BY_LABEL_NORMALIZED = (() => {
 function getBuildingMaterialLabelByLocale(key, localeCode) {
   const dict = BUILDING_MATERIAL_LABELS[normalizeLocaleCode(localeCode)] || BUILDING_MATERIAL_LABELS.en;
   return dict[String(key || '').trim()] || BUILDING_MATERIAL_LABELS.en[String(key || '').trim()] || null;
+}
+
+function getConcreteBuildingMaterialLabelByLocale(key, localeCode) {
+  const dict = CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS[normalizeLocaleCode(localeCode)]
+    || CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en;
+  return dict[String(key || '').trim()] || CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en[String(key || '').trim()] || null;
+}
+
+function normalizeConcreteBuildingMaterialVariant(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+  if (CONCRETE_BUILDING_MATERIAL_VARIANT_VALUES.has(text)) return text;
+  if (text.startsWith('concrete_')) {
+    const suffix = text.slice('concrete_'.length);
+    if (CONCRETE_BUILDING_MATERIAL_VARIANT_VALUES.has(suffix)) return suffix;
+  }
+  return '';
+}
+
+export function isConcreteBuildingMaterialVariantKey(value) {
+  return CONCRETE_BUILDING_MATERIAL_VARIANTS.has(String(value || '').trim().toLowerCase());
+}
+
+export function normalizeBuildingMaterialSelection(value, concreteVariant = null) {
+  const raw = normalizeBuildingMaterialKey(value);
+  if (!raw) return '';
+  if (CONCRETE_BUILDING_MATERIAL_VARIANTS.has(raw)) {
+    return raw;
+  }
+
+  const normalizedConcreteVariant = normalizeConcreteBuildingMaterialVariant(concreteVariant);
+  if (raw === 'concrete' && normalizedConcreteVariant) {
+    for (const [selectionKey, variantValue] of CONCRETE_BUILDING_MATERIAL_VARIANTS.entries()) {
+      if (variantValue === normalizedConcreteVariant) return selectionKey;
+    }
+  }
+
+  return raw;
+}
+
+export function splitBuildingMaterialSelection(value) {
+  const selection = normalizeBuildingMaterialSelection(value);
+  const concreteVariant = CONCRETE_BUILDING_MATERIAL_VARIANTS.get(selection) || '';
+  if (concreteVariant) {
+    return {
+      material: 'concrete',
+      materialConcrete: concreteVariant
+    };
+  }
+  return {
+    material: selection,
+    materialConcrete: ''
+  };
 }
 
 export function normalizeBuildingMaterialKey(value) {
@@ -112,7 +190,9 @@ export function getBuildingMaterialOptions(localeCode = null) {
   return BUILDING_MATERIAL_KEYS
     .map((value) => ({
       value,
-      label: getBuildingMaterialLabelByLocale(value, resolvedLocaleCode) || value
+      label: getBuildingMaterialLabelByLocale(value, resolvedLocaleCode)
+        || getConcreteBuildingMaterialLabelByLocale(value, resolvedLocaleCode)
+        || value
     }))
     .sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
 }
@@ -130,8 +210,11 @@ export function toHumanBuildingMaterial(value, localeCode = null) {
 
   const resolvedLocaleCode = resolveLocaleCode(localeCode);
   const translated = parts.map((part) => {
-    const normalized = normalizeBuildingMaterialKey(part);
+    const normalized = normalizeBuildingMaterialSelection(part);
     if (!normalized) return null;
+    if (CONCRETE_BUILDING_MATERIAL_VARIANTS.has(normalized)) {
+      return getConcreteBuildingMaterialLabelByLocale(normalized, resolvedLocaleCode) || part;
+    }
     if (BUILDING_MATERIAL_KEY_SET.has(normalized)) {
       return getBuildingMaterialLabelByLocale(normalized, resolvedLocaleCode) || part;
     }

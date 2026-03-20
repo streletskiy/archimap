@@ -1,4 +1,9 @@
 const USER_EDIT_STATUS_VALUES = new Set(['pending', 'accepted', 'rejected', 'partially_accepted', 'superseded']);
+const CONCRETE_BUILDING_MATERIAL_VARIANTS = new Map([
+  ['concrete_panels', 'panels'],
+  ['concrete_blocks', 'blocks'],
+  ['concrete_monolith', 'monolith']
+]);
 const ARCHI_EDITED_FIELD_ALIASES = new Map([
   ['name', 'name'],
   ['style', 'style'],
@@ -28,6 +33,43 @@ function sanitizeFieldText(value, maxLen = 500) {
   return text.slice(0, maxLen);
 }
 
+function normalizeBuildingMaterialSelectionKey(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+  if (CONCRETE_BUILDING_MATERIAL_VARIANTS.has(text)) return text;
+  if (text.startsWith('concrete_')) {
+    const suffix = text.slice('concrete_'.length);
+    if (CONCRETE_BUILDING_MATERIAL_VARIANTS.has(`concrete_${suffix}`)) return `concrete_${suffix}`;
+  }
+  return text;
+}
+
+function normalizeConcreteBuildingMaterialVariant(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+  if (text === 'panels' || text === 'blocks' || text === 'monolith') return text;
+  if (text.startsWith('concrete_')) {
+    const suffix = text.slice('concrete_'.length);
+    if (suffix === 'panels' || suffix === 'blocks' || suffix === 'monolith') return suffix;
+  }
+  return '';
+}
+
+function splitBuildingMaterialSelection(value) {
+  const selection = normalizeBuildingMaterialSelectionKey(value);
+  const concreteVariant = CONCRETE_BUILDING_MATERIAL_VARIANTS.get(selection) || '';
+  if (concreteVariant) {
+    return {
+      material: 'concrete',
+      material_concrete: concreteVariant
+    };
+  }
+  return {
+    material: selection || null,
+    material_concrete: null
+  };
+}
+
 function sanitizeYearBuilt(value) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const parsed = Number(value);
@@ -47,17 +89,36 @@ function sanitizeArchiPayload(body) {
   const levelsRaw = body?.levels;
   const yearBuilt = sanitizeYearBuilt(yearRaw);
   const levels = sanitizeLevels(levelsRaw);
+  const materialSelection = String(body?.material ?? '').trim();
+  const explicitMaterialConcrete = normalizeConcreteBuildingMaterialVariant(body?.materialConcrete ?? body?.material_concrete);
+  const explicitMaterialConcreteRaw = sanitizeFieldText(body?.materialConcrete ?? body?.material_concrete, 40);
+  const splitMaterial = splitBuildingMaterialSelection(materialSelection);
+  const material = splitMaterial.material;
+  const materialConcrete = explicitMaterialConcrete || splitMaterial.material_concrete;
   if ((yearRaw !== null && yearRaw !== undefined && String(yearRaw).trim() !== '') && yearBuilt == null) {
     return { code: 'ERR_INVALID_YEAR_BUILT', error: 'Year built must be an integer between 1000 and 2100' };
   }
   if ((levelsRaw !== null && levelsRaw !== undefined && String(levelsRaw).trim() !== '') && levels == null) {
     return { code: 'ERR_INVALID_LEVELS', error: 'Levels must be an integer between 0 and 300' };
   }
+  if (explicitMaterialConcreteRaw && !explicitMaterialConcrete) {
+    return { code: 'ERR_INVALID_INPUT', error: 'Invalid building:material:concrete value' };
+  }
+  if (explicitMaterialConcrete && splitMaterial.material_concrete && explicitMaterialConcrete !== splitMaterial.material_concrete) {
+    return { code: 'ERR_INVALID_INPUT', error: 'Conflicting building material concrete values were provided' };
+  }
+  if (materialConcrete && material !== 'concrete') {
+    return { code: 'ERR_INVALID_INPUT', error: 'building:material:concrete can only be used together with building:material=concrete' };
+  }
+  if (materialConcrete && !CONCRETE_BUILDING_MATERIAL_VARIANTS.has(`concrete_${materialConcrete}`)) {
+    return { code: 'ERR_INVALID_INPUT', error: 'Invalid building:material:concrete value' };
+  }
   return {
     value: {
       name: sanitizeFieldText(body?.name, 250),
       style: sanitizeFieldText(body?.style, 200),
-      material: sanitizeFieldText(body?.material, 120),
+      material,
+      material_concrete: materialConcrete,
       colour: sanitizeFieldText(body?.colour ?? body?.color, 120),
       levels,
       year_built: yearBuilt,
@@ -103,6 +164,7 @@ module.exports = {
   sanitizeFieldText,
   sanitizeYearBuilt,
   sanitizeLevels,
+  splitBuildingMaterialSelection,
   sanitizeArchiPayload,
   sanitizeEditedFields,
   USER_EDIT_STATUS_VALUES

@@ -914,7 +914,10 @@
     "adobe": "Adobe",
     "rammed_earth": "Rammed earth",
     "solar_panels": "Solar panels",
-    "tyres": "Tyres"
+    "tyres": "Tyres",
+    "concrete_panels": "Concrete panels",
+    "concrete_blocks": "Concrete blocks",
+    "concrete_monolith": "Concrete monolith"
   },
   "architectureStyles": {
     "islamic": "Islamic architecture",

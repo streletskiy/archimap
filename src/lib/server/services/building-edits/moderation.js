@@ -16,7 +16,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
   }
 
   function mergeLocalInfoForReassign(sourceRow, targetRow, { force = false } = {}) {
-    const fields = ['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+    const fields = ['name', 'style', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
     const conflicts = [];
     const merged = {};
 
@@ -104,13 +104,14 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
           material = excluded.material,
+          material_concrete = excluded.material_concrete,
           colour = excluded.colour,
           levels = excluded.levels,
           year_built = excluded.year_built,
@@ -125,6 +126,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
         merged.name ?? null,
         merged.style ?? null,
         merged.material ?? null,
+        merged.material_concrete ?? null,
         merged.colour ?? null,
         merged.levels ?? null,
         merged.year_built ?? null,

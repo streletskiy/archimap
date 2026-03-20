@@ -914,7 +914,10 @@
     "adobe": "Саман",
     "rammed_earth": "Утрамбованная земля",
     "solar_panels": "Солнечные панели",
-    "tyres": "Шины"
+    "tyres": "Шины",
+    "concrete_panels": "Бетонные панели",
+    "concrete_blocks": "Бетонные блоки",
+    "concrete_monolith": "Бетонный монолит"
   },
   "architectureStyles": {
     "islamic": "Исламская архитектура",

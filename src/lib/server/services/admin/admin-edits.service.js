@@ -5,6 +5,7 @@ const {
   parseOsmTarget,
   parsePositiveId
 } = require('./shared');
+const { splitBuildingMaterialSelection } = require('../edits.service');
 
 function createAdminEditsService(options = {}) {
   const {
@@ -219,6 +220,12 @@ function createAdminEditsService(options = {}) {
         sanitizedValues[key] = parsedLevels;
         continue;
       }
+      if (key === 'material') {
+        const selection = splitBuildingMaterialSelection(source[key]);
+        sanitizedValues.material = selection.material;
+        sanitizedValues.material_concrete = selection.material_concrete;
+        continue;
+      }
       sanitizedValues[key] = sanitizeFieldText(source[key], key === 'archimap_description' ? 1000 : 300);
     }
 
@@ -235,7 +242,7 @@ function createAdminEditsService(options = {}) {
       editCreatedTs,
       currentMergedTs,
       editSource: await db.prepare(`
-        SELECT name, style, material, colour, levels, year_built, architect, address, archimap_description
+        SELECT name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
@@ -244,6 +251,7 @@ function createAdminEditsService(options = {}) {
         name: currentMerged.name ?? null,
         style: currentMerged.style ?? null,
         material: currentMerged.material ?? null,
+        material_concrete: currentMerged.material_concrete ?? null,
         colour: currentMerged.colour ?? null,
         levels: currentMerged.levels ?? null,
         year_built: currentMerged.year_built ?? null,
@@ -309,6 +317,19 @@ function createAdminEditsService(options = {}) {
     }
 
     for (const field of fieldsToMerge) {
+      if (field === 'material') {
+        if (Object.prototype.hasOwnProperty.call(sanitizedValues, 'material')) {
+          const materialSplit = splitBuildingMaterialSelection(sanitizedValues.material);
+          mergedCandidate.material = materialSplit.material;
+          mergedCandidate.material_concrete = Object.prototype.hasOwnProperty.call(sanitizedValues, 'material_concrete')
+            ? sanitizedValues.material_concrete
+            : materialSplit.material_concrete || null;
+        } else {
+          mergedCandidate.material = editSource.material ?? null;
+          mergedCandidate.material_concrete = editSource.material_concrete ?? null;
+        }
+        continue;
+      }
       mergedCandidate[field] = Object.prototype.hasOwnProperty.call(sanitizedValues, field)
         ? sanitizedValues[field]
         : (editSource[field] ?? null);
@@ -321,13 +342,14 @@ function createAdminEditsService(options = {}) {
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
           material = excluded.material,
+          material_concrete = excluded.material_concrete,
           colour = excluded.colour,
           levels = excluded.levels,
           year_built = excluded.year_built,
@@ -342,6 +364,7 @@ function createAdminEditsService(options = {}) {
         mergedCandidate.name,
         mergedCandidate.style,
         mergedCandidate.material,
+        mergedCandidate.material_concrete,
         mergedCandidate.colour,
         mergedCandidate.levels,
         mergedCandidate.year_built,

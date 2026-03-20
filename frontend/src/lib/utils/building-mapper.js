@@ -2,7 +2,9 @@ import {
   normalizeArchitectureStyleKey,
   toHumanArchitectureStyle
 } from './architecture-style.js';
-import { normalizeBuildingMaterialKey } from './building-material.js';
+import {
+  normalizeBuildingMaterialSelection
+} from './building-material.js';
 import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from './building-address.js';
 import { normalizeIntegerField, pickFirstText } from './text.js';
 
@@ -59,7 +61,7 @@ export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingF
   return {
     name: pickFirstText(formValue.name),
     style: normalizeArchitectureStyleKey(formValue.style),
-    material: normalizeBuildingMaterialKey(formValue.material),
+    material: normalizeBuildingMaterialSelection(formValue.material),
     colour: pickFirstText(formValue.colour).toLowerCase(),
     levels: pickFirstText(formValue.levels),
     yearBuilt: pickFirstText(formValue.yearBuilt),
@@ -96,6 +98,10 @@ export function hydrateBuildingForm(details) {
     fallbackAddress,
     allowAddressRawAsFull: canEditAddressFull
   });
+  const materialSelection = normalizeBuildingMaterialSelection(
+    info.material ?? sourceTags?.['building:material'] ?? sourceTags?.material,
+    info.material_concrete ?? sourceTags?.['building:material:concrete'] ?? sourceTags?.material_concrete
+  );
   const form = {
     name: pickFirstText(info.name, sourceTags?.name, sourceTags?.['name:ru'], sourceTags?.['name:en']),
     levels: normalizeIntegerField(info.levels ?? sourceTags?.['building:levels'] ?? sourceTags?.levels, 0, 300),
@@ -108,9 +114,7 @@ export function hydrateBuildingForm(details) {
     style: normalizeStyleForBuildingForm(
       info.styleRaw ?? info.style ?? sourceTags?.['building:architecture'] ?? sourceTags?.architecture ?? sourceTags?.style
     ),
-    material: normalizeBuildingMaterialKey(
-      info.material ?? sourceTags?.['building:material'] ?? sourceTags?.material
-    ),
+    material: materialSelection,
     colour: pickFirstText(info.colour, sourceTags?.['building:colour'], sourceTags?.colour),
     archimapDescription: pickFirstText(info.archimap_description, info.description),
     addressFull: nextAddressFields.full,
