@@ -310,6 +310,30 @@
   $: pruneSelectedCandidates();
   $: dispatch('summary', { total: activeCandidates.length, archived: archivedCandidates.length });
 
+  $: currentTags = selectedCandidateDetail?.liveElement?.tags || selectedCandidateDetail?.currentContourTags || {};
+  $: desiredTags = selectedCandidateDetail?.desiredTags || selectedCandidateDetail?.localState || {};
+
+  $: computedDiff = (() => {
+    if (!selectedCandidateDetail) return [];
+    const keys = Array.from(new Set([...Object.keys(currentTags), ...Object.keys(desiredTags)])).sort();
+    const diff = [];
+    for (const key of keys) {
+      const cur = currentTags[key];
+      const des = desiredTags[key];
+      if (cur === undefined && des !== undefined) {
+        diff.push({ type: 'added', key, val: des });
+      } else if (des === undefined && cur !== undefined) {
+        diff.push({ type: 'removed', key, val: cur });
+      } else if (cur !== des) {
+        diff.push({ type: 'removed', key, val: cur });
+        diff.push({ type: 'added', key, val: des });
+      } else {
+        diff.push({ type: 'unchanged', key, val: cur });
+      }
+    }
+    return diff;
+  })();
+
   onMount(() => {
     void loadState();
     const unsubscribe = page.subscribe(($pageState) => {
@@ -600,16 +624,30 @@
           </div>
         {/if}
 
-        <div class="grid gap-3 lg:grid-cols-2">
-          <article class="rounded-xl border ui-border ui-surface-base p-3">
-            <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.osm.detail.current')}</p>
-            <pre class="mt-2 max-h-64 overflow-auto text-xs ui-text-body whitespace-pre-wrap break-words">{JSON.stringify(selectedCandidateDetail?.liveElement?.tags || selectedCandidateDetail?.currentContourTags || {}, null, 2)}</pre>
-          </article>
-          <article class="rounded-xl border ui-border ui-surface-base p-3">
-            <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.osm.detail.desired')}</p>
-            <pre class="mt-2 max-h-64 overflow-auto text-xs ui-text-body whitespace-pre-wrap break-words">{JSON.stringify(selectedCandidateDetail?.desiredTags || selectedCandidateDetail?.localState || {}, null, 2)}</pre>
-          </article>
-        </div>
+        <article class="rounded-xl border ui-border ui-surface-base overflow-hidden">
+          <div class="px-3 py-2 border-b ui-border ui-surface-soft">
+            <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.osm.detail.diff') || 'Детали синхронизации (Diff)'}</p>
+          </div>
+          <div class="font-mono text-xs leading-6 overflow-x-auto">
+            {#if computedDiff.length === 0}
+              <div class="p-3 text-center ui-text-muted italic">{$t('admin.osm.detail.noChanges') || 'Без изменений'}</div>
+            {:else}
+              {#each computedDiff as line}
+                <div class="flex items-start px-3 py-1 group border-b last:border-0 ui-border/50
+                  {line.type === 'added' ? 'bg-emerald-100/60 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-100' : ''}
+                  {line.type === 'removed' ? 'bg-rose-100/60 dark:bg-rose-900/40 text-rose-900 dark:text-rose-100' : ''}
+                  {line.type === 'unchanged' ? 'ui-text-body opacity-80' : ''}">
+                  <span class="w-6 shrink-0 select-none opacity-50 font-bold overflow-hidden mt-[1px]">
+                    {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
+                  </span>
+                  <span class="w-[30%] shrink-0 truncate select-all font-semibold break-all whitespace-normal pr-2 pt-[1px]">{line.key}</span>
+                  <span class="mr-2 opacity-50 shrink-0 mt-[1px]">=</span>
+                  <span class="break-all select-all whitespace-pre-wrap pt-[1px]">{line.val}</span>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </article>
 
         <div class="rounded-xl border ui-border ui-surface-base p-3 text-sm ui-text-body">
           <p><strong>{$t('admin.osm.detail.sourceUpdatedAt')}:</strong> {formatUiDate(selectedCandidateDetail?.sourceOsmUpdatedAt) || '---'}</p>
