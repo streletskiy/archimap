@@ -115,12 +115,21 @@ function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
   return normalizeFilterPresetName(fallback);
 }
 
-function normalizeFilterPresetRule(rule = {}) {
-  return {
+function normalizeFilterPresetRule(rule = {}, options = {}) {
+  const normalized = {
     key: String(rule?.key || '').trim(),
     op: String(rule?.op || 'contains').trim(),
     value: String(rule?.value || '').trim()
   };
+
+  if (options.preserveId === true) {
+    const ruleId = String(rule?.id || '').trim();
+    if (ruleId) {
+      normalized.id = ruleId;
+    }
+  }
+
+  return normalized;
 }
 
 function normalizeFilterPresetLayersForDraft(layers = []) {
@@ -132,8 +141,8 @@ function normalizeFilterPresetLayersForDraft(layers = []) {
     ...layer,
     priority: Number.isFinite(Number(layer?.priority)) ? Number(layer.priority) : index,
     rules: Array.isArray(layer?.rules) && layer.rules.length > 0
-      ? layer.rules.map((rule) => normalizeFilterPresetRule(rule))
-      : [normalizeFilterPresetRule()]
+      ? layer.rules.map((rule) => normalizeFilterPresetRule(rule, { preserveId: true }))
+      : [normalizeFilterPresetRule({}, { preserveId: true })]
   }, list.slice(0, index)));
 }
 
