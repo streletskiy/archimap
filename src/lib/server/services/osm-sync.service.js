@@ -628,7 +628,7 @@ function createOsmSyncService(options = {}) {
     const normalized = normalizeStateValue(material);
     const concrete = normalizeStateValue(materialConcrete);
     if (!normalized) return null;
-    if (normalized === 'concrete' && concrete) return 'concrete';
+    if (normalized === 'concrete' && concrete) return `concrete_${concrete}`;
     return normalized;
   }
 
@@ -735,7 +735,7 @@ function createOsmSyncService(options = {}) {
       case 'style':
         return ['building:architecture', 'architecture', 'style'];
       case 'material':
-        return ['building:material', 'material'];
+        return ['building:material', 'material', 'building:material:concrete', 'material_concrete'];
       case 'colour':
         return ['building:colour', 'colour'];
       case 'levels':
@@ -775,9 +775,16 @@ function createOsmSyncService(options = {}) {
         delete tags.style;
         return ['architecture', 'style'];
       case 'material':
-        tags['building:material'] = normalized.startsWith('concrete:') ? 'concrete' : normalized;
-        tags.material = normalized.startsWith('concrete:') ? 'concrete' : normalized;
-        return [];
+        if (normalized.startsWith('concrete_')) {
+          tags['building:material'] = 'concrete';
+          tags['building:material:concrete'] = normalized.slice('concrete_'.length);
+        } else {
+          tags['building:material'] = normalized;
+          delete tags['building:material:concrete'];
+        }
+        delete tags.material;
+        delete tags.material_concrete;
+        return ['material', 'material_concrete'];
       case 'colour':
         tags['building:colour'] = normalized;
         tags.colour = normalized;
