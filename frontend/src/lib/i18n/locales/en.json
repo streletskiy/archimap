@@ -537,19 +537,19 @@
         "syncing": "Publishing to OSM...",
         "synced": "OSM sync completed",
         "syncedNoChange": "OSM already has the same state",
-      "failed": "Sync failed",
-      "unsynced": "Unsynced",
-      "cleaned": "Local overwrite cleaned up",
-      "syncingState": "Syncing",
-      "detailLoadFailed": "Failed to load sync details"
+        "failed": "Sync failed",
+        "unsynced": "Unsynced",
+        "cleaned": "Local overwrite cleaned up",
+        "syncingState": "Syncing",
+        "detailLoadFailed": "Failed to load sync details"
+      },
+      "archive": {
+        "title": "Synced archive",
+        "hint": "Read-only building groups already published to OSM.",
+        "readOnly": "Read only",
+        "readOnlyHelp": "This building group was already synchronized. It stays here for inspection only."
+      }
     },
-    "archive": {
-      "title": "Synced archive",
-      "hint": "Read-only building groups already published to OSM.",
-      "readOnly": "Read only",
-      "readOnlyHelp": "This building group was already synchronized. It stays here for inspection only."
-    }
-  },
     "styles": {
       "title": "Styles",
       "subtitle": "Override regional architecture-style restrictions for specific regions or region masks.",
