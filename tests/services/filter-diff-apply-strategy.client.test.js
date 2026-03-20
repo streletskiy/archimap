@@ -62,11 +62,8 @@ test('createFilterDiffApplyStrategy filters building parts separately and hides 
     buildingPartsVisible: false
   });
 
-  assert.deepEqual(map.filters.get('building-fill'), [
-    'all',
-    ['!=', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['id'], ['literal', [202]]]
-  ]);
+  assert.equal(map.filters.has('building-fill'), false);
+  assert.equal(map.filters.has('building-line'), false);
   assert.deepEqual(map.filters.get('part-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],

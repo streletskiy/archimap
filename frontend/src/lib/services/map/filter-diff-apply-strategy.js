@@ -76,27 +76,12 @@ function normalizeFeatureIds(values) {
 
 function applyBuildingLayerFilters({ map, layerIds, featureIds, active }) {
   if (!map) return;
-  const buildingFillFilter = buildRegionBuildingLayerFilterExpression({
-    featureIds,
-    featureKind: 'building',
-    active
-  });
-  const buildingLineFilter = buildingFillFilter;
   const partFillFilter = buildRegionBuildingLayerFilterExpression({
     featureIds,
     featureKind: 'building_part',
     active
   });
   const partLineFilter = partFillFilter;
-
-  for (const layerId of layerIds.buildingFillLayerIds || []) {
-    if (!map.getLayer(layerId)) continue;
-    map.setFilter(layerId, buildingFillFilter);
-  }
-  for (const layerId of layerIds.buildingLineLayerIds || []) {
-    if (!map.getLayer(layerId)) continue;
-    map.setFilter(layerId, buildingLineFilter);
-  }
   for (const layerId of layerIds.buildingPartFillLayerIds || []) {
     if (!map.getLayer(layerId)) continue;
     map.setFilter(layerId, partFillFilter);
