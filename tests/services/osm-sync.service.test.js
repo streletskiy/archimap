@@ -686,3 +686,63 @@ test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite a
   assert.equal(syncRow.sync_status, 'cleaned');
   assert.ok(syncRow.sync_cleaned_at);
 });
+
+test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes outside synced fields', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run(
+    'way',
+    102,
+    JSON.stringify({
+      name: 'Synced Name',
+      architect: 'Someone Else Now'
+    }),
+    '2026-01-10T00:00:00Z'
+  );
+  db.prepare(`
+    INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run('way', 102, 'Synced Name', '2026-01-10T00:00:00Z');
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, sync_attempted_at, sync_succeeded_at,
+      sync_changeset_id, sync_summary_json, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    2,
+    'way',
+    102,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'Synced Name',
+    'synced',
+    '2026-01-10T00:00:00Z',
+    '2026-01-10T00:01:00Z',
+    124,
+    JSON.stringify({ changesetId: 124, syncedAt: '2026-01-10T00:01:00Z' }),
+    '2026-01-10T00:01:00Z',
+    '2026-01-10T00:00:00Z'
+  );
+
+  const result = await service.cleanupSyncedLocalOverwritesAfterImport();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.cleaned.length, 1);
+
+  const localRow = db.prepare(`
+    SELECT COUNT(*) AS total
+    FROM local.architectural_info
+    WHERE osm_type = ? AND osm_id = ?
+  `).get('way', 102);
+  assert.equal(Number(localRow.total || 0), 0);
+});

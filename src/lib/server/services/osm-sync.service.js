@@ -946,6 +946,9 @@ function createOsmSyncService(options = {}) {
     const latestRow = rows[0];
     const latestLocalState = stateFromLocalRow(latestRow);
     const contourState = stateFromContourTags(parseTags(latestRow?.contour_tags_json));
+    const explicitFields = [...new Set(
+      rows.flatMap((row) => parseEditedFields(row.edited_fields_json))
+    )];
     const latestSyncStatus = rows.reduce((acc, row) => {
       const status = String(row.sync_status || 'unsynced');
       if (status === 'failed') return 'failed';
@@ -984,7 +987,8 @@ function createOsmSyncService(options = {}) {
       changes,
       syncReadOnly,
       canSync: hasSyncableEdits && !syncReadOnly && latestSyncStatus !== 'syncing',
-      hasLocalState: Object.values(latestLocalState).some((value) => value != null)
+      hasLocalState: Object.values(latestLocalState).some((value) => value != null),
+      explicitFields
     };
   }
 
@@ -1442,7 +1446,15 @@ function createOsmSyncService(options = {}) {
 
       const contourState = stateFromContourTags(parseTags(contourRow.tags_json));
       const localState = candidate.localState;
-      const sameState = diffStates(contourState, localState).length === 0;
+      const syncedFields = Array.isArray(candidate.explicitFields) && candidate.explicitFields.length > 0
+        ? candidate.explicitFields
+        : Object.keys(localState).filter((field) => field in localState);
+      const sameState = syncedFields.every((field) => {
+        if (!Object.prototype.hasOwnProperty.call(localState, field)) {
+          return true;
+        }
+        return normalizeStateValue(contourState?.[field]) === normalizeStateValue(localState?.[field]);
+      });
       if (!sameState) continue;
 
       const tx = db.transaction(() => {
