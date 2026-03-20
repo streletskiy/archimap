@@ -53,6 +53,19 @@ test('normalizeFilterRules validates operators and trims values', async () => {
 
   const badNumeric = normalizeFilterRules([{ key: 'levels', op: 'greater_than', value: 'many' }]);
   assert.match(String(badNumeric.invalidReason || ''), /numeric/i);
+
+  assert.equal(matchesFilterRule({
+    sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+    archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+  }, { key: 'style', op: 'equals', valueNormalized: 'local style' }), true);
+  assert.equal(matchesFilterRule({
+    sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+    archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+  }, { key: 'material', op: 'equals', valueNormalized: 'stone' }), true);
+  assert.equal(matchesFilterRule({
+    sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+    archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+  }, { key: 'colour', op: 'equals', valueNormalized: 'red' }), true);
 });
 
 test('buildFeatureStateDiffPlan returns only changed ids', async () => {

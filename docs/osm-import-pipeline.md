@@ -343,8 +343,8 @@ Field precedence:
 
 Important note:
 
-- filter semantics do not match search/building-info precedence exactly
-- if the source OSM tag exists, some filter paths prefer the raw OSM tag value before local fallback
+- filter semantics now follow the same precedence as building-info and search for architectural fields
+- accepted local values in `local.architectural_info` win over raw OSM tags when both are present
 
 ### Corner case: master admin needs to fully remove a bad or obsolete edit
 

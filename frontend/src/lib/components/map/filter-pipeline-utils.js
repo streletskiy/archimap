@@ -165,9 +165,67 @@ export function parseNumericFilterValue(rawValue) {
   return Number.isFinite(value) ? value : null;
 }
 
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+
+function getFilterRuleValue(source, key) {
+  const sourceTags = source?.sourceTags && typeof source.sourceTags === 'object'
+    ? source.sourceTags
+    : (source && typeof source === 'object' ? source : {});
+  const archiInfo = source?.archiInfo && typeof source.archiInfo === 'object' ? source.archiInfo : {};
+  const hasMeaningfulValue = (value) => {
+    const normalized = Array.isArray(value) ? value.join(';') : (value == null ? null : String(value));
+    return normalized != null && String(normalized).trim().length > 0;
+  };
+  
+  if (key.startsWith('archi.')) return archiInfo[key.slice(6)];
+  
+  // Apply archiInfo overrides for common OSM tags
+  if (key === 'building:colour' || key === 'colour') {
+    if (hasMeaningfulValue(archiInfo.colour)) return archiInfo.colour;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:colour')) return sourceTags['building:colour'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'colour')) return sourceTags.colour;
+  }
+  if (key === 'building:material' || key === 'material') {
+    if (hasMeaningfulValue(archiInfo.material)) return archiInfo.material;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material')) return sourceTags['building:material'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'material')) return sourceTags.material;
+  }
+  if (key === 'building:material:concrete' || key === 'material_concrete') {
+    if (hasMeaningfulValue(archiInfo.material_concrete)) return archiInfo.material_concrete;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material:concrete')) return sourceTags['building:material:concrete'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'material_concrete')) return sourceTags.material_concrete;
+  }
+  if (key === 'building:architecture' || key === 'architecture' || key === 'style') {
+     if (hasMeaningfulValue(archiInfo.style)) return archiInfo.style;
+  }
+  if (key === 'building:levels' || key === 'levels') {
+     if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
+  }
+  if (key === 'building:year' || key === 'year_built' || key === 'start_date') {
+     if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;
+  }
+  if (key === 'architect' || key === 'architect_name') {
+     if (hasMeaningfulValue(archiInfo.architect)) return archiInfo.architect;
+  }
+  if (key === 'name' || key === 'name:ru' || key === 'name:en') {
+     if (hasMeaningfulValue(archiInfo.name)) return archiInfo.name;
+  }
+  if (key === 'description' || key === 'archimap_description') {
+     if (hasMeaningfulValue(archiInfo.archimap_description)) return archiInfo.archimap_description;
+     if (hasMeaningfulValue(archiInfo.description)) return archiInfo.description;
+  }
+
+  if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) {
+    return archiInfo[key];
+  }
+  if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
+  if (ARCHI_RULE_KEYS.has(key)) return archiInfo[key];
+  return undefined;
+}
+
 export function matchesFilterRule(tags, rule) {
   if (!rule || !rule.key) return true;
-  const actualRaw = tags?.[rule.key];
+  const actualRaw = getFilterRuleValue(tags, rule.key);
   const actual = Array.isArray(actualRaw) ? actualRaw.join(';') : (actualRaw == null ? null : String(actualRaw));
   const hasValue = actual != null && String(actual).trim().length > 0;
   if (rule.op === 'exists') return hasValue;

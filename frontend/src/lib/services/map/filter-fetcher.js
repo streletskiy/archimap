@@ -163,8 +163,7 @@ export function createFilterFetcher({
     for (const key of visibleKeys) {
       const item = byKey.get(key);
       if (!item) continue;
-      const tags = item?.sourceTags || {};
-      const ok = matchesFilterRules(tags, rules);
+      const ok = matchesFilterRules(item, rules);
       if (!ok) continue;
       matchedKeys.push(key);
       const parsed = parseOsmKey(key);

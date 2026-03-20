@@ -67,8 +67,8 @@ function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${r
   const fallbackSql = fallbackKey ? getPostgresArchiFallbackSql(fallbackKey, rowAlias) : 'NULL::text';
   const tagValueSql = buildPostgresTagValueSql(tagsAlias, getPostgresRuleTagKeys(fallbackKey || key));
   return {
-    sql: `CASE WHEN COALESCE(length(btrim(${tagValueSql.sql})), 0) > 0 THEN ${tagValueSql.sql} ELSE ${fallbackSql} END`,
-    params: [...tagValueSql.params, ...tagValueSql.params]
+    sql: `CASE WHEN COALESCE(length(btrim(${fallbackSql})), 0) > 0 THEN ${fallbackSql} ELSE ${tagValueSql.sql} END`,
+    params: [...tagValueSql.params]
   };
 }
 

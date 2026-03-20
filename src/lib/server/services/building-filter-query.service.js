@@ -3,6 +3,7 @@ const {
   compilePostgresFilterRulesGuardPredicate,
   compilePostgresFilterRulesPredicate
 } = require('../utils/filter-sql-builder');
+const { splitBuildingMaterialSelection } = require('./edits.service');
 
 const FILTER_DATA_SELECT_FIELDS_SQL = `
   SELECT
@@ -13,6 +14,7 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ai.name,
     ai.style,
     ai.material,
+    ai.material_concrete,
     ai.colour,
     ai.levels,
     ai.year_built,
@@ -87,6 +89,7 @@ function mapFilterDataRow(row) {
     sourceTags = {};
   }
   const hasExtraInfo = row.info_osm_id != null;
+  const split = hasExtraInfo ? splitBuildingMaterialSelection(row.material) : null;
   return {
     osmKey,
     sourceTags,
@@ -96,7 +99,8 @@ function mapFilterDataRow(row) {
         osm_id: row.osm_id,
         name: row.name,
         style: row.style,
-        material: row.material,
+        material: split?.material ?? row.material,
+        material_concrete: split?.material_concrete ?? row.material_concrete,
         colour: row.colour,
         levels: row.levels,
         year_built: row.year_built,
@@ -128,6 +132,7 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       ai.name,
       ai.style,
       ai.material,
+      ai.material_concrete,
       ai.colour,
       ai.levels,
       ai.year_built,

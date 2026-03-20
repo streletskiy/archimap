@@ -15,56 +15,56 @@ test('compilePostgresFilterRulePredicate: compiles supported operators with stab
     op: 'contains',
     valueNormalized: 'alpha'
   });
-  assert.match(contains.sql, /strpos\(lower\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE src\.name END\), \?\) > 0/);
-  assert.deepEqual(contains.params, ['name', 'name', 'alpha']);
+  assert.match(contains.sql, /strpos\(lower\(CASE WHEN COALESCE\(length\(btrim\(src\.name\)\), 0\) > 0 THEN src\.name ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\), \?\) > 0/);
+  assert.deepEqual(contains.params, ['name', 'alpha']);
 
   const equals = compilePostgresFilterRulePredicate({
     key: 'archi.style',
     op: 'equals',
     valueNormalized: 'neo'
   });
-  assert.match(equals.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE src\.style END\) = \?/);
-  assert.deepEqual(equals.params, ['style', 'style', 'neo']);
+  assert.match(equals.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(src\.style\)\), 0\) > 0 THEN src\.style ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\) = \?/);
+  assert.deepEqual(equals.params, ['style', 'neo']);
 
   const colour = compilePostgresFilterRulePredicate({
     key: 'colour',
     op: 'equals',
     valueNormalized: 'red'
   });
-  assert.match(colour.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(COALESCE\(jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\)\), 0\) > 0 THEN COALESCE\(jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\)\) ELSE src\.colour END\) = \?/);
-  assert.deepEqual(colour.params, ['building:colour', 'colour', 'building:colour', 'colour', 'red']);
+  assert.match(colour.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(src\.colour\)\), 0\) > 0 THEN src\.colour ELSE COALESCE\(jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\)\) END\) = \?/);
+  assert.deepEqual(colour.params, ['building:colour', 'colour', 'red']);
 
   const notEquals = compilePostgresFilterRulePredicate({
     key: 'foo',
     op: 'not_equals',
     valueNormalized: 'bar'
   });
-  assert.match(notEquals.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE NULL::text END\) <> \?/);
-  assert.deepEqual(notEquals.params, ['foo', 'foo', 'bar']);
+  assert.match(notEquals.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(NULL::text\)\), 0\) > 0 THEN NULL::text ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\) <> \?/);
+  assert.deepEqual(notEquals.params, ['foo', 'bar']);
 
   const startsWith = compilePostgresFilterRulePredicate({
     key: 'prefix',
     op: 'starts_with',
     valueNormalized: 'sam'
   });
-  assert.match(startsWith.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE NULL::text END\) LIKE \(\? \|\| '%'\)/);
-  assert.deepEqual(startsWith.params, ['prefix', 'prefix', 'sam']);
+  assert.match(startsWith.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(NULL::text\)\), 0\) > 0 THEN NULL::text ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\) LIKE \(\? \|\| '%'\)/);
+  assert.deepEqual(startsWith.params, ['prefix', 'sam']);
 
   const exists = compilePostgresFilterRulePredicate({
     key: 'style',
     op: 'exists',
     valueNormalized: ''
   });
-  assert.match(exists.sql, /COALESCE\(length\(btrim\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE src\.style END\)\), 0\) > 0/);
-  assert.deepEqual(exists.params, ['style', 'style']);
+  assert.match(exists.sql, /COALESCE\(length\(btrim\(CASE WHEN COALESCE\(length\(btrim\(src\.style\)\), 0\) > 0 THEN src\.style ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\)\), 0\) > 0/);
+  assert.deepEqual(exists.params, ['style']);
 
   const notExists = compilePostgresFilterRulePredicate({
     key: 'name',
     op: 'not_exists',
     valueNormalized: ''
   });
-  assert.match(notExists.sql, /COALESCE\(length\(btrim\(CASE WHEN COALESCE\(length\(btrim\(jsonb_extract_path_text\(src\.tags_jsonb, \?\)\)\), 0\) > 0 THEN jsonb_extract_path_text\(src\.tags_jsonb, \?\) ELSE src\.name END\)\), 0\) = 0/);
-  assert.deepEqual(notExists.params, ['name', 'name']);
+  assert.match(notExists.sql, /COALESCE\(length\(btrim\(CASE WHEN COALESCE\(length\(btrim\(src\.name\)\), 0\) > 0 THEN src\.name ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\)\), 0\) = 0/);
+  assert.deepEqual(notExists.params, ['name']);
 
   const greaterOrEquals = compilePostgresFilterRulePredicate({
     key: 'levels',
@@ -73,7 +73,7 @@ test('compilePostgresFilterRulePredicate: compiles supported operators with stab
     numericValue: 5
   });
   assert.match(greaterOrEquals.sql, /double precision ELSE NULL END >= \?/);
-  assert.deepEqual(greaterOrEquals.params, ['levels', 'levels', 'levels', 'levels', 5]);
+  assert.deepEqual(greaterOrEquals.params, ['levels', 'levels', 5]);
 });
 
 test('compilePostgresFilterRulesPredicate: combines predicates and preserves params order', () => {
@@ -85,9 +85,9 @@ test('compilePostgresFilterRulesPredicate: combines predicates and preserves par
 
   assert.match(compiled.sql, /^\(.+\) AND \(.+\) AND \(.+\)$/);
   assert.deepEqual(compiled.params, [
-    'name', 'name', 'alpha',
-    'foo', 'foo', 'bar',
-    'style', 'style'
+    'name', 'alpha',
+    'foo', 'bar',
+    'style'
   ]);
 });
 
@@ -206,4 +206,50 @@ test('buildFilterMatchBatchResults evaluates multiple requests against the same 
   assert.deepEqual(results[1].matchedKeys, ['way/102']);
   assert.equal(results[1].meta.rulesHash, 'hash-2');
   assert.equal(results[1].meta.truncated, false);
+});
+
+test('buildFilterMatchBatchResults prefers local archi info over raw OSM tags', () => {
+  const items = [
+    {
+      osmKey: 'way/201',
+      sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+      archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+    }
+  ];
+
+  const styleResult = buildFilterMatchBatchResults(items, [
+    {
+      id: 'style-local',
+      rulesHash: 'hash-style',
+      maxResults: 100,
+      rules: [
+        { key: 'style', op: 'equals', value: 'Local Style', valueNormalized: 'local style', numericValue: null }
+      ]
+    }
+  ]);
+  assert.deepEqual(styleResult[0].matchedKeys, ['way/201']);
+
+  const materialResult = buildFilterMatchBatchResults(items, [
+    {
+      id: 'material-local',
+      rulesHash: 'hash-material',
+      maxResults: 100,
+      rules: [
+        { key: 'material', op: 'equals', value: 'stone', valueNormalized: 'stone', numericValue: null }
+      ]
+    }
+  ]);
+  assert.deepEqual(materialResult[0].matchedKeys, ['way/201']);
+
+  const colourResult = buildFilterMatchBatchResults(items, [
+    {
+      id: 'colour-local',
+      rulesHash: 'hash-colour',
+      maxResults: 100,
+      rules: [
+        { key: 'colour', op: 'equals', value: 'red', valueNormalized: 'red', numericValue: null }
+      ]
+    }
+  ]);
+  assert.deepEqual(colourResult[0].matchedKeys, ['way/201']);
 });

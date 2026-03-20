@@ -54,11 +54,27 @@ function normalizeTagValue(value) {
   return String(value);
 }
 
+function hasMeaningfulValue(value) {
+  const normalized = normalizeTagValue(value);
+  return normalized != null && String(normalized).trim().length > 0;
+}
+
 function getRuleValue(item, key) {
-  const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
-  if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
   if (key.startsWith('archi.')) return archiInfo[key.slice(6)];
+  const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
+  if (key === 'colour') {
+    if (hasMeaningfulValue(archiInfo.colour)) return archiInfo.colour;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:colour')) return sourceTags['building:colour'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'colour')) return sourceTags.colour;
+  }
+  if (key === 'material') {
+    if (hasMeaningfulValue(archiInfo.material)) return archiInfo.material;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material')) return sourceTags['building:material'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'material')) return sourceTags.material;
+  }
+  if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) return archiInfo[key];
+  if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   if (ARCHI_RULE_KEYS.has(key)) return archiInfo[key];
   return undefined;
 }
@@ -94,6 +110,8 @@ function mapFilterDataRow(row) {
       ? {
         name: row.name,
         style: row.style,
+        material: row.material,
+        colour: row.colour,
         levels: row.levels,
         year_built: row.year_built,
         architect: row.architect,
@@ -148,12 +166,14 @@ async function upsertFilterFixtures(connectionString, fixtures) {
       if (fixture.archiInfo) {
         await client.query(`
           INSERT INTO local.architectural_info (
-            osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+            osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'postgres-runtime-test', NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'postgres-runtime-test', NOW())
           ON CONFLICT (osm_type, osm_id) DO UPDATE SET
             name = EXCLUDED.name,
             style = EXCLUDED.style,
+            material = EXCLUDED.material,
+            colour = EXCLUDED.colour,
             levels = EXCLUDED.levels,
             year_built = EXCLUDED.year_built,
             architect = EXCLUDED.architect,
@@ -167,6 +187,8 @@ async function upsertFilterFixtures(connectionString, fixtures) {
           fixture.osmId,
           fixture.archiInfo.name ?? null,
           fixture.archiInfo.style ?? null,
+          fixture.archiInfo.material ?? null,
+          fixture.archiInfo.colour ?? null,
           fixture.archiInfo.levels ?? null,
           fixture.archiInfo.year_built ?? null,
           fixture.archiInfo.architect ?? null,
@@ -304,18 +326,20 @@ async function buildExpectedAnonMatches(connectionString, payload) {
       WITH env AS (
         SELECT ST_MakeEnvelope($1, $2, $3, $4, 4326) AS geom
       )
-      SELECT
-        bc.osm_type,
-        bc.osm_id,
-        bc.tags_json,
-        ai.osm_id AS info_osm_id,
-        ai.name,
-        ai.style,
-        ai.levels,
-        ai.year_built,
-        ai.architect,
-        ai.address,
-        ai.description,
+        SELECT
+          bc.osm_type,
+          bc.osm_id,
+          bc.tags_json,
+          ai.osm_id AS info_osm_id,
+          ai.name,
+          ai.style,
+          ai.material,
+          ai.colour,
+          ai.levels,
+          ai.year_built,
+          ai.architect,
+          ai.address,
+          ai.description,
         ai.archimap_description,
         ai.updated_by,
         ai.updated_at
@@ -529,6 +553,17 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
         },
         {
           osmType: 'way',
+          osmId: baseId + 5,
+          tags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9910,10.0060],[-169.9895,10.0060],[-169.9895,10.0075],[-169.9910,10.0075],[-169.9910,10.0060]]]}',
+          minLon: -169.9910,
+          minLat: 10.0060,
+          maxLon: -169.9895,
+          maxLat: 10.0075,
+          archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+        },
+        {
+          osmType: 'way',
           osmId: baseId + 3,
           tags: { 'archi.style': 'Neo', name: null },
           geometryJson: '{"type":"Polygon","coordinates":[[[-169.9950,10.0070],[-169.9930,10.0070],[-169.9930,10.0090],[-169.9950,10.0090],[-169.9950,10.0070]]]}',
@@ -581,6 +616,18 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'style', op: 'exists', value: '' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'material', op: 'equals', value: 'stone' }]
+        },
+        {
+          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          zoomBucket: 15,
+          maxResults: 50,
+          rules: [{ key: 'colour', op: 'equals', value: 'red' }]
         },
         {
           bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },

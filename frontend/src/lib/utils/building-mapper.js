@@ -3,7 +3,8 @@ import {
   toHumanArchitectureStyle
 } from './architecture-style.js';
 import {
-  normalizeBuildingMaterialSelection
+  normalizeBuildingMaterialSelection,
+  splitBuildingMaterialSelection
 } from './building-material.js';
 import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from './building-address.js';
 import { normalizeIntegerField, pickFirstText } from './text.js';
@@ -125,12 +126,46 @@ export function hydrateBuildingForm(details) {
     addressHouseNumber: nextAddressFields.housenumber
   };
 
+  const synthesizedTags = { ...sourceTags };
+  if (pickFirstText(info.style)) synthesizedTags['building:architecture'] = info.style;
+  if (pickFirstText(info.material)) {
+    const split = splitBuildingMaterialSelection(info.material);
+    
+    // Clear all possible material tags first
+    delete synthesizedTags['material'];
+    delete synthesizedTags['building:material'];
+    delete synthesizedTags['material_concrete'];
+    delete synthesizedTags['building:material:concrete'];
+    
+    synthesizedTags['building:material'] = split.material;
+    if (split.materialConcrete) {
+      synthesizedTags['building:material:concrete'] = split.materialConcrete;
+    }
+  }
+  
+  // Also check if info.material_concrete was explicitly provided independently
+  if (pickFirstText(info.material_concrete)) {
+    synthesizedTags['building:material:concrete'] = info.material_concrete;
+    if (!synthesizedTags['building:material']) {
+      synthesizedTags['building:material'] = 'concrete';
+    }
+  }
+  if (pickFirstText(info.colour)) synthesizedTags[sourceTags['colour'] ? 'colour' : 'building:colour'] = info.colour;
+  if (pickFirstText(info.levels)) synthesizedTags[sourceTags['levels'] ? 'levels' : 'building:levels'] = info.levels;
+  if (pickFirstText(info.year_built)) {
+    if (sourceTags['start_date']) synthesizedTags['start_date'] = info.year_built;
+    else if (sourceTags['year_built']) synthesizedTags['year_built'] = info.year_built;
+    else synthesizedTags['building:year_built'] = info.year_built;
+  }
+  if (pickFirstText(info.architect)) synthesizedTags[sourceTags['architect_name'] ? 'architect_name' : 'architect'] = info.architect;
+  if (pickFirstText(info.name)) synthesizedTags['name'] = info.name;
+
   return {
     form,
     initialComparable: buildBuildingComparableSnapshot(form),
     canEditAddressFull,
     sourceTags,
-    osmTagEntries: buildOsmTagEntries(sourceTags)
+    osmTagEntries: buildOsmTagEntries(synthesizedTags)
   };
 }
 
