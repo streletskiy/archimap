@@ -9,7 +9,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - region settings/status
    - sync run history
    - feature-to-region membership
-3. Region source selection is DB-only; env no longer configures extract queries or a single legacy PMTiles file.
+3. Region source selection is DB-only.
 
 ## Managed sync pipeline
 
@@ -32,7 +32,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - a refreshed union dataset in the runtime DB
    - a refreshed PMTiles archive for the target region
    - updated region sync metadata and bounds for runtime clients
-7. For managed in-app syncs, the runtime then runs post-sync maintenance through `ServerRuntime` boot modules:
+7. For managed in-app syncs, the runtime runs post-sync maintenance through `ServerRuntime` boot modules:
    - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite)
    - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
 
@@ -58,11 +58,11 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 
 - Existing building/search/filter APIs continue to read the union dataset from `osm.building_contours`.
 - Search source rows are normalized in Node.js from raw `tags_json` plus `local.architectural_info` via `src/lib/server/services/search-index-source.service.js`, shared by incremental updates and full rebuild worker.
-- This keeps `/api/building/*`, `/api/building-info/*`, `/api/search-buildings`, and filter endpoints backward-compatible in single-region and multi-region setups.
+- This keeps `/api/building/*`, `/api/building-info/*`, `/api/search-buildings`, and filter endpoints aligned in single-region and multi-region setups.
 
 ## Operational notes
 
-- Region PMTiles are named by region slug on disk; runtime/API addressing still uses numeric `regionId`, and legacy id-based filenames are accepted as a fallback during migration.
+- Region PMTiles are named by region slug on disk; runtime/API addressing uses numeric `regionId`.
 - `server.js` is only a thin entrypoint; runtime orchestration is built by `ServerRuntime` and split across `src/lib/server/boot/server-runtime.boot.js` plus `server-runtime.{config,middleware,routes}.js`.
-- Search index rebuild still runs after successful syncs so search/filter APIs stay aligned with the union dataset.
-- Bounds-driven PMTiles activation is a v1 tradeoff: source activation is rectangle-based, not polygon-precise by extract shape.
+- Search index rebuild runs after successful syncs so search/filter APIs stay aligned with the union dataset.
+- Bounds-driven PMTiles activation is rectangle-based, not polygon-precise by extract shape.

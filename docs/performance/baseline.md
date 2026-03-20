@@ -40,4 +40,4 @@
 - Search improved (p50 ~56% faster).
 - BBox filter improved (p50 ~54% faster, p95 ~49% faster).
 - Contours status improved (~23% faster p50) but remains DB aggregate sensitive.
-- Largest frontend chunk reduced, but still > 500k warning threshold.
+- Largest frontend chunk reduced and remains above the 500k warning threshold.

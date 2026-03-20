@@ -107,7 +107,7 @@ System notes:
   - Creates or updates a region.
   - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
   - Supported source type: `sourceType=extract`.
-  - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`) and rejects legacy `sourceType=extract_query`.
+  - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`).
   - On save, server re-validates the selected canonical extract via exact resolver lookup. Ambiguous or missing canonical extract selection returns `400` with a manual-resolution message; managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
 - `DELETE /api/admin/app-settings/data/regions/:regionId`
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
@@ -145,15 +145,15 @@ System notes:
   - Master-admin only.
   - Publishes the merged local building state to OSM after preflight drift checks.
   - Marks the linked accepted/partially accepted edit rows as synced and stores the returned changeset id / compact summary in edit history.
-  - Returns `409 OSM_SYNC_ALREADY_PUBLISHED` for building groups that were already synchronized and are now read-only.
+  - Returns `409 OSM_SYNC_ALREADY_PUBLISHED` for building groups that were already synchronized and are read-only.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
-  - Edit history items now include sync metadata when available: `syncStatus`, `syncAttemptedAt`, `syncSucceededAt`, `syncCleanedAt`, `syncChangesetId`, `syncSummary`, `syncError`.
+  - Edit history items include sync metadata when available: `syncStatus`, `syncAttemptedAt`, `syncSucceededAt`, `syncCleanedAt`, `syncChangesetId`, `syncSummary`, `syncError`.
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
 - `POST /api/admin/building-edits/:editId/reassign`
 - `DELETE /api/admin/building-edits/:editId`
   - Master-admin only.
   - `pending`, `rejected`, `superseded`: deletes only the edit history row.
-  - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit still points to the same building.
+  - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit points to the same building.
   - Returns `409 EDIT_DELETE_SHARED_MERGED_STATE` when merged local data is already shared with other accepted edits for the same OSM object.
   - Returns `409 EDIT_SYNC_LOCKED` for rows that are already synchronized and treated as read-only.
 - `GET /api/admin/style-overrides`

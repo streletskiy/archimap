@@ -6,7 +6,7 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
 
 ## Pipeline
 
-1. Filter input is still prepared in worker (`prepare-rules`) and diff plans are built in worker (`build-apply-plan`).
+1. Filter input is prepared in worker (`prepare-rules`) and diff plans are built in worker (`build-apply-plan`).
 2. For each viewport, client builds a coverage window (expanded bbox).
 3. Authoritative request is made for coverage window, not exact viewport bbox.
 4. While viewport remains fully inside active coverage window:
@@ -50,11 +50,11 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
 ## UX
 
 - Apply model stays local-first (`FilterPanel` drafts -> `setBuildingFilterLayers`), and shareable URLs can restore the same camera + filter stack through query params.
-- Filter panel now shows runtime status and stats:
+- Filter panel shows runtime status and stats:
   - status (`Applied`, `Refining`, `Too many matches`, etc.)
   - count
   - elapsed ms
-- Degrade mode (`>20k matches`) keeps current highlight and shows clear action hint, without forced hard reset.
+- Degrade mode (`>20k matches`) keeps the existing highlight and shows a clear action hint, without forced hard reset.
 
 ## Dev/Test telemetry
 

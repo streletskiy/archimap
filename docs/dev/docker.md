@@ -116,7 +116,7 @@ Docker downloads only changed layers during pull.
 
 ## PostgreSQL + PostGIS (default in Compose)
 
-`docker-compose.yml` now starts `db-postgres` by default.
+`docker-compose.yml` starts `db-postgres` by default.
 
 ```bash
 docker compose up -d

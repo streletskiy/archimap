@@ -28,11 +28,11 @@ OSM publish flow:
 - Master admins can open `Admin -> Send to OSM` and connect an OSM OAuth2 client.
 - Sync works on a building group (`osm_type` + `osm_id`), not on an individual history row.
 - The sync queue supports selecting multiple building groups and publishing them in one OSM changeset.
-- Style edits are published only as `building:architecture`; legacy `architecture` and `style` tags are not written by ArchiMap.
+- Style edits are published as `building:architecture`.
 - Before publishing, the runtime fetches the live OSM element and compares it with the stored source snapshot; if the upstream OSM state drifted, sync is blocked with `409 OSM_SYNC_SOURCE_DRIFT`.
 - On success, the runtime opens an OSM changeset with a compact `comment`, `source`, and `created_by` metadata payload, pushes one or more merged element updates as standard OSM XML documents wrapped in `<osm version="0.6">`, closes the changeset, and marks all accepted / partially accepted rows for the synced building groups as `synced`.
-- Changeset comments now begin with `Update architectural info:` in all OSM sync cases.
-- The original local history rows remain in place, but now carry sync metadata such as the changeset id, sync timestamps, and a compact JSON summary.
+- Changeset comments begin with `Update architectural info:` in all OSM sync cases.
+- The original local history rows remain in place and carry sync metadata such as the changeset id, sync timestamps, and a compact JSON summary.
 - Synced / cleaned rows are treated as read-only in admin views: they move to compact archive sections, stay collapsed by default in the UI, and cannot be re-synced or re-moderated.
 - After the next successful OSM import, if the tags that were actually synchronized are already present in the imported contour data, the runtime can remove the redundant `local.architectural_info` overwrite while leaving the edit history row in compact form.
 

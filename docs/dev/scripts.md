@@ -46,7 +46,7 @@
 
 Notes:
 
-- `scripts/sync-osm-region.js` is intentionally thin; implementation stages now live in `scripts/region-sync/python-extractor.js`, `db-ingester.js`, `region-db.js`, `import-applier.js`, and `pmtiles-builder.js`.
+- `scripts/sync-osm-region.js` is intentionally thin; implementation stages live in `scripts/region-sync/python-extractor.js`, `db-ingester.js`, `region-db.js`, `import-applier.js`, and `pmtiles-builder.js`.
 - Docker containers start through `scripts/runtime-start.js`, which runs `scripts/ensure-admin-regions-pmtiles.js` before booting `server.sveltekit.js`.
 - `npm test` does not run Playwright; use `npm run test:e2e` separately when finalizing UI-impacting changes.
 - For shared UI work, `npm run frontend:check`, `npm run frontend:build`, and `npm run test:e2e` are the minimum practical frontend contour.

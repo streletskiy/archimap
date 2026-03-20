@@ -4,7 +4,7 @@
 
 ArchiMap is a self-hosted platform for an interactive architectural map.
 Building data is based on OpenStreetMap and enriched in the selected runtime DB provider:
-PostgreSQL + PostGIS (production default) or SQLite (dev/fallback).
+PostgreSQL + PostGIS or SQLite.
 The map is rendered with MapLibre and vector PMTiles.
 The public backend runtime is SvelteKit Node (`server.sveltekit.js`).
 The project is designed for private deployments with full control over data, tiles, and sessions.
@@ -179,7 +179,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - `i18n:check`
 - `version:print`
 
-`npm run tiles:build -- --region-id=<id>` and direct `node scripts/sync-osm-region.js --region-id=<id>` now rebuild search and filter-tag read-models after a successful full region sync. `--pmtiles-only` still rebuilds only the archive.
+`npm run tiles:build -- --region-id=<id>` and direct `node scripts/sync-osm-region.js --region-id=<id>` rebuild search and filter-tag read-models after a successful full region sync. `--pmtiles-only` rebuilds only the archive.
 
 ## Build Version
 
@@ -209,7 +209,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 - Map camera: `?lat=<latitude>&lng=<longitude>&z=<zoom>`
 - Shareable filter state: `?f=<encodedFilterLayers>`
 - Open building modal: `?building=way/<osmId>` or `?building=relation/<osmId>`
-- Open admin edit details: `?edit=<id>` (`adminEdit=<id>` is still supported for backward compatibility)
+- Open admin edit details: `?edit=<id>`
 - Open the OSM sync admin tab: `/admin/osm`
 - Canonical info/legal routes:
   - `/info/about`, `/info/terms`, `/info/privacy`
@@ -220,8 +220,7 @@ Notes:
 - Camera updates use history replace (no history spam while panning/zooming).
 - Shareable map links can combine camera, building, and filter state in one URL, for example `?lat=55.751244&lng=37.618423&z=15.2&f=...`.
 - `f` is a compact versioned payload for filter layers and should be treated as opaque; it stores layer order, mode, color, and rules.
-- Legacy legal params remain compatible (`tab=user-agreement`, `tab=privacy-policy`).
-- Section root routes such as `/app/info` and `/info` still honor legacy query aliases and normalize back to canonical tab state.
+- Section root routes such as `/app/info` and `/info` normalize back to canonical tab state.
 
 ## License
 

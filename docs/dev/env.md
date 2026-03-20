@@ -58,7 +58,7 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 
 ## DB-backed data settings
 
-- Runtime OSM region settings now live in `Admin -> Data`.
+- Runtime OSM region settings live in `Admin -> Data`.
 - Each enabled region stores its extract query, schedule, PMTiles zooms/layer, bounds, sync status, and run history in the application DB.
 - The map runtime receives regional PMTiles metadata only through `/app-config.js`.
 

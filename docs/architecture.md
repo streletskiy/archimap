@@ -115,7 +115,7 @@
 - Multi-layer execution stays client-side:
   - all `and` and `or` layers are resolved as one combined logical group;
   - each `layer` mode layer is fetched independently;
-  - endpoint contract stays backward-compatible because each request still contains flat `rules[]`.
+  - each request contains flat `rules[]`.
 - Combined group semantics:
   - all `and` layers must pass;
   - if any `or` layers exist, at least one `or` layer must pass;

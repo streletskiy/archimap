@@ -34,7 +34,7 @@ The goal of this stack is not to redesign ArchiMap around upstream demos. The go
 3. `frontend/src/app.css` is the source of truth for shared UI styling. Do not duplicate long Tailwind state chains across many components when the pattern is shared.
 4. New UI work must preserve existing page, panel, and modal structure unless the redesign is explicitly planned.
 5. The ArchiMap palette stays authoritative. Upstream `shadcn-svelte` defaults do not replace ArchiMap colors.
-6. Tailwind theme customization belongs in CSS tokens and semantic classes, not in a reintroduced legacy Tailwind config.
+6. Tailwind theme customization belongs in CSS tokens and semantic classes, not in a separate Tailwind config.
 7. If a shared control pattern appears in more than one feature area, extract it into the base layer or into a semantic layout contract in `app.css`.
 
 ## Styling Source Of Truth
@@ -46,7 +46,7 @@ The goal of this stack is not to redesign ArchiMap around upstream demos. The go
 
 ## Base Components
 
-Current project-level shared controls:
+Shared controls:
 
 - `UiButton`
 - `UiCheckbox`
@@ -102,7 +102,7 @@ When a new control is needed:
 - For map filter layers, keep the trigger compact and use shared swatches plus hex input inside the popover.
 - User-defined colors may use inline CSS custom properties, but only on the nearest semantic root for that colored element or component.
 - Do not use raw inline presentation styles such as `style="background: ..."` in product code when the same value can be expressed through a custom property consumed by shared CSS.
-- Third-party internals may still emit inline color styles in generated DOM. Treat that as library behavior, not a pattern to copy into product code.
+- Third-party internals can emit inline color styles in generated DOM. Treat that as library behavior, not a pattern to copy into product code.
 
 ### Filter Toolbars
 

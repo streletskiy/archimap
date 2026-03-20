@@ -19,4 +19,4 @@
 ## CDN compatibility notes
 
 - Byte-range and validators are CDN-friendly.
-- Keep region URLs stable by addressing PMTiles through `regionId`; the on-disk file may still use the current region slug.
+- Keep region URLs stable by addressing PMTiles through `regionId`; the on-disk file may use the current region slug.

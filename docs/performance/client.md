@@ -7,7 +7,7 @@
   - MapLibre + PMTiles libraries are dynamically imported in `frontend/src/lib/services/map-runtime.js`.
   - `MapCanvas.svelte` stays focused on render/bind concerns and delegates non-UI logic to `frontend/src/lib/services/map/**`.
 - Request cancellation:
-  - Search requests now use `AbortController` in `+page.svelte`.
+  - Search requests use `AbortController` in `+page.svelte`.
   - Building filter match requests (`POST /api/buildings/filter-matches`) cancel stale requests through `MapFilterService`.
 - Debounce:
   - Map filter reload on `moveend/zoomend` is debounced (`180ms`) in `frontend/src/lib/services/map/map-filter-pipeline.js`.
@@ -25,7 +25,7 @@
   - Optional low-priority directional prefetch warms cache without competing with main requests.
   - Filter pipeline responsibilities are split across `filter-request-planner.js`, `filter-match-cache-strategy.js`, `filter-worker-dispatcher.js`, `filter-diff-apply-strategy.js`, with `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js` as supporting modules; `map-filter-pipeline.js` stays orchestration-only.
   - Theme switching keeps custom PMTiles layers and applies style repaint instead of layer drop.
-  - `MapCanvas.svelte` now delegates selection flow and region/source/layer orchestration to dedicated controllers instead of keeping that logic inside one Svelte component.
+  - `MapCanvas.svelte` delegates selection flow and region/source/layer orchestration to dedicated controllers instead of keeping that logic inside one Svelte component.
 
 ## Filter tech note
 

@@ -24,7 +24,7 @@
 ## Docker release script behavior
 
 - Runtime base tag is derived from dependency versions (`tippecanoe`, `quackosm`, `duckdb`, `pip`).
-- `scripts/release-docker.sh` and `scripts/release-docker.ps1` now skip rebuilding `runtime-base` if that tag already exists in registry.
+- `scripts/release-docker.sh` and `scripts/release-docker.ps1` skip rebuilding `runtime-base` if that tag already exists in registry.
 - Force rebuild only when needed:
   - Bash: `--force-runtime-base`
   - PowerShell: `-ForceRuntimeBase`
