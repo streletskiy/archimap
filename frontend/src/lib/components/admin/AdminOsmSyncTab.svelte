@@ -496,12 +496,27 @@
                   </UiTableCell>
                 {/if}
                 <UiTableCell className="min-w-0">
+                  {@const addedTags = (item.changes || []).filter(c => c.before == null && c.after != null).length}
+                  {@const removedTags = (item.changes || []).filter(c => c.before != null && c.after == null).length}
+                  {@const modifiedTags = (item.changes || []).filter(c => c.before != null && c.after != null).length}
                   <p class="font-semibold ui-text-strong break-words line-clamp-1">{item.latestLocalName || `${item.osmType}/${item.osmId}`}</p>
                   <p class="text-xs ui-text-subtle truncate">{item.osmType}/{item.osmId}</p>
-                  <div class="mt-1 flex flex-wrap gap-1">
-                    <span class="rounded-md ui-surface-soft px-2 py-1 text-[11px] font-semibold ui-text-muted">{item.totalEdits} {$t('admin.osm.list.edits')}</span>
+                  <div class="mt-1 flex flex-wrap items-center gap-1">
+                    {#if addedTags > 0}
+                      <span class="rounded-md bg-emerald-100/60 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-1.5 py-0.5 text-[11px] font-bold" title="Заполнено новых полей">+{addedTags}</span>
+                    {/if}
+                    {#if modifiedTags > 0}
+                      <span class="rounded-md bg-amber-100/60 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 text-[11px] font-bold" title="Изменено существующих полей">~{modifiedTags}</span>
+                    {/if}
+                    {#if removedTags > 0}
+                      <span class="rounded-md bg-rose-100/60 dark:bg-rose-900/40 text-rose-800 dark:text-rose-300 px-1.5 py-0.5 text-[11px] font-bold" title="Очищено полей">-{removedTags}</span>
+                    {/if}
+                    {#if addedTags === 0 && modifiedTags === 0 && removedTags === 0}
+                      <span class="rounded-md ui-surface-soft px-1.5 py-0.5 text-[11px] font-bold ui-text-muted">{$t('admin.osm.detail.noChanges') || 'Без изменений'}</span>
+                    {/if}
+                    <span class="ml-1 rounded-md ui-surface-soft px-2 py-0.5 text-[11px] font-medium ui-text-muted" title="Количество одобренных заявок от пользователей, образующих это состояние">Заявок: {item.totalEdits}</span>
                     {#if item.syncChangesetId}
-                      <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">#{item.syncChangesetId}</span>
+                      <span class="rounded-md ui-surface-info px-2 py-0.5 text-[11px] font-bold ui-text-info">#{item.syncChangesetId}</span>
                     {/if}
                   </div>
                 </UiTableCell>
