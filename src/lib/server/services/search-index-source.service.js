@@ -1,3 +1,5 @@
+const { getFeatureKindFromTagsJson } = require('../utils/building-feature-kind');
+
 const SEARCH_SOURCE_RAW_SELECT_FIELDS = `
   bc.osm_type AS osm_type,
   bc.osm_id AS osm_id,
@@ -177,6 +179,9 @@ function normalizeSearchSourceRow(rawRow) {
   }
 
   const tags = parseTagsJson(rawRow.tags_json);
+  if (getFeatureKindFromTagsJson(rawRow.tags_json) === 'building_part') {
+    return null;
+  }
   const name = pickFirstText(
     rawRow.local_name,
     tags.name,

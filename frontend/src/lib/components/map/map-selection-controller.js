@@ -1,6 +1,8 @@
 import {
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
+  getCurrentBuildingPartFillLayerIds,
+  getCurrentBuildingPartLineLayerIds,
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds
 } from '../../services/map/map-layer-utils.js';
@@ -32,7 +34,9 @@ export function createMapSelectionController({
     const activeRegions = getActiveRegions?.() || [];
     const buildingLayerIds = [
       ...getCurrentBuildingsLineLayerIds(activeRegions),
-      ...getCurrentBuildingsFillLayerIds(activeRegions)
+      ...getCurrentBuildingsFillLayerIds(activeRegions),
+      ...getCurrentBuildingPartLineLayerIds(activeRegions),
+      ...getCurrentBuildingPartFillLayerIds(activeRegions)
     ];
     if (buildingLayerIds.length === 0) return null;
     const features = map.queryRenderedFeatures(event.point, {

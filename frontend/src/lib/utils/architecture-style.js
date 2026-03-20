@@ -1,8 +1,15 @@
 import { get } from 'svelte/store';
-import { locale as activeLocale, translateNow } from '$lib/i18n/index';
-import en from '$lib/i18n/locales/en.json' with { type: 'json' };
-import ru from '$lib/i18n/locales/ru.json' with { type: 'json' };
-import { EMPTY_TEXT_TOKENS } from '$lib/utils/text';
+import { locale as activeLocale, translateNow } from '../i18n/index.js';
+import en from '../i18n/locales/en.json' with { type: 'json' };
+import ru from '../i18n/locales/ru.json' with { type: 'json' };
+import { EMPTY_TEXT_TOKENS } from './text.js';
+import {
+  STYLE_ALLOWED_REGION_PATTERNS,
+  STYLE_ALLOWED_REGIONS,
+  isArchitectureStyleAllowed
+} from './architecture-style-regions.js';
+
+export { extractMacroRegionCodeFromSlug } from './architecture-style-regions.js';
 
 const STYLE_KEYS = Object.freeze([
   'islamic',
@@ -18,6 +25,7 @@ const STYLE_KEYS = Object.freeze([
   'neoclassicism',
   'empire',
   'moorish_revival',
+  'oldrussian',
   'pseudo-russian',
   'eclectic',
   'georgian',
@@ -143,13 +151,35 @@ const ARCHITECTURE_STYLE_KEY_BY_LABEL_NORMALIZED = (() => {
   return map;
 })();
 
-export function getArchitectureStyleOptions(localeCode = null) {
+export function getArchitectureStyleOptions(localeCode = null, regionSlugs = [], overrides = []) {
   const resolvedLocaleCode = resolveLocaleCode(localeCode);
   return STYLE_KEYS
+    .filter((styleKey) => isArchitectureStyleAllowed(styleKey, regionSlugs, overrides))
     .map((value) => ({
       value,
       label: getStyleLabelByLocale(value, resolvedLocaleCode) || value
     }))
+    .sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
+}
+
+export function getArchitectureStyleDefaultRules(localeCode = null) {
+  const resolvedLocaleCode = resolveLocaleCode(localeCode);
+  return STYLE_KEYS
+    .map((value) => {
+      const macroRegions = Array.isArray(STYLE_ALLOWED_REGIONS[value])
+        ? [...STYLE_ALLOWED_REGIONS[value]]
+        : [];
+      const regionPatterns = Array.isArray(STYLE_ALLOWED_REGION_PATTERNS[value])
+        ? [...STYLE_ALLOWED_REGION_PATTERNS[value]]
+        : [];
+      return {
+        value,
+        label: getStyleLabelByLocale(value, resolvedLocaleCode) || value,
+        isGlobal: macroRegions.length === 0 && regionPatterns.length === 0,
+        macroRegions,
+        regionPatterns
+      };
+    })
     .sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
 }
 

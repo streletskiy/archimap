@@ -10,8 +10,10 @@
 - `src/lib/server/boot/server-runtime.routes.js`: route registration for API/system endpoints.
 - `src/lib/server/boot/*.boot.js`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
 - `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
+- `frontend/src/lib/components/ui/**`: generated `shadcn-svelte` primitives kept close to upstream.
+- `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
-- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
+- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
@@ -30,6 +32,7 @@
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
+- Shared UI composition follows `ui/** -> base/** -> shell/routes`; product code should not consume generated primitives directly.
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
@@ -55,6 +58,7 @@
   - `src/lib/server/services/admin/shared.js`: shared admin guards, parsers, and typed error helpers
   - `src/lib/server/services/admin/admin-settings.service.js`: email-preview, app-settings, data-settings, and region-sync orchestration
   - `src/lib/server/services/admin/admin-edits.service.js`: admin edit moderation, merge flows, and admin user detail queries
+  - `src/lib/server/services/style-region-overrides.service.js`: public/admin style-region override rule persistence and validation
 - Frontend map filter decomposition:
   - `frontend/src/lib/services/map/map-filter-pipeline.js`: filter lifecycle orchestration entrypoint for viewport events and status transitions
   - `frontend/src/lib/services/map/filter-request-planner.js`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping
@@ -65,11 +69,11 @@
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
   - `frontend/src/lib/components/map/map-selection-controller.js`: map selection, selected-feature highlight, and search-result click routing
   - `frontend/src/lib/components/map/map-region-layers-controller.js`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
-- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`) composed by `data-settings.service.js`.
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.js`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
 - Shared utilities: `src/lib/shared/**`.
 - Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/filterUrlState.js`, `frontend/src/lib/client/section-routes.js`.
-- Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and filter-tag management is isolated into a dedicated `Filters` tab instead of being embedded inside `Data`.
+- Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and the `Filters` tab contains both filter-tag allowlist management and DB-backed filter-preset CRUD.
 
 ## Security and auth points
 
@@ -99,6 +103,9 @@
 
 - Building base layers are region-scoped PMTiles layers (`<region>-fill`, `<region>-line`) and remain visible; custom rules do not hide or re-filter them directly.
 - UI filter state is layer-based (`buildingFilterLayers[]`): each layer carries `color`, `priority`, `mode` (`and|or|layer`), and `rules[]`.
+- Persisted preset state is DB-backed (`data_filter_presets`) and reuses the same layer/rule model as runtime map filters.
+- Runtime preset source of truth is backend-managed storage exposed through `GET /api/filter-presets`; frontend constants no longer store preset definitions.
+- Preset names support persisted localized values (`nameI18n`); map/admin UI resolves labels by active locale with `name` fallback.
 - Custom building filter renders through dedicated region-scoped highlight layers:
   - `<region>-filter-highlight-fill`
   - `<region>-filter-highlight-line`

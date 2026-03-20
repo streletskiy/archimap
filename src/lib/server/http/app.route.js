@@ -44,6 +44,7 @@ function registerAppRoutes(deps) {
     registrationEnabled,
     getRegistrationEnabled,
     dataSettingsService,
+    styleRegionOverridesService,
     getFilterTagKeysCached,
     getAllFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress
@@ -126,13 +127,13 @@ function registerAppRoutes(deps) {
   app.get('/api/data/regions/:regionId/pmtiles', async (req, res) => {
     const regionId = Number(req.params.regionId);
     if (!Number.isInteger(regionId) || regionId <= 0) {
-      return res.status(400).json({ error: 'Некорректный идентификатор региона' });
+      return res.status(400).json({ code: 'ERR_INVALID_REGION_ID', error: 'Invalid region id' });
     }
     const region = dataSettingsService
       ? await dataSettingsService.getRegionById(regionId)
       : null;
     if (!region) {
-      return res.status(404).json({ error: 'Регион не найден' });
+      return res.status(404).json({ code: 'ERR_REGION_NOT_FOUND', error: 'Region not found' });
     }
     const pmtilesPath = resolveExistingRegionPmtilesPath(dataDir, region)
       || resolveRegionPmtilesPath(dataDir, region);
@@ -154,7 +155,35 @@ function registerAppRoutes(deps) {
         cacheControl: 'public, max-age=300'
       });
     } catch {
-      return res.status(500).json({ error: 'Не удалось получить список ключей OSM тегов' });
+      return res.status(500).json({ code: 'ERR_FILTER_TAG_KEYS_LOAD_FAILED', error: 'Failed to load OSM tag keys' });
+    }
+  });
+
+  app.get('/api/filter-presets', publicApiRateLimiter, async (req, res) => {
+    try {
+      const items = dataSettingsService
+        ? await dataSettingsService.getFilterPresetsForRuntime()
+        : [];
+      return sendCachedJson(req, res, {
+        items: Array.isArray(items) ? items : []
+      }, {
+        cacheControl: 'public, max-age=60'
+      });
+    } catch {
+      return res.status(500).json({ code: 'ERR_FILTER_PRESETS_LOAD_FAILED', error: 'Failed to load filter presets' });
+    }
+  });
+
+  app.get('/api/style-overrides', publicApiRateLimiter, async (req, res) => {
+    try {
+      const items = styleRegionOverridesService
+        ? await styleRegionOverridesService.listPublicOverrides()
+        : [];
+      return sendCachedJson(req, res, { items }, {
+        cacheControl: 'public, max-age=60'
+      });
+    } catch {
+      return res.status(500).json({ code: 'ERR_STYLE_OVERRIDES_LOAD_FAILED', error: 'Failed to load public architecture style overrides' });
     }
   });
 

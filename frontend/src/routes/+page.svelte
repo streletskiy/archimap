@@ -1,6 +1,5 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-  import { page } from '$app/stores';
   import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
   import SearchModal from '$lib/components/shell/SearchModal.svelte';
   import { t } from '$lib/i18n/index';
@@ -16,7 +15,6 @@
   const buildingDetailsManager = createBuildingDetailsManager();
   const searchManager = createSearchManager();
   const urlStateManager = createUrlStateManager({
-    pageStore: page,
     onApplyBuilding: (building) => buildingDetailsManager.selectBuilding(building),
     onClearBuildingSelection: () => buildingDetailsManager.clearSelection(),
     onApplyFilters: (filters) => setBuildingFilterLayers(filters),
@@ -24,14 +22,41 @@
   });
 
   let MapCanvasComponent = null;
+  let urlStateMounted = false;
+  let removePopstateListener = null;
+
+  // Keep URL-state sync local to the map shell so query updates do not force
+  // route-level rerenders while portal-based UI is open.
+  function applyUrlStateFromLocation() {
+    if (!urlStateMounted) return;
+    urlStateManager.applyUrlStateToUi({
+      mapReady: $mapReady,
+      buildingModalOpen: $buildingModalOpen,
+      selectedBuilding: $selectedBuilding,
+      currentFilters: $buildingFilterLayers
+    });
+  }
 
   onMount(async () => {
     searchManager.start();
+    urlStateMounted = true;
+    const onPopState = () => {
+      applyUrlStateFromLocation();
+    };
+    window.addEventListener('popstate', onPopState);
+    removePopstateListener = () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+    queueMicrotask(() => {
+      applyUrlStateFromLocation();
+    });
     const module = await import('$lib/components/map/MapCanvas.svelte');
     MapCanvasComponent = module.default;
   });
 
   onDestroy(() => {
+    removePopstateListener?.();
+    removePopstateListener = null;
     searchManager.destroy();
     urlStateManager.destroy();
     buildingDetailsManager.destroy();
@@ -69,32 +94,35 @@
     await buildingDetailsManager.saveEdit(event?.detail);
   }
 
-  $: {
-    $page;
+  $: if (urlStateMounted) {
     $mapReady;
-    urlStateManager.applyUrlStateToUi({
+    $buildingModalOpen;
+    $selectedBuilding;
+    $buildingFilterLayers;
+    applyUrlStateFromLocation();
+  }
+
+  $: if (urlStateMounted) {
+    urlStateManager.syncBuildingSelection({
       mapReady: $mapReady,
       buildingModalOpen: $buildingModalOpen,
-      selectedBuilding: $selectedBuilding,
-      currentFilters: $buildingFilterLayers
+      selectedBuilding: $selectedBuilding
     });
   }
 
-  $: urlStateManager.syncBuildingSelection({
-    mapReady: $mapReady,
-    buildingModalOpen: $buildingModalOpen,
-    selectedBuilding: $selectedBuilding
-  });
+  $: if (urlStateMounted) {
+    urlStateManager.syncCamera({
+      mapReady: $mapReady,
+      mapCenter: $mapCenter,
+      mapZoom: $mapZoom
+    });
+  }
 
-  $: urlStateManager.syncCamera({
-    mapReady: $mapReady,
-    mapCenter: $mapCenter,
-    mapZoom: $mapZoom
-  });
-
-  $: urlStateManager.syncFilters({
-    currentFilters: $buildingFilterLayers
-  });
+  $: if (urlStateMounted) {
+    urlStateManager.syncFilters({
+      currentFilters: $buildingFilterLayers
+    });
+  }
 </script>
 
 {#if MapCanvasComponent}

@@ -16,7 +16,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
   }
 
   function mergeLocalInfoForReassign(sourceRow, targetRow, { force = false } = {}) {
-    const fields = ['name', 'style', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+    const fields = ['name', 'style', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
     const conflicts = [];
     const merged = {};
 
@@ -43,28 +43,28 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
   async function reassignUserEdit(editId, target, options = {}) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) {
-      throw new Error('Некорректный идентификатор правки');
+      throw new Error('Invalid edit id');
     }
 
     const targetOsmType = String(target?.osmType || '').trim();
     const targetOsmId = Number(target?.osmId);
     if (!['way', 'relation'].includes(targetOsmType) || !Number.isInteger(targetOsmId) || targetOsmId <= 0) {
-      throw new Error('Некорректный идентификатор целевого здания');
+      throw new Error('Invalid target building id');
     }
 
     const actor = String(options.actor || '').trim() || 'admin';
     const force = Boolean(options.force);
     const item = await getUserEditDetailsById(id);
     if (!item) {
-      throw new Error('Правка не найдена');
+      throw new Error('Edit not found');
     }
     if (!REASSIGNABLE_EDIT_STATUSES.has(item.status)) {
-      throw new Error('Эту правку нельзя переназначить');
+      throw new Error('This edit cannot be reassigned');
     }
 
     const targetContour = await getOsmContourRow(targetOsmType, targetOsmId);
     if (!targetContour) {
-      throw new Error('Целевое здание не найдено в локальной базе контуров');
+      throw new Error('Target building was not found in the local contours database');
     }
 
     if (item.osmType === targetOsmType && Number(item.osmId) === targetOsmId) {
@@ -93,23 +93,26 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
 
     const sourceMerged = await getMergedInfoRow(item.osmType, item.osmId);
     if (!sourceMerged) {
-      throw new Error('Локальные объединённые данные для этой правки не найдены');
+      throw new Error('Merged local data for this edit was not found');
     }
     const targetMerged = await getMergedInfoRow(targetOsmType, targetOsmId);
     const { merged, conflicts } = mergeLocalInfoForReassign(sourceMerged, targetMerged, { force });
     if (conflicts.length > 0) {
-      throw new Error(`Целевое здание уже содержит конфликтующие локальные поля: ${conflicts.join(', ')}`);
+      throw new Error(`Target building already contains conflicting local fields: ${conflicts.join(', ')}`);
     }
 
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
+          material = excluded.material,
+          material_concrete = excluded.material_concrete,
+          colour = excluded.colour,
           levels = excluded.levels,
           year_built = excluded.year_built,
           architect = excluded.architect,
@@ -122,6 +125,9 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
         targetOsmId,
         merged.name ?? null,
         merged.style ?? null,
+        merged.material ?? null,
+        merged.material_concrete ?? null,
+        merged.colour ?? null,
         merged.levels ?? null,
         merged.year_built ?? null,
         merged.architect ?? null,
@@ -154,7 +160,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
   async function deleteUserEdit(editId) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) {
-      throw new Error('Некорректный идентификатор правки');
+      throw new Error('Invalid edit id');
     }
 
     const tx = db.transaction(async () => {
@@ -166,7 +172,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
       `).get(id);
 
       if (!row) {
-        const error = new Error('Правка не найдена');
+        const error = new Error('Edit not found');
         error.code = 'EDIT_NOT_FOUND';
         throw error;
       }
@@ -176,7 +182,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
       if (deletesMergedLocal) {
         const otherMergedCount = await countMergedEditsForTarget(row.osm_type, row.osm_id, id);
         if (otherMergedCount > 0) {
-          const error = new Error('Нельзя полностью удалить принятую правку, пока у здания есть другие accepted/partially_accepted правки: локальные merged-данные уже общие.');
+          const error = new Error('Cannot fully delete an accepted edit while the building still has other accepted/partially_accepted edits because merged local data is already shared.');
           error.code = 'EDIT_DELETE_SHARED_MERGED_STATE';
           throw error;
         }
@@ -193,7 +199,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
       `).run(id);
 
       if (Number(result?.changes || 0) === 0) {
-        const error = new Error('Правка не найдена');
+        const error = new Error('Edit not found');
         error.code = 'EDIT_NOT_FOUND';
         throw error;
       }

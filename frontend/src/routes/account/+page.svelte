@@ -6,14 +6,32 @@
   import { fade } from 'svelte/transition';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { buildAccountUrl, buildInfoUrl, resolveAccountTabFromUrl } from '$lib/client/section-routes';
+  import {
+    UiBadge,
+    UiButton,
+    UiDateRangePicker,
+    UiInput,
+    UiLabel,
+    UiScrollArea,
+    UiSelect,
+    UiSwitch,
+    UiTable,
+    UiTableBody,
+    UiTableCell,
+    UiTableHead,
+    UiTableHeader,
+    UiTableRow,
+    UiTabsNav
+  } from '$lib/components/base';
+  import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
   import { getRuntimeConfig } from '$lib/services/config';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
-  import { t, translateNow } from '$lib/i18n/index';
-  import { getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, parseEditKey } from '$lib/utils/edit-ui';
+  import { locale, t, translateNow } from '$lib/i18n/index';
+  import { getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, matchesUiDateRange, parseEditKey } from '$lib/utils/edit-ui';
   import { focusMapOnGeometry, getGeometryCenter } from '$lib/utils/map-geometry';
 
   const LIGHT = '/styles/positron-custom.json';
@@ -26,6 +44,7 @@
   const MAP_PIN_INK = '#342700';
 
   let activeTab = resolveAccountTabFromUrl(get(page).url);
+  let tabNavValue = activeTab;
   let accountUrlSyncBusy = false;
   let firstName = '';
   let lastName = '';
@@ -43,7 +62,13 @@
   let editsFilter = 'all';
   let editsLimit = 200;
   let editsQuery = '';
-  let editsDate = '';
+  let editsDateRange = undefined;
+  let editsFilterItems = [];
+  const editsLimitItems = [
+    { value: 100, label: '100' },
+    { value: 200, label: '200' },
+    { value: 500, label: '500' }
+  ];
 
   let selectedEdit = null;
   let detailLoading = false;
@@ -384,6 +409,7 @@
   async function activateTab(tab) {
     if (activeTab === tab) return;
     activeTab = tab;
+    tabNavValue = tab;
     await tick();
     if (tab === 'edits') {
       await ensureMap();
@@ -402,15 +428,22 @@
     await replaceAccountUrl(tab);
   }
 
+  async function handleTabNavChange(event) {
+    const nextTab = String(event.detail?.value || '').trim();
+    if (!nextTab) {
+      tabNavValue = activeTab;
+      return;
+    }
+    await switchTab(nextTab);
+  }
+
   $: {
     const q = String(editsQuery || '').trim().toLowerCase();
-    const date = String(editsDate || '').trim();
     visibleEdits = edits.filter((item) => {
       const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`.toLowerCase();
       const address = getEditAddress(item).toLowerCase();
-      const updatedAt = String(item?.updatedAt || '');
       if (q && !address.includes(q) && !osmKey.includes(q)) return false;
-      if (date && !updatedAt.startsWith(date)) return false;
+      if (!matchesUiDateRange(item?.updatedAt, editsDateRange)) return false;
       return true;
     });
     editIdByKey.clear();
@@ -429,12 +462,20 @@
 
   $: accountPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
   $: accountUserLabel = `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim() || String(email || '').trim() || '-';
-
+  $: editsFilterItems = [
+    { value: 'all', label: $t('account.edits.filterAll') },
+    { value: 'pending', label: $t('account.edits.filterPending') },
+    { value: 'accepted', label: $t('account.edits.filterAccepted') },
+    { value: 'partially_accepted', label: $t('account.edits.filterPartiallyAccepted') },
+    { value: 'rejected', label: $t('account.edits.filterRejected') },
+    { value: 'superseded', label: $t('account.edits.filterSuperseded') }
+  ];
   onMount(() => {
     const unsubscribePage = page.subscribe(($pageState) => {
       if (accountUrlSyncBusy) return;
       const nextTab = resolveAccountTabFromUrl($pageState.url);
       void (async () => {
+        tabNavValue = nextTab;
         await activateTab(nextTab);
         await replaceAccountUrl(nextTab);
       })();
@@ -460,8 +501,8 @@
 {:else}
   <PortalFrame eyebrow="Archimap" title={$t('account.title')} description={$t('account.subtitle')}>
     <svelte:fragment slot="meta">
-      <span class="ui-chip"><strong>{$t('account.profile.email')}</strong>{email || '-'}</span>
-      <span class="ui-chip"><strong>{$t('account.tabs.edits')}</strong>{edits.length}</span>
+      <UiBadge variant="default"><strong>{$t('account.profile.email')}</strong>{email || '-'}</UiBadge>
+      <UiBadge variant="accent"><strong>{$t('account.tabs.edits')}</strong>{edits.length}</UiBadge>
     </svelte:fragment>
 
     <svelte:fragment slot="lead">
@@ -481,11 +522,64 @@
       </div>
     </svelte:fragment>
 
-    <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist"><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'settings'} on:click={() => switchTab('settings')}>{$t('account.tabs.settings')}</button></li><li><button type="button" class="ui-tab-btn" class:ui-tab-btn-active={activeTab === 'edits'} on:click={() => switchTab('edits')}>{$t('account.tabs.edits')}</button></li></ul>
+    <UiTabsNav
+      bind:value={tabNavValue}
+      items={[
+        { value: 'settings', label: $t('account.tabs.settings') },
+        { value: 'edits', label: $t('account.tabs.edits') }
+      ]}
+      onchange={handleTabNavChange}
+    />
     {#if activeTab === 'settings'}
       <div class="mt-4 grid gap-4 xl:grid-cols-3">
-          <section class="rounded-2xl border ui-border ui-surface-muted p-4"><h3 class="text-base font-bold ui-text-strong">{$t('account.profile.title')}</h3><form class="mt-4 space-y-4" on:submit={saveProfile}><div><label for="account-first-name" class="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.firstName')}</label><input id="account-first-name" class="ui-field ui-surface-base" bind:value={firstName} /></div><div><label for="account-last-name" class="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.lastName')}</label><input id="account-last-name" class="ui-field ui-surface-base" bind:value={lastName} /></div><div><label for="account-email" class="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.email')}</label><input id="account-email" class="ui-field ui-surface-base ui-text-subtle" readonly value={email} /></div><button type="submit" class="ui-btn ui-btn-primary">{$t('account.profile.save')}</button></form>{#if profileStatus}<p class="mt-3 text-sm ui-text-muted">{profileStatus}</p>{/if}</section>
-          <section class="rounded-2xl border ui-border ui-surface-muted p-4"><h3 class="text-base font-bold ui-text-strong">{$t('account.security.title')}</h3><form class="mt-4 space-y-4" on:submit={changePassword}><input type="password" class="ui-field ui-surface-base" placeholder={$t('account.security.currentPassword')} bind:value={currentPassword} required /><input type="password" class="ui-field ui-surface-base" placeholder={$t('account.security.newPassword')} bind:value={newPassword} required /><input type="password" class="ui-field ui-surface-base" placeholder={$t('account.security.repeatPassword')} bind:value={confirmNewPassword} required /><button type="submit" class="ui-btn ui-btn-outline-brand">{$t('account.security.change')}</button></form>{#if passwordStatus}<p class="mt-3 text-sm ui-text-muted">{passwordStatus}</p>{/if}</section>
+          <section class="rounded-2xl border ui-border ui-surface-muted p-4">
+            <h3 class="text-base font-bold ui-text-strong">{$t('account.profile.title')}</h3>
+            <form class="mt-4 space-y-4" on:submit={saveProfile}>
+              <div>
+                <UiLabel for="account-first-name" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.firstName')}</UiLabel>
+                <UiInput id="account-first-name" bind:value={firstName} />
+              </div>
+              <div>
+                <UiLabel for="account-last-name" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.lastName')}</UiLabel>
+                <UiInput id="account-last-name" bind:value={lastName} />
+              </div>
+              <div>
+                <UiLabel for="account-email" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.email')}</UiLabel>
+                <UiInput id="account-email" value={email} readonly className="ui-text-subtle" />
+              </div>
+              <UiButton type="submit">{$t('account.profile.save')}</UiButton>
+            </form>
+            {#if profileStatus}
+              <p class="mt-3 text-sm ui-text-muted">{profileStatus}</p>
+            {/if}
+          </section>
+          <section class="rounded-2xl border ui-border ui-surface-muted p-4">
+            <h3 class="text-base font-bold ui-text-strong">{$t('account.security.title')}</h3>
+            <form class="mt-4 space-y-4" on:submit={changePassword}>
+              <UiInput
+                type="password"
+                placeholder={$t('account.security.currentPassword')}
+                bind:value={currentPassword}
+                required
+              />
+              <UiInput
+                type="password"
+                placeholder={$t('account.security.newPassword')}
+                bind:value={newPassword}
+                required
+              />
+              <UiInput
+                type="password"
+                placeholder={$t('account.security.repeatPassword')}
+                bind:value={confirmNewPassword}
+                required
+              />
+              <UiButton type="submit" variant="outline">{$t('account.security.change')}</UiButton>
+            </form>
+            {#if passwordStatus}
+              <p class="mt-3 text-sm ui-text-muted">{passwordStatus}</p>
+            {/if}
+          </section>
           <section class="rounded-2xl border ui-border ui-surface-muted p-4">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.notifications.title')}</h3>
             <div class="mt-4 space-y-4">
@@ -494,30 +588,21 @@
                   <p class="text-sm font-semibold ui-text-strong">{$t('account.notifications.commentsTitle')}</p>
                   <p class="mt-1 text-sm ui-text-subtle">{$t('account.notifications.commentsText')}</p>
                 </div>
-                <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
-                  <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="ui-faux-switch" aria-hidden="true"></div>
-                </label>
+                <UiSwitch checked={false} disabled aria-label={$t('account.notifications.commentsTitle')} />
               </div>
               <div class="flex items-start justify-between gap-3 rounded-2xl border ui-border ui-surface-base p-4">
                 <div>
                   <p class="text-sm font-semibold ui-text-strong">{$t('account.notifications.moderationTitle')}</p>
                   <p class="mt-1 text-sm ui-text-subtle">{$t('account.notifications.moderationText')}</p>
                 </div>
-                <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
-                  <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="ui-faux-switch" aria-hidden="true"></div>
-                </label>
+                <UiSwitch checked={false} disabled aria-label={$t('account.notifications.moderationTitle')} />
               </div>
               <div class="flex items-start justify-between gap-3 rounded-2xl border ui-border ui-surface-base p-4">
                 <div>
                   <p class="text-sm font-semibold ui-text-strong">{$t('account.notifications.weeklyTitle')}</p>
                   <p class="mt-1 text-sm ui-text-subtle">{$t('account.notifications.weeklyText')}</p>
                 </div>
-                <label class="relative inline-flex cursor-not-allowed items-center opacity-60">
-                  <input type="checkbox" class="peer sr-only" disabled aria-disabled="true" />
-                  <div class="ui-faux-switch" aria-hidden="true"></div>
-                </label>
+                <UiSwitch checked={false} disabled aria-label={$t('account.notifications.weeklyTitle')} />
               </div>
             </div>
           </section>
@@ -531,47 +616,105 @@
           </section>
       </div>
     {:else}
-      <div class="mt-4 grid gap-4 overflow-x-hidden" class:lg:grid-cols-[1.1fr_1fr]={accountPaneOpen} class:lg:grid-cols-1={!accountPaneOpen}>
-        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3">
-          <div class="grid gap-2 lg:grid-cols-[1.6fr_repeat(2,minmax(0,1fr))]"><input class="ui-field" type="search" placeholder={$t('account.edits.searchPlaceholder')} bind:value={editsQuery} /><input class="ui-field" type="date" bind:value={editsDate} /><div class="flex gap-2"><select class="ui-field ui-field-xs" bind:value={editsFilter} on:change={loadEdits}><option value="all">{$t('account.edits.filterAll')}</option><option value="pending">{$t('account.edits.filterPending')}</option><option value="accepted">{$t('account.edits.filterAccepted')}</option><option value="partially_accepted">{$t('account.edits.filterPartiallyAccepted')}</option><option value="rejected">{$t('account.edits.filterRejected')}</option><option value="superseded">{$t('account.edits.filterSuperseded')}</option></select><select class="ui-field ui-field-xs" bind:value={editsLimit} on:change={loadEdits}><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select><button type="button" class="ui-btn ui-btn-secondary ui-btn-xs" on:click={loadEdits}>{$t('common.refresh')}</button></div></div>
-          <p class="text-sm ui-text-muted">{editsStatus}</p>
-          <div class="h-[36vh] min-h-[260px] overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
-          <div class="overflow-x-auto rounded-xl border ui-border">
-            <table class="min-w-full text-sm">
-              <thead>
-                <tr class="border-b ui-border text-left ui-text-muted">
-                  <th class="px-3 py-2">{$t('account.edits.tableObject')}</th>
-                  <th class="px-3 py-2">{$t('account.edits.tableAuthor')}</th>
-                  <th class="px-3 py-2">{$t('account.edits.tableStatus')}</th>
-                  <th class="px-3 py-2">{$t('account.edits.tableChanges')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if editsLoading}
-                  <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('account.edits.loading')}</td></tr>
-                {:else if visibleEdits.length===0}
-                  <tr><td colspan="4" class="px-3 py-3 ui-text-subtle">{$t('account.edits.empty')}</td></tr>
-                {:else}
-                  {#each visibleEdits as it (`${it.id || it.editId}`)}
-                        {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
-                    {@const counters = getChangeCounters(it.changes)}
-                    <tr class="cursor-pointer border-b ui-border-soft ui-hover-surface" on:click={() => openEdit(it.id || it.editId)}>
-                      <td class="px-3 py-2"><p class="font-semibold ui-text-strong">{getEditAddress(it)}</p><p class="text-xs ui-text-subtle">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p><div class="mt-1 flex flex-wrap gap-1">{#if it.orphaned}<span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>{/if}{#if !it.osmPresent && !it.orphaned}<span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>{/if}{#if it.sourceOsmChanged}<span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>{/if}</div>{#if String(it?.adminComment || '').trim()}<p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>{/if}</td>
-                      <td class="px-3 py-2">{it.updatedBy || '-'}</td>
-                      <td class="px-3 py-2"><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span></td>
-          <td class="px-3 py-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">{counters.total} {$t('account.edits.total')}</span>{#if counters.created > 0}<span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">+{counters.created} {$t('account.edits.created')}</span>{/if}{#if counters.modified > 0}<span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body">~{counters.modified} {$t('account.edits.modified')}</span>{/if}</div></td>
-                    </tr>
-                  {/each}
-                {/if}
-              </tbody>
-            </table>
+      <div class="mt-4 grid gap-4 overflow-hidden min-h-0" class:lg:grid-cols-[1.1fr_1fr]={accountPaneOpen} class:lg:grid-cols-1={!accountPaneOpen}>
+        <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden">
+          <div class="ui-filter-toolbar ui-filter-toolbar--account-edits">
+            <UiInput type="search" placeholder={$t('account.edits.searchPlaceholder')} bind:value={editsQuery} />
+            <UiDateRangePicker
+              value={editsDateRange}
+              locale={$locale}
+              placeholder={$t('account.edits.dateRangePlaceholder')}
+              calendarLabel={$t('account.edits.dateRangeLabel')}
+              clearLabel={$t('common.clear')}
+              onchange={(event) => (editsDateRange = event.detail.value)}
+            />
+            <UiSelect items={editsFilterItems} bind:value={editsFilter} onchange={loadEdits} />
+            <div class="ui-filter-toolbar__group ui-filter-toolbar__group--limit">
+              <UiSelect items={editsLimitItems} bind:value={editsLimit} onchange={loadEdits} />
+              <UiButton
+                type="button"
+                variant="secondary"
+                className="w-full min-h-11 rounded-[1rem] px-4 py-3 text-sm sm:w-auto"
+                onclick={loadEdits}
+              >
+                {$t('common.refresh')}
+              </UiButton>
+            </div>
           </div>
+          <p class="text-sm ui-text-muted">{editsStatus}</p>
+          <div class="h-[36vh] min-h-[260px] flex-shrink-0 overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
+          <UiScrollArea className="flex-1 min-h-0 rounded-xl border ui-border">
+            <UiTable containerClassName="ui-surface-base">
+            <UiTableHeader>
+              <UiTableRow className="hover:[&>th]:bg-transparent">
+                <UiTableHead>{$t('account.edits.tableObject')}</UiTableHead>
+                <UiTableHead>{$t('account.edits.tableAuthor')}</UiTableHead>
+                <UiTableHead>{$t('account.edits.tableStatus')}</UiTableHead>
+                <UiTableHead>{$t('account.edits.tableChanges')}</UiTableHead>
+              </UiTableRow>
+            </UiTableHeader>
+            <UiTableBody>
+              {#if editsLoading}
+                <UiTableRow>
+                  <UiTableCell colspan="4" className="ui-text-subtle">{$t('account.edits.loading')}</UiTableCell>
+                </UiTableRow>
+              {:else if visibleEdits.length===0}
+                <UiTableRow>
+                  <UiTableCell colspan="4" className="ui-text-subtle">{$t('account.edits.empty')}</UiTableCell>
+                </UiTableRow>
+              {:else}
+                {#each visibleEdits as it (`${it.id || it.editId}`)}
+                  {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
+                  {@const counters = getChangeCounters(it.changes)}
+                  <UiTableRow
+                    className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
+                    on:click={() => openEdit(it.id || it.editId)}
+                  >
+                    <UiTableCell className="min-w-0">
+                      <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(it)}</p>
+                      <p class="text-xs ui-text-subtle truncate">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>
+                      <div class="mt-1 flex flex-wrap gap-1">
+                        {#if it.orphaned}
+                          <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>
+                        {/if}
+                        {#if !it.osmPresent && !it.orphaned}
+                          <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
+                        {/if}
+                        {#if it.sourceOsmChanged}
+                          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>
+                        {/if}
+                      </div>
+                      {#if String(it?.adminComment || '').trim()}
+                        <p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>
+                      {/if}
+                    </UiTableCell>
+                    <UiTableCell>{it.updatedBy || '-'}</UiTableCell>
+                    <UiTableCell>
+                      <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span>
+                    </UiTableCell>
+                    <UiTableCell>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">{counters.total} {$t('account.edits.total')}</span>
+                        {#if counters.created > 0}
+                          <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">+{counters.created} {$t('account.edits.created')}</span>
+                        {/if}
+                        {#if counters.modified > 0}
+                          <span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body">~{counters.modified} {$t('account.edits.modified')}</span>
+                        {/if}
+                      </div>
+                    </UiTableCell>
+                  </UiTableRow>
+                {/each}
+              {/if}
+            </UiTableBody>
+          </UiTable>
+          </UiScrollArea>
         </section>
         {#if detailPaneVisible}
-        <section class="space-y-3 rounded-2xl border ui-border ui-surface-base p-3" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
+        <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.edits.detailTitle')}</h3>
-            <button type="button" class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close" aria-label={$t('account.edits.closeDetail')} on:click={closeEditPanel}><svg class="ui-close-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6L18 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /><path d="M18 6L6 18" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" /></svg></button>
+            <UiButton type="button" variant="secondary" size="close" aria-label={$t('account.edits.closeDetail')} onclick={closeEditPanel}><CloseIcon class="ui-close-icon" /></UiButton>
           </div>
           {#if detailLoading}
             <p class="text-sm ui-text-subtle">{$t('account.edits.loading')}</p>
@@ -593,7 +736,10 @@
                 {/if}
               </div>
             {/if}
-            <div class="max-h-[42vh] space-y-2 overflow-auto rounded-xl border ui-border p-2">
+            <UiScrollArea
+              className="max-h-[42vh] rounded-xl border ui-border"
+              contentClassName="space-y-2 p-2"
+            >
               {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
                 <p class="text-sm ui-text-subtle">{$t('account.edits.noChanges')}</p>
               {:else}
@@ -601,7 +747,7 @@
                   <div class="rounded-lg border ui-border ui-surface-muted p-2"><p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p><p class="text-xs ui-text-muted"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
                 {/each}
               {/if}
-            </div>
+            </UiScrollArea>
             {#if detailStatus}<p class="text-sm ui-text-muted">{detailStatus}</p>{/if}
           {/if}
         </section>

@@ -7,6 +7,8 @@ const Database = require('better-sqlite3');
 
 const migration = require('../../db/migrations/003_data_regions.migration.js');
 const filterTagAllowlistMigration = require('../../db/migrations/005_filter_tag_allowlist.migration.js');
+const filterPresetsMigration = require('../../db/migrations/011_filter_presets.migration.js');
+const filterPresetNameI18nMigration = require('../../db/migrations/012_filter_preset_name_i18n.migration.js');
 const {
   createDataSettingsService,
   buildRegionPmtilesFileName,
@@ -15,11 +17,14 @@ const {
   resolveExistingRegionPmtilesPath
 } = require('../../src/lib/server/services/data-settings.service');
 const { DEFAULT_FILTER_TAG_ALLOWLIST } = require('../../src/lib/server/services/filter-tags.service');
+const { DEFAULT_FILTER_PRESETS } = require('../../src/lib/server/services/filter-presets-defaults');
 
 function createTestDb() {
   const db = new Database(':memory:');
   migration.up(db);
   filterTagAllowlistMigration.up(db);
+  filterPresetsMigration.up(db);
+  filterPresetNameI18nMigration.up(db);
   return db;
 }
 
@@ -236,6 +241,115 @@ test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () 
   assert.equal(saved.updatedBy, 'tester@example.com');
 });
 
+test('filter preset defaults are bootstrapped for admin/runtime payloads', async () => {
+  const db = createTestDb();
+  const service = createService({ db });
+
+  const adminPresets = await service.getFilterPresetsForAdmin();
+  assert.equal(adminPresets.source, 'db');
+  assert.equal(Array.isArray(adminPresets.items), true);
+  assert.equal(adminPresets.items.length, DEFAULT_FILTER_PRESETS.length);
+
+  const byKey = new Map(adminPresets.items.map((item) => [item.key, item]));
+  assert.equal(byKey.has('building-levels'), true);
+  assert.equal(byKey.has('building-material'), true);
+  assert.ok(Array.isArray(byKey.get('building-levels')?.layers));
+  assert.ok(byKey.get('building-levels')?.layers.length > 0);
+  assert.equal(byKey.get('building-levels')?.nameI18n?.en, 'Building levels');
+  assert.equal(byKey.get('building-levels')?.nameI18n?.ru, 'Этажность');
+
+  const runtimePresets = await service.getFilterPresetsForRuntime();
+  assert.equal(runtimePresets.length, DEFAULT_FILTER_PRESETS.length);
+  assert.deepEqual(
+    runtimePresets.map((item) => item.key).sort(),
+    DEFAULT_FILTER_PRESETS.map((item) => item.key).sort()
+  );
+});
+
+test('filter preset save/update/delete flow keeps stable key and normalized layers', async () => {
+  const db = createTestDb();
+  const service = createService({ db });
+
+  const created = await service.saveFilterPreset({
+    key: 'roof-shape',
+    name: 'Roof shape',
+    nameI18n: {
+      en: 'Roof shape',
+      ru: 'Форма крыши'
+    },
+    description: 'Highlights roof forms',
+    layers: [
+      {
+        id: 'layer-a',
+        color: '#93c5fd',
+        mode: 'layer',
+        rules: [
+          { key: 'roof:shape', op: 'equals', value: 'gabled' }
+        ]
+      }
+    ]
+  }, 'preset-admin@example.com');
+
+  assert.ok(Number(created?.id || 0) > 0);
+  assert.equal(created.key, 'roof-shape');
+  assert.equal(created.name, 'Roof shape');
+  assert.equal(created.nameI18n?.en, 'Roof shape');
+  assert.equal(created.nameI18n?.ru, 'Форма крыши');
+  assert.equal(created.updatedBy, 'preset-admin@example.com');
+  assert.deepEqual(created.layers, [
+    {
+      id: 'layer-a',
+      color: '#93c5fd',
+      priority: 0,
+      mode: 'layer',
+      rules: [
+        { key: 'roof:shape', op: 'equals', value: 'gabled' }
+      ]
+    }
+  ]);
+
+  const updated = await service.saveFilterPreset({
+    id: created.id,
+    key: 'roof-shape',
+    nameI18n: {
+      en: 'Roof shape updated',
+      ru: 'Форма крыши (обновлено)'
+    },
+    description: '',
+    layers: [
+      {
+        id: 'layer-b',
+        color: '#fca5a5',
+        mode: 'layer',
+        rules: [
+          { key: 'roof:shape', op: 'equals', value: 'flat' }
+        ]
+      },
+      {
+        id: 'layer-c',
+        color: '#86efac',
+        mode: 'layer',
+        rules: [
+          { key: 'roof:shape', op: 'equals', value: 'hipped' }
+        ]
+      }
+    ]
+  }, 'preset-admin@example.com');
+
+  assert.equal(updated.id, created.id);
+  assert.equal(updated.key, 'roof-shape');
+  assert.equal(updated.name, 'Roof shape updated');
+  assert.equal(updated.nameI18n?.en, 'Roof shape updated');
+  assert.equal(updated.nameI18n?.ru, 'Форма крыши (обновлено)');
+  assert.equal(updated.layers.length, 2);
+  assert.equal(updated.layers[0].priority, 0);
+  assert.equal(updated.layers[1].priority, 1);
+
+  const deleted = await service.deleteFilterPresetById(created.id);
+  assert.equal(deleted.id, created.id);
+  assert.equal(deleted.key, 'roof-shape');
+});
+
 test('saveRegion allows renaming existing region while preserving id', async () => {
   const db = createTestDb();
   const service = createService({
@@ -393,7 +507,7 @@ test('legacy unresolved regions stay unresolved until manual extract selection',
 
   await assert.rejects(
     service.createQueuedRun(legacy.id, 'manual', 'tester'),
-    /ручной выбор canonical extract/i
+    /manual canonical extract selection/i
   );
 });
 

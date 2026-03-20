@@ -205,24 +205,24 @@ function createRegionsDomain(context = {}) {
 
     const errors = [];
     if (hasLegacySourceValueField) {
-      errors.push('Поле sourceValue больше не поддерживается. Используйте searchQuery.');
+      errors.push('The sourceValue field is no longer supported. Use searchQuery instead.');
     }
     if (sourceTypeRaw === 'extract_query') {
-      errors.push('sourceType=extract_query больше не поддерживается. Используйте sourceType=extract.');
+      errors.push('sourceType=extract_query is no longer supported. Use sourceType=extract instead.');
     } else if (next.sourceType !== 'extract') {
-      errors.push('Для v2 поддерживается только sourceType=extract');
+      errors.push('Only sourceType=extract is supported in v2');
     }
     if (!next.extractSource || !next.extractId) {
-      errors.push('Выберите canonical extract перед сохранением региона');
+      errors.push('Select a canonical extract before saving the region');
     }
     if (!next.name) {
-      errors.push('Укажите название региона');
+      errors.push('Region name is required');
     }
     if (!next.slug) {
-      errors.push('Не удалось сформировать slug региона');
+      errors.push('Failed to generate region slug');
     }
     if (!next.sourceLayer) {
-      errors.push('Укажите source layer для PMTiles');
+      errors.push('PMTiles source layer is required');
     }
 
     return {
@@ -236,10 +236,10 @@ function createRegionsDomain(context = {}) {
     const regionId = Number(input?.id || 0);
     const existing = regionId > 0 ? await getRegionById(regionId) : null;
     if (regionId > 0 && !existing) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
     if (existing && ['queued', 'running'].includes(existing.lastSyncStatus)) {
-      throw new Error('Нельзя изменять регион во время очереди или активной синхронизации');
+      throw new Error('Region cannot be updated while it is queued or actively syncing');
     }
 
     if (existing) {
@@ -259,7 +259,7 @@ function createRegionsDomain(context = {}) {
       if (extractChanged && hasSavedCanonicalExtract) {
         const membershipCount = await countRegionMemberships(existing.id);
         if (membershipCount > 0 || existing.lastSuccessfulSyncAt) {
-          throw new Error('Изменение canonical extract для уже синхронизированного региона не поддерживается. Создайте новый регион.');
+          throw new Error('Changing canonical extract for an already synced region is not supported. Create a new region instead.');
         }
       }
     }
@@ -271,7 +271,7 @@ function createRegionsDomain(context = {}) {
 
     const extractValidation = await validateSelectedExtract(normalized.value, existing);
     if (extractValidation.error || !extractValidation.candidate) {
-      throw new Error(extractValidation.error || 'Не удалось проверить canonical extract');
+      throw new Error(extractValidation.error || 'Failed to validate canonical extract');
     }
 
     const next = {
@@ -416,7 +416,7 @@ function createRegionsDomain(context = {}) {
 
     const deleteResult = await db.prepare(DELETE_REGION_SQL.deleteRegion).run(existing.id);
     if (Number(deleteResult?.changes || 0) === 0) {
-      throw new Error('Регион уже был удалён');
+      throw new Error('Region has already been deleted');
     }
 
     return buildDeleteResult(existing, deletedBy, membershipCount, runCount, orphanDeletedCount);
@@ -426,15 +426,15 @@ function createRegionsDomain(context = {}) {
     await ensureBootstrapped();
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
 
     const existing = await getRegionById(numericRegionId);
     if (!existing) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
     if (['queued', 'running'].includes(existing.lastSyncStatus)) {
-      throw new Error('Нельзя удалить регион во время очереди или активной синхронизации');
+      throw new Error('Region cannot be deleted while it is queued or actively syncing');
     }
 
     const deletedBy = normalizeNullableText(actor, 160);

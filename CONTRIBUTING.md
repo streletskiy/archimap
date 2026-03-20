@@ -16,16 +16,21 @@ Before opening a PR, run:
 
 - `npm run format:check`
 - `npm run lint`
+- `npm run frontend:check`
 - `npm run test`
+- `npm run test:e2e` for UI-impacting changes
 
 ## Frontend Guidelines (Required)
 
 Frontend is implemented in `frontend/` with SvelteKit.
 
-- Use reusable Svelte components from `frontend/src/lib/components`.
+- Use shared controls from `frontend/src/lib/components/base/**` in product code.
+- Do not import `frontend/src/lib/components/ui/**` directly outside the base-layer wrappers.
 - Keep client state in Svelte stores (`frontend/src/lib/stores`), not in imperative DOM mutation code.
 - Put API interaction logic in `frontend/src/lib/services`.
 - Avoid duplicated markup/styles across routes; extract shared components.
+- Keep shared visual rules in `frontend/src/app.css`; do not duplicate long repeated class chains across feature components.
+- For UI work, follow [docs/ui-architecture.md](docs/ui-architecture.md).
 - PRs that reintroduce legacy imperative page scripts in `public/` should be considered incomplete.
 
 ## Commit Convention

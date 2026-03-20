@@ -24,6 +24,11 @@ System notes:
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`, plus `warmingUp`.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
+- `GET /api/filter-presets`
+  - Returns runtime map filter presets from DB-backed admin settings storage.
+  - Each item contains `id`, stable `key`, `name`, `nameI18n`, optional `description`, and runtime-compatible `layers[]`.
+  - `layers[]` is fully compatible with `normalizeFilterLayers(...)` and map filter pipeline execution.
+  - Cache: `Cache-Control: public, max-age=60`, `ETag`.
 - `POST /api/buildings/filter-data`
   - Body: `{ keys: ["way/123", "relation/456", ...] }`.
   - Returns merged filter payload for explicit building keys.
@@ -42,7 +47,14 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
+  - Editable merged fields include `name`, `style`, `material`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
+  - `material` can represent the concrete subtypes `concrete_panels`, `concrete_blocks`, and `concrete_monolith`; the runtime stores them as `material=concrete` plus `material_concrete`.
+  - Includes `region_slugs[]` for the building's current region memberships.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).
+- `GET /api/style-overrides`
+  - Public list of active style-region override rules used by the frontend style picker.
+  - Returns `{ items[] }`, where each item contains `id`, `region_pattern`, `style_key`, `is_allowed`.
+  - Cache: `Cache-Control: public, max-age=60`.
 - `GET /api/data/regions/:regionId/pmtiles`
   - Region-specific PMTiles binary stream.
   - Supports `Range`, `If-None-Match`, `If-Modified-Since`.
@@ -64,12 +76,26 @@ System notes:
 - `GET /api/admin/app-settings/data`
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
+  - Also returns filter presets config for admin (`filterPresets.source`, `filterPresets.items[]`).
   - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`) and storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`).
   - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
+  - `filterPresets.items[]` includes `id`, `key`, `name`, `nameI18n`, `description`, `layers[]`, `createdAt`, `updatedAt`, `updatedBy`.
 - `POST /api/admin/app-settings/data/filter-tag-allowlist`
   - Master-admin only.
   - Body: `{ allowlist: ["building", "height", ...] }`.
   - Saves the explicit allowlist used by public filter-tag suggestions and server-side filter-key validation.
+- `GET /api/admin/app-settings/data/filter-presets`
+  - Master-admin only.
+  - Returns `{ ok, source, items[] }` where each item is a persisted filter preset.
+- `POST /api/admin/app-settings/data/filter-presets`
+  - Master-admin only.
+  - Upserts one filter preset.
+  - Body: `{ preset: { id?, key, name?, nameI18n?, description?, layers[] } }`.
+  - `nameI18n` is an object like `{ en: "Building levels", ru: "Этажность" }`; at least one name value must be provided (`name` or `nameI18n.*`).
+  - `layers[]` uses the same structure as map `buildingFilterLayers[]`: `id`, `color`, `priority`, `mode`, `rules[]`.
+- `DELETE /api/admin/app-settings/data/filter-presets/:id`
+  - Master-admin only.
+  - Deletes one persisted filter preset by id.
 - `GET /api/admin/app-settings/data/regions`
   - Returns region list for admin UI.
   - Region payload mirrors admin data summary items, including extract-resolution fields plus cached storage stats `pmtilesBytes`, `dbBytes`, `dbBytesApproximate`.
@@ -100,6 +126,13 @@ System notes:
   - `pending`, `rejected`, `superseded`: deletes only the edit history row.
   - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit still points to the same building.
   - Returns `409 EDIT_DELETE_SHARED_MERGED_STATE` when merged local data is already shared with other accepted edits for the same OSM object.
+- `GET /api/admin/style-overrides`
+  - Admin-only list of style-region override rules.
+- `POST /api/admin/style-overrides`
+  - Admin-only create/update for a style-region override rule.
+  - Body: `{ override: { region_pattern, style_key, is_allowed } }`.
+- `DELETE /api/admin/style-overrides/:id`
+  - Admin-only delete for a style-region override rule.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
 
 ## Runtime config payload
@@ -132,6 +165,9 @@ System notes:
 - Not found: `404`.
 - Rate limit: `429` + `Retry-After`.
 - Internal errors: `500` with sanitized message (no stack trace leak in prod).
+- JSON error responses use the normalized shape `{ code, error }`.
+- `code` is the stable integration contract for frontend i18n and client logic.
+- `error` is sanitized backend text and should be treated as a fallback/debug field, not as the primary user-facing localization source.
 
 ## CSRF scope
 

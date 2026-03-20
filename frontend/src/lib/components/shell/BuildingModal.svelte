@@ -1,12 +1,15 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
+  import { UiBadge, UiButton, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
   import { selectedBuilding } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
   import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
+  import { getBuildingMaterialOptions, toHumanBuildingMaterial } from '$lib/utils/building-material';
+  import { styleRegionOverrides } from '$lib/stores/style-overrides';
   import {
     buildAddressFromBuildingForm,
     buildBuildingComparableSnapshot,
@@ -28,6 +31,26 @@
   export let saveStatus = '';
 
   const dispatch = createEventDispatcher();
+  const buildingColourSwatches = [
+    '#ffffff',
+    '#e96b39',
+    '#cf2f2f',
+    '#7f0c0c',
+    '#f6f0d0',
+    '#7a7d80',
+    '#cabc91',
+    '#f3d36d',
+    '#d8d8d8',
+    '#81c476',
+    '#7d5252',
+    '#79abcb',
+    '#d9d2c3',
+    '#b5653b',
+    '#a58a6a',
+    '#8f9f8a',
+    '#6b5b4b',
+    '#4f4f4f'
+  ];
 
   let lastBuildingKey = null;
   let form = createEmptyBuildingForm();
@@ -72,6 +95,8 @@
       osmId: Number(selection.osmId),
       name: snapshot.name,
       style: snapshot.style,
+      material: snapshot.material,
+      colour: snapshot.colour,
       levels: snapshot.levels,
       yearBuilt: snapshot.yearBuilt,
       architect: snapshot.architect,
@@ -115,15 +140,49 @@
   }
 
   $: archiInfo = buildingDetails?.properties?.archiInfo || {};
+  $: isBuildingPartFeature = buildingDetails?.feature_kind === 'building_part';
   $: buildingKey = $selectedBuilding?.osmType && $selectedBuilding?.osmId
     ? `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`
     : '-';
   $: displayName = pickFirstText(form.name, archiInfo.name) || buildingKey;
   $: displayAddress = pickFirstText(buildAddressFromForm(), archiInfo.address);
   $: displayStyle = resolveDisplayStyle(form.style || archiInfo.styleRaw || archiInfo.style, $locale);
+  $: displayMaterialRaw = pickFirstText(form.material, archiInfo.material);
+  $: displayMaterial = displayMaterialRaw
+    ? (toHumanBuildingMaterial(displayMaterialRaw, $locale) || displayMaterialRaw)
+    : '';
+  $: displayColour = pickFirstText(form.colour, archiInfo.colour);
   $: displayDescription = pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
+  $: currentRegionSlugs = Array.isArray(buildingDetails?.region_slugs) ? buildingDetails.region_slugs : [];
+  $: availableArchitectureStyleItems = getArchitectureStyleOptions($locale, currentRegionSlugs, $styleRegionOverrides).map((option) => ({
+    value: option.value,
+    label: option.label
+  }));
+  $: currentArchitectureStyleItem = form.style
+    ? (getArchitectureStyleOptions($locale).find((option) => option.value === form.style) || {
+      value: form.style,
+      label: resolveDisplayStyle(form.style, $locale) || form.style
+    })
+    : null;
+  $: architectureStyleItems = currentArchitectureStyleItem
+    && !availableArchitectureStyleItems.some((option) => option.value === currentArchitectureStyleItem.value)
+    ? [currentArchitectureStyleItem, ...availableArchitectureStyleItems]
+    : availableArchitectureStyleItems;
+  $: availableBuildingMaterialItems = getBuildingMaterialOptions($locale);
+  $: currentBuildingMaterialItem = form.material
+    ? (availableBuildingMaterialItems.find((option) => option.value === form.material) || {
+      value: form.material,
+      label: toHumanBuildingMaterial(form.material, $locale) || form.material
+    })
+    : null;
+  $: buildingMaterialItems = currentBuildingMaterialItem
+    && !availableBuildingMaterialItems.some((option) => option.value === currentBuildingMaterialItem.value)
+    ? [currentBuildingMaterialItem, ...availableBuildingMaterialItems]
+    : availableBuildingMaterialItems;
   $: summaryItems = [
     { label: $t('buildingModal.style'), value: displayStyle },
+    { label: $t('buildingModal.material'), value: displayMaterial },
+    { label: $t('buildingModal.colour'), value: displayColour },
     { label: $t('buildingModal.levels'), value: pickFirstText(form.levels, archiInfo.levels) },
     { label: $t('buildingModal.yearBuilt'), value: pickFirstText(form.yearBuilt, archiInfo.year_built) },
     { label: $t('buildingModal.architect'), value: pickFirstText(form.architect, archiInfo.architect) }
@@ -161,21 +220,27 @@
           <p class="ui-kicker">{$t('buildingModal.overview')}</p>
           <h3 id="building-modal-title">{displayName}</h3>
           <div class="modal-header-meta">
-            <span class="identity-pill">{buildingKey}</span>
+            <UiBadge
+              variant="accent"
+              className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
+            >
+              {buildingKey}
+            </UiBadge>
             {#if displayAddress}
               <span class="modal-address">{displayAddress}</span>
             {/if}
           </div>
         </div>
 
-        <button
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
-          on:click={closeModal}
+          variant="secondary"
+          size="close"
+          onclick={closeModal}
           aria-label={$t('common.close')}
         >
           <CloseIcon class="ui-close-icon" />
-        </button>
+        </UiButton>
       </header>
 
       {#if buildingDetails}
@@ -208,85 +273,168 @@
                 <h4>{$t('buildingModal.primarySection')}</h4>
               </div>
 
-              <FormRow forId="building-name" label={$t('buildingModal.name')}>
-                <input id="building-name" class="ui-field" type="text" bind:value={form.name} />
-              </FormRow>
+              {#if isBuildingPartFeature}
+                <div class="grid2">
+                  <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
+                    <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  </FormRow>
 
-              <div class="grid2">
-                <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
-                  <input id="building-levels" class="ui-field" type="number" min="0" max="300" bind:value={form.levels} />
+                  <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
+                    <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  </FormRow>
+                </div>
+
+                <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
+                    bind:value={form.style}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
                 </FormRow>
 
-                <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
-                  <input id="building-year" class="ui-field" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                <FormRow forId="building-material-select" label={$t('buildingModal.material')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...buildingMaterialItems]}
+                    bind:value={form.material}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
                 </FormRow>
-              </div>
 
-              <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
-                <input id="building-architect" class="ui-field" type="text" bind:value={form.architect} />
-              </FormRow>
-
-              <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
-                <select id="building-style-select" class="ui-field" bind:value={form.style}>
-                  <option value="">{$t('buildingModal.notSpecified')}</option>
-                  {#each getArchitectureStyleOptions($locale) as option}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </FormRow>
-
-              <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
-                <textarea id="building-archimap-description" class="ui-field" rows="4" bind:value={form.archimapDescription}></textarea>
-              </FormRow>
-            </section>
-
-            <section class="form-section">
-              <div class="section-head">
-                <h4>{$t('buildingModal.addressSection')}</h4>
-              </div>
-
-              {#if canEditAddressFull}
-                <FormRow forId="building-addr-full" label={$t('buildingModal.addressFull')}>
-                  <input id="building-addr-full" class="ui-field" type="text" bind:value={form.addressFull} />
+                <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
+                  <div class="colour-picker-row">
+                    <UiColorPicker
+                      value={form.colour}
+                      label={$t('buildingModal.colour')}
+                      swatches={buildingColourSwatches}
+                      contentClassName="ui-floating-layer-building-modal"
+                      onchange={(event) => (form.colour = String(event?.detail?.value || ''))}
+                    />
+                    <UiButton
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      disabled={!form.colour}
+                      onclick={() => (form.colour = '')}
+                    >
+                      {$t('common.clear')}
+                    </UiButton>
+                  </div>
                 </FormRow>
               {:else}
-                <FormRow note={$t('buildingModal.addressFullDerived')} />
+                <FormRow forId="building-name" label={$t('buildingModal.name')}>
+                  <UiInput id="building-name" type="text" bind:value={form.name} />
+                </FormRow>
+
+                <div class="grid2">
+                  <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
+                    <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  </FormRow>
+
+                  <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
+                    <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  </FormRow>
+                </div>
+
+                <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
+                  <UiInput id="building-architect" type="text" bind:value={form.architect} />
+                </FormRow>
+
+                <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
+                    bind:value={form.style}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
+                </FormRow>
+
+                <FormRow forId="building-material-select" label={$t('buildingModal.material')}>
+                  <UiSelect
+                    items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...buildingMaterialItems]}
+                    bind:value={form.material}
+                    placeholder={$t('buildingModal.notSpecified')}
+                    contentClassName="ui-floating-layer-building-modal"
+                  />
+                </FormRow>
+
+                <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
+                  <div class="colour-picker-row">
+                    <UiColorPicker
+                      value={form.colour}
+                      label={$t('buildingModal.colour')}
+                      swatches={buildingColourSwatches}
+                      contentClassName="ui-floating-layer-building-modal"
+                      onchange={(event) => (form.colour = String(event?.detail?.value || ''))}
+                    />
+                    <UiButton
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      disabled={!form.colour}
+                      onclick={() => (form.colour = '')}
+                    >
+                      {$t('common.clear')}
+                    </UiButton>
+                  </div>
+                </FormRow>
+
+                <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
+                  <UiTextarea id="building-archimap-description" rows="4" bind:value={form.archimapDescription}></UiTextarea>
+                </FormRow>
               {/if}
-
-              <div class="grid2">
-                <FormRow forId="building-addr-postcode" label={$t('buildingModal.postcode')}>
-                  <input id="building-addr-postcode" class="ui-field" type="text" bind:value={form.addressPostcode} />
-                </FormRow>
-
-                <FormRow forId="building-addr-city" label={$t('buildingModal.city')}>
-                  <input id="building-addr-city" class="ui-field" type="text" bind:value={form.addressCity} />
-                </FormRow>
-
-                <FormRow forId="building-addr-place" label={$t('buildingModal.place')}>
-                  <input id="building-addr-place" class="ui-field" type="text" bind:value={form.addressPlace} />
-                </FormRow>
-
-                <FormRow forId="building-addr-street" label={$t('buildingModal.street')}>
-                  <input id="building-addr-street" class="ui-field" type="text" bind:value={form.addressStreet} />
-                </FormRow>
-              </div>
-
-              <FormRow forId="building-addr-housenumber" label={$t('buildingModal.houseNumber')}>
-                <input id="building-addr-housenumber" class="ui-field" type="text" bind:value={form.addressHouseNumber} />
-              </FormRow>
             </section>
+
+            {#if !isBuildingPartFeature}
+              <section class="form-section">
+                <div class="section-head">
+                  <h4>{$t('buildingModal.addressSection')}</h4>
+                </div>
+
+                {#if canEditAddressFull}
+                  <FormRow forId="building-addr-full" label={$t('buildingModal.addressFull')}>
+                    <UiInput id="building-addr-full" type="text" bind:value={form.addressFull} />
+                  </FormRow>
+                {:else}
+                  <FormRow note={$t('buildingModal.addressFullDerived')} />
+                {/if}
+
+                <div class="grid2">
+                  <FormRow forId="building-addr-postcode" label={$t('buildingModal.postcode')}>
+                    <UiInput id="building-addr-postcode" type="text" bind:value={form.addressPostcode} />
+                  </FormRow>
+
+                  <FormRow forId="building-addr-city" label={$t('buildingModal.city')}>
+                    <UiInput id="building-addr-city" type="text" bind:value={form.addressCity} />
+                  </FormRow>
+
+                  <FormRow forId="building-addr-place" label={$t('buildingModal.place')}>
+                    <UiInput id="building-addr-place" type="text" bind:value={form.addressPlace} />
+                  </FormRow>
+
+                  <FormRow forId="building-addr-street" label={$t('buildingModal.street')}>
+                    <UiInput id="building-addr-street" type="text" bind:value={form.addressStreet} />
+                  </FormRow>
+                </div>
+
+                <FormRow forId="building-addr-housenumber" label={$t('buildingModal.houseNumber')}>
+                  <UiInput id="building-addr-housenumber" type="text" bind:value={form.addressHouseNumber} />
+                </FormRow>
+              </section>
+            {/if}
 
             <details class="osm-tags">
               <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
               {#if osmTagEntries.length > 0}
-                <div class="osm-tags-list">
+                <UiScrollArea className="max-h-[18rem]" contentClassName="mt-[0.8rem] grid gap-[0.55rem] pr-[0.15rem]">
                   {#each osmTagEntries as item (item.key)}
                     <div class="osm-tag-row">
                       <code class="osm-tag-key">{item.key}</code>
                       <code class="osm-tag-value">{item.value || '-'}</code>
                     </div>
                   {/each}
-                </div>
+                </UiScrollArea>
               {:else}
                 <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
               {/if}
@@ -294,9 +442,9 @@
 
             <div class="form-footer">
               <p class="status" data-filled={saveStatus ? 'true' : 'false'}>{saveStatus || ''}</p>
-              <button type="submit" class="ui-btn ui-btn-primary" disabled={savePending || !hasEditedFields}>
+              <UiButton type="submit" disabled={savePending || !hasEditedFields}>
                 {savePending ? $t('buildingModal.saving') : $t('buildingModal.save')}
-              </button>
+              </UiButton>
             </div>
           </form>
         {:else}
@@ -331,14 +479,14 @@
           <details class="osm-tags">
             <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
             {#if osmTagEntries.length > 0}
-              <div class="osm-tags-list">
+              <UiScrollArea className="max-h-[18rem]" contentClassName="mt-[0.8rem] grid gap-[0.55rem] pr-[0.15rem]">
                 {#each osmTagEntries as item (item.key)}
                   <div class="osm-tag-row">
                     <code class="osm-tag-key">{item.key}</code>
                     <code class="osm-tag-value">{item.value || '-'}</code>
                   </div>
                 {/each}
-              </div>
+              </UiScrollArea>
             {:else}
               <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
             {/if}
@@ -418,17 +566,6 @@
     flex-wrap: wrap;
     gap: 0.55rem;
     align-items: center;
-  }
-
-  .identity-pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.42rem 0.72rem;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-    font-size: 0.78rem;
-    font-weight: 700;
   }
 
   .modal-address {
@@ -546,6 +683,12 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .colour-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
   .form-footer {
     position: sticky;
     bottom: 0;
@@ -586,15 +729,6 @@
     font-weight: 700;
     color: var(--fg-strong);
     user-select: none;
-  }
-
-  .osm-tags-list {
-    margin-top: 0.8rem;
-    display: grid;
-    gap: 0.55rem;
-    max-height: 18rem;
-    overflow: auto;
-    padding-right: 0.15rem;
   }
 
   .osm-tag-row {

@@ -13,10 +13,15 @@
   } from '$lib/services/map/map-filter-pipeline';
   import {
     applyBuildingThemePaint as applyBuildingThemePaintToLayers,
+    applyBuildingPartsLayerVisibility as applyBuildingPartsLayerVisibilityToLayers,
     applyLabelLayerVisibility as applyMapLabelLayerVisibility,
     bindMapInteractionHandlers,
     getCurrentBuildingsFillLayerIds,
-    getCurrentBuildingsLineLayerIds
+    getCurrentBuildingsLineLayerIds,
+    getCurrentBuildingPartFillLayerIds,
+    getCurrentBuildingPartLineLayerIds,
+    getCurrentBuildingPartFilterHighlightFillLayerIds,
+    getCurrentBuildingPartFilterHighlightLineLayerIds
   } from '$lib/services/map/map-layer-utils';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
@@ -34,6 +39,7 @@
     lastMapCamera,
     mapFocusRequest,
     mapLabelsVisible,
+    mapBuildingPartsVisible,
     mapReady as mapReadyStore,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
@@ -118,6 +124,7 @@
     getSearchItems: () => $searchMapState.items,
     getSelectedBuilding: () => $selectedBuilding,
     getMapLabelsVisible: () => $mapLabelsVisible,
+    getBuildingPartsVisible: () => $mapBuildingPartsVisible,
     getBuildingFilterLayers: () => $buildingFilterLayers,
     getWindowOrigin: () => window.location.origin,
     onBindStyleInteractionHandlers: () => bindStyleInteractionHandlers(),
@@ -125,6 +132,9 @@
     onUpdateSearchMarkers: (items) => updateSearchMarkers(items),
     onApplyBuildingThemePaint: (theme) => applyBuildingThemePaint(theme),
     onApplyLabelLayerVisibility: (visible) => applyLabelLayerVisibility(visible),
+    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
+      forceHighlightVisible: Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0
+    }),
     onRefreshFilterDebugState: (active) => filterPipeline.refreshDebugState(active),
     onReapplyFilteredHighlight: () => filterPipeline.reapplyFilteredHighlight()
   });
@@ -181,7 +191,22 @@
       map,
       theme,
       fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegions),
-      lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions)
+      lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions),
+      partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
+      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions)
+    });
+  }
+
+  function applyBuildingPartsLayerVisibility(visible = $mapBuildingPartsVisible, { forceHighlightVisible = false } = {}) {
+    const activeRegions = regionLayersController.getActiveRegionPmtiles();
+    applyBuildingPartsLayerVisibilityToLayers({
+      map,
+      visible,
+      forceHighlightVisible,
+      partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
+      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
+      partFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegions),
+      partFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegions)
     });
   }
 
@@ -226,6 +251,8 @@
       map,
       buildingFillLayerIds: layerIds.buildingFillLayerIds,
       buildingLineLayerIds: layerIds.buildingLineLayerIds,
+      buildingPartFillLayerIds: layerIds.buildingPartFillLayerIds,
+      buildingPartLineLayerIds: layerIds.buildingPartLineLayerIds,
       onBuildingClick: (event) => selectionController.handleMapBuildingClick(event),
       onSearchClusterClick: (event) => selectionController.onSearchClusterClick(event),
       onSearchResultClick: (event) => selectionController.onSearchResultClick(event),
@@ -302,6 +329,13 @@
 
   $: if (map) {
     applyLabelLayerVisibility($mapLabelsVisible);
+  }
+
+  $: if (map) {
+    const buildingPartsVisible = $mapBuildingPartsVisible;
+    const forceHighlightVisible = Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0;
+    applyBuildingPartsLayerVisibility(buildingPartsVisible, { forceHighlightVisible });
+    filterPipeline.reapplyFilteredHighlight();
   }
 
   onMount(() => {

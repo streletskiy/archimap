@@ -27,6 +27,7 @@ export const UI_STRINGS = {
     get yearBuilt() { return translateNow('buildingModal.yearBuilt'); },
     get architect() { return translateNow('buildingModal.architect'); },
     get style() { return translateNow('buildingModal.style'); },
+    get material() { return translateNow('buildingModal.material'); },
     get notSpecified() { return translateNow('buildingModal.notSpecified'); },
     get extraInfo() { return translateNow('buildingModal.extraInfo'); },
     get addressFull() { return translateNow('buildingModal.addressFull'); },

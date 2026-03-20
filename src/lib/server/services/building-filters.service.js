@@ -64,6 +64,14 @@ function normalizeTagValue(value) {
 
 function getRuleValue(item, key) {
   const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
+  if (key === 'colour') {
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:colour')) return sourceTags['building:colour'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'colour')) return sourceTags.colour;
+  }
+  if (key === 'material') {
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material')) return sourceTags['building:material'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'material')) return sourceTags.material;
+  }
   if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
   if (key.startsWith('archi.')) {
@@ -146,10 +154,10 @@ function normalizeFilterMatchRequest(request, { isFilterTagAllowed } = {}) {
   const normalizedRules = [];
   const rulesRaw = request?.rules;
   if (!Array.isArray(rulesRaw)) {
-    return { error: 'Ожидается массив rules' };
+    return { code: 'ERR_RULES_ARRAY_REQUIRED', error: 'rules must be an array' };
   }
   if (rulesRaw.length > FILTER_MATCH_MAX_RULES) {
-    return { error: `Слишком много правил (максимум ${FILTER_MATCH_MAX_RULES})` };
+    return { code: 'ERR_TOO_MANY_RULES', error: `Too many rules (maximum ${FILTER_MATCH_MAX_RULES})` };
   }
   for (const entry of rulesRaw) {
     const parsed = normalizeFilterRule(entry, { isFilterTagAllowed });
@@ -284,7 +292,7 @@ function createBuildingFiltersService({
 
   async function getFilterDataByKeys(rawKeys, actorKey) {
     if (!Array.isArray(rawKeys)) {
-      return { status: 400, error: 'Ожидается массив keys' };
+      return { status: 400, code: 'ERR_KEYS_ARRAY_REQUIRED', error: 'keys must be an array' };
     }
 
     const unique = [];
@@ -354,10 +362,10 @@ function createBuildingFiltersService({
 
     const requestsRaw = body?.requests;
     if (!Array.isArray(requestsRaw)) {
-      return { status: 400, error: 'Ожидается массив requests' };
+      return { status: 400, code: 'ERR_REQUESTS_ARRAY_REQUIRED', error: 'requests must be an array' };
     }
     if (requestsRaw.length > FILTER_MATCH_BATCH_MAX_REQUESTS) {
-      return { status: 400, error: `Слишком много requests (максимум ${FILTER_MATCH_BATCH_MAX_REQUESTS})` };
+      return { status: 400, code: 'ERR_TOO_MANY_REQUESTS', error: `Too many requests (maximum ${FILTER_MATCH_BATCH_MAX_REQUESTS})` };
     }
 
     const normalizedRequests = [];
@@ -450,10 +458,10 @@ function createBuildingFiltersService({
 
     const rulesRaw = body?.rules;
     if (!Array.isArray(rulesRaw)) {
-      return { status: 400, error: 'Ожидается массив rules' };
+      return { status: 400, code: 'ERR_RULES_ARRAY_REQUIRED', error: 'rules must be an array' };
     }
     if (rulesRaw.length > FILTER_MATCH_MAX_RULES) {
-      return { status: 400, error: `Слишком много правил (максимум ${FILTER_MATCH_MAX_RULES})` };
+      return { status: 400, code: 'ERR_TOO_MANY_RULES', error: `Too many rules (maximum ${FILTER_MATCH_MAX_RULES})` };
     }
 
     const normalizedRules = [];

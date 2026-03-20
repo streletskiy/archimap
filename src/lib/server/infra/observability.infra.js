@@ -74,7 +74,7 @@ function initObservabilityInfra(app, options = {}) {
 
   app.get('/metrics', async (req, res) => {
     if (!metricsEnabled) {
-      return res.status(404).json({ error: 'Metrics disabled' });
+      return res.status(404).json({ code: 'ERR_METRICS_DISABLED', error: 'Metrics disabled' });
     }
     if (typeof options.getMetricsToken === 'function') {
       const validToken = await options.getMetricsToken();
@@ -82,7 +82,7 @@ function initObservabilityInfra(app, options = {}) {
         const authHeader = req.get('Authorization') || '';
         const providedToken = authHeader.replace(/^Bearer\\s+/i, '').trim();
         if (providedToken !== validToken) {
-          return res.status(401).json({ error: 'Unauthorized metrics access' });
+          return res.status(401).json({ code: 'ERR_METRICS_UNAUTHORIZED', error: 'Unauthorized metrics access' });
         }
       }
     }

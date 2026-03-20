@@ -1,3 +1,5 @@
+const { getFeatureKindFromTagsJson } = require('../utils/building-feature-kind');
+
 function createFeatureInfoSupport(options = {}) {
   const {
     db,
@@ -29,11 +31,19 @@ function createFeatureInfoSupport(options = {}) {
     } catch {
       tags = {};
     }
+    const featureKind = getFeatureKindFromTagsJson(row.tags_json);
 
     return {
       type: 'Feature',
       id: `${row.osm_type}/${row.osm_id}`,
-      properties: { ...tags, source_tags: tags },
+      properties: {
+        ...tags,
+        osm_type: row.osm_type,
+        osm_id: row.osm_id,
+        osm_key: `${row.osm_type}/${row.osm_id}`,
+        feature_kind: featureKind,
+        source_tags: tags
+      },
       geometry: geometry || { type: 'Polygon', coordinates: [ring] }
     };
   }
@@ -56,7 +66,7 @@ function createFeatureInfoSupport(options = {}) {
         params.push(type, Number(id));
       }
       const rows = await db.prepare(`
-        SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+        SELECT osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
         FROM local.architectural_info
         WHERE ${clauses}
       `).all(...params);

@@ -14,8 +14,9 @@ The UI is multilingual (`en` + `ru`) with runtime locale switching.
 
 - Architectural data is sourced from OpenStreetMap.
 - Data is imported, normalized, and stored in PostgreSQL + PostGIS or SQLite (depending on `DB_PROVIDER`).
-- A PMTiles file is generated from building contours for efficient map delivery.
+- A PMTiles file is generated from building contours and building parts for efficient map delivery, with render metadata that lets the client split normal buildings and pure `building:part` features into separate layers. If an object has both `building` and `building:part=yes`, it is treated as a normal building.
 - The SvelteKit UI loads tiles and renders them through MapLibre.
+- Map filter presets are loaded at runtime from backend-managed admin settings (`/api/filter-presets`) and edited in Admin -> Filters, including per-locale preset names (`nameI18n`).
 - Users can submit building info edits.
 - Administrators moderate and merge approved changes into the local layer.
 
@@ -27,7 +28,7 @@ References:
 
 ## Architecture (Short)
 
-- SvelteKit (UI)
+- SvelteKit UI (`Tailwind CSS v4` + `shadcn-svelte` base layer)
 - API layer (`server.js` thin entrypoint + `src/lib/server/boot/server-runtime.boot.js` internal runtime dispatched by `server.sveltekit.js` for `/api` and system endpoints)
   - internal runtime is built around `ServerRuntime` + `createServerRuntime(...)`
   - runtime composition is split across `src/lib/server/boot/server-runtime.{config,middleware,routes}.js` and other `*.boot.js` modules
@@ -37,6 +38,13 @@ References:
 - Redis (optional, for sessions)
 
 Details -> [docs/architecture.md](docs/architecture.md)
+
+## Frontend UI Conventions
+
+- Generated `shadcn-svelte` primitives live in `frontend/src/lib/components/ui/**`.
+- Product code imports shared controls from `frontend/src/lib/components/base/**`, not from `ui/**`.
+- Shared visual contracts and semantic UI classes live in `frontend/src/app.css`.
+- UI rules, shared patterns, and verification expectations are documented in [docs/ui-architecture.md](docs/ui-architecture.md).
 
 ## Quick Start
 
@@ -184,6 +192,7 @@ DB_PROVIDER=postgres DATABASE_URL=postgresql://archimap:archimap@127.0.0.1:5432/
 
 - Docs index -> [docs/README.md](docs/README.md)
 - Architecture -> [docs/architecture.md](docs/architecture.md)
+- UI architecture -> [docs/ui-architecture.md](docs/ui-architecture.md)
 - API -> [docs/api.md](docs/api.md)
 - OSM import pipeline -> [docs/osm-import-pipeline.md](docs/osm-import-pipeline.md)
 - Security -> [docs/security.md](docs/security.md)

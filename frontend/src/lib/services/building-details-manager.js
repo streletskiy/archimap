@@ -6,6 +6,10 @@ import { session } from '$lib/stores/auth';
 import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
 import { closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
 import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
+import {
+  normalizeBuildingMaterialSelection,
+  splitBuildingMaterialSelection
+} from '$lib/utils/building-material';
 import { resolveAddressText } from '$lib/utils/building-address';
 import { isAbortError } from '$lib/utils/error';
 import {
@@ -49,6 +53,7 @@ function updateSelectionDebugHook(selection) {
 
 function normalizeArchiInfo(payload) {
   const info = payload || {};
+  const sourceTags = info._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {};
   const styleRaw = pickNullableText(
     info.style,
     info.architecture,
@@ -66,6 +71,23 @@ function normalizeArchiInfo(payload) {
       2100
     ),
     architect: pickNullableText(info.architect, info['building:architect']),
+    material: normalizeBuildingMaterialSelection(
+      pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+      pickNullableText(
+        info.material_concrete,
+        info['building:material:concrete'],
+        sourceTags?.['building:material:concrete'],
+        sourceTags?.material_concrete
+      )
+    ),
+    materialRaw: pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+    materialConcrete: pickNullableText(
+      info.material_concrete,
+      info['building:material:concrete'],
+      sourceTags?.['building:material:concrete'],
+      sourceTags?.material_concrete
+    ),
+    colour: pickNullableText(info.colour, info['building:colour'], sourceTags?.['building:colour'], sourceTags?.colour),
     address: resolveAddressText(info, pickNullableText, info.address),
     description: pickNullableText(info.description),
     archimap_description: pickNullableText(info.archimap_description, info.description),
@@ -75,6 +97,8 @@ function normalizeArchiInfo(payload) {
 
 function createFallbackBuildingDetails() {
   return {
+    feature_kind: null,
+    region_slugs: [],
     properties: {
       archiInfo: {
         name: null,
@@ -83,6 +107,10 @@ function createFallbackBuildingDetails() {
         levels: null,
         year_built: null,
         architect: null,
+        material: null,
+        materialRaw: null,
+        materialConcrete: null,
+        colour: null,
         address: null,
         _sourceTags: {}
       }
@@ -108,6 +136,8 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload, editedFields = []) 
     ? { ...currentInfo }
     : { _sourceTags: {} };
   const rawStyle = coerceNullableText(payload?.style);
+  const materialSelection = normalizeBuildingMaterialSelection(payload?.material);
+  const splitMaterial = splitBuildingMaterialSelection(materialSelection);
   const editedFieldSet = new Set(normalizeEditedBuildingFields(editedFields));
   const applyAll = editedFieldSet.size === 0;
 
@@ -116,6 +146,11 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload, editedFields = []) 
     next.styleRaw = rawStyle;
     next.style = rawStyle;
   }
+  if (applyAll || editedFieldSet.has('material')) {
+    next.material = coerceNullableText(splitMaterial.material);
+    next.material_concrete = coerceNullableText(splitMaterial.materialConcrete);
+  }
+  if (applyAll || editedFieldSet.has('colour')) next.colour = coerceNullableText(payload?.colour);
   if (applyAll || editedFieldSet.has('levels')) next.levels = coerceNullableIntegerText(payload?.levels, 0, 300);
   if (applyAll || editedFieldSet.has('yearBuilt')) next.year_built = coerceNullableIntegerText(payload?.yearBuilt, 1000, 2100);
   if (applyAll || editedFieldSet.has('architect')) next.architect = coerceNullableText(payload?.architect);
@@ -155,11 +190,12 @@ export function createBuildingDetailsManager() {
       selectionKey: `${detail.osmType}/${detail.osmId}`
     });
 
+    let feature = null;
     try {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
       let sourceTags = {};
       try {
-        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
+        feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         sourceTags = feature?.properties?.source_tags || {};
       } catch (featureError) {
         if (!isAbortError(featureError)) {
@@ -171,6 +207,8 @@ export function createBuildingDetailsManager() {
       if (token !== activeBuildingDetailsToken) return;
       updateState({
         buildingDetails: {
+          feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.feature?.properties?.feature_kind || null,
+          region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
           properties: {
             archiInfo: normalizeArchiInfo({
               ...data,
@@ -191,6 +229,8 @@ export function createBuildingDetailsManager() {
         if (token !== activeBuildingDetailsToken) return;
         updateState({
           buildingDetails: {
+            feature_kind: feature?.properties?.feature_kind || detail?.feature?.properties?.feature_kind || null,
+            region_slugs: [],
             properties: {
               archiInfo: normalizeArchiInfo({
                 ...archiInfo,
@@ -252,6 +292,9 @@ export function createBuildingDetailsManager() {
   async function saveEdit(detail) {
     const normalized = normalizeBuildingSelection(detail);
     if (!normalized) return;
+    const currentState = get(state);
+    const isBuildingPartFeature = currentState.buildingDetails?.feature_kind === 'building_part';
+    const allowedPartFields = new Set(['levels', 'colour', 'style', 'material', 'yearBuilt']);
 
     if (!get(session).authenticated) {
       updateState({ saveStatus: translateNow('mapPage.authRequired') });
@@ -259,7 +302,10 @@ export function createBuildingDetailsManager() {
     }
 
     const editedFields = normalizeEditedBuildingFields(detail.editedFields);
-    if (editedFields.length === 0) {
+    const outgoingEditedFields = isBuildingPartFeature
+      ? editedFields.filter((field) => allowedPartFields.has(field))
+      : editedFields;
+    if (outgoingEditedFields.length === 0) {
       updateState({ saveStatus: translateNow('buildingModal.noChanges') });
       return;
     }
@@ -272,14 +318,16 @@ export function createBuildingDetailsManager() {
     const payload = {
       osmType: normalized.osmType,
       osmId: normalized.osmId,
-      name: coerceNullableText(detail.name),
+      name: isBuildingPartFeature ? null : coerceNullableText(detail.name),
       style: coerceNullableText(normalizeArchitectureStyleKey(detail.style)),
+      material: coerceNullableText(normalizeBuildingMaterialSelection(detail.material)),
+      colour: coerceNullableText(detail.colour),
       levels: coerceNullableIntegerText(detail.levels, 0, 300),
       yearBuilt: coerceNullableIntegerText(detail.yearBuilt, 1000, 2100),
-      architect: coerceNullableText(detail.architect),
-      address: coerceNullableText(detail.address),
-      archimapDescription: coerceNullableText(detail.archimapDescription),
-      editedFields
+      architect: isBuildingPartFeature ? null : coerceNullableText(detail.architect),
+      address: isBuildingPartFeature ? null : coerceNullableText(detail.address),
+      archimapDescription: isBuildingPartFeature ? null : coerceNullableText(detail.archimapDescription),
+      editedFields: outgoingEditedFields
     };
 
     try {
@@ -298,11 +346,16 @@ export function createBuildingDetailsManager() {
           ...current,
           buildingDetails: isSameSelection
             ? {
+                ...current.buildingDetails,
+                feature_kind: current.buildingDetails?.feature_kind || null,
+                region_slugs: Array.isArray(current.buildingDetails?.region_slugs)
+                  ? current.buildingDetails.region_slugs
+                  : [],
                 properties: {
                   archiInfo: toDisplayArchiInfoFromPayload(
                     current.buildingDetails?.properties?.archiInfo,
                     payload,
-                    editedFields
+                    outgoingEditedFields
                   )
                 }
               }

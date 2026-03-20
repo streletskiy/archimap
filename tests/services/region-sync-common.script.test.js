@@ -27,6 +27,7 @@ test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () =>
 
   assert.equal(row.geometry_json, null);
   assert.equal(row.geometry_wkb_hex, '0A0B0C0D');
+  assert.equal(row.feature_kind, 'building');
 });
 
 test('parseRowPayload rejects missing GeoJSON when GeoJSON is required', () => {
@@ -98,8 +99,66 @@ test('formatGeojsonFeatureLine preserves geometry json and encoded OSM feature i
 
   assert.equal(
     line,
-    '{"type":"Feature","id":247,"properties":{"osm_id":123},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":247,"properties":{"osm_id":123,"feature_kind":"building"},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
+});
+
+test('formatGeojsonFeatureLine derives building_part feature kind from tags json', () => {
+  const line = formatGeojsonFeatureLine(
+    'way',
+    124,
+    '{"type":"Point","coordinates":[37.6,55.7]}',
+    '{"building:part":"yes"}'
+  );
+
+  assert.equal(
+    line,
+    '{"type":"Feature","id":248,"properties":{"osm_id":124,"feature_kind":"building_part"},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+  );
+});
+
+test('formatGeojsonFeatureLine treats mixed building tags as building', () => {
+  const line = formatGeojsonFeatureLine(
+    'way',
+    125,
+    '{"type":"Point","coordinates":[37.6,55.7]}',
+    '{"building":"yes","building:part":"yes"}'
+  );
+
+  assert.equal(
+    line,
+    '{"type":"Feature","id":250,"properties":{"osm_id":125,"feature_kind":"building"},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+  );
+});
+
+test('parseRowPayload derives building_part feature kind from tags json', () => {
+  const row = parseRowPayload(JSON.stringify({
+    osm_type: 'relation',
+    osm_id: 456,
+    tags_json: '{"building:part":"yes"}',
+    geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
+    min_lon: 37.5,
+    min_lat: 55.5,
+    max_lon: 37.6,
+    max_lat: 55.6
+  }), { requireGeometryJson: true });
+
+  assert.equal(row.feature_kind, 'building_part');
+});
+
+test('parseRowPayload treats mixed building tags as building', () => {
+  const row = parseRowPayload(JSON.stringify({
+    osm_type: 'way',
+    osm_id: 457,
+    tags_json: '{"building":"yes","building:part":"yes"}',
+    geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
+    min_lon: 37.5,
+    min_lat: 55.5,
+    max_lon: 37.6,
+    max_lat: 55.6
+  }), { requireGeometryJson: true });
+
+  assert.equal(row.feature_kind, 'building');
 });
 
 test('exportImportRowsToGeojson writes feature NDJSON and computes bounds', async () => {
@@ -175,17 +234,18 @@ test('exportRegionMembersToGeojsonNdjson streams sqlite region members directly 
       CREATE TABLE building_contours (
         osm_type TEXT NOT NULL,
         osm_id INTEGER NOT NULL,
+        tags_json TEXT,
         geometry_json TEXT NOT NULL,
         min_lon REAL NOT NULL,
         min_lat REAL NOT NULL,
         max_lon REAL NOT NULL,
         max_lat REAL NOT NULL
       );
-      INSERT INTO building_contours (osm_type, osm_id, geometry_json, min_lon, min_lat, max_lon, max_lat)
+      INSERT INTO building_contours (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat)
       VALUES
-        ('way', 21, '{"type":"Point","coordinates":[30.0,60.0]}', 30.0, 60.0, 30.0, 60.0),
-        ('relation', 22, '{"type":"Point","coordinates":[31.5,61.2]}', 31.5, 61.2, 31.5, 61.2),
-        ('way', 99, '{"type":"Point","coordinates":[99.0,99.0]}', 99.0, 99.0, 99.0, 99.0);
+        ('way', 21, '{"building":"yes"}', '{"type":"Point","coordinates":[30.0,60.0]}', 30.0, 60.0, 30.0, 60.0),
+        ('relation', 22, '{"building":"yes"}', '{"type":"Point","coordinates":[31.5,61.2]}', 31.5, 61.2, 31.5, 61.2),
+        ('way', 99, '{"building":"yes"}', '{"type":"Point","coordinates":[99.0,99.0]}', 99.0, 99.0, 99.0, 99.0);
     `);
     osmDb.close();
 

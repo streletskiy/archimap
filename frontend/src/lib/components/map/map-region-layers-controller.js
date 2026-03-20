@@ -6,6 +6,10 @@ import {
   getCurrentBuildingSourceConfigs,
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
+  getCurrentBuildingPartFillLayerIds,
+  getCurrentBuildingPartLineLayerIds,
+  getCurrentBuildingPartFilterHighlightFillLayerIds,
+  getCurrentBuildingPartFilterHighlightLineLayerIds,
   getCurrentFilterHighlightFillLayerIds,
   getCurrentFilterHighlightLineLayerIds,
   getCurrentSelectedFillLayerIds,
@@ -34,6 +38,7 @@ export function createMapRegionLayersController({
   getSearchItems,
   getSelectedBuilding,
   getMapLabelsVisible,
+  getBuildingPartsVisible,
   getBuildingFilterLayers,
   getWindowOrigin,
   onBindStyleInteractionHandlers,
@@ -41,6 +46,7 @@ export function createMapRegionLayersController({
   onUpdateSearchMarkers,
   onApplyBuildingThemePaint,
   onApplyLabelLayerVisibility,
+  onApplyBuildingPartsLayerVisibility,
   onRefreshFilterDebugState,
   onReapplyFilteredHighlight
 } = {}) {
@@ -54,6 +60,10 @@ export function createMapRegionLayersController({
     return {
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(activeRegionPmtiles),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(activeRegionPmtiles),
+      buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegionPmtiles),
+      buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegionPmtiles),
+      buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles),
+      buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegionPmtiles),
@@ -66,8 +76,12 @@ export function createMapRegionLayersController({
     return [
       ...layerIds.buildingFillLayerIds,
       ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartFillLayerIds,
+      ...layerIds.buildingPartLineLayerIds,
       ...layerIds.filterHighlightFillLayerIds,
       ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.buildingPartFilterHighlightFillLayerIds,
+      ...layerIds.buildingPartFilterHighlightLineLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -81,6 +95,10 @@ export function createMapRegionLayersController({
     return {
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(regions),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(regions),
+      buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(regions),
+      buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(regions),
+      buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(regions),
+      buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(regions),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(regions),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(regions),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(regions),
@@ -103,8 +121,12 @@ export function createMapRegionLayersController({
     const allLayerIds = [
       ...layerIds.buildingFillLayerIds,
       ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartFillLayerIds,
+      ...layerIds.buildingPartLineLayerIds,
       ...layerIds.filterHighlightFillLayerIds,
       ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.buildingPartFilterHighlightFillLayerIds,
+      ...layerIds.buildingPartFilterHighlightLineLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -250,13 +272,18 @@ export function createMapRegionLayersController({
       regionLayersChanged = true;
     }
     activeRegionPmtiles = nextActiveRegions;
+    const currentBuildingFilters = getBuildingFilterLayers?.() || [];
+    const hasActiveBuildingFilters = Array.isArray(currentBuildingFilters) && currentBuildingFilters.length > 0;
+    const partsVisible = Boolean(getBuildingPartsVisible?.() ?? true);
     for (const region of nextActiveRegions) {
       const hadRegionLayers = hasRegionLayersReady([region]);
       ensureRegionBuildingSourceAndLayers({
         map,
         region,
         buildingPaint,
-        origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : ''
+        origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : '',
+        buildingPartsVisible: partsVisible,
+        buildingPartHighlightVisible: partsVisible || hasActiveBuildingFilters
       });
       if (!hadRegionLayers) {
         regionLayersChanged = true;
@@ -269,6 +296,7 @@ export function createMapRegionLayersController({
     onUpdateSearchMarkers?.(getSearchItems?.() || []);
     onApplyBuildingThemePaint?.(theme);
     onApplyLabelLayerVisibility?.(getMapLabelsVisible?.());
+    onApplyBuildingPartsLayerVisibility?.();
     scheduleCoverageCheck();
     if (force || searchLayersChanged || regionLayersChanged) {
       const activeFilterLayers = getBuildingFilterLayers?.() || [];

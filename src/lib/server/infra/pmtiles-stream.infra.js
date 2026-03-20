@@ -42,13 +42,13 @@ function sendPmtiles(req, res, pmtilesPath, options = {}) {
     stat = fs.statSync(pmtilesPath);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      return res.status(404).json({ error: 'Файл PMTiles не найден. Выполните sync для генерации tileset.' });
+      return res.status(404).json({ code: 'ERR_PMTILES_NOT_FOUND', error: 'PMTiles file was not found. Run sync to generate the tileset.' });
     }
-    return res.status(500).json({ error: 'Не удалось прочитать PMTiles файл' });
+    return res.status(500).json({ code: 'ERR_PMTILES_READ_FAILED', error: 'Failed to read PMTiles file' });
   }
 
   if (!stat.isFile()) {
-    return res.status(404).json({ error: 'Файл PMTiles не найден. Выполните sync для генерации tileset.' });
+    return res.status(404).json({ code: 'ERR_PMTILES_NOT_FOUND', error: 'PMTiles file was not found. Run sync to generate the tileset.' });
   }
 
   const cacheControl = String(options.cacheControl || 'public, max-age=300').trim();
@@ -91,7 +91,7 @@ function sendPmtiles(req, res, pmtilesPath, options = {}) {
   const stream = fs.createReadStream(pmtilesPath, { start, end });
   stream.on('error', () => {
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Не удалось отдать PMTiles файл' });
+      res.status(500).json({ code: 'ERR_PMTILES_STREAM_FAILED', error: 'Failed to stream PMTiles file' });
       return;
     }
     res.destroy();

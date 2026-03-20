@@ -19,6 +19,9 @@ function createTestDb() {
       created_by TEXT NOT NULL,
       name TEXT,
       style TEXT,
+      material TEXT,
+      material_concrete TEXT,
+      colour TEXT,
       levels INTEGER,
       year_built INTEGER,
       architect TEXT,
@@ -49,6 +52,9 @@ function createTestDb() {
       osm_id INTEGER NOT NULL,
       name TEXT,
       style TEXT,
+      material TEXT,
+      material_concrete TEXT,
+      colour TEXT,
       levels INTEGER,
       year_built INTEGER,
       architect TEXT,
@@ -197,6 +203,44 @@ test('buildChangesFromRows does not report levels diff for numeric-equivalent va
 
   const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));
   assert.equal(fields.has('levels'), false);
+});
+
+test('buildChangesFromRows treats concrete material variants as one selection', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2102,
+    JSON.stringify({
+      'building:material': 'concrete',
+      'building:material:concrete': 'panels'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, material, material_concrete, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    21,
+    'way',
+    2102,
+    'user@example.com',
+    'concrete',
+    'panels',
+    'pending'
+  );
+
+  const items = await service.getUserEditsList({ status: 'pending', limit: 10 });
+  assert.equal(items.length, 1);
+
+  const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));
+  assert.equal(fields.has('material'), false);
 });
 
 test('getUserEditsList marks accepted edit as orphaned when contour is missing', async () => {

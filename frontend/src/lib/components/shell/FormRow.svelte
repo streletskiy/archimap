@@ -1,4 +1,6 @@
 <script>
+  import { UiLabel } from '$lib/components/base';
+
   export let label = '';
   export let forId = '';
   export let note = '';
@@ -6,7 +8,7 @@
 
 <div class="form-row">
   {#if label}
-    <label for={forId}>{label}</label>
+    <UiLabel className="text-[0.76rem] uppercase tracking-[0.08em] ui-text-muted" for={forId}>{label}</UiLabel>
   {/if}
   {#if note}
     <p class="form-row-note">{note}</p>
@@ -18,13 +20,6 @@
   .form-row {
     display: grid;
     gap: 0.38rem;
-  }
-
-  .form-row > label {
-    font-size: 0.76rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
   }
 
   .form-row-note {

@@ -12,6 +12,8 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ai.osm_id AS info_osm_id,
     ai.name,
     ai.style,
+    ai.material,
+    ai.colour,
     ai.levels,
     ai.year_built,
     ai.architect,
@@ -55,10 +57,10 @@ function parseBboxInput(source, fields) {
   const maxLon = Number(source?.[fields.maxLon]);
   const maxLat = Number(source?.[fields.maxLat]);
   if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
-    return { bbox: null, error: 'Некорректные координаты bbox' };
+    return { bbox: null, error: 'Invalid bbox coordinates' };
   }
   if (minLon > maxLon || minLat > maxLat) {
-    return { bbox: null, error: 'Некорректные границы bbox' };
+    return { bbox: null, error: 'Invalid bbox boundaries' };
   }
   return {
     bbox: {
@@ -94,6 +96,8 @@ function mapFilterDataRow(row) {
         osm_id: row.osm_id,
         name: row.name,
         style: row.style,
+        material: row.material,
+        colour: row.colour,
         levels: row.levels,
         year_built: row.year_built,
         architect: row.architect,
@@ -123,6 +127,8 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       ai.osm_id AS info_osm_id,
       ai.name,
       ai.style,
+      ai.material,
+      ai.colour,
       ai.levels,
       ai.year_built,
       ai.architect,

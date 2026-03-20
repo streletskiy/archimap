@@ -8,52 +8,52 @@ function createRateLimiters(options = {}) {
     searchRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 60,
-      message: 'Слишком много поисковых запросов, попробуйте позже'
+      message: 'Too many search requests, please try again later'
     }),
     publicApiRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 180,
-      message: 'Слишком много запросов, попробуйте позже'
+      message: 'Too many requests, please try again later'
     }),
     accountReadRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 120,
-      message: 'Слишком много запросов аккаунта, попробуйте позже'
+      message: 'Too many account requests, please try again later'
     }),
     adminApiRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 120,
-      message: 'Слишком много административных запросов, попробуйте позже'
+      message: 'Too many admin requests, please try again later'
     }),
     filterDataRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 240,
-      message: 'Слишком много запросов данных по зданиям, попробуйте позже'
+      message: 'Too many building data requests, please try again later'
     }),
     filterDataBboxRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 60,
-      message: 'Слишком много запросов bbox, попробуйте позже'
+      message: 'Too many bbox requests, please try again later'
     }),
     filterMatchesRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 90,
-      message: 'Слишком много запросов фильтрации, попробуйте позже'
+      message: 'Too many filtering requests, please try again later'
     }),
     buildingsReadRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 120,
-      message: 'Слишком много запросов к зданиям, попробуйте позже'
+      message: 'Too many building requests, please try again later'
     }),
     buildingsWriteRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 60,
-      message: 'Слишком много изменений по зданиям, попробуйте позже'
+      message: 'Too many building edit requests, please try again later'
     }),
     contoursStatusRateLimiter: createSimpleRateLimiter({
       windowMs: 60 * 1000,
       maxRequests: 60,
-      message: 'Слишком много запросов статуса контуров, попробуйте позже'
+      message: 'Too many contour status requests, please try again later'
     })
   };
 }

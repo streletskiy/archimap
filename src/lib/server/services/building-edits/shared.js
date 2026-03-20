@@ -40,6 +40,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         ${MERGED_EDITS_FOR_TARGET_SQL},
         ai.name AS merged_name,
         ai.style AS merged_style,
+        ai.material AS merged_material,
+        ai.material_concrete AS merged_material_concrete,
+        ai.colour AS merged_colour,
         ai.levels AS merged_levels,
         ai.year_built AS merged_year_built,
         ai.architect AS merged_architect,
@@ -70,6 +73,16 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return text ? text : null;
   }
 
+  function normalizeMaterialSelection(material, materialConcrete = null) {
+    const normalizedMaterial = normalizeInfoForDiff(material);
+    const normalizedConcrete = normalizeInfoForDiff(materialConcrete);
+    if (normalizedMaterial === 'concrete' && normalizedConcrete) {
+      return `concrete_${normalizedConcrete}`;
+    }
+    if (normalizedMaterial) return normalizedMaterial;
+    return null;
+  }
+
   function normalizeComparableForField(fieldKey, value) {
     const normalized = normalizeInfoForDiff(value);
     if (normalized == null) return null;
@@ -82,6 +95,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         if (Number.isFinite(num)) return String(num);
       }
       return text;
+    }
+    if (key === 'colour') {
+      return String(normalized).trim().toLowerCase();
     }
 
     return normalized;
@@ -122,6 +138,8 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
     { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
     { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
+    { key: 'material', label: 'Материал', osmTag: 'building:material | material' },
+    { key: 'colour', label: 'Цвет', osmTag: 'building:colour | colour' },
     { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
   ]);
 
@@ -153,6 +171,11 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         next.description = row.archimap_description ?? null;
         continue;
       }
+      if (field === 'material') {
+        next.material = row.material ?? null;
+        next.material_concrete = row.material_concrete ?? null;
+        continue;
+      }
       next[field] = row[field] ?? null;
     }
 
@@ -161,7 +184,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   async function getMergedInfoRow(osmType, osmId) {
     return await db.prepare(`
-      SELECT osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+      SELECT osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
@@ -248,6 +271,11 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     const osmBaseline = {
       name: pickTagValue(tags, ['name', 'name:ru', 'official_name']),
       style: pickTagValue(tags, ['building:architecture', 'architecture', 'style']),
+      material: normalizeMaterialSelection(
+        pickTagValue(tags, ['building:material', 'material']),
+        pickTagValue(tags, ['building:material:concrete', 'material_concrete'])
+      ),
+      colour: pickTagValue(tags, ['building:colour', 'colour']),
       levels: pickTagValue(tags, ['building:levels', 'levels']),
       year_built: pickTagValue(tags, ['building:year', 'start_date', 'construction_date', 'year_built']),
       architect: pickTagValue(tags, ['architect', 'architect_name']),
@@ -259,6 +287,8 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       ? {
         name: normalizeInfoForDiff(mergedRow.name),
         style: normalizeInfoForDiff(mergedRow.style),
+        material: normalizeMaterialSelection(mergedRow.material, mergedRow.material_concrete),
+        colour: normalizeInfoForDiff(mergedRow.colour),
         levels: normalizeInfoForDiff(mergedRow.levels),
         year_built: normalizeInfoForDiff(mergedRow.year_built),
         architect: normalizeInfoForDiff(mergedRow.architect),
@@ -277,7 +307,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       const baselineValue = mergedBaseline
         ? (mergedBaseline[field.key] ?? osmBaseline[field.key] ?? null)
         : (osmBaseline[field.key] ?? null);
-      const localValue = normalizeInfoForDiff(editRow[field.key]);
+      const localValue = field.key === 'material'
+        ? normalizeMaterialSelection(editRow.material, editRow.material_concrete)
+        : normalizeInfoForDiff(editRow[field.key]);
       const baselineComparable = normalizeComparableForField(field.key, baselineValue);
       const localComparable = normalizeComparableForField(field.key, localValue);
       const differs = baselineComparable !== localComparable;
@@ -332,6 +364,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     if (!row) return null;
     const hasMergedValue = row.name != null
       || row.style != null
+      || row.material != null
+      || row.material_concrete != null
+      || row.colour != null
       || row.levels != null
       || row.year_built != null
       || row.architect != null
@@ -343,6 +378,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return {
       name: row.name ?? null,
       style: row.style ?? null,
+      material: row.material ?? null,
+      material_concrete: row.material_concrete ?? null,
+      colour: row.colour ?? null,
       levels: row.levels ?? null,
       year_built: row.year_built ?? null,
       architect: row.architect ?? null,
@@ -358,6 +396,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return normalizeMergedInfoRow({
       name: row?.merged_name,
       style: row?.merged_style,
+      material: row?.merged_material,
+      material_concrete: row?.merged_material_concrete,
+      colour: row?.merged_colour,
       levels: row?.merged_levels,
       year_built: row?.merged_year_built,
       architect: row?.merged_architect,
@@ -442,6 +483,10 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       values: {
         name: row.name ?? null,
         style: row.style ?? null,
+        material: normalizeMaterialSelection(row.material, row.material_concrete),
+        material_raw: row.material ?? null,
+        material_concrete: row.material_concrete ?? null,
+        colour: row.colour ?? null,
         levels: row.levels ?? null,
         year_built: row.year_built ?? null,
         architect: row.architect ?? null,

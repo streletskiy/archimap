@@ -1,0 +1,15 @@
+# ArchiMap default robots policy for public deployment.
+User-agent: *
+Allow: /
+
+# Private and technical sections.
+Disallow: /admin
+Disallow: /account
+Disallow: /setup
+Disallow: /login-04
+Disallow: /signup-04
+Disallow: /api/
+Disallow: /ui/
+Disallow: /healthz
+Disallow: /readyz
+Disallow: /metrics

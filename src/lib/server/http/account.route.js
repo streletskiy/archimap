@@ -19,7 +19,7 @@ function registerAccountRoutes({
   app.get('/api/account/edits', accountReadRateLimiter, requireAuth, async (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
-      return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
+      return res.status(400).json({ code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve current user' });
     }
     const statusRaw = String(req.query?.status || '').trim().toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
@@ -33,18 +33,18 @@ function registerAccountRoutes({
   app.get('/api/account/edits/:editId', accountReadRateLimiter, requireAuth, async (req, res) => {
     const actorKey = getSessionEditActorKey(req);
     if (!actorKey) {
-      return res.status(400).json({ error: 'Не удалось определить текущего пользователя' });
+      return res.status(400).json({ code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve current user' });
     }
     const editId = Number(req.params.editId);
     if (!Number.isInteger(editId) || editId <= 0) {
-      return res.status(400).json({ error: 'Некорректный идентификатор правки' });
+      return res.status(400).json({ code: 'ERR_INVALID_EDIT_ID', error: 'Invalid edit id' });
     }
     const item = await getUserEditDetailsById(editId);
     if (!item) {
-      return res.status(404).json({ error: 'Правка не найдена' });
+      return res.status(404).json({ code: 'ERR_EDIT_NOT_FOUND', error: 'Edit not found' });
     }
     if (String(item.updatedBy || '').trim().toLowerCase() !== actorKey) {
-      return res.status(403).json({ error: 'Доступ запрещен' });
+      return res.status(403).json({ code: 'ERR_ACCESS_DENIED', error: 'Access denied' });
     }
     return sendCachedJson(req, res, { item }, {
       cacheControl: 'private, no-cache',

@@ -17,15 +17,15 @@ function createSyncRunsDomain(context = {}) {
 
   function buildRegionSyncEligibilityError(region) {
     if (!region) {
-      return 'Регион не найден';
+      return 'Region not found';
     }
     if (region.extractResolutionStatus === 'resolution_error') {
-      return region.extractResolutionError || 'Не удалось подтвердить canonical extract для региона';
+      return region.extractResolutionError || 'Failed to confirm canonical extract for the region';
     }
     if (region.extractResolutionStatus === 'resolution_required' || region.extractResolutionStatus === 'needs_resolution') {
-      return region.extractResolutionError || 'Для региона требуется ручной выбор canonical extract';
+      return region.extractResolutionError || 'Region requires manual canonical extract selection';
     }
-    return 'Регион не готов к синхронизации: canonical extract не выбран';
+    return 'Region is not ready for sync: canonical extract is not selected';
   }
 
   async function getRecentRuns(regionId = null, limit = 25) {
@@ -63,10 +63,10 @@ function createSyncRunsDomain(context = {}) {
     await ensureBootstrapped();
     const region = await getRegionById(regionId);
     if (!region) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
     if (!region.enabled) {
-      throw new Error('Синхронизация доступна только для enabled региона');
+      throw new Error('Sync is only available for enabled regions');
     }
     if (!region.canSync) {
       throw new Error(buildRegionSyncEligibilityError(region));
@@ -115,7 +115,7 @@ function createSyncRunsDomain(context = {}) {
     await ensureBootstrapped();
     const run = await getRunById(runId);
     if (!run) {
-      throw new Error('Run не найден');
+      throw new Error('Run not found');
     }
     const startedAt = toIsoOrNull(now());
     await db.prepare(`
@@ -142,11 +142,11 @@ function createSyncRunsDomain(context = {}) {
     await ensureBootstrapped();
     const run = await getRunById(runId);
     if (!run) {
-      throw new Error('Run не найден');
+      throw new Error('Run not found');
     }
     const region = await getRegionById(run.regionId);
     if (!region) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
 
     const finishedAt = toIsoOrNull(now());
@@ -230,11 +230,11 @@ function createSyncRunsDomain(context = {}) {
     await ensureBootstrapped();
     const run = await getRunById(runId);
     if (!run) {
-      throw new Error('Run не найден');
+      throw new Error('Run not found');
     }
     const region = await getRegionById(run.regionId);
     if (!region) {
-      throw new Error('Регион не найден');
+      throw new Error('Region not found');
     }
 
     const finishedAt = toIsoOrNull(now());

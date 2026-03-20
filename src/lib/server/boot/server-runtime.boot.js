@@ -4,6 +4,7 @@ const { createRateLimiterFactory } = require('../services/rate-limiter.service')
 const { createSearchService } = require('../services/search.service');
 const { createBuildingEditsService } = require('../services/building-edits.service');
 const { createAppSettingsService } = require('../services/app-settings.service');
+const { createStyleRegionOverridesService } = require('../services/style-region-overrides.service');
 const {
   DEFAULT_FILTER_TAG_ALLOWLIST,
   normalizeFilterTagKeyList,
@@ -172,6 +173,9 @@ class ServerRuntime {
         pmtilesMaxZoom: this.config.buildingsPmtilesMaxZoom,
         sourceLayer: this.config.buildingsPmtilesSourceLayer
       }
+    });
+    this.styleRegionOverridesService = createStyleRegionOverridesService({
+      db: this.db
     });
 
     Object.assign(this, createRuntimeSettingsBoot({

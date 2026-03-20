@@ -139,7 +139,7 @@ test('applyFilterPaintHighlight updates only highlight paint properties and rese
     type: 'setPaintProperty',
     layerId: 'buildings-filter-highlight-fill',
     name: 'fill-opacity',
-    value: 0.4
+    value: 1
   });
   assert.deepEqual(calls[3], {
     type: 'setFilter',
@@ -170,7 +170,7 @@ test('applyFilterPaintHighlight updates only highlight paint properties and rese
     type: 'setPaintProperty',
     layerId: 'buildings-filter-highlight-outline',
     name: 'line-opacity',
-    value: 0.95
+    value: 1
   });
 
   calls.length = 0;
@@ -270,7 +270,7 @@ test('applyFilterPaintHighlight uses constant color for a single normalized colo
       type: 'setPaintProperty',
       layerId: 'buildings-filter-highlight-fill',
       name: 'fill-opacity',
-      value: 0.4
+      value: 1
     },
     {
       type: 'setFilter',
@@ -293,7 +293,7 @@ test('applyFilterPaintHighlight uses constant color for a single normalized colo
       type: 'setPaintProperty',
       layerId: 'buildings-filter-highlight-outline',
       name: 'line-opacity',
-      value: 0.95
+      value: 1
     }
   ]);
 });

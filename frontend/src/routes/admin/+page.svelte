@@ -4,11 +4,13 @@
   import { beforeNavigate, goto } from '$app/navigation';
   import { page } from '$app/stores';
 
+  import { UiBadge, UiTabsNav } from '$lib/components/base';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import AdminDataTab from '$lib/components/admin/AdminDataTab.svelte';
   import AdminEditsTab from '$lib/components/admin/AdminEditsTab.svelte';
   import AdminFiltersTab from '$lib/components/admin/AdminFiltersTab.svelte';
   import AdminSettingsTab from '$lib/components/admin/AdminSettingsTab.svelte';
+  import AdminStylesTab from '$lib/components/admin/AdminStylesTab.svelte';
   import AdminUsersTab from '$lib/components/admin/AdminUsersTab.svelte';
   import { createAdminDataController } from '$lib/components/admin/admin-data-controller.js';
   import { buildAdminUrl, resolveAdminTabFromUrl } from '$lib/client/section-routes';
@@ -17,9 +19,10 @@
   import { session } from '$lib/stores/auth';
 
   const dataController = createAdminDataController();
-  const filterTagAllowlistDirty = dataController.filterTagAllowlistDirty;
+  const filtersDirty = dataController.filtersDirty;
 
   let activeTab = resolveAdminTabFromUrl(get(page).url);
+  let tabNavValue = activeTab;
   let pendingUrlEditId = normalizeEditId(parseUrlState(get(page).url)?.editId);
   let adminUrlSyncBusy = false;
   let dataBootstrapTabKey = '';
@@ -42,6 +45,7 @@
     if (tab === 'settings') return translateNow('admin.tabs.settings');
     if (tab === 'data') return translateNow('admin.tabs.data');
     if (tab === 'filters') return translateNow('admin.tabs.filters');
+    if (tab === 'styles') return translateNow('admin.tabs.styles');
     return translateNow('admin.tabs.edits');
   }
 
@@ -69,10 +73,12 @@
   async function switchTab(tab, options = {}) {
     const { syncUrl = true, force = false } = options;
     if (!force && tab !== activeTab && !dataController.confirmDiscardFilterTagChanges()) {
+      tabNavValue = activeTab;
       return;
     }
 
     activeTab = tab;
+    tabNavValue = tab;
     if (tab !== 'edits') {
       pendingUrlEditId = null;
     }
@@ -108,8 +114,17 @@
     await replaceAdminUrlState({ editId: pendingUrlEditId }, activeTab);
   }
 
+  async function handleTabNavChange(event) {
+    const nextTab = String(event.detail?.value || '').trim();
+    if (!nextTab) {
+      tabNavValue = activeTab;
+      return;
+    }
+    await switchTab(nextTab);
+  }
+
   beforeNavigate((navigation) => {
-    if (!get(filterTagAllowlistDirty)) return;
+    if (!get(filtersDirty)) return;
     const nextPathname = String(navigation?.to?.url?.pathname || '').trim();
     if (!nextPathname) return;
     if (typeof window !== 'undefined' && nextPathname !== window.location.pathname && !dataController.confirmDiscardFilterTagChanges()) {
@@ -126,10 +141,11 @@
       if (nextTab !== activeTab) {
         activeTab = nextTab;
       }
+      tabNavValue = activeTab;
     });
 
     const onBeforeUnload = (event) => {
-      if (!get(filterTagAllowlistDirty)) return;
+      if (!get(filtersDirty)) return;
       event.preventDefault();
       event.returnValue = '';
     };
@@ -158,8 +174,8 @@
 {:else}
   <PortalFrame eyebrow="Archimap" title={$t('admin.title')} description={$t('admin.subtitle')}>
     <svelte:fragment slot="meta">
-      <span class="ui-chip"><strong>{$t('admin.tabs.users')}</strong>{formatCount(usersCount)}</span>
-      <span class="ui-chip"><strong>{$t('admin.tabs.edits')}</strong>{formatCount(editsTotal)}</span>
+      <UiBadge variant="accent"><strong>{$t('admin.tabs.users')}</strong>{formatCount(usersCount)}</UiBadge>
+      <UiBadge variant="default"><strong>{$t('admin.tabs.edits')}</strong>{formatCount(editsTotal)}</UiBadge>
     </svelte:fragment>
 
     <svelte:fragment slot="lead">
@@ -179,48 +195,18 @@
       </div>
     </svelte:fragment>
 
-    <ul class="ui-tab-shell flex flex-wrap gap-1" role="tablist">
-      <li>
-        <button
-          type="button"
-          class="ui-tab-btn"
-          class:ui-tab-btn-active={activeTab === 'edits'}
-          on:click={() => switchTab('edits')}>{$t('admin.tabs.edits')}</button
-        >
-      </li>
-      <li>
-        <button
-          type="button"
-          class="ui-tab-btn"
-          class:ui-tab-btn-active={activeTab === 'users'}
-          on:click={() => switchTab('users')}>{$t('admin.tabs.users')}</button
-        >
-      </li>
-      <li>
-        <button
-          type="button"
-          class="ui-tab-btn"
-          class:ui-tab-btn-active={activeTab === 'data'}
-          on:click={() => switchTab('data')}>{$t('admin.tabs.data')}</button
-        >
-      </li>
-      <li>
-        <button
-          type="button"
-          class="ui-tab-btn"
-          class:ui-tab-btn-active={activeTab === 'filters'}
-          on:click={() => switchTab('filters')}>{$t('admin.tabs.filters')}</button
-        >
-      </li>
-      <li>
-        <button
-          type="button"
-          class="ui-tab-btn"
-          class:ui-tab-btn-active={activeTab === 'settings'}
-          on:click={() => switchTab('settings')}>{$t('admin.tabs.settings')}</button
-        >
-      </li>
-    </ul>
+    <UiTabsNav
+      bind:value={tabNavValue}
+      items={[
+        { value: 'edits', label: $t('admin.tabs.edits') },
+        { value: 'users', label: $t('admin.tabs.users') },
+        { value: 'data', label: $t('admin.tabs.data') },
+        { value: 'filters', label: $t('admin.tabs.filters') },
+        { value: 'styles', label: $t('admin.tabs.styles') },
+        { value: 'settings', label: $t('admin.tabs.settings') }
+      ]}
+      onchange={handleTabNavChange}
+    />
 
     {#if activeTab === 'users'}
       <AdminUsersTab isMasterAdmin={$session.user?.isMasterAdmin} on:summary={handleUsersSummary} />
@@ -228,6 +214,8 @@
       <AdminDataTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'filters'}
       <AdminFiltersTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
+    {:else if activeTab === 'styles'}
+      <AdminStylesTab />
     {:else if activeTab === 'settings'}
       <AdminSettingsTab isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else}

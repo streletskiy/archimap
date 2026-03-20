@@ -21,7 +21,10 @@ test('resolveAccountTabFromUrl and resolveAdminTabFromUrl keep legacy query comp
 
   assert.equal(resolveAccountTabFromUrl('http://localhost/app/account?tab=history'), 'edits');
   assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin?tab=users'), 'users');
+  assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin?tab=styles'), 'styles');
   assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin?adminEdit=42'), 'edits');
   assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin/filters'), 'filters');
+  assert.equal(resolveAdminTabFromUrl('http://localhost/app/admin/styles'), 'styles');
   assert.equal(buildAdminUrl('http://localhost/app/admin', 'filters').pathname, '/app/admin/filters');
+  assert.equal(buildAdminUrl('http://localhost/app/admin', 'styles').pathname, '/app/admin/styles');
 });

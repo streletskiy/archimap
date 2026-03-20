@@ -1,9 +1,9 @@
 export const FILTER_HIGHLIGHT_MODE = 'layer';
 export const EMPTY_LAYER_FILTER = ['==', ['id'], -1];
 export const FILTER_TRANSPARENT_COLOR = 'transparent';
-export const FILTER_HIGHLIGHT_FILL_OPACITY = 0.4;
+export const FILTER_HIGHLIGHT_FILL_OPACITY = 1;
 export const FILTER_HIGHLIGHT_LINE_WIDTH = 1.8;
-export const FILTER_HIGHLIGHT_LINE_OPACITY = 0.95;
+export const FILTER_HIGHLIGHT_LINE_OPACITY = 1;
 
 function normalizeIds(values) {
   return Array.isArray(values)
@@ -121,6 +121,13 @@ function buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups) {
   };
 }
 
+function combineFilterExpressions(expressions = []) {
+  const normalized = expressions.filter(Boolean);
+  if (normalized.length === 0) return EMPTY_LAYER_FILTER;
+  if (normalized.length === 1) return normalized[0];
+  return ['all', ...normalized];
+}
+
 export function applyFilterPaintHighlight({
   map,
   colorGroups,
@@ -129,6 +136,7 @@ export function applyFilterPaintHighlight({
   forceStaticPaintProperties = false,
   fillLayerIds = [],
   lineLayerIds = [],
+  additionalFilterExpression = null,
   onLayerPaintApplied
 }) {
   if (!map) {
@@ -148,6 +156,10 @@ export function applyFilterPaintHighlight({
     ? normalizedColorGroups
     : normalizeFilterPaintColorGroups(colorGroups);
   const { expr: filterExpression, count } = buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups);
+  const combinedFilterExpression = combineFilterExpressions([
+    additionalFilterExpression,
+    filterExpression
+  ]);
   const active = count > 0;
   const colorExpression = !active
     ? FILTER_TRANSPARENT_COLOR
@@ -162,7 +174,7 @@ export function applyFilterPaintHighlight({
 
   for (const layerId of fillLayerIds) {
     if (!map.getLayer(layerId)) continue;
-    map.setFilter(layerId, filterExpression);
+    map.setFilter(layerId, combinedFilterExpression);
     map.setPaintProperty(layerId, 'fill-color', colorExpression);
     paintPropertyCalls += 1;
     if (typeof onLayerPaintApplied === 'function') {
@@ -179,7 +191,7 @@ export function applyFilterPaintHighlight({
 
   for (const layerId of lineLayerIds) {
     if (!map.getLayer(layerId)) continue;
-    map.setFilter(layerId, filterExpression);
+    map.setFilter(layerId, combinedFilterExpression);
     map.setPaintProperty(layerId, 'line-color', colorExpression);
     paintPropertyCalls += 1;
     if (typeof onLayerPaintApplied === 'function') {
@@ -200,7 +212,7 @@ export function applyFilterPaintHighlight({
     active,
     count,
     colorExpression,
-    filterExpression,
+    filterExpression: combinedFilterExpression,
     fillOpacityExpression,
     lineWidthExpression,
     lineOpacityExpression,

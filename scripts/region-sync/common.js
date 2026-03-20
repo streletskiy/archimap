@@ -20,6 +20,30 @@ function encodeOsmFeatureId(osmType, osmId) {
   return (Number(osmId) * 2) + typeBit;
 }
 
+function normalizeFeatureKind(rawFeatureKind) {
+  const kind = String(rawFeatureKind || '').trim().toLowerCase();
+  return kind === 'building_part' ? 'building_part' : 'building';
+}
+
+function deriveFeatureKindFromTagsJson(tagsJson) {
+  const text = String(tagsJson || '').trim();
+  if (!text) return 'building';
+  try {
+    const tags = JSON.parse(text);
+    if (!tags || typeof tags !== 'object' || Array.isArray(tags)) return 'building';
+    if (Object.prototype.hasOwnProperty.call(tags, 'building')) {
+      return 'building';
+    }
+    const rawValue = String(tags['building:part'] ?? tags.building_part ?? '').trim().toLowerCase();
+    if (rawValue === 'yes' || rawValue === 'true' || rawValue === '1') {
+      return 'building_part';
+    }
+  } catch {
+    return 'building';
+  }
+  return 'building';
+}
+
 function updateBounds(bounds, row) {
   if (!row) return bounds;
   if (!bounds) {
@@ -38,14 +62,16 @@ function updateBounds(bounds, row) {
   };
 }
 
-function formatGeojsonFeatureLine(osmType, osmId, geometryJson) {
+function formatGeojsonFeatureLine(osmType, osmId, geometryJson, tagsJson = null, featureKind = null) {
   const normalizedGeometryJson = String(geometryJson || '').trim();
   if (!normalizedGeometryJson) {
     throw new Error(`Missing GeoJSON geometry for ${String(osmType || '').trim()}/${Number(osmId) || 0}`);
   }
+  const normalizedFeatureKind = normalizeFeatureKind(featureKind || deriveFeatureKindFromTagsJson(tagsJson));
   return (
     `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
-    `"properties":{"osm_id":${Number(osmId)}},"geometry":${normalizedGeometryJson}}\n`
+    `"properties":{"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}"},` +
+    `"geometry":${normalizedGeometryJson}}\n`
   );
 }
 
@@ -64,6 +90,7 @@ function parseRowPayload(line, options = {}) {
   const osmId = Number(payload?.osm_id);
   const geometryJson = String(payload?.geometry_json || '').trim();
   const geometryWkbHex = normalizeGeometryWkbHex(payload?.geometry_wkb_hex);
+  const featureKind = normalizeFeatureKind(payload?.feature_kind || deriveFeatureKindFromTagsJson(payload?.tags_json));
   const minLon = Number(payload?.min_lon);
   const minLat = Number(payload?.min_lat);
   const maxLon = Number(payload?.max_lon);
@@ -89,6 +116,7 @@ function parseRowPayload(line, options = {}) {
     osm_type: osmType,
     osm_id: osmId,
     tags_json: payload?.tags_json == null ? null : String(payload.tags_json),
+    feature_kind: featureKind,
     geometry_json: geometryJson || null,
     geometry_wkb_hex: geometryWkbHex,
     min_lon: minLon,
@@ -179,12 +207,14 @@ function buildPmtilesSwap(finalPath, newBuiltPath) {
 }
 
 module.exports = {
+  deriveFeatureKindFromTagsJson,
   buildPmtilesSwap,
   closeWriteStream,
   createWorkspace,
   encodeOsmFeatureId,
   ensureDir,
   formatGeojsonFeatureLine,
+  normalizeFeatureKind,
   normalizeGeometryWkbHex,
   parseRowPayload,
   readImportRows,

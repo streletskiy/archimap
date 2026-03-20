@@ -17,3 +17,7 @@ npm-debug.log
 .env.*
 !*.example
 data
+docs
+tests
+.husky
+.github

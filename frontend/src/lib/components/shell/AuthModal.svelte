@@ -1,10 +1,14 @@
 <script>
   import { tick } from 'svelte';
   import { page } from '$app/stores';
+  import { UiButton, UiInput } from '$lib/components/base';
+  import LoginForm from '$lib/components/login-form.svelte';
+  import SignupForm from '$lib/components/signup-form.svelte';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
-  import { clearSession, setSession } from '$lib/stores/auth';
+  import { setSession } from '$lib/stores/auth';
+  import AuthCardShell from './AuthCardShell.svelte';
 
   export let open = false;
   export let preferredTab = 'login';
@@ -20,8 +24,8 @@
   let regFirstName = '';
   let regLastName = '';
   let regCode = '';
-  let regAcceptTerms = false;
-  let regAcceptPrivacy = false;
+  let regAcceptTerms = true;
+  let regAcceptPrivacy = true;
   let registerPendingEmail = '';
   let registerStartInFlight = false;
   let registerCodeReady = false;
@@ -36,11 +40,16 @@
   let lastHandledRequestId = 0;
   let modalEl = null;
   let hadOpenState = false;
+  let authModalWidthClass = 'auth-modal w-full max-w-sm md:max-w-4xl';
 
   $: if (requestId && requestId !== lastHandledRequestId) {
     lastHandledRequestId = requestId;
     authTab = preferredTab === 'register' ? 'register' : 'login';
     resetMode = false;
+    registerPendingEmail = '';
+    registerCodeReady = false;
+    regCode = '';
+    status = '';
     open = true;
   }
 
@@ -68,6 +77,18 @@
     }
   }
 
+  function showAuthTab(tab) {
+    authTab = tab === 'register' ? 'register' : 'login';
+    resetMode = false;
+    status = '';
+  }
+
+  function openResetMode() {
+    resetMode = true;
+    authTab = 'login';
+    status = '';
+  }
+
   async function submitLogin(event) {
     event.preventDefault();
     status = translateNow('header.status.loginInProgress');
@@ -89,6 +110,7 @@
   async function submitRegisterStart(event) {
     event.preventDefault();
     if (registerStartInFlight) return;
+
     const email = String(regEmail || '').trim();
     const password = String(regPassword || '');
     const passwordConfirm = String(regPasswordConfirm || '');
@@ -105,15 +127,11 @@
       status = translateNow('header.status.registerPasswordMismatch');
       return;
     }
-    if (!regAcceptTerms || !regAcceptPrivacy) {
-      status = translateNow('header.status.registerNeedConsents');
-      return;
-    }
-
     registerPendingEmail = email;
     registerCodeReady = false;
     registerStartInFlight = true;
     status = translateNow('header.status.registerCodeSending');
+
     try {
       await apiJson('/api/register/start', {
         method: 'POST',
@@ -250,10 +268,14 @@
   } else if (!open && hadOpenState) {
     hadOpenState = false;
   }
+
+  $: authModalWidthClass = registerPendingEmail || resetMode
+    ? 'auth-modal w-full max-w-sm md:max-w-3xl'
+    : 'auth-modal w-full max-w-sm md:max-w-4xl';
 </script>
 
 {#if open}
-  <div class="auth-backdrop">
+  <div class:auth-backdrop-mobile-top={registerPendingEmail || resetMode || authTab === 'register'} class="auth-backdrop">
     <button
       type="button"
       class="auth-dismiss-layer"
@@ -263,7 +285,7 @@
     ></button>
 
     <div
-      class="auth-modal"
+      class={authModalWidthClass}
       bind:this={modalEl}
       role="dialog"
       aria-modal="true"
@@ -271,134 +293,113 @@
       tabindex="-1"
       on:keydown={closeOnKeydown}
     >
-      <div class="auth-head">
-        <div class="auth-head-copy">
-          <p class="ui-kicker">{$t('common.appName')}</p>
-          <h3 id="auth-modal-title">{$t('header.authTitle')}</h3>
-        </div>
-        <button
+      {#if registerPendingEmail || resetMode}
+        <UiButton
           type="button"
-          class="ui-btn ui-btn-secondary ui-btn-xs ui-btn-close"
-          on:click={closeAuth}
+          variant="secondary"
+          size="close"
+          className="auth-modal-close"
+          onclick={closeAuth}
           aria-label={$t('common.close')}
         >
           <CloseIcon class="ui-close-icon" />
-        </button>
-      </div>
+        </UiButton>
+      {/if}
 
       {#if registerPendingEmail}
-        <form class="stack" on:submit={submitRegisterConfirm}>
-          <p class="hint">{$t('header.confirmRegistration')}</p>
-          <input class="ui-field" value={registerPendingEmail} readonly />
-          <input
-            class="ui-field"
-            bind:value={regCode}
-            inputmode="numeric"
-            maxlength="6"
-            placeholder="123456"
-            required
-          />
-          <button class="ui-btn ui-btn-secondary" type="submit" disabled={!registerCodeReady}>
-            {$t('header.confirmCode')}
-          </button>
-        </form>
+        <AuthCardShell
+          title={$t('header.confirmRegistration')}
+          subtitle={$t('header.authConfirmSubtitle')}
+          bodyClassName="grid content-center"
+        >
+          <h2 id="auth-modal-title" class="sr-only">{$t('header.confirmRegistration')}</h2>
+          <form class="auth-stage-form" on:submit={submitRegisterConfirm}>
+            <UiInput value={registerPendingEmail} readonly />
+            <UiInput
+              bind:value={regCode}
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="123456"
+              required
+            />
+            <UiButton type="submit" className="w-full" disabled={!registerCodeReady}>
+              {$t('header.confirmCode')}
+            </UiButton>
+          </form>
+        </AuthCardShell>
       {:else if resetMode}
-        <form class="stack" on:submit={submitResetRequest}>
-          <input
-            class="ui-field"
-            bind:value={resetEmail}
-            type="email"
-            placeholder={$t('header.emailAccount')}
-            required
-          />
-          <button class="ui-btn ui-btn-secondary" type="submit">{$t('header.sendResetLink')}</button>
-        </form>
-        <form class="stack" on:submit={submitResetConfirm}>
-          <input class="ui-field" bind:value={resetToken} placeholder={$t('header.resetToken')} required />
-          <input
-            class="ui-field"
-            bind:value={resetNewPassword}
-            type="password"
-            placeholder={$t('header.newPassword')}
-            required
-          />
-          <button class="ui-btn ui-btn-primary" type="submit">{$t('header.changePassword')}</button>
-        </form>
-      {:else}
-        <div class="tabs ui-tab-shell">
-          <button
-            type="button"
-            class="ui-tab-btn"
-            class:ui-tab-btn-active={authTab === 'login'}
-            on:click={() => (authTab = 'login')}
-          >
-            {$t('header.tabLogin')}
-          </button>
-          <button
-            type="button"
-            class="ui-tab-btn"
-            class:ui-tab-btn-active={authTab === 'register'}
-            on:click={() => (authTab = 'register')}
-          >
-            {$t('header.tabRegister')}
-          </button>
-        </div>
+        <AuthCardShell
+          title={$t('header.changePassword')}
+          subtitle={$t('header.authResetSubtitle')}
+          bodyClassName="grid content-center"
+        >
+          <h2 id="auth-modal-title" class="sr-only">{$t('header.changePassword')}</h2>
+          <div class="auth-stage-stack">
+            <form class="auth-stage-form" on:submit={submitResetRequest}>
+              <UiInput
+                bind:value={resetEmail}
+                type="email"
+                placeholder={$t('header.emailAccount')}
+                required
+                autocomplete="email"
+              />
+              <UiButton variant="secondary" type="submit" className="w-full">
+                {$t('header.sendResetLink')}
+              </UiButton>
+            </form>
 
-        {#if authTab === 'login'}
-          <form class="stack" on:submit={submitLogin}>
-            <input class="ui-field" bind:value={loginEmail} type="email" placeholder={$t('header.email')} required />
-            <input
-              class="ui-field"
-              bind:value={loginPassword}
-              type="password"
-              placeholder={$t('header.password')}
-              required
-            />
-            <button type="button" class="forgot-btn" on:click={() => (resetMode = true)}>
-              {$t('header.forgotPassword')}
+            <div class="auth-stage-divider" aria-hidden="true"></div>
+
+            <form class="auth-stage-form" on:submit={submitResetConfirm}>
+              <UiInput bind:value={resetToken} placeholder={$t('header.resetToken')} required />
+              <UiInput
+                bind:value={resetNewPassword}
+                type="password"
+                placeholder={$t('header.newPassword')}
+                required
+                autocomplete="new-password"
+              />
+              <UiButton type="submit" className="w-full">
+                {$t('header.changePassword')}
+              </UiButton>
+            </form>
+
+            <button type="button" class="auth-stage-link" on:click={() => showAuthTab('login')}>
+              {$t('header.login')}
             </button>
-            <button class="ui-btn ui-btn-primary" type="submit">{$t('header.login')}</button>
-          </form>
-        {:else}
-          <form class="stack" on:submit={submitRegisterStart}>
-            <input class="ui-field" bind:value={regFirstName} placeholder={$t('header.firstName')} />
-            <input class="ui-field" bind:value={regLastName} placeholder={$t('header.lastName')} />
-            <input
-              class="ui-field"
-              bind:value={regEmail}
-              type="email"
-              placeholder={$t('header.emailRequired')}
-              required
-              aria-required="true"
-            />
-            <input
-              class="ui-field"
-              bind:value={regPassword}
-              type="password"
-              placeholder={$t('header.passwordRequired')}
-              required
-              aria-required="true"
-            />
-            <input
-              class="ui-field"
-              bind:value={regPasswordConfirm}
-              type="password"
-              placeholder={$t('header.repeatPassword')}
-              required
-            />
-            <label class="consent">
-              <input type="checkbox" bind:checked={regAcceptTerms} required aria-required="true" />
-              <span>{$t('header.acceptTerms')} <a href={termsHref}>{$t('header.termsLink')}</a></span>
-            </label>
-            <label class="consent">
-              <input type="checkbox" bind:checked={regAcceptPrivacy} required aria-required="true" />
-              <span>{$t('header.acceptPrivacy')} <a href={privacyHref}>{$t('header.privacyLink')}</a></span>
-            </label>
-            <button class="ui-btn ui-btn-primary" type="submit" disabled={registerStartInFlight}>
-              {$t('header.createAccount')}
-            </button>
-          </form>
-        {/if}
+          </div>
+        </AuthCardShell>
+      {:else if authTab === 'register'}
+        <div aria-labelledby="auth-modal-title">
+          <h2 id="auth-modal-title" class="sr-only">{$t('header.tabRegister')}</h2>
+          <SignupForm
+            bind:firstName={regFirstName}
+            bind:lastName={regLastName}
+            bind:email={regEmail}
+            bind:password={regPassword}
+            bind:passwordConfirm={regPasswordConfirm}
+            {termsHref}
+            {privacyHref}
+            pending={registerStartInFlight}
+            onsubmit={submitRegisterStart}
+            onclose={closeAuth}
+            onswitch={() => showAuthTab('login')}
+          />
+        </div>
+      {:else}
+        <div aria-labelledby="auth-modal-title">
+          <h2 id="auth-modal-title" class="sr-only">{$t('header.tabLogin')}</h2>
+          <LoginForm
+            bind:email={loginEmail}
+            bind:password={loginPassword}
+            {termsHref}
+            {privacyHref}
+            onsubmit={submitLogin}
+            onforgot={openResetMode}
+            onclose={closeAuth}
+            onswitch={() => showAuthTab('register')}
+          />
+        </div>
       {/if}
 
       {#if status}
@@ -416,8 +417,11 @@
     display: grid;
     place-items: center;
     padding: 1rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     background: rgba(8, 17, 31, 0.44);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(10px);
     pointer-events: auto;
   }
 
@@ -432,91 +436,70 @@
   .auth-modal {
     position: relative;
     z-index: 1;
-    width: min(31rem, 100%);
-    padding: 1rem;
-    border: 1px solid var(--panel-border);
-    border-radius: 1.3rem;
-    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
-    box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(18px);
     pointer-events: auto;
   }
 
-  .auth-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.85rem;
+  .auth-modal-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 5;
   }
 
-  .auth-head-copy {
+  .auth-stage-stack,
+  .auth-stage-form {
     display: grid;
-    gap: 0.2rem;
+    gap: 0.9rem;
   }
 
-  .auth-head h3 {
-    margin: 0;
-    color: var(--fg-strong);
+  .auth-stage-divider {
+    height: 1px;
+    background: var(--panel-border);
+    opacity: 0.75;
   }
 
-  .tabs {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.25rem;
-    margin-bottom: 0.8rem;
-  }
-
-  .stack {
-    display: grid;
-    gap: 0.6rem;
-    margin-bottom: 0.55rem;
-  }
-
-  .forgot-btn {
+  .auth-stage-link {
+    justify-self: start;
     border: 0;
-    background: transparent;
-    text-align: right;
-    color: var(--accent-ink);
-    font-weight: 700;
-    font-size: 0.8rem;
-    cursor: pointer;
     padding: 0;
-  }
-
-  .hint {
-    margin: 0 0 0.15rem;
-    color: var(--fg-strong);
+    background: transparent;
+    color: var(--accent-ink);
+    font-size: 0.88rem;
     font-weight: 700;
-    font-size: 0.92rem;
+    cursor: pointer;
   }
 
   .status {
-    margin: 0.4rem 0 0;
-    padding: 0.75rem 0.85rem;
+    margin: 0.85rem 0 0;
+    padding: 0.8rem 0.95rem;
     border-radius: 1rem;
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
-    color: var(--muted);
-    font-size: 0.82rem;
-    line-height: 1.45;
-  }
-
-  .consent {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.55rem;
-    font-size: 0.82rem;
+    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
     color: var(--muted-strong);
+    font-size: 0.85rem;
+    line-height: 1.45;
+    backdrop-filter: blur(16px);
   }
 
-  .consent input {
-    margin-top: 0.12rem;
+  @media (min-width: 768px) {
+    .auth-modal-close {
+      top: 1rem;
+      right: 1rem;
+    }
   }
 
-  .consent a {
-    color: var(--accent-ink);
-    text-decoration: underline;
-    text-underline-offset: 2px;
+  @media (max-width: 767px) {
+    .auth-backdrop-mobile-top {
+      place-items: start center;
+      padding-top: 1rem;
+    }
+
+    .auth-backdrop {
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    .auth-modal {
+      width: 100%;
+    }
   }
 </style>

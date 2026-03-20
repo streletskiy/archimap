@@ -49,7 +49,7 @@ function createRateLimiterFactory(options = {}) {
           if (count > maxRequests) {
             const retryAfterSec = Math.max(1, Math.ceil((ttl > 0 ? ttl : windowMs) / 1000));
             res.setHeader('Retry-After', String(retryAfterSec));
-            return res.status(429).json({ error: message || 'Слишком много запросов, попробуйте позже' });
+            return res.status(429).json({ code: 'ERR_RATE_LIMITED', error: message || 'Too many requests, please try again later' });
           }
 
           return next();
@@ -68,7 +68,7 @@ function createRateLimiterFactory(options = {}) {
       if (bucket.count > maxRequests) {
         const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
         res.setHeader('Retry-After', String(retryAfterSec));
-        return res.status(429).json({ error: message || 'Слишком много запросов, попробуйте позже' });
+        return res.status(429).json({ code: 'ERR_RATE_LIMITED', error: message || 'Too many requests, please try again later' });
       }
 
       return next();

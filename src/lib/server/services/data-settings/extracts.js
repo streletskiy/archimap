@@ -48,15 +48,15 @@ function createExtractsDomain(context = {}) {
     const searchQuery = normalizeNullableText(query, 240);
     if (result.errorCode === 'multiple') {
       return searchQuery
-        ? `Запрос "${searchQuery}" соответствует нескольким extract-вариантам. Выберите один вручную.`
-        : 'Запрос соответствует нескольким extract-вариантам. Выберите один вручную.';
+        ? `Query "${searchQuery}" matches multiple extract candidates. Choose one manually.`
+        : 'Query matches multiple extract candidates. Choose one manually.';
     }
     if (result.errorCode === 'not_found') {
       return searchQuery
-        ? `Для запроса "${searchQuery}" не найден точный canonical extract.`
-        : 'Точный canonical extract не найден.';
+        ? `No exact canonical extract was found for query "${searchQuery}".`
+        : 'Exact canonical extract was not found.';
     }
-    return 'Для региона требуется ручной выбор canonical extract.';
+    return 'Region requires manual canonical extract selection.';
   }
 
   async function searchExtractCandidates(query, options = {}) {
@@ -99,7 +99,7 @@ function createExtractsDomain(context = {}) {
     if (!extractSource || !extractId) {
       return {
         candidate: null,
-        error: 'Выберите canonical extract перед сохранением региона.'
+        error: 'Select a canonical extract before saving the region.'
       };
     }
 
@@ -124,7 +124,7 @@ function createExtractsDomain(context = {}) {
     } catch (error) {
       return {
         candidate: null,
-        error: `Не удалось проверить canonical extract: ${String(error?.message || error || 'Unknown error')}`
+        error: `Failed to validate canonical extract: ${String(error?.message || error || 'Unknown error')}`
       };
     }
   }

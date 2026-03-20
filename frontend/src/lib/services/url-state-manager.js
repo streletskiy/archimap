@@ -1,6 +1,4 @@
-import { pushState, replaceState } from '$app/navigation';
 import { resolve } from '$app/paths';
-import { get } from 'svelte/store';
 import { getFilterLayersUrlSignature } from '$lib/client/filterUrlState';
 import { parseUrlState, patchUrlState } from '$lib/client/urlState';
 import { normalizeOptionalMapZoom, requestMapFocus } from '$lib/stores/map';
@@ -26,13 +24,16 @@ function getUrlBuildingKey(state) {
     : '';
 }
 
+function getUrlFilterKey(state) {
+  return getFilterLayersUrlSignature(state?.filters);
+}
+
 function getSelectedBuildingKey(selection) {
   const building = toBuildingUrlParam(selection);
   return building ? `${building.osmType}/${building.osmId}` : '';
 }
 
 export function createUrlStateManager({
-  pageStore,
   onApplyBuilding,
   onClearBuildingSelection,
   onApplyFilters,
@@ -46,6 +47,7 @@ export function createUrlStateManager({
   let lastAppliedCameraKey = '';
   let handledUrlSignature = '';
   let lastUrlBuildingKey = '';
+  let lastUrlFilterKey = '';
 
   function updateUrlState(patch, { replaceState: shouldReplaceState = true } = {}) {
     if (typeof window === 'undefined') return;
@@ -57,12 +59,12 @@ export function createUrlStateManager({
     try {
       handledUrlSignature = getUrlStateSignature(nextState);
       lastUrlBuildingKey = getUrlBuildingKey(nextState);
+      lastUrlFilterKey = getUrlFilterKey(nextState);
       const target = resolve(`${next.pathname}${next.search}${next.hash}`);
-      const currentPageState = get(pageStore)?.state ?? {};
       if (shouldReplaceState) {
-        replaceState(target, currentPageState);
+        window.history.replaceState(window.history.state, '', target);
       } else {
-        pushState(target, currentPageState);
+        window.history.pushState(window.history.state, '', target);
       }
     } finally {
       queueMicrotask(() => {
@@ -117,6 +119,9 @@ export function createUrlStateManager({
     const nextUrlBuildingKey = getUrlBuildingKey(state);
     const hadUrlBuildingKey = lastUrlBuildingKey;
     lastUrlBuildingKey = nextUrlBuildingKey;
+    const nextUrlFilterKey = getUrlFilterKey(state);
+    const hadUrlFilterKey = lastUrlFilterKey;
+    lastUrlFilterKey = nextUrlFilterKey;
 
     if (state.camera && mapReady) {
       const cameraKey = `${state.camera.lat}:${state.camera.lng}:${state.camera.z ?? ''}`;
@@ -137,7 +142,12 @@ export function createUrlStateManager({
 
     if (state.filters) {
       applyFiltersFromUrl(state.filters, currentFilters);
-    } else if (!filterApplyInFlight && Array.isArray(currentFilters) && currentFilters.length > 0) {
+    } else if (
+      hadUrlFilterKey
+      && !filterApplyInFlight
+      && Array.isArray(currentFilters)
+      && currentFilters.length > 0
+    ) {
       filterApplyInFlight = true;
       try {
         onClearFilters?.();

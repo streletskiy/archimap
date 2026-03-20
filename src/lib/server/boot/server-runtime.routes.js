@@ -47,6 +47,7 @@ function registerServerRuntimeRoutes(runtime) {
     registrationEnabled: runtime.config.registrationEnabled,
     getRegistrationEnabled: runtime.getRegistrationEnabled,
     dataSettingsService: runtime.dataSettingsService,
+    styleRegionOverridesService: runtime.styleRegionOverridesService,
     getFilterTagKeysCached: runtime.getFilterTagKeysCached,
     getAllFilterTagKeysCached: runtime.getAllFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress: runtime.isFilterTagKeysRebuildInProgress
@@ -100,7 +101,8 @@ function registerServerRuntimeRoutes(runtime) {
     appBaseUrl: runtime.config.appBaseUrl,
     getAppBaseUrl: runtime.getAppBaseUrl,
     registrationCodeTtlMinutes: runtime.config.registrationCodeTtlMinutes,
-    passwordResetTtlMinutes: runtime.config.passwordResetTtlMinutes
+    passwordResetTtlMinutes: runtime.config.passwordResetTtlMinutes,
+    styleRegionOverridesService: runtime.styleRegionOverridesService
   });
 
   registerBuildingsRoutes({

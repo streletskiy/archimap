@@ -10,15 +10,15 @@ function createAuthMiddlewareSupport(options = {}) {
 
   async function requireAuth(req, res, next) {
     if (!req.session || !req.session.user) {
-      return res.status(401).json({ error: 'Требуется авторизация' });
+      return res.status(401).json({ code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' });
     }
     const email = String(req.session.user.email || '').trim().toLowerCase();
     if (!email) {
-      return res.status(401).json({ error: 'Требуется авторизация' });
+      return res.status(401).json({ code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' });
     }
     const row = await db.prepare('SELECT email, can_edit, is_admin, is_master_admin, first_name, last_name FROM auth.users WHERE email = ?').get(email);
     if (!row) {
-      return res.status(401).json({ error: 'Требуется авторизация' });
+      return res.status(401).json({ code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' });
     }
     const isMasterAdmin = Number(row.is_master_admin || 0) > 0;
     const isAdmin = isMasterAdmin || Number(row.is_admin || 0) > 0;
@@ -43,17 +43,17 @@ function createAuthMiddlewareSupport(options = {}) {
 
   function requireAdmin(req, res, next) {
     if (!req?.session?.user) {
-      return res.status(401).json({ error: 'Требуется авторизация' });
+      return res.status(401).json({ code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' });
     }
     if (!isAdminRequest(req)) {
-      return res.status(403).json({ error: 'Требуются права администратора' });
+      return res.status(403).json({ code: 'ERR_ADMIN_REQUIRED', error: 'Admin privileges are required' });
     }
     return next();
   }
 
   async function requireBuildingEditPermission(req, res, next) {
     if (!req.session?.user) {
-      return res.status(401).json({ error: 'Требуется авторизация' });
+      return res.status(401).json({ code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' });
     }
 
     if (isAdminRequest(req)) return next();
@@ -61,16 +61,16 @@ function createAuthMiddlewareSupport(options = {}) {
 
     const email = String(req.session.user.email || '').trim().toLowerCase();
     if (!email) {
-      return res.status(403).json({ error: 'Редактирование недоступно для этой учетной записи' });
+      return res.status(403).json({ code: 'ERR_EDITING_UNAVAILABLE', error: 'Editing is unavailable for this account' });
     }
 
     const row = await db.prepare('SELECT can_edit, is_admin FROM auth.users WHERE email = ?').get(email);
     if (!row) {
-      return res.status(403).json({ error: 'Редактирование недоступно для этой учетной записи' });
+      return res.status(403).json({ code: 'ERR_EDITING_UNAVAILABLE', error: 'Editing is unavailable for this account' });
     }
     if (Number(row.is_admin || 0) > 0) return next();
     if (Number(row.can_edit || 0) <= 0) {
-      return res.status(403).json({ error: 'Редактирование запрещено. Обратитесь к администратору за доступом.' });
+      return res.status(403).json({ code: 'ERR_EDITING_FORBIDDEN', error: 'Editing is not allowed for this account. Contact an administrator for access.' });
     }
 
     return next();

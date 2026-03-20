@@ -228,7 +228,7 @@ function createAuthService({
   async function requireAdminSession(req, res, next) {
     const user = await resolveSessionUser(req);
     if (!user || !user.isAdmin) {
-      return res.status(403).json({ error: 'Требуются права администратора' });
+      return res.status(403).json({ code: 'ERR_ADMIN_REQUIRED', error: 'Admin privileges are required' });
     }
     return next();
   }
@@ -236,7 +236,7 @@ function createAuthService({
   async function requireMasterAdminSession(req, res, next) {
     const user = await resolveSessionUser(req);
     if (!user || !user.isMasterAdmin) {
-      return res.status(403).json({ error: 'Требуются права master admin' });
+      return res.status(403).json({ code: 'ERR_MASTER_ADMIN_REQUIRED', error: 'Master admin privileges are required' });
     }
     return next();
   }
@@ -289,7 +289,7 @@ function createAuthService({
     const allowEdit = Boolean(options.allowEdit || makeAdmin || makeMasterAdmin);
     const deleteRegistrationCode = options.deleteRegistrationCode !== false;
     if (!isValidEmail(email) || !passwordHash) {
-      return { status: 400, error: 'Данные регистрации повреждены, начните заново' };
+      return { status: 400, code: 'ERR_REGISTRATION_DATA_CORRUPTED', error: 'Registration data is corrupted. Start over.' };
     }
 
     const tx = db.transaction(async (nextEmail, nextPasswordHash, nextFirstName, nextLastName, nextCanEdit, nextIsAdmin, nextIsMasterAdmin) => {
@@ -304,7 +304,7 @@ function createAuthService({
       await tx(email, passwordHash, firstName, lastName, allowEdit, makeAdmin, makeMasterAdmin);
     } catch (error) {
       if (String(error?.code || '') === '23505' || String(error?.message || '').includes('UNIQUE constraint failed: auth.users.email')) {
-        return { status: 409, error: 'Пользователь с таким email уже зарегистрирован' };
+        return { status: 409, code: 'ERR_EMAIL_ALREADY_REGISTERED', error: 'A user with this email is already registered' };
       }
       throw error;
     }
@@ -347,7 +347,7 @@ function createAuthService({
           authSession = await establishAuthenticatedSession(req, buildSessionUserFromRow(user));
         } catch (error) {
           logger.error('auth_login_session_failed', { error: String(error.message || error) });
-          return { status: 500, error: 'Не удалось создать сессию' };
+          return { status: 500, code: 'ERR_SESSION_CREATE_FAILED', error: 'Failed to create session' };
         }
         return {
           payload: {
@@ -359,12 +359,12 @@ function createAuthService({
       }
     }
 
-    return { status: 401, error: 'Неверный логин или пароль' };
+    return { status: 401, code: 'ERR_LOGIN_FAILED', error: 'Invalid email or password' };
   }
 
   async function startRegistration(req) {
     if (!resolveRegistrationEnabled()) {
-      return { status: 403, error: 'Регистрация отключена' };
+      return { status: 403, code: 'ERR_REGISTRATION_DISABLED', error: 'Registration is disabled' };
     }
 
     const email = normalizeEmail(req.body?.email);
@@ -374,27 +374,27 @@ function createAuthService({
     const acceptTerms = req.body?.acceptTerms === true;
     const acceptPrivacy = req.body?.acceptPrivacy === true;
     if (!isValidEmail(email)) {
-      return { status: 400, error: 'Укажите корректный email' };
+      return { status: 400, code: 'ERR_INVALID_EMAIL', error: 'Provide a valid email' };
     }
     if (password.length < registrationMinPasswordLength) {
-      return { status: 400, error: `Пароль должен содержать минимум ${registrationMinPasswordLength} символов` };
+      return { status: 400, code: 'ERR_PASSWORD_TOO_SHORT', error: `Password must be at least ${registrationMinPasswordLength} characters long` };
     }
     if (!acceptTerms || !acceptPrivacy) {
-      return { status: 400, error: 'Для регистрации необходимо принять пользовательское соглашение и политику конфиденциальности' };
+      return { status: 400, code: 'ERR_REGISTRATION_CONSENT_REQUIRED', error: 'Terms of service and privacy policy must be accepted for registration' };
     }
 
     if (!isEmailDeliveryConfigured()) {
-      return { status: 503, error: 'Отправка писем не настроена на сервере' };
+      return { status: 503, code: 'ERR_EMAIL_DELIVERY_NOT_CONFIGURED', error: 'Email delivery is not configured on the server' };
     }
 
     const baseUrl = resolveAppBaseUrl(req);
     if (!baseUrl) {
-      return { status: 500, error: 'Не удалось определить адрес приложения для ссылки подтверждения' };
+      return { status: 500, code: 'ERR_APP_BASE_URL_UNAVAILABLE', error: 'Failed to resolve app base URL for the confirmation link' };
     }
 
     const existingUser = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
     if (existingUser) {
-      return { status: 409, error: 'Пользователь с таким email уже зарегистрирован' };
+      return { status: 409, code: 'ERR_EMAIL_ALREADY_REGISTERED', error: 'A user with this email is already registered' };
     }
 
     const now = Date.now();
@@ -406,7 +406,8 @@ function createAuthService({
       const retryAfterSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
       return {
         status: 429,
-        error: `Повторная отправка будет доступна через ${retryAfterSec} сек.`,
+        code: 'ERR_REGISTRATION_RETRY_LATER',
+        error: `Retry will be available in ${retryAfterSec} seconds`,
         headers: { 'Retry-After': String(retryAfterSec) }
       };
     }
@@ -437,7 +438,7 @@ function createAuthService({
       await sendRegistrationCodeEmail({ to: email, code, expiresInMinutes: registrationCodeTtlMinutes, confirmUrl });
     } catch (error) {
       logger.error('auth_registration_code_send_failed', { email, error: String(error.message || error) });
-      return { status: 502, error: 'Не удалось отправить письмо с кодом подтверждения' };
+      return { status: 502, code: 'ERR_REGISTRATION_EMAIL_SEND_FAILED', error: 'Failed to send registration confirmation email' };
     }
 
     return {
@@ -450,21 +451,21 @@ function createAuthService({
 
   async function confirmRegistrationCode(req) {
     if (!resolveRegistrationEnabled()) {
-      return { status: 403, error: 'Регистрация отключена' };
+      return { status: 403, code: 'ERR_REGISTRATION_DISABLED', error: 'Registration is disabled' };
     }
 
     const email = normalizeEmail(req.body?.email);
     const code = String(req.body?.code || '').trim();
     if (!isValidEmail(email)) {
-      return { status: 400, error: 'Укажите корректный email' };
+      return { status: 400, code: 'ERR_INVALID_EMAIL', error: 'Provide a valid email' };
     }
     if (!/^\d{6}$/.test(code)) {
-      return { status: 400, error: 'Код должен состоять из 6 цифр' };
+      return { status: 400, code: 'ERR_CONFIRMATION_CODE_FORMAT', error: 'Confirmation code must contain 6 digits' };
     }
 
     const existingUser = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(email);
     if (existingUser) {
-      return { status: 409, error: 'Пользователь с таким email уже зарегистрирован' };
+      return { status: 409, code: 'ERR_EMAIL_ALREADY_REGISTERED', error: 'A user with this email is already registered' };
     }
 
     const codeRow = await db.prepare(`
@@ -474,22 +475,22 @@ function createAuthService({
     `).get(email);
 
     if (!codeRow) {
-      return { status: 400, error: 'Сначала отправьте форму регистрации' };
+      return { status: 400, code: 'ERR_REGISTRATION_NOT_STARTED', error: 'Submit the registration form first' };
     }
 
     const now = Date.now();
     if (Number(codeRow.expires_at || 0) <= now) {
       await db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(email);
-      return { status: 400, error: 'Срок действия кода истек, отправьте форму снова' };
+      return { status: 400, code: 'ERR_CONFIRMATION_CODE_EXPIRED', error: 'Confirmation code has expired. Submit the form again' };
     }
     if (Number(codeRow.attempts || 0) >= registrationCodeMaxAttempts) {
-      return { status: 429, error: 'Превышено число попыток, отправьте форму заново' };
+      return { status: 429, code: 'ERR_CONFIRMATION_ATTEMPTS_EXCEEDED', error: 'Maximum number of attempts exceeded. Submit the form again' };
     }
 
     const expectedHash = hashRegistrationCode(sessionSecret, email, code);
     if (expectedHash !== String(codeRow.code_hash || '')) {
       await db.prepare('UPDATE auth.email_registration_codes SET attempts = attempts + 1 WHERE email = ?').run(email);
-      return { status: 400, error: 'Неверный код подтверждения' };
+      return { status: 400, code: 'ERR_CONFIRMATION_CODE_INVALID', error: 'Invalid confirmation code' };
     }
 
     const done = await completeRegistration(codeRow);
@@ -501,7 +502,7 @@ function createAuthService({
       authSession = await establishAuthenticatedSession(req, done.payload.user);
     } catch (error) {
       logger.error('auth_registration_code_session_failed', { error: String(error.message || error) });
-      return { status: 500, error: 'Не удалось создать сессию' };
+      return { status: 500, code: 'ERR_SESSION_CREATE_FAILED', error: 'Failed to create session' };
     }
     return {
       payload: {
@@ -514,12 +515,12 @@ function createAuthService({
 
   async function confirmRegistrationLink(req) {
     if (!resolveRegistrationEnabled()) {
-      return { status: 403, error: 'Регистрация отключена' };
+      return { status: 403, code: 'ERR_REGISTRATION_DISABLED', error: 'Registration is disabled' };
     }
 
     const token = String(req.body?.token || '').trim();
     if (token.length < 32) {
-      return { status: 400, error: 'Некорректный токен подтверждения' };
+      return { status: 400, code: 'ERR_CONFIRMATION_TOKEN_INVALID', error: 'Invalid confirmation token' };
     }
 
     const tokenHash = hashRegistrationVerifyToken(sessionSecret, token);
@@ -530,11 +531,11 @@ function createAuthService({
       LIMIT 1
     `).get(tokenHash);
     if (!row) {
-      return { status: 400, error: 'Ссылка подтверждения недействительна или истекла' };
+      return { status: 400, code: 'ERR_CONFIRMATION_LINK_INVALID', error: 'Confirmation link is invalid or expired' };
     }
     if (Number(row.expires_at || 0) <= Date.now()) {
       await db.prepare('DELETE FROM auth.email_registration_codes WHERE email = ?').run(row.email);
-      return { status: 400, error: 'Ссылка подтверждения недействительна или истекла' };
+      return { status: 400, code: 'ERR_CONFIRMATION_LINK_INVALID', error: 'Confirmation link is invalid or expired' };
     }
 
     const done = await completeRegistration(row);
@@ -546,7 +547,7 @@ function createAuthService({
       authSession = await establishAuthenticatedSession(req, done.payload.user);
     } catch (error) {
       logger.error('auth_registration_link_session_failed', { error: String(error.message || error) });
-      return { status: 500, error: 'Не удалось создать сессию' };
+      return { status: 500, code: 'ERR_SESSION_CREATE_FAILED', error: 'Failed to create session' };
     }
     return {
       payload: {
@@ -569,32 +570,32 @@ function createAuthService({
 
   async function changePassword(req) {
     if (!req.session?.user) {
-      return { status: 401, error: 'Требуется авторизация' };
+      return { status: 401, code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' };
     }
 
     const email = normalizeEmail(req.session.user.email);
     if (!isValidEmail(email)) {
-      return { status: 400, error: 'Не удалось определить email текущего пользователя' };
+      return { status: 400, code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve the current user email' };
     }
 
     const currentPassword = String(req.body?.currentPassword || '');
     const newPassword = String(req.body?.newPassword || '');
     if (!currentPassword || !newPassword) {
-      return { status: 400, error: 'Укажите текущий и новый пароль' };
+      return { status: 400, code: 'ERR_PASSWORD_CHANGE_FIELDS_REQUIRED', error: 'Provide both current and new password' };
     }
     if (newPassword.length < registrationMinPasswordLength) {
-      return { status: 400, error: `Новый пароль должен содержать минимум ${registrationMinPasswordLength} символов` };
+      return { status: 400, code: 'ERR_PASSWORD_TOO_SHORT', error: `New password must be at least ${registrationMinPasswordLength} characters long` };
     }
     if (currentPassword === newPassword) {
-      return { status: 400, error: 'Новый пароль должен отличаться от текущего' };
+      return { status: 400, code: 'ERR_PASSWORD_CHANGE_SAME', error: 'New password must be different from the current password' };
     }
 
     const user = await db.prepare('SELECT id, password_hash FROM auth.users WHERE email = ?').get(email);
     if (!user) {
-      return { status: 404, error: 'Пользователь не найден' };
+      return { status: 404, code: 'ERR_USER_NOT_FOUND', error: 'User not found' };
     }
     if (!verifyPassword(currentPassword, user.password_hash)) {
-      return { status: 400, error: 'Текущий пароль указан неверно' };
+      return { status: 400, code: 'ERR_CURRENT_PASSWORD_INVALID', error: 'Current password is incorrect' };
     }
 
     const passwordHash = hashPassword(newPassword);
@@ -605,7 +606,7 @@ function createAuthService({
 
   async function requestPasswordReset(req) {
     if (!isEmailDeliveryConfigured()) {
-      return { status: 503, error: 'Отправка писем не настроена на сервере' };
+      return { status: 503, code: 'ERR_EMAIL_DELIVERY_NOT_CONFIGURED', error: 'Email delivery is not configured on the server' };
     }
 
     const email = normalizeEmail(req.body?.email);
@@ -620,7 +621,7 @@ function createAuthService({
 
     const baseUrl = resolveAppBaseUrl(req);
     if (!baseUrl) {
-      return { status: 500, error: 'Не удалось определить адрес приложения для ссылки сброса' };
+      return { status: 500, code: 'ERR_APP_BASE_URL_UNAVAILABLE', error: 'Failed to resolve app base URL for the reset link' };
     }
 
     const now = Date.now();
@@ -640,7 +641,7 @@ function createAuthService({
       await sendPasswordResetEmail({ to: email, resetUrl, expiresInMinutes: passwordResetTtlMinutes });
     } catch (error) {
       logger.error('auth_password_reset_send_failed', { email, error: String(error.message || error) });
-      return { status: 502, error: 'Не удалось отправить письмо для сброса пароля' };
+      return { status: 502, code: 'ERR_PASSWORD_RESET_EMAIL_SEND_FAILED', error: 'Failed to send password reset email' };
     }
 
     return { payload: { ok: true } };
@@ -650,10 +651,10 @@ function createAuthService({
     const token = String(req.body?.token || '').trim();
     const newPassword = String(req.body?.newPassword || '');
     if (token.length < 32) {
-      return { status: 400, error: 'Некорректный токен сброса' };
+      return { status: 400, code: 'ERR_PASSWORD_RESET_TOKEN_INVALID', error: 'Invalid password reset token' };
     }
     if (newPassword.length < registrationMinPasswordLength) {
-      return { status: 400, error: `Новый пароль должен содержать минимум ${registrationMinPasswordLength} символов` };
+      return { status: 400, code: 'ERR_PASSWORD_TOO_SHORT', error: `New password must be at least ${registrationMinPasswordLength} characters long` };
     }
 
     const tokenHash = hashPasswordResetToken(sessionSecret, token);
@@ -666,12 +667,12 @@ function createAuthService({
     `).get(tokenHash);
 
     if (!resetRow || Number(resetRow.used_at || 0) > 0 || Number(resetRow.expires_at || 0) <= now) {
-      return { status: 400, error: 'Ссылка сброса недействительна или истекла' };
+      return { status: 400, code: 'ERR_PASSWORD_RESET_LINK_INVALID', error: 'Password reset link is invalid or expired' };
     }
 
     const user = await db.prepare('SELECT id FROM auth.users WHERE email = ?').get(resetRow.email);
     if (!user) {
-      return { status: 404, error: 'Пользователь не найден' };
+      return { status: 404, code: 'ERR_USER_NOT_FOUND', error: 'User not found' };
     }
 
     const passwordHash = hashPassword(newPassword);

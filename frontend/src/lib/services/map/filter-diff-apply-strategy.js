@@ -3,6 +3,11 @@ import {
   applyFilterPaintHighlight,
   normalizeFilterPaintColorGroups
 } from '../../components/map/filter-highlight-utils.js';
+import {
+  BUILDING_FEATURE_KIND,
+  BUILDING_PART_FEATURE_KIND,
+  buildRegionBuildingLayerFilterExpression
+} from './map-layer-utils.js';
 import { getNow, normalizeLayerIdsSnapshot } from './filter-utils.js';
 
 function areHighlightColorGroupsEqual(left, right) {
@@ -25,19 +30,72 @@ function areHighlightColorGroupsEqual(left, right) {
   return true;
 }
 
-function buildHighlightLayerSignature(layerIds) {
+function buildHighlightLayerSignature(layerIds, buildingPartsVisible = true) {
   const fillLayerIds = Array.isArray(layerIds?.filterHighlightFillLayerIds)
     ? layerIds.filterHighlightFillLayerIds
     : [];
   const lineLayerIds = Array.isArray(layerIds?.filterHighlightLineLayerIds)
     ? layerIds.filterHighlightLineLayerIds
     : [];
-  return `fill:${fillLayerIds.join(',')}|line:${lineLayerIds.join(',')}`;
+  const buildingFillLayerIds = Array.isArray(layerIds?.buildingFillLayerIds)
+    ? layerIds.buildingFillLayerIds
+    : [];
+  const buildingLineLayerIds = Array.isArray(layerIds?.buildingLineLayerIds)
+    ? layerIds.buildingLineLayerIds
+    : [];
+  const buildingPartFillLayerIds = Array.isArray(layerIds?.buildingPartFillLayerIds)
+    ? layerIds.buildingPartFillLayerIds
+    : [];
+  const buildingPartLineLayerIds = Array.isArray(layerIds?.buildingPartLineLayerIds)
+    ? layerIds.buildingPartLineLayerIds
+    : [];
+  const buildingPartFilterHighlightFillLayerIds = Array.isArray(layerIds?.buildingPartFilterHighlightFillLayerIds)
+    ? layerIds.buildingPartFilterHighlightFillLayerIds
+    : [];
+  const buildingPartFilterHighlightLineLayerIds = Array.isArray(layerIds?.buildingPartFilterHighlightLineLayerIds)
+    ? layerIds.buildingPartFilterHighlightLineLayerIds
+    : [];
+  return [
+    `fill:${fillLayerIds.join(',')}`,
+    `line:${lineLayerIds.join(',')}`,
+    `bfill:${buildingFillLayerIds.join(',')}`,
+    `bline:${buildingLineLayerIds.join(',')}`,
+    `pfill:${buildingPartFillLayerIds.join(',')}`,
+    `pline:${buildingPartLineLayerIds.join(',')}`,
+    `pffill:${buildingPartFilterHighlightFillLayerIds.join(',')}`,
+    `pfln:${buildingPartFilterHighlightLineLayerIds.join(',')}`,
+    `parts:${buildingPartsVisible ? 'visible' : 'hidden'}`
+  ].join('|');
+}
+
+function normalizeFeatureIds(values) {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    .sort((left, right) => left - right);
+}
+
+function applyBuildingLayerFilters({ map, layerIds, featureIds, active }) {
+  if (!map) return;
+  const partFillFilter = buildRegionBuildingLayerFilterExpression({
+    featureIds,
+    featureKind: 'building_part',
+    active
+  });
+  const partLineFilter = partFillFilter;
+  for (const layerId of layerIds.buildingPartFillLayerIds || []) {
+    if (!map.getLayer(layerId)) continue;
+    map.setFilter(layerId, partFillFilter);
+  }
+  for (const layerId of layerIds.buildingPartLineLayerIds || []) {
+    if (!map.getLayer(layerId)) continue;
+    map.setFilter(layerId, partLineFilter);
+  }
 }
 
 export function createFilterDiffApplyStrategy({
   resolveMap,
   resolveLayerIds,
+  getBuildingPartsVisible,
   getLatestFilterToken,
   patchState,
   debugFilterLog,
@@ -49,6 +107,7 @@ export function createFilterDiffApplyStrategy({
 } = {}) {
   let filteredColorGroups = [];
   let filteredFeatureCount = 0;
+  let filteredFeatureIds = [];
   let lastAppliedHighlightLayerSignature = '';
   let lastAppliedHighlightActive = false;
 
@@ -58,10 +117,21 @@ export function createFilterDiffApplyStrategy({
 
   function applyCurrentHighlight(meta = {}) {
     const applyStartedAt = getNow();
+    const map = resolveMap();
     const layerIds = meta.layerIds || getHighlightLayerIds();
-    const layerSignature = buildHighlightLayerSignature(layerIds);
-    const applyResult = applyFilterPaintHighlight({
-      map: resolveMap(),
+    const buildingPartsVisible = Boolean(meta.buildingPartsVisible ?? getBuildingPartsVisible?.() ?? true);
+    const nextFeatureIds = normalizeFeatureIds(meta.featureIds || filteredFeatureIds);
+    const layerSignature = buildHighlightLayerSignature(layerIds, buildingPartsVisible);
+
+    applyBuildingLayerFilters({
+      map,
+      layerIds,
+      featureIds: nextFeatureIds,
+      active: nextFeatureIds.length > 0
+    });
+
+    const buildingHighlightResult = applyFilterPaintHighlight({
+      map,
       normalizedColorGroups: filteredColorGroups,
       previousActive: Boolean(meta.previousActive ?? lastAppliedHighlightActive),
       forceStaticPaintProperties: Boolean(
@@ -72,23 +142,50 @@ export function createFilterDiffApplyStrategy({
         )
       ),
       fillLayerIds: layerIds.filterHighlightFillLayerIds,
-      lineLayerIds: layerIds.filterHighlightLineLayerIds
+      lineLayerIds: layerIds.filterHighlightLineLayerIds,
+      additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
+        featureKind: BUILDING_FEATURE_KIND,
+        active: false
+      })
+    });
+    const buildingPartHighlightResult = applyFilterPaintHighlight({
+      map,
+      normalizedColorGroups: filteredColorGroups,
+      previousActive: Boolean(meta.previousActive ?? lastAppliedHighlightActive),
+      forceStaticPaintProperties: Boolean(
+        meta.forceStaticPaintProperties
+        || (
+          meta.forceStaticPaintProperties == null
+          && layerSignature !== lastAppliedHighlightLayerSignature
+        )
+      ),
+      fillLayerIds: layerIds.buildingPartFilterHighlightFillLayerIds,
+      lineLayerIds: layerIds.buildingPartFilterHighlightLineLayerIds,
+      additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
+        featureKind: BUILDING_PART_FEATURE_KIND,
+        active: false
+      })
     });
     lastAppliedHighlightLayerSignature = layerSignature;
-    lastAppliedHighlightActive = Boolean(applyResult.active);
+    const paintPropertyCalls = Number(buildingHighlightResult.paintPropertyCalls || 0)
+      + Number(buildingPartHighlightResult.paintPropertyCalls || 0);
+    const active = Boolean(buildingHighlightResult.active || buildingPartHighlightResult.active);
+    lastAppliedHighlightActive = active;
     const elapsedMs = Math.round(getNow() - applyStartedAt);
     patchState?.({
-      setPaintPropertyCallsLast: Number(applyResult.paintPropertyCalls || 0),
+      setPaintPropertyCallsLast: paintPropertyCalls,
       lastPaintApplyMs: elapsedMs
     });
     recordFilterTelemetry?.('apply_paint_finish', {
       token: meta.token ?? null,
       count: filteredFeatureCount,
-      paintPropertyCalls: Number(applyResult.paintPropertyCalls || 0),
+      paintPropertyCalls,
       elapsedMs
     });
     return {
-      ...applyResult,
+      ...buildingHighlightResult,
+      active,
+      paintPropertyCalls,
       elapsedMs
     };
   }
@@ -97,16 +194,23 @@ export function createFilterDiffApplyStrategy({
     if (token !== Number(getLatestFilterToken?.() ?? token)) return;
 
     const nextColorGroups = normalizeFilterPaintColorGroups(colorGroups);
-    const nextFeatureCount = nextColorGroups.reduce((sum, group) => sum + group.ids.length, 0);
     const layerIds = getHighlightLayerIds();
-    const nextLayerSignature = buildHighlightLayerSignature(layerIds);
+    const buildingPartsVisible = Boolean(meta.buildingPartsVisible ?? getBuildingPartsVisible?.() ?? true);
+    const normalizedFeatureIds = normalizeFeatureIds(
+      meta.matchedFeatureIds || nextColorGroups.flatMap((group) => Array.isArray(group?.ids) ? group.ids : [])
+    );
+    const nextFeatureCount = normalizedFeatureIds.length;
+    const nextLayerSignature = buildHighlightLayerSignature(layerIds, buildingPartsVisible);
 
     if (
       areHighlightColorGroupsEqual(filteredColorGroups, nextColorGroups) &&
+      filteredFeatureIds.length === normalizedFeatureIds.length &&
+      filteredFeatureIds.every((id, index) => id === normalizedFeatureIds[index]) &&
       nextLayerSignature === lastAppliedHighlightLayerSignature
     ) {
       filteredColorGroups = nextColorGroups;
       filteredFeatureCount = nextFeatureCount;
+      filteredFeatureIds = normalizedFeatureIds;
       patchState?.({
         lastCount: filteredFeatureCount,
         setPaintPropertyCallsLast: 0,
@@ -130,6 +234,7 @@ export function createFilterDiffApplyStrategy({
 
     filteredColorGroups = nextColorGroups;
     filteredFeatureCount = nextFeatureCount;
+    filteredFeatureIds = normalizedFeatureIds;
 
     recordFilterTelemetry?.('apply_paint_start', {
       token,
@@ -137,7 +242,9 @@ export function createFilterDiffApplyStrategy({
     });
     const applyResult = applyCurrentHighlight({
       token,
-      layerIds
+      layerIds,
+      buildingPartsVisible,
+      featureIds: filteredFeatureIds
     });
 
     patchState?.({
@@ -159,8 +266,19 @@ export function createFilterDiffApplyStrategy({
   function clearFilteredHighlight() {
     filteredColorGroups = [];
     filteredFeatureCount = 0;
+    filteredFeatureIds = [];
+    const layerIds = getHighlightLayerIds();
+    applyBuildingLayerFilters({
+      map: resolveMap(),
+      layerIds,
+      featureIds: [],
+      active: false
+    });
     const applyResult = applyCurrentHighlight({
-      previousActive: lastAppliedHighlightActive
+      previousActive: lastAppliedHighlightActive,
+      layerIds,
+      buildingPartsVisible: Boolean(getBuildingPartsVisible?.() ?? true),
+      featureIds: []
     });
     patchState?.({
       lastCount: 0,
@@ -183,8 +301,12 @@ export function createFilterDiffApplyStrategy({
   }
 
   function reapplyFilteredHighlight() {
+    const layerIds = getHighlightLayerIds();
     const applyResult = applyCurrentHighlight({
-      forceStaticPaintProperties: true
+      forceStaticPaintProperties: true,
+      layerIds,
+      buildingPartsVisible: Boolean(getBuildingPartsVisible?.() ?? true),
+      featureIds: filteredFeatureIds
     });
     patchState?.({
       setPaintPropertyCallsLast: Number(applyResult.paintPropertyCalls || 0),

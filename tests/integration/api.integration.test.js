@@ -4,6 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const Database = require('better-sqlite3');
 const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
 
 let pythonExtractorDepsSkipReason = null;
@@ -66,6 +67,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       SESSION_SECRET: 'integration-test-secret',
       APP_BASE_URL: baseUrl,
       DB_PROVIDER: 'sqlite',
+      OSM_DB_PATH: path.join(tempRoot, 'osm.db'),
       SMTP_URL: '',
       SMTP_HOST: '',
       SMTP_PORT: '587',
@@ -85,7 +87,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   server.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); });
   server.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
 
-  async function waitUntilReady(timeoutMs = 15000) {
+  async function waitUntilReady(timeoutMs = 30000) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       try {
@@ -213,7 +215,30 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       // The key expectation: no "bootstrap admin disabled" style block (403).
       assert.equal(registerStart.status, 503);
       const registerBody = await registerStart.json();
-      assert.match(String(registerBody.error || ''), /Отправка писем не настроена/);
+      assert.match(String(registerBody.error || ''), /Email delivery is not configured/i);
+    });
+
+    await t.test('public style overrides endpoint is readable and admin mutation requires auth', async () => {
+      const publicOverrides = await callApi('/api/style-overrides');
+      assert.equal(publicOverrides.status, 200);
+      const publicBody = await publicOverrides.json();
+      assert.ok(Array.isArray(publicBody?.items));
+      assert.equal(publicBody.items.length, 0);
+
+      const createWithoutAuth = await callApi('/api/admin/style-overrides', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          override: {
+            region_pattern: 'ru-*',
+            style_key: 'omani',
+            is_allowed: true
+          }
+        })
+      });
+      assert.equal(createWithoutAuth.status, 401);
     });
 
     let csrfToken = '';
@@ -269,7 +294,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const shortQuery = await callApi('/api/search-buildings?q=a');
       assert.equal(shortQuery.status, 400);
       const searchBody = await shortQuery.json();
-      assert.match(String(searchBody.error || ''), /Минимальная длина/);
+      assert.match(String(searchBody.error || ''), /Minimum query length/i);
 
       const invalidBbox = await callApi('/api/search-buildings?q=test&west=44&south=56&east=44.1');
       assert.equal(invalidBbox.status, 400);
@@ -292,6 +317,383 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(typeof mapSearchBody.total, 'number');
       assert.equal(typeof mapSearchBody.truncated, 'boolean');
       assert.ok(Array.isArray(mapSearchBody.items));
+    });
+
+    await t.test('style override admin endpoints work and building-info returns region_slugs', async () => {
+      const createOverride = await callApi('/api/admin/style-overrides', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          override: {
+            region_pattern: 'ru-*',
+            style_key: 'omani',
+            is_allowed: true
+          }
+        })
+      });
+      assert.equal(createOverride.status, 200);
+      const createOverrideBody = await createOverride.json();
+      assert.equal(createOverrideBody?.ok, true);
+      assert.equal(createOverrideBody?.item?.region_pattern, 'ru-*');
+      assert.equal(createOverrideBody?.item?.style_key, 'omani');
+      assert.equal(createOverrideBody?.item?.is_allowed, true);
+
+      const adminOverrides = await callApi('/api/admin/style-overrides');
+      assert.equal(adminOverrides.status, 200);
+      const adminOverridesBody = await adminOverrides.json();
+      assert.equal(adminOverridesBody?.ok, true);
+      assert.equal(adminOverridesBody?.items?.length, 1);
+
+      const publicOverrides = await callApi('/api/style-overrides');
+      assert.equal(publicOverrides.status, 200);
+      const publicOverridesBody = await publicOverrides.json();
+      assert.deepEqual(publicOverridesBody?.items, [{
+        id: createOverrideBody.item.id,
+        region_pattern: 'ru-*',
+        style_key: 'omani',
+        is_allowed: true
+      }]);
+
+      const mainDb = new Database(path.join(tempRoot, 'archimap.db'));
+      const localDb = new Database(path.join(tempRoot, 'local-edits.db'));
+      const osmDb = new Database(path.join(tempRoot, 'osm.db'));
+      try {
+        mainDb.prepare(`
+          INSERT INTO data_sync_regions (slug, name, updated_by)
+          VALUES (?, ?, ?)
+        `).run('ru-moscow', 'Moscow', 'integration-test');
+        const regionId = Number(mainDb.prepare(`
+          SELECT id
+          FROM data_sync_regions
+          WHERE slug = ?
+        `).get('ru-moscow')?.id || 0);
+        assert.ok(regionId > 0);
+
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 101);
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 102);
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 103);
+        mainDb.prepare(`
+          INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
+          VALUES (?, ?, ?, datetime('now'), datetime('now'))
+        `).run(regionId, 'way', 104);
+
+        osmDb.exec(`
+          CREATE TABLE IF NOT EXISTS building_contours (
+            osm_type TEXT NOT NULL,
+            osm_id INTEGER NOT NULL,
+            tags_json TEXT,
+            geometry_json TEXT NOT NULL,
+            min_lon REAL NOT NULL,
+            min_lat REAL NOT NULL,
+            max_lon REAL NOT NULL,
+            max_lat REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (osm_type, osm_id)
+          );
+        `);
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          101,
+          JSON.stringify({
+            building: 'yes',
+            name: 'Integration test building'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.6, 55.7],
+              [37.61, 55.7],
+              [37.61, 55.71],
+              [37.6, 55.71],
+              [37.6, 55.7]
+            ]]
+          }),
+          37.6,
+          55.7,
+          37.61,
+          55.71
+        );
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          102,
+          JSON.stringify({
+            'building:part': 'yes',
+            name: 'Integration test part'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.62, 55.72],
+              [37.63, 55.72],
+              [37.63, 55.73],
+              [37.62, 55.73],
+              [37.62, 55.72]
+            ]]
+          }),
+          37.62,
+          55.72,
+          37.63,
+          55.73
+        );
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          103,
+          JSON.stringify({
+            building: 'yes',
+            'building:part': 'yes',
+            name: 'Integration test mixed building'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.64, 55.74],
+              [37.65, 55.74],
+              [37.65, 55.75],
+              [37.64, 55.75],
+              [37.64, 55.74]
+            ]]
+          }),
+          37.64,
+          55.74,
+          37.65,
+          55.75
+        );
+
+        osmDb.prepare(`
+          INSERT OR REPLACE INTO building_contours (
+            osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          'way',
+          104,
+          JSON.stringify({
+            building: 'yes',
+            'building:material': 'concrete',
+            'building:material:concrete': 'panels',
+            name: 'Integration test concrete building'
+          }),
+          JSON.stringify({
+            type: 'Polygon',
+            coordinates: [[
+              [37.66, 55.76],
+              [37.67, 55.76],
+              [37.67, 55.77],
+              [37.66, 55.77],
+              [37.66, 55.76]
+            ]]
+          }),
+          37.66,
+          55.76,
+          37.67,
+          55.77
+        );
+
+        localDb.prepare(`
+          INSERT INTO architectural_info (
+            osm_type,
+            osm_id,
+            name,
+            style,
+            updated_by,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, datetime('now'))
+        `).run('way', 101, 'Integration test building', 'omani', 'integration-test');
+
+        localDb.prepare(`
+          INSERT INTO architectural_info (
+            osm_type,
+            osm_id,
+            style,
+            colour,
+            levels,
+            year_built,
+            updated_by,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run('way', 102, 'omani', '#8f6b3d', 3, 1988, 'integration-test');
+
+        localDb.prepare(`
+          INSERT INTO architectural_info (
+            osm_type,
+            osm_id,
+            material,
+            material_concrete,
+            updated_by,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, datetime('now'))
+        `).run('way', 104, 'concrete', 'panels', 'integration-test');
+      } finally {
+        mainDb.close();
+        localDb.close();
+        osmDb.close();
+      }
+
+      const buildingInfo = await callApi('/api/building-info/way/101');
+      assert.equal(buildingInfo.status, 200);
+      const buildingInfoBody = await buildingInfo.json();
+      assert.equal(buildingInfoBody?.name, 'Integration test building');
+      assert.equal(buildingInfoBody?.feature_kind, 'building');
+      assert.deepEqual(buildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const partBuildingInfo = await callApi('/api/building-info/way/102');
+      assert.equal(partBuildingInfo.status, 200);
+      const partBuildingInfoBody = await partBuildingInfo.json();
+      assert.equal(partBuildingInfoBody?.feature_kind, 'building_part');
+      assert.equal(partBuildingInfoBody?.colour, '#8f6b3d');
+      assert.deepEqual(partBuildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const mixedBuildingInfo = await callApi('/api/building-info/way/103');
+      assert.equal(mixedBuildingInfo.status, 200);
+      const mixedBuildingInfoBody = await mixedBuildingInfo.json();
+      assert.equal(mixedBuildingInfoBody?.feature_kind, 'building');
+      assert.deepEqual(mixedBuildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const concreteBuildingInfo = await callApi('/api/building-info/way/104');
+      assert.equal(concreteBuildingInfo.status, 200);
+      const concreteBuildingInfoBody = await concreteBuildingInfo.json();
+      assert.equal(concreteBuildingInfoBody?.material, 'concrete');
+      assert.equal(concreteBuildingInfoBody?.material_concrete, 'panels');
+      assert.equal(concreteBuildingInfoBody?.feature_kind, 'building');
+      assert.deepEqual(concreteBuildingInfoBody?.region_slugs, ['ru-moscow']);
+
+      const concreteEdit = await callApi('/api/building-info', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          osmType: 'way',
+          osmId: 104,
+          material: 'concrete_blocks',
+          editedFields: ['material']
+        })
+      });
+      assert.equal(concreteEdit.status, 200);
+      const concreteEditBody = await concreteEdit.json();
+      assert.equal(concreteEditBody?.ok, true);
+
+      const concreteUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
+      try {
+        const pendingConcreteEdit = concreteUserEditsDb.prepare(`
+          SELECT material, material_concrete
+          FROM building_user_edits
+          WHERE id = ?
+        `).get(concreteEditBody.editId);
+        assert.equal(pendingConcreteEdit?.material, 'concrete');
+        assert.equal(pendingConcreteEdit?.material_concrete, 'blocks');
+      } finally {
+        concreteUserEditsDb.close();
+      }
+
+      const partEdit = await callApi('/api/building-info', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          osmType: 'way',
+          osmId: 102,
+          style: 'omani',
+          colour: '#7f6a52',
+          levels: '4',
+          yearBuilt: '1989',
+          editedFields: ['style', 'colour', 'levels', 'year_built']
+        })
+      });
+      assert.equal(partEdit.status, 200);
+      const partEditBody = await partEdit.json();
+      assert.equal(partEditBody?.ok, true);
+      assert.equal(partEditBody?.status, 'pending');
+      assert.equal(typeof partEditBody?.editId, 'number');
+
+      const partUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
+      try {
+        const pendingPartEdit = partUserEditsDb.prepare(`
+          SELECT *
+          FROM building_user_edits
+          WHERE id = ?
+        `).get(partEditBody.editId);
+        assert.equal(pendingPartEdit?.colour, '#7f6a52');
+        assert.equal(pendingPartEdit?.style, 'omani');
+        assert.equal(pendingPartEdit?.levels, 4);
+        assert.equal(pendingPartEdit?.year_built, 1989);
+        assert.equal(pendingPartEdit?.name, null);
+        assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"yes"/);
+      } finally {
+        partUserEditsDb.close();
+      }
+
+      const disallowedPartEdit = await callApi('/api/building-info', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          osmType: 'way',
+          osmId: 102,
+          name: 'Not allowed',
+          style: 'omani',
+          colour: '#7f6a52',
+          levels: '4',
+          yearBuilt: '1989',
+          editedFields: ['name', 'style']
+        })
+      });
+      assert.equal(disallowedPartEdit.status, 400);
+      const disallowedPartEditBody = await disallowedPartEdit.json();
+      assert.equal(disallowedPartEditBody?.code, 'ERR_BUILDING_PART_EDIT_RESTRICTED');
+
+      const deleteOverride = await callApi(`/api/admin/style-overrides/${createOverrideBody.item.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-csrf-token': csrfToken
+        }
+      });
+      assert.equal(deleteOverride.status, 200);
+      const deleteOverrideBody = await deleteOverride.json();
+      assert.equal(deleteOverrideBody?.ok, true);
+
+      const publicOverridesAfterDelete = await callApi('/api/style-overrides');
+      assert.equal(publicOverridesAfterDelete.status, 200);
+      const publicOverridesAfterDeleteBody = await publicOverridesAfterDelete.json();
+      assert.deepEqual(publicOverridesAfterDeleteBody?.items, []);
     });
 
     await t.test('admin data settings endpoints support create/rename/delete flow for regions', pythonExtractorIntegrationTestOptions, async () => {
@@ -475,6 +877,132 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(regionsAfterDelete.status, 200);
       const regionsAfterDeleteBody = await regionsAfterDelete.json();
       assert.equal(regionsAfterDeleteBody.items.some((item) => Number(item?.id || 0) === Number(region.id)), false);
+    });
+
+    await t.test('filter preset admin/runtime endpoints support create/update/delete flow', async () => {
+      const runtimeDefaults = await callApi('/api/filter-presets');
+      assert.equal(runtimeDefaults.status, 200);
+      const runtimeDefaultsBody = await runtimeDefaults.json();
+      assert.ok(Array.isArray(runtimeDefaultsBody?.items));
+      const defaultKeys = new Set(runtimeDefaultsBody.items.map((item) => String(item?.key || '').trim()));
+      assert.equal(defaultKeys.has('building-levels'), true);
+      assert.equal(defaultKeys.has('building-material'), true);
+      const buildingLevelsDefault = runtimeDefaultsBody.items.find((item) => String(item?.key || '') === 'building-levels');
+      assert.equal(buildingLevelsDefault?.nameI18n?.en, 'Building levels');
+      assert.equal(buildingLevelsDefault?.nameI18n?.ru, 'Этажность');
+
+      const adminList = await callApi('/api/admin/app-settings/data/filter-presets');
+      assert.equal(adminList.status, 200);
+      const adminListBody = await adminList.json();
+      assert.equal(adminListBody?.ok, true);
+      assert.ok(Array.isArray(adminListBody?.items));
+
+      const createPreset = await callApi('/api/admin/app-settings/data/filter-presets', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          preset: {
+            key: 'integration-preset',
+            name: 'Integration preset',
+            nameI18n: {
+              en: 'Integration preset',
+              ru: 'Интеграционный пресет'
+            },
+            description: 'Created in integration test',
+            layers: [
+              {
+                id: 'layer-integration-a',
+                color: '#93c5fd',
+                mode: 'layer',
+                rules: [
+                  {
+                    key: 'building:material',
+                    op: 'equals',
+                    value: 'brick'
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      });
+      assert.equal(createPreset.status, 200);
+      const createPresetBody = await createPreset.json();
+      assert.equal(createPresetBody?.ok, true);
+      assert.ok(Number(createPresetBody?.item?.id || 0) > 0);
+      assert.equal(createPresetBody?.item?.key, 'integration-preset');
+
+      const updatePreset = await callApi('/api/admin/app-settings/data/filter-presets', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          preset: {
+            id: createPresetBody.item.id,
+            key: 'integration-preset',
+            nameI18n: {
+              en: 'Integration preset updated',
+              ru: 'Интеграционный пресет обновлен'
+            },
+            description: '',
+            layers: [
+              {
+                id: 'layer-integration-b',
+                color: '#86efac',
+                mode: 'layer',
+                rules: [
+                  {
+                    key: 'building:levels',
+                    op: 'greater_or_equals',
+                    value: '5'
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      });
+      assert.equal(updatePreset.status, 200);
+      const updatePresetBody = await updatePreset.json();
+      assert.equal(updatePresetBody?.ok, true);
+      assert.equal(updatePresetBody?.item?.id, createPresetBody.item.id);
+      assert.equal(updatePresetBody?.item?.name, 'Integration preset updated');
+      assert.equal(updatePresetBody?.item?.nameI18n?.en, 'Integration preset updated');
+      assert.equal(updatePresetBody?.item?.nameI18n?.ru, 'Интеграционный пресет обновлен');
+      assert.equal(updatePresetBody?.item?.layers?.length, 1);
+
+      const runtimeWithCustom = await callApi('/api/filter-presets');
+      assert.equal(runtimeWithCustom.status, 200);
+      const runtimeWithCustomBody = await runtimeWithCustom.json();
+      const custom = runtimeWithCustomBody?.items?.find((item) => String(item?.key || '') === 'integration-preset');
+      assert.ok(custom);
+      assert.equal(custom?.name, 'Integration preset updated');
+      assert.equal(custom?.nameI18n?.en, 'Integration preset updated');
+      assert.equal(custom?.nameI18n?.ru, 'Интеграционный пресет обновлен');
+
+      const deletePreset = await callApi(`/api/admin/app-settings/data/filter-presets/${createPresetBody.item.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-csrf-token': csrfToken
+        }
+      });
+      assert.equal(deletePreset.status, 200);
+      const deletePresetBody = await deletePreset.json();
+      assert.equal(deletePresetBody?.ok, true);
+      assert.equal(deletePresetBody?.item?.id, createPresetBody.item.id);
+
+      const runtimeAfterDelete = await callApi('/api/filter-presets');
+      assert.equal(runtimeAfterDelete.status, 200);
+      const runtimeAfterDeleteBody = await runtimeAfterDelete.json();
+      assert.equal(
+        runtimeAfterDeleteBody?.items?.some((item) => String(item?.key || '') === 'integration-preset'),
+        false
+      );
     });
 
     await t.test('filter-matches endpoint validates input, returns meta and uses cache', async () => {

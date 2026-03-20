@@ -58,6 +58,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - serialize tags to JSON
    - serialize geometry as WKB hex for PostgreSQL DB import handoff
    - serialize geometry as GeoJSON for SQLite import handoff and PMTiles build input
+   - derive `feature_kind` from tags so pure `building:part=yes` rows become `building_part`, while any row that also has a `building` tag stays `building`
    - compute `min_lon`, `min_lat`, `max_lon`, `max_lat`
 8. Filtered rows are exported as workspace artifacts:
    - PostgreSQL full sync: `region-import.ndjson` (WKB hex + bbox + tags), `region-build.ndjson` (GeoJSON features for `tippecanoe`), and `region-export-summary.json` (feature count + bounds)
@@ -66,6 +67,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - PostgreSQL full sync: reuses the already exported `region-build.ndjson`
    - SQLite full sync: `scripts/region-sync/pmtiles-builder.js` converts import NDJSON into `region-build.ndjson`
    - `--pmtiles-only`: `scripts/region-sync/region-db.js` streams current region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file
+   - every exported feature carries `feature_kind` so the client can split `building` and `building_part` layers without a second PMTiles archive
 10. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`.
 11. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.js`:
     - PostgreSQL: `region_import_tmp` with `geometry_wkb_hex`
@@ -151,7 +153,7 @@ flowchart TD
 
 - Resolves the configured extract query.
 - Downloads or reuses the matching extract.
-- Filters source data by `tags_filter={'building': True}` before the project-specific SQL stage.
+- Filters source data by `tags_filter={'building': True, 'building:part': True}` before the project-specific SQL stage.
 - Writes the raw import result into DuckDB as `quackosm_raw`.
 
 ### Canonical extract resolution and multiple matches
@@ -196,6 +198,7 @@ flowchart TD
 - PostgreSQL keeps only searchable rows in `building_search_source` and derives `search_tsv` there through a generated column.
 - SQLite keeps `building_search_source` plus `building_search_fts`.
 - Parsing and fallback composition for `name`, `address`, `style`, and `architect` now happens in Node.js via `src/lib/server/services/search-index-source.service.js`.
+- pure `building:part` rows are excluded from the search read model so part geometries do not create duplicate search hits for the same visible building; rows that also have a `building` tag stay searchable as normal buildings.
 - The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 
 ### PMTiles
@@ -248,6 +251,7 @@ flowchart TD
 - These jobs rebuild the search read-model through `search-index.boot.js` (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite), then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
 - Direct standalone full sync execution of `scripts/sync-osm-region.js` now invokes the same rebuild workers itself, so search/filter read-models stay aligned after new region imports and normal region updates even without the in-app runtime wrapper.
 - `--pmtiles-only` still rebuilds only the archive from current DB rows and intentionally skips search/filter follow-up because imported OSM rows are unchanged.
+- The archive remains a single regional source of truth; `building_part` is just another feature kind inside the same PMTiles file, not a separate archive.
 
 ## Failure handling and invariants
 

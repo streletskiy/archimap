@@ -1,4 +1,6 @@
 <script>
+  import { UiCard } from '$lib/components/base';
+
   export let eyebrow = '';
   export let title = '';
   export let description = '';
@@ -6,11 +8,11 @@
   export let shellClass = '';
 
   $: rootClassName = ['portal-page', pageClass].filter(Boolean).join(' ');
-  $: shellClassName = ['portal-shell', 'surface-card', shellClass].filter(Boolean).join(' ');
+  $: shellClassName = ['portal-shell', shellClass].filter(Boolean).join(' ');
 </script>
 
 <main class={rootClassName}>
-  <section class={shellClassName}>
+  <UiCard className={shellClassName}>
     <header class="portal-hero">
       <div class="portal-hero-main">
         {#if eyebrow}
@@ -44,5 +46,5 @@
     <div class="portal-body">
       <slot />
     </div>
-  </section>
+  </UiCard>
 </main>

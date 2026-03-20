@@ -22,6 +22,7 @@ function createAdminSettingsService(options = {}) {
     onSmtpSettingsSaved,
     onDataRegionsSaved,
     onRegionSyncRequested,
+    onFilterPresetsSaved,
     registrationCodeHtmlTemplate,
     registrationCodeTextTemplate,
     passwordResetHtmlTemplate,
@@ -32,14 +33,14 @@ function createAdminSettingsService(options = {}) {
 
   function ensureAppSettingsService() {
     if (!appSettingsService) {
-      throw createAdminError(500, 'Сервис настроек недоступен');
+      throw createAdminError(500, 'Settings service is unavailable');
     }
     return appSettingsService;
   }
 
   function ensureDataSettingsService() {
     if (!dataSettingsService) {
-      throw createAdminError(500, 'Сервис настроек данных недоступен');
+      throw createAdminError(500, 'Data settings service is unavailable');
     }
     return dataSettingsService;
   }
@@ -126,14 +127,14 @@ function createAdminSettingsService(options = {}) {
   async function sendSmtpTest({ smtp, testEmail } = {}) {
     const effectiveTestEmail = String(testEmail || '').trim().toLowerCase();
     if (!isLikelyEmail(effectiveTestEmail)) {
-      throw createAdminError(400, 'Укажите корректный email для тестового письма');
+      throw createAdminError(400, 'Provide a valid email for the test message');
     }
 
     const candidateInput = normalizeObject(smtp);
     const keepPassword = candidateInput.keepPassword !== false;
     const candidate = await ensureAppSettingsService().buildSmtpConfigFromInput(candidateInput, { keepPassword });
     if (!candidate.from) {
-      throw createAdminError(400, 'Для отправки тестового письма укажите поле From');
+      throw createAdminError(400, 'SMTP test requires a From address');
     }
 
     const effectiveAppDisplayName = resolveAppDisplayName(options);
@@ -149,7 +150,7 @@ function createAdminSettingsService(options = {}) {
     ].join('\n');
 
     if (!candidate.url && (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from)) {
-      throw createAdminError(400, 'Для тестовой отправки нужны host/port/user/password/from или smtp url');
+      throw createAdminError(400, 'SMTP test requires host/port/user/password/from or smtp url');
     }
 
     try {
@@ -167,7 +168,7 @@ function createAdminSettingsService(options = {}) {
 
     return {
       ok: true,
-      message: `Тестовое письмо отправлено на ${effectiveTestEmail}`
+      message: `Test email sent to ${effectiveTestEmail}`
     };
   }
 
@@ -194,7 +195,46 @@ function createAdminSettingsService(options = {}) {
       }
       return saved;
     } catch (error) {
-      throw createAdminError(400, String(error?.message || error || 'Не удалось сохранить allowlist тегов'));
+      throw createAdminError(400, String(error?.message || error || 'Failed to save filter tag allowlist'));
+    }
+  }
+
+  async function listFilterPresets() {
+    try {
+      return ensureDataSettingsService().getFilterPresetsForAdmin();
+    } catch (error) {
+      if (error?.status) throw error;
+      throw createAdminError(400, String(error?.message || error || 'Failed to load filter presets'));
+    }
+  }
+
+  async function saveFilterPreset(preset, actor) {
+    try {
+      const saved = await ensureDataSettingsService().saveFilterPreset(normalizeObject(preset), actor);
+      if (typeof onFilterPresetsSaved === 'function') {
+        await Promise.resolve(onFilterPresetsSaved({
+          action: 'save',
+          saved
+        }));
+      }
+      return saved;
+    } catch (error) {
+      throw createAdminError(400, String(error?.message || error || 'Failed to save filter preset'));
+    }
+  }
+
+  async function deleteFilterPreset(id) {
+    try {
+      const deleted = await ensureDataSettingsService().deleteFilterPresetById(id);
+      if (typeof onFilterPresetsSaved === 'function') {
+        await Promise.resolve(onFilterPresetsSaved({
+          action: 'delete',
+          deleted
+        }));
+      }
+      return deleted;
+    } catch (error) {
+      throw createAdminError(400, String(error?.message || error || 'Failed to delete filter preset'));
     }
   }
 
@@ -217,7 +257,7 @@ function createAdminSettingsService(options = {}) {
         items: resolved.items
       };
     } catch (error) {
-      throw createAdminError(400, String(error?.message || error || 'Не удалось подобрать extract-кандидатов'));
+      throw createAdminError(400, String(error?.message || error || 'Failed to resolve extract candidates'));
     }
   }
 
@@ -225,12 +265,12 @@ function createAdminSettingsService(options = {}) {
     const service = ensureDataSettingsService();
     const regionId = parseRegionId(regionIdRaw);
     if (!regionId) {
-      throw createAdminError(400, 'Некорректный идентификатор региона');
+      throw createAdminError(400, 'Invalid region id');
     }
     const limit = parseLimit(limitRaw, 20, 1, 200);
     const region = await service.getRegionById(regionId);
     if (!region) {
-      throw createAdminError(404, 'Регион не найден');
+      throw createAdminError(404, 'Region not found');
     }
     const items = await service.getRecentRuns(regionId, limit);
     return {
@@ -257,7 +297,7 @@ function createAdminSettingsService(options = {}) {
       if (error?.status) {
         throw error;
       }
-      throw createAdminError(400, String(error?.message || error || 'Не удалось сохранить регион'));
+      throw createAdminError(400, String(error?.message || error || 'Failed to save region'));
     }
   }
 
@@ -265,7 +305,7 @@ function createAdminSettingsService(options = {}) {
     const service = ensureDataSettingsService();
     const regionId = parseRegionId(regionIdRaw);
     if (!regionId) {
-      throw createAdminError(400, 'Некорректный идентификатор региона');
+      throw createAdminError(400, 'Invalid region id');
     }
 
     try {
@@ -278,18 +318,18 @@ function createAdminSettingsService(options = {}) {
       }
       return deleted;
     } catch (error) {
-      throw createAdminError(400, String(error?.message || error || 'Не удалось удалить регион'));
+      throw createAdminError(400, String(error?.message || error || 'Failed to delete region'));
     }
   }
 
   async function requestRegionSync(regionIdRaw, requestedBy) {
     ensureDataSettingsService();
     if (typeof onRegionSyncRequested !== 'function') {
-      throw createAdminError(503, 'Очередь синхронизации пока недоступна');
+      throw createAdminError(503, 'Sync queue is currently unavailable');
     }
     const regionId = parseRegionId(regionIdRaw);
     if (!regionId) {
-      throw createAdminError(400, 'Некорректный идентификатор региона');
+      throw createAdminError(400, 'Invalid region id');
     }
 
     try {
@@ -298,7 +338,7 @@ function createAdminSettingsService(options = {}) {
         requestedBy
       });
     } catch (error) {
-      throw createAdminError(400, String(error?.message || error || 'Не удалось поставить регион в очередь синхронизации'));
+      throw createAdminError(400, String(error?.message || error || 'Failed to queue region sync'));
     }
   }
 
@@ -311,6 +351,9 @@ function createAdminSettingsService(options = {}) {
     sendSmtpTest,
     getDataSettingsItem,
     saveFilterTagAllowlist,
+    listFilterPresets,
+    saveFilterPreset,
+    deleteFilterPreset,
     listRegions,
     resolveExtractCandidates,
     getRegionRuns,

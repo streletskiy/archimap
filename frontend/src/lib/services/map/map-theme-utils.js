@@ -4,16 +4,18 @@ export const STYLE_OVERLAY_FADE_MS = 260;
 
 export const BUILDING_THEME = Object.freeze({
   light: {
-    fillColor: '#a3a3a3',
-    fillOpacity: 0.32,
+    fillColor: '#dededc',
+    fillOpacity: 1,
     lineColor: '#bcbcbc',
-    lineWidth: 0.9
+    lineWidth: 0.9,
+    lineOpacity: 1
   },
   dark: {
     fillColor: '#64748b',
-    fillOpacity: 0.36,
+    fillOpacity: 1,
     lineColor: '#94a3b8',
-    lineWidth: 1
+    lineWidth: 1,
+    lineOpacity: 1
   }
 });
 

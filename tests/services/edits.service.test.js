@@ -22,14 +22,19 @@ test('sanitize numeric fields keeps valid values and rejects invalid', () => {
 });
 
 test('sanitizeArchiPayload validates bounds and normalizes text', () => {
-  const ok = sanitizeArchiPayload({ name: '  Test  ', yearBuilt: '1950', levels: '5' });
+  const ok = sanitizeArchiPayload({ name: '  Test  ', yearBuilt: '1950', levels: '5', colour: '  Ivory  ' });
   assert.equal(ok.error, undefined);
   assert.equal(ok.value.name, 'Test');
   assert.equal(ok.value.year_built, 1950);
   assert.equal(ok.value.levels, 5);
+  assert.equal(ok.value.colour, 'Ivory');
+
+  const colorAlias = sanitizeArchiPayload({ yearBuilt: '1950', levels: '5', color: '  Beige  ' });
+  assert.equal(colorAlias.error, undefined);
+  assert.equal(colorAlias.value.colour, 'Beige');
 
   const bad = sanitizeArchiPayload({ yearBuilt: '3000' });
-  assert.match(String(bad.error || ''), /Год постройки/);
+  assert.match(String(bad.error || ''), /Year built/i);
 });
 
 test('sanitizeFieldText trims and limits length', () => {

@@ -1,4 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 
@@ -6,6 +7,7 @@ export default defineConfig(({ mode }) => {
   const isAnalyze = mode === 'analyze';
   return {
     plugins: [
+      tailwindcss(),
       sveltekit(),
       ...(isAnalyze ? [visualizer({ filename: 'build/bundle-analysis.html', gzipSize: true, brotliSize: true })] : [])
     ],
@@ -18,9 +20,6 @@ export default defineConfig(({ mode }) => {
           manualChunks(id) {
             if (id.includes('maplibre-gl')) {
               return 'maplibre';
-            }
-            if (id.includes('pmtiles')) {
-              return 'pmtiles';
             }
             if (id.includes('marked')) {
               return 'markdown';

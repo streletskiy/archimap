@@ -39,7 +39,10 @@ async function exportImportRowsToGeojson(importPath, geojsonPath) {
 
   try {
     for await (const row of readImportRows(importPath, { requireGeometryJson: true })) {
-      await writeStreamLine(out, formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json));
+      await writeStreamLine(
+        out,
+        formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json, row.tags_json, row.feature_kind)
+      );
       importedFeatureCount += 1;
       bounds = updateBounds(bounds, row);
     }

@@ -13,7 +13,7 @@ function sendPrivateJson(req, res, payload, lastModified) {
   return sendCachedJson(req, res, payload, cacheOptions);
 }
 
-function sendAdminError(res, error, fallbackStatus = 500, fallbackMessage = 'Запрос администратора завершился ошибкой') {
+function sendAdminError(res, error, fallbackStatus = 500, fallbackMessage = 'Admin request failed') {
   const status = Number(error?.status) || fallbackStatus;
   const payload = {
     error: String(error?.message || fallbackMessage)
@@ -50,6 +50,7 @@ function registerAdminRoutes(deps) {
   // Route file stays focused on HTTP wiring while the admin domain lives in dedicated services.
   const adminSettingsService = createAdminSettingsService(deps);
   const adminEditsService = createAdminEditsService(deps);
+  const styleRegionOverridesService = deps.styleRegionOverridesService;
 
   app.use('/api/admin', adminApiRateLimiter);
   app.use('/api/ui/email-previews', adminApiRateLimiter);
@@ -65,7 +66,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек недоступен'
+    message: 'Settings service is unavailable'
   }));
 
   app.get('/api/admin/app-settings/general', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -75,7 +76,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек недоступен'
+    message: 'Settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/general', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -85,7 +86,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек недоступен'
+    message: 'Settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/smtp', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -95,7 +96,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек недоступен'
+    message: 'Settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/smtp/test', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -105,7 +106,7 @@ function registerAdminRoutes(deps) {
     }));
   }, {
     status: 500,
-    message: 'Сервис настроек недоступен'
+    message: 'Settings service is unavailable'
   }));
 
   app.get('/api/admin/app-settings/data', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -115,7 +116,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/data/filter-tag-allowlist', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -125,7 +126,39 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
+  }));
+
+  app.get('/api/admin/app-settings/data/filter-presets', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    const result = await adminSettingsService.listFilterPresets();
+    return sendPrivateJson(req, res, {
+      ok: true,
+      source: result?.source || 'db',
+      items: Array.isArray(result?.items) ? result.items : []
+    });
+  }, {
+    status: 500,
+    message: 'Data settings service is unavailable'
+  }));
+
+  app.post('/api/admin/app-settings/data/filter-presets', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await adminSettingsService.saveFilterPreset(req.body?.preset, getSessionEditActorKey(req) || 'admin')
+    });
+  }, {
+    status: 500,
+    message: 'Data settings service is unavailable'
+  }));
+
+  app.delete('/api/admin/app-settings/data/filter-presets/:id', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await adminSettingsService.deleteFilterPreset(req.params.id)
+    });
+  }, {
+    status: 500,
+    message: 'Data settings service is unavailable'
   }));
 
   app.get('/api/admin/app-settings/data/regions', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -135,7 +168,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/data/regions/resolve-extract', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -150,7 +183,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.get('/api/admin/app-settings/data/regions/:regionId/runs', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -162,7 +195,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/data/regions', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -172,7 +205,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.delete('/api/admin/app-settings/data/regions/:regionId', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -182,7 +215,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.post('/api/admin/app-settings/data/regions/:regionId/sync-now', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -192,7 +225,7 @@ function registerAdminRoutes(deps) {
     });
   }, {
     status: 500,
-    message: 'Сервис настроек данных недоступен'
+    message: 'Data settings service is unavailable'
   }));
 
   app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {
@@ -213,6 +246,27 @@ function registerAdminRoutes(deps) {
   app.get('/api/admin/building-edits/:editId', requireAuth, requireAdmin, withAdminError(async (req, res) => {
     const item = await adminEditsService.getBuildingEditDetails(req.params.editId);
     return sendPrivateJson(req, res, { item }, item.updatedAt || undefined);
+  }));
+
+  app.get('/api/admin/style-overrides', requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    return sendPrivateJson(req, res, {
+      ok: true,
+      items: await styleRegionOverridesService.listOverridesForAdmin()
+    });
+  }));
+
+  app.post('/api/admin/style-overrides', requireCsrfSession, requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await styleRegionOverridesService.saveOverride(req.body?.override, getSessionEditActorKey(req) || 'admin')
+    });
+  }));
+
+  app.delete('/api/admin/style-overrides/:id', requireCsrfSession, requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await styleRegionOverridesService.deleteOverride(req.params.id)
+    });
   }));
 
   app.get('/api/admin/users/:email', requireAuth, requireAdmin, withAdminError(async (req, res) => {
