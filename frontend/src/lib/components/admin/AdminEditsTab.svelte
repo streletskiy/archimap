@@ -41,6 +41,8 @@
 
   let edits = [];
   let visibleEdits = [];
+  let activeEdits = [];
+  let syncedEdits = [];
   let editsLoading = false;
   let editsStatus = translateNow('admin.loading');
   let editsError = '';
@@ -102,6 +104,20 @@
     reassignTargetType = 'way';
     reassignTargetId = '';
     reassignForce = false;
+  }
+
+  function getSyncBadgeMeta(status) {
+    const normalized = String(status || 'unsynced').trim().toLowerCase();
+    if (normalized === 'synced') return { cls: 'ui-surface-success-soft ui-text-success-soft', text: $t('admin.edits.syncSynced') };
+    if (normalized === 'cleaned') return { cls: 'ui-surface-info ui-text-info', text: $t('admin.edits.syncCleaned') };
+    if (normalized === 'syncing') return { cls: 'ui-surface-warning ui-text-warning', text: $t('admin.edits.syncing') };
+    if (normalized === 'failed') return { cls: 'ui-surface-danger ui-text-danger', text: $t('admin.edits.syncFailed') };
+    return { cls: 'ui-surface-soft ui-text-muted', text: $t('admin.edits.syncUnsynced') };
+  }
+
+  function isSyncedArchiveEdit(item) {
+    const normalized = String(item?.syncStatus || '').trim().toLowerCase();
+    return normalized === 'synced' || normalized === 'cleaned' || Boolean(item?.syncReadOnly);
   }
 
   function seedReassignDraft(item) {
@@ -169,6 +185,8 @@
     } catch (error) {
       edits = [];
       visibleEdits = [];
+      activeEdits = [];
+      syncedEdits = [];
       editsUsers = [];
       editsError = msg(error, translateNow('admin.edits.loadFailed'));
       editsStatus = editsError;
@@ -424,6 +442,8 @@
       if (status !== 'all' && String(item?.status || '').trim().toLowerCase() !== status) return false;
       return true;
     });
+    activeEdits = visibleEdits.filter((item) => !isSyncedArchiveEdit(item));
+    syncedEdits = visibleEdits.filter((item) => isSyncedArchiveEdit(item));
 
     const nextEditIdByKey = new Map();
     for (const item of visibleEdits) {
@@ -439,13 +459,13 @@
     } else if (editsLoading) {
       editsStatus = translateNow('admin.loading');
     } else {
-      editsStatus = visibleEdits.length
-        ? translateNow('admin.edits.statusShown', { visible: visibleEdits.length, total: edits.length })
+      editsStatus = activeEdits.length || syncedEdits.length
+        ? translateNow('admin.edits.statusShown', { visible: activeEdits.length, total: visibleEdits.length })
         : translateNow('admin.empty');
     }
   }
 
-  $: dispatch('summary', { total: edits.length, visible: visibleEdits.length });
+  $: dispatch('summary', { total: edits.length, visible: activeEdits.length, archived: syncedEdits.length });
 
   $: {
     const nextRequestedEditId = normalizeEditId(requestedEditId);
@@ -460,6 +480,7 @@
     }
   }
 
+  $: selectedEditIsReadOnly = isSyncedArchiveEdit(selectedEdit);
   $: adminPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
 
   onMount(() => {
@@ -530,17 +551,17 @@
           <UiTableRow>
             <UiTableCell colspan="4" className="ui-text-subtle">{$t('admin.loading')}</UiTableCell>
           </UiTableRow>
-        {:else if visibleEdits.length === 0}
+        {:else if activeEdits.length === 0}
           <UiTableRow>
             <UiTableCell colspan="4" className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
           </UiTableRow>
         {:else}
-          {#each visibleEdits as edit (`${edit.id || edit.editId}`)}
+          {#each activeEdits as edit (`${edit.id || edit.editId}`)}
             {@const statusMeta = getStatusBadgeMeta(edit.status, translateNow)}
             {@const counters = getChangeCounters(edit.changes)}
             <UiTableRow
               className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
-              on:click={() => openEdit(edit.id || edit.editId)}
+              onclick={() => openEdit(edit.id || edit.editId)}
             >
               <UiTableCell className="min-w-0">
                 <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(edit)}</p>
@@ -561,7 +582,16 @@
                       >{$t('admin.edits.osmChanged')}</span
                     >
                   {/if}
+                  {#if edit.syncStatus && edit.syncStatus !== 'unsynced'}
+                    {@const syncMeta = getSyncBadgeMeta(edit.syncStatus)}
+                    <span class={`rounded-md px-2 py-1 text-[11px] font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
+                  {/if}
                 </div>
+                {#if edit.syncChangesetId}
+                  <p class="mt-1 text-xs ui-text-subtle">
+                    {$t('admin.edits.syncChangeset')}: #{edit.syncChangesetId}
+                  </p>
+                {/if}
               </UiTableCell>
               <UiTableCell>{edit.updatedBy || '-'}</UiTableCell>
               <UiTableCell
@@ -591,6 +621,71 @@
         {/if}
       </UiTableBody>
     </UiTable>
+
+    {#if syncedEdits.length > 0}
+      <details class="overflow-hidden rounded-xl border ui-border ui-surface-muted" open={false}>
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 p-3">
+          <div>
+            <h4 class="text-sm font-semibold ui-text-strong">{$t('admin.edits.syncedArchiveTitle')}</h4>
+            <p class="text-xs ui-text-muted">{$t('admin.edits.syncedArchiveHint')}</p>
+          </div>
+          <span class="text-xs ui-text-subtle">{syncedEdits.length}</span>
+        </summary>
+        <div class="border-t ui-border p-3">
+          <UiScrollArea className="max-h-72 rounded-xl border ui-border" contentClassName="space-y-2 p-2">
+            <UiTable containerClassName="ui-surface-base">
+              <UiTableHeader>
+                <UiTableRow className="hover:[&>th]:bg-transparent">
+                  <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
+                  <UiTableHead>{$t('admin.edits.tableStatus')}</UiTableHead>
+                  <UiTableHead>{$t('admin.edits.tableChanges')}</UiTableHead>
+                  <UiTableHead>{$t('admin.edits.syncStatus')}</UiTableHead>
+                </UiTableRow>
+              </UiTableHeader>
+              <UiTableBody>
+                {#each syncedEdits as edit (`synced-${edit.id || edit.editId}`)}
+                  {@const statusMeta = getStatusBadgeMeta(edit.status, translateNow)}
+                  {@const counters = getChangeCounters(edit.changes)}
+                  {@const syncMeta = getSyncBadgeMeta(edit.syncStatus)}
+                  <UiTableRow
+                    className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_24%,var(--panel-solid))]"
+                    onclick={() => openEdit(edit.id || edit.editId)}
+                  >
+                    <UiTableCell className="min-w-0">
+                      <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(edit)}</p>
+                      <p class="text-xs ui-text-subtle truncate">ID: {edit.osmType}/{edit.osmId}</p>
+                      <div class="mt-1 flex flex-wrap gap-1">
+                        {#if edit.syncChangesetId}
+                          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">#{edit.syncChangesetId}</span>
+                        {/if}
+                        <span class={`rounded-md px-2 py-1 text-[11px] font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
+                      </div>
+                    </UiTableCell>
+                    <UiTableCell>
+                      <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span>
+                    </UiTableCell>
+                    <UiTableCell>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">{counters.total} {$t('admin.edits.changesTotal')}</span>
+                        {#if counters.created > 0}
+                          <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">+{counters.created} {$t('admin.edits.changesCreated')}</span>
+                        {/if}
+                        {#if counters.modified > 0}
+                          <span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body">~{counters.modified} {$t('admin.edits.changesModified')}</span>
+                        {/if}
+                      </div>
+                    </UiTableCell>
+                    <UiTableCell>
+                      <span class="rounded-md ui-surface-soft px-2 py-1 text-xs font-semibold ui-text-muted">{$t('admin.edits.syncedArchiveReadOnly')}</span>
+                    </UiTableCell>
+                  </UiTableRow>
+                {/each}
+              </UiTableBody>
+            </UiTable>
+          </UiScrollArea>
+        </div>
+      </details>
+    {/if}
   </section>
 
   {#if detailPaneVisible}
@@ -630,7 +725,34 @@
           <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}"
             >{selectedStatusMeta.text}</span
           >
+          {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
+            {@const syncMeta = getSyncBadgeMeta(selectedEdit.syncStatus)}
+            <span class={`badge-pill rounded-full px-2.5 py-1 text-xs font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
+          {/if}
         </p>
+
+        {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
+          <div class="space-y-1 rounded-xl border ui-border ui-surface-muted p-3 text-sm ui-text-body">
+            <p><strong>{$t('admin.edits.syncStatus')}:</strong> {getSyncBadgeMeta(selectedEdit.syncStatus).text}</p>
+            <p><strong>{$t('admin.edits.syncAttemptedAt')}:</strong> {formatUiDate(selectedEdit.syncAttemptedAt) || '---'}</p>
+            <p><strong>{$t('admin.edits.syncSucceededAt')}:</strong> {formatUiDate(selectedEdit.syncSucceededAt) || '---'}</p>
+            <p><strong>{$t('admin.edits.syncCleanedAt')}:</strong> {formatUiDate(selectedEdit.syncCleanedAt) || '---'}</p>
+            <p><strong>{$t('admin.edits.syncChangeset')}:</strong> {selectedEdit.syncChangesetId || '---'}</p>
+            {#if selectedEdit.syncSummary}
+              <p class="text-xs ui-text-subtle break-words">{JSON.stringify(selectedEdit.syncSummary)}</p>
+            {/if}
+            {#if selectedEdit.syncError}
+              <p class="text-xs ui-text-danger break-words">{selectedEdit.syncError}</p>
+            {/if}
+          </div>
+        {/if}
+
+        {#if selectedEditIsReadOnly}
+          <div class="rounded-xl border ui-border ui-surface-soft p-3 text-sm ui-text-body">
+            <p class="font-semibold ui-text-strong">{$t('admin.edits.syncedArchiveReadOnly')}</p>
+            <p class="mt-1 text-xs ui-text-muted">{$t('admin.edits.syncedArchiveReadOnlyHelp')}</p>
+          </div>
+        {/if}
 
         {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
           <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -657,28 +779,30 @@
               <div class="rounded-lg border ui-border ui-surface-muted p-2">
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <p class="text-sm font-semibold ui-text-strong">{change.label || change.field}</p>
-                  <div class="flex items-center gap-1">
-                    <UiButton
-                      type="button"
-                      size="xs"
-                      variant={fieldDecisions[change.field] !== 'reject' ? 'primary' : 'secondary'}
-                      onclick={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'accept' })}
-                      >{$t('admin.edits.accept')}</UiButton
-                    >
-                    <UiButton
-                      type="button"
-                      size="xs"
-                      variant={fieldDecisions[change.field] === 'reject' ? 'primary' : 'secondary'}
-                      onclick={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'reject' })}
-                      >{$t('admin.edits.reject')}</UiButton
-                    >
-                  </div>
+                  {#if !selectedEditIsReadOnly}
+                    <div class="flex items-center gap-1">
+                      <UiButton
+                        type="button"
+                        size="xs"
+                        variant={fieldDecisions[change.field] !== 'reject' ? 'primary' : 'secondary'}
+                        onclick={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'accept' })}
+                        >{$t('admin.edits.accept')}</UiButton
+                      >
+                      <UiButton
+                        type="button"
+                        size="xs"
+                        variant={fieldDecisions[change.field] === 'reject' ? 'primary' : 'secondary'}
+                        onclick={() => (fieldDecisions = { ...fieldDecisions, [change.field]: 'reject' })}
+                        >{$t('admin.edits.reject')}</UiButton
+                      >
+                    </div>
+                  {/if}
                 </div>
                 <p class="text-xs ui-text-muted">
                   <span class="line-through">{String(change.osmValue ?? $t('admin.edits.emptyValue'))}</span> ->
                   <strong>{String(change.localValue ?? $t('admin.edits.emptyValue'))}</strong>
                 </p>
-                {#if fieldDecisions[change.field] !== 'reject'}
+                {#if !selectedEditIsReadOnly && fieldDecisions[change.field] !== 'reject'}
                   <UiInput
                     className="mt-2"
                     value={fieldValues[change.field] ?? ''}
@@ -690,76 +814,78 @@
           {/if}
         </UiScrollArea>
 
-        <UiTextarea
-          className="min-h-[84px]"
-          placeholder={$t('admin.edits.moderatorComment')}
-          bind:value={moderationComment}
-        ></UiTextarea>
+        {#if !selectedEditIsReadOnly}
+          <UiTextarea
+            className="min-h-[84px]"
+            placeholder={$t('admin.edits.moderatorComment')}
+            bind:value={moderationComment}
+          ></UiTextarea>
 
-        {#if selectedEdit.canReassign}
-          <div class="space-y-2 rounded-xl border ui-border ui-surface-muted p-3">
-            <p class="text-sm font-semibold ui-text-strong">{$t('admin.edits.reassignTitle')}</p>
-            <p class="text-xs ui-text-muted">{$t('admin.edits.reassignHelp')}</p>
-            <div class="grid gap-2 sm:grid-cols-[120px_1fr_auto]">
-              <UiSelect items={reassignTargetTypeItems} bind:value={reassignTargetType} />
-              <UiInput
-                type="number"
-                min="1"
-                bind:value={reassignTargetId}
-                placeholder={$t('admin.edits.reassignTargetId')}
-              />
-              <UiButton
-                type="button"
-                variant="secondary"
-                disabled={moderationBusy}
-                onclick={reassignSelectedEdit}>{$t('admin.edits.reassignAction')}</UiButton
+          {#if selectedEdit.canReassign}
+            <div class="space-y-2 rounded-xl border ui-border ui-surface-muted p-3">
+              <p class="text-sm font-semibold ui-text-strong">{$t('admin.edits.reassignTitle')}</p>
+              <p class="text-xs ui-text-muted">{$t('admin.edits.reassignHelp')}</p>
+              <div class="grid gap-2 sm:grid-cols-[120px_1fr_auto]">
+                <UiSelect items={reassignTargetTypeItems} bind:value={reassignTargetType} />
+                <UiInput
+                  type="number"
+                  min="1"
+                  bind:value={reassignTargetId}
+                  placeholder={$t('admin.edits.reassignTargetId')}
+                />
+                <UiButton
+                  type="button"
+                  variant="secondary"
+                  disabled={moderationBusy}
+                  onclick={reassignSelectedEdit}>{$t('admin.edits.reassignAction')}</UiButton
+                >
+              </div>
+              <label class="flex items-center gap-2 text-xs ui-text-body"
+                ><UiCheckbox bind:checked={reassignForce} />
+                {$t('admin.edits.reassignForce')}</label
               >
             </div>
-            <label class="flex items-center gap-2 text-xs ui-text-body"
-              ><UiCheckbox bind:checked={reassignForce} />
-              {$t('admin.edits.reassignForce')}</label
-            >
-          </div>
-        {/if}
+          {/if}
 
-        {#if isMasterAdmin}
-          <div class="space-y-2 rounded-xl border ui-border-danger-soft ui-surface-danger-soft p-3">
-            <p class="text-sm font-semibold ui-text-danger-strong">{$t('admin.edits.deleteTitle')}</p>
-            {#if selectedEdit.canHardDelete}
-              <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteHelp')}</p>
-            {:else if selectedEdit.hardDeleteBlockedReason === 'merged_with_other_accepted_edits'}
-              <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlockedSharedMergedState')}</p>
-            {:else}
-              <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlocked')}</p>
-            {/if}
+          {#if isMasterAdmin}
+            <div class="space-y-2 rounded-xl border ui-border-danger-soft ui-surface-danger-soft p-3">
+              <p class="text-sm font-semibold ui-text-danger-strong">{$t('admin.edits.deleteTitle')}</p>
+              {#if selectedEdit.canHardDelete}
+                <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteHelp')}</p>
+              {:else if selectedEdit.hardDeleteBlockedReason === 'merged_with_other_accepted_edits'}
+                <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlockedSharedMergedState')}</p>
+              {:else}
+                <p class="text-xs ui-text-danger-strong">{$t('admin.edits.deleteBlocked')}</p>
+              {/if}
+              <UiButton
+                type="button"
+                variant="danger"
+                disabled={moderationBusy || !selectedEdit.canHardDelete}
+                onclick={deleteSelectedEdit}>{$t('admin.edits.deleteAction')}</UiButton
+              >
+            </div>
+          {/if}
+
+          <div class="flex flex-wrap gap-2">
+            <UiButton type="button" variant="secondary" onclick={() => setAll('accept')}
+              >{$t('admin.edits.acceptAll')}</UiButton
+            >
+            <UiButton type="button" variant="secondary" onclick={() => setAll('reject')}
+              >{$t('admin.edits.rejectAll')}</UiButton
+            >
+            <UiButton
+              type="button"
+              disabled={moderationBusy}
+              onclick={() => applyDecision('apply')}>{$t('admin.edits.applyDecision')}</UiButton
+            >
             <UiButton
               type="button"
               variant="danger"
-              disabled={moderationBusy || !selectedEdit.canHardDelete}
-              onclick={deleteSelectedEdit}>{$t('admin.edits.deleteAction')}</UiButton
+              disabled={moderationBusy}
+              onclick={() => applyDecision('reject')}>{$t('admin.edits.rejectEdit')}</UiButton
             >
           </div>
         {/if}
-
-        <div class="flex flex-wrap gap-2">
-          <UiButton type="button" variant="secondary" onclick={() => setAll('accept')}
-            >{$t('admin.edits.acceptAll')}</UiButton
-          >
-          <UiButton type="button" variant="secondary" onclick={() => setAll('reject')}
-            >{$t('admin.edits.rejectAll')}</UiButton
-          >
-          <UiButton
-            type="button"
-            disabled={moderationBusy}
-            onclick={() => applyDecision('apply')}>{$t('admin.edits.applyDecision')}</UiButton
-          >
-          <UiButton
-            type="button"
-            variant="danger"
-            disabled={moderationBusy}
-            onclick={() => applyDecision('reject')}>{$t('admin.edits.rejectEdit')}</UiButton
-          >
-        </div>
 
         {#if detailStatus}
           <p class="text-sm ui-text-muted">{detailStatus}</p>

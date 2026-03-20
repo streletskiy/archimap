@@ -11,6 +11,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   const isPostgres = db.provider === 'postgres';
   const REASSIGNABLE_EDIT_STATUSES = new Set(['pending', 'accepted', 'partially_accepted']);
   const MERGED_EDIT_STATUSES = new Set(['accepted', 'partially_accepted']);
+  const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
   const MERGED_EDITS_FOR_TARGET_SQL = `
         (
           SELECT COUNT(*)
@@ -28,6 +29,11 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         ue.updated_at,
         ue.created_at,
         ue.status,
+        ue.sync_status,
+        ue.sync_attempted_at,
+        ue.sync_succeeded_at,
+        ue.sync_cleaned_at,
+        ue.sync_changeset_id,
         bc.osm_id AS contour_osm_id,
         ${MERGED_EDITS_FOR_TARGET_SQL}
   `;
@@ -137,7 +143,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     { key: 'levels', label: 'Этажей', osmTag: 'building:levels | levels' },
     { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
     { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
-    { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture | architecture | style' },
+    { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture' },
     { key: 'material', label: 'Материал', osmTag: 'building:material | material' },
     { key: 'colour', label: 'Цвет', osmTag: 'building:colour | colour' },
     { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
@@ -267,7 +273,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     `).run(osmType, osmId, author);
   }
 
-  function buildChangesFromRows(editRow, tags, mergedRow = null) {
+  function buildChangesFromRows(editRow, tags) {
     const osmBaseline = {
       name: pickTagValue(tags, ['name', 'name:ru', 'official_name']),
       style: pickTagValue(tags, ['building:architecture', 'architecture', 'style']),
@@ -283,20 +289,6 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       archimap_description: null
     };
 
-    const mergedBaseline = mergedRow
-      ? {
-        name: normalizeInfoForDiff(mergedRow.name),
-        style: normalizeInfoForDiff(mergedRow.style),
-        material: normalizeMaterialSelection(mergedRow.material, mergedRow.material_concrete),
-        colour: normalizeInfoForDiff(mergedRow.colour),
-        levels: normalizeInfoForDiff(mergedRow.levels),
-        year_built: normalizeInfoForDiff(mergedRow.year_built),
-        architect: normalizeInfoForDiff(mergedRow.architect),
-        address: normalizeInfoForDiff(mergedRow.address),
-        archimap_description: normalizeInfoForDiff(mergedRow.archimap_description ?? mergedRow.description ?? null)
-      }
-      : null;
-
     const explicitEditedFields = getEditedFieldsFromRow(editRow);
     const fieldsToCompare = explicitEditedFields
       ? ARCHI_EDIT_FIELDS.filter((field) => explicitEditedFields.includes(field.key))
@@ -304,9 +296,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
     const changes = [];
     for (const field of fieldsToCompare) {
-      const baselineValue = mergedBaseline
-        ? (mergedBaseline[field.key] ?? osmBaseline[field.key] ?? null)
-        : (osmBaseline[field.key] ?? null);
+      const baselineValue = osmBaseline[field.key] ?? null;
       const localValue = field.key === 'material'
         ? normalizeMaterialSelection(editRow.material, editRow.material_concrete)
         : normalizeInfoForDiff(editRow[field.key]);
@@ -412,6 +402,8 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   function buildEditRuntimeState(row, mergedInfoRow = null) {
     const status = normalizeUserEditStatus(row?.status);
+    const syncStatus = String(row?.sync_status || 'unsynced').trim().toLowerCase();
+    const syncReadOnly = READ_ONLY_SYNC_STATUSES.has(syncStatus);
     const osmPresent = row?.contour_osm_id != null;
     const hasMergedLocal = Boolean(mergedInfoRow);
     const orphaned = !osmPresent && hasMergedLocal;
@@ -428,12 +420,14 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
     return {
       status,
+      syncStatus,
+      syncReadOnly,
       osmPresent,
       orphaned,
       hasMergedLocal,
       sourceOsmChanged,
-      canReassign: REASSIGNABLE_EDIT_STATUSES.has(status),
-      canHardDelete,
+      canReassign: REASSIGNABLE_EDIT_STATUSES.has(status) && !syncReadOnly,
+      canHardDelete: !syncReadOnly && canHardDelete,
       hardDeleteBlockedReason,
       mergedEditsForTarget
     };
@@ -468,6 +462,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       reviewedAt: row.reviewed_at ?? null,
       mergedBy: row.merged_by ?? null,
       mergedAt: row.merged_at ?? null,
+      sourceOsmVersion: row.source_osm_version ?? null,
       osmPresent: runtimeState.osmPresent,
       orphaned: runtimeState.orphaned,
       hasMergedLocal: runtimeState.hasMergedLocal,
@@ -478,6 +473,20 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       mergedEditsForTarget: runtimeState.mergedEditsForTarget,
       sourceOsmUpdatedAt: row.source_osm_updated_at ?? null,
       currentOsmUpdatedAt: row.current_osm_updated_at ?? null,
+      syncStatus: runtimeState.syncStatus,
+      syncReadOnly: runtimeState.syncReadOnly,
+      syncAttemptedAt: row.sync_attempted_at ?? null,
+      syncSucceededAt: row.sync_succeeded_at ?? null,
+      syncCleanedAt: row.sync_cleaned_at ?? null,
+      syncChangesetId: row.sync_changeset_id ?? null,
+      syncSummary: row.sync_summary_json ? (() => {
+        try {
+          return JSON.parse(row.sync_summary_json);
+        } catch {
+          return null;
+        }
+      })() : null,
+      syncError: row.sync_error_text ?? null,
       editedFields,
       mergedFields,
       values: {
@@ -516,6 +525,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     BASE_USER_EDITS_SUMMARY_SELECT,
     MERGED_EDIT_STATUSES,
     REASSIGNABLE_EDIT_STATUSES,
+    READ_ONLY_SYNC_STATUSES,
     USER_EDITS_ORDER_BY_SQL,
     applyUserEditRowToInfo,
     buildChangesFromRows,

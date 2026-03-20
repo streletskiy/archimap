@@ -221,6 +221,7 @@ function registerBuildingsRoutes(deps) {
         await db.prepare(`
           UPDATE user_edits.building_user_edits
           SET
+            source_osm_version = @source_osm_version,
             name = @name,
             style = @style,
             material = @material,
@@ -241,10 +242,18 @@ function registerBuildingsRoutes(deps) {
             merged_by = NULL,
             merged_at = NULL,
             merged_fields_json = NULL,
+            sync_status = 'unsynced',
+            sync_attempted_at = NULL,
+            sync_succeeded_at = NULL,
+            sync_cleaned_at = NULL,
+            sync_changeset_id = NULL,
+            sync_summary_json = NULL,
+            sync_error_text = NULL,
             updated_at = datetime('now')
           WHERE id = @id
         `).run({
           id: latest.id,
+          source_osm_version: null,
           source_tags_json: currentContour.tags_json ?? null,
           source_osm_updated_at: currentContour.updated_at ?? null,
           ...payload
@@ -257,20 +266,21 @@ function registerBuildingsRoutes(deps) {
       if (isPostgres) {
         const inserted = await db.prepare(`
           INSERT INTO user_edits.building_user_edits (
-            osm_type, osm_id, created_by,
+            osm_type, osm_id, created_by, source_osm_version,
             name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
-            status, created_at, updated_at
+            status, sync_status, created_at, updated_at
           )
           VALUES (
-            @osm_type, @osm_id, @created_by,
+            @osm_type, @osm_id, @created_by, @source_osm_version,
             @name, @style, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
-            'pending', datetime('now'), datetime('now')
+            'pending', 'unsynced', datetime('now'), datetime('now')
           )
           RETURNING id
         `).get({
           osm_type: osmType,
           osm_id: osmId,
           created_by: actorKey,
+          source_osm_version: null,
           source_tags_json: currentContour.tags_json ?? null,
           source_osm_updated_at: currentContour.updated_at ?? null,
           ...payload
@@ -280,19 +290,20 @@ function registerBuildingsRoutes(deps) {
 
       const inserted = await db.prepare(`
       INSERT INTO user_edits.building_user_edits (
-        osm_type, osm_id, created_by,
+        osm_type, osm_id, created_by, source_osm_version,
         name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
-        status, created_at, updated_at
+        status, sync_status, created_at, updated_at
       )
       VALUES (
-        @osm_type, @osm_id, @created_by,
+        @osm_type, @osm_id, @created_by, @source_osm_version,
         @name, @style, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
-        'pending', datetime('now'), datetime('now')
+        'pending', 'unsynced', datetime('now'), datetime('now')
       )
       `).run({
         osm_type: osmType,
         osm_id: osmId,
         created_by: actorKey,
+        source_osm_version: null,
         source_tags_json: currentContour.tags_json ?? null,
         source_osm_updated_at: currentContour.updated_at ?? null,
         ...payload

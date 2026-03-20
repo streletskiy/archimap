@@ -78,6 +78,7 @@ function registerServerRuntimeRoutes(runtime) {
     passwordResetHtmlTemplate,
     passwordResetTextTemplate,
     appSettingsService: runtime.appSettingsService,
+    settingsSecret: String(runtime.config.rawEnv.APP_SETTINGS_SECRET || runtime.config.sessionSecret).trim() || runtime.config.sessionSecret,
     dataSettingsService: runtime.dataSettingsService,
     getAllFilterTagKeysCached: runtime.getAllFilterTagKeysCached,
     applyFilterTagAllowlistSnapshot: runtime.applyFilterTagAllowlistSnapshot,
@@ -102,7 +103,8 @@ function registerServerRuntimeRoutes(runtime) {
     getAppBaseUrl: runtime.getAppBaseUrl,
     registrationCodeTtlMinutes: runtime.config.registrationCodeTtlMinutes,
     passwordResetTtlMinutes: runtime.config.passwordResetTtlMinutes,
-    styleRegionOverridesService: runtime.styleRegionOverridesService
+    styleRegionOverridesService: runtime.styleRegionOverridesService,
+    osmSyncService: runtime.osmSyncService
   });
 
   registerBuildingsRoutes({

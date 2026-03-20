@@ -9,6 +9,7 @@
   import AdminDataTab from '$lib/components/admin/AdminDataTab.svelte';
   import AdminEditsTab from '$lib/components/admin/AdminEditsTab.svelte';
   import AdminFiltersTab from '$lib/components/admin/AdminFiltersTab.svelte';
+  import AdminOsmSyncTab from '$lib/components/admin/AdminOsmSyncTab.svelte';
   import AdminSettingsTab from '$lib/components/admin/AdminSettingsTab.svelte';
   import AdminStylesTab from '$lib/components/admin/AdminStylesTab.svelte';
   import AdminUsersTab from '$lib/components/admin/AdminUsersTab.svelte';
@@ -30,6 +31,7 @@
   let usersCount = null;
   let editsTotal = null;
   let editsVisible = null;
+  let osmTotal = null;
 
   function normalizeEditId(value) {
     const numeric = Number(value || 0);
@@ -44,6 +46,7 @@
     if (tab === 'users') return translateNow('admin.tabs.users');
     if (tab === 'settings') return translateNow('admin.tabs.settings');
     if (tab === 'data') return translateNow('admin.tabs.data');
+    if (tab === 'osm') return translateNow('admin.tabs.osm');
     if (tab === 'filters') return translateNow('admin.tabs.filters');
     if (tab === 'styles') return translateNow('admin.tabs.styles');
     return translateNow('admin.tabs.edits');
@@ -94,6 +97,10 @@
   function handleEditsSummary(event) {
     editsTotal = Number(event.detail?.total || 0);
     editsVisible = Number(event.detail?.visible || 0);
+  }
+
+  function handleOsmSummary(event) {
+    osmTotal = Number(event.detail?.total || 0);
   }
 
   $: {
@@ -176,6 +183,7 @@
     <svelte:fragment slot="meta">
       <UiBadge variant="accent"><strong>{$t('admin.tabs.users')}</strong>{formatCount(usersCount)}</UiBadge>
       <UiBadge variant="default"><strong>{$t('admin.tabs.edits')}</strong>{formatCount(editsTotal)}</UiBadge>
+      <UiBadge variant="default"><strong>{$t('admin.tabs.osm')}</strong>{formatCount(osmTotal)}</UiBadge>
     </svelte:fragment>
 
     <svelte:fragment slot="lead">
@@ -187,6 +195,10 @@
         <article class="portal-stat">
           <span>{$t('admin.tabs.edits')}</span>
           <strong>{formatCount(editsVisible)} / {formatCount(editsTotal)}</strong>
+        </article>
+        <article class="portal-stat">
+          <span>{$t('admin.tabs.osm')}</span>
+          <strong>{formatCount(osmTotal)}</strong>
         </article>
         <article class="portal-stat">
           <span>{$t('admin.currentSection')}</span>
@@ -201,6 +213,7 @@
         { value: 'edits', label: $t('admin.tabs.edits') },
         { value: 'users', label: $t('admin.tabs.users') },
         { value: 'data', label: $t('admin.tabs.data') },
+        { value: 'osm', label: $t('admin.tabs.osm') },
         { value: 'filters', label: $t('admin.tabs.filters') },
         { value: 'styles', label: $t('admin.tabs.styles') },
         { value: 'settings', label: $t('admin.tabs.settings') }
@@ -212,6 +225,8 @@
       <AdminUsersTab isMasterAdmin={$session.user?.isMasterAdmin} on:summary={handleUsersSummary} />
     {:else if activeTab === 'data'}
       <AdminDataTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
+    {:else if activeTab === 'osm'}
+      <AdminOsmSyncTab isMasterAdmin={$session.user?.isMasterAdmin} on:summary={handleOsmSummary} />
     {:else if activeTab === 'filters'}
       <AdminFiltersTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'styles'}

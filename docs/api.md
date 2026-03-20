@@ -118,7 +118,36 @@ System notes:
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
+- `GET /api/admin/app-settings/osm`
+  - Master-admin only.
+  - Returns OSM sync settings, connection state, and OAuth capability metadata for the `Admin -> Send to OSM` tab.
+- `POST /api/admin/app-settings/osm`
+  - Master-admin only.
+  - Saves OSM OAuth2 client settings and encrypted token material.
+- `POST /api/admin/app-settings/osm/oauth/start`
+  - Master-admin only.
+  - Starts the OAuth2 authorization-code flow and returns the provider authorize URL plus `state`.
+- `GET /api/admin/app-settings/osm/oauth/callback`
+  - Master-admin only.
+  - OAuth callback endpoint used by OpenStreetMap to exchange `code` + `state` for access tokens.
+  - On success, the route redirects back to `/admin/osm`.
+- `GET /api/admin/osm-sync/candidates`
+  - Returns building-level sync candidates grouped by `osm_type` + `osm_id`.
+  - Includes local merge state, sync status, last sync timestamps, and current contour snapshot data.
+  - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the collapsed archive section of the admin UI, and are excluded from bulk sync selection.
+- `GET /api/admin/osm-sync/candidates/:osmType/:osmId`
+  - Returns a detailed preflight snapshot for one building, including current live OSM state, local desired state, and drift/conflict diagnostics.
+- `POST /api/admin/osm-sync/candidates/sync`
+  - Master-admin only.
+  - Accepts `{ items: [{ osmType, osmId }, ...] }` and publishes the selected building groups in one OSM changeset.
+  - Marks synced edit rows with a shared changeset id and per-building summary metadata.
+- `POST /api/admin/osm-sync/candidates/:osmType/:osmId/sync`
+  - Master-admin only.
+  - Publishes the merged local building state to OSM after preflight drift checks.
+  - Marks the linked accepted/partially accepted edit rows as synced and stores the returned changeset id / compact summary in edit history.
+  - Returns `409 OSM_SYNC_ALREADY_PUBLISHED` for building groups that were already synchronized and are now read-only.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
+  - Edit history items now include sync metadata when available: `syncStatus`, `syncAttemptedAt`, `syncSucceededAt`, `syncCleanedAt`, `syncChangesetId`, `syncSummary`, `syncError`.
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
 - `POST /api/admin/building-edits/:editId/reassign`
 - `DELETE /api/admin/building-edits/:editId`
@@ -126,6 +155,7 @@ System notes:
   - `pending`, `rejected`, `superseded`: deletes only the edit history row.
   - `accepted`, `partially_accepted`: deletes the edit row and the linked `local.architectural_info` record only when no other accepted edit still points to the same building.
   - Returns `409 EDIT_DELETE_SHARED_MERGED_STATE` when merged local data is already shared with other accepted edits for the same OSM object.
+  - Returns `409 EDIT_SYNC_LOCKED` for rows that are already synchronized and treated as read-only.
 - `GET /api/admin/style-overrides`
   - Admin-only list of style-region override rules.
 - `POST /api/admin/style-overrides`
@@ -134,6 +164,7 @@ System notes:
 - `DELETE /api/admin/style-overrides/:id`
   - Admin-only delete for a style-region override rule.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
+  - Account history uses the same sync metadata fields as admin edit details and keeps them visible after local overwrite cleanup.
 
 ## Runtime config payload
 

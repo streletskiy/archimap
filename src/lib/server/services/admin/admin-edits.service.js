@@ -23,6 +23,34 @@ function createAdminEditsService(options = {}) {
     enqueueSearchIndexRefresh,
     ARCHI_FIELD_SET
   } = options;
+  const MUTABLE_SYNC_STATUSES = new Set(['unsynced', 'failed']);
+
+  function assertMutableEdit(item) {
+    const syncStatus = String(item?.syncStatus || 'unsynced').trim().toLowerCase();
+    if (syncStatus === 'synced' || syncStatus === 'cleaned') {
+      throw createAdminError(409, 'This edit has already been synchronized and can only be viewed.', {
+        code: 'EDIT_SYNC_LOCKED'
+      });
+    }
+    if (syncStatus === 'syncing') {
+      throw createAdminError(409, 'This edit is currently being synchronized and cannot be changed right now.', {
+        code: 'EDIT_SYNC_IN_PROGRESS'
+      });
+    }
+    if (!MUTABLE_SYNC_STATUSES.has(syncStatus) && syncStatus !== 'syncing') {
+      return;
+    }
+  }
+
+  async function getRawEditSyncStatus(editId) {
+    const row = await db.prepare(`
+      SELECT sync_status
+      FROM user_edits.building_user_edits
+      WHERE id = ?
+      LIMIT 1
+    `).get(editId);
+    return String(row?.sync_status || 'unsynced').trim().toLowerCase();
+  }
 
   async function listBuildingEdits({ status, limit } = {}) {
     const statusRaw = String(status || '').trim().toLowerCase();
@@ -104,6 +132,7 @@ function createAdminEditsService(options = {}) {
 
   async function rejectBuildingEdit(editIdRaw, { comment, reviewer } = {}) {
     const row = await getBuildingEditDetails(editIdRaw);
+    assertMutableEdit(row);
     if (normalizeUserEditStatus(row.status) !== 'pending') {
       throw createAdminError(409, 'Edit has already been processed');
     }
@@ -149,6 +178,18 @@ function createAdminEditsService(options = {}) {
     if (!before) {
       throw createAdminError(404, 'Edit not found');
     }
+    const rawSyncStatus = await getRawEditSyncStatus(editId);
+    if (rawSyncStatus === 'synced' || rawSyncStatus === 'cleaned') {
+      throw createAdminError(409, 'This edit has already been synchronized and can only be viewed.', {
+        code: 'EDIT_SYNC_LOCKED'
+      });
+    }
+    if (rawSyncStatus === 'syncing') {
+      throw createAdminError(409, 'This edit is currently being synchronized and cannot be changed right now.', {
+        code: 'EDIT_SYNC_IN_PROGRESS'
+      });
+    }
+    assertMutableEdit(before);
 
     try {
       const updated = await reassignUserEdit(editId, parsedTarget, {
@@ -164,6 +205,15 @@ function createAdminEditsService(options = {}) {
       return updated;
     } catch (error) {
       const message = String(error?.message || error || 'Failed to reassign edit');
+      if (/synchronized/i.test(message)) {
+        throw createAdminError(error.status || 409, message, { code: 'EDIT_SYNC_LOCKED' });
+      }
+      if (/currently being synchronized/i.test(message)) {
+        throw createAdminError(error.status || 409, message, { code: 'EDIT_SYNC_IN_PROGRESS' });
+      }
+      if (String(error?.code || '').startsWith('EDIT_SYNC_')) {
+        throw createAdminError(error.status || 409, message, { code: error.code });
+      }
       if (message.includes('not found')) {
         throw createAdminError(404, message);
       }
@@ -180,6 +230,23 @@ function createAdminEditsService(options = {}) {
       throw createAdminError(400, 'Invalid edit id');
     }
 
+    const before = await getUserEditDetailsById(editId);
+    if (!before) {
+      throw createAdminError(404, 'Edit not found');
+    }
+    const rawSyncStatus = await getRawEditSyncStatus(editId);
+    if (rawSyncStatus === 'synced' || rawSyncStatus === 'cleaned') {
+      throw createAdminError(409, 'This edit has already been synchronized and can only be viewed.', {
+        code: 'EDIT_SYNC_LOCKED'
+      });
+    }
+    if (rawSyncStatus === 'syncing') {
+      throw createAdminError(409, 'This edit is currently being synchronized and cannot be changed right now.', {
+        code: 'EDIT_SYNC_IN_PROGRESS'
+      });
+    }
+    assertMutableEdit(before);
+
     try {
       const deleted = await deleteUserEdit(editId);
       if (deleted?.osmType && Number.isInteger(Number(deleted.osmId))) {
@@ -188,6 +255,15 @@ function createAdminEditsService(options = {}) {
       return deleted;
     } catch (error) {
       const message = String(error?.message || error || 'Failed to delete edit');
+      if (/synchronized/i.test(message)) {
+        throw createAdminError(error.status || 409, message, { code: 'EDIT_SYNC_LOCKED' });
+      }
+      if (/currently being synchronized/i.test(message)) {
+        throw createAdminError(error.status || 409, message, { code: 'EDIT_SYNC_IN_PROGRESS' });
+      }
+      if (String(error?.code || '').startsWith('EDIT_SYNC_')) {
+        throw createAdminError(error.status || 409, message, { code: error.code });
+      }
       if (error?.code === 'EDIT_NOT_FOUND' || message.includes('not found')) {
         throw createAdminError(404, message);
       }
@@ -264,6 +340,7 @@ function createAdminEditsService(options = {}) {
 
   async function mergeBuildingEdit(editIdRaw, { force, fields, values, comment, reviewer } = {}) {
     const item = await getBuildingEditDetails(editIdRaw);
+    assertMutableEdit(item);
     if (normalizeUserEditStatus(item.status) !== 'pending') {
       throw createAdminError(409, 'Edit has already been processed');
     }

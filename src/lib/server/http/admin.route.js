@@ -1,6 +1,7 @@
 const { sendCachedJson } = require('../infra/http-cache.infra');
 const { createAdminSettingsService } = require('../services/admin/admin-settings.service');
 const { createAdminEditsService } = require('../services/admin/admin-edits.service');
+const { createOsmSyncService } = require('../services/osm-sync.service');
 const { requireMasterAdmin } = require('../services/admin/shared');
 
 function sendPrivateJson(req, res, payload, lastModified) {
@@ -50,6 +51,7 @@ function registerAdminRoutes(deps) {
   // Route file stays focused on HTTP wiring while the admin domain lives in dedicated services.
   const adminSettingsService = createAdminSettingsService(deps);
   const adminEditsService = createAdminEditsService(deps);
+  const osmSyncService = createOsmSyncService(deps);
   const styleRegionOverridesService = deps.styleRegionOverridesService;
 
   app.use('/api/admin', adminApiRateLimiter);
@@ -226,6 +228,99 @@ function registerAdminRoutes(deps) {
   }, {
     status: 500,
     message: 'Data settings service is unavailable'
+  }));
+
+  app.get('/api/admin/app-settings/osm', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return sendPrivateJson(req, res, {
+      ok: true,
+      item: await osmSyncService.getSettingsForAdmin()
+    });
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
+  }));
+
+  app.post('/api/admin/app-settings/osm', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await osmSyncService.saveSettings(req.body?.osm, getSessionEditActorKey(req) || 'admin')
+    });
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
+  }));
+
+  app.post('/api/admin/app-settings/osm/oauth/start', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await osmSyncService.startOAuth(getSessionEditActorKey(req) || 'admin')
+    });
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
+  }));
+
+  app.get('/api/admin/app-settings/osm/oauth/callback', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    const result = await osmSyncService.handleOauthCallback({
+      code: req.query?.code,
+      state: req.query?.state
+    });
+    const message = encodeURIComponent('osm-connected');
+    const user = encodeURIComponent(result?.osm?.connectedUser || '');
+    return res.redirect(`/admin/osm?osmSync=${message}${user ? `&user=${user}` : ''}`);
+  }, {
+    status: 500,
+    message: 'OSM OAuth callback failed'
+  }));
+
+  app.get('/api/admin/osm-sync/candidates', requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    const items = await osmSyncService.listSyncCandidates(req.query?.limit);
+    return sendPrivateJson(req, res, {
+      total: items.length,
+      items
+    });
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
+  }));
+
+  app.post('/api/admin/osm-sync/candidates/sync', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    return res.json({
+      ok: true,
+      item: await osmSyncService.syncCandidatesToOsm(
+        items,
+        getSessionEditActorKey(req) || 'admin'
+      )
+    });
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
+  }));
+
+  app.get('/api/admin/osm-sync/candidates/:osmType/:osmId', requireAuth, requireAdmin, withAdminError(async (req, res) => {
+    const item = await osmSyncService.getSyncCandidate(req.params.osmType, req.params.osmId);
+    if (!item) {
+      return res.status(404).json({ error: 'Sync candidate not found' });
+    }
+    return sendPrivateJson(req, res, { item }, item.latestUpdatedAt || undefined);
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
+  }));
+
+  app.post('/api/admin/osm-sync/candidates/:osmType/:osmId/sync', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
+    return res.json({
+      ok: true,
+      item: await osmSyncService.syncCandidateToOsm(
+        req.params.osmType,
+        req.params.osmId,
+        getSessionEditActorKey(req) || 'admin'
+      )
+    });
+  }, {
+    status: 500,
+    message: 'OSM sync service is unavailable'
   }));
 
   app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {

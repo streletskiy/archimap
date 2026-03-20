@@ -2,6 +2,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
   const {
     MERGED_EDIT_STATUSES,
     REASSIGNABLE_EDIT_STATUSES,
+    READ_ONLY_SYNC_STATUSES,
     countMergedEditsForTarget,
     db,
     getMergedInfoRow,
@@ -40,6 +41,21 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
     return { merged, conflicts };
   }
 
+  function throwSyncLockedError(syncStatus) {
+    if (syncStatus === 'syncing') {
+      const error = new Error('This edit is currently being synchronized and cannot be changed right now.');
+      error.status = 409;
+      error.code = 'EDIT_SYNC_IN_PROGRESS';
+      throw error;
+    }
+    if (READ_ONLY_SYNC_STATUSES.has(syncStatus)) {
+      const error = new Error('This edit has already been synchronized and can only be viewed.');
+      error.status = 409;
+      error.code = 'EDIT_SYNC_LOCKED';
+      throw error;
+    }
+  }
+
   async function reassignUserEdit(editId, target, options = {}) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) {
@@ -61,6 +77,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
     if (!REASSIGNABLE_EDIT_STATUSES.has(item.status)) {
       throw new Error('This edit cannot be reassigned');
     }
+    throwSyncLockedError(String(item.syncStatus || 'unsynced').trim().toLowerCase());
 
     const targetContour = await getOsmContourRow(targetOsmType, targetOsmId);
     if (!targetContour) {
@@ -178,6 +195,7 @@ function createBuildingEditModerationService(context, { getUserEditDetailsById }
       }
 
       const status = normalizeUserEditStatus(row.status);
+      throwSyncLockedError(String((await getUserEditDetailsById(id))?.syncStatus || 'unsynced').trim().toLowerCase());
       const deletesMergedLocal = MERGED_EDIT_STATUSES.has(status);
       if (deletesMergedLocal) {
         const otherMergedCount = await countMergedEditsForTarget(row.osm_type, row.osm_id, id);

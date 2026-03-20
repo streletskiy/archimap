@@ -31,7 +31,7 @@
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { locale, t, translateNow } from '$lib/i18n/index';
-  import { getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, matchesUiDateRange, parseEditKey } from '$lib/utils/edit-ui';
+  import { formatUiDate, getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, matchesUiDateRange, parseEditKey } from '$lib/utils/edit-ui';
   import { focusMapOnGeometry, getGeometryCenter } from '$lib/utils/map-geometry';
 
   const LIGHT = '/styles/positron-custom.json';
@@ -387,6 +387,15 @@
     }
   }
 
+  function getSyncBadgeMeta(status) {
+    const normalized = String(status || 'unsynced').trim().toLowerCase();
+    if (normalized === 'synced') return { cls: 'ui-surface-success-soft ui-text-success-soft', text: $t('account.edits.syncSynced') };
+    if (normalized === 'cleaned') return { cls: 'ui-surface-info ui-text-info', text: $t('account.edits.syncCleaned') };
+    if (normalized === 'syncing') return { cls: 'ui-surface-warning ui-text-warning', text: $t('account.edits.syncing') };
+    if (normalized === 'failed') return { cls: 'ui-surface-danger ui-text-danger', text: $t('account.edits.syncFailed') };
+    return { cls: 'ui-surface-soft ui-text-muted', text: $t('account.edits.syncUnsynced') };
+  }
+
   async function replaceAccountUrl(tab) {
     if (typeof window === 'undefined') return;
     const next = buildAccountUrl(window.location.href, tab);
@@ -668,7 +677,7 @@
                   {@const counters = getChangeCounters(it.changes)}
                   <UiTableRow
                     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
-                    on:click={() => openEdit(it.id || it.editId)}
+                    onclick={() => openEdit(it.id || it.editId)}
                   >
                     <UiTableCell className="min-w-0">
                       <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(it)}</p>
@@ -680,12 +689,19 @@
                         {#if !it.osmPresent && !it.orphaned}
                           <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
                         {/if}
-                        {#if it.sourceOsmChanged}
+                      {#if it.sourceOsmChanged}
                           <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>
+                        {/if}
+                        {#if it.syncStatus && it.syncStatus !== 'unsynced'}
+                          {@const syncMeta = getSyncBadgeMeta(it.syncStatus)}
+                          <span class={`rounded-md px-2 py-1 text-[11px] font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
                         {/if}
                       </div>
                       {#if String(it?.adminComment || '').trim()}
                         <p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>
+                      {/if}
+                      {#if it.syncChangesetId}
+                        <p class="mt-1 text-xs ui-text-subtle">{$t('account.edits.syncChangeset')}: #{it.syncChangesetId}</p>
                       {/if}
                     </UiTableCell>
                     <UiTableCell>{it.updatedBy || '-'}</UiTableCell>
@@ -723,6 +739,21 @@
           {:else}
                 {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
             <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
+            {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
+              <div class="rounded-xl border ui-border ui-surface-muted p-3 text-sm ui-text-body">
+                <p><strong>{$t('account.edits.syncStatus')}:</strong> {getSyncBadgeMeta(selectedEdit.syncStatus).text}</p>
+                <p><strong>{$t('account.edits.syncAttemptedAt')}:</strong> {formatUiDate(selectedEdit.syncAttemptedAt) || '---'}</p>
+                <p><strong>{$t('account.edits.syncSucceededAt')}:</strong> {formatUiDate(selectedEdit.syncSucceededAt) || '---'}</p>
+                <p><strong>{$t('account.edits.syncCleanedAt')}:</strong> {formatUiDate(selectedEdit.syncCleanedAt) || '---'}</p>
+                <p><strong>{$t('account.edits.syncChangeset')}:</strong> {selectedEdit.syncChangesetId || '---'}</p>
+                {#if selectedEdit.syncSummary}
+                  <p class="mt-1 text-xs ui-text-subtle break-words">{JSON.stringify(selectedEdit.syncSummary)}</p>
+                {/if}
+                {#if selectedEdit.syncError}
+                  <p class="mt-1 text-xs ui-text-danger break-words">{selectedEdit.syncError}</p>
+                {/if}
+              </div>
+            {/if}
             {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
               <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                 {#if selectedEdit.orphaned}

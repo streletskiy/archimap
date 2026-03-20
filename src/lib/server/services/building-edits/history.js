@@ -47,7 +47,12 @@ function createBuildingEditHistoryService(context) {
         updatedAt: row.updated_at,
         createdAt: row.created_at,
         status: normalizeUserEditStatus(row.status),
-        osmPresent: row.contour_osm_id != null
+        osmPresent: row.contour_osm_id != null,
+        syncStatus: row.sync_status ?? 'unsynced',
+        syncAttemptedAt: row.sync_attempted_at ?? null,
+        syncSucceededAt: row.sync_succeeded_at ?? null,
+        syncCleanedAt: row.sync_cleaned_at ?? null,
+        syncChangesetId: row.sync_changeset_id ?? null
       }));
     }
 

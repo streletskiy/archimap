@@ -34,6 +34,13 @@ function createTestDb() {
       merged_by TEXT,
       merged_at TEXT,
       merged_fields_json TEXT,
+      sync_status TEXT,
+      sync_attempted_at TEXT,
+      sync_succeeded_at TEXT,
+      sync_cleaned_at TEXT,
+      sync_changeset_id INTEGER,
+      sync_summary_json TEXT,
+      sync_error_text TEXT,
       source_tags_json TEXT,
       source_osm_updated_at TEXT,
       created_at TEXT,
@@ -268,6 +275,45 @@ test('getUserEditsList marks accepted edit as orphaned when contour is missing',
   assert.equal(items[0].hasMergedLocal, true);
 });
 
+test('accepted edit keeps original change counters visible after merge', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    3103,
+    JSON.stringify({
+      name: 'Исходное имя',
+      architect: 'Старый архитектор'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO local.architectural_info (
+      osm_type, osm_id, name, architect, updated_by, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+  `).run('way', 3103, 'Принятое имя', 'Новый архитектор', 'admin@example.com');
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, architect, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(11, 'way', 3103, 'user@example.com', 'Принятое имя', 'Новый архитектор', 'accepted');
+
+  const items = await service.getUserEditsList({ status: 'accepted', limit: 10 });
+  assert.equal(items.length, 1);
+  assert.ok(Array.isArray(items[0].changes));
+  const fields = new Set(items[0].changes.map((change) => String(change.field || '')));
+  assert.equal(fields.has('name'), true);
+  assert.equal(fields.has('architect'), true);
+  assert.equal(items[0].changes.length, 2);
+});
+
 test('getUserEditDetailsById marks edit as drifted when OSM tags changed after submission', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
@@ -451,5 +497,33 @@ test('deleteUserEdit blocks deleting accepted edit when merged state is shared',
     WHERE osm_type = ? AND osm_id = ?
   `).get('way', 9009);
   assert.ok(localRow);
+});
+
+test('synced edits are read only in admin moderation actions', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, sync_status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(10, 'way', 3010, 'user@example.com', 'Synced building', 'accepted', 'synced');
+
+  await assert.rejects(
+    () => service.reassignUserEdit(10, { osmType: 'way', osmId: 3011 }, { actor: 'admin@example.com' }),
+    (error) => {
+      assert.match(error.message, /synchronized/i);
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    () => service.deleteUserEdit(10),
+    (error) => {
+      assert.match(error.message, /synchronized/i);
+      return true;
+    }
+  );
 });
 

@@ -269,11 +269,11 @@ Accepted local edits are stored separately from imported OSM contours:
 - user submissions are stored in `user_edits.building_user_edits`
 - region sync updates only imported OSM data (`osm.building_contours`, `data_region_memberships`, PMTiles)
 
-This means sync does not currently cascade changes into local edits automatically.
+This means the import path still does not rewrite local edits directly, but the runtime now runs a reconciliation pass after successful syncs to remove redundant local overwrites when the imported OSM contour already contains the synced state.
 
 ### What is handled now
 
-- Accepted local edits survive normal OSM reimports because sync does not overwrite `local.architectural_info`.
+- Accepted local edits survive normal OSM reimports; when a synced building is imported back into the main contour dataset with the same local state, the runtime can delete the redundant `local.architectural_info` overwrite and keep only the compact history row.
 - Overlapping regions stay safe because OSM contour cleanup is driven by `data_region_memberships`, not by a full-table replace.
 - Every new or updated user edit stores a snapshot of the OSM baseline at submission time in `user_edits.building_user_edits`:
   - `source_tags_json`
@@ -286,6 +286,10 @@ This means sync does not currently cascade changes into local edits automaticall
 - Admin merge has two stale guards:
   - local stale guard: merge returns `409 EDIT_OUTDATED` when `local.architectural_info.updated_at` is newer than the edit creation time
   - upstream stale guard: merge returns `409 EDIT_OUTDATED_OSM` when current OSM tags differ from the stored source snapshot
+- OSM sync adds a second lifecycle:
+  - master admins can publish merged local state back to OSM from `Admin -> Send to OSM`
+  - after the next successful import, the runtime compares the imported contour with synced local state and removes the now-redundant `local.architectural_info` row when they match
+  - the corresponding edit history rows are preserved in compact form with sync metadata and the OSM changeset reference
 
 ### Corner case: building was deleted from OSM / disappeared from the extract
 

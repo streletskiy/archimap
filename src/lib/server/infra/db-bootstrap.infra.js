@@ -115,6 +115,32 @@ CREATE TABLE IF NOT EXISTS app_general_settings (
   updated_by TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS app_osm_settings (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  provider_name TEXT NOT NULL DEFAULT 'OpenStreetMap',
+  auth_base_url TEXT NOT NULL DEFAULT 'https://www.openstreetmap.org',
+  api_base_url TEXT NOT NULL DEFAULT 'https://api.openstreetmap.org',
+  client_id TEXT,
+  client_secret_enc TEXT,
+  redirect_uri TEXT,
+  access_token_enc TEXT,
+  refresh_token_enc TEXT,
+  token_type TEXT,
+  scope TEXT,
+  connected_user TEXT,
+  connected_at TEXT,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS app_osm_oauth_states (
+  state TEXT PRIMARY KEY,
+  code_verifier TEXT NOT NULL,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
 `);
 
   function migrateLegacyOsmDataIfNeeded() {
@@ -334,6 +360,9 @@ CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
   osm_type TEXT NOT NULL,
   osm_id INTEGER NOT NULL,
   created_by TEXT NOT NULL,
+  source_osm_version INTEGER,
+  source_tags_json TEXT,
+  source_osm_updated_at TEXT,
   name TEXT,
   style TEXT,
   material TEXT,
@@ -352,6 +381,13 @@ CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
   merged_by TEXT,
   merged_at TEXT,
   merged_fields_json TEXT,
+  sync_status TEXT NOT NULL DEFAULT 'unsynced',
+  sync_attempted_at TEXT,
+  sync_succeeded_at TEXT,
+  sync_cleaned_at TEXT,
+  sync_changeset_id INTEGER,
+  sync_summary_json TEXT,
+  sync_error_text TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -364,6 +400,9 @@ ON building_user_edits (created_by, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_status
 ON building_user_edits (status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_sync
+ON building_user_edits (osm_type, osm_id, sync_status, updated_at DESC);
 
 `);
 

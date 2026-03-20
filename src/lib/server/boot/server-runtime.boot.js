@@ -5,6 +5,7 @@ const { createSearchService } = require('../services/search.service');
 const { createBuildingEditsService } = require('../services/building-edits.service');
 const { createAppSettingsService } = require('../services/app-settings.service');
 const { createStyleRegionOverridesService } = require('../services/style-region-overrides.service');
+const { createOsmSyncService } = require('../services/osm-sync.service');
 const {
   DEFAULT_FILTER_TAG_ALLOWLIST,
   normalizeFilterTagKeyList,
@@ -248,6 +249,13 @@ class ServerRuntime {
     this.stopSearchIndexBoot = searchIndexBoot.stop;
     this.isSearchIndexRebuildInProgress = searchIndexBoot.isSearchIndexRebuildInProgress;
 
+    this.osmSyncService = createOsmSyncService({
+      db: this.db,
+      settingsSecret: String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
+      appSettingsService: this.appSettingsService,
+      enqueueSearchIndexRefresh: this.enqueueSearchIndexRefresh
+    });
+
     Object.assign(this, createRegionPmtilesBoot({
       dataDir: this.config.paths.dataDir,
       logger: this.logger
@@ -325,6 +333,13 @@ class ServerRuntime {
       getContoursTotal: async () => Number((await this.db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
       onSyncSuccess: async (payload = null) => {
         const managedRegionSync = Boolean(payload?.region);
+        try {
+          await this.osmSyncService?.cleanupSyncedLocalOverwritesAfterImport?.();
+        } catch (error) {
+          this.logger.error('osm_sync_cleanup_after_import_failed', {
+            error: String(error?.message || error)
+          });
+        }
         await this.rebuildSearchIndex(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
         this.resetFilterTagKeysCache();
         this.scheduleFilterTagKeysCacheRebuild(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');

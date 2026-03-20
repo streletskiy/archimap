@@ -130,6 +130,7 @@ When a new control is needed:
 
 - `UiTable*` is the default table stack for product code.
 - Native `<table>` markup should remain only inside generated upstream primitives or content-rendering cases that are not part of product UI composition.
+- Interactive table rows must use `UiTableRow` with the `onclick` callback prop, not `on:click`, so row selection works consistently through the base wrapper.
 
 ### Scrollable Areas
 
