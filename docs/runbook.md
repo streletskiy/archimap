@@ -61,7 +61,7 @@
 1. Update region settings in `Admin -> Data`.
 2. Run `Sync now` for the target region or `npm run tiles:build -- --region-id=<id>`.
 3. Optional maintenance rebuild without re-import:
-   - `node scripts/sync-osm-region.js --region-id=<id> --pmtiles-only`
+   - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`
 4. Verify PMTiles:
    - `curl -I -H "Range: bytes=0-1023" http://host/api/data/regions/<id>/pmtiles`
    - Expect `206`, `Accept-Ranges`, `Content-Range`.
@@ -97,10 +97,10 @@
 
 ### Runtime mode and entrypoint
 
-- Public HTTP runtime entrypoint is `server.sveltekit.js`.
-- `server.js` is a thin backend entrypoint that creates and exports the internal app runtime.
-- API/system routes are dispatched by `server.sveltekit.js` to the internal runtime assembled by `ServerRuntime` in `src/lib/server/boot/server-runtime.boot.js`.
-- Runtime assembly is further split into `server-runtime.config.js`, `server-runtime.middleware.js`, and `server-runtime.routes.js`.
+- Public HTTP runtime entrypoint is `server.sveltekit.ts`.
+- `server.ts` is a thin backend entrypoint that creates and exports the internal app runtime.
+- API/system routes are dispatched by `server.sveltekit.ts` to the internal runtime assembled by `ServerRuntime` in `src/lib/server/boot/server-runtime.boot.ts`.
+- Runtime assembly is further split into `server-runtime.config.ts`, `server-runtime.middleware.ts`, and `server-runtime.routes.ts`.
 
 ### Region sync CLI fails immediately
 

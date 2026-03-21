@@ -4,16 +4,16 @@
 
 - Lazy map runtime:
   - Map component is dynamically imported in `frontend/src/routes/+page.svelte`.
-  - MapLibre + PMTiles libraries are dynamically imported in `frontend/src/lib/services/map-runtime.js`.
+  - MapLibre + PMTiles libraries are dynamically imported in `frontend/src/lib/services/map-runtime.ts`.
   - `MapCanvas.svelte` stays focused on render/bind concerns and delegates non-UI logic to `frontend/src/lib/services/map/**`.
 - Request cancellation:
   - Search requests use `AbortController` in `+page.svelte`.
   - Building filter match requests (`POST /api/buildings/filter-matches`) cancel stale requests through `MapFilterService`.
 - Debounce:
-  - Map filter reload on `moveend/zoomend` is debounced (`180ms`) in `frontend/src/lib/services/map/map-filter-pipeline.js`.
+  - Map filter reload on `moveend/zoomend` is debounced (`180ms`) in `frontend/src/lib/services/map/map-filter-pipeline.ts`.
   - Rule-change refresh applies optimistic state immediately and debounces authoritative fetch (default `90ms`, heavy contains rules `500ms`).
 - Client cache:
-  - `apiJsonCached` in `frontend/src/lib/services/http.js`.
+  - `apiJsonCached` in `frontend/src/lib/services/http.ts`.
   - Search and bbox responses reuse short-lived in-memory cache.
   - Map filter keeps a short-lived in-memory match cache for `/api/buildings/filter-matches` (`rulesHash+bboxHash+zoomBucket`), and per-building cache for fallback `/api/buildings/filter-data`.
 - Reduced unnecessary redraws:

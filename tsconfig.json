@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "moduleDetection": "force",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "types/**/*.d.ts",
+    "commitlint.config.ts",
+    "drizzle.config.ts",
+    "playwright.config.ts",
+    "server.ts",
+    "server.sveltekit.ts",
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "workers/**/*.ts",
+    "tests/**/*.ts",
+    "db/**/*.ts"
+  ],
+  "exclude": [
+    "frontend/**",
+    "node_modules/**",
+    "data/**",
+    "dist/**",
+    "build/**",
+    "tmp/**",
+    "playwright-report/**",
+    "test-results/**"
+  ]
+}

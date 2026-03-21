@@ -57,11 +57,12 @@ ARG BUILD_DESCRIBE
 ARG BUILD_LATEST_TAG
 
 COPY package.json ./
+COPY --from=deps /app/node_modules ./node_modules
 COPY scripts ./scripts
 COPY src/lib ./src/lib
 COPY legal ./legal
 COPY frontend ./frontend
-RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG="${BUILD_LATEST_TAG}" node scripts/generate-version.js \
+RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG="${BUILD_LATEST_TAG}" node --import tsx scripts/generate-version.ts \
   && npm --prefix frontend run build \
   && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\\n')"
 
@@ -105,8 +106,8 @@ ENV PYTHON_BIN=/opt/pyosm/bin/python
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=frontend-runtime-deps /app/frontend/node_modules ./frontend/node_modules
-COPY server.js ./server.js
-COPY server.sveltekit.js ./server.sveltekit.js
+COPY server.ts ./server.ts
+COPY server.sveltekit.ts ./server.sveltekit.ts
 COPY db ./db
 COPY scripts ./scripts
 COPY workers ./workers
@@ -116,5 +117,5 @@ COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version
 
 EXPOSE 3252
 
-CMD ["node", "scripts/runtime-start.js"]
+CMD ["node", "--import", "tsx", "scripts/runtime-start.ts"]
 

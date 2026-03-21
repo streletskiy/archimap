@@ -2,8 +2,8 @@
 
 ## Runtime routing
 
-- Public HTTP runtime is `server.sveltekit.js`.
-- API/system endpoints are dispatched to the internal app runtime created by `src/lib/server/boot/server-runtime.boot.js` and exported through thin `server.js` entrypoint for:
+- Public HTTP runtime is `server.sveltekit.ts`.
+- API/system endpoints are dispatched to the internal app runtime created by `src/lib/server/boot/server-runtime.boot.ts` and exported through thin `server.ts` entrypoint for:
   - `/api/**`
   - `/healthz`, `/readyz`, `/metrics`
   - `/app-config.js`, `/favicon.ico`, `/.well-known/appspecific/com.chrome.devtools.json`, `/ui/**`

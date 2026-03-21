@@ -4,11 +4,11 @@
     "moduleResolution": "bundler",
     "target": "ES2022",
     "module": "ESNext",
-    "allowJs": true,
+    "allowJs": false,
     "checkJs": false,
     "skipLibCheck": true,
     "strict": false,
     "types": ["node"]
   },
-  "include": ["src/**/*.d.ts", "src/**/*.js", "src/**/*.ts", "src/**/*.svelte"]
+  "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
 }

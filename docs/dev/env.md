@@ -100,9 +100,9 @@ These values are used as fallback camera only when neither URL nor the saved cli
   set `SESSION_COOKIE_SECURE=false` for non-HTTPS local runs.
 - `DB_PROVIDER=postgres` but startup fails:
   verify `DATABASE_URL` (or full `POSTGRES_*`) and run `npm run db:pg:migrate`.
-- `node scripts/sync-osm-region.js --region-id=<id>` fails before extract starts:
+- `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails before extract starts:
   verify `PYTHON_BIN` or install Python modules `quackosm` and `duckdb`.
-- `node scripts/sync-osm-region.js --region-id=<id>` fails during PMTiles build:
+- `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails during PMTiles build:
   install `tippecanoe` or set `TIPPECANOE_BIN`.
 - Newly created regions do not appear on the map:
   verify the region has a successful sync, non-empty bounds, and a PMTiles file under `data/regions/`.

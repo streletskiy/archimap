@@ -1,7 +1,7 @@
 # OSM Import Pipeline
 
 This document describes the managed end-to-end OSM building import pipeline used by region syncs.
-It covers the real runtime path implemented by [`scripts/sync-osm-region.js`](../scripts/sync-osm-region.js),
+It covers the real runtime path implemented by [`scripts/sync-osm-region.ts`](../scripts/sync-osm-region.ts),
 its helper modules under [`scripts/region-sync/`](../scripts/region-sync/), and
 [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py), including `quackosm`,
 `duckdb`, the runtime DB (`postgres` or `sqlite`), and region `PMTiles`.
@@ -17,12 +17,12 @@ The pipeline below is the source of truth for managed region syncs where:
 Primary entrypoints:
 
 - `npm run tiles:build -- --region-id=<id>`
-- `node scripts/sync-osm-region.js --region-id=<id>`
+- `node --import tsx scripts/sync-osm-region.ts --region-id=<id>`
 - in-app scheduler/queue launching the same script per region
 
 There is also a maintenance-only variant:
 
-- `node scripts/sync-osm-region.js --region-id=<id> --pmtiles-only`
+- `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`
 
 `--pmtiles-only` rebuilds a region archive from already imported DB rows and skips the `quackosm` / `duckdb` import stage.
 
@@ -40,13 +40,13 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
 
 1. Region definition lives in `data_sync_regions`.
 2. Scheduler or manual trigger chooses a concrete `regionId`.
-3. [`scripts/sync-osm-region.js`](../scripts/sync-osm-region.js) loads the region config through `scripts/region-sync/db-ingester.js` and validates:
+3. [`scripts/sync-osm-region.ts`](../scripts/sync-osm-region.ts) loads the region config through `scripts/region-sync/db-ingester.ts` and validates:
    - region exists
    - `sourceType=extract`
    - canonical `extractSource` + `extractId` are present
    - `extractResolutionStatus=resolved`
 4. The script creates a temp workspace under the OS temp directory for the run.
-5. The orchestrator delegates the extract stage to `scripts/region-sync/python-extractor.js`, which resolves Python and calls the importer with:
+5. The orchestrator delegates the extract stage to `scripts/region-sync/python-extractor.ts`, which resolves Python and calls the importer with:
    - `--extract-query <region.extractId>`
    - `--extract-source <region.extractSource>`
    - PostgreSQL full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
@@ -65,11 +65,11 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - SQLite full sync: `region-import.ndjson` (GeoJSON + bbox + tags)
 9. The PMTiles input is prepared as newline-delimited GeoJSON features for `tippecanoe`:
    - PostgreSQL full sync: reuses the already exported `region-build.ndjson`
-   - SQLite full sync: `scripts/region-sync/pmtiles-builder.js` converts import NDJSON into `region-build.ndjson`
-   - `--pmtiles-only`: `scripts/region-sync/region-db.js` streams region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file
+   - SQLite full sync: `scripts/region-sync/pmtiles-builder.ts` converts import NDJSON into `region-build.ndjson`
+   - `--pmtiles-only`: `scripts/region-sync/region-db.ts` streams region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file
    - every exported feature carries `feature_kind` so the client can split `building` and `building_part` layers without a second PMTiles archive
 10. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`.
-11. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.js`:
+11. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.ts`:
     - PostgreSQL: `region_import_tmp` with `geometry_wkb_hex`
     - SQLite: `temp.region_import_tmp` with `geometry_json`
 12. Inside one DB transaction the sync:
@@ -79,32 +79,32 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
     - deletes only true orphans from `osm.building_contours`, meaning objects no longer referenced by any region
 
 13. PostgreSQL also refreshes `osm.building_contours_summary` in the same transaction.
-14. `scripts/region-sync/import-applier.js` swaps the new PMTiles archive into `data/regions/buildings-region-<slug>.pmtiles` with backup-and-rollback protection.
+14. `scripts/region-sync/import-applier.ts` swaps the new PMTiles archive into `data/regions/buildings-region-<slug>.pmtiles` with backup-and-rollback protection.
 15. If the DB transaction commits, the backup is dropped and the new archive becomes active.
 16. If any step fails after swap staging, the DB transaction is rolled back and the previous PMTiles file is restored.
 17. Runtime clients later receive the region PMTiles metadata via `/app-config.js` and fetch the archive through `/api/data/regions/:regionId/pmtiles`.
 18. For managed in-app syncs, `ServerRuntime` boot modules then rebuild search index tables and schedule filter-tag cache refresh.
-19. Direct standalone full sync execution (`node scripts/sync-osm-region.js --region-id=<id>` and wrappers such as `npm run tiles:build -- --region-id=<id>`) runs the same search-index and filter-tag follow-up workers before exiting; `--pmtiles-only` skips them because it does not change imported DB rows.
+19. Direct standalone full sync execution (`node --import tsx scripts/sync-osm-region.ts --region-id=<id>` and wrappers such as `npm run tiles:build -- --region-id=<id>`) runs the same search-index and filter-tag follow-up workers before exiting; `--pmtiles-only` skips them because it does not change imported DB rows.
 
 ## Mermaid diagram
 
 ```mermaid
 flowchart TD
   A["Admin Data settings / Scheduler / CLI"] --> B["data_sync_regions"]
-  B --> C["scripts/sync-osm-region.js"]
+  B --> C["scripts/sync-osm-region.ts"]
   C --> D["Create temp workspace"]
-  D --> E["scripts/region-sync/python-extractor.js"]
+  D --> E["scripts/region-sync/python-extractor.ts"]
   E --> F["scripts/sync-osm-buildings.py"]
   F --> G["QuackOSM extract query resolution"]
   G --> H["DuckDB file in data/quackosm"]
   H --> I["DuckDB spatial SQL over quackosm_raw"]
   I --> J["region-import.ndjson (WKB for PostgreSQL / GeoJSON for SQLite)"]
   I --> L["region-build.ndjson (GeoJSON for PostgreSQL full sync)"]
-  J --> K["scripts/region-sync/pmtiles-builder.js"]
+  J --> K["scripts/region-sync/pmtiles-builder.ts"]
   K --> L["GeoJSON NDJSON for tippecanoe"]
   L --> M["tippecanoe"]
   M --> N["temp region.pmtiles"]
-  J --> O["scripts/region-sync/import-applier.js"]
+  J --> O["scripts/region-sync/import-applier.ts"]
   O --> P["temp staging table region_import_tmp"]
   P --> Q["Upsert osm.building_contours"]
   P --> R["Upsert data_region_memberships"]
@@ -123,7 +123,7 @@ flowchart TD
 
 ## Component responsibilities
 
-### `scripts/sync-osm-region.js`
+### `scripts/sync-osm-region.ts`
 
 - Thin orchestrator for managed region sync.
 - Parses CLI args, creates runtime options/workspace, and runs either:
@@ -131,19 +131,19 @@ flowchart TD
   - `--pmtiles-only` rebuild path
 - Can be imported without side effects; CLI execution happens only under `require.main === module`.
 
-### `scripts/region-sync/python-extractor.js`
+### `scripts/region-sync/python-extractor.ts`
 
 - Resolves Python executable candidates.
 - Verifies `quackosm` and `duckdb` Python dependencies before starting import.
 - Invokes `scripts/sync-osm-buildings.py` and turns Python setup failures into explicit sync errors.
 - Exposes both fuzzy candidate search (`--resolve-extract-query`) and exact canonical resolution (`--resolve-exact-extract`) for admin data settings.
 
-### `scripts/region-sync/db-ingester.js`
+### `scripts/region-sync/db-ingester.ts`
 
 - Small facade that exposes the region-sync DB/public helpers used by the orchestrator.
 - Re-exports region loading/export helpers and transactional import/apply helpers.
 
-### `scripts/region-sync/region-db.js`
+### `scripts/region-sync/region-db.ts`
 
 - Loads region config from PostgreSQL or SQLite.
 - Validates managed-sync prerequisites for a region.
@@ -186,7 +186,7 @@ flowchart TD
 - PostgreSQL keeps `osm.building_contours_summary` updated for runtime fast paths.
 - SQLite follows the same logical flow but uses local temp tables and file-backed DBs.
 
-### `scripts/region-sync/import-applier.js`
+### `scripts/region-sync/import-applier.ts`
 
 - Streams NDJSON rows into the provider-specific staging table.
 - Applies the authoritative transactional upsert/cleanup logic for PostgreSQL and SQLite.
@@ -197,7 +197,7 @@ flowchart TD
 
 - PostgreSQL keeps only searchable rows in `building_search_source` and derives `search_tsv` there through a generated column.
 - SQLite keeps `building_search_source` plus `building_search_fts`.
-- Parsing and fallback composition for `name`, `address`, `style`, and `architect` happens in Node.js via `src/lib/server/services/search-index-source.service.js`.
+- Parsing and fallback composition for `name`, `address`, `style`, and `architect` happens in Node.js via `src/lib/server/services/search-index-source.service.ts`.
 - pure `building:part` rows are excluded from the search read model so part geometries do not create duplicate search hits for the same visible building; rows that also have a `building` tag stay searchable as normal buildings.
 - The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 
@@ -207,7 +207,7 @@ flowchart TD
 - The file is built outside the DB transaction and then swapped into place with rollback protection.
 - The API serves it through `/api/data/regions/:regionId/pmtiles` with Range support, validators, and cache headers.
 
-### `scripts/region-sync/pmtiles-builder.js`
+### `scripts/region-sync/pmtiles-builder.ts`
 
 - Converts import NDJSON rows into newline-delimited GeoJSON features for `tippecanoe` when the importer did not already emit a dedicated GeoJSON build artifact.
 - Detects `tippecanoe` from `TIPPECANOE_BIN` or `PATH`.
@@ -232,8 +232,8 @@ flowchart TD
     - SQLite full sync: GeoJSON + bbox + tags
   - `region-build.ndjson`
     - PostgreSQL full sync: exported directly by the importer
-    - SQLite full sync: generated by `pmtiles-builder.js`
-    - `--pmtiles-only`: streamed directly from the runtime DB by `region-db.js`
+    - SQLite full sync: generated by `pmtiles-builder.ts`
+    - `--pmtiles-only`: streamed directly from the runtime DB by `region-db.ts`
   - `region-export-summary.json`
     - PostgreSQL full sync: feature count + bounds emitted directly by the importer
   - `region.pmtiles`
@@ -249,7 +249,7 @@ flowchart TD
 
 - In-app sync flow (scheduler/admin queue) runs follow-up jobs from `ServerRuntime` boot modules.
 - These jobs rebuild the search read-model through `search-index.boot.js` (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite), then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
-- Direct standalone full sync execution of `scripts/sync-osm-region.js` invokes the same rebuild workers itself, so search/filter read-models stay aligned after new region imports and normal region updates even without the in-app runtime wrapper.
+- Direct standalone full sync execution of `scripts/sync-osm-region.ts` invokes the same rebuild workers itself, so search/filter read-models stay aligned after new region imports and normal region updates even without the in-app runtime wrapper.
 - `--pmtiles-only` rebuilds only the archive from DB rows and intentionally skips search/filter follow-up because imported OSM rows are unchanged.
 - The archive remains a single regional source of truth; `building_part` is just another feature kind inside the same PMTiles file, not a separate archive.
 

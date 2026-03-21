@@ -32,6 +32,8 @@ __pycache__/
 *.pyc
 frontend/.svelte-kit/
 frontend/build/
+frontend/svelte.config.js
+frontend/static/theme-init.js
 public/app/
 tmp/
 playwright-report/

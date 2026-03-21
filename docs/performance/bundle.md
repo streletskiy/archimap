@@ -8,7 +8,7 @@
 
 ## Chunk strategy
 
-- Vite manual chunks in `frontend/vite.config.js`:
+- Vite manual chunks in `frontend/vite.config.ts`:
   - `admin`
   - `maplibre`
   - `pmtiles`
