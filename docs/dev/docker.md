@@ -27,7 +27,8 @@ Reference: [`Dockerfile`](../../Dockerfile)
 4. `frontend-build`
 
 - Generates version metadata and builds frontend bundle from committed frontend assets.
-- Depends on frontend sources, not on backend dependency install layer.
+- Installs the backend production dependency tree in the build-platform stage so `scripts/generate-version.ts` uses a matching native `esbuild` binary.
+- Does not reuse the runtime `deps` layer.
 
 5. `runtime`
 

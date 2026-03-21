@@ -56,8 +56,12 @@ ARG BUILD_SHA
 ARG BUILD_DESCRIBE
 ARG BUILD_LATEST_TAG
 
-COPY package.json ./
-COPY --from=deps /app/node_modules ./node_modules
+# Install the backend production tree in the build-platform stage so tsx/esbuild
+# always matches the architecture that runs the version-generation step.
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+  npm ci --omit=dev --ignore-scripts
+
 COPY scripts ./scripts
 COPY src/lib ./src/lib
 COPY legal ./legal
