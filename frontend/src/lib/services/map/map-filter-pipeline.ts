@@ -342,7 +342,7 @@ export function createFilterPipeline({
       updateFilterRuntimeStatus({
         statusCode: 'refining'
       });
-      let requestResults = [];
+      let requestResults: LooseRecord[];
       try {
         const cachedResults = [];
         const missingSpecs = [];

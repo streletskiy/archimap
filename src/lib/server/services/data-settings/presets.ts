@@ -203,7 +203,7 @@ function clonePresetLayers(layers = []) {
 
 function mapPresetRow(row: LooseRecord) {
   if (!row || typeof row !== 'object') return null;
-  let parsedLayers = [];
+  let parsedLayers: LooseRecord[];
   try {
     parsedLayers = JSON.parse(String(row.layers_json || '[]'));
   } catch {

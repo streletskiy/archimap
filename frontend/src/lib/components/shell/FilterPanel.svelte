@@ -31,7 +31,7 @@
   let filterPresetsLoading = false;
   let filterPresetsError = '';
   let filterPresetsRetryTimer = null;
-  let panelWasOpen = false;
+  let panelWasOpen;
 
   $: if (open && !panelWasOpen) {
     draftLayers = buildDraftLayers($buildingFilterLayers);
@@ -41,6 +41,7 @@
   $: if (!open && panelWasOpen) {
     panelWasOpen = false;
   }
+  $: void panelWasOpen;
 
   $: activeFilterCount = Array.isArray($buildingFilterLayers) ? $buildingFilterLayers.length : 0;
   $: draftFilterCount = draftLayers.filter((layer) => hasActiveLayerRules(layer)).length;
@@ -343,7 +344,10 @@
     right: 0.75rem;
     width: min(39rem, calc(100vw - 1.5rem));
     max-height: min(42rem, calc(100vh - 7rem));
+    max-height: min(42rem, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)));
     overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 0.8rem;
     display: grid;
     gap: 0.8rem;
@@ -436,6 +440,9 @@
       right: auto;
       left: 0.5rem;
       width: calc(100vw - 1rem);
+      max-height: min(42rem, calc(100vh - 7rem));
+      max-height: min(42rem, calc(100dvh - 7rem - env(safe-area-inset-bottom, 0px)));
+      margin-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
     }
 
     .preset-head {

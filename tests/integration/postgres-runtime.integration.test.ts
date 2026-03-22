@@ -96,7 +96,7 @@ function matchesFilterRule(item, rule) {
 }
 
 function mapFilterDataRow(row) {
-  let sourceTags = {};
+  let sourceTags: LooseRecord;
   try {
     sourceTags = row.tags_json ? JSON.parse(row.tags_json) : {};
   } catch {

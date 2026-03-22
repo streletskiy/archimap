@@ -22,14 +22,14 @@
 
   let debounceTimer = null;
   let searchInputEl = null;
-  let hadOpenState = false;
+  let hadOpenState;
   let isDesktopInteractive = false;
   let removeDesktopMediaListener = null;
-  let displayedResults = [];
-  let visibleResultsTotal = 0;
-  let queryIsActive = false;
-  let showVisibleMapStatus = false;
-  let visibleListLimited = false;
+  let displayedResults;
+  let visibleResultsTotal;
+  let queryIsActive;
+  let showVisibleMapStatus;
+  let visibleListLimited;
 
   function onDialogKeydown(event) {
     if (event.key === 'Escape') {
@@ -148,6 +148,7 @@
   } else if (!$searchState.modalOpen && hadOpenState) {
     hadOpenState = false;
   }
+  $: void hadOpenState;
 
   $: displayedResults = buildDisplayedResults($searchMapState.items, $searchState.items);
   $: visibleResultsTotal = Math.max(0, Number($searchMapState.total || 0));

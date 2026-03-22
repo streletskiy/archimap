@@ -37,10 +37,10 @@
   let resetMode = false;
   let handledRegisterToken = '';
   let handledResetToken = '';
-  let lastHandledRequestId = 0;
+  let lastHandledRequestId;
   let modalEl = null;
-  let hadOpenState = false;
-  let authModalWidthClass = 'auth-modal w-full max-w-sm md:max-w-4xl';
+  let hadOpenState;
+  let authModalWidthClass;
 
   $: if (requestId && requestId !== lastHandledRequestId) {
     lastHandledRequestId = requestId;
@@ -52,6 +52,7 @@
     status = '';
     open = true;
   }
+  $: void lastHandledRequestId;
 
   $: {
     const registerTokenFromQuery = $page.url.searchParams.get('registerToken');
@@ -268,6 +269,7 @@
   } else if (!open && hadOpenState) {
     hadOpenState = false;
   }
+  $: void hadOpenState;
 
   $: authModalWidthClass = registerPendingEmail || resetMode
     ? 'auth-modal w-full max-w-sm md:max-w-3xl'

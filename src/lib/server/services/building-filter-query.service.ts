@@ -82,7 +82,7 @@ function resolveBboxQueryMode(isPostgres, rtreeState) {
 
 function mapFilterDataRow(row) {
   const osmKey = `${row.osm_type}/${row.osm_id}`;
-  let sourceTags = {};
+  let sourceTags: LooseRecord;
   try {
     sourceTags = row.tags_json ? JSON.parse(row.tags_json) : {};
   } catch {

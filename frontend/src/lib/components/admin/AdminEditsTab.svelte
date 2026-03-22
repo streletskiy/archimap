@@ -40,11 +40,11 @@
   const msg = (error, fallback) => String(error?.message || fallback);
 
   let edits = [];
-  let visibleEdits = [];
-  let activeEdits = [];
-  let syncedEdits = [];
+  let visibleEdits;
+  let activeEdits;
+  let syncedEdits;
   let editsLoading = false;
-  let editsStatus = translateNow('admin.loading');
+  let editsStatus;
   let editsError = '';
   let editsFilter = 'all';
   let editsLimit = 200;
@@ -52,8 +52,8 @@
   let editsDateRange = undefined;
   let editsUser = '';
   let editsUsers = [];
-  let editsUserItems = [];
-  let editsFilterItems = [];
+  let editsUserItems;
+  let editsFilterItems;
   const editsLimitItems = [
     { value: 100, label: '100' },
     { value: 200, label: '200' },
@@ -77,10 +77,10 @@
   let reassignTargetType = 'way';
   let reassignTargetId = '';
   let reassignForce = false;
-  let previousRequestedEditId = normalizeEditId(requestedEditId);
+  let previousRequestedEditId;
 
   let centerByKey = new Map();
-  let editIdByKey = new Map();
+  let editIdByKey;
 
   $: editsUserItems = [
     { value: '', label: $t('admin.edits.userAll') },
@@ -478,6 +478,7 @@
         closeEditPanel({ syncUrl: false });
       }
     }
+    void previousRequestedEditId;
   }
 
   $: selectedEditIsReadOnly = isSyncedArchiveEdit(selectedEdit);
@@ -537,7 +538,7 @@
       on:openedit={(event) => openEdit(event.detail?.editId)}
     />
 
-    <UiTable>
+    <UiTable framed={false}>
       <UiTableHeader>
         <UiTableRow className="hover:[&>th]:bg-transparent">
           <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
@@ -632,8 +633,8 @@
           <span class="text-xs ui-text-subtle">{syncedEdits.length}</span>
         </summary>
         <div class="border-t ui-border p-3">
-          <UiScrollArea className="max-h-72 rounded-xl border ui-border" contentClassName="space-y-2 p-2">
-            <UiTable containerClassName="ui-surface-base">
+          <UiScrollArea className="ui-scroll-surface max-h-72 rounded-xl" contentClassName="space-y-2 p-2">
+            <UiTable framed={false}>
               <UiTableHeader>
                 <UiTableRow className="hover:[&>th]:bg-transparent">
                   <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
@@ -769,7 +770,7 @@
         {/if}
 
         <UiScrollArea
-          className="max-h-[42vh] rounded-xl border ui-border"
+          className="ui-scroll-surface max-h-[42vh] rounded-xl"
           contentClassName="space-y-2 p-2"
         >
           {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}

@@ -86,7 +86,7 @@ function createAppSettingsService(options: LooseRecord = {}) {
   async function getGeneralSettingsSchema() {
     if (generalSettingsSchema) return generalSettingsSchema;
 
-    let hasMetricsToken = false;
+    let hasMetricsToken: boolean;
     try {
       if (dbProvider === 'postgres') {
         const row = await db.prepare(`

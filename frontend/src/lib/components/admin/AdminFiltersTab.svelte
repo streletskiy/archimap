@@ -128,7 +128,7 @@
         </p>
       {:else}
         <UiScrollArea
-          className="max-h-[20rem] rounded-xl border ui-border ui-surface-base p-3"
+          className="ui-scroll-surface max-h-[20rem] rounded-xl p-3"
           contentClassName="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
         >
           {#each $sortedAvailableFilterTagKeys as key (key)}

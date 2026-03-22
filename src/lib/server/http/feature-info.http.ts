@@ -13,7 +13,7 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
   function rowToFeature(row) {
     let ring = [];
     let geometry = null;
-    let tags: LooseRecord = {};
+    let tags: LooseRecord;
     try {
       const parsed = JSON.parse(row.geometry_json);
       if (parsed && typeof parsed === 'object' && parsed.type && Array.isArray(parsed.coordinates)) {

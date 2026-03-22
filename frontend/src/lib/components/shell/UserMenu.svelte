@@ -24,7 +24,7 @@
 
   let darkTheme = false;
   let themeObserver = null;
-  let localeItems = [];
+  let localeItems;
 
   $: userInitials = getUserInitials($session.user);
   $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');

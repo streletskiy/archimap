@@ -27,7 +27,7 @@
   let deletingId = null;
   let status = '';
   let editorDialogOpen = false;
-  let editorDialogWasOpen = false;
+  let editorDialogWasOpen;
   let editorStyleKey = '';
   let editor = createEditor();
 
@@ -334,6 +334,7 @@
     editorStyleKey = '';
     editor = createEditor();
   }
+  $: void editorDialogWasOpen;
 
   onMount(() => {
     void loadOverrides();
@@ -631,7 +632,7 @@
 
     <div class="mt-4 hidden overflow-x-auto rounded-xl border ui-border ui-surface-base lg:block">
       <div class="min-w-[74rem]">
-        <UiTable>
+        <UiTable framed={false}>
           <UiTableHeader>
             <UiTableRow className="hover:[&>th]:bg-transparent">
               <UiTableHead>{$t('admin.styles.defaults.table.style')}</UiTableHead>

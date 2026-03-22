@@ -141,7 +141,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
   }
 
   async function getLatestStorageStatsByRegionId() {
-    let rows = [];
+    let rows: LooseRecord[];
     try {
       rows = await db.prepare(`
         SELECT runs.region_id, runs.pmtiles_bytes, runs.db_bytes, runs.db_bytes_approximate

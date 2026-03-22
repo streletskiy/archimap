@@ -147,7 +147,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
   function attrsToObject(text = '') {
     const attrs = {};
     const re = /([A-Za-z_][A-Za-z0-9_.:-]*)="([^"]*)"/g;
-    let match = null;
+    let match: RegExpExecArray | null;
     while ((match = re.exec(String(text || '')))) attrs[String(match[1])] = unescapeXml(match[2]);
     return attrs;
   }
@@ -451,7 +451,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
       body
     });
     const text = await response.text();
-    let payload: LooseRecord = {};
+    let payload: LooseRecord;
     try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
     if (!response.ok) {
       const error = new Error(String(payload?.error_description || payload?.error || text || `OSM token exchange failed (${response.status})`)) as LooseOsmError;

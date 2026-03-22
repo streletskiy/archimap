@@ -78,7 +78,9 @@ function parseJsonPayload(raw) {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(`Failed to parse Python extractor JSON: ${String(error?.message || error)}`);
+    throw new Error(`Failed to parse Python extractor JSON: ${String(error?.message || error)}`, {
+      cause: error
+    });
   }
 }
 

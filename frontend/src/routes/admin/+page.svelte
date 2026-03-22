@@ -4,7 +4,7 @@
   import { beforeNavigate, goto } from '$app/navigation';
   import { page } from '$app/stores';
 
-  import { UiBadge, UiTabsNav } from '$lib/components/base';
+  import { UiTabsNav } from '$lib/components/base';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import AdminDataTab from '$lib/components/admin/AdminDataTab.svelte';
   import AdminEditsTab from '$lib/components/admin/AdminEditsTab.svelte';
@@ -16,7 +16,7 @@
   import { createAdminDataController } from '$lib/components/admin/admin-data-controller.js';
   import { buildAdminUrl, resolveAdminTabFromUrl } from '$lib/client/section-routes';
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
-  import { t, translateNow } from '$lib/i18n/index';
+  import { t } from '$lib/i18n/index';
   import { session } from '$lib/stores/auth';
 
   const dataController = createAdminDataController();
@@ -26,30 +26,11 @@
   let tabNavValue = activeTab;
   let pendingUrlEditId = normalizeEditId(parseUrlState(get(page).url)?.editId);
   let adminUrlSyncBusy = false;
-  let dataBootstrapTabKey = '';
-
-  let usersCount = null;
-  let editsTotal = null;
-  let editsVisible = null;
-  let osmTotal = null;
+  let dataBootstrapTabKey;
 
   function normalizeEditId(value) {
     const numeric = Number(value || 0);
     return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
-  }
-
-  function formatCount(value) {
-    return Number.isFinite(value) ? String(value) : '---';
-  }
-
-  function getActiveTabLabel(tab = activeTab) {
-    if (tab === 'users') return translateNow('admin.tabs.users');
-    if (tab === 'settings') return translateNow('admin.tabs.settings');
-    if (tab === 'data') return translateNow('admin.tabs.data');
-    if (tab === 'osm') return translateNow('admin.tabs.osm');
-    if (tab === 'filters') return translateNow('admin.tabs.filters');
-    if (tab === 'styles') return translateNow('admin.tabs.styles');
-    return translateNow('admin.tabs.edits');
   }
 
   async function replaceAdminUrlState(patch, tab = activeTab) {
@@ -90,19 +71,6 @@
     }
   }
 
-  function handleUsersSummary(event) {
-    usersCount = Number(event.detail?.count || 0);
-  }
-
-  function handleEditsSummary(event) {
-    editsTotal = Number(event.detail?.total || 0);
-    editsVisible = Number(event.detail?.visible || 0);
-  }
-
-  function handleOsmSummary(event) {
-    osmTotal = Number(event.detail?.total || 0);
-  }
-
   $: {
     const nextDataBootstrapTabKey =
       $session.user?.isMasterAdmin && (activeTab === 'data' || activeTab === 'filters')
@@ -114,6 +82,7 @@
     } else if (!nextDataBootstrapTabKey) {
       dataBootstrapTabKey = '';
     }
+    void dataBootstrapTabKey;
   }
 
   async function handleEditIdChange(event) {
@@ -167,46 +136,19 @@
 </script>
 
 {#if !$session.authenticated}
-  <PortalFrame eyebrow="Archimap" title={$t('admin.title')} description={$t('admin.subtitle')}>
+  <PortalFrame title={$t('admin.title')} description={$t('admin.subtitle')}>
     <div class="portal-notice">
       <h2 class="text-xl font-extrabold ui-text-strong">{$t('admin.authRequired')}</h2>
     </div>
   </PortalFrame>
 {:else if !$session.user?.isAdmin}
-  <PortalFrame eyebrow="Archimap" title={$t('admin.title')} description={$t('admin.subtitle')}>
+  <PortalFrame title={$t('admin.title')} description={$t('admin.subtitle')}>
     <div class="portal-notice">
       <h2 class="text-xl font-extrabold ui-text-strong">{$t('admin.forbidden')}</h2>
     </div>
   </PortalFrame>
 {:else}
-  <PortalFrame eyebrow="Archimap" title={$t('admin.title')} description={$t('admin.subtitle')}>
-    <svelte:fragment slot="meta">
-      <UiBadge variant="accent"><strong>{$t('admin.tabs.users')}</strong>{formatCount(usersCount)}</UiBadge>
-      <UiBadge variant="default"><strong>{$t('admin.tabs.edits')}</strong>{formatCount(editsTotal)}</UiBadge>
-      <UiBadge variant="default"><strong>{$t('admin.tabs.osm')}</strong>{formatCount(osmTotal)}</UiBadge>
-    </svelte:fragment>
-
-    <svelte:fragment slot="lead">
-      <div class="portal-lead-grid">
-        <article class="portal-stat">
-          <span>{$t('admin.tabs.users')}</span>
-          <strong>{formatCount(usersCount)}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('admin.tabs.edits')}</span>
-          <strong>{formatCount(editsVisible)} / {formatCount(editsTotal)}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('admin.tabs.osm')}</span>
-          <strong>{formatCount(osmTotal)}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('admin.currentSection')}</span>
-          <strong>{getActiveTabLabel(activeTab)}</strong>
-        </article>
-      </div>
-    </svelte:fragment>
-
+  <PortalFrame title={$t('admin.title')} description={$t('admin.subtitle')}>
     <UiTabsNav
       bind:value={tabNavValue}
       items={[
@@ -222,11 +164,11 @@
     />
 
     {#if activeTab === 'users'}
-      <AdminUsersTab isMasterAdmin={$session.user?.isMasterAdmin} on:summary={handleUsersSummary} />
+      <AdminUsersTab isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'data'}
       <AdminDataTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'osm'}
-      <AdminOsmSyncTab isMasterAdmin={$session.user?.isMasterAdmin} on:summary={handleOsmSummary} />
+      <AdminOsmSyncTab isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'filters'}
       <AdminFiltersTab controller={dataController} isMasterAdmin={$session.user?.isMasterAdmin} />
     {:else if activeTab === 'styles'}
@@ -238,7 +180,6 @@
         requestedEditId={pendingUrlEditId}
         isMasterAdmin={$session.user?.isMasterAdmin}
         on:editidchange={handleEditIdChange}
-        on:summary={handleEditsSummary}
       />
     {/if}
   </PortalFrame>

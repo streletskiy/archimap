@@ -1961,18 +1961,10 @@ html[data-theme='light'] .auth-legal-note a {
   padding: 1rem;
 }
 
-.ui-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.ui-table th,
-.ui-table td {
-  text-align: left;
-  border-top: 1px solid var(--panel-border);
-  padding: 0.5rem 0.375rem;
-  font-size: 0.875rem;
-  vertical-align: top;
+.ui-scroll-surface {
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  background: var(--ui-surface-base);
 }
 
 .ui-muted {
@@ -2079,41 +2071,6 @@ html[data-theme='light'] .auth-legal-note a {
   padding-top: 0.15rem;
 }
 
-.portal-lead {
-  padding-top: 1rem;
-}
-
-.portal-lead-grid {
-  display: grid;
-  gap: 0.85rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.portal-stat {
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
-  padding: 0.95rem 1rem;
-  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
-}
-
-.portal-stat span {
-  display: block;
-  margin-bottom: 0.28rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.portal-stat strong {
-  display: block;
-  color: var(--fg-strong);
-  font-size: 1rem;
-  line-height: 1.4;
-}
-
 .portal-body {
   padding-top: 1rem;
 }
@@ -2162,12 +2119,6 @@ html[data-theme='light'] .auth-legal-note a {
 
   #filter-shell {
     top: calc(100% + var(--desktop-surface-gap));
-  }
-}
-
-@media (max-width: 900px) {
-  .portal-lead-grid {
-    grid-template-columns: 1fr;
   }
 }
 

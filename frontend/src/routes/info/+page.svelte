@@ -14,9 +14,10 @@
 
   let activeTab = resolveInfoTabFromUrl(get(page).url);
   let infoUrlSyncBusy = false;
-  let agreementHtml = '';
-  let privacyHtml = '';
-  let lastHandledTab = activeTab;
+  let agreementHtml;
+  let privacyHtml;
+  let lastHandledTab;
+  let infoTabInitialized = false;
   $: infoTabs = [
     { value: 'about', label: $t('info.tabAbout') },
     { value: 'agreement', label: $t('info.tabAgreement') },
@@ -33,10 +34,15 @@
   }
   agreementHtml = markdownToHtml(agreementMarkdownSource);
   privacyHtml = markdownToHtml(privacyMarkdownSource);
-  $: if (activeTab !== lastHandledTab) {
+  $: if (!infoTabInitialized) {
+    infoTabInitialized = true;
+    lastHandledTab = activeTab;
+  } else if (activeTab !== lastHandledTab) {
     lastHandledTab = activeTab;
     void replaceInfoUrl(activeTab);
   }
+  $: void infoTabInitialized;
+  $: void lastHandledTab;
 
   async function replaceInfoUrl(tab) {
     if (typeof window === 'undefined') return;
@@ -74,9 +80,15 @@
   });
 </script>
 
-<PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
+<PortalFrame title={$t('info.title')} description={$t('info.subtitle')}>
   <svelte:fragment slot="meta">
-    <UiBadge variant="accent"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</UiBadge>
+    <UiBadge
+      variant="accent"
+      className="max-w-full flex-col items-start justify-start whitespace-normal break-words text-left gap-0.5 sm:flex-row sm:items-center sm:gap-1"
+    >
+      <strong>{$t('info.version')}:</strong>
+      <span class="min-w-0 whitespace-normal break-words">{APP_VERSION_DISPLAY}</span>
+    </UiBadge>
     <UiBadge
       variant="outline"
       href={APP_REPO_URL}
@@ -267,7 +279,6 @@
     .legal-shell {
       padding: 1rem 0.95rem;
     }
-
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(h1),

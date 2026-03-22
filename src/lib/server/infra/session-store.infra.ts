@@ -62,7 +62,10 @@ async function initSessionStore({
     });
   } catch (error) {
     if (!sessionAllowMemoryFallback) {
-      throw new Error(`[session] Redis unavailable and SESSION_ALLOW_MEMORY_FALLBACK=false: ${String(error.message || error)}`);
+      throw new Error(
+        `[session] Redis unavailable and SESSION_ALLOW_MEMORY_FALLBACK=false: ${String(error.message || error)}`,
+        { cause: error }
+      );
     }
     logger.warn('session_redis_fallback_memory_store', { error: String(error.message || error) });
     try {

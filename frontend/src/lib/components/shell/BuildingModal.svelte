@@ -58,7 +58,7 @@
   let canEditAddressFull = true;
   let osmTagEntries = [];
   let modalEl = null;
-  let hadOpenState = false;
+  let hadOpenState;
 
   function hydrateForm(details) {
     const nextState = hydrateBuildingForm(details);
@@ -138,6 +138,7 @@
   } else if (!$buildingModalOpen && hadOpenState) {
     hadOpenState = false;
   }
+  $: void hadOpenState;
 
   $: archiInfo = buildingDetails?.properties?.archiInfo || {};
   $: isBuildingPartFeature = buildingDetails?.feature_kind === 'building_part';

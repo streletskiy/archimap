@@ -221,6 +221,11 @@
     z-index: 1005;
     padding: 0.75rem;
     pointer-events: none;
+    --nav-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  }
+
+  :global(html[data-theme='dark']) .nav-shell {
+    --nav-shadow: 0 8px 20px rgba(2, 6, 23, 0.28);
   }
 
   .nav {
@@ -232,7 +237,7 @@
     border: 1px solid var(--panel-border);
     border-radius: 1.35rem;
     background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
-    box-shadow: var(--shadow-panel);
+    box-shadow: var(--nav-shadow);
     backdrop-filter: blur(18px);
     pointer-events: auto;
     position: relative;

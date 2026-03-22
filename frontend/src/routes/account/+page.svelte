@@ -58,12 +58,12 @@
   let edits = [];
   let visibleEdits = [];
   let editsLoading = false;
-  let editsStatus = translateNow('account.edits.loading');
+  let editsStatus;
   let editsFilter = 'all';
   let editsLimit = 200;
   let editsQuery = '';
   let editsDateRange = undefined;
-  let editsFilterItems = [];
+  let editsFilterItems;
   const editsLimitItems = [
     { value: 100, label: '100' },
     { value: 200, label: '200' },
@@ -476,7 +476,6 @@
   }
 
   $: accountPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
-  $: accountUserLabel = `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim() || String(email || '').trim() || '-';
   $: editsFilterItems = [
     { value: 'all', label: $t('account.edits.filterAll') },
     { value: 'pending', label: $t('account.edits.filterPending') },
@@ -512,34 +511,17 @@
 </script>
 
 {#if !$session.authenticated}
-  <PortalFrame eyebrow="Archimap" title={$t('account.title')} description={$t('account.subtitle')}>
+  <PortalFrame title={$t('account.title')} description={$t('account.subtitle')}>
     <div class="portal-notice">
       <h2 class="text-xl font-extrabold ui-text-strong">{$t('account.authRequiredTitle')}</h2>
       <p class="mt-2 text-sm ui-text-muted">{$t('account.authRequiredText')}</p>
     </div>
   </PortalFrame>
 {:else}
-  <PortalFrame eyebrow="Archimap" title={$t('account.title')} description={$t('account.subtitle')}>
+  <PortalFrame title={$t('account.title')} description={$t('account.subtitle')}>
     <svelte:fragment slot="meta">
       <UiBadge variant="default"><strong>{$t('account.profile.email')}</strong>{email || '-'}</UiBadge>
       <UiBadge variant="accent"><strong>{$t('account.tabs.edits')}</strong>{edits.length}</UiBadge>
-    </svelte:fragment>
-
-    <svelte:fragment slot="lead">
-      <div class="portal-lead-grid">
-        <article class="portal-stat">
-          <span>{$t('account.profile.title')}</span>
-          <strong>{accountUserLabel}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('account.profile.email')}</span>
-          <strong>{email || '-'}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('account.tabs.edits')}</span>
-          <strong>{visibleEdits.length} / {edits.length}</strong>
-        </article>
-      </div>
     </svelte:fragment>
 
     <UiTabsNav
@@ -663,8 +645,8 @@
           </div>
           <p class="text-sm ui-text-muted">{editsStatus}</p>
           <div class="h-[36vh] min-h-[260px] flex-shrink-0 overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
-          <UiScrollArea className="flex-1 min-h-0 rounded-xl border ui-border">
-            <UiTable containerClassName="ui-surface-base">
+          <UiScrollArea className="ui-scroll-surface flex-1 min-h-0 rounded-xl">
+            <UiTable framed={false}>
             <UiTableHeader>
               <UiTableRow className="hover:[&>th]:bg-transparent">
                 <UiTableHead>{$t('account.edits.tableObject')}</UiTableHead>
@@ -779,7 +761,7 @@
               </div>
             {/if}
             <UiScrollArea
-              className="max-h-[42vh] rounded-xl border ui-border"
+              className="ui-scroll-surface max-h-[42vh] rounded-xl"
               contentClassName="space-y-2 p-2"
             >
               {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}

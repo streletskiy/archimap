@@ -13,8 +13,8 @@ export default defineConfig(({ mode }) => {
     ],
     build: {
       // MapLibre ships as a large prebundled runtime chunk. It is already isolated behind lazy imports,
-      // so the default Vite warning becomes noise rather than an actionable signal.
-      chunkSizeWarningLimit: 950,
+      // so keep the warning threshold above that known bundle size.
+      chunkSizeWarningLimit: 1200,
       rollupOptions: {
         output: {
           manualChunks(id) {

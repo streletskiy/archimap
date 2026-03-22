@@ -1820,6 +1820,14 @@ export function createAdminDataController() {
     return String(region?.extractResolutionError || '').trim();
   }
 
+  function getRegionExtractSummaryText(region) {
+    const primary = getRegionExtractPrimaryText(region);
+    const secondary = getRegionExtractSecondaryText(region);
+    if (!secondary) return primary;
+    if (!primary || primary === '---') return secondary;
+    return `${primary} · ${secondary}`;
+  }
+
   function getRegionSyncState(region) {
     return mapRegionController.getRegionSyncState(region);
   }
@@ -1931,6 +1939,7 @@ export function createAdminDataController() {
     getRegionEnabledLabel,
     getRegionExtractPrimaryText,
     getRegionExtractSecondaryText,
+    getRegionExtractSummaryText,
     getRegionSyncState,
     getRegionStatusMeta,
     getRegionSyncModeLabel,

@@ -459,8 +459,8 @@
     {:else if activeCandidates.length === 0}
       <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">{$t('admin.osm.list.empty')}</p>
     {:else}
-      <UiScrollArea className="rounded-xl max-h-[32rem] [scrollbar-gutter:stable]" contentClassName="space-y-2 pr-3">
-        <UiTable>
+      <UiScrollArea className="ui-scroll-surface max-h-[32rem] rounded-xl" contentClassName="space-y-2 p-2">
+        <UiTable framed={false}>
           <UiTableHeader>
             <UiTableRow className="hover:[&>th]:bg-transparent">
                 {#if isMasterAdmin}
@@ -561,8 +561,8 @@
           <span class="text-xs ui-text-subtle">{archivedCandidates.length}</span>
         </summary>
         <div class="space-y-2 border-t ui-border px-3 py-3">
-          <UiScrollArea className="rounded-lg max-h-60 [scrollbar-gutter:stable]" contentClassName="space-y-2 pr-3">
-            <UiTable>
+          <UiScrollArea className="ui-scroll-surface max-h-60 rounded-lg" contentClassName="space-y-2 p-2">
+            <UiTable framed={false}>
               <UiTableHeader>
                 <UiTableRow className="hover:[&>th]:bg-transparent">
                   <UiTableHead>{$t('admin.osm.list.building')}</UiTableHead>

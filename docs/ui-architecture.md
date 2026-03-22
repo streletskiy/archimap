@@ -131,10 +131,12 @@ When a new control is needed:
 - `UiTable*` is the default table stack for product code.
 - Native `<table>` markup should remain only inside generated upstream primitives or content-rendering cases that are not part of product UI composition.
 - Interactive table rows must use `UiTableRow` with the `onclick` callback prop, not `on:click`, so row selection works consistently through the base wrapper.
+- When a table sits inside a bordered card or scroll container, use `UiTable framed={false}` so the outer shell owns the contour and the table keeps only row and cell structure.
 
 ### Scrollable Areas
 
 - `UiScrollArea` is the default wrapper for long panes and lists such as search results, diff panes, OSM tag dumps, and admin region lists.
+- Bordered scroll list surfaces should use the semantic `ui-scroll-surface` class on the root so the border and background stay consistent across admin and account panes.
 
 ### Pressable Cards
 

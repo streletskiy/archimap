@@ -4,10 +4,11 @@
 
   export let className = '';
   export let containerClassName = '';
+  export let framed = true;
 </script>
 
 <PrimitiveTable
-  containerClass={cn('ui-table-surface', containerClassName)}
+  containerClass={cn(framed ? 'ui-table-surface' : '', containerClassName)}
   class={cn(className)}
   {...$$restProps}
 >
