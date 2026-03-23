@@ -116,6 +116,7 @@ COPY db ./db
 COPY scripts ./scripts
 COPY workers ./workers
 COPY src ./src
+COPY frontend/src/lib/i18n/locales ./frontend/src/lib/i18n/locales
 COPY --from=frontend-build /app/frontend/build ./frontend/build
 COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version.generated.json
 
