@@ -45,9 +45,10 @@ function normalizeEmailLocale(value) {
 }
 
 function parseCookieValue(cookieHeader, name = EMAIL_LOCALE_COOKIE_NAME) {
-  const target = `${String(name || '').trim()}=`;
-  if (!target || !cookieHeader) return '';
-  const parts = String(cookieHeader || '').split(';');
+  const cookieName = String(name || '').trim();
+  if (!cookieName || !cookieHeader) return '';
+  const target = `${cookieName}=`;
+  const parts = String(cookieHeader).split(';');
   for (const part of parts) {
     const text = String(part || '').trim();
     if (!text.startsWith(target)) continue;

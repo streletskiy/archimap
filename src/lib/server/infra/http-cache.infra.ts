@@ -8,7 +8,7 @@ function toHttpDate(value) {
 }
 
 function createWeakEtag(payloadBuffer) {
-  const hash = crypto.createHash('sha1').update(payloadBuffer).digest('base64url');
+  const hash = crypto.createHash('sha256').update(payloadBuffer).digest('base64url');
   return `W/"${payloadBuffer.length.toString(16)}-${hash}"`;
 }
 

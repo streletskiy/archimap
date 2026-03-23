@@ -13,7 +13,7 @@ const TRUSTED_MESSAGE_ORIGIN = String(self.location?.origin || '');
 
 self.onmessage = (event: MessageEvent<FilterWorkerPrepareRequest>) => {
   const messageOrigin = String(event?.origin || '');
-  if (TRUSTED_MESSAGE_ORIGIN && messageOrigin && messageOrigin !== TRUSTED_MESSAGE_ORIGIN) return;
+  if (messageOrigin !== TRUSTED_MESSAGE_ORIGIN) return;
 
   const payload = event.data;
   const type = String(payload.type || '');
@@ -66,14 +66,14 @@ self.onmessage = (event: MessageEvent<FilterWorkerPrepareRequest>) => {
       requestId,
       ok: true,
       rules,
-        layers: rules.length > 0
-          ? [{
-          id: 'compat-filter-layer',
-          color: '#f59e0b',
-          priority: 0,
-          mode: 'and' as const,
-          rules
-        }]
+      layers: rules.length > 0
+        ? [{
+            id: 'compat-filter-layer',
+            color: '#f59e0b',
+            priority: 0,
+            mode: 'and' as const,
+            rules
+          }]
         : [],
       rulesHash: computeRulesHash(rules),
       heavy: rules.some((rule) => isHeavyRule(rule))

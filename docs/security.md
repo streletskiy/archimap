@@ -57,7 +57,7 @@
 
 ## Worker messaging
 
-- Dedicated worker `message` handlers verify `event.origin` against `self.location.origin` before processing payloads.
+- Dedicated worker `message` handlers require an exact `event.origin === self.location.origin` match before processing payloads.
 - The building filter worker follows this rule before accepting `prepare-rules` messages.
 
 ## Logging and redaction

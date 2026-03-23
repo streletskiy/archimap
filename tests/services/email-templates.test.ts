@@ -47,7 +47,7 @@ test('registration email renders in both locales and keeps the light palette', (
   assert.match(enHtml, /lang=en/);
   assert.match(enHtml, /supported-color-schemes/);
   assert.match(enText, /Your code: 583401/);
-  assert.match(enText, /Confirmation link: https:\/\/example\.com\/account\/\?registerToken=sample&lang=en/);
+  assert.ok(enText.includes('Confirmation link: https://example.com/account/?registerToken=sample&lang=en'));
 
   assert.match(ruHtml, /background-color:#f6f4ef/);
   assert.match(ruHtml, /background:#fbfaf7/);
@@ -55,7 +55,7 @@ test('registration email renders in both locales and keeps the light palette', (
   assert.match(ruHtml, /<html lang="ru">/);
   assert.match(ruHtml, /lang=ru/);
   assert.match(ruText, /Ваш код: 583401/);
-  assert.match(ruText, /Подтверждение по ссылке: https:\/\/example\.com\/account\/\?registerToken=sample&lang=ru/);
+  assert.ok(ruText.includes('Подтверждение по ссылке: https://example.com/account/?registerToken=sample&lang=ru'));
 });
 
 test('password reset email renders in both locales and keeps the light palette', () => {
@@ -88,13 +88,13 @@ test('password reset email renders in both locales and keeps the light palette',
   assert.match(enHtml, /Reset password/);
   assert.match(enHtml, /<html lang="en">/);
   assert.match(enHtml, /lang=en/);
-  assert.match(enText, /Reset link: https:\/\/example\.com\/\?resetToken=sample&lang=en/);
+  assert.ok(enText.includes('Reset link: https://example.com/?resetToken=sample&lang=en'));
 
   assert.match(ruHtml, /background:#fbfaf7/);
   assert.match(ruHtml, /Сброс пароля/);
   assert.match(ruHtml, /<html lang="ru">/);
   assert.match(ruHtml, /lang=ru/);
-  assert.match(ruText, /Ссылка для сброса: https:\/\/example\.com\/\?resetToken=sample&lang=ru/);
+  assert.ok(ruText.includes('Ссылка для сброса: https://example.com/?resetToken=sample&lang=ru'));
 });
 
 test('smtp test email renders in both locales and includes delivery details', () => {
@@ -151,7 +151,7 @@ test('smtp test email renders in both locales and includes delivery details', ()
   assert.match(enHtml, /Mail delivery test/);
   assert.match(enHtml, /<html lang="en">/);
   assert.match(enHtml, /admin@example\.test/);
-  assert.match(enHtml, /smtp-relay\.example\.com/);
+  assert.ok(enHtml.includes('smtp-relay.example.com'));
   assert.match(enText, /ArchiMap: mail delivery test/);
   assert.match(enText, /Date: /);
   assert.match(enText, /Secure: No/);
@@ -161,7 +161,7 @@ test('smtp test email renders in both locales and includes delivery details', ()
   assert.match(ruHtml, /<html lang="ru">/);
   assert.match(ruHtml, /Проверка/);
   assert.match(ruHtml, /admin@example\.test/);
-  assert.match(ruHtml, /smtp-relay\.example\.com/);
+  assert.ok(ruHtml.includes('smtp-relay.example.com'));
   assert.match(ruText, /ArchiMap: тест отправки почты/);
   assert.match(ruText, /Дата: /);
   assert.match(ruText, /Безопасное соединение: Нет/);

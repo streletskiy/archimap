@@ -18,7 +18,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
   const secret = String(settingsSecret || '').trim();
   if (!secret) throw new Error('createOsmSyncService: settingsSecret is required');
 
-  const secretKey = crypto.createHash('sha256').update(secret).digest();
+  const secretKey = crypto.scryptSync(secret, 'archimap:osm-sync-service', 32);
 
   function normalizeText(value, maxLength = 255) {
     const text = String(value ?? '').trim();
@@ -39,6 +39,16 @@ function createOsmSyncService(options: LooseRecord = {}) {
     }
   }
 
+  function isMasterOsmAuthBaseUrl(value) {
+    const normalized = normalizeBaseUrl(value, '');
+    if (!normalized) return false;
+    try {
+      return new URL(normalized).hostname === 'master.apis.dev.openstreetmap.org';
+    } catch {
+      return false;
+    }
+  }
+
   function normalizeAuthBaseUrl(value) {
     return normalizeBaseUrl(value, DEFAULT_AUTH_BASE_URL) || DEFAULT_AUTH_BASE_URL;
   }
@@ -46,7 +56,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
   function normalizeApiBaseUrl(value, authBaseUrl = DEFAULT_AUTH_BASE_URL) {
     const explicit = normalizeBaseUrl(value, '');
     if (explicit) return explicit;
-    return String(authBaseUrl || '').includes('master.apis.dev.openstreetmap.org')
+    return isMasterOsmAuthBaseUrl(authBaseUrl)
       ? 'https://master.apis.dev.openstreetmap.org'
       : DEFAULT_API_BASE_URL;
   }
@@ -97,6 +107,16 @@ function createOsmSyncService(options: LooseRecord = {}) {
     } catch {
       return '';
     }
+  }
+
+  async function createPkceChallenge(verifier) {
+    const subtle = crypto.webcrypto?.subtle;
+    if (!subtle) {
+      throw new Error('crypto.webcrypto.subtle is required for PKCE challenge generation');
+    }
+    const verifierBytes = Buffer.from(String(verifier || ''), 'utf8');
+    const digest = await subtle.digest('SHA-256', verifierBytes);
+    return Buffer.from(digest).toString('base64url');
   }
 
   function stableJson(value) {
@@ -275,7 +295,8 @@ function createOsmSyncService(options: LooseRecord = {}) {
     const current = await readSettingsRow();
     const currentNormalized = normalizeStoredSettings(current, general.appBaseUrl || '');
     const authBaseUrl = normalizeAuthBaseUrl(input.authBaseUrl || currentNormalized.authBaseUrl || DEFAULT_AUTH_BASE_URL);
-    const apiBaseUrl = normalizeApiBaseUrl(input.apiBaseUrl || currentNormalized.apiBaseUrl || '', authBaseUrl);
+    const currentApiBaseUrl = String(current?.api_base_url || '').trim();
+    const apiBaseUrl = normalizeApiBaseUrl(input.apiBaseUrl || currentApiBaseUrl || '', authBaseUrl);
     const redirectUri = normalizeRedirectUri(input.redirectUri || currentNormalized.redirectUri || '', general.appBaseUrl || '');
     const clientId = normalizeText(input.clientId, 160);
     const providerName = normalizeText(input.providerName, 80) || 'OpenStreetMap';
@@ -407,7 +428,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
     if (!creds.clientSecret) throw new Error('OSM client secret is not configured');
     if (!creds.redirectUri) throw new Error('OSM redirect URI is not configured');
     const stateRow = await createOauthState(requestedBy);
-    const challenge = crypto.createHash('sha256').update(stateRow.verifier).digest('base64url');
+    const challenge = await createPkceChallenge(stateRow.verifier);
     const authorizeUrl = new URL('/oauth2/authorize', creds.authBaseUrl);
     authorizeUrl.searchParams.set('response_type', 'code');
     authorizeUrl.searchParams.set('client_id', creds.settings.clientId);

@@ -21,7 +21,7 @@ test('buildEmailPreviewPayload includes the SMTP test template in the requested 
   assert.match(payload.templates.registration.text, /Ваш код:/);
   assert.match(payload.templates.registration.text, /lang=ru/);
   assert.match(payload.templates.smtpTest.html, /Тест отправки почты/);
-  assert.match(payload.templates.smtpTest.html, /smtp-relay\.example\.com/);
+  assert.ok(payload.templates.smtpTest.html.includes('smtp-relay.example.com'));
   assert.match(payload.templates.smtpTest.html, /admin@example\.test/);
   assert.match(payload.templates.smtpTest.text, /ArchiMap: тест отправки почты/);
 });
@@ -105,5 +105,5 @@ test('sendSmtpTest sends html and text content', async (t) => {
   assert.match(capturedMailOptions.html, /<html lang="en">/);
   assert.match(capturedMailOptions.html, /background-color:#f6f4ef/);
   assert.match(capturedMailOptions.text, /ArchiMap: mail delivery test/);
-  assert.match(capturedMailOptions.text, /smtp-relay\.example\.com:587/);
+  assert.ok(capturedMailOptions.text.includes('smtp-relay.example.com:587'));
 });

@@ -185,6 +185,54 @@ test('saveSettings encrypts the client secret and OAuth callback stores connecte
   assert.equal(result.osm.hasRefreshToken, true);
 });
 
+test('saveSettings only maps the OSM master auth host to the master API host', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({
+    db,
+    settingsSecret: 'test-secret'
+  });
+
+  await service.saveSettings({
+    providerName: 'OpenStreetMap',
+    authBaseUrl: 'https://master.apis.dev.openstreetmap.org',
+    clientId: 'client-id',
+    clientSecret: 'client-secret',
+    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+  }, 'admin@example.com');
+
+  let row = db.prepare(`
+    SELECT api_base_url
+    FROM app_osm_settings
+    WHERE id = 1
+  `).get();
+  assert.equal(row.api_base_url, 'https://master.apis.dev.openstreetmap.org');
+
+  const fallbackDb = createTestDb();
+  fallbackDb.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const fallbackService = createOsmSyncService({
+    db: fallbackDb,
+    settingsSecret: 'test-secret'
+  });
+
+  await fallbackService.saveSettings({
+    providerName: 'OpenStreetMap',
+    authBaseUrl: 'https://master.apis.dev.openstreetmap.org.evil',
+    clientId: 'client-id',
+    clientSecret: 'client-secret',
+    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+  }, 'admin@example.com');
+
+  row = fallbackDb.prepare(`
+    SELECT api_base_url
+    FROM app_osm_settings
+    WHERE id = 1
+  `).get();
+  assert.equal(row.api_base_url, 'https://api.openstreetmap.org');
+});
+
 test('listSyncCandidates groups accepted edits by building and exposes sync state', async () => {
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
