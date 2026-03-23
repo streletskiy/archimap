@@ -73,7 +73,7 @@
     "@playwright/test": "^1.54.2",
     "@types/node": "^25.5.0",
     "depcheck": "^1.4.7",
-    "drizzle-kit": "1.0.0-beta.18-5ffac6d",
+    "drizzle-kit": "1.0.0-beta.19-2a36fd0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-svelte": "^3.16.0",
