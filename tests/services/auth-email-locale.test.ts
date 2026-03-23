@@ -20,7 +20,7 @@ test('registration email uses the locale from the request cookie', async (t) => 
   const originalSmtpTransportCache = require.cache[smtpTransportServicePath];
   let capturedMailOptions = null;
 
-  require.cache[smtpTransportServicePath] = {
+  const smtpTransportMock = {
     id: smtpTransportServicePath,
     filename: smtpTransportServicePath,
     loaded: true,
@@ -38,7 +38,8 @@ test('registration email uses the locale from the request cookie', async (t) => 
         };
       }
     }
-  };
+  } as unknown as NodeJS.Module;
+  require.cache[smtpTransportServicePath] = smtpTransportMock;
 
   delete require.cache[authIndexPath];
   delete require.cache[authServicePath];
@@ -115,7 +116,7 @@ test('password reset email uses the locale from the request cookie', async (t) =
   const originalSmtpTransportCache = require.cache[smtpTransportServicePath];
   let capturedMailOptions = null;
 
-  require.cache[smtpTransportServicePath] = {
+  const smtpTransportMock = {
     id: smtpTransportServicePath,
     filename: smtpTransportServicePath,
     loaded: true,
@@ -133,7 +134,8 @@ test('password reset email uses the locale from the request cookie', async (t) =
         };
       }
     }
-  };
+  } as unknown as NodeJS.Module;
+  require.cache[smtpTransportServicePath] = smtpTransportMock;
 
   delete require.cache[authIndexPath];
   delete require.cache[authServicePath];

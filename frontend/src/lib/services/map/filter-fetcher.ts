@@ -1,6 +1,42 @@
 import { apiJson } from '../http.js';
 import { matchesFilterRules } from '../../components/map/filter-pipeline-utils.js';
 import { encodeOsmFeatureId, parseOsmKey, resolveFeatureIdentity } from './filter-utils.js';
+import type {
+  FilterBuildingSourceConfig,
+  FilterMapLike,
+  FilterMatchPayload,
+  FilterRequestSpec,
+  FilterRule,
+  LayerIdsSnapshot
+} from './filter-types.js';
+
+type FilterMatchBatchItem = FilterMatchPayload & {
+  id?: string;
+};
+
+type FilterMatchBatchResponse = {
+  items?: FilterMatchBatchItem[];
+  meta?: {
+    elapsedMs?: number;
+    cacheHit?: boolean;
+  };
+};
+
+type FilterFetcherOptions = {
+  resolveMap: () => FilterMapLike | null | undefined;
+  resolveLayerIds: () => LayerIdsSnapshot;
+  resolveBuildingSourceConfigs: () => FilterBuildingSourceConfig[];
+  getCurrentRulesHash: () => string;
+  getLastViewportHash: () => string;
+  matchDefaultLimit: number;
+  dataCacheTtlMs: number;
+  dataCacheMaxItems: number;
+  dataRequestChunkSize: number;
+};
+
+type FilterDataItem = Record<string, unknown> & {
+  osmKey?: string;
+};
 
 export function createFilterFetcher({
   resolveMap,
@@ -12,8 +48,8 @@ export function createFilterFetcher({
   dataCacheTtlMs,
   dataCacheMaxItems,
   dataRequestChunkSize
-}: LooseRecord = {}) {
-  let filterDataByOsmKeyCache = new Map();
+}: FilterFetcherOptions = {} as FilterFetcherOptions) {
+  let filterDataByOsmKeyCache = new Map<string, { cachedAt: number; item: FilterDataItem }>();
 
   function getVisibleBuildingOsmKeys() {
     const currentMap = resolveMap();
@@ -27,7 +63,7 @@ export function createFilterFetcher({
     ];
     if (buildingLayerIds.length === 0) return [];
     const features = currentMap.queryRenderedFeatures({ layers: buildingLayerIds });
-    const keys = new Set();
+    const keys = new Set<string>();
     for (const feature of Array.isArray(features) ? features : []) {
       const identity = resolveFeatureIdentity(feature);
       if (!identity?.osmType || !Number.isInteger(identity?.osmId)) continue;
@@ -39,7 +75,7 @@ export function createFilterFetcher({
   function getLoadedSourceBuildingOsmKeys() {
     const currentMap = resolveMap();
     if (!currentMap) return [];
-    const keys = new Set();
+    const keys = new Set<string>();
     for (const sourceConfig of resolveBuildingSourceConfigs()) {
       if (!sourceConfig?.sourceLayer || !currentMap.getSource(sourceConfig.sourceId)) continue;
       const features = currentMap.querySourceFeatures(sourceConfig.sourceId, {
@@ -60,7 +96,13 @@ export function createFilterFetcher({
     return getLoadedSourceBuildingOsmKeys();
   }
 
-  async function fetchFilterMatchesPrimary({ bbox, zoomBucket, rules, rulesHash, signal }) {
+  async function fetchFilterMatchesPrimary({ bbox, zoomBucket, rules, rulesHash, signal }: {
+    bbox: unknown;
+    zoomBucket: number;
+    rules: FilterRule[];
+    rulesHash: string;
+    signal?: AbortSignal | null;
+  }): Promise<FilterMatchPayload> {
     return apiJson('/api/buildings/filter-matches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -72,10 +114,15 @@ export function createFilterFetcher({
         maxResults: matchDefaultLimit
       }),
       signal
-    });
+    }) as Promise<FilterMatchPayload>;
   }
 
-  async function fetchFilterMatchesBatchPrimary({ bbox, zoomBucket, requestSpecs, signal }) {
+  async function fetchFilterMatchesBatchPrimary({ bbox, zoomBucket, requestSpecs, signal }: {
+    bbox: unknown;
+    zoomBucket: number;
+    requestSpecs: FilterRequestSpec[];
+    signal?: AbortSignal | null;
+  }): Promise<FilterMatchBatchResponse> {
     return apiJson('/api/buildings/filter-matches-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -90,17 +137,17 @@ export function createFilterFetcher({
         }))
       }),
       signal
-    });
+    }) as Promise<FilterMatchBatchResponse>;
   }
 
-  async function fetchFilterDataByOsmKeys(keys, signal) {
+  async function fetchFilterDataByOsmKeys(keys: string[], signal?: AbortSignal | null) {
     const normalized = [...new Set((Array.isArray(keys) ? keys : [])
       .map((key) => String(key || '').trim())
       .filter((key) => /^(way|relation)\/\d+$/.test(key))
     )];
-    if (normalized.length === 0) return new Map();
+    if (normalized.length === 0) return new Map<string, FilterDataItem>();
 
-    const out = new Map();
+    const out = new Map<string, FilterDataItem>();
     const missing = [];
     const now = Date.now();
     for (const key of normalized) {
@@ -141,7 +188,10 @@ export function createFilterFetcher({
     return out;
   }
 
-  async function fetchFilterMatchesFallback({ rules, signal }) {
+  async function fetchFilterMatchesFallback({ rules, signal }: {
+    rules: FilterRule[];
+    signal?: AbortSignal | null;
+  }): Promise<FilterMatchPayload> {
     const visibleKeys = getFilterCandidateOsmKeys();
     if (visibleKeys.length === 0) {
       return {

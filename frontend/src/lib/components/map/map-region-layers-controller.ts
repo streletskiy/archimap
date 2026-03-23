@@ -28,8 +28,41 @@ import {
   getActiveRegionPmtiles,
   pointInBounds
 } from '../../services/region-pmtiles.js';
+import type {
+  FilterBuildingSourceConfig,
+  FilterMapLike
+} from '../../services/map/filter-types.js';
 
 const CARTO_SHOW_DELAY_MS = 160;
+
+type RegionLike = {
+  id?: number | string;
+  bounds?: unknown;
+} & Record<string, unknown>;
+
+type RuntimeConfigLike = {
+  buildingRegionsPmtiles?: RegionLike[];
+};
+
+type MapRegionLayersControllerOptions = {
+  getMap?: () => FilterMapLike | null | undefined;
+  getRuntimeConfig?: () => RuntimeConfigLike | null | undefined;
+  getCurrentTheme?: () => unknown;
+  getSearchItems?: () => unknown[];
+  getSelectedBuilding?: () => unknown;
+  getMapLabelsVisible?: () => boolean | null | undefined;
+  getBuildingPartsVisible?: () => boolean | null | undefined;
+  getBuildingFilterLayers?: () => unknown[];
+  getWindowOrigin?: () => string;
+  onBindStyleInteractionHandlers?: () => void;
+  onApplySelectionFromStore?: (selection: unknown) => void;
+  onUpdateSearchMarkers?: (items: unknown[]) => void;
+  onApplyBuildingThemePaint?: (theme: unknown) => void;
+  onApplyLabelLayerVisibility?: (visible: boolean | null | undefined) => void;
+  onApplyBuildingPartsLayerVisibility?: () => void;
+  onRefreshFilterDebugState?: (active: boolean) => void;
+  onReapplyFilteredHighlight?: () => void;
+};
 
 export function createMapRegionLayersController({
   getMap,
@@ -49,8 +82,8 @@ export function createMapRegionLayersController({
   onApplyBuildingPartsLayerVisibility,
   onRefreshFilterDebugState,
   onReapplyFilteredHighlight
-}: LooseRecord = {}) {
-  let activeRegionPmtiles = [];
+}: MapRegionLayersControllerOptions = {}) {
+  let activeRegionPmtiles: RegionLike[] = [];
   let coverageDebounceTimer = null;
   let cartoShowTimer = null;
   let coverageEvalToken = 0;
@@ -87,11 +120,11 @@ export function createMapRegionLayersController({
     ];
   }
 
-  function getCurrentBuildingSourceConfigsSnapshot() {
+  function getCurrentBuildingSourceConfigsSnapshot(): FilterBuildingSourceConfig[] {
     return getCurrentBuildingSourceConfigs(activeRegionPmtiles);
   }
 
-  function getMapLayerIdsForRegions(regions: LooseRecord[] = []) {
+  function getMapLayerIdsForRegions(regions: RegionLike[] = []) {
     return {
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(regions),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(regions),
@@ -106,7 +139,7 @@ export function createMapRegionLayersController({
     };
   }
 
-  function areRegionSetsEqualById(left: LooseRecord[] = [], right: LooseRecord[] = []) {
+  function areRegionSetsEqualById(left: RegionLike[] = [], right: RegionLike[] = []) {
     if (left.length !== right.length) return false;
     for (let index = 0; index < left.length; index += 1) {
       if (Number(left[index]?.id) !== Number(right[index]?.id)) return false;
@@ -114,7 +147,7 @@ export function createMapRegionLayersController({
     return true;
   }
 
-  function hasRegionLayersReady(regions: LooseRecord[] = []) {
+  function hasRegionLayersReady(regions: RegionLike[] = []) {
     const map = getMap?.();
     if (!map) return false;
     const layerIds = getMapLayerIdsForRegions(regions);
@@ -147,11 +180,11 @@ export function createMapRegionLayersController({
       && Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID));
   }
 
-  function getConfiguredRegionPmtiles(config: LooseRecord = getRuntimeConfig?.()) {
+  function getConfiguredRegionPmtiles(config: RuntimeConfigLike | null | undefined = getRuntimeConfig?.()) {
     return Array.isArray(config?.buildingRegionsPmtiles) ? config.buildingRegionsPmtiles : [];
   }
 
-  function getViewportActiveRegionPmtiles(config: LooseRecord = getRuntimeConfig?.()) {
+  function getViewportActiveRegionPmtiles(config: RuntimeConfigLike | null | undefined = getRuntimeConfig?.()) {
     const map = getMap?.();
     if (!map) return [];
     return getActiveRegionPmtiles(getConfiguredRegionPmtiles(config), map.getBounds());
@@ -189,7 +222,12 @@ export function createMapRegionLayersController({
   function getViewportSamplePoints() {
     const map = getMap?.();
     if (!map) return [];
-    const bounds = map.getBounds();
+    const bounds = map.getBounds() as {
+      getWest?: () => number;
+      getEast?: () => number;
+      getSouth?: () => number;
+      getNorth?: () => number;
+    } | null | undefined;
     if (!bounds) return [];
     const west = bounds.getWest();
     const east = bounds.getEast();
@@ -247,7 +285,10 @@ export function createMapRegionLayersController({
     }, 80);
   }
 
-  function ensureMapSourcesAndLayers(config: LooseRecord, { force = false }: LooseRecord = {}) {
+  function ensureMapSourcesAndLayers(
+    config: RuntimeConfigLike,
+    { force = false }: { force?: boolean } = {}
+  ) {
     const map = getMap?.();
     if (!map) return;
     const theme = getCurrentTheme?.();

@@ -12,6 +12,49 @@ import {
   SEARCH_RESULTS_SOURCE_ID
 } from '../../services/map/map-search-utils.js';
 import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter } from './selection-utils.js';
+import type { FilterMapLike } from '../../services/map/filter-types.js';
+
+type RegionLike = {
+  id?: number | string;
+};
+
+type SelectionIdentity = {
+  osmType: string;
+  osmId: number;
+};
+
+type SelectionLngLat = {
+  lng: number;
+  lat: number;
+};
+
+type SelectionPointLike = {
+  x?: number;
+  y?: number;
+};
+
+type SelectionFeatureLike = {
+  layer?: { id?: string };
+  id?: number | string | null;
+  properties?: Record<string, unknown> | null;
+  geometry?: {
+    coordinates?: unknown;
+  } | null;
+} | null | undefined;
+
+type SelectionDispatchPayload = SelectionIdentity & {
+  lon: number | null;
+  lat: number | null;
+  feature: SelectionFeatureLike;
+};
+
+type MapSelectionControllerOptions = {
+  getMap?: () => FilterMapLike | null | undefined;
+  getActiveRegions?: () => RegionLike[] | null | undefined;
+  recordDebugSetFilter?: (layerId: string) => void;
+  debugSelectionLog?: (eventName: string, payload?: Record<string, unknown>) => void;
+  dispatchBuildingClick?: (payload: SelectionDispatchPayload) => void;
+};
 
 export function createMapSelectionController({
   getMap,
@@ -19,12 +62,13 @@ export function createMapSelectionController({
   recordDebugSetFilter,
   debugSelectionLog,
   dispatchBuildingClick
-}: LooseRecord = {}) {
+}: MapSelectionControllerOptions = {}) {
   let lastHandledBuildingClickSig = null;
 
-  function getPrimaryBuildingFeature(event) {
+  function getPrimaryBuildingFeature(event: { point?: SelectionPointLike | null }) {
     const map = getMap?.();
     if (!map) return null;
+    if (!event?.point) return null;
     const searchFeatures = map.queryRenderedFeatures(event.point, {
       layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
     });
@@ -45,7 +89,15 @@ export function createMapSelectionController({
     return features?.[0] || null;
   }
 
-  function focusSelectedFeature({ feature, identity, lngLat }: LooseRecord) {
+  function focusSelectedFeature({
+    feature,
+    identity,
+    lngLat
+  }: {
+    feature: SelectionFeatureLike;
+    identity: SelectionIdentity;
+    lngLat?: SelectionLngLat | null;
+  }) {
     const map = getMap?.();
     if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
@@ -90,7 +142,21 @@ export function createMapSelectionController({
     });
   }
 
-  function selectBuildingOnMap({ source, feature, identity, lngLat, lon = null, lat = null }: LooseRecord) {
+  function selectBuildingOnMap({
+    source,
+    feature,
+    identity,
+    lngLat,
+    lon = null,
+    lat = null
+  }: {
+    source: string;
+    feature: SelectionFeatureLike;
+    identity: SelectionIdentity;
+    lngLat?: SelectionLngLat | null;
+    lon?: number | null;
+    lat?: number | null;
+  }) {
     focusSelectedFeature({ feature, identity, lngLat });
     debugSelectionLog?.('building-click', {
       source,
@@ -107,7 +173,11 @@ export function createMapSelectionController({
     });
   }
 
-  function handleMapBuildingClick(event) {
+  function handleMapBuildingClick(event: {
+    point?: SelectionPointLike;
+    originalEvent?: { timeStamp?: number };
+    lngLat?: SelectionLngLat;
+  }) {
     const feature = getPrimaryBuildingFeature(event);
     if (!feature) return;
     const identity = getFeatureIdentity(feature);
@@ -139,7 +209,7 @@ export function createMapSelectionController({
     }
   }
 
-  function applySelectionFromStore(selection) {
+  function applySelectionFromStore(selection: { osmType?: string | null; osmId?: number | string | null } | null | undefined) {
     const map = getMap?.();
     if (!map || !selection?.osmType || !selection?.osmId) return;
     const activeRegions = getActiveRegions?.() || [];
@@ -160,7 +230,16 @@ export function createMapSelectionController({
     }
   }
 
-  function onSearchClusterClick(event) {
+  function onSearchClusterClick(event: {
+    features?: Array<{
+      properties?: {
+        cluster_id?: number | string | null;
+      } | null;
+      geometry?: {
+        coordinates?: [number, number] | number[] | null;
+      } | null;
+    }>;
+  }) {
     const map = getMap?.();
     const feature = event?.features?.[0];
     if (!map || !feature) return;
@@ -168,7 +247,7 @@ export function createMapSelectionController({
     const coordinates = feature.geometry?.coordinates;
     const source = map.getSource(SEARCH_RESULTS_SOURCE_ID);
     if (!source || clusterId == null || !Array.isArray(coordinates)) return;
-    source.getClusterExpansionZoom(clusterId, (error, zoom) => {
+    source.getClusterExpansionZoom(Number(clusterId), (error, zoom) => {
       if (error) return;
       map.easeTo({
         center: coordinates,
@@ -179,7 +258,18 @@ export function createMapSelectionController({
     });
   }
 
-  function onSearchResultClick(event) {
+  function onSearchResultClick(event: {
+    features?: Array<{
+      properties?: {
+        osm_type?: string | null;
+        osm_id?: number | string | null;
+      } | null;
+      geometry?: {
+        coordinates?: [number, number] | number[] | null;
+      } | null;
+    }>;
+    lngLat?: SelectionLngLat;
+  }) {
     const feature = event?.features?.[0];
     if (!feature) return;
     const osmType = String(feature?.properties?.osm_type || '').trim();

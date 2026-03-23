@@ -234,7 +234,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     }
     draining = true;
     try {
-      if (currentSyncChild || queue.length === 0) return;
+      if (queue.length === 0) return;
       const next = queue.shift();
       queuedRegionIds.delete(next.regionId);
       currentRun = next;

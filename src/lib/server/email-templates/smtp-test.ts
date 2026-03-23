@@ -62,7 +62,7 @@ function buildTransportValue(smtp, copy) {
   return `${host}:${port}`;
 }
 
-function buildDetailRows({ smtp = {}, testEmail = '', sentAt = '', locale }) {
+function buildDetailRows({ smtp = {}, testEmail = '', sentAt = '', locale }: LooseRecord = {}) {
   const copy = getEmailCopy(locale);
   const rows = [
     [copy.smtpTest.detailLabels.date, formatEmailDate(sentAt, locale)],

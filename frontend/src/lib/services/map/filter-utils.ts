@@ -1,3 +1,8 @@
+import type {
+  FeatureIdentitySource,
+  LayerIdsSnapshot
+} from './filter-types.js';
+
 export function parseOsmKey(raw) {
   const text = String(raw || '').trim();
   if (!text || !text.includes('/')) return null;
@@ -27,7 +32,7 @@ export function nextAnimationFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-export function normalizeLayerIdsSnapshot(layerIds: LooseRecord = {}) {
+export function normalizeLayerIdsSnapshot(layerIds: Partial<LayerIdsSnapshot> | null | undefined = {}): LayerIdsSnapshot {
   const source = layerIds && typeof layerIds === 'object' ? layerIds : {};
   return {
     buildingFillLayerIds: Array.isArray(source.buildingFillLayerIds) ? source.buildingFillLayerIds : [],
@@ -43,7 +48,7 @@ export function normalizeLayerIdsSnapshot(layerIds: LooseRecord = {}) {
   };
 }
 
-export function resolveFeatureIdentity(feature) {
+export function resolveFeatureIdentity(feature: FeatureIdentitySource) {
   const fromKey = parseOsmKey(feature?.properties?.osm_key);
   if (fromKey) return fromKey;
   const osmType = String(feature?.properties?.osm_type || '').trim();

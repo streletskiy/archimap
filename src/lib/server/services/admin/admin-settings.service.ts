@@ -60,7 +60,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     return dataSettingsService;
   }
 
-  async function buildEmailPreviewPayload({ locale } = {}) {
+  async function buildEmailPreviewPayload({ locale }: LooseRecord = {}) {
     const currentAppDisplayName = resolveAppDisplayName(options);
     const currentAppBaseUrl = resolveAppBaseUrl(options);
     const currentLocale = resolveEmailLocale({ locale });

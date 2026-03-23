@@ -9,6 +9,15 @@ import {
   buildRegionBuildingLayerFilterExpression
 } from './map-layer-utils.js';
 import { getNow, normalizeLayerIdsSnapshot } from './filter-utils.js';
+import type {
+  FilterColorGroup,
+  FilterDebugHookInput,
+  FilterDiffApplyMeta,
+  FilterMapLike,
+  FilterPipelineState,
+  FilterRuntimeStatus,
+  LayerIdsSnapshot
+} from './filter-types.js';
 
 function areHighlightColorGroupsEqual(left, right) {
   if (left === right) return true;
@@ -30,7 +39,7 @@ function areHighlightColorGroupsEqual(left, right) {
   return true;
 }
 
-function buildHighlightLayerSignature(layerIds, buildingPartsVisible = true) {
+function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefined, buildingPartsVisible = true) {
   const fillLayerIds = Array.isArray(layerIds?.filterHighlightFillLayerIds)
     ? layerIds.filterHighlightFillLayerIds
     : [];
@@ -68,13 +77,23 @@ function buildHighlightLayerSignature(layerIds, buildingPartsVisible = true) {
   ].join('|');
 }
 
-function normalizeFeatureIds(values) {
+function normalizeFeatureIds(values: Array<number | string | null | undefined> | null | undefined) {
   if (!Array.isArray(values)) return [];
   return [...new Set(values.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     .sort((left, right) => left - right);
 }
 
-function applyBuildingLayerFilters({ map, layerIds, featureIds, active }: LooseRecord) {
+function applyBuildingLayerFilters({
+  map,
+  layerIds,
+  featureIds,
+  active
+}: {
+  map: FilterMapLike | null | undefined;
+  layerIds: LayerIdsSnapshot;
+  featureIds: number[];
+  active: boolean;
+}) {
   if (!map) return;
   const partFillFilter = buildRegionBuildingLayerFilterExpression({
     featureIds,
@@ -104,10 +123,22 @@ export function createFilterDiffApplyStrategy({
   updateFilterDebugHook,
   getCurrentPhase,
   highlightMode
-}: LooseRecord = {}) {
-  let filteredColorGroups = [];
+}: {
+  resolveMap?: () => FilterMapLike | null | undefined;
+  resolveLayerIds?: () => Partial<LayerIdsSnapshot> | LayerIdsSnapshot | null | undefined;
+  getBuildingPartsVisible?: () => boolean | null | undefined;
+  getLatestFilterToken?: () => number;
+  patchState?: (patch: Partial<FilterPipelineState>) => void;
+  debugFilterLog?: (eventName: string, payload?: Record<string, unknown>) => void;
+  recordFilterTelemetry?: (eventName: string, payload?: Record<string, unknown>) => void;
+  updateFilterRuntimeStatus?: (status: FilterRuntimeStatus) => void;
+  updateFilterDebugHook?: (input: FilterDebugHookInput) => void;
+  getCurrentPhase?: () => string | null | undefined;
+  highlightMode?: string;
+} = {}) {
+  let filteredColorGroups: FilterColorGroup[] = [];
   let filteredFeatureCount = 0;
-  let filteredFeatureIds = [];
+  let filteredFeatureIds: number[] = [];
   let lastAppliedHighlightLayerSignature = '';
   let lastAppliedHighlightActive = false;
 
@@ -115,9 +146,9 @@ export function createFilterDiffApplyStrategy({
     return normalizeLayerIdsSnapshot(resolveLayerIds?.() || {});
   }
 
-  function applyCurrentHighlight(meta: LooseRecord = {}) {
+  function applyCurrentHighlight(meta: FilterDiffApplyMeta = {}) {
     const applyStartedAt = getNow();
-    const map = resolveMap();
+    const map = resolveMap?.();
     const layerIds = meta.layerIds || getHighlightLayerIds();
     const buildingPartsVisible = Boolean(meta.buildingPartsVisible ?? getBuildingPartsVisible?.() ?? true);
     const nextFeatureIds = normalizeFeatureIds(meta.featureIds || filteredFeatureIds);
@@ -190,7 +221,11 @@ export function createFilterDiffApplyStrategy({
     };
   }
 
-  async function applyFilteredFeaturePaintGroups(colorGroups, token, meta: LooseRecord = {}) {
+  async function applyFilteredFeaturePaintGroups(
+    colorGroups: FilterColorGroup[] | null | undefined,
+    token: number,
+    meta: FilterDiffApplyMeta = {}
+  ) {
     if (token !== Number(getLatestFilterToken?.() ?? token)) return;
 
     const nextColorGroups = normalizeFilterPaintColorGroups(colorGroups);
@@ -269,7 +304,7 @@ export function createFilterDiffApplyStrategy({
     filteredFeatureIds = [];
     const layerIds = getHighlightLayerIds();
     applyBuildingLayerFilters({
-      map: resolveMap(),
+      map: resolveMap?.(),
       layerIds,
       featureIds: [],
       active: false

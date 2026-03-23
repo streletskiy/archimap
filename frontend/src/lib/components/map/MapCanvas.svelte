@@ -40,7 +40,6 @@
     mapFocusRequest,
     mapLabelsVisible,
     mapBuildingPartsVisible,
-    mapReady as mapReadyStore,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
     selectedBuilding,
@@ -71,6 +70,8 @@
   let styleTransitionOverlaySrc = null;
   let styleTransitionOverlayVisible = false;
   let styleTransitionTimer = null;
+  let stopBuildingFilterLayers = null;
+  let currentBuildingFilterLayers = [];
   let filterStatusOverlayText;
   let cameraStoreSyncEnabled = false;
 
@@ -126,7 +127,7 @@
     getSelectedBuilding: () => $selectedBuilding,
     getMapLabelsVisible: () => $mapLabelsVisible,
     getBuildingPartsVisible: () => $mapBuildingPartsVisible,
-    getBuildingFilterLayers: () => $buildingFilterLayers,
+    getBuildingFilterLayers: () => currentBuildingFilterLayers,
     getWindowOrigin: () => window.location.origin,
     onBindStyleInteractionHandlers: () => bindStyleInteractionHandlers(),
     onApplySelectionFromStore: (selection) => selectionController.applySelectionFromStore(selection),
@@ -134,7 +135,7 @@
     onApplyBuildingThemePaint: (theme) => applyBuildingThemePaint(theme),
     onApplyLabelLayerVisibility: (visible) => applyLabelLayerVisibility(visible),
     onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
-      forceHighlightVisible: Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0
+      forceHighlightVisible: currentBuildingFilterLayers.length > 0
     }),
     onRefreshFilterDebugState: (active) => filterPipeline.refreshDebugState(active),
     onReapplyFilteredHighlight: () => filterPipeline.reapplyFilteredHighlight()
@@ -154,6 +155,13 @@
     getBuildingSourceConfigs: () => regionLayersController.getCurrentBuildingSourceConfigs(),
     onStatusChange: setBuildingFilterRuntimeStatus,
     translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
+  });
+
+  stopBuildingFilterLayers = buildingFilterLayers.subscribe((layers) => {
+    currentBuildingFilterLayers = Array.isArray(layers) ? layers : [];
+    if (map) {
+      filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
+    }
   });
 
   const selectionController = createMapSelectionController({
@@ -272,7 +280,7 @@
       if (!map || !runtimeConfig) return;
       if (!map.isStyleLoaded()) return;
       regionLayersController.ensureMapSourcesAndLayers(runtimeConfig, { force: true });
-      filterPipeline.applyBuildingFilters($buildingFilterLayers, { reason: 'style' });
+      filterPipeline.applyBuildingFilters(currentBuildingFilterLayers, { reason: 'style' });
       clearStyleTransitionOverlaySoon();
     };
     map.once('styledata', tryRestore);
@@ -302,11 +310,6 @@
       selectionController.applySelectionFromStore($selectedBuilding);
     }
     void lastSelectedKey;
-  }
-
-  $: if (map && $mapReadyStore) {
-    const layers = $buildingFilterLayers;
-    filterPipeline.scheduleFilterRulesRefresh(layers);
   }
 
   $: if (map) {
@@ -400,10 +403,10 @@
         syncMapCameraStores();
         regionLayersController.syncMapRegionSources();
       });
-      map.on('moveend', () => filterPipeline.scheduleFilterRefresh($buildingFilterLayers));
+      map.on('moveend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('moveend', () => regionLayersController.scheduleCoverageCheck());
       map.on('move', () => regionLayersController.scheduleCoverageCheck());
-      map.on('zoomend', () => filterPipeline.scheduleFilterRefresh($buildingFilterLayers));
+      map.on('zoomend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('zoomend', syncMapZoomStore);
       map.on('zoomend', () => regionLayersController.syncMapRegionSources());
       map.on('zoomend', () => regionLayersController.scheduleCoverageCheck());
@@ -412,9 +415,7 @@
 
       map.on('style.load', () => {
         regionLayersController.ensureMapSourcesAndLayers(config, { force: true });
-        if ($mapReadyStore) {
-          filterPipeline.scheduleFilterRefresh($buildingFilterLayers);
-        }
+        filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();
       });
 
@@ -423,7 +424,7 @@
         filterPipeline.registerFilterMoveEnd();
         syncMapCameraStores();
         setMapReady(true);
-        filterPipeline.scheduleFilterRulesRefresh($buildingFilterLayers);
+        filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();
       });
 
@@ -446,6 +447,8 @@
   });
 
   onDestroy(() => {
+    stopBuildingFilterLayers?.();
+    stopBuildingFilterLayers = null;
     cameraStoreSyncEnabled = false;
     setMapReady(false);
     setMapCenter(null);

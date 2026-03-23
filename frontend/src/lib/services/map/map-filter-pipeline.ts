@@ -22,6 +22,19 @@ import {
 import { createFilterDiffApplyStrategy } from './filter-diff-apply-strategy';
 import { normalizeLayerIdsSnapshot } from './filter-utils';
 import { createFilterWorkerDispatcher } from './filter-worker-dispatcher';
+import type {
+  BboxSnapshot,
+  FilterBuildingSourceConfig,
+  FilterCoverageContext,
+  FilterDebugHookInput,
+  FilterMapDebug,
+  FilterMapLike,
+  FilterPipelineState,
+  FilterRequestResolution,
+  FilterRequestSpec,
+  FilterRuntimeStatus,
+  LayerIdsSnapshot
+} from './filter-types.js';
 
 export const FILTER_HIGHLIGHT_MODE = 'paint-property';
 export const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
@@ -41,7 +54,7 @@ const FILTER_COVERAGE_MARGIN_MAX = 0.35;
 const FILTER_PREFETCH_ENABLED = true;
 const FILTER_PREFETCH_MIN_INTERVAL_MS = 900;
 
-function createInitialState(mapDebug) {
+function createInitialState(mapDebug: FilterMapDebug | null | undefined) {
   const debugState = mapDebug?.getState?.() || {
     active: false,
     exprHash: hashFilterExpression(EMPTY_LAYER_FILTER)
@@ -68,8 +81,15 @@ export function createFilterPipeline({
   getBuildingSourceConfigs,
   onStatusChange,
   translateInvalidMessage
-}: LooseRecord = {}) {
-  const resolveMap = typeof map === 'function' ? map : () => map;
+}: {
+  map?: FilterMapLike | (() => FilterMapLike | null | undefined) | null | undefined;
+  mapDebug?: FilterMapDebug | null | undefined;
+  getLayerIds?: () => Partial<LayerIdsSnapshot> | LayerIdsSnapshot | null | undefined;
+  getBuildingSourceConfigs?: () => FilterBuildingSourceConfig[] | null | undefined;
+  onStatusChange?: (status: FilterRuntimeStatus & { updatedAt: number }) => void;
+  translateInvalidMessage?: (message?: string) => string;
+} = {}) {
+  const resolveMap: () => FilterMapLike | null | undefined = typeof map === 'function' ? map : () => map;
   const resolveLayerIds = typeof getLayerIds === 'function'
     ? () => normalizeLayerIdsSnapshot(getLayerIds())
     : () => normalizeLayerIdsSnapshot();
@@ -97,13 +117,16 @@ export function createFilterPipeline({
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
   let lastAuthoritativeRequestKey = '';
-  let activeFilterCoverageWindow = null;
+  let activeFilterCoverageWindow: (FilterCoverageContext['coverageWindow'] & {
+    rulesHash?: string;
+    zoomBucket?: number;
+  }) | null = null;
   let activeFilterCoverageKey = '';
   let filterLastMoveEndAt = 0;
   let filterLastMapCenter = null;
   let filterLastMoveVector = { dx: 0, dy: 0 };
 
-  function patchState(patch: LooseRecord = {}) {
+  function patchState(patch: Partial<FilterPipelineState> = {}) {
     currentState = {
       ...currentState,
       ...patch
@@ -112,7 +135,7 @@ export function createFilterPipeline({
     return currentState;
   }
 
-  function debugFilterLog(eventName, payload: LooseRecord = {}) {
+  function debugFilterLog(eventName: string, payload: Record<string, unknown> = {}) {
     mapDebug?.log?.(eventName, payload);
   }
 
@@ -125,7 +148,7 @@ export function createFilterPipeline({
     lastCount = currentState.lastCount,
     cacheHit = currentState.lastCacheHit,
     setPaintPropertyCalls = currentState.setPaintPropertyCallsLast
-  }: LooseRecord = {}) {
+  }: FilterDebugHookInput = {}) {
     const nextDebugState = mapDebug?.updateHook?.({
       active,
       expr,
@@ -145,7 +168,7 @@ export function createFilterPipeline({
     });
   }
 
-  function updateFilterRuntimeStatus(status: LooseRecord = {}) {
+  function updateFilterRuntimeStatus(status: FilterRuntimeStatus = {}) {
     const nextPhase = status.phase != null
       ? String(status.phase)
       : String(currentState.phase || 'idle');
@@ -196,7 +219,7 @@ export function createFilterPipeline({
     mapDebug?.recordFilterRequestEvent?.(eventName);
   }
 
-  function recordFilterTelemetry(eventName, payload: LooseRecord = {}) {
+  function recordFilterTelemetry(eventName: string, payload: Record<string, unknown> = {}) {
     mapDebug?.recordFilterTelemetry?.(eventName, payload);
   }
 
@@ -238,7 +261,7 @@ export function createFilterPipeline({
     prefetchMinIntervalMs: FILTER_PREFETCH_MIN_INTERVAL_MS
   });
 
-  function getCoverageWindowForViewport(viewportBbox) {
+  function getCoverageWindowForViewport(viewportBbox: BboxSnapshot | null | undefined) {
     return getCoverageWindowForViewportSnapshot(viewportBbox, {
       lastCount: currentState.lastCount,
       defaultLimit: FILTER_MATCH_DEFAULT_LIMIT,
@@ -253,7 +276,17 @@ export function createFilterPipeline({
     return buildBboxSnapshot(currentMap.getBounds?.());
   }
 
-  function canReuseActiveCoverageWindow({ viewportBbox, rulesHash, zoomBucket, reason }: LooseRecord) {
+  function canReuseActiveCoverageWindow({
+    viewportBbox,
+    rulesHash,
+    zoomBucket,
+    reason
+  }: {
+    viewportBbox: BboxSnapshot | null | undefined;
+    rulesHash: string;
+    zoomBucket: number;
+    reason?: string | null | undefined;
+  }) {
     if (reason !== 'viewport') return false;
     if (!activeFilterCoverageWindow) return false;
     if (String(activeFilterCoverageWindow.rulesHash || '') !== String(rulesHash || '')) return false;
@@ -342,10 +375,10 @@ export function createFilterPipeline({
       updateFilterRuntimeStatus({
         statusCode: 'refining'
       });
-      let requestResults: LooseRecord[];
+      let requestResults: FilterRequestResolution[];
       try {
-        const cachedResults = [];
-        const missingSpecs = [];
+        const cachedResults: FilterRequestResolution[] = [];
+        const missingSpecs: FilterRequestSpec[] = [];
         for (const spec of context.requestSpecs) {
           const cachedResult = filterMatchCacheStrategy.getCachedRequestSpecResult(spec, context);
           if (cachedResult) {
@@ -388,7 +421,9 @@ export function createFilterPipeline({
       }
       if (token !== latestFilterToken) return;
 
-      const payloadsByRequestId = new Map(requestResults.map((result) => [result.spec.id, result.payload]));
+      const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
+        requestResults.map((result) => [result.spec.id, result.payload])
+      );
       const usedFallback = requestResults.some((result) => result.usedFallback);
       const resolvedPayload = buildResolvedLayerPayload({
         prepared: context,
@@ -514,7 +549,9 @@ export function createFilterPipeline({
   }
 
   async function applyBuildingFilters(input, { reason = 'rules' } = {}) {
-    if (!resolveMap()) return;
+    if (!resolveMap()) {
+      return;
+    }
     const token = ++latestFilterToken;
     const prepared = await prepareRulesForFiltering(input);
     if (token !== latestFilterToken) return;
@@ -723,7 +760,7 @@ export function createFilterPipeline({
     }, token, debounceMs);
   }
 
-  function scheduleFilterRefresh(input: LooseRecord) {
+  function scheduleFilterRefresh(input: unknown) {
     if (mapMoveDebounceTimer) {
       clearTimeout(mapMoveDebounceTimer);
       mapMoveDebounceTimer = null;
@@ -756,7 +793,7 @@ export function createFilterPipeline({
     });
   }
 
-  function scheduleFilterRulesRefresh(input: LooseRecord) {
+  function scheduleFilterRulesRefresh(input: unknown) {
     applyBuildingFilters(input, { reason: 'rules' });
   }
 

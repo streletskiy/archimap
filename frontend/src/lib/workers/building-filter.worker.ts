@@ -4,30 +4,20 @@ import {
   normalizeFilterLayers,
   normalizeFilterRules
 } from '$lib/components/map/filter-pipeline-utils';
+import type {
+  FilterWorkerPrepareRequest,
+  FilterWorkerPrepareResponse
+} from '../services/map/filter-types.js';
 
-function isTrustedMessageOrigin(event) {
-  try {
-    const selfOrigin = String(self.location?.origin || '');
-    if (!selfOrigin) return false;
+const TRUSTED_MESSAGE_ORIGIN = String(self.location?.origin || '');
 
-    const messageOrigin = String(event?.origin || '');
-    if (messageOrigin) {
-      return messageOrigin === selfOrigin;
-    }
+self.onmessage = (event: MessageEvent<FilterWorkerPrepareRequest>) => {
+  const messageOrigin = String(event?.origin || '');
+  if (TRUSTED_MESSAGE_ORIGIN && messageOrigin && messageOrigin !== TRUSTED_MESSAGE_ORIGIN) return;
 
-    const targetOrigin = String(event?.currentTarget?.location?.origin || '');
-    return Boolean(targetOrigin) && targetOrigin === selfOrigin;
-  } catch {
-    return false;
-  }
-}
-
-self.onmessage = (event) => {
-  if (!isTrustedMessageOrigin(event)) return;
-
-  const payload = event?.data || {};
-  const type = String(payload?.type || '');
-  const requestId = String(payload?.requestId || '');
+  const payload = event.data;
+  const type = String(payload.type || '');
+  const requestId = String(payload.requestId || '');
 
   if (type === 'prepare-rules') {
     if (Array.isArray(payload.layers)) {
@@ -38,7 +28,7 @@ self.onmessage = (event) => {
           requestId,
           ok: false,
           invalidReason: normalizedLayers.invalidReason
-        });
+        } satisfies FilterWorkerPrepareResponse);
         return;
       }
       const layers = normalizedLayers.layers;
@@ -56,7 +46,7 @@ self.onmessage = (event) => {
           rules: layer.rules,
           heavy: layer.rules.some((rule) => isHeavyRule(rule))
         }))
-      });
+      } satisfies FilterWorkerPrepareResponse);
       return;
     }
 
@@ -67,7 +57,7 @@ self.onmessage = (event) => {
         requestId,
         ok: false,
         invalidReason: normalized.invalidReason
-      });
+      } satisfies FilterWorkerPrepareResponse);
       return;
     }
     const rules = normalized.rules;
@@ -76,18 +66,18 @@ self.onmessage = (event) => {
       requestId,
       ok: true,
       rules,
-      layers: rules.length > 0
-        ? [{
+        layers: rules.length > 0
+          ? [{
           id: 'compat-filter-layer',
           color: '#f59e0b',
           priority: 0,
-          mode: 'and',
+          mode: 'and' as const,
           rules
         }]
         : [],
       rulesHash: computeRulesHash(rules),
       heavy: rules.some((rule) => isHeavyRule(rule))
-    });
+    } satisfies FilterWorkerPrepareResponse);
     return;
   }
 };

@@ -31,7 +31,7 @@ test('sendSmtpTest sends html and text content', async (t) => {
   const originalSmtpTransportCache = require.cache[smtpTransportServicePath];
   let capturedMailOptions = null;
 
-  require.cache[smtpTransportServicePath] = {
+  const smtpTransportMock = {
     id: smtpTransportServicePath,
     filename: smtpTransportServicePath,
     loaded: true,
@@ -49,7 +49,8 @@ test('sendSmtpTest sends html and text content', async (t) => {
         };
       }
     }
-  };
+  } as unknown as NodeJS.Module;
+  require.cache[smtpTransportServicePath] = smtpTransportMock;
 
   delete require.cache[adminSettingsServicePath];
   t.after(() => {

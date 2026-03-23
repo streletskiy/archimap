@@ -3,6 +3,17 @@ import {
   expandBboxWithMargin,
   getAdaptiveCoverageMarginRatio
 } from '../../services/map/map-math-utils.js';
+import type {
+  BboxSnapshot,
+  FilterFeatureState,
+  FilterFeatureStateEntry,
+  FilterLayer,
+  FilterLayerMode,
+  FilterLayerInput,
+  FilterMatchPayload,
+  FilterRule,
+  FilterRuleInput
+} from '../../services/map/filter-types.js';
 import {
   FILTER_LAYER_BASE_COLOR,
   FILTER_LAYER_COLOR_PALETTE
@@ -46,9 +57,9 @@ export function createFilterLayerId(prefix = 'filter-layer') {
   return `${prefix}-${Date.now()}-${filterLayerIdSeq}`;
 }
 
-export function normalizeFilterLayerMode(rawMode) {
+export function normalizeFilterLayerMode(rawMode): FilterLayer['mode'] {
   const mode = String(rawMode || 'and').trim().toLowerCase();
-  return FILTER_LAYER_MODES.has(mode) ? mode : 'and';
+  return FILTER_LAYER_MODES.has(mode) ? (mode as FilterLayerMode) : 'and';
 }
 
 export function resolveDefaultFilterLayerColor(priority = 0) {
@@ -66,9 +77,9 @@ export function normalizeFilterColor(rawColor, fallbackColor = FILTER_LAYER_BASE
   return String(fallbackColor || FILTER_LAYER_BASE_COLOR).trim().toLowerCase();
 }
 
-export function normalizeFilterRules(rawRules) {
+export function normalizeFilterRules(rawRules: FilterRuleInput[] | null | undefined) {
   const input = Array.isArray(rawRules) ? rawRules : [];
-  const rules = [];
+  const rules: FilterRule[] = [];
   for (const raw of input) {
     const key = String(raw?.key || '').trim();
     if (!key) continue;
@@ -92,7 +103,7 @@ export function normalizeFilterRules(rawRules) {
   return { rules, invalidReason: '' };
 }
 
-export function sortFilterLayersByPriority(layers) {
+export function sortFilterLayersByPriority(layers: FilterLayer[] | null | undefined) {
   return [...(Array.isArray(layers) ? layers : [])].sort((left, right) => {
     const leftPriority = Number(left?.priority);
     const rightPriority = Number(right?.priority);
@@ -101,9 +112,12 @@ export function sortFilterLayersByPriority(layers) {
   });
 }
 
-export function normalizeFilterLayers(rawLayers, { preserveEmpty = false }: LooseRecord = {}) {
+export function normalizeFilterLayers(
+  rawLayers: FilterLayerInput[] | null | undefined,
+  { preserveEmpty = false }: { preserveEmpty?: boolean } = {}
+) {
   const input = Array.isArray(rawLayers) ? rawLayers : [];
-  const normalizedLayers = [];
+  const normalizedLayers: Array<FilterLayer & { originalIndex: number }> = [];
   for (let index = 0; index < input.length; index += 1) {
     const rawLayer = input[index] || {};
     const normalizedRules = normalizeFilterRules(rawLayer.rules);
@@ -139,16 +153,16 @@ export function normalizeFilterLayers(rawLayers, { preserveEmpty = false }: Loos
   return { layers, invalidReason: '' };
 }
 
-export function flattenFilterLayers(rawLayers) {
+export function flattenFilterLayers(rawLayers: FilterLayer[] | null | undefined) {
   return sortFilterLayersByPriority(rawLayers)
     .flatMap((layer) => (Array.isArray(layer?.rules) ? layer.rules : []));
 }
 
-export function isHeavyRule(rule) {
+export function isHeavyRule(rule: FilterRule | null | undefined) {
   return String(rule?.op || '') === 'contains';
 }
 
-export function computeRulesHash(rules) {
+export function computeRulesHash(rules: Array<unknown> | null | undefined) {
   const raw = JSON.stringify(Array.isArray(rules) ? rules : []);
   let hash = 2166136261;
   for (let i = 0; i < raw.length; i += 1) {
@@ -252,8 +266,10 @@ export function matchesFilterRules(tags, rules) {
   return (Array.isArray(rules) ? rules : []).every((rule) => matchesFilterRule(tags, rule));
 }
 
-export function toFeatureIdSetFromMatches(matched: LooseRecord = {}) {
-  const out = new Set();
+export function toFeatureIdSetFromMatches(
+  matched: Pick<FilterMatchPayload, 'matchedFeatureIds' | 'matchedKeys'> | null | undefined = null
+) {
+  const out = new Set<number>();
   const ids = Array.isArray(matched?.matchedFeatureIds) ? matched.matchedFeatureIds : [];
   for (const raw of ids) {
     const id = Number(raw);
@@ -269,7 +285,12 @@ export function toFeatureIdSetFromMatches(matched: LooseRecord = {}) {
   return out;
 }
 
-function normalizeFeatureStateEntry(rawEntry) {
+function normalizeFeatureStateEntry(
+  rawEntry: {
+    id?: number | string | null;
+    state?: Partial<FilterFeatureState> | null;
+  } | null | undefined
+): FilterFeatureStateEntry | null {
   const id = Number(rawEntry?.id);
   if (!Number.isInteger(id) || id <= 0) return null;
   return {
@@ -281,7 +302,10 @@ function normalizeFeatureStateEntry(rawEntry) {
   };
 }
 
-export function buildFeatureStateEntry(id, state: LooseRecord = {}) {
+export function buildFeatureStateEntry(
+  id: number | string | null | undefined,
+  state: Partial<FilterFeatureState> | null | undefined = {}
+) {
   return normalizeFeatureStateEntry({ id, state });
 }
 
@@ -293,8 +317,8 @@ export function areFeatureStatesEqual(left, right) {
 }
 
 export function buildFeatureStateEntryDiffPlan(prevEntries, nextEntries) {
-  const prev = new Map();
-  const next = new Map();
+  const prev = new Map<number, FilterFeatureState>();
+  const next = new Map<number, FilterFeatureState>();
   for (const rawEntry of Array.isArray(prevEntries) ? prevEntries : []) {
     const entry = normalizeFeatureStateEntry(rawEntry);
     if (!entry) continue;
@@ -355,7 +379,12 @@ export function buildFeatureStateDiffPlan(prevFeatureIds, nextFeatureIds) {
   };
 }
 
-export function buildBboxSnapshot(bounds) {
+export function buildBboxSnapshot(bounds: {
+  getWest?: () => number | null | undefined;
+  getSouth?: () => number | null | undefined;
+  getEast?: () => number | null | undefined;
+  getNorth?: () => number | null | undefined;
+} | null | undefined): BboxSnapshot | null {
   const west = Number(bounds?.getWest?.());
   const south = Number(bounds?.getSouth?.());
   const east = Number(bounds?.getEast?.());
@@ -364,7 +393,7 @@ export function buildBboxSnapshot(bounds) {
   return { west, south, east, north };
 }
 
-export function buildBboxHash(bbox, precision = 4) {
+export function buildBboxHash(bbox: BboxSnapshot | null | undefined, precision = 4) {
   if (!bbox) return 'bbox:none';
   return [
     Number(bbox.west).toFixed(precision),
@@ -374,7 +403,11 @@ export function buildBboxHash(bbox, precision = 4) {
   ].join(':');
 }
 
-export function isViewportInsideBbox(viewport, containerBbox, epsilon = 1e-7) {
+export function isViewportInsideBbox(
+  viewport: BboxSnapshot | null | undefined,
+  containerBbox: BboxSnapshot | null | undefined,
+  epsilon = 1e-7
+) {
   if (!viewport || !containerBbox) return false;
   const viewportWest = Number(viewport.west);
   const viewportSouth = Number(viewport.south);

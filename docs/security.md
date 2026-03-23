@@ -52,7 +52,13 @@
   - `POST /api/admin/**`
 - Token is session-bound and validated by `requireCsrfSession`.
 - Login/registration/password-reset flows do not require CSRF; they rely on rate limits, session rotation, and one-time email tokens.
+- Registration and password-reset one-time email tokens are stored as derived hashes, not plaintext.
 - Integration coverage includes negative path (`mutation without CSRF -> 403`).
+
+## Worker messaging
+
+- Dedicated worker `message` handlers verify `event.origin` against `self.location.origin` before processing payloads.
+- The building filter worker follows this rule before accepting `prepare-rules` messages.
 
 ## Logging and redaction
 

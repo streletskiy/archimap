@@ -86,9 +86,8 @@ function createAuthService({
 
   function hashPasswordResetToken(secret, token) {
     return crypto
-      .createHash('sha256')
-      .update(`${secret}:password-reset:${String(token || '').trim()}`)
-      .digest('hex');
+      .scryptSync(String(token || '').trim(), `${String(secret || '')}:password-reset`, 32)
+      .toString('hex');
   }
 
   function generatePasswordResetToken() {

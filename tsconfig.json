@@ -1,11 +1,18 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
     "moduleDetection": "force",
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
+    "paths": {
+      "$lib": ["frontend/src/lib"],
+      "$lib/*": ["frontend/src/lib/*"],
+      "$shared": ["src/lib/shared"],
+      "$shared/*": ["src/lib/shared/*"]
+    },
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,

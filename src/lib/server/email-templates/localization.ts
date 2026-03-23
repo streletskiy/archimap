@@ -9,17 +9,17 @@ const EMAIL_CATALOG = Object.freeze({
   ru: buildEmailCopy(sharedRuLocale?.email || {})
 });
 
-function interpolateEmailTemplate(template, values = {}) {
+function interpolateEmailTemplate(template, values: LooseRecord = {}) {
   return String(template || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => {
     const value = values[key];
     return value == null ? '' : String(value);
   });
 }
 
-function buildEmailCopy(raw = {}) {
-  const registration = raw.registration || {};
-  const passwordReset = raw.passwordReset || {};
-  const smtpTest = raw.smtpTest || {};
+function buildEmailCopy(raw: LooseRecord = {}) {
+  const registration: LooseRecord = raw.registration || {};
+  const passwordReset: LooseRecord = raw.passwordReset || {};
+  const smtpTest: LooseRecord = raw.smtpTest || {};
 
   return Object.freeze({
     registration: Object.freeze({
@@ -71,7 +71,7 @@ function parseAcceptLanguage(headerValue) {
   return '';
 }
 
-function resolveEmailLocale(input = {}) {
+function resolveEmailLocale(input: LooseRecord = {}) {
   const req = input.req && typeof input.req === 'object' ? input.req : null;
   const candidate = input.locale
     || input.bodyLocale

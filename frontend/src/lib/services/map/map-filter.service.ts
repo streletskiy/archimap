@@ -1,17 +1,25 @@
+import type {
+  FilterWorkerPrepareRequest,
+  FilterWorkerPrepareResponse,
+  FilterWorkerFactory
+} from './filter-types.js';
+
 const DEFAULT_WORKER_ERROR = 'Filter worker crashed';
 
 export class MapFilterService {
-  workerFactory: () => Worker;
+  workerFactory: FilterWorkerFactory;
   worker: Worker | null;
   requestSeq: number;
   pending: Map<string, {
-    resolve: (value: LooseRecord) => void;
+    resolve: (value: FilterWorkerPrepareResponse) => void;
     reject: (error: unknown) => void;
   }>;
 
   constructor({
     workerFactory = null
-  }: LooseRecord = {}) {
+  }: {
+    workerFactory?: FilterWorkerFactory | null;
+  } = {}) {
     this.workerFactory = workerFactory || (() => new Worker(
       new URL('../../workers/building-filter.worker.ts', import.meta.url),
       { type: 'module' }
@@ -26,7 +34,7 @@ export class MapFilterService {
 
     this.worker = this.workerFactory();
     this.worker.onmessage = (event) => {
-      const data = event?.data || {};
+      const data = (event?.data || {}) as FilterWorkerPrepareResponse;
       const requestId = String(data?.requestId || '');
       const handlers = this.pending.get(requestId);
       if (!handlers) return;
@@ -40,14 +48,17 @@ export class MapFilterService {
     return this.worker;
   }
 
-  request(type, payload: LooseRecord = {}) {
+  request(
+    type: FilterWorkerPrepareRequest['type'],
+    payload: Omit<FilterWorkerPrepareRequest, 'type' | 'requestId'> = {}
+  ) {
     this.ensureWorker();
     if (!this.worker) {
       return Promise.reject(new Error('Filter worker is unavailable'));
     }
 
     const requestId = `w-${Date.now()}-${++this.requestSeq}`;
-    return new Promise<LooseRecord>((resolve, reject) => {
+    return new Promise<FilterWorkerPrepareResponse>((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
       this.worker.postMessage({
         type,
