@@ -1088,7 +1088,6 @@ function createOsmSyncService(options: LooseRecord = {}) {
     if (!Array.isArray(rows) || rows.length === 0) return null;
     const grouped = buildCandidateRecord(rows);
     const currentContour = parseTags(rows[0]?.contour_tags_json);
-    const general = await getSettingsForAdmin();
     let liveElement = null;
     let preflightError = null;
 
@@ -1112,7 +1111,6 @@ function createOsmSyncService(options: LooseRecord = {}) {
 
     return {
       ...grouped,
-      oauth: general.oauth,
       currentContourUpdatedAt: rows[0]?.contour_updated_at || null,
       currentContourTags: currentContour,
       liveElement: liveElement ? {

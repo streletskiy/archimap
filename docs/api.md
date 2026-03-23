@@ -137,6 +137,7 @@ System notes:
   - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the collapsed archive section of the admin UI, and are excluded from bulk sync selection.
 - `GET /api/admin/osm-sync/candidates/:osmType/:osmId`
   - Returns a detailed preflight snapshot for one building, including current live OSM state, local desired state, and drift/conflict diagnostics.
+  - OAuth connection metadata is not included here; use `GET /api/admin/app-settings/osm` for OSM settings and connection state.
 - `POST /api/admin/osm-sync/candidates/sync`
   - Master-admin only.
   - Accepts `{ items: [{ osmType, osmId }, ...] }` and publishes the selected building groups in one OSM changeset.
