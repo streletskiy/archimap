@@ -6,10 +6,16 @@ const {
   passwordResetHtmlTemplate,
   passwordResetTextTemplate
 } = require('./password-reset');
+const {
+  smtpTestHtmlTemplate,
+  smtpTestTextTemplate
+} = require('./smtp-test');
 
 module.exports = {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
   passwordResetHtmlTemplate,
-  passwordResetTextTemplate
+  passwordResetTextTemplate,
+  smtpTestHtmlTemplate,
+  smtpTestTextTemplate
 };

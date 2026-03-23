@@ -756,7 +756,7 @@
         {/if}
 
         {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
-          <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
             {#if selectedEdit.orphaned}
               <p>{$t('admin.edits.orphanedHelp')}</p>
             {/if}

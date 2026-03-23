@@ -536,17 +536,17 @@
       <div class="mt-4 grid gap-4 xl:grid-cols-3">
           <section class="rounded-2xl border ui-border ui-surface-muted p-4">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.profile.title')}</h3>
-            <form class="mt-4 space-y-4" on:submit={saveProfile}>
-              <div>
-                <UiLabel for="account-first-name" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.firstName')}</UiLabel>
+            <form class="mt-4 grid gap-4" on:submit={saveProfile}>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-first-name">{$t('account.profile.firstName')}</UiLabel>
                 <UiInput id="account-first-name" bind:value={firstName} />
               </div>
-              <div>
-                <UiLabel for="account-last-name" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.lastName')}</UiLabel>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-last-name">{$t('account.profile.lastName')}</UiLabel>
                 <UiInput id="account-last-name" bind:value={lastName} />
               </div>
-              <div>
-                <UiLabel for="account-email" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.email')}</UiLabel>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-email">{$t('account.profile.email')}</UiLabel>
                 <UiInput id="account-email" value={email} readonly className="ui-text-subtle" />
               </div>
               <UiButton type="submit">{$t('account.profile.save')}</UiButton>
@@ -557,25 +557,37 @@
           </section>
           <section class="rounded-2xl border ui-border ui-surface-muted p-4">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.security.title')}</h3>
-            <form class="mt-4 space-y-4" on:submit={changePassword}>
-              <UiInput
-                type="password"
-                placeholder={$t('account.security.currentPassword')}
-                bind:value={currentPassword}
-                required
-              />
-              <UiInput
-                type="password"
-                placeholder={$t('account.security.newPassword')}
-                bind:value={newPassword}
-                required
-              />
-              <UiInput
-                type="password"
-                placeholder={$t('account.security.repeatPassword')}
-                bind:value={confirmNewPassword}
-                required
-              />
+            <form class="mt-4 grid gap-4" on:submit={changePassword}>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-current-password">{$t('account.security.currentPassword')}</UiLabel>
+                <UiInput
+                  id="account-current-password"
+                  type="password"
+                  bind:value={currentPassword}
+                  autocomplete="current-password"
+                  required
+                />
+              </div>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-new-password">{$t('account.security.newPassword')}</UiLabel>
+                <UiInput
+                  id="account-new-password"
+                  type="password"
+                  bind:value={newPassword}
+                  autocomplete="new-password"
+                  required
+                />
+              </div>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-confirm-password">{$t('account.security.repeatPassword')}</UiLabel>
+                <UiInput
+                  id="account-confirm-password"
+                  type="password"
+                  bind:value={confirmNewPassword}
+                  autocomplete="new-password"
+                  required
+                />
+              </div>
               <UiButton type="submit" variant="outline">{$t('account.security.change')}</UiButton>
             </form>
             {#if passwordStatus}
@@ -748,7 +760,7 @@
               </div>
             {/if}
             {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
-              <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
                 {#if selectedEdit.orphaned}
                   <p>{$t('account.edits.orphanedHelp')}</p>
                 {/if}

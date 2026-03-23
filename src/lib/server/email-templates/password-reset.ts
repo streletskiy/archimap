@@ -1,22 +1,29 @@
-const { escapeHtml, emailShell } = require('./shell');
+const {
+  ctaButtonStyle,
+  contentNoteStyle,
+  contentParagraphStyle,
+  emailShell,
+  escapeHtml,
+  linkStyle
+} = require('./shell');
 
 function passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName }) {
   const safeResetUrl = escapeHtml(resetUrl);
   const safeMinutes = escapeHtml(expiresInMinutes);
   const appName = String(appDisplayName || '').trim() || 'archimap';
-  const safeAppName = escapeHtml(appName);
 
   return emailShell({
     title: 'Сброс пароля',
-    pretitle: safeAppName || 'archimap',
+    pretitle: 'Восстановление',
+    brandName: appName,
     intro: 'Нажмите кнопку ниже, чтобы задать новый пароль.',
     contentHtml: `
       <p style="margin:0 0 12px 0;">
-        <a href="${safeResetUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#5b62f0;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">Сбросить пароль</a>
+        <a href="${safeResetUrl}" style="${ctaButtonStyle()}">Сбросить пароль</a>
       </p>
-      <p style="margin:0;font-size:14px;line-height:1.7;color:#334155;">Ссылка действует <strong>${safeMinutes} минут</strong>.</p>
-      <p style="margin:8px 0 0 0;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">Если кнопка не работает, откройте ссылку: ${safeResetUrl}</p>
-      <p style="margin:10px 0 0 0;font-size:14px;line-height:1.7;color:#334155;">Если вы не запрашивали сброс пароля, просто проигнорируйте письмо.</p>
+      <p style="${contentParagraphStyle()}">Ссылка действует <strong>${safeMinutes} минут</strong>.</p>
+      <p style="${contentNoteStyle()}">Если кнопка не работает, откройте ссылку: <a href="${safeResetUrl}" style="${linkStyle()}">${safeResetUrl}</a></p>
+      <p style="${contentParagraphStyle('10px 0 0 0')}">Если вы не запрашивали сброс пароля, просто проигнорируйте письмо.</p>
     `,
     footer: 'Это автоматическое письмо. Отвечать на него не нужно.'
   });

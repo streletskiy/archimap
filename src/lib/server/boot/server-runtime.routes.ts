@@ -4,7 +4,9 @@ const {
   registrationCodeHtmlTemplate,
   registrationCodeTextTemplate,
   passwordResetHtmlTemplate,
-  passwordResetTextTemplate
+  passwordResetTextTemplate,
+  smtpTestHtmlTemplate,
+  smtpTestTextTemplate
 } = require('../email-templates');
 const { registerContoursStatusRoute } = require('../http/contours-status.route');
 const { registerAppRoutes } = require('../http/app.route');
@@ -77,6 +79,8 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     registrationCodeTextTemplate,
     passwordResetHtmlTemplate,
     passwordResetTextTemplate,
+    smtpTestHtmlTemplate,
+    smtpTestTextTemplate,
     appSettingsService: runtime.appSettingsService,
     settingsSecret: String(runtime.config.rawEnv.APP_SETTINGS_SECRET || runtime.config.sessionSecret).trim() || runtime.config.sessionSecret,
     dataSettingsService: runtime.dataSettingsService,

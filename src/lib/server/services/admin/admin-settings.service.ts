@@ -1,5 +1,13 @@
 const { sendMailWithFallback } = require('../smtp-transport.service');
 const {
+  registrationCodeHtmlTemplate: defaultRegistrationCodeHtmlTemplate,
+  registrationCodeTextTemplate: defaultRegistrationCodeTextTemplate,
+  passwordResetHtmlTemplate: defaultPasswordResetHtmlTemplate,
+  passwordResetTextTemplate: defaultPasswordResetTextTemplate,
+  smtpTestHtmlTemplate: defaultSmtpTestHtmlTemplate,
+  smtpTestTextTemplate: defaultSmtpTestTextTemplate
+} = require('../../email-templates');
+const {
   createAdminError,
   isLikelyEmail,
   parseRegionId,
@@ -23,10 +31,12 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     onDataRegionsSaved,
     onRegionSyncRequested,
     onFilterPresetsSaved,
-    registrationCodeHtmlTemplate,
-    registrationCodeTextTemplate,
-    passwordResetHtmlTemplate,
-    passwordResetTextTemplate,
+    registrationCodeHtmlTemplate = defaultRegistrationCodeHtmlTemplate,
+    registrationCodeTextTemplate = defaultRegistrationCodeTextTemplate,
+    passwordResetHtmlTemplate = defaultPasswordResetHtmlTemplate,
+    passwordResetTextTemplate = defaultPasswordResetTextTemplate,
+    smtpTestHtmlTemplate = defaultSmtpTestHtmlTemplate,
+    smtpTestTextTemplate = defaultSmtpTestTextTemplate,
     registrationCodeTtlMinutes,
     passwordResetTtlMinutes
   } = options;
@@ -48,6 +58,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
   async function buildEmailPreviewPayload() {
     const currentAppDisplayName = resolveAppDisplayName(options);
     const currentAppBaseUrl = resolveAppBaseUrl(options);
+    const generatedAt = new Date().toISOString();
     const sample = {
       registration: {
         code: '583401',
@@ -57,6 +68,16 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       passwordReset: {
         expiresInMinutes: passwordResetTtlMinutes,
         resetUrl: `${currentAppBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`
+      },
+      smtpTest: {
+        testEmail: 'admin@example.test',
+        sentAt: generatedAt,
+        smtp: {
+          host: 'smtp-relay.example.com',
+          port: 587,
+          secure: false,
+          from: `${currentAppDisplayName} <no-reply@example.com>`
+        }
       }
     };
 
@@ -90,12 +111,29 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       })
     };
 
+    const smtpTest = {
+      subject: `${currentAppDisplayName}: SMTP test`,
+      html: smtpTestHtmlTemplate({
+        smtp: sample.smtpTest.smtp,
+        testEmail: sample.smtpTest.testEmail,
+        sentAt: sample.smtpTest.sentAt,
+        appDisplayName: currentAppDisplayName
+      }),
+      text: smtpTestTextTemplate({
+        smtp: sample.smtpTest.smtp,
+        testEmail: sample.smtpTest.testEmail,
+        sentAt: sample.smtpTest.sentAt,
+        appDisplayName: currentAppDisplayName
+      })
+    };
+
     return {
       appDisplayName: currentAppDisplayName,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
       templates: {
         registration,
-        passwordReset
+        passwordReset,
+        smtpTest
       }
     };
   }
@@ -139,15 +177,19 @@ function createAdminSettingsService(options: LooseRecord = {}) {
 
     const effectiveAppDisplayName = resolveAppDisplayName(options);
     const subject = `${effectiveAppDisplayName}: SMTP test`;
-    const nowIso = new Date().toISOString();
-    const text = [
-      `Это тестовое письмо от ${effectiveAppDisplayName}.`,
-      '',
-      `Дата: ${nowIso}`,
-      `Host: ${candidate.host || '(from SMTP URL)'}`,
-      `Port: ${candidate.port || '(from SMTP URL)'}`,
-      `Secure: ${candidate.secure ? 'true' : 'false'}`
-    ].join('\n');
+    const sentAt = new Date().toISOString();
+    const text = smtpTestTextTemplate({
+      smtp: candidate,
+      testEmail: effectiveTestEmail,
+      sentAt,
+      appDisplayName: effectiveAppDisplayName
+    });
+    const html = smtpTestHtmlTemplate({
+      smtp: candidate,
+      testEmail: effectiveTestEmail,
+      sentAt,
+      appDisplayName: effectiveAppDisplayName
+    });
 
     if (!candidate.url && (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from)) {
       throw createAdminError(400, 'SMTP test requires host/port/user/password/from or smtp url');
@@ -158,7 +200,8 @@ function createAdminSettingsService(options: LooseRecord = {}) {
         from: candidate.from,
         to: effectiveTestEmail,
         subject,
-        text
+        text,
+        html
       }, {
         logContext: { flow: 'admin_smtp_test', to: '[REDACTED]' }
       });
