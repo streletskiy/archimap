@@ -9,11 +9,11 @@ import type {
   FilterWorkerPrepareResponse
 } from '../services/map/filter-types.js';
 
-const TRUSTED_MESSAGE_ORIGIN = String(self.location?.origin || '');
-
 self.onmessage = (event: MessageEvent<FilterWorkerPrepareRequest>) => {
-  const messageOrigin = String(event?.origin || '');
-  if (messageOrigin !== TRUSTED_MESSAGE_ORIGIN) return;
+  // Chromium exposes an empty origin for same-origin messages sent to dedicated workers.
+  const trustedOrigin = String(self.location?.origin || '');
+  const messageOrigin = String(event?.origin || trustedOrigin);
+  if (messageOrigin !== trustedOrigin) return;
 
   const payload = event.data;
   const type = String(payload.type || '');

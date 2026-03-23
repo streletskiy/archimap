@@ -3,6 +3,27 @@ const assert = require('node:assert/strict');
 
 const adminSettingsServicePath = require.resolve('../../src/lib/server/services/admin/admin-settings.service');
 const smtpTransportServicePath = require.resolve('../../src/lib/server/services/smtp-transport.service');
+const { getEmailCopy } = require('../../src/lib/server/email-templates/localization');
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getHtmlDetailValue(html, label) {
+  const pattern = new RegExp(
+    `<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`,
+    'i'
+  );
+  const match = String(html || '').match(pattern);
+  return match ? match[1].trim() : null;
+}
+
+function getTextDetailValue(text, label) {
+  const line = String(text || '')
+    .split('\n')
+    .find((entry) => entry.startsWith(`${label}: `));
+  return line ? line.slice(label.length + 2).trim() : null;
+}
 
 test('buildEmailPreviewPayload includes the SMTP test template in the requested locale', async () => {
   const { createAdminSettingsService } = require(adminSettingsServicePath);
@@ -17,13 +38,21 @@ test('buildEmailPreviewPayload includes the SMTP test template in the requested 
 
   assert.equal(payload.appDisplayName, 'ArchiMap');
   assert.ok(payload.templates.smtpTest);
+  const ruCopy = getEmailCopy('ru');
   assert.match(payload.templates.registration.html, /<html lang="ru">/);
   assert.match(payload.templates.registration.text, /Ваш код:/);
   assert.match(payload.templates.registration.text, /lang=ru/);
   assert.match(payload.templates.smtpTest.html, /Тест отправки почты/);
-  assert.ok(payload.templates.smtpTest.html.includes('smtp-relay.example.com'));
   assert.match(payload.templates.smtpTest.html, /admin@example\.test/);
   assert.match(payload.templates.smtpTest.text, /ArchiMap: тест отправки почты/);
+  assert.equal(
+    getHtmlDetailValue(payload.templates.smtpTest.html, ruCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+  assert.equal(
+    getTextDetailValue(payload.templates.smtpTest.text, ruCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
 });
 
 test('sendSmtpTest sends html and text content', async (t) => {
@@ -105,5 +134,13 @@ test('sendSmtpTest sends html and text content', async (t) => {
   assert.match(capturedMailOptions.html, /<html lang="en">/);
   assert.match(capturedMailOptions.html, /background-color:#f6f4ef/);
   assert.match(capturedMailOptions.text, /ArchiMap: mail delivery test/);
-  assert.ok(capturedMailOptions.text.includes('smtp-relay.example.com:587'));
+  const enCopy = getEmailCopy('en');
+  assert.equal(
+    getHtmlDetailValue(capturedMailOptions.html, enCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+  assert.equal(
+    getTextDetailValue(capturedMailOptions.text, enCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
 });

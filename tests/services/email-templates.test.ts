@@ -9,6 +9,27 @@ const {
   smtpTestHtmlTemplate,
   smtpTestTextTemplate
 } = require('../../src/lib/server/email-templates');
+const { getEmailCopy } = require('../../src/lib/server/email-templates/localization');
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getHtmlDetailValue(html, label) {
+  const pattern = new RegExp(
+    `<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`,
+    'i'
+  );
+  const match = String(html || '').match(pattern);
+  return match ? match[1].trim() : null;
+}
+
+function getTextDetailValue(text, label) {
+  const line = String(text || '')
+    .split('\n')
+    .find((entry) => entry.startsWith(`${label}: `));
+  return line ? line.slice(label.length + 2).trim() : null;
+}
 
 test('registration email renders in both locales and keeps the light palette', () => {
   const enHtml = registrationCodeHtmlTemplate({
@@ -98,6 +119,8 @@ test('password reset email renders in both locales and keeps the light palette',
 });
 
 test('smtp test email renders in both locales and includes delivery details', () => {
+  const enCopy = getEmailCopy('en');
+  const ruCopy = getEmailCopy('ru');
   const enHtml = smtpTestHtmlTemplate({
     smtp: {
       host: 'smtp-relay.example.com',
@@ -151,18 +174,32 @@ test('smtp test email renders in both locales and includes delivery details', ()
   assert.match(enHtml, /Mail delivery test/);
   assert.match(enHtml, /<html lang="en">/);
   assert.match(enHtml, /admin@example\.test/);
-  assert.ok(enHtml.includes('smtp-relay.example.com'));
   assert.match(enText, /ArchiMap: mail delivery test/);
   assert.match(enText, /Date: /);
   assert.match(enText, /Secure: No/);
+  assert.equal(
+    getHtmlDetailValue(enHtml, enCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+  assert.equal(
+    getTextDetailValue(enText, enCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
 
   assert.match(ruHtml, /background:#fbfaf7/);
   assert.match(ruHtml, /Тест отправки почты/);
   assert.match(ruHtml, /<html lang="ru">/);
   assert.match(ruHtml, /Проверка/);
   assert.match(ruHtml, /admin@example\.test/);
-  assert.ok(ruHtml.includes('smtp-relay.example.com'));
   assert.match(ruText, /ArchiMap: тест отправки почты/);
   assert.match(ruText, /Дата: /);
   assert.match(ruText, /Безопасное соединение: Нет/);
+  assert.equal(
+    getHtmlDetailValue(ruHtml, ruCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+  assert.equal(
+    getTextDetailValue(ruText, ruCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
 });
