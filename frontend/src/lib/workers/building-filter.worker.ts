@@ -11,8 +11,11 @@ import type {
 
 self.onmessage = (event: MessageEvent<FilterWorkerPrepareRequest>) => {
   // Chromium exposes an empty origin for same-origin messages sent to dedicated workers.
-  const trustedOrigin = String(self.location?.origin || '');
-  const messageOrigin = String(event?.origin || trustedOrigin);
+  const trustedOrigin = self.location?.origin ?? '';
+  const messageOrigin =
+    event.origin ||
+    // For some browsers/environments, origin may be empty for same-origin dedicated workers.
+    ((event.currentTarget as { location?: { origin?: string } } | null)?.location?.origin ?? '');
   if (messageOrigin !== trustedOrigin) return;
 
   const payload = event.data;
