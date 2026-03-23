@@ -52,8 +52,6 @@
     "svelte-awesome-color-picker": "^4.1.0"
   },
   "overrides": {
-    "@sveltejs/kit": {
-      "cookie": "0.6.0"
-    }
+    "cookie": "0.7.2"
   }
 }
