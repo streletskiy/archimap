@@ -6,6 +6,11 @@ const {
   passwordResetHtmlTemplate,
   passwordResetTextTemplate
 } = require('../email-templates');
+const {
+  appendLocaleParam,
+  getEmailCopy,
+  resolveEmailLocale
+} = require('../email-templates/localization');
 
 function createAuthService({
   db,
@@ -247,15 +252,30 @@ function createAuthService({
     return Boolean(smtpConfig.host && smtpConfig.port && smtpConfig.user && smtpConfig.pass && smtpConfig.from);
   }
 
-  async function sendRegistrationCodeEmail({ to, code, expiresInMinutes, confirmUrl }: LooseRecord) {
+  async function sendRegistrationCodeEmail({ to, code, expiresInMinutes, confirmUrl, locale }: LooseRecord) {
     const effectiveAppDisplayName = resolveAppDisplayName();
     const smtpConfig = resolveSmtpConfig();
+    const currentLocale = resolveEmailLocale({ locale });
+    const copy = getEmailCopy(currentLocale);
+    const localizedConfirmUrl = appendLocaleParam(confirmUrl, currentLocale);
     const mailOptions = {
       from: smtpConfig.from,
       to,
-      subject: `${effectiveAppDisplayName}: код подтверждения регистрации`,
-      text: registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName: effectiveAppDisplayName, confirmUrl }),
-      html: registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName: effectiveAppDisplayName, confirmUrl })
+      subject: `${effectiveAppDisplayName}: ${copy.registration.subject}`,
+      text: registrationCodeTextTemplate({
+        code,
+        expiresInMinutes,
+        appDisplayName: effectiveAppDisplayName,
+        confirmUrl: localizedConfirmUrl,
+        locale: currentLocale
+      }),
+      html: registrationCodeHtmlTemplate({
+        code,
+        expiresInMinutes,
+        appDisplayName: effectiveAppDisplayName,
+        confirmUrl: localizedConfirmUrl,
+        locale: currentLocale
+      })
     };
     return sendMailWithFallback(smtpConfig, mailOptions, {
       logger,
@@ -263,15 +283,28 @@ function createAuthService({
     });
   }
 
-  async function sendPasswordResetEmail({ to, resetUrl, expiresInMinutes }: LooseRecord) {
+  async function sendPasswordResetEmail({ to, resetUrl, expiresInMinutes, locale }: LooseRecord) {
     const effectiveAppDisplayName = resolveAppDisplayName();
     const smtpConfig = resolveSmtpConfig();
+    const currentLocale = resolveEmailLocale({ locale });
+    const copy = getEmailCopy(currentLocale);
+    const localizedResetUrl = appendLocaleParam(resetUrl, currentLocale);
     const mailOptions = {
       from: smtpConfig.from,
       to,
-      subject: `${effectiveAppDisplayName}: сброс пароля`,
-      text: passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName: effectiveAppDisplayName }),
-      html: passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName: effectiveAppDisplayName })
+      subject: `${effectiveAppDisplayName}: ${copy.passwordReset.subject}`,
+      text: passwordResetTextTemplate({
+        resetUrl: localizedResetUrl,
+        expiresInMinutes,
+        appDisplayName: effectiveAppDisplayName,
+        locale: currentLocale
+      }),
+      html: passwordResetHtmlTemplate({
+        resetUrl: localizedResetUrl,
+        expiresInMinutes,
+        appDisplayName: effectiveAppDisplayName,
+        locale: currentLocale
+      })
     };
     return sendMailWithFallback(smtpConfig, mailOptions, {
       logger,
@@ -367,6 +400,7 @@ function createAuthService({
       return { status: 403, code: 'ERR_REGISTRATION_DISABLED', error: 'Registration is disabled' };
     }
 
+    const locale = resolveEmailLocale({ req, locale: req.body?.locale });
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || '');
     const firstName = normalizeProfileName(req.body?.firstName);
@@ -414,7 +448,7 @@ function createAuthService({
 
     const code = generateRegistrationCode();
     const verifyToken = generateRegistrationVerifyToken();
-    const confirmUrl = `${baseUrl}/account/?registerToken=${encodeURIComponent(verifyToken)}`;
+    const confirmUrl = appendLocaleParam(`${baseUrl}/account/?registerToken=${encodeURIComponent(verifyToken)}`, locale);
     const expiresAt = now + (registrationCodeTtlMinutes * 60 * 1000);
     const codeHash = hashRegistrationCode(sessionSecret, email, code);
     const verifyTokenHash = hashRegistrationVerifyToken(sessionSecret, verifyToken);
@@ -435,7 +469,7 @@ function createAuthService({
     `).run(email, codeHash, expiresAt, now, now, passwordHash, firstName, lastName, verifyTokenHash);
 
     try {
-      await sendRegistrationCodeEmail({ to: email, code, expiresInMinutes: registrationCodeTtlMinutes, confirmUrl });
+      await sendRegistrationCodeEmail({ to: email, code, expiresInMinutes: registrationCodeTtlMinutes, confirmUrl, locale });
     } catch (error) {
       logger.error('auth_registration_code_send_failed', { email, error: String(error.message || error) });
       return { status: 502, code: 'ERR_REGISTRATION_EMAIL_SEND_FAILED', error: 'Failed to send registration confirmation email' };
@@ -609,6 +643,7 @@ function createAuthService({
       return { status: 503, code: 'ERR_EMAIL_DELIVERY_NOT_CONFIGURED', error: 'Email delivery is not configured on the server' };
     }
 
+    const locale = resolveEmailLocale({ req, locale: req.body?.locale });
     const email = normalizeEmail(req.body?.email);
     if (!isValidEmail(email)) {
       return { payload: { ok: true } };
@@ -636,9 +671,9 @@ function createAuthService({
       VALUES (?, ?, ?, ?, NULL)
     `).run(tokenHash, email, expiresAt, now);
 
-    const resetUrl = `${baseUrl}/?resetToken=${encodeURIComponent(token)}`;
+    const resetUrl = appendLocaleParam(`${baseUrl}/?resetToken=${encodeURIComponent(token)}`, locale);
     try {
-      await sendPasswordResetEmail({ to: email, resetUrl, expiresInMinutes: passwordResetTtlMinutes });
+      await sendPasswordResetEmail({ to: email, resetUrl, expiresInMinutes: passwordResetTtlMinutes, locale });
     } catch (error) {
       logger.error('auth_password_reset_send_failed', { email, error: String(error.message || error) });
       return { status: 502, code: 'ERR_PASSWORD_RESET_EMAIL_SEND_FAILED', error: 'Failed to send password reset email' };

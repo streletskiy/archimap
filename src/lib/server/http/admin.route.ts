@@ -3,6 +3,7 @@ const { createAdminSettingsService } = require('../services/admin/admin-settings
 const { createAdminEditsService } = require('../services/admin/admin-edits.service');
 const { createOsmSyncService } = require('../services/osm-sync.service');
 const { requireMasterAdmin } = require('../services/admin/shared');
+const { resolveEmailLocale } = require('../email-templates/localization');
 
 function sendPrivateJson(req, res, payload, lastModified = null) {
   const cacheOptions: LooseRecord = {
@@ -58,7 +59,9 @@ function registerAdminRoutes(deps: LooseRecord) {
   app.use('/api/ui/email-previews', adminApiRateLimiter);
 
   app.get('/api/ui/email-previews', requireAuth, requireAdmin, withAdminError(async (req, res) => {
-    return sendPrivateJson(req, res, await adminSettingsService.buildEmailPreviewPayload());
+    return sendPrivateJson(req, res, await adminSettingsService.buildEmailPreviewPayload({
+      locale: resolveEmailLocale({ req })
+    }));
   }));
 
   app.get('/api/admin/app-settings/smtp', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
@@ -104,7 +107,8 @@ function registerAdminRoutes(deps: LooseRecord) {
   app.post('/api/admin/app-settings/smtp/test', requireCsrfSession, requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
     return res.json(await adminSettingsService.sendSmtpTest({
       smtp: req.body?.smtp,
-      testEmail: req.body?.testEmail
+      testEmail: req.body?.testEmail,
+      locale: resolveEmailLocale({ req, locale: req.body?.locale })
     }));
   }, {
     status: 500,

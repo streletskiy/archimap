@@ -1,3 +1,5 @@
+const { normalizeEmailLocale } = require('./localization');
+
 const EMAIL_THEME = {
   pageTop: '#f6f4ef',
   pageBottom: '#f1efea',
@@ -95,15 +97,16 @@ function linkStyle() {
   return `color:${EMAIL_THEME.accentInk};text-decoration:underline;text-decoration-color:rgba(91, 67, 0, 0.28);word-break:break-all;`;
 }
 
-function emailShell({ title, pretitle, intro, contentHtml, footer, brandName }) {
+function emailShell({ title, pretitle, intro, contentHtml, footer, brandName, lang }) {
   const safeTitle = escapeHtml(title);
   const safePretitle = String(pretitle || '').trim() ? escapeHtml(pretitle) : '';
   const safeBrandName = escapeHtml(String(brandName || '').trim() || 'archimap');
   const safeIntro = escapeHtml(intro);
   const safeFooter = escapeHtml(footer);
+  const safeLang = escapeHtml(normalizeEmailLocale(lang));
 
   return `<!doctype html>
-<html lang="ru">
+<html lang="${safeLang}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />

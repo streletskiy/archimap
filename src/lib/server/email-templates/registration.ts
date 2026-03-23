@@ -9,44 +9,56 @@ const {
   escapeHtml,
   linkStyle
 } = require('./shell');
+const {
+  appendLocaleParam,
+  getEmailCopy,
+  normalizeEmailLocale
+} = require('./localization');
 
-function registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl }) {
+function registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl, locale }) {
+  const currentLocale = normalizeEmailLocale(locale);
+  const copy = getEmailCopy(currentLocale);
   const safeCode = escapeHtml(String(code || '').trim());
   const safeMinutes = escapeHtml(expiresInMinutes);
-  const safeConfirmUrl = escapeHtml(confirmUrl);
+  const safeConfirmUrl = escapeHtml(appendLocaleParam(confirmUrl, currentLocale));
   const appName = String(appDisplayName || '').trim() || 'archimap';
 
   return emailShell({
-    title: 'Подтверждение регистрации',
-    pretitle: 'Регистрация',
+    lang: currentLocale,
+    title: copy.registration.title,
+    pretitle: copy.registration.pretitle,
     brandName: appName,
-    intro: 'Используйте код ниже, чтобы завершить создание аккаунта.',
+    intro: copy.registration.intro,
     contentHtml: `
       <div style="${codeShellStyle()}">
-        <div style="${codeLabelStyle()}">Код подтверждения</div>
+        <div style="${codeLabelStyle()}">${copy.registration.codeLabel}</div>
         <div style="${codeValueStyle()}">${safeCode}</div>
       </div>
-      <p style="${contentParagraphStyle()}">Код действует <strong>${safeMinutes} минут</strong>.</p>
+      <p style="${contentParagraphStyle()}">${copy.registration.codeValidity(safeMinutes)}</p>
       <p style="margin:0 0 12px 0;">
-        <a href="${safeConfirmUrl}" style="${ctaButtonStyle()}">Подтвердить регистрацию</a>
+        <a href="${safeConfirmUrl}" style="${ctaButtonStyle()}">${copy.registration.cta}</a>
       </p>
-      <p style="${contentNoteStyle()}">Если кнопка не работает, откройте ссылку: <a href="${safeConfirmUrl}" style="${linkStyle()}">${safeConfirmUrl}</a></p>
-      <p style="${contentParagraphStyle('10px 0 0 0')}">Если вы не запрашивали регистрацию, просто проигнорируйте это письмо.</p>
+      <p style="${contentNoteStyle()}">${copy.registration.linkIntro} <a href="${safeConfirmUrl}" style="${linkStyle()}">${safeConfirmUrl}</a></p>
+      <p style="${contentParagraphStyle('10px 0 0 0')}">${copy.registration.notRequested}</p>
     `,
-    footer: 'Это автоматическое письмо. Отвечать на него не нужно.'
+    footer: copy.registration.footer
   });
 }
 
-function registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl }) {
+function registrationCodeTextTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl, locale }) {
+  const currentLocale = normalizeEmailLocale(locale);
+  const copy = getEmailCopy(currentLocale);
   const appName = String(appDisplayName || '').trim() || 'archimap';
   return [
-    `${appName}: код подтверждения регистрации`,
+    `${appName}: ${copy.registration.subject}`,
     '',
-    `Ваш код: ${String(code || '').trim()}`,
-    `Код действителен ${expiresInMinutes} минут.`,
-    `Подтверждение по ссылке: ${confirmUrl}`,
+    copy.registration.intro,
     '',
-    'Если вы не запрашивали регистрацию, проигнорируйте это письмо.'
+    `${copy.registration.textCodeLabel} ${String(code || '').trim()}`,
+    copy.registration.codeValidity(expiresInMinutes),
+    `${copy.registration.textLinkLabel} ${appendLocaleParam(confirmUrl, currentLocale)}`,
+    '',
+    copy.registration.notRequested
   ].join('\n');
 }
 

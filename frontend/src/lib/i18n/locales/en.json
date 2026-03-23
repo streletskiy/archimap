@@ -277,6 +277,58 @@
     "filterTagKeysEmpty": "No tag keys available yet.",
     "filterTagKeysLoadFailed": "Failed to load tag keys."
   },
+  "email": {
+    "registration": {
+      "subject": "registration confirmation code",
+      "title": "Confirm registration",
+      "pretitle": "Registration",
+      "intro": "Use the code below to finish creating your account.",
+      "codeLabel": "Confirmation code",
+      "textCodeLabel": "Your code:",
+      "codeValidity": "The code is valid for {minutes} minutes.",
+      "cta": "Confirm registration",
+      "linkIntro": "If the button does not work, open the link:",
+      "notRequested": "If you did not request registration, ignore this email.",
+      "footer": "This is an automated email. Please do not reply.",
+      "textLinkLabel": "Confirmation link:"
+    },
+    "passwordReset": {
+      "subject": "password reset",
+      "title": "Reset password",
+      "pretitle": "Recovery",
+      "intro": "Click the button below to choose a new password.",
+      "cta": "Reset password",
+      "linkIntro": "If the button does not work, open the link:",
+      "validity": "The link is valid for {minutes} minutes.",
+      "notRequested": "If you did not request a password reset, ignore this email.",
+      "footer": "This is an automated email. Please do not reply.",
+      "textLinkLabel": "Reset link:"
+    },
+    "smtpTest": {
+      "subject": "mail delivery test",
+      "title": "Mail delivery test",
+      "pretitle": "Check",
+      "intro": "This test message confirms that ArchiMap outbound email is working.",
+      "note": "This email was sent from the admin panel to verify SMTP settings.",
+      "ignore": "If you did not launch the test, you can ignore this email.",
+      "footer": "This is an automated diagnostic email. Please do not reply.",
+      "callout": "If you see this email, SMTP delivery is configured correctly for {email}.",
+      "detailLabels": {
+        "date": "Date",
+        "to": "To",
+        "from": "From",
+        "transport": "Transport",
+        "parameters": "Parameters",
+        "secure": "Secure"
+      },
+      "transportUrlLabel": "SMTP URL",
+      "transportHostPortLabel": "Host / Port",
+      "transportUrlValue": "Configuration is provided through SMTP URL",
+      "notProvided": "not provided",
+      "yes": "Yes",
+      "no": "No"
+    }
+  },
   "account": {
     "authRequiredTitle": "Sign in required",
     "authRequiredText": "To access the account page, sign in from the header.",

@@ -5,6 +5,11 @@ const {
   emailShell,
   escapeHtml
 } = require('./shell');
+const {
+  formatEmailDate,
+  getEmailCopy,
+  normalizeEmailLocale
+} = require('./localization');
 
 const DETAIL_BORDER = EMAIL_THEME.cardBorder;
 const DETAIL_LABEL_COLOR = EMAIL_THEME.textMuted;
@@ -44,70 +49,76 @@ function renderDetailRow(label, value, firstRow = false) {
   `;
 }
 
-function buildTransportLabel(smtp) {
-  return String(smtp?.url || '').trim() ? 'SMTP URL' : 'Host / Port';
+function buildTransportLabel(smtp, copy) {
+  return String(smtp?.url || '').trim() ? copy.smtpTest.transportUrlLabel : copy.smtpTest.transportHostPortLabel;
 }
 
-function buildTransportValue(smtp) {
+function buildTransportValue(smtp, copy) {
   if (String(smtp?.url || '').trim()) {
-    return 'Конфигурация передана через SMTP URL';
+    return copy.smtpTest.transportUrlValue;
   }
-  const host = String(smtp?.host || '').trim() || 'не указан';
-  const port = String(smtp?.port || '').trim() || 'не указан';
+  const host = String(smtp?.host || '').trim() || copy.smtpTest.notProvided;
+  const port = String(smtp?.port || '').trim() || copy.smtpTest.notProvided;
   return `${host}:${port}`;
 }
 
-function buildDetailRows({ smtp = {}, testEmail = '', sentAt = '' }) {
+function buildDetailRows({ smtp = {}, testEmail = '', sentAt = '', locale }) {
+  const copy = getEmailCopy(locale);
   const rows = [
-    ['Дата', sentAt || new Date().toISOString()],
-    ['Кому', testEmail || 'не указан'],
-    ['От кого', String(smtp?.from || smtp?.user || '').trim() || 'не указан'],
-    ['Транспорт', buildTransportLabel(smtp)],
-    ['Параметры', buildTransportValue(smtp)],
-    ['Secure', smtp?.secure ? 'true' : 'false']
+    [copy.smtpTest.detailLabels.date, formatEmailDate(sentAt, locale)],
+    [copy.smtpTest.detailLabels.to, testEmail || copy.smtpTest.notProvided],
+    [copy.smtpTest.detailLabels.from, String(smtp?.from || smtp?.user || '').trim() || copy.smtpTest.notProvided],
+    [copy.smtpTest.detailLabels.transport, buildTransportLabel(smtp, copy)],
+    [copy.smtpTest.detailLabels.parameters, buildTransportValue(smtp, copy)],
+    [copy.smtpTest.detailLabels.secure, smtp?.secure ? copy.smtpTest.yes : copy.smtpTest.no]
   ];
 
   return rows;
 }
 
-function smtpTestHtmlTemplate({ smtp, testEmail, sentAt, appDisplayName }) {
+function smtpTestHtmlTemplate({ smtp, testEmail, sentAt, appDisplayName, locale }) {
+  const currentLocale = normalizeEmailLocale(locale);
+  const copy = getEmailCopy(currentLocale);
   const appName = String(appDisplayName || '').trim() || 'archimap';
-  const safeDetails = buildDetailRows({ smtp, testEmail, sentAt })
+  const safeDetails = buildDetailRows({ smtp, testEmail, sentAt, locale: currentLocale })
     .map(([label, value], index) => renderDetailRow(label, value, index === 0))
     .join('');
-  const safeEmail = escapeHtml(String(testEmail || '').trim() || 'не указан');
+  const safeEmail = escapeHtml(String(testEmail || '').trim() || copy.smtpTest.notProvided);
 
   return emailShell({
-    title: 'Тест отправки почты',
-    pretitle: 'Проверка',
+    lang: currentLocale,
+    title: copy.smtpTest.title,
+    pretitle: copy.smtpTest.pretitle,
     brandName: appName,
-    intro: 'Это тестовое письмо подтверждает, что исходящая почта ArchiMap работает.',
+    intro: copy.smtpTest.intro,
     contentHtml: `
       <div style="${detailCalloutStyle()}">
-        <p style="${detailCalloutTextStyle()}">Если вы видите это письмо, SMTP доставка настроена корректно для адреса ${safeEmail}.</p>
+        <p style="${detailCalloutTextStyle()}">${copy.smtpTest.callout(safeEmail)}</p>
       </div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="${detailTableStyle()}">
         ${safeDetails}
       </table>
-      <p style="${contentParagraphStyle('16px 0 0 0')}">Письмо отправлено из админки для проверки SMTP настроек.</p>
-      <p style="${contentNoteStyle('8px 0 0 0')}">Если вы не запускали тест, это письмо можно проигнорировать.</p>
+      <p style="${contentParagraphStyle('16px 0 0 0')}">${copy.smtpTest.note}</p>
+      <p style="${contentNoteStyle('8px 0 0 0')}">${copy.smtpTest.ignore}</p>
     `,
-    footer: 'Это автоматическое диагностическое письмо. Отвечать на него не нужно.'
+    footer: copy.smtpTest.footer
   });
 }
 
-function smtpTestTextTemplate({ smtp, testEmail, sentAt, appDisplayName }) {
+function smtpTestTextTemplate({ smtp, testEmail, sentAt, appDisplayName, locale }) {
+  const currentLocale = normalizeEmailLocale(locale);
+  const copy = getEmailCopy(currentLocale);
   const appName = String(appDisplayName || '').trim() || 'archimap';
-  const rows = buildDetailRows({ smtp, testEmail, sentAt }).map(([label, value]) => `${label}: ${value}`);
+  const rows = buildDetailRows({ smtp, testEmail, sentAt, locale: currentLocale }).map(([label, value]) => `${label}: ${value}`);
   return [
-    `${appName}: тест отправки почты`,
+    `${appName}: ${copy.smtpTest.subject}`,
     '',
-    'Это тестовое письмо подтверждает, что исходящая почта ArchiMap работает.',
+    copy.smtpTest.intro,
     '',
     ...rows,
     '',
-    'Письмо отправлено из админки для проверки SMTP настроек.',
-    'Если вы не запускали тест, просто проигнорируйте письмо.'
+    copy.smtpTest.note,
+    copy.smtpTest.ignore
   ].join('\n');
 }
 

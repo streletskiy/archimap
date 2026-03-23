@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const adminSettingsServicePath = require.resolve('../../src/lib/server/services/admin/admin-settings.service');
 const smtpTransportServicePath = require.resolve('../../src/lib/server/services/smtp-transport.service');
 
-test('buildEmailPreviewPayload includes the SMTP test template', async () => {
+test('buildEmailPreviewPayload includes the SMTP test template in the requested locale', async () => {
   const { createAdminSettingsService } = require(adminSettingsServicePath);
   const service = createAdminSettingsService({
     appDisplayName: 'ArchiMap',
@@ -13,10 +13,13 @@ test('buildEmailPreviewPayload includes the SMTP test template', async () => {
     passwordResetTtlMinutes: 20
   });
 
-  const payload = await service.buildEmailPreviewPayload();
+  const payload = await service.buildEmailPreviewPayload({ locale: 'ru' });
 
   assert.equal(payload.appDisplayName, 'ArchiMap');
   assert.ok(payload.templates.smtpTest);
+  assert.match(payload.templates.registration.html, /<html lang="ru">/);
+  assert.match(payload.templates.registration.text, /Ваш код:/);
+  assert.match(payload.templates.registration.text, /lang=ru/);
   assert.match(payload.templates.smtpTest.html, /Тест отправки почты/);
   assert.match(payload.templates.smtpTest.html, /smtp-relay\.example\.com/);
   assert.match(payload.templates.smtpTest.html, /admin@example\.test/);
@@ -89,14 +92,17 @@ test('sendSmtpTest sends html and text content', async (t) => {
       pass: 'smtp-pass',
       from: 'ArchiMap <no-reply@example.com>'
     },
-    testEmail: 'admin@example.test'
+    testEmail: 'admin@example.test',
+    locale: 'en'
   });
 
   assert.equal(result.ok, true);
   assert.ok(capturedMailOptions);
   assert.equal(capturedMailOptions.to, 'admin@example.test');
-  assert.match(capturedMailOptions.html, /Тест отправки почты/);
+  assert.match(capturedMailOptions.subject, /SMTP test|mail delivery test/);
+  assert.match(capturedMailOptions.html, /Mail delivery test/);
+  assert.match(capturedMailOptions.html, /<html lang="en">/);
   assert.match(capturedMailOptions.html, /background-color:#f6f4ef/);
-  assert.match(capturedMailOptions.text, /ArchiMap: тест отправки почты/);
+  assert.match(capturedMailOptions.text, /ArchiMap: mail delivery test/);
   assert.match(capturedMailOptions.text, /smtp-relay\.example\.com:587/);
 });

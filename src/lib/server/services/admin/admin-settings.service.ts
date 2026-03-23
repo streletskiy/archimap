@@ -8,6 +8,11 @@ const {
   smtpTestTextTemplate: defaultSmtpTestTextTemplate
 } = require('../../email-templates');
 const {
+  appendLocaleParam,
+  getEmailCopy,
+  resolveEmailLocale
+} = require('../../email-templates/localization');
+const {
   createAdminError,
   isLikelyEmail,
   parseRegionId,
@@ -55,19 +60,21 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     return dataSettingsService;
   }
 
-  async function buildEmailPreviewPayload() {
+  async function buildEmailPreviewPayload({ locale } = {}) {
     const currentAppDisplayName = resolveAppDisplayName(options);
     const currentAppBaseUrl = resolveAppBaseUrl(options);
+    const currentLocale = resolveEmailLocale({ locale });
+    const copy = getEmailCopy(currentLocale);
     const generatedAt = new Date().toISOString();
     const sample = {
       registration: {
         code: '583401',
         expiresInMinutes: registrationCodeTtlMinutes,
-        confirmUrl: `${currentAppBaseUrl || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`
+        confirmUrl: appendLocaleParam(`${currentAppBaseUrl || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`, currentLocale)
       },
       passwordReset: {
         expiresInMinutes: passwordResetTtlMinutes,
-        resetUrl: `${currentAppBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`
+        resetUrl: appendLocaleParam(`${currentAppBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`, currentLocale)
       },
       smtpTest: {
         testEmail: 'admin@example.test',
@@ -82,48 +89,54 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     };
 
     const registration = {
-      subject: `${currentAppDisplayName}: код подтверждения регистрации`,
+      subject: `${currentAppDisplayName}: ${copy.registration.subject}`,
       html: registrationCodeHtmlTemplate({
         code: sample.registration.code,
         expiresInMinutes: sample.registration.expiresInMinutes,
         appDisplayName: currentAppDisplayName,
-        confirmUrl: sample.registration.confirmUrl
+        confirmUrl: sample.registration.confirmUrl,
+        locale: currentLocale
       }),
       text: registrationCodeTextTemplate({
         code: sample.registration.code,
         expiresInMinutes: sample.registration.expiresInMinutes,
         appDisplayName: currentAppDisplayName,
-        confirmUrl: sample.registration.confirmUrl
+        confirmUrl: sample.registration.confirmUrl,
+        locale: currentLocale
       })
     };
 
     const passwordReset = {
-      subject: `${currentAppDisplayName}: сброс пароля`,
+      subject: `${currentAppDisplayName}: ${copy.passwordReset.subject}`,
       html: passwordResetHtmlTemplate({
         resetUrl: sample.passwordReset.resetUrl,
         expiresInMinutes: sample.passwordReset.expiresInMinutes,
-        appDisplayName: currentAppDisplayName
+        appDisplayName: currentAppDisplayName,
+        locale: currentLocale
       }),
       text: passwordResetTextTemplate({
         resetUrl: sample.passwordReset.resetUrl,
         expiresInMinutes: sample.passwordReset.expiresInMinutes,
-        appDisplayName: currentAppDisplayName
+        appDisplayName: currentAppDisplayName,
+        locale: currentLocale
       })
     };
 
     const smtpTest = {
-      subject: `${currentAppDisplayName}: SMTP test`,
+      subject: `${currentAppDisplayName}: ${copy.smtpTest.subject}`,
       html: smtpTestHtmlTemplate({
         smtp: sample.smtpTest.smtp,
         testEmail: sample.smtpTest.testEmail,
         sentAt: sample.smtpTest.sentAt,
-        appDisplayName: currentAppDisplayName
+        appDisplayName: currentAppDisplayName,
+        locale: currentLocale
       }),
       text: smtpTestTextTemplate({
         smtp: sample.smtpTest.smtp,
         testEmail: sample.smtpTest.testEmail,
         sentAt: sample.smtpTest.sentAt,
-        appDisplayName: currentAppDisplayName
+        appDisplayName: currentAppDisplayName,
+        locale: currentLocale
       })
     };
 
@@ -162,7 +175,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     return saved;
   }
 
-  async function sendSmtpTest({ smtp, testEmail }: LooseRecord = {}) {
+  async function sendSmtpTest({ smtp, testEmail, locale }: LooseRecord = {}) {
     const effectiveTestEmail = String(testEmail || '').trim().toLowerCase();
     if (!isLikelyEmail(effectiveTestEmail)) {
       throw createAdminError(400, 'Provide a valid email for the test message');
@@ -176,19 +189,23 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     }
 
     const effectiveAppDisplayName = resolveAppDisplayName(options);
-    const subject = `${effectiveAppDisplayName}: SMTP test`;
+    const currentLocale = resolveEmailLocale({ locale });
+    const copy = getEmailCopy(currentLocale);
+    const subject = `${effectiveAppDisplayName}: ${copy.smtpTest.subject}`;
     const sentAt = new Date().toISOString();
     const text = smtpTestTextTemplate({
       smtp: candidate,
       testEmail: effectiveTestEmail,
       sentAt,
-      appDisplayName: effectiveAppDisplayName
+      appDisplayName: effectiveAppDisplayName,
+      locale: currentLocale
     });
     const html = smtpTestHtmlTemplate({
       smtp: candidate,
       testEmail: effectiveTestEmail,
       sentAt,
-      appDisplayName: effectiveAppDisplayName
+      appDisplayName: effectiveAppDisplayName,
+      locale: currentLocale
     });
 
     if (!candidate.url && (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from)) {

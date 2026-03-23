@@ -95,7 +95,8 @@
 
 - Core runtime: `frontend/src/lib/i18n/index.ts`.
 - Locale config: `frontend/src/lib/i18n/config.ts`.
-- Locales: `frontend/src/lib/i18n/locales/en.tson`, `frontend/src/lib/i18n/locales/ru.tson`.
+- Locales: `frontend/src/lib/i18n/locales/en.json`, `frontend/src/lib/i18n/locales/ru.json`.
+- Transactional email copy is loaded from the same locale JSON files under `email.*` by `src/lib/server/email-templates/localization.ts`.
 - Locale storage: cookie `archimap_locale`.
 - Fallback policy: missing key in active locale falls back to `en`; in dev missing keys are logged.
 

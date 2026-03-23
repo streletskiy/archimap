@@ -6,38 +6,49 @@ const {
   escapeHtml,
   linkStyle
 } = require('./shell');
+const {
+  appendLocaleParam,
+  getEmailCopy,
+  normalizeEmailLocale
+} = require('./localization');
 
-function passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName }) {
-  const safeResetUrl = escapeHtml(resetUrl);
+function passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName, locale }) {
+  const currentLocale = normalizeEmailLocale(locale);
+  const copy = getEmailCopy(currentLocale);
+  const safeResetUrl = escapeHtml(appendLocaleParam(resetUrl, currentLocale));
   const safeMinutes = escapeHtml(expiresInMinutes);
   const appName = String(appDisplayName || '').trim() || 'archimap';
 
   return emailShell({
-    title: 'Сброс пароля',
-    pretitle: 'Восстановление',
+    lang: currentLocale,
+    title: copy.passwordReset.title,
+    pretitle: copy.passwordReset.pretitle,
     brandName: appName,
-    intro: 'Нажмите кнопку ниже, чтобы задать новый пароль.',
+    intro: copy.passwordReset.intro,
     contentHtml: `
       <p style="margin:0 0 12px 0;">
-        <a href="${safeResetUrl}" style="${ctaButtonStyle()}">Сбросить пароль</a>
+        <a href="${safeResetUrl}" style="${ctaButtonStyle()}">${copy.passwordReset.cta}</a>
       </p>
-      <p style="${contentParagraphStyle()}">Ссылка действует <strong>${safeMinutes} минут</strong>.</p>
-      <p style="${contentNoteStyle()}">Если кнопка не работает, откройте ссылку: <a href="${safeResetUrl}" style="${linkStyle()}">${safeResetUrl}</a></p>
-      <p style="${contentParagraphStyle('10px 0 0 0')}">Если вы не запрашивали сброс пароля, просто проигнорируйте письмо.</p>
+      <p style="${contentParagraphStyle()}">${copy.passwordReset.validity(safeMinutes)}</p>
+      <p style="${contentNoteStyle()}">${copy.passwordReset.linkIntro} <a href="${safeResetUrl}" style="${linkStyle()}">${safeResetUrl}</a></p>
+      <p style="${contentParagraphStyle('10px 0 0 0')}">${copy.passwordReset.notRequested}</p>
     `,
-    footer: 'Это автоматическое письмо. Отвечать на него не нужно.'
+    footer: copy.passwordReset.footer
   });
 }
 
-function passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName }) {
+function passwordResetTextTemplate({ resetUrl, expiresInMinutes, appDisplayName, locale }) {
+  const currentLocale = normalizeEmailLocale(locale);
+  const copy = getEmailCopy(currentLocale);
   const appName = String(appDisplayName || '').trim() || 'archimap';
   return [
-    `${appName}: сброс пароля`,
+    `${appName}: ${copy.passwordReset.subject}`,
     '',
-    `Откройте ссылку, чтобы задать новый пароль: ${resetUrl}`,
-    `Ссылка действительна ${expiresInMinutes} минут.`,
+    copy.passwordReset.intro,
+    `${copy.passwordReset.textLinkLabel} ${appendLocaleParam(resetUrl, currentLocale)}`,
+    copy.passwordReset.validity(expiresInMinutes),
     '',
-    'Если вы не запрашивали сброс пароля, проигнорируйте письмо.'
+    copy.passwordReset.notRequested
   ].join('\n');
 }
 
