@@ -23,7 +23,6 @@
   },
   "include": [
     "types/**/*.d.ts",
-    "commitlint.config.ts",
     "drizzle.config.ts",
     "playwright.config.ts",
     "server.ts",
