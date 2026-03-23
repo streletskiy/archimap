@@ -62,15 +62,16 @@
   let maplibregl = null;
   let protocol = null;
   let themeObserver = null;
-  let lastSelectedKey = null;
-  let lastSearchFitSeq = 0;
-  let lastMapFocusRequestId = null;
+  let lastSelectedKey;
+  let lastSearchFitSeq;
+  let searchFitSeqInitialized = false;
+  let lastMapFocusRequestId;
   let currentMapStyleUrl = LIGHT_MAP_STYLE_URL;
   let runtimeConfig = null;
   let styleTransitionOverlaySrc = null;
   let styleTransitionOverlayVisible = false;
   let styleTransitionTimer = null;
-  let filterStatusOverlayText = '';
+  let filterStatusOverlayText;
   let cameraStoreSyncEnabled = false;
 
   beforeNavigate((navigation) => {
@@ -291,6 +292,7 @@
   $: if (map && !$selectedBuilding) {
     lastSelectedKey = null;
     selectionController.clearSelectedFeature();
+    void lastSelectedKey;
   }
 
   $: if (map && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
@@ -299,6 +301,7 @@
       lastSelectedKey = key;
       selectionController.applySelectionFromStore($selectedBuilding);
     }
+    void lastSelectedKey;
   }
 
   $: if (map && $mapReadyStore) {
@@ -310,9 +313,19 @@
     updateSearchMarkers($searchMapState.items);
   }
 
-  $: if (map && $searchState.fitSeq !== lastSearchFitSeq) {
-    lastSearchFitSeq = $searchState.fitSeq;
-    fitMapToSearchResults($searchState.items);
+  $: if (map) {
+    if (!searchFitSeqInitialized) {
+      searchFitSeqInitialized = true;
+      lastSearchFitSeq = $searchState.fitSeq;
+      if (lastSearchFitSeq) {
+        fitMapToSearchResults($searchState.items);
+      }
+    } else if ($searchState.fitSeq !== lastSearchFitSeq) {
+      lastSearchFitSeq = $searchState.fitSeq;
+      fitMapToSearchResults($searchState.items);
+    }
+    void searchFitSeqInitialized;
+    void lastSearchFitSeq;
   }
 
   $: if (map && $mapFocusRequest && $mapFocusRequest.id !== lastMapFocusRequestId) {
@@ -325,6 +338,7 @@
       duration: Number($mapFocusRequest.duration || 420),
       essential: true
     });
+    void lastMapFocusRequestId;
   }
 
   $: if (map) {

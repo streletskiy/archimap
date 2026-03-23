@@ -4,7 +4,6 @@
   import { UiButton, UiInput } from '$lib/components/base';
   import LoginForm from '$lib/components/login-form.svelte';
   import SignupForm from '$lib/components/signup-form.svelte';
-  import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
   import { setSession } from '$lib/stores/auth';
@@ -37,10 +36,10 @@
   let resetMode = false;
   let handledRegisterToken = '';
   let handledResetToken = '';
-  let lastHandledRequestId = 0;
+  let lastHandledRequestId;
   let modalEl = null;
-  let hadOpenState = false;
-  let authModalWidthClass = 'auth-modal w-full max-w-sm md:max-w-4xl';
+  let hadOpenState;
+  let authModalWidthClass;
 
   $: if (requestId && requestId !== lastHandledRequestId) {
     lastHandledRequestId = requestId;
@@ -52,6 +51,7 @@
     status = '';
     open = true;
   }
+  $: void lastHandledRequestId;
 
   $: {
     const registerTokenFromQuery = $page.url.searchParams.get('registerToken');
@@ -268,10 +268,13 @@
   } else if (!open && hadOpenState) {
     hadOpenState = false;
   }
+  $: void hadOpenState;
 
-  $: authModalWidthClass = registerPendingEmail || resetMode
-    ? 'auth-modal w-full max-w-sm md:max-w-3xl'
-    : 'auth-modal w-full max-w-sm md:max-w-4xl';
+  $: authModalWidthClass = registerPendingEmail
+    ? 'auth-modal w-full max-w-sm md:max-w-4xl'
+    : resetMode
+      ? 'auth-modal w-full max-w-sm md:max-w-3xl'
+      : 'auth-modal w-full max-w-sm md:max-w-4xl';
 </script>
 
 {#if open}
@@ -293,24 +296,12 @@
       tabindex="-1"
       on:keydown={closeOnKeydown}
     >
-      {#if registerPendingEmail || resetMode}
-        <UiButton
-          type="button"
-          variant="secondary"
-          size="close"
-          className="auth-modal-close"
-          onclick={closeAuth}
-          aria-label={$t('common.close')}
-        >
-          <CloseIcon class="ui-close-icon" />
-        </UiButton>
-      {/if}
-
       {#if registerPendingEmail}
         <AuthCardShell
           title={$t('header.confirmRegistration')}
           subtitle={$t('header.authConfirmSubtitle')}
           bodyClassName="grid content-center"
+          onclose={closeAuth}
         >
           <h2 id="auth-modal-title" class="sr-only">{$t('header.confirmRegistration')}</h2>
           <form class="auth-stage-form" on:submit={submitRegisterConfirm}>
@@ -332,6 +323,7 @@
           title={$t('header.changePassword')}
           subtitle={$t('header.authResetSubtitle')}
           bodyClassName="grid content-center"
+          onclose={closeAuth}
         >
           <h2 id="auth-modal-title" class="sr-only">{$t('header.changePassword')}</h2>
           <div class="auth-stage-stack">
@@ -420,8 +412,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    background: rgba(8, 17, 31, 0.44);
-    backdrop-filter: blur(10px);
+    background: rgba(8, 17, 31, 0.72);
     pointer-events: auto;
   }
 
@@ -437,13 +428,6 @@
     position: relative;
     z-index: 1;
     pointer-events: auto;
-  }
-
-  .auth-modal-close {
-    position: absolute;
-    top: 0.75rem;
-    right: 0.75rem;
-    z-index: 5;
   }
 
   .auth-stage-stack,
@@ -474,18 +458,10 @@
     padding: 0.8rem 0.95rem;
     border-radius: 1rem;
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
     color: var(--muted-strong);
     font-size: 0.85rem;
     line-height: 1.45;
-    backdrop-filter: blur(16px);
-  }
-
-  @media (min-width: 768px) {
-    .auth-modal-close {
-      top: 1rem;
-      right: 1rem;
-    }
   }
 
   @media (max-width: 767px) {

@@ -18,7 +18,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-6">
+<div class="flex flex-col gap-4">
   <UiCard className="relative overflow-hidden border-0 p-0 shadow-[0_28px_60px_rgba(8,17,31,0.24)]">
     <UiButton
       type="button"
@@ -32,57 +32,64 @@
     </UiButton>
 
     <div class="grid p-0 md:min-h-[35rem] md:grid-cols-2">
-      <form class="auth-form-pane" on:submit={handleSubmit}>
-        <div class="auth-form-stack">
-          <div class="auth-form-copy">
-            <h1 class="text-2xl font-bold">{$t('header.tabLogin')}</h1>
-            <p class="text-muted-foreground text-balance">{$t('header.authLoginSubtitle')}</p>
+      <form class="flex h-full flex-col justify-center p-6 md:p-8" on:submit={handleSubmit}>
+        <div class="grid gap-6">
+          <!-- Header -->
+          <div class="grid gap-1.5 text-center">
+            <h1 class="m-0 text-2xl font-bold">{$t('header.tabLogin')}</h1>
+            <p class="m-0 text-sm text-muted-foreground text-balance">{$t('header.authLoginSubtitle')}</p>
           </div>
 
-          <div class="auth-form-field">
-            <UiLabel for="auth-login-email">{$t('header.email')}</UiLabel>
-            <UiInput
-              id="auth-login-email"
-              type="email"
-              bind:value={email}
-              placeholder="m@example.com"
-              autocomplete="email"
-              required
-            />
+          <!-- Fields -->
+          <div class="grid gap-4">
+            <div class="grid gap-1.5">
+              <UiLabel for="auth-login-email">{$t('header.email')}</UiLabel>
+              <UiInput
+                id="auth-login-email"
+                type="email"
+                bind:value={email}
+                placeholder="m@example.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <div class="grid gap-1.5">
+              <div class="flex items-baseline justify-between gap-2">
+                <UiLabel for="auth-login-password">{$t('header.password')}</UiLabel>
+                <button
+                  type="button"
+                  class="auth-link-inline"
+                  on:click={() => onforgot?.()}
+                >
+                  {$t('header.forgotPassword')}
+                </button>
+              </div>
+              <UiInput
+                id="auth-login-password"
+                type="password"
+                bind:value={password}
+                autocomplete="current-password"
+                required
+              />
+            </div>
           </div>
 
-          <div class="auth-form-field">
-            <div class="auth-form-field-head">
-              <UiLabel for="auth-login-password">{$t('header.password')}</UiLabel>
+          <!-- Actions -->
+          <div class="grid gap-3">
+            <UiButton type="submit" className="w-full">{$t('header.login')}</UiButton>
+
+            <p class="m-0 text-center text-sm ui-text-muted">
+              {$t('header.authNoAccount')}
               <button
                 type="button"
-                class="auth-inline-link"
-                on:click={() => onforgot?.()}
+                class="auth-link-inline font-bold ui-text-emphasis"
+                on:click={() => onswitch?.()}
               >
-                {$t('header.forgotPassword')}
+                {$t('header.tabRegister')}
               </button>
-            </div>
-            <UiInput
-              id="auth-login-password"
-              type="password"
-              bind:value={password}
-              autocomplete="current-password"
-              required
-            />
+            </p>
           </div>
-
-          <UiButton type="submit" className="w-full">{$t('header.login')}</UiButton>
-
-          <p class="auth-footer-note">
-            {$t('header.authNoAccount')}
-            <button
-              type="button"
-              class="auth-inline-link auth-inline-link--strong"
-              on:click={() => onswitch?.()}
-            >
-              {$t('header.tabRegister')}
-            </button>
-          </p>
         </div>
       </form>
 
@@ -90,93 +97,28 @@
     </div>
   </UiCard>
 
-  <p class="auth-legal-note px-6 text-center text-sm">
+  <p class="auth-legal-note m-0 px-8 text-center text-xs ui-text-muted text-balance">
     {$t('header.authLegalPrefix')}
-    <a class="auth-legal-link" href={termsHref} target="_blank" rel="noopener noreferrer">
+    <a class="font-semibold underline underline-offset-2 ui-text-emphasis" href={termsHref} target="_blank" rel="noopener noreferrer">
       {$t('header.termsLink')}
     </a>
     {$t('header.authLegalAnd')}
-    <a class="auth-legal-link" href={privacyHref} target="_blank" rel="noopener noreferrer">
+    <a class="font-semibold underline underline-offset-2 ui-text-emphasis" href={privacyHref} target="_blank" rel="noopener noreferrer">
       {$t('header.privacyLink')}
     </a>.
   </p>
 </div>
 
 <style>
-  .auth-form-pane {
-    display: flex;
-    height: 100%;
-    flex-direction: column;
-    justify-content: center;
-    padding: 1.5rem;
-  }
-
-  .auth-form-stack {
-    display: grid;
-    gap: 1.25rem;
-  }
-
-  .auth-form-copy {
-    display: grid;
-    gap: 0.5rem;
-    text-align: center;
-  }
-
-  .auth-form-copy h1,
-  .auth-footer-note {
-    margin: 0;
-  }
-
-  .auth-form-field {
-    display: grid;
-    gap: 0.5rem;
-  }
-
-  .auth-form-field-head {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-
-  .auth-form-field-head :global(.ui-label) {
-    min-width: 0;
-  }
-
-  .auth-inline-link {
-    margin-left: auto;
+  .auth-link-inline {
+    cursor: pointer;
     border: 0;
-    padding: 0;
     background: transparent;
-    color: var(--muted-strong);
-    font-size: 0.875rem;
+    padding: 0;
+    font-size: 0.8125rem;
     font-weight: 600;
+    line-height: 1.2;
     text-decoration: underline;
     text-underline-offset: 2px;
-    cursor: pointer;
-  }
-
-  .auth-inline-link--strong {
-    margin-left: 0.35rem;
-    color: var(--fg-strong);
-    font-weight: 700;
-  }
-
-  .auth-footer-note {
-    text-align: center;
-    font-size: 0.875rem;
-    color: var(--muted);
-  }
-
-  .auth-legal-link {
-    color: var(--fg-strong);
-    font-weight: 600;
-    text-decoration: underline;
-    text-underline-offset: 0.18em;
-  }
-
-  @media (min-width: 768px) {
-    .auth-form-pane {
-      padding: 2rem;
-    }
   }
 </style>

@@ -27,13 +27,14 @@ Reference: [`Dockerfile`](../../Dockerfile)
 4. `frontend-build`
 
 - Generates version metadata and builds frontend bundle from committed frontend assets.
-- Depends on frontend sources, not on backend dependency install layer.
+- Installs the backend production dependency tree in the build-platform stage so `scripts/generate-version.ts` uses a matching native `esbuild` binary.
+- Does not reuse the runtime `deps` layer.
 
 5. `runtime`
 
 - Uses pinned `node:20-bookworm-slim`.
 - Contains only runtime assets:
-  - backend runtime code (`server.sveltekit.js`, `server.js`, `src/`, `scripts/`, `workers/`)
+  - backend runtime code (`server.sveltekit.ts`, `server.ts`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`
   - production `node_modules`
   - python venv with `quackosm`/`duckdb`
@@ -116,7 +117,7 @@ Docker downloads only changed layers during pull.
 
 ## PostgreSQL + PostGIS (default in Compose)
 
-`docker-compose.yml` now starts `db-postgres` by default.
+`docker-compose.yml` starts `db-postgres` by default.
 
 ```bash
 docker compose up -d

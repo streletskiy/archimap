@@ -14,9 +14,9 @@
   export let onchange = undefined;
   const dispatch = createEventDispatcher();
   let normalizedItems = [];
-  let selectItems = [];
+  let selectItems;
   let selectedKey = '';
-  let selectedItem = null;
+  let selectedItem;
 
   function serializeValue(nextValue) {
     return nextValue === null || nextValue === undefined ? '' : JSON.stringify(nextValue);

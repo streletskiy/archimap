@@ -14,11 +14,16 @@
    - `npm run start`
 5. Recommended verification after changes:
    - `npm run lint`
+   - `npm run typecheck`
    - `npm run frontend:check`
    - `npm run frontend:build` for frontend-only or shared UI changes
    - `npm test`
    - `npm run test:e2e` for UI-impacting changes
    - `npm run test:integration:postgres` when validating PostgreSQL-specific behavior with `DATABASE_URL`
+
+   Frontend bootstrap note:
+   - `frontend/src/bootstrap/svelte.config.ts` is compiled into `frontend/svelte.config.js` by the frontend `generate:bootstrap` step.
+   - `frontend/src/theme-init.ts` is compiled into `frontend/static/theme-init.js` by the frontend `generate:bootstrap` step.
 
 For frontend work, read [UI Architecture](../ui-architecture.md) before changing shared controls, app-level styling, dialogs, filters, or route shells.
 

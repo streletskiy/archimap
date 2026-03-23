@@ -3,7 +3,7 @@
 ## HTTP behavior
 
 - Endpoint: `GET /api/data/regions/:regionId/pmtiles`.
-- Implementation: `src/lib/server/infra/pmtiles-stream.infra.js`.
+- Implementation: `src/lib/server/infra/pmtiles-stream.infra.ts`.
 - Uses `fs.createReadStream` with explicit byte window.
 - The regional archive contains both normal buildings and pure `building:part` features; the client splits them with the `feature_kind` property instead of fetching a second archive. If `building` is also present, the feature is treated as a normal building.
 
@@ -19,4 +19,4 @@
 ## CDN compatibility notes
 
 - Byte-range and validators are CDN-friendly.
-- Keep region URLs stable by addressing PMTiles through `regionId`; the on-disk file may still use the current region slug.
+- Keep region URLs stable by addressing PMTiles through `regionId`; the on-disk file may use the current region slug.
