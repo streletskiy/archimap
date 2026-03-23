@@ -412,8 +412,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    background: rgba(8, 17, 31, 0.44);
-    backdrop-filter: blur(10px);
+    background: rgba(8, 17, 31, 0.72);
     pointer-events: auto;
   }
 
@@ -459,11 +458,10 @@
     padding: 0.8rem 0.95rem;
     border-radius: 1rem;
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
     color: var(--muted-strong);
     font-size: 0.85rem;
     line-height: 1.45;
-    backdrop-filter: blur(16px);
   }
 
   @media (max-width: 767px) {

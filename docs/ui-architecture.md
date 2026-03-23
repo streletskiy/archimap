@@ -43,6 +43,7 @@ The goal of this stack is not to redesign ArchiMap around upstream demos. The go
 - Keep light and dark themes compatible with the existing `html[data-theme='light|dark']` model.
 - Shared control visuals should be expressed through semantic classes such as `ui-button`, `ui-input`, `ui-select-trigger`, `ui-tabs-trigger`, `ui-table-*`, `ui-switch`, and `ui-label`.
 - Use local utilities for one-off layout adjustments. Use semantic classes when the pattern is shared or repeated.
+- Shared surfaces should stay opaque. Avoid `backdrop-filter`, frosted translucency, and glassmorphism-style panel treatments in product UI.
 
 ## Base Components
 
@@ -146,7 +147,7 @@ When a new control is needed:
 
 - Login and registration reuse the current `shadcn-svelte` block structure derived from `login-04` and `signup-04`.
 - Auth mode switches must not change modal width or visual-pane dimensions.
-- The right-side visual keeps the project-specific blurred map treatment rather than upstream demo art.
+- The right-side visual keeps the project-specific architectural/map illustration treatment rather than upstream demo art.
 - Registration uses a single footer legal note and standard required-field markers instead of per-field `required/optional` labels and inline consent checkboxes.
 - Guest navigation exposes a single combined auth action: `Sign in / Register`.
 

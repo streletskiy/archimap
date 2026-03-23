@@ -50,7 +50,7 @@
     padding: 0.25rem 0.35rem 0.25rem 0.95rem;
     border: 1px solid var(--panel-border);
     border-radius: 999px;
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
     color: var(--muted);
   }
 

@@ -170,7 +170,7 @@
     padding: 1.2rem 1.25rem;
     border: 1px solid var(--panel-border);
     border-radius: 1.35rem;
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
     box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
   }
 
@@ -231,19 +231,19 @@
     margin: 0.7rem 0;
     padding: 0.55rem 0.7rem;
     border-left: 3px solid var(--panel-border-strong);
-    background: color-mix(in srgb, var(--panel-solid) 80%, transparent);
+    background: var(--panel-solid);
     border-radius: 0.45rem;
   }
 
   .legal-markdown :global(code) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     padding: 0.08rem 0.3rem;
     border-radius: 0.35rem;
   }
 
   .legal-markdown :global(pre) {
-    background: color-mix(in srgb, var(--panel-solid) 80%, transparent);
+    background: var(--panel-solid);
     border: 1px solid var(--panel-border);
     border-radius: 0.7rem;
     padding: 0.7rem;
@@ -294,17 +294,17 @@
 
   :global(html[data-theme='dark']) .legal-markdown :global(blockquote) {
     border-left-color: var(--panel-border-strong);
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     color: var(--fg);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(code) {
-    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    background: var(--panel-solid);
     color: var(--fg-strong);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(pre) {
-    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    background: var(--panel-solid);
     border-color: var(--panel-border);
     color: var(--fg-strong);
   }

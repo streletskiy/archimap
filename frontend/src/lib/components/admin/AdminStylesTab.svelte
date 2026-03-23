@@ -714,19 +714,19 @@
   .style-style-card,
   .style-editor-card {
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-soft);
   }
 
   .style-editor-dialog-surface {
-    background: color-mix(in srgb, var(--panel-solid) 96%, transparent);
+    background: var(--panel-solid);
   }
 
   .style-override-inline-card,
   .style-preview-pill {
     border: 1px solid var(--panel-border);
     border-radius: 0.95rem;
-    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    background: var(--panel-solid);
   }
 
   .style-override-inline-card {

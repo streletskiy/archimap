@@ -353,9 +353,8 @@
     gap: 0.8rem;
     border: 1px solid var(--panel-border);
     border-radius: 1.2rem;
-    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(18px);
     pointer-events: auto;
     z-index: 2;
   }
@@ -391,15 +390,15 @@
 
   .filter-runtime[data-filter-runtime-status='too_many_matches'],
   .filter-runtime[data-filter-runtime-status='truncated'] {
-    border-color: rgba(245, 158, 11, 0.42);
-    background: rgba(245, 158, 11, 0.12);
-    color: #9a3412;
+    border-color: var(--ui-map-filter-warning-border);
+    background: var(--ui-map-filter-warning-bg);
+    color: var(--ui-map-filter-warning-text);
   }
 
   .filter-runtime[data-filter-runtime-status='invalid'] {
-    border-color: rgba(225, 29, 72, 0.3);
-    background: rgba(225, 29, 72, 0.1);
-    color: #9f1239;
+    border-color: var(--ui-map-filter-danger-border);
+    background: var(--ui-map-filter-danger-bg);
+    color: var(--ui-map-filter-danger-text);
   }
 
   .filter-preview-list,
@@ -412,7 +411,7 @@
 
   .layer-pill {
     border-left: 0.26rem solid var(--layer-color, var(--accent));
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
   }
 
   .preset-section {

@@ -278,7 +278,7 @@
                   {#if entry.item.style}
                     <UiBadge
                       variant="default"
-                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:color-mix(in_srgb,var(--panel-solid)_76%,transparent)] [color:var(--muted-strong)]"
+                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:var(--panel-solid)] [color:var(--muted-strong)]"
                     >
                       <strong class="[color:var(--fg-strong)]">{$t('search.style')}</strong>
                       {toHumanArchitectureStyle(entry.item.style, $locale) || entry.item.style}
@@ -288,7 +288,7 @@
                   {#if entry.item.architect}
                     <UiBadge
                       variant="default"
-                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:color-mix(in_srgb,var(--panel-solid)_76%,transparent)] [color:var(--muted-strong)]"
+                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:var(--panel-solid)] [color:var(--muted-strong)]"
                     >
                       <strong class="[color:var(--fg-strong)]">{$t('search.architect')}</strong>
                       {entry.item.architect}
@@ -355,7 +355,7 @@
     padding: 0.95rem 1rem 1rem;
     border: 1px solid var(--panel-border);
     border-radius: 1.35rem;
-    background: color-mix(in srgb, var(--panel-solid) 96%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-panel);
     overscroll-behavior: contain;
   }
@@ -393,7 +393,7 @@
     padding: 0 0.3rem 0 0.9rem;
     border: 1px solid var(--panel-border);
     border-radius: 999px;
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
     color: var(--muted);
   }
 
@@ -454,7 +454,7 @@
     padding: 0.85rem 0.95rem;
     border: 1px solid var(--panel-border);
     border-radius: 1.1rem;
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
     cursor: pointer;
     transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
@@ -517,7 +517,7 @@
     padding: 1rem;
     border-radius: 1rem;
     border: 1px dashed var(--panel-border-strong);
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     color: var(--muted);
     font-size: 0.88rem;
   }

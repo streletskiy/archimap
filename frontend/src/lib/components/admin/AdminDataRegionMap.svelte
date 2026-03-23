@@ -749,7 +749,7 @@
 <style>
   .data-map-card {
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-soft);
   }
 
