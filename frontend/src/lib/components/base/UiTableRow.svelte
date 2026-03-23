@@ -3,8 +3,9 @@
   import { cn } from '$lib/utils/ui.js';
 
   export let className = '';
+  export let onclick = undefined;
 </script>
 
-<PrimitiveTableRow class={cn(className)} {...$$restProps}>
+<PrimitiveTableRow class={cn(className)} {onclick} {...$$restProps}>
   <slot />
 </PrimitiveTableRow>

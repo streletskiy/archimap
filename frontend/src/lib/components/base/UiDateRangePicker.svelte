@@ -114,7 +114,7 @@
         calendarLabel={calendarLabel || placeholder}
         weekdayFormat="short"
         fixedWeeks
-        class="rounded-[0.95rem] border p-2 shadow-none [border-color:var(--panel-border)] [background:color-mix(in_srgb,var(--panel-solid)_96%,transparent)]"
+        class="rounded-[0.95rem] border p-2 shadow-none [border-color:var(--panel-border)] [background:var(--panel-solid)]"
       />
     </div>
   {/if}

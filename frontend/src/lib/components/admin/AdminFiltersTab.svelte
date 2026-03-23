@@ -128,7 +128,7 @@
         </p>
       {:else}
         <UiScrollArea
-          className="max-h-[20rem] rounded-xl border ui-border ui-surface-base p-3"
+          className="ui-scroll-surface max-h-[20rem] rounded-xl p-3"
           contentClassName="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
         >
           {#each $sortedAvailableFilterTagKeys as key (key)}
@@ -354,7 +354,7 @@
 
   .filter-tag-option {
     border-color: var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    background: var(--panel-solid);
     color: var(--fg);
     transition:
       background-color 140ms ease,
@@ -364,7 +364,7 @@
 
   .filter-tag-option[data-draft-state='unchanged'] {
     border-color: var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    background: var(--panel-solid);
     color: var(--fg);
     box-shadow: none;
   }
@@ -399,7 +399,7 @@
 
   :global(html[data-theme='dark']) .filter-tag-option[data-draft-state='unchanged'] {
     border-color: var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+    background: var(--panel-solid);
     color: var(--fg);
   }
 
@@ -418,7 +418,7 @@
     display: grid;
     gap: 0.2rem;
     text-align: left;
-    background: color-mix(in srgb, var(--panel-solid) 90%, transparent);
+    background: var(--panel-solid);
     color: var(--fg);
     transition:
       border-color 140ms ease,

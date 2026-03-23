@@ -2,13 +2,13 @@
 
 ## Runtime components
 
-- `server.sveltekit.js`: main public HTTP runtime (SvelteKit Node handler + internal app dispatch for API/system paths).
-- `server.js`: thin backend entrypoint that loads env, creates runtime, and re-exports lifecycle hooks.
-- `src/lib/server/boot/server-runtime.boot.js`: internal app runtime class/factory (`ServerRuntime`, `createServerRuntime`) used by `server.js`.
-- `src/lib/server/boot/server-runtime.config.js`: runtime config/env/path normalization.
-- `src/lib/server/boot/server-runtime.middleware.js`: middleware/security/session wiring for the internal app.
-- `src/lib/server/boot/server-runtime.routes.js`: route registration for API/system endpoints.
-- `src/lib/server/boot/*.boot.js`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
+- `server.sveltekit.ts`: main public HTTP runtime (SvelteKit Node handler + internal app dispatch for API/system paths).
+- `server.ts`: thin backend entrypoint that loads env, creates runtime, and re-exports lifecycle hooks.
+- `src/lib/server/boot/server-runtime.boot.ts`: internal app runtime class/factory (`ServerRuntime`, `createServerRuntime`) used by `server.ts`.
+- `src/lib/server/boot/server-runtime.config.ts`: runtime config/env/path normalization.
+- `src/lib/server/boot/server-runtime.middleware.ts`: middleware/security/session wiring for the internal app.
+- `src/lib/server/boot/server-runtime.routes.ts`: route registration for API/system endpoints.
+- `src/lib/server/boot/*.boot.ts`: subsystem bootstrap modules for DB runtime, rate limiters, runtime settings caches, PMTiles hooks, search rebuild, and filter-tag cache rebuild.
 - `frontend/` (SvelteKit adapter-node build): UI bundles/routes + server routes (`/`, `/app`, `/admin`, `/account`, `/info`, `/api/**`).
 - `frontend/src/lib/components/ui/**`: generated `shadcn-svelte` primitives kept close to upstream.
 - `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
@@ -33,69 +33,70 @@
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
 - Shared UI composition follows `ui/** -> base/** -> shell/routes`; product code should not consume generated primitives directly.
-- Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.js`.
+- Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.ts`.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
 - Building filter backend decomposition:
-  - `src/lib/server/http/buildings.route.js`: thin HTTP wiring for building/filter endpoints
-  - `src/lib/server/services/building-filters.service.js`: filter-data/filter-matches orchestration, cache policy, request normalization
-  - `src/lib/server/services/building-filter-query.service.js`: bbox/key query selection for SQLite RTREE/plain paths and PostGIS paths
-  - `src/lib/server/utils/filter-sql-builder.js`: isolated Postgres predicate/guard SQL builder for filter rules
+  - `src/lib/server/http/buildings.route.ts`: thin HTTP wiring for building/filter endpoints
+  - `src/lib/server/services/building-filters.service.ts`: filter-data/filter-matches orchestration, cache policy, request normalization
+  - `src/lib/server/services/building-filter-query.service.ts`: bbox/key query selection for SQLite RTREE/plain paths and PostGIS paths
+  - `src/lib/server/utils/filter-sql-builder.ts`: isolated Postgres predicate/guard SQL builder for filter rules
 - Building edit backend decomposition:
-  - `src/lib/server/services/building-edits.service.js`: service assembly entrypoint for runtime wiring
-  - `src/lib/server/services/building-edits/shared.js`: shared edit context, row mapping, reusable SQL fragments, info normalization
-  - `src/lib/server/services/building-edits/history.js`: edit list/details queries and response shaping
-  - `src/lib/server/services/building-edits/moderation.js`: reassignment/delete flows and merged-local-state safety checks
-  - `src/lib/server/services/building-edits/personal-overlays.js`: pending/rejected personal overlay lookup for feature info and filter payloads
+  - `src/lib/server/services/building-edits.service.ts`: service assembly entrypoint for runtime wiring
+  - `src/lib/server/services/building-edits/shared.ts`: shared edit context, row mapping, reusable SQL fragments, info normalization
+  - `src/lib/server/services/building-edits/history.ts`: edit list/details queries and response shaping
+  - `src/lib/server/services/building-edits/moderation.ts`: reassignment/delete flows and merged-local-state safety checks
+  - `src/lib/server/services/building-edits/personal-overlays.ts`: pending/rejected personal overlay lookup for feature info and filter payloads
 - Auth backend decomposition:
-  - `src/lib/server/auth/index.js`: auth bootstrap and route registration entrypoint
-  - `src/lib/server/auth/schema.js`: auth schema bootstrap for SQLite
-  - `src/lib/server/auth/auth.route.js`: thin HTTP wiring for auth/session/password/admin-user endpoints
-  - `src/lib/server/auth/auth.service.js`: login/session/registration/password-reset workflows and admin auth guards
-  - `src/lib/server/auth/user-profile.service.js`: current-profile updates and admin user-management queries/mutations
+  - `src/lib/server/auth/index.ts`: auth bootstrap and route registration entrypoint
+  - `src/lib/server/auth/schema.ts`: auth schema bootstrap for SQLite
+  - `src/lib/server/auth/auth.route.ts`: thin HTTP wiring for auth/session/password/admin-user endpoints
+  - `src/lib/server/auth/auth.service.ts`: login/session/registration/password-reset workflows and admin auth guards
+  - `src/lib/server/auth/user-profile.service.ts`: current-profile updates and admin user-management queries/mutations
 - Admin backend decomposition:
-  - `src/lib/server/http/admin.route.js`: thin HTTP wiring for admin/settings/moderation endpoints
-  - `src/lib/server/services/admin/shared.js`: shared admin guards, parsers, and typed error helpers
-  - `src/lib/server/services/admin/admin-settings.service.js`: email-preview, app-settings, data-settings, and region-sync orchestration
-  - `src/lib/server/services/admin/admin-edits.service.js`: admin edit moderation, merge flows, and admin user detail queries
-  - `src/lib/server/services/style-region-overrides.service.js`: public/admin style-region override rule persistence and validation
+  - `src/lib/server/http/admin.route.ts`: thin HTTP wiring for admin/settings/moderation endpoints
+  - `src/lib/server/services/admin/shared.ts`: shared admin guards, parsers, and typed error helpers
+  - `src/lib/server/services/admin/admin-settings.service.ts`: email-preview, app-settings, data-settings, and region-sync orchestration
+  - `src/lib/server/services/admin/admin-edits.service.ts`: admin edit moderation, merge flows, and admin user detail queries
+  - `src/lib/server/services/style-region-overrides.service.ts`: public/admin style-region override rule persistence and validation
 - Frontend map filter decomposition:
-  - `frontend/src/lib/services/map/map-filter-pipeline.js`: filter lifecycle orchestration entrypoint for viewport events and status transitions
-  - `frontend/src/lib/services/map/filter-request-planner.js`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping
-  - `frontend/src/lib/services/map/filter-match-cache-strategy.js`: optimistic cache reuse, authoritative request caching, and prefetch coordination
-  - `frontend/src/lib/services/map/filter-worker-dispatcher.js`: lazy `MapFilterService` worker lifecycle and request dispatch
-  - `frontend/src/lib/services/map/filter-diff-apply-strategy.js`: highlight diff/apply strategy over MapLibre paint properties
+  - `frontend/src/lib/services/map/map-filter-pipeline.ts`: filter lifecycle orchestration entrypoint for viewport events and status transitions
+  - `frontend/src/lib/services/map/filter-request-planner.ts`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping
+  - `frontend/src/lib/services/map/filter-match-cache-strategy.ts`: optimistic cache reuse, authoritative request caching, and prefetch coordination
+  - `frontend/src/lib/services/map/filter-worker-dispatcher.ts`: lazy `MapFilterService` worker lifecycle and request dispatch
+  - `frontend/src/lib/services/map/filter-diff-apply-strategy.ts`: highlight diff/apply strategy over MapLibre paint properties
 - Frontend map canvas decomposition:
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
-  - `frontend/src/lib/components/map/map-selection-controller.js`: map selection, selected-feature highlight, and search-result click routing
-  - `frontend/src/lib/components/map/map-region-layers-controller.js`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
-- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.js`.
-- Shared search source normalization: `src/lib/server/services/search-index-source.service.js`.
+  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, and search-result click routing
+  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
+- Shared search source normalization: `src/lib/server/services/search-index-source.service.ts`.
 - Shared utilities: `src/lib/shared/**`.
-- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.js`, `frontend/src/lib/client/filterUrlState.js`, `frontend/src/lib/client/section-routes.js`.
+- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.ts`, `frontend/src/lib/client/filterUrlState.ts`, `frontend/src/lib/client/section-routes.ts`.
 - Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and the `Filters` tab contains both filter-tag allowlist management and DB-backed filter-preset CRUD.
 
 ## Security and auth points
 
 - Security headers/CSP:
-  - internal app runtime: `src/lib/server/infra/security-headers.infra.js`, `src/lib/server/infra/csp.infra.js`
+  - internal app runtime: `src/lib/server/infra/security-headers.infra.ts`, `src/lib/server/infra/csp.infra.ts`
   - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
-- Auth/session routes: `src/lib/server/auth/auth.route.js` via facade `src/lib/server/auth/index.js`.
-- CSRF enforcement: `src/lib/server/services/csrf.service.js`.
-- Error normalization: `src/lib/server/infra/error-handling.infra.js`.
+- Auth/session routes: `src/lib/server/auth/auth.route.ts` via facade `src/lib/server/auth/index.ts`.
+- CSRF enforcement: `src/lib/server/services/csrf.service.ts`.
+- Error normalization: `src/lib/server/infra/error-handling.infra.ts`.
 
 ## Caching points
 
-- HTTP cache helpers (ETag/Last-Modified/304 + JSON compression): `src/lib/server/infra/http-cache.infra.js`.
-- PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.js`.
-- In-process LRU: `src/lib/server/infra/lru-cache.infra.js` (search hot-paths plus building filter bbox/match caches via `building-filters.service.js`).
-- Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.js`.
+- HTTP cache helpers (ETag/Last-Modified/304 + JSON compression): `src/lib/server/infra/http-cache.infra.ts`.
+- PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.ts`.
+- In-process LRU: `src/lib/server/infra/lru-cache.infra.ts` (search hot-paths plus building filter bbox/match caches via `building-filters.service.ts`).
+- Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.ts`.
 
 ## i18n
 
-- Core runtime: `frontend/src/lib/i18n/index.js`.
-- Locale config: `frontend/src/lib/i18n/config.js`.
-- Locales: `frontend/src/lib/i18n/locales/en.json`, `frontend/src/lib/i18n/locales/ru.json`.
+- Core runtime: `frontend/src/lib/i18n/index.ts`.
+- Locale config: `frontend/src/lib/i18n/config.ts`.
+- Locales: `src/lib/shared/i18n/locales/en.json`, `src/lib/shared/i18n/locales/ru.json`.
+- Frontend imports them through the `$shared/i18n/locales/*` alias, and transactional email copy is loaded from the same locale JSON files under `email.*` by `src/lib/server/email-templates/localization.ts`.
 - Locale storage: cookie `archimap_locale`.
 - Fallback policy: missing key in active locale falls back to `en`; in dev missing keys are logged.
 
@@ -109,13 +110,14 @@
 - Custom building filter renders through dedicated region-scoped highlight layers:
   - `<region>-filter-highlight-fill`
   - `<region>-filter-highlight-line`
+- Filter evaluation for architectural fields uses merged local values first and then falls back to raw OSM tags, so accepted/synced edits participate in map highlighting the same way they do in building details.
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
   - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
 - Multi-layer execution stays client-side:
   - all `and` and `or` layers are resolved as one combined logical group;
   - each `layer` mode layer is fetched independently;
-  - endpoint contract stays backward-compatible because each request still contains flat `rules[]`.
+  - each request contains flat `rules[]`.
 - Combined group semantics:
   - all `and` layers must pass;
   - if any `or` layers exist, at least one `or` layer must pass;
@@ -140,15 +142,15 @@
 Browser (SvelteKit UI)
   |  GET/POST /api/*
   v
-SvelteKit Node runtime (server.sveltekit.js)
+SvelteKit Node runtime (server.sveltekit.ts)
   |- Svelte pages/assets
   |- route dispatch:
       * /api/**, /healthz, /readyz, /metrics, /app-config.js, /favicon.ico, /.well-known/*, /ui/** -> internal app
       * everything else -> Svelte handler/pages
        v
-    server.js (thin entrypoint)
+    server.ts (thin entrypoint)
        v
-    Internal app runtime boot (src/lib/server/boot/server-runtime.boot.js)
+    Internal app runtime boot (src/lib/server/boot/server-runtime.boot.ts)
       |- ServerRuntime + createServerRuntime(...)
       |- server-runtime.config / middleware / routes
       |- rate limiters + runtime settings caches

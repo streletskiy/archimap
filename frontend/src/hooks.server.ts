@@ -13,7 +13,7 @@ function extractInlineScriptHashesFromHtml(html: string) {
   const text = String(html || '');
   const hashes: string[] = [];
   const scriptTagPattern = /<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi;
-  let match: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
 
   while ((match = scriptTagPattern.exec(text)) !== null) {
     const attrs = String(match[1] || '');

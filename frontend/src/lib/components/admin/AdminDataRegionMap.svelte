@@ -30,8 +30,8 @@
   let mapLoading = true;
   let mapError = '';
   let hasInitialFit = false;
-  let lastFocusedDraftKey = '';
-  let mapBootstrapRequested = false;
+  let lastFocusedDraftKey;
+  let mapBootstrapRequested;
   let regionById = new Map();
   let featureById = new Map();
   let featureAreaById = new Map();
@@ -680,12 +680,14 @@
       }
       lastFocusedDraftKey = nextDraftKey;
     }
+    void lastFocusedDraftKey;
   }
 
   $: if (mapEl && !mapBootstrapRequested) {
     mapBootstrapRequested = true;
     void Promise.all([loadRegionsGeoJson(), ensureMap()]);
   }
+  $: void mapBootstrapRequested;
 
   onMount(() => {
     const observer = new MutationObserver(() => {
@@ -706,20 +708,17 @@
 </script>
 
 <section class="data-map-card rounded-2xl p-4 min-w-0">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div class="space-y-1">
-      <span class="inline-flex rounded-full ui-surface-brand px-2.5 py-1 text-xs font-semibold ui-text-brand">
-        {$t('admin.data.map.badge')}
-      </span>
+  <div class="space-y-1">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <h4 class="text-base font-bold ui-text-strong">{$t('admin.data.map.title')}</h4>
-      <p class="text-sm ui-text-muted">{$t('admin.data.map.description')}</p>
+      <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold sm:justify-end">
+        <span class="data-map-legend rounded-full px-2 py-0.5" data-tone="missing">{$t('admin.data.map.legendMissing')}</span>
+        <span class="data-map-legend rounded-full px-2 py-0.5" data-tone="syncing">{$t('admin.data.map.legendSyncing')}</span>
+        <span class="data-map-legend rounded-full px-2 py-0.5" data-tone="failed">{$t('admin.data.map.legendFailed')}</span>
+        <span class="data-map-legend rounded-full px-2 py-0.5" data-tone="ready">{$t('admin.data.map.legendReady')}</span>
+      </div>
     </div>
-    <div class="flex flex-wrap gap-2 text-xs ui-text-body">
-      <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="missing">{$t('admin.data.map.legendMissing')}</span>
-      <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="syncing">{$t('admin.data.map.legendSyncing')}</span>
-      <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="failed">{$t('admin.data.map.legendFailed')}</span>
-      <span class="data-map-legend rounded-full px-3 py-1.5" data-tone="ready">{$t('admin.data.map.legendReady')}</span>
-    </div>
+    <p class="text-sm ui-text-muted">{$t('admin.data.map.description')}</p>
   </div>
 
   {#if mapError}
@@ -732,24 +731,15 @@
     {#if hoveredFeatureMeta?.name || hoveredFeatureMeta?.extractId}
       <div class="pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-xl border ui-border ui-surface-soft px-3 py-2 shadow-sm">
         <p class="truncate text-sm font-semibold ui-text-strong">{hoveredFeatureMeta.name || hoveredFeatureMeta.extractId}</p>
-        {#if hoveredFeatureMeta?.extractId}
-          <p class="truncate text-xs ui-text-muted">
-            {hoveredFeatureMeta.extractSource || 'osmfr'} · {hoveredFeatureMeta.extractId}
-          </p>
-        {/if}
       </div>
     {/if}
     <div class="data-map-canvas h-[28rem] min-h-[420px] w-full" bind:this={mapEl}></div>
   </div>
 
   <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-    <p class="ui-text-subtle">
-      {#if draft?.name}
-        {$t('admin.data.map.selectionLabel', { name: draft.name })}
-      {:else}
-        {$t('admin.data.map.selectionHint')}
-      {/if}
-    </p>
+    {#if !draft?.name}
+      <p class="ui-text-subtle">{$t('admin.data.map.selectionHint')}</p>
+    {/if}
     {#if draft?.extractSource && draft?.extractId}
       <span class="rounded-full ui-surface-soft px-2.5 py-1 ui-text-muted">{draft.extractSource} · {draft.extractId}</span>
     {/if}
@@ -759,7 +749,7 @@
 <style>
   .data-map-card {
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-soft);
   }
 

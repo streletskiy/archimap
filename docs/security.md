@@ -3,7 +3,7 @@
 ## CSP
 
 - Implemented in two runtime layers:
-  - internal app/API runtime: `src/lib/server/infra/csp.infra.js`, applied via `security-headers.infra.js`
+  - internal app/API runtime: `src/lib/server/infra/csp.infra.ts`, applied via `security-headers.infra.ts`
   - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
 - Prod profile:
   - `default-src 'self'`
@@ -56,7 +56,7 @@
 
 ## Logging and redaction
 
-- Logger: `src/lib/server/services/logger.service.js`.
+- Logger: `src/lib/server/services/logger.service.ts`.
 - URL sanitization: query values stripped (`sanitizeUrl`).
 - Sensitive fields masked (`maskSensitive`): tokens, passwords, csrf, cookies, auth headers.
 

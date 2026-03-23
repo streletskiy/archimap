@@ -14,9 +14,10 @@
 
   let activeTab = resolveInfoTabFromUrl(get(page).url);
   let infoUrlSyncBusy = false;
-  let agreementHtml = '';
-  let privacyHtml = '';
-  let lastHandledTab = activeTab;
+  let agreementHtml;
+  let privacyHtml;
+  let lastHandledTab;
+  let infoTabInitialized = false;
   $: infoTabs = [
     { value: 'about', label: $t('info.tabAbout') },
     { value: 'agreement', label: $t('info.tabAgreement') },
@@ -33,10 +34,15 @@
   }
   agreementHtml = markdownToHtml(agreementMarkdownSource);
   privacyHtml = markdownToHtml(privacyMarkdownSource);
-  $: if (activeTab !== lastHandledTab) {
+  $: if (!infoTabInitialized) {
+    infoTabInitialized = true;
+    lastHandledTab = activeTab;
+  } else if (activeTab !== lastHandledTab) {
     lastHandledTab = activeTab;
     void replaceInfoUrl(activeTab);
   }
+  $: void infoTabInitialized;
+  $: void lastHandledTab;
 
   async function replaceInfoUrl(tab) {
     if (typeof window === 'undefined') return;
@@ -74,9 +80,15 @@
   });
 </script>
 
-<PortalFrame eyebrow="Archimap" title={$t('info.title')} description={$t('info.subtitle')}>
+<PortalFrame title={$t('info.title')} description={$t('info.subtitle')}>
   <svelte:fragment slot="meta">
-    <UiBadge variant="accent"><strong>{$t('info.version')}</strong>{APP_VERSION_DISPLAY}</UiBadge>
+    <UiBadge
+      variant="accent"
+      className="max-w-full flex-col items-start justify-start whitespace-normal break-words text-left gap-0.5 sm:flex-row sm:items-center sm:gap-1"
+    >
+      <strong>{$t('info.version')}:</strong>
+      <span class="min-w-0 whitespace-normal break-words">{APP_VERSION_DISPLAY}</span>
+    </UiBadge>
     <UiBadge
       variant="outline"
       href={APP_REPO_URL}
@@ -158,7 +170,7 @@
     padding: 1.2rem 1.25rem;
     border: 1px solid var(--panel-border);
     border-radius: 1.35rem;
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
     box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
   }
 
@@ -219,19 +231,19 @@
     margin: 0.7rem 0;
     padding: 0.55rem 0.7rem;
     border-left: 3px solid var(--panel-border-strong);
-    background: color-mix(in srgb, var(--panel-solid) 80%, transparent);
+    background: var(--panel-solid);
     border-radius: 0.45rem;
   }
 
   .legal-markdown :global(code) {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     padding: 0.08rem 0.3rem;
     border-radius: 0.35rem;
   }
 
   .legal-markdown :global(pre) {
-    background: color-mix(in srgb, var(--panel-solid) 80%, transparent);
+    background: var(--panel-solid);
     border: 1px solid var(--panel-border);
     border-radius: 0.7rem;
     padding: 0.7rem;
@@ -267,7 +279,6 @@
     .legal-shell {
       padding: 1rem 0.95rem;
     }
-
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(h1),
@@ -283,17 +294,17 @@
 
   :global(html[data-theme='dark']) .legal-markdown :global(blockquote) {
     border-left-color: var(--panel-border-strong);
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     color: var(--fg);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(code) {
-    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    background: var(--panel-solid);
     color: var(--fg-strong);
   }
 
   :global(html[data-theme='dark']) .legal-markdown :global(pre) {
-    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    background: var(--panel-solid);
     border-color: var(--panel-border);
     color: var(--fg-strong);
   }

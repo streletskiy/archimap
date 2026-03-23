@@ -31,7 +31,7 @@
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { locale, t, translateNow } from '$lib/i18n/index';
-  import { getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, matchesUiDateRange, parseEditKey } from '$lib/utils/edit-ui';
+  import { formatUiDate, getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, matchesUiDateRange, parseEditKey } from '$lib/utils/edit-ui';
   import { focusMapOnGeometry, getGeometryCenter } from '$lib/utils/map-geometry';
 
   const LIGHT = '/styles/positron-custom.json';
@@ -58,12 +58,12 @@
   let edits = [];
   let visibleEdits = [];
   let editsLoading = false;
-  let editsStatus = translateNow('account.edits.loading');
+  let editsStatus;
   let editsFilter = 'all';
   let editsLimit = 200;
   let editsQuery = '';
   let editsDateRange = undefined;
-  let editsFilterItems = [];
+  let editsFilterItems;
   const editsLimitItems = [
     { value: 100, label: '100' },
     { value: 200, label: '200' },
@@ -90,6 +90,12 @@
     firstName = String($session.user?.firstName || '');
     lastName = String($session.user?.lastName || '');
     email = String($session.user?.email || '');
+    
+    // Ensure edits are loaded if we reload directly on the edits tab 
+    // and session hydrates after mount.
+    if (activeTab === 'edits' && !editsLoading && edits.length === 0) {
+      loadEdits();
+    }
   }
 
   const msg = (e, f) => String(e?.message || f);
@@ -387,6 +393,15 @@
     }
   }
 
+  function getSyncBadgeMeta(status) {
+    const normalized = String(status || 'unsynced').trim().toLowerCase();
+    if (normalized === 'synced') return { cls: 'ui-surface-success-soft ui-text-success-soft', text: $t('account.edits.syncSynced') };
+    if (normalized === 'cleaned') return { cls: 'ui-surface-info ui-text-info', text: $t('account.edits.syncCleaned') };
+    if (normalized === 'syncing') return { cls: 'ui-surface-warning ui-text-warning', text: $t('account.edits.syncing') };
+    if (normalized === 'failed') return { cls: 'ui-surface-danger ui-text-danger', text: $t('account.edits.syncFailed') };
+    return { cls: 'ui-surface-soft ui-text-muted', text: $t('account.edits.syncUnsynced') };
+  }
+
   async function replaceAccountUrl(tab) {
     if (typeof window === 'undefined') return;
     const next = buildAccountUrl(window.location.href, tab);
@@ -461,7 +476,6 @@
   }
 
   $: accountPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
-  $: accountUserLabel = `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim() || String(email || '').trim() || '-';
   $: editsFilterItems = [
     { value: 'all', label: $t('account.edits.filterAll') },
     { value: 'pending', label: $t('account.edits.filterPending') },
@@ -480,7 +494,12 @@
         await replaceAccountUrl(nextTab);
       })();
     });
-    if ($session.authenticated) loadEdits();
+    if (activeTab === 'edits') {
+      ensureMap();
+      if ($session.authenticated && !editsLoading && edits.length === 0) {
+        loadEdits();
+      }
+    }
     const obs = new MutationObserver(() => { if (map) map.setStyle(styleByTheme()); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => {
@@ -492,34 +511,17 @@
 </script>
 
 {#if !$session.authenticated}
-  <PortalFrame eyebrow="Archimap" title={$t('account.title')} description={$t('account.subtitle')}>
+  <PortalFrame title={$t('account.title')} description={$t('account.subtitle')}>
     <div class="portal-notice">
       <h2 class="text-xl font-extrabold ui-text-strong">{$t('account.authRequiredTitle')}</h2>
       <p class="mt-2 text-sm ui-text-muted">{$t('account.authRequiredText')}</p>
     </div>
   </PortalFrame>
 {:else}
-  <PortalFrame eyebrow="Archimap" title={$t('account.title')} description={$t('account.subtitle')}>
+  <PortalFrame title={$t('account.title')} description={$t('account.subtitle')}>
     <svelte:fragment slot="meta">
       <UiBadge variant="default"><strong>{$t('account.profile.email')}</strong>{email || '-'}</UiBadge>
       <UiBadge variant="accent"><strong>{$t('account.tabs.edits')}</strong>{edits.length}</UiBadge>
-    </svelte:fragment>
-
-    <svelte:fragment slot="lead">
-      <div class="portal-lead-grid">
-        <article class="portal-stat">
-          <span>{$t('account.profile.title')}</span>
-          <strong>{accountUserLabel}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('account.profile.email')}</span>
-          <strong>{email || '-'}</strong>
-        </article>
-        <article class="portal-stat">
-          <span>{$t('account.tabs.edits')}</span>
-          <strong>{visibleEdits.length} / {edits.length}</strong>
-        </article>
-      </div>
     </svelte:fragment>
 
     <UiTabsNav
@@ -534,17 +536,17 @@
       <div class="mt-4 grid gap-4 xl:grid-cols-3">
           <section class="rounded-2xl border ui-border ui-surface-muted p-4">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.profile.title')}</h3>
-            <form class="mt-4 space-y-4" on:submit={saveProfile}>
-              <div>
-                <UiLabel for="account-first-name" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.firstName')}</UiLabel>
+            <form class="mt-4 grid gap-4" on:submit={saveProfile}>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-first-name">{$t('account.profile.firstName')}</UiLabel>
                 <UiInput id="account-first-name" bind:value={firstName} />
               </div>
-              <div>
-                <UiLabel for="account-last-name" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.lastName')}</UiLabel>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-last-name">{$t('account.profile.lastName')}</UiLabel>
                 <UiInput id="account-last-name" bind:value={lastName} />
               </div>
-              <div>
-                <UiLabel for="account-email" className="mb-1 block text-sm font-medium ui-text-body">{$t('account.profile.email')}</UiLabel>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-email">{$t('account.profile.email')}</UiLabel>
                 <UiInput id="account-email" value={email} readonly className="ui-text-subtle" />
               </div>
               <UiButton type="submit">{$t('account.profile.save')}</UiButton>
@@ -555,25 +557,37 @@
           </section>
           <section class="rounded-2xl border ui-border ui-surface-muted p-4">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.security.title')}</h3>
-            <form class="mt-4 space-y-4" on:submit={changePassword}>
-              <UiInput
-                type="password"
-                placeholder={$t('account.security.currentPassword')}
-                bind:value={currentPassword}
-                required
-              />
-              <UiInput
-                type="password"
-                placeholder={$t('account.security.newPassword')}
-                bind:value={newPassword}
-                required
-              />
-              <UiInput
-                type="password"
-                placeholder={$t('account.security.repeatPassword')}
-                bind:value={confirmNewPassword}
-                required
-              />
+            <form class="mt-4 grid gap-4" on:submit={changePassword}>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-current-password">{$t('account.security.currentPassword')}</UiLabel>
+                <UiInput
+                  id="account-current-password"
+                  type="password"
+                  bind:value={currentPassword}
+                  autocomplete="current-password"
+                  required
+                />
+              </div>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-new-password">{$t('account.security.newPassword')}</UiLabel>
+                <UiInput
+                  id="account-new-password"
+                  type="password"
+                  bind:value={newPassword}
+                  autocomplete="new-password"
+                  required
+                />
+              </div>
+              <div class="grid gap-1.5">
+                <UiLabel for="account-confirm-password">{$t('account.security.repeatPassword')}</UiLabel>
+                <UiInput
+                  id="account-confirm-password"
+                  type="password"
+                  bind:value={confirmNewPassword}
+                  autocomplete="new-password"
+                  required
+                />
+              </div>
               <UiButton type="submit" variant="outline">{$t('account.security.change')}</UiButton>
             </form>
             {#if passwordStatus}
@@ -643,8 +657,8 @@
           </div>
           <p class="text-sm ui-text-muted">{editsStatus}</p>
           <div class="h-[36vh] min-h-[260px] flex-shrink-0 overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
-          <UiScrollArea className="flex-1 min-h-0 rounded-xl border ui-border">
-            <UiTable containerClassName="ui-surface-base">
+          <UiScrollArea className="ui-scroll-surface flex-1 min-h-0 rounded-xl">
+            <UiTable framed={false}>
             <UiTableHeader>
               <UiTableRow className="hover:[&>th]:bg-transparent">
                 <UiTableHead>{$t('account.edits.tableObject')}</UiTableHead>
@@ -668,7 +682,7 @@
                   {@const counters = getChangeCounters(it.changes)}
                   <UiTableRow
                     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
-                    on:click={() => openEdit(it.id || it.editId)}
+                    onclick={() => openEdit(it.id || it.editId)}
                   >
                     <UiTableCell className="min-w-0">
                       <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(it)}</p>
@@ -680,12 +694,19 @@
                         {#if !it.osmPresent && !it.orphaned}
                           <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
                         {/if}
-                        {#if it.sourceOsmChanged}
+                      {#if it.sourceOsmChanged}
                           <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>
+                        {/if}
+                        {#if it.syncStatus && it.syncStatus !== 'unsynced'}
+                          {@const syncMeta = getSyncBadgeMeta(it.syncStatus)}
+                          <span class={`rounded-md px-2 py-1 text-[11px] font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
                         {/if}
                       </div>
                       {#if String(it?.adminComment || '').trim()}
                         <p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>
+                      {/if}
+                      {#if it.syncChangesetId}
+                        <p class="mt-1 text-xs ui-text-subtle">{$t('account.edits.syncChangeset')}: #{it.syncChangesetId}</p>
                       {/if}
                     </UiTableCell>
                     <UiTableCell>{it.updatedBy || '-'}</UiTableCell>
@@ -723,8 +744,23 @@
           {:else}
                 {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
             <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
+            {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
+              <div class="rounded-xl border ui-border ui-surface-muted p-3 text-sm ui-text-body">
+                <p><strong>{$t('account.edits.syncStatus')}:</strong> {getSyncBadgeMeta(selectedEdit.syncStatus).text}</p>
+                <p><strong>{$t('account.edits.syncAttemptedAt')}:</strong> {formatUiDate(selectedEdit.syncAttemptedAt) || '---'}</p>
+                <p><strong>{$t('account.edits.syncSucceededAt')}:</strong> {formatUiDate(selectedEdit.syncSucceededAt) || '---'}</p>
+                <p><strong>{$t('account.edits.syncCleanedAt')}:</strong> {formatUiDate(selectedEdit.syncCleanedAt) || '---'}</p>
+                <p><strong>{$t('account.edits.syncChangeset')}:</strong> {selectedEdit.syncChangesetId || '---'}</p>
+                {#if selectedEdit.syncSummary}
+                  <p class="mt-1 text-xs ui-text-subtle break-words">{JSON.stringify(selectedEdit.syncSummary)}</p>
+                {/if}
+                {#if selectedEdit.syncError}
+                  <p class="mt-1 text-xs ui-text-danger break-words">{selectedEdit.syncError}</p>
+                {/if}
+              </div>
+            {/if}
             {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
-              <div class="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
                 {#if selectedEdit.orphaned}
                   <p>{$t('account.edits.orphanedHelp')}</p>
                 {/if}
@@ -737,7 +773,7 @@
               </div>
             {/if}
             <UiScrollArea
-              className="max-h-[42vh] rounded-xl border ui-border"
+              className="ui-scroll-surface max-h-[42vh] rounded-xl"
               contentClassName="space-y-2 p-2"
             >
               {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}

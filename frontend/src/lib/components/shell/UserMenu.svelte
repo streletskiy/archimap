@@ -24,7 +24,7 @@
 
   let darkTheme = false;
   let themeObserver = null;
-  let localeItems = [];
+  let localeItems;
 
   $: userInitials = getUserInitials($session.user);
   $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');
@@ -225,9 +225,8 @@
     -webkit-overflow-scrolling: touch;
     border: 1px solid var(--panel-border);
     border-radius: 1.2rem;
-    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(18px);
     pointer-events: auto;
     z-index: 2;
   }
@@ -295,12 +294,17 @@
     font-size: 0.88rem;
     font-weight: 700;
     color: var(--muted-strong);
-    background: color-mix(in srgb, var(--panel-solid) 72%, transparent);
+    background: var(--panel-solid);
     border: 1px solid transparent;
     transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
   }
 
-  .menu-links a:hover,
+  .menu-links a:hover {
+    border-color: color-mix(in srgb, var(--accent) 22%, var(--panel-border));
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel-solid));
+    color: var(--accent-ink);
+  }
+
   .menu-links a.active {
     border-color: color-mix(in srgb, var(--accent) 22%, var(--panel-border));
     background: var(--accent-soft);
@@ -315,7 +319,7 @@
     padding: 0.5rem 0.7rem;
     border: 1px solid var(--panel-border);
     border-radius: 1rem;
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     font-size: 0.88rem;
     font-weight: 700;
     color: var(--muted-strong);

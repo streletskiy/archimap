@@ -11,14 +11,20 @@
   export let onchange = undefined;
 
   const dispatch = createEventDispatcher();
-  let lastDispatchedValue = value;
+  let lastDispatchedValue;
+  let initialized = false;
 
-  $: if (value !== lastDispatchedValue) {
+  $: if (!initialized) {
+    initialized = true;
+    lastDispatchedValue = value;
+  } else if (value !== lastDispatchedValue) {
     lastDispatchedValue = value;
     const detail = { value };
     onchange?.({ detail });
     dispatch('change', detail);
   }
+  $: void initialized;
+  $: void lastDispatchedValue;
 </script>
 
 <Tabs.Root bind:value>
