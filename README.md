@@ -8,7 +8,7 @@ PostgreSQL + PostGIS or SQLite.
 The map is rendered with MapLibre and vector PMTiles.
 The public backend runtime is SvelteKit Node (`server.sveltekit.ts`).
 The project is designed for private deployments with full control over data, tiles, and sessions.
-The UI is multilingual (`en` + `ru`) with runtime locale switching, and transactional emails reuse the same locale JSON base and follow the active locale.
+The UI is multilingual (`en` + `ru`) with runtime locale switching, and transactional emails reuse the same locale JSON base from `src/lib/shared/i18n/locales` and follow the active locale.
 
 ## How It Works
 

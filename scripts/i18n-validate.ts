@@ -23,7 +23,7 @@ function flattenKeys(input, prefix = '', output = new Set()) {
   return output;
 }
 
-const localesDir = path.join(process.cwd(), 'frontend', 'src', 'lib', 'i18n', 'locales');
+const localesDir = path.join(process.cwd(), 'src', 'lib', 'shared', 'i18n', 'locales');
 const files = fs.readdirSync(localesDir).filter((file) => file.endsWith('.json')).sort();
 if (files.length < 2) {
   console.error('[i18n:validate] At least 2 locale files are required.');

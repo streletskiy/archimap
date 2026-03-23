@@ -9,7 +9,8 @@ const config = {
       out: 'build'
     }),
     alias: {
-      $lib: './src/lib'
+      $lib: './src/lib',
+      $shared: '../src/lib/shared'
     }
   }
 } satisfies Config;

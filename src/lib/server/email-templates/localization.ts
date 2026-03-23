@@ -1,12 +1,12 @@
-const frontendEnLocale = require('../../../../frontend/src/lib/i18n/locales/en.json');
-const frontendRuLocale = require('../../../../frontend/src/lib/i18n/locales/ru.json');
+const sharedEnLocale = require('../../shared/i18n/locales/en.json');
+const sharedRuLocale = require('../../shared/i18n/locales/ru.json');
 
 const EMAIL_DEFAULT_LOCALE = 'en';
 const EMAIL_SUPPORTED_LOCALES = Object.freeze(['en', 'ru']);
 const EMAIL_LOCALE_COOKIE_NAME = 'archimap_locale';
 const EMAIL_CATALOG = Object.freeze({
-  en: buildEmailCopy(frontendEnLocale?.email || {}),
-  ru: buildEmailCopy(frontendRuLocale?.email || {})
+  en: buildEmailCopy(sharedEnLocale?.email || {}),
+  ru: buildEmailCopy(sharedRuLocale?.email || {})
 });
 
 function interpolateEmailTemplate(template, values = {}) {

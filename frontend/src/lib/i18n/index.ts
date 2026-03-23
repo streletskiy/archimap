@@ -1,6 +1,6 @@
 import { derived, get, writable } from 'svelte/store';
-import en from './locales/en.json' with { type: 'json' };
-import ru from './locales/ru.json' with { type: 'json' };
+import en from '$shared/i18n/locales/en.json' with { type: 'json' };
+import ru from '$shared/i18n/locales/ru.json' with { type: 'json' };
 import { DEFAULT_LOCALE, I18N_COOKIE_NAME, SUPPORTED_LOCALES, isSupportedLocale } from './config.js';
 
 /** @typedef {import('./types').I18nKey} I18nKey */

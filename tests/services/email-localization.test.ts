@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const frontendEnLocale = require('../../frontend/src/lib/i18n/locales/en.json');
-const frontendRuLocale = require('../../frontend/src/lib/i18n/locales/ru.json');
+const sharedEnLocale = require('../../src/lib/shared/i18n/locales/en.json');
+const sharedRuLocale = require('../../src/lib/shared/i18n/locales/ru.json');
 
 const {
   appendLocaleParam,
@@ -31,17 +31,17 @@ test('email copy is sourced from the shared locale json files', () => {
   const enCopy = getEmailCopy('en');
   const ruCopy = getEmailCopy('ru');
 
-  assert.equal(enCopy.registration.subject, frontendEnLocale.email.registration.subject);
-  assert.equal(enCopy.passwordReset.title, frontendEnLocale.email.passwordReset.title);
+  assert.equal(enCopy.registration.subject, sharedEnLocale.email.registration.subject);
+  assert.equal(enCopy.passwordReset.title, sharedEnLocale.email.passwordReset.title);
   assert.equal(
     enCopy.smtpTest.callout('admin@example.test'),
-    frontendEnLocale.email.smtpTest.callout.replace('{email}', 'admin@example.test')
+    sharedEnLocale.email.smtpTest.callout.replace('{email}', 'admin@example.test')
   );
 
-  assert.equal(ruCopy.registration.subject, frontendRuLocale.email.registration.subject);
-  assert.equal(ruCopy.passwordReset.validity(20), frontendRuLocale.email.passwordReset.validity.replace('{minutes}', '20'));
+  assert.equal(ruCopy.registration.subject, sharedRuLocale.email.registration.subject);
+  assert.equal(ruCopy.passwordReset.validity(20), sharedRuLocale.email.passwordReset.validity.replace('{minutes}', '20'));
   assert.equal(
     ruCopy.smtpTest.callout('admin@example.test'),
-    frontendRuLocale.email.smtpTest.callout.replace('{email}', 'admin@example.test')
+    sharedRuLocale.email.smtpTest.callout.replace('{email}', 'admin@example.test')
   );
 });
