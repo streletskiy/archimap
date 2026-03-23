@@ -37,12 +37,6 @@
       {/if}
     </header>
 
-    {#if $$slots.lead}
-      <div class="portal-lead">
-        <slot name="lead" />
-      </div>
-    {/if}
-
     <div class="portal-body">
       <slot />
     </div>

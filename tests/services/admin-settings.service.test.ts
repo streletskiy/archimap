@@ -1,0 +1,146 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const adminSettingsServicePath = require.resolve('../../src/lib/server/services/admin/admin-settings.service');
+const smtpTransportServicePath = require.resolve('../../src/lib/server/services/smtp-transport.service');
+const { getEmailCopy } = require('../../src/lib/server/email-templates/localization');
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getHtmlDetailValue(html, label) {
+  const pattern = new RegExp(
+    `<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`,
+    'i'
+  );
+  const match = String(html || '').match(pattern);
+  return match ? match[1].trim() : null;
+}
+
+function getTextDetailValue(text, label) {
+  const line = String(text || '')
+    .split('\n')
+    .find((entry) => entry.startsWith(`${label}: `));
+  return line ? line.slice(label.length + 2).trim() : null;
+}
+
+test('buildEmailPreviewPayload includes the SMTP test template in the requested locale', async () => {
+  const { createAdminSettingsService } = require(adminSettingsServicePath);
+  const service = createAdminSettingsService({
+    appDisplayName: 'ArchiMap',
+    appBaseUrl: 'https://example.com',
+    registrationCodeTtlMinutes: 15,
+    passwordResetTtlMinutes: 20
+  });
+
+  const payload = await service.buildEmailPreviewPayload({ locale: 'ru' });
+
+  assert.equal(payload.appDisplayName, 'ArchiMap');
+  assert.ok(payload.templates.smtpTest);
+  const ruCopy = getEmailCopy('ru');
+  assert.match(payload.templates.registration.html, /<html lang="ru">/);
+  assert.match(payload.templates.registration.text, /Ваш код:/);
+  assert.match(payload.templates.registration.text, /lang=ru/);
+  assert.match(payload.templates.smtpTest.html, /Тест отправки почты/);
+  assert.match(payload.templates.smtpTest.html, /admin@example\.test/);
+  assert.match(payload.templates.smtpTest.text, /ArchiMap: тест отправки почты/);
+  assert.equal(
+    getHtmlDetailValue(payload.templates.smtpTest.html, ruCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+  assert.equal(
+    getTextDetailValue(payload.templates.smtpTest.text, ruCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+});
+
+test('sendSmtpTest sends html and text content', async (t) => {
+  const originalAdminSettingsCache = require.cache[adminSettingsServicePath];
+  const originalSmtpTransportCache = require.cache[smtpTransportServicePath];
+  let capturedMailOptions = null;
+
+  const smtpTransportMock = {
+    id: smtpTransportServicePath,
+    filename: smtpTransportServicePath,
+    loaded: true,
+    exports: {
+      sendMailWithFallback: async (_smtp, mailOptions) => {
+        capturedMailOptions = mailOptions;
+        return {
+          info: {
+            accepted: ['admin@example.test'],
+            rejected: [],
+            pending: [],
+            messageId: 'test-message-id'
+          },
+          candidate: { label: 'stub' }
+        };
+      }
+    }
+  } as unknown as NodeJS.Module;
+  require.cache[smtpTransportServicePath] = smtpTransportMock;
+
+  delete require.cache[adminSettingsServicePath];
+  t.after(() => {
+    if (originalAdminSettingsCache) {
+      require.cache[adminSettingsServicePath] = originalAdminSettingsCache;
+    } else {
+      delete require.cache[adminSettingsServicePath];
+    }
+
+    if (originalSmtpTransportCache) {
+      require.cache[smtpTransportServicePath] = originalSmtpTransportCache;
+    } else {
+      delete require.cache[smtpTransportServicePath];
+    }
+  });
+
+  const { createAdminSettingsService } = require(adminSettingsServicePath);
+  const service = createAdminSettingsService({
+    appDisplayName: 'ArchiMap',
+    appSettingsService: {
+      async buildSmtpConfigFromInput() {
+        return {
+          host: 'smtp-relay.example.com',
+          port: 587,
+          secure: false,
+          user: 'smtp-user',
+          pass: 'smtp-pass',
+          from: 'ArchiMap <no-reply@example.com>'
+        };
+      }
+    }
+  });
+
+  const result = await service.sendSmtpTest({
+    smtp: {
+      host: 'smtp-relay.example.com',
+      port: 587,
+      secure: false,
+      user: 'smtp-user',
+      pass: 'smtp-pass',
+      from: 'ArchiMap <no-reply@example.com>'
+    },
+    testEmail: 'admin@example.test',
+    locale: 'en'
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(capturedMailOptions);
+  assert.equal(capturedMailOptions.to, 'admin@example.test');
+  assert.match(capturedMailOptions.subject, /SMTP test|mail delivery test/);
+  assert.match(capturedMailOptions.html, /Mail delivery test/);
+  assert.match(capturedMailOptions.html, /<html lang="en">/);
+  assert.match(capturedMailOptions.html, /background-color:#f6f4ef/);
+  assert.match(capturedMailOptions.text, /ArchiMap: mail delivery test/);
+  const enCopy = getEmailCopy('en');
+  assert.equal(
+    getHtmlDetailValue(capturedMailOptions.html, enCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+  assert.equal(
+    getTextDetailValue(capturedMailOptions.text, enCopy.smtpTest.detailLabels.parameters),
+    'smtp-relay.example.com:587'
+  );
+});

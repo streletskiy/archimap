@@ -34,7 +34,7 @@ The goal of this stack is not to redesign ArchiMap around upstream demos. The go
 3. `frontend/src/app.css` is the source of truth for shared UI styling. Do not duplicate long Tailwind state chains across many components when the pattern is shared.
 4. New UI work must preserve existing page, panel, and modal structure unless the redesign is explicitly planned.
 5. The ArchiMap palette stays authoritative. Upstream `shadcn-svelte` defaults do not replace ArchiMap colors.
-6. Tailwind theme customization belongs in CSS tokens and semantic classes, not in a reintroduced legacy Tailwind config.
+6. Tailwind theme customization belongs in CSS tokens and semantic classes, not in a separate Tailwind config.
 7. If a shared control pattern appears in more than one feature area, extract it into the base layer or into a semantic layout contract in `app.css`.
 
 ## Styling Source Of Truth
@@ -43,10 +43,11 @@ The goal of this stack is not to redesign ArchiMap around upstream demos. The go
 - Keep light and dark themes compatible with the existing `html[data-theme='light|dark']` model.
 - Shared control visuals should be expressed through semantic classes such as `ui-button`, `ui-input`, `ui-select-trigger`, `ui-tabs-trigger`, `ui-table-*`, `ui-switch`, and `ui-label`.
 - Use local utilities for one-off layout adjustments. Use semantic classes when the pattern is shared or repeated.
+- Shared surfaces should stay opaque. Avoid `backdrop-filter`, frosted translucency, and glassmorphism-style panel treatments in product UI.
 
 ## Base Components
 
-Current project-level shared controls:
+Shared controls:
 
 - `UiButton`
 - `UiCheckbox`
@@ -102,7 +103,7 @@ When a new control is needed:
 - For map filter layers, keep the trigger compact and use shared swatches plus hex input inside the popover.
 - User-defined colors may use inline CSS custom properties, but only on the nearest semantic root for that colored element or component.
 - Do not use raw inline presentation styles such as `style="background: ..."` in product code when the same value can be expressed through a custom property consumed by shared CSS.
-- Third-party internals may still emit inline color styles in generated DOM. Treat that as library behavior, not a pattern to copy into product code.
+- Third-party internals can emit inline color styles in generated DOM. Treat that as library behavior, not a pattern to copy into product code.
 
 ### Filter Toolbars
 
@@ -130,10 +131,13 @@ When a new control is needed:
 
 - `UiTable*` is the default table stack for product code.
 - Native `<table>` markup should remain only inside generated upstream primitives or content-rendering cases that are not part of product UI composition.
+- Interactive table rows must use `UiTableRow` with the `onclick` callback prop, not `on:click`, so row selection works consistently through the base wrapper.
+- When a table sits inside a bordered card or scroll container, use `UiTable framed={false}` so the outer shell owns the contour and the table keeps only row and cell structure.
 
 ### Scrollable Areas
 
 - `UiScrollArea` is the default wrapper for long panes and lists such as search results, diff panes, OSM tag dumps, and admin region lists.
+- Bordered scroll list surfaces should use the semantic `ui-scroll-surface` class on the root so the border and background stay consistent across admin and account panes.
 
 ### Pressable Cards
 
@@ -143,7 +147,7 @@ When a new control is needed:
 
 - Login and registration reuse the current `shadcn-svelte` block structure derived from `login-04` and `signup-04`.
 - Auth mode switches must not change modal width or visual-pane dimensions.
-- The right-side visual keeps the project-specific blurred map treatment rather than upstream demo art.
+- The right-side visual keeps the project-specific architectural/map illustration treatment rather than upstream demo art.
 - Registration uses a single footer legal note and standard required-field markers instead of per-field `required/optional` labels and inline consent checkboxes.
 - Guest navigation exposes a single combined auth action: `Sign in / Register`.
 

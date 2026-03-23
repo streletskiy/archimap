@@ -1,5 +1,6 @@
 <script>
-  import { UiCard } from '$lib/components/base';
+  import { UiButton, UiCard } from '$lib/components/base';
+  import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import { t } from '$lib/i18n/index';
   import AuthVisualPane from '$lib/components/shell/AuthVisualPane.svelte';
   import { cn } from '$lib/utils/ui.js';
@@ -8,14 +9,28 @@
   export let subtitle = '';
   export let className = '';
   export let bodyClassName = '';
+  export let onclose = undefined;
 </script>
 
 <UiCard
   className={cn(
-    'overflow-hidden border-0 p-0 shadow-[0_28px_60px_rgba(8,17,31,0.24)]',
+    'relative overflow-hidden border-0 p-0 shadow-[0_28px_60px_rgba(8,17,31,0.24)]',
     className
   )}
 >
+  {#if onclose}
+    <UiButton
+      type="button"
+      variant="secondary"
+      size="close"
+      className="absolute right-3.5 top-3.5 z-[2]"
+      onclick={() => onclose?.()}
+      aria-label={$t('common.close')}
+    >
+      <CloseIcon class="ui-close-icon" />
+    </UiButton>
+  {/if}
+
   <div class="grid p-0 md:grid-cols-2">
     <div class={cn('p-6 md:p-8', bodyClassName)}>
       <div class="auth-card-copy">

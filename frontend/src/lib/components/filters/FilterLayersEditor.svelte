@@ -396,7 +396,7 @@
     grid-template-columns: 0.42rem minmax(0, 1fr);
     border-radius: 1rem;
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     overflow: hidden;
   }
 
@@ -464,7 +464,7 @@
     padding: 0.65rem;
     border: 1px solid color-mix(in srgb, var(--panel-border) 86%, transparent);
     border-radius: 0.9rem;
-    background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+    background: var(--panel-solid);
   }
 
   .rule-item-head {

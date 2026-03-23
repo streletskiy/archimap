@@ -58,7 +58,7 @@
   let canEditAddressFull = true;
   let osmTagEntries = [];
   let modalEl = null;
-  let hadOpenState = false;
+  let hadOpenState;
 
   function hydrateForm(details) {
     const nextState = hydrateBuildingForm(details);
@@ -138,6 +138,7 @@
   } else if (!$buildingModalOpen && hadOpenState) {
     hadOpenState = false;
   }
+  $: void hadOpenState;
 
   $: archiInfo = buildingDetails?.properties?.archiInfo || {};
   $: isBuildingPartFeature = buildingDetails?.feature_kind === 'building_part';
@@ -538,7 +539,7 @@
     padding: 1rem;
     border-radius: 1.4rem;
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 96%, transparent);
+    background: var(--panel-solid);
     box-shadow: var(--shadow-panel);
   }
 
@@ -578,7 +579,7 @@
   .read-card {
     border: 1px solid var(--panel-border);
     border-radius: 1.15rem;
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
     box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
   }
 
@@ -645,10 +646,10 @@
   .warning {
     margin: 0;
     padding: 0.9rem 1rem;
-    border: 1px solid color-mix(in srgb, #f59e0b 42%, var(--panel-border));
+    border: 1px solid color-mix(in srgb, var(--ui-text-warning) 28%, var(--panel-border));
     border-radius: 1rem;
-    background: rgba(245, 158, 11, 0.12);
-    color: #9a3412;
+    background: var(--ui-surface-warning);
+    color: var(--ui-text-warning-strong);
     font-size: 0.9rem;
     line-height: 1.45;
   }
@@ -697,7 +698,8 @@
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.85rem 0 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, color-mix(in srgb, var(--panel-solid) 92%, transparent) 42%);
+    border-top: 1px solid var(--panel-border);
+    background: var(--panel-solid);
   }
 
   .status {
@@ -712,14 +714,14 @@
     padding: 0.7rem 0.8rem;
     border-radius: 0.95rem;
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+    background: var(--panel-solid);
   }
 
   .osm-tags {
     margin: 0;
     border: 1px solid var(--panel-border);
     border-radius: 1rem;
-    background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
+    background: var(--panel-solid);
     padding: 0.65rem 0.75rem;
   }
 
@@ -739,7 +741,7 @@
     padding: 0.65rem 0.75rem;
     border: 1px solid var(--panel-border);
     border-radius: 0.85rem;
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
   }
 
   .osm-tag-key,
@@ -769,7 +771,7 @@
     padding: 1rem;
     border: 1px dashed var(--panel-border-strong);
     border-radius: 1rem;
-    background: color-mix(in srgb, var(--panel-solid) 74%, transparent);
+    background: var(--panel-solid);
   }
 
   @media (max-width: 1100px) {

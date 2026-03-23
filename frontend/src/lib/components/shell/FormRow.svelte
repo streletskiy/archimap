@@ -19,11 +19,11 @@
 <style>
   .form-row {
     display: grid;
-    gap: 0.38rem;
+    gap: 0.375rem;
   }
 
   .form-row-note {
-    margin: -0.15rem 0 0.1rem;
+    margin: 0;
     color: var(--muted);
     font-size: 0.84rem;
     line-height: 1.45;

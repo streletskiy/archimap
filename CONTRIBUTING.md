@@ -31,7 +31,7 @@ Frontend is implemented in `frontend/` with SvelteKit.
 - Avoid duplicated markup/styles across routes; extract shared components.
 - Keep shared visual rules in `frontend/src/app.css`; do not duplicate long repeated class chains across feature components.
 - For UI work, follow [docs/ui-architecture.md](docs/ui-architecture.md).
-- PRs that reintroduce legacy imperative page scripts in `public/` should be considered incomplete.
+- PRs that add imperative page scripts in `public/` should be considered incomplete.
 
 ## Commit Convention
 

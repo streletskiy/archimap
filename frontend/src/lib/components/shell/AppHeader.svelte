@@ -221,6 +221,11 @@
     z-index: 1005;
     padding: 0.75rem;
     pointer-events: none;
+    --nav-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  }
+
+  :global(html[data-theme='dark']) .nav-shell {
+    --nav-shadow: 0 8px 20px rgba(2, 6, 23, 0.28);
   }
 
   .nav {
@@ -231,9 +236,8 @@
     padding: 0.65rem 0.75rem 0.65rem 1.1rem;
     border: 1px solid var(--panel-border);
     border-radius: 1.35rem;
-    background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
-    box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(18px);
+    background: var(--panel-solid);
+    box-shadow: var(--nav-shadow);
     pointer-events: auto;
     position: relative;
     z-index: 2;
@@ -286,7 +290,7 @@
   }
 
   .nav-links a:hover {
-    background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel-solid));
   }
 
   .nav-links a.active {
@@ -304,7 +308,7 @@
   .menu-btn-trigger,
   .filter-trigger {
     border: 1px solid var(--panel-border);
-    background: color-mix(in srgb, var(--panel-solid) 84%, transparent);
+    background: var(--panel-solid);
     color: var(--muted-strong);
     cursor: pointer;
     transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
@@ -315,7 +319,7 @@
   .filter-trigger:hover {
     transform: translateY(-1px);
     border-color: var(--panel-border-strong);
-    background: var(--panel-solid);
+    background: var(--ui-surface-hover);
     color: var(--fg-strong);
     box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
   }

@@ -3,6 +3,7 @@
 ## Recommended final gate
 
 - `npm run lint`
+- `npm run typecheck`
 - `npm run frontend:check`
 - `npm test`
 - `npm run test:e2e`

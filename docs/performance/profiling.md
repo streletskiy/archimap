@@ -3,14 +3,14 @@
 ## Node CPU profile
 
 1. Start server with inspector/profile:
-   - `node --cpu-prof server.sveltekit.js`
+   - `node --import tsx --cpu-prof server.sveltekit.ts`
 2. Reproduce workload (`npm run perf:smoke` or realistic traffic).
 3. Open generated `.cpuprofile` in Chrome DevTools Performance panel.
 
 ## Node heap/memory
 
 1. Start with:
-   - `node --inspect server.sveltekit.js`
+   - `node --import tsx --inspect server.sveltekit.ts`
 2. Connect via `chrome://inspect`.
 3. Capture heap snapshot before and after high-volume bbox/search requests.
 
@@ -19,7 +19,7 @@
 1. Install once:
    - `npm i -D clinic`
 2. Run:
-   - `npx clinic flame -- node server.sveltekit.js`
+   - `npx clinic flame -- node --import tsx server.sveltekit.ts`
 3. Exercise routes, stop process, inspect report.
 
 ## Browser profiling

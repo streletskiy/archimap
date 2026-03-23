@@ -3,7 +3,7 @@
 ## CSP
 
 - Implemented in two runtime layers:
-  - internal app/API runtime: `src/lib/server/infra/csp.infra.js`, applied via `security-headers.infra.js`
+  - internal app/API runtime: `src/lib/server/infra/csp.infra.ts`, applied via `security-headers.infra.ts`
   - SvelteKit-rendered pages: `frontend/src/hooks.server.ts`
 - Prod profile:
   - `default-src 'self'`
@@ -52,11 +52,17 @@
   - `POST /api/admin/**`
 - Token is session-bound and validated by `requireCsrfSession`.
 - Login/registration/password-reset flows do not require CSRF; they rely on rate limits, session rotation, and one-time email tokens.
+- Registration and password-reset one-time email tokens are stored as derived hashes, not plaintext.
 - Integration coverage includes negative path (`mutation without CSRF -> 403`).
+
+## Worker messaging
+
+- Dedicated worker `message` handlers should validate the sender origin before processing payloads.
+- Chromium exposes an empty `event.origin` for same-origin messages sent to dedicated workers, so the building filter worker normalizes that case to the worker origin before comparing and only accepts `prepare-rules` messages from the trusted origin.
 
 ## Logging and redaction
 
-- Logger: `src/lib/server/services/logger.service.js`.
+- Logger: `src/lib/server/services/logger.service.ts`.
 - URL sanitization: query values stripped (`sanitizeUrl`).
 - Sensitive fields masked (`maskSensitive`): tokens, passwords, csrf, cookies, auth headers.
 

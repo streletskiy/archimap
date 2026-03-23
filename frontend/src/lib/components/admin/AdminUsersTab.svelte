@@ -32,11 +32,11 @@
   let usersHasEdits = 'all';
   let usersSortBy = 'createdAt';
   let usersSortDir = 'desc';
-  let usersRoleItems = [];
-  let usersCanEditItems = [];
-  let usersHasEditsItems = [];
-  let usersSortByItems = [];
-  let usersSortDirItems = [];
+  let usersRoleItems;
+  let usersCanEditItems;
+  let usersHasEditsItems;
+  let usersSortByItems;
+  let usersSortDirItems;
 
   $: usersRoleItems = [
     { value: 'all', label: $t('admin.users.roleAll') },
@@ -159,8 +159,8 @@
 
   <p class="text-sm ui-text-muted">{usersStatus}</p>
 
-  <UiScrollArea className="flex-1 min-h-0 rounded-2xl border ui-border">
-    <UiTable containerClassName="ui-surface-base">
+  <UiScrollArea className="ui-scroll-surface flex-1 min-h-0 rounded-2xl">
+    <UiTable framed={false}>
     <UiTableHeader>
       <UiTableRow className="hover:[&>th]:bg-transparent">
         <UiTableHead>{$t('admin.users.table.email')}</UiTableHead>
