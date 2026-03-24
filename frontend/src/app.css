@@ -1803,6 +1803,18 @@ textarea {
   font: inherit;
 }
 
+button:not(:disabled):not([aria-disabled='true']),
+input[type='button']:not(:disabled):not([aria-disabled='true']),
+input[type='submit']:not(:disabled):not([aria-disabled='true']),
+input[type='reset']:not(:disabled):not([aria-disabled='true']),
+a[href]:not([aria-disabled='true']),
+summary:not([aria-disabled='true']),
+[role='button']:not([aria-disabled='true']),
+[role='tab']:not([aria-disabled='true']),
+[role='switch']:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
 a {
   color: inherit;
 }
