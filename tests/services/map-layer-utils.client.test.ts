@@ -94,6 +94,8 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
     'region-buildings-7-filter-highlight-line',
     'region-buildings-7-part-filter-highlight-fill',
     'region-buildings-7-part-filter-highlight-line',
+    'region-buildings-7-hover-fill',
+    'region-buildings-7-hover-line',
     'region-buildings-7-selected-fill',
     'region-buildings-7-selected-line'
   ]);
@@ -113,10 +115,34 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-line').paint['line-opacity'], 1);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').paint['fill-opacity'], 0);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').paint['line-opacity'], 0);
+  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-color'], '#c8bcae');
+  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.44);
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-color'], '#7d7063');
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.9);
   assert.equal(map.layers.get('region-buildings-7-part-fill').layout.visibility, 'visible');
   assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'visible');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').layout.visibility, 'none');
+});
+
+test('applyBuildingThemePaint updates hover layers with hover theme paint', async () => {
+  const { applyBuildingThemePaint } = await loadMapLayerUtils();
+  const map = createMapStub();
+  map.addLayer({ id: 'region-buildings-7-hover-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-line', type: 'line', paint: {} });
+
+  applyBuildingThemePaint({
+    map,
+    theme: 'dark',
+    hoverFillLayerIds: ['region-buildings-7-hover-fill'],
+    hoverLineLayerIds: ['region-buildings-7-hover-line']
+  });
+
+  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-color'], '#7189a4');
+  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.44);
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-color'], '#d7e1ea');
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.9);
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-opacity'], 1);
 });
 
 test('ensureRegionBuildingSourceAndLayers applies initial hidden state for building parts', async () => {

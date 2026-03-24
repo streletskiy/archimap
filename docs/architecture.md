@@ -67,7 +67,7 @@
   - `frontend/src/lib/services/map/filter-diff-apply-strategy.ts`: highlight diff/apply strategy over MapLibre paint properties
 - Frontend map canvas decomposition:
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
-  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, and search-result click routing
+  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, buffered hover/click hit-testing for pmtiles buildings, and search-result click routing
   - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.
@@ -110,6 +110,10 @@
 - Custom building filter renders through dedicated region-scoped highlight layers:
   - `<region>-filter-highlight-fill`
   - `<region>-filter-highlight-line`
+- Building hover renders through dedicated region-scoped hover layers:
+  - `<region>-hover-fill`
+  - `<region>-hover-line`
+  - Hover hit-testing uses a small pixel buffer around the cursor so thin building contours still respond to pointer hover and click.
 - Filter evaluation for architectural fields uses merged local values first and then falls back to raw OSM tags, so accepted/synced edits participate in map highlighting the same way they do in building details.
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.

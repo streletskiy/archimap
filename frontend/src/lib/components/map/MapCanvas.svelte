@@ -21,7 +21,9 @@
     getCurrentBuildingPartFillLayerIds,
     getCurrentBuildingPartLineLayerIds,
     getCurrentBuildingPartFilterHighlightFillLayerIds,
-    getCurrentBuildingPartFilterHighlightLineLayerIds
+    getCurrentBuildingPartFilterHighlightLineLayerIds,
+    getCurrentBuildingHoverFillLayerIds,
+    getCurrentBuildingHoverLineLayerIds
   } from '$lib/services/map/map-layer-utils';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
@@ -176,6 +178,7 @@
     onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
       forceHighlightVisible: currentBuildingFilterLayers.length > 0
     }),
+    onRefreshHoverFromPointer: () => selectionController.refreshHoverFromLastPointer(),
     onRefreshFilterDebugState: (active) => filterPipeline.refreshDebugState(active),
     onReapplyFilteredHighlight: () => filterPipeline.reapplyFilteredHighlight()
   });
@@ -211,6 +214,12 @@
     dispatchBuildingClick: (payload) => dispatch('buildingClick', payload)
   });
 
+  const handleBuildingClick = (event) => selectionController.handleMapBuildingClick(event);
+  const handleSearchClusterClick = (event) => selectionController.onSearchClusterClick(event);
+  const handleSearchResultClick = (event) => selectionController.onSearchResultClick(event);
+  const handleMapPointerMove = (event) => selectionController.handleMapPointerMove(event);
+  const handleMapPointerLeave = () => selectionController.handleMapPointerLeave();
+
   const filterState = filterPipeline.state;
 
   function updateSearchMarkers(items) {
@@ -241,7 +250,9 @@
       fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegions),
       lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions),
       partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
-      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions)
+      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions)
     });
   }
 
@@ -283,29 +294,12 @@
     }
   }
 
-  function onPointerEnter() {
-    if (!map) return;
-    map.getCanvas().style.cursor = 'pointer';
-  }
-
-  function onPointerLeave() {
-    if (!map) return;
-    map.getCanvas().style.cursor = '';
-  }
-
   function bindStyleInteractionHandlers() {
-    const layerIds = regionLayersController.getCurrentMapLayerIds();
     bindMapInteractionHandlers({
       map,
-      buildingFillLayerIds: layerIds.buildingFillLayerIds,
-      buildingLineLayerIds: layerIds.buildingLineLayerIds,
-      buildingPartFillLayerIds: layerIds.buildingPartFillLayerIds,
-      buildingPartLineLayerIds: layerIds.buildingPartLineLayerIds,
-      onBuildingClick: (event) => selectionController.handleMapBuildingClick(event),
-      onSearchClusterClick: (event) => selectionController.onSearchClusterClick(event),
-      onSearchResultClick: (event) => selectionController.onSearchResultClick(event),
-      onPointerEnter,
-      onPointerLeave
+      onBuildingClick: handleBuildingClick,
+      onSearchClusterClick: handleSearchClusterClick,
+      onSearchResultClick: handleSearchResultClick
     });
   }
 
@@ -458,6 +452,9 @@
       map.on('zoomend', () => regionLayersController.scheduleCoverageCheck());
       map.on('resize', () => regionLayersController.syncMapRegionSources());
       map.on('resize', () => regionLayersController.scheduleCoverageCheck());
+      map.on('mousemove', handleMapPointerMove);
+      map.on('mouseleave', handleMapPointerLeave);
+      map.on('mouseout', handleMapPointerLeave);
 
       map.on('style.load', () => {
         regionLayersController.ensureMapSourcesAndLayers(config, { force: true });

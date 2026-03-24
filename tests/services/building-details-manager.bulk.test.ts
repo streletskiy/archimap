@@ -3,11 +3,11 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
-async function loadModule(modulePath) {
+async function loadModule(modulePath: string) {
   return import(pathToFileURL(path.join(process.cwd(), modulePath)).href);
 }
 
-function createJsonResponse(body, status = 200) {
+function createJsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -16,6 +16,22 @@ function createJsonResponse(body, status = 200) {
   });
 }
 
+function copyHeaders(initHeaders: HeadersInit | undefined): Record<string, string> {
+  const headers = new Headers(initHeaders || {});
+  const result: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+}
+
+type RequestRecord = {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: any;
+};
+
 test('bulk edit skips buildings that already match the target values', async () => {
   const { get } = await import('svelte/store');
   const { session } = await loadModule('frontend/src/lib/stores/auth.ts');
@@ -23,7 +39,7 @@ test('bulk edit skips buildings that already match the target values', async () 
   const { createBuildingDetailsManager } = await loadModule('frontend/src/lib/services/building-details-manager.ts');
 
   const originalFetch = global.fetch;
-  const requests = [];
+  const requests: RequestRecord[] = [];
 
   session.set({
     loading: false,
@@ -35,7 +51,7 @@ test('bulk edit skips buildings that already match the target values', async () 
   });
   clearSelectedBuildings();
 
-  global.fetch = async (input, init = {}) => {
+  global.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     const method = String(init.method || 'GET').toUpperCase();
     let body = null;
@@ -49,7 +65,7 @@ test('bulk edit skips buildings that already match the target values', async () 
     requests.push({
       url,
       method,
-      headers: Object.fromEntries(new Headers(init.headers || {}).entries()),
+      headers: copyHeaders(init.headers),
       body
     });
 
@@ -112,7 +128,7 @@ test('bulk edit skips buildings that already match the target values', async () 
     }
 
     return createJsonResponse({});
-  };
+  }) as typeof fetch;
 
   try {
     const manager = createBuildingDetailsManager();
@@ -141,7 +157,7 @@ test('bulk edit skips buildings that already match the target values', async () 
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const selectionState = get(selectedBuildings);
+    const selectionState = get(selectedBuildings) as Array<unknown>;
     assert.equal(selectionState.length, 2);
     const beforeSaveState = stateSnapshots[stateSnapshots.length - 1];
     assert.equal(beforeSaveState?.selectedBuildingDetails?.length, 2);
@@ -196,7 +212,7 @@ test('building details manager keeps design project suggestions and sends design
   const { createBuildingDetailsManager } = await loadModule('frontend/src/lib/services/building-details-manager.ts');
 
   const originalFetch = global.fetch;
-  const requests = [];
+  const requests: RequestRecord[] = [];
 
   session.set({
     loading: false,
@@ -208,7 +224,7 @@ test('building details manager keeps design project suggestions and sends design
   });
   clearSelectedBuildings();
 
-  global.fetch = async (input, init = {}) => {
+  global.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     const method = String(init.method || 'GET').toUpperCase();
     let body = null;
@@ -219,7 +235,12 @@ test('building details manager keeps design project suggestions and sends design
         body = init.body;
       }
     }
-    requests.push({ url, method, body });
+    requests.push({
+      url,
+      method,
+      headers: copyHeaders(init.headers),
+      body
+    });
 
     if (method === 'GET' && url.endsWith('/api/building-info/way/11')) {
       return createJsonResponse({
@@ -252,7 +273,7 @@ test('building details manager keeps design project suggestions and sends design
     }
 
     return createJsonResponse({});
-  };
+  }) as typeof fetch;
 
   try {
     const manager = createBuildingDetailsManager();
@@ -266,7 +287,7 @@ test('building details manager keeps design project suggestions and sends design
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const beforeSave = get(manager);
+    const beforeSave = get(manager) as any;
     assert.equal(beforeSave.buildingDetails?.properties?.archiInfo?.design_ref, '1-335');
     assert.equal(beforeSave.buildingDetails?.properties?.archiInfo?.design_year, '1964');
     assert.deepEqual(beforeSave.buildingDetails?.design_ref_suggestions, ['1-335', '1-464', '1-335']);

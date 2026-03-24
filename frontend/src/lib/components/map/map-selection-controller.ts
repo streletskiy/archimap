@@ -4,6 +4,8 @@ import {
   getCurrentBuildingsLineLayerIds,
   getCurrentBuildingPartFillLayerIds,
   getCurrentBuildingPartLineLayerIds,
+  getCurrentBuildingHoverFillLayerIds,
+  getCurrentBuildingHoverLineLayerIds,
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds
 } from '../../services/map/map-layer-utils.js';
@@ -67,7 +69,11 @@ export function createMapSelectionController({
   debugSelectionLog,
   dispatchBuildingClick
 }: MapSelectionControllerOptions = {}) {
-  let lastHandledBuildingClickSig = null;
+  let lastHandledBuildingClickSig: string | null = null;
+  let lastHoveredBuildingSig: string | null = null;
+  let lastPointerPoint: SelectionPointLike | null = null;
+  // Thin PMTiles contour strokes need a small buffer so hover can catch the edge.
+  const BUILDING_HIT_BUFFER_PX = 4;
 
   function getFeatureKind(feature: SelectionFeatureLike) {
     return String(feature?.properties?.feature_kind || '').trim() || null;
@@ -96,11 +102,83 @@ export function createMapSelectionController({
     return Boolean(get(mapSelectionShiftKey));
   }
 
+  function getNormalizedPoint(point: SelectionPointLike | null | undefined) {
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }
+
+  function setMapCursor(nextCursor: string) {
+    const map = getMap?.();
+    const canvas = map?.getCanvas?.();
+    if (!canvas?.style) return;
+    const normalizedCursor = String(nextCursor || '');
+    if (canvas.style.cursor === normalizedCursor) return;
+    canvas.style.cursor = normalizedCursor;
+  }
+
+  function getHoverLayerIds(activeRegions: RegionLike[] = []) {
+    return {
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions)
+    };
+  }
+
+  function clearHoveredBuilding({ force = false }: { force?: boolean } = {}) {
+    const map = getMap?.();
+    if (!map) {
+      lastHoveredBuildingSig = null;
+      return;
+    }
+    if (!force && lastHoveredBuildingSig == null) return;
+    const activeRegions = getActiveRegions?.() || [];
+    const { hoverFillLayerIds, hoverLineLayerIds } = getHoverLayerIds(activeRegions);
+    for (const layerId of hoverFillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, ['==', ['id'], -1]);
+    }
+    for (const layerId of hoverLineLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, ['==', ['id'], -1]);
+    }
+    lastHoveredBuildingSig = null;
+  }
+
+  function applyHoveredBuilding({
+    feature,
+    identity,
+    force = false
+  }: {
+    feature: SelectionFeatureLike;
+    identity: SelectionIdentity;
+    force?: boolean;
+  }) {
+    const map = getMap?.();
+    if (!map) return;
+    const hoverKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
+    if (!force && hoverKey === lastHoveredBuildingSig) return;
+    const activeRegions = getActiveRegions?.() || [];
+    const filter = getSelectionFilter(feature, identity);
+    const { hoverFillLayerIds, hoverLineLayerIds } = getHoverLayerIds(activeRegions);
+    for (const layerId of hoverFillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+    }
+    for (const layerId of hoverLineLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+    }
+    lastHoveredBuildingSig = hoverKey;
+  }
+
   function getPrimaryBuildingFeature(event: { point?: SelectionPointLike | null }) {
     const map = getMap?.();
     if (!map) return null;
-    if (!event?.point) return null;
-    const searchFeatures = map.queryRenderedFeatures(event.point, {
+    if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) return null;
+    const normalizedPoint = getNormalizedPoint(event?.point);
+    if (!normalizedPoint) return null;
+    const searchFeatures = map.queryRenderedFeatures(normalizedPoint, {
       layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
     });
     if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
@@ -114,10 +192,93 @@ export function createMapSelectionController({
       ...getCurrentBuildingPartFillLayerIds(activeRegions)
     ];
     if (buildingLayerIds.length === 0) return null;
-    const features = map.queryRenderedFeatures(event.point, {
+    const queryBounds = [
+      [normalizedPoint.x - BUILDING_HIT_BUFFER_PX, normalizedPoint.y - BUILDING_HIT_BUFFER_PX],
+      [normalizedPoint.x + BUILDING_HIT_BUFFER_PX, normalizedPoint.y + BUILDING_HIT_BUFFER_PX]
+    ];
+    const features = map.queryRenderedFeatures(queryBounds, {
       layers: buildingLayerIds
     });
     return features?.[0] || null;
+  }
+
+  function handleMapPointerMove(event: {
+    point?: SelectionPointLike | null;
+  }, { forceHover = false }: { forceHover?: boolean } = {}) {
+    const map = getMap?.();
+    if (!map) return;
+    if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) {
+      clearHoveredBuilding({ force: true });
+      setMapCursor('');
+      return;
+    }
+    const normalizedPoint = getNormalizedPoint(event?.point);
+    if (!normalizedPoint) {
+      clearHoveredBuilding();
+      setMapCursor('');
+      lastPointerPoint = null;
+      return;
+    }
+    lastPointerPoint = { x: normalizedPoint.x, y: normalizedPoint.y };
+
+    const searchFeatures = map.queryRenderedFeatures(normalizedPoint, {
+      layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
+    });
+    if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
+      clearHoveredBuilding();
+      setMapCursor('pointer');
+      return;
+    }
+
+    const activeRegions = getActiveRegions?.() || [];
+    const buildingLayerIds = [
+      ...getCurrentBuildingsLineLayerIds(activeRegions),
+      ...getCurrentBuildingsFillLayerIds(activeRegions),
+      ...getCurrentBuildingPartLineLayerIds(activeRegions),
+      ...getCurrentBuildingPartFillLayerIds(activeRegions)
+    ];
+    if (buildingLayerIds.length === 0) {
+      clearHoveredBuilding();
+      setMapCursor('');
+      return;
+    }
+
+    const queryBounds = [
+      [normalizedPoint.x - BUILDING_HIT_BUFFER_PX, normalizedPoint.y - BUILDING_HIT_BUFFER_PX],
+      [normalizedPoint.x + BUILDING_HIT_BUFFER_PX, normalizedPoint.y + BUILDING_HIT_BUFFER_PX]
+    ];
+    const features = map.queryRenderedFeatures(queryBounds, {
+      layers: buildingLayerIds
+    });
+    const feature = Array.isArray(features) ? features[0] : null;
+    const identity = feature ? getFeatureIdentity(feature) : null;
+    if (!feature || !identity) {
+      clearHoveredBuilding();
+      setMapCursor('');
+      return;
+    }
+
+    applyHoveredBuilding({
+      feature,
+      identity,
+      force: forceHover
+    });
+    setMapCursor('pointer');
+  }
+
+  function handleMapPointerLeave() {
+    clearHoveredBuilding();
+    setMapCursor('');
+    lastPointerPoint = null;
+  }
+
+  function refreshHoverFromLastPointer() {
+    if (!lastPointerPoint) {
+      clearHoveredBuilding({ force: true });
+      setMapCursor('');
+      return;
+    }
+    handleMapPointerMove({ point: lastPointerPoint }, { forceHover: true });
   }
 
   function focusSelectedFeature({
@@ -333,6 +494,10 @@ export function createMapSelectionController({
 
   function destroy() {
     lastHandledBuildingClickSig = null;
+    clearHoveredBuilding({ force: true });
+    setMapCursor('');
+    lastHoveredBuildingSig = null;
+    lastPointerPoint = null;
   }
 
   return {
@@ -340,7 +505,10 @@ export function createMapSelectionController({
     clearSelectedFeature,
     destroy,
     handleMapBuildingClick,
+    handleMapPointerLeave,
+    handleMapPointerMove,
     onSearchClusterClick,
-    onSearchResultClick
+    onSearchResultClick,
+    refreshHoverFromLastPointer
   };
 }

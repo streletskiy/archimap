@@ -80,16 +80,19 @@ test('getSelectionFilter supports multiple selected buildings', async () => {
   ]);
 });
 
-test('createMapSelectionController queries part layers in the building hit test', async () => {
+test('createMapSelectionController queries part layers in the buffered building hit test', async () => {
   const { createMapSelectionController } = await loadMapSelectionController();
-  const queriedLayers = [];
+  const queriedCalls = [];
   const dispatches = [];
   const map = {
     getLayer(layerId) {
       return { id: layerId };
     },
-    queryRenderedFeatures(point, options: LooseRecord = {}) {
-      queriedLayers.push([...(options.layers || [])]);
+    queryRenderedFeatures(geometry, options: { layers?: string[] } = {}) {
+      queriedCalls.push({
+        geometry,
+        layers: [...(options.layers || [])]
+      });
       if ((options.layers || []).length === 2) {
         return [];
       }
@@ -124,12 +127,105 @@ test('createMapSelectionController queries part layers in the building hit test'
     lngLat: { lng: 37.5, lat: 55.7 }
   });
 
-  assert.ok(queriedLayers.some((layers) => layers.includes('region-buildings-7-part-fill')));
-  assert.ok(queriedLayers.some((layers) => layers.includes('region-buildings-7-part-line')));
+  assert.equal(queriedCalls.length, 2);
+  assert.deepEqual(queriedCalls[0].geometry, { x: 15, y: 20 });
+  assert.deepEqual(queriedCalls[1].geometry, [
+    [11, 16],
+    [19, 24]
+  ]);
+  assert.ok(queriedCalls[1].layers.includes('region-buildings-7-part-fill'));
+  assert.ok(queriedCalls[1].layers.includes('region-buildings-7-part-line'));
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].osmType, 'way');
   assert.equal(dispatches[0].osmId, 42);
   assert.equal(dispatches[0].feature.layer.id, 'region-buildings-7-part-fill');
+});
+
+test('createMapSelectionController applies hover filters and cursor for buffered building hover', async () => {
+  const { createMapSelectionController } = await loadMapSelectionController();
+  const filters = [];
+  const queriedCalls = [];
+  const canvas = { style: { cursor: '' } };
+  const map = {
+    getLayer(layerId) {
+      return { id: layerId };
+    },
+    getCanvas() {
+      return canvas;
+    },
+    queryRenderedFeatures(geometry, options: { layers?: string[] } = {}) {
+      queriedCalls.push({
+        geometry,
+        layers: [...(options.layers || [])]
+      });
+      if ((options.layers || []).length === 2) {
+        return [];
+      }
+      return [{
+        id: 248,
+        layer: { id: 'region-buildings-7-line' },
+        properties: {
+          osm_type: 'way',
+          osm_id: 42
+        }
+      }];
+    },
+    setFilter(layerId, filter) {
+      filters.push({ layerId, filter });
+    },
+    setLayoutProperty() {},
+    on() {},
+    off() {},
+    once() {},
+    easeTo() {},
+    isStyleLoaded() {
+      return true;
+    }
+  };
+
+  const controller = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => [{ id: 7 }],
+    recordDebugSetFilter: () => {},
+    debugSelectionLog: () => {}
+  });
+
+  controller.handleMapPointerMove({
+    point: { x: 30, y: 40 }
+  });
+
+  assert.equal(queriedCalls.length, 2);
+  assert.deepEqual(queriedCalls[0].geometry, { x: 30, y: 40 });
+  assert.deepEqual(queriedCalls[1].geometry, [
+    [26, 36],
+    [34, 44]
+  ]);
+  assert.equal(canvas.style.cursor, 'pointer');
+  assert.deepEqual(filters, [
+    {
+      layerId: 'region-buildings-7-hover-fill',
+      filter: ['==', ['id'], 84]
+    },
+    {
+      layerId: 'region-buildings-7-hover-line',
+      filter: ['==', ['id'], 84]
+    }
+  ]);
+
+  filters.length = 0;
+  controller.refreshHoverFromLastPointer();
+
+  assert.equal(canvas.style.cursor, 'pointer');
+  assert.deepEqual(filters, [
+    {
+      layerId: 'region-buildings-7-hover-fill',
+      filter: ['==', ['id'], 84]
+    },
+    {
+      layerId: 'region-buildings-7-hover-line',
+      filter: ['==', ['id'], 84]
+    }
+  ]);
 });
 
 test('createMapSelectionController skips zoom on shift-click and forwards feature kind', async () => {
@@ -141,7 +237,7 @@ test('createMapSelectionController skips zoom on shift-click and forwards featur
     getLayer(layerId) {
       return { id: layerId };
     },
-    queryRenderedFeatures(point, options = {}) {
+    queryRenderedFeatures(point, options: { layers?: string[] } = {}) {
       if (Array.isArray(options.layers) && options.layers.length === 2) {
         return [];
       }

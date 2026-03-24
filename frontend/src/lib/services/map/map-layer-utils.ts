@@ -1,6 +1,6 @@
 import { resolvePmtilesUrl } from '../map-runtime.js';
 import { buildRegionLayerId, buildRegionSourceId } from '../region-pmtiles.js';
-import { getBuildingThemePaint } from './map-theme-utils.js';
+import { getBuildingHoverThemePaint, getBuildingThemePaint } from './map-theme-utils.js';
 import {
   EMPTY_LAYER_FILTER,
   buildFilterHighlightExpression
@@ -95,6 +95,14 @@ export function getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPm
   return getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-line');
 }
 
+export function getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'hover-fill');
+}
+
+export function getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles = []) {
+  return getRegionLayerIds(activeRegionPmtiles, 'hover-line');
+}
+
 export function getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles = []) {
   return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-fill');
 }
@@ -117,10 +125,13 @@ export function applyBuildingThemePaint({
   fillLayerIds = [],
   lineLayerIds = [],
   partFillLayerIds = [],
-  partLineLayerIds = []
+  partLineLayerIds = [],
+  hoverFillLayerIds = [],
+  hoverLineLayerIds = []
 }) {
   if (!map) return;
   const paint = getBuildingThemePaint(theme);
+  const hoverPaint = getBuildingHoverThemePaint(theme);
   for (const layerId of [...new Set([...fillLayerIds, ...partFillLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setPaintProperty(layerId, 'fill-color', paint.fillColor);
@@ -134,80 +145,35 @@ export function applyBuildingThemePaint({
       map.setPaintProperty(layerId, 'line-opacity', paint.lineOpacity);
     }
   }
+  for (const layerId of [...new Set([...hoverFillLayerIds])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setPaintProperty(layerId, 'fill-color', hoverPaint.fillColor);
+    map.setPaintProperty(layerId, 'fill-opacity', hoverPaint.fillOpacity);
+  }
+  for (const layerId of [...new Set([...hoverLineLayerIds])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setPaintProperty(layerId, 'line-color', hoverPaint.lineColor);
+    map.setPaintProperty(layerId, 'line-width', hoverPaint.lineWidth);
+    if (hoverPaint.lineOpacity != null) {
+      map.setPaintProperty(layerId, 'line-opacity', hoverPaint.lineOpacity);
+    }
+  }
 }
 
 export function bindMapInteractionHandlers({
   map,
-  buildingFillLayerIds = [],
-  buildingLineLayerIds = [],
-  buildingPartFillLayerIds = [],
-  buildingPartLineLayerIds = [],
   onBuildingClick,
   onSearchClusterClick,
-  onSearchResultClick,
-  onPointerEnter,
-  onPointerLeave
+  onSearchResultClick
 }) {
   if (!map) return;
-  const fillLayerIds = [...new Set(buildingFillLayerIds)];
-  const lineLayerIds = [...new Set(buildingLineLayerIds)];
-  const partFillLayerIds = [...new Set(buildingPartFillLayerIds)];
-  const partLineLayerIds = [...new Set(buildingPartLineLayerIds)];
   map.off('click', onBuildingClick);
   map.off('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
   map.off('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
-  map.off('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
-  map.off('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
-  map.off('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
-  map.off('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
-  for (const layerId of fillLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.off('mouseenter', layerId, onPointerEnter);
-    map.off('mouseleave', layerId, onPointerLeave);
-  }
-  for (const layerId of lineLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.off('mouseenter', layerId, onPointerEnter);
-    map.off('mouseleave', layerId, onPointerLeave);
-  }
-  for (const layerId of partFillLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.off('mouseenter', layerId, onPointerEnter);
-    map.off('mouseleave', layerId, onPointerLeave);
-  }
-  for (const layerId of partLineLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.off('mouseenter', layerId, onPointerEnter);
-    map.off('mouseleave', layerId, onPointerLeave);
-  }
 
   map.on('click', onBuildingClick);
   map.on('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
   map.on('click', SEARCH_RESULTS_LAYER_ID, onSearchResultClick);
-  map.on('mouseenter', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerEnter);
-  map.on('mouseleave', SEARCH_RESULTS_CLUSTER_LAYER_ID, onPointerLeave);
-  map.on('mouseenter', SEARCH_RESULTS_LAYER_ID, onPointerEnter);
-  map.on('mouseleave', SEARCH_RESULTS_LAYER_ID, onPointerLeave);
-  for (const layerId of fillLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.on('mouseenter', layerId, onPointerEnter);
-    map.on('mouseleave', layerId, onPointerLeave);
-  }
-  for (const layerId of lineLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.on('mouseenter', layerId, onPointerEnter);
-    map.on('mouseleave', layerId, onPointerLeave);
-  }
-  for (const layerId of partFillLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.on('mouseenter', layerId, onPointerEnter);
-    map.on('mouseleave', layerId, onPointerLeave);
-  }
-  for (const layerId of partLineLayerIds) {
-    if (!map.getLayer(layerId)) continue;
-    map.on('mouseenter', layerId, onPointerEnter);
-    map.on('mouseleave', layerId, onPointerLeave);
-  }
 }
 
 export function isBaseLabelLayer(layer) {
@@ -308,6 +274,7 @@ export function ensureRegionBuildingSourceAndLayers({
   map,
   region,
   buildingPaint,
+  hoverPaint = getBuildingHoverThemePaint('light'),
   origin,
   buildingPartsVisible = true,
   buildingPartHighlightVisible = false
@@ -322,6 +289,8 @@ export function ensureRegionBuildingSourceAndLayers({
   const filterLineLayerId = buildRegionLayerId(region.id, 'filter-highlight-line');
   const partFilterFillLayerId = buildRegionLayerId(region.id, 'part-filter-highlight-fill');
   const partFilterLineLayerId = buildRegionLayerId(region.id, 'part-filter-highlight-line');
+  const hoverFillLayerId = buildRegionLayerId(region.id, 'hover-fill');
+  const hoverLineLayerId = buildRegionLayerId(region.id, 'hover-line');
   const selectedFillLayerId = buildRegionLayerId(region.id, 'selected-fill');
   const selectedLineLayerId = buildRegionLayerId(region.id, 'selected-line');
   const pmtilesUrl = resolvePmtilesUrl(region.url, origin);
@@ -473,6 +442,37 @@ export function ensureRegionBuildingSourceAndLayers({
     });
   }
 
+  if (!map.getLayer(hoverFillLayerId)) {
+    map.addLayer({
+      id: hoverFillLayerId,
+      type: 'fill',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: ['==', ['id'], -1],
+      paint: {
+        'fill-color': hoverPaint.fillColor,
+        'fill-opacity': hoverPaint.fillOpacity
+      }
+    });
+  }
+
+  if (!map.getLayer(hoverLineLayerId)) {
+    map.addLayer({
+      id: hoverLineLayerId,
+      type: 'line',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: ['==', ['id'], -1],
+      paint: {
+        'line-color': hoverPaint.lineColor,
+        'line-width': hoverPaint.lineWidth,
+        'line-opacity': hoverPaint.lineOpacity ?? 1
+      }
+    });
+  }
+
   if (!map.getLayer(selectedFillLayerId)) {
     map.addLayer({
       id: selectedFillLayerId,
@@ -509,6 +509,8 @@ export function removeRegionBuildingSourceAndLayers(map, regionId) {
   const layerIds = [
     buildRegionLayerId(regionId, 'selected-line'),
     buildRegionLayerId(regionId, 'selected-fill'),
+    buildRegionLayerId(regionId, 'hover-line'),
+    buildRegionLayerId(regionId, 'hover-fill'),
     buildRegionLayerId(regionId, 'part-filter-highlight-line'),
     buildRegionLayerId(regionId, 'part-filter-highlight-fill'),
     buildRegionLayerId(regionId, 'filter-highlight-line'),

@@ -10,6 +10,8 @@ import {
   getCurrentBuildingPartLineLayerIds,
   getCurrentBuildingPartFilterHighlightFillLayerIds,
   getCurrentBuildingPartFilterHighlightLineLayerIds,
+  getCurrentBuildingHoverFillLayerIds,
+  getCurrentBuildingHoverLineLayerIds,
   getCurrentFilterHighlightFillLayerIds,
   getCurrentFilterHighlightLineLayerIds,
   getCurrentSelectedFillLayerIds,
@@ -22,7 +24,7 @@ import {
   SEARCH_RESULTS_LAYER_ID,
   SEARCH_RESULTS_SOURCE_ID
 } from '../../services/map/map-search-utils.js';
-import { getBuildingThemePaint } from '../../services/map/map-theme-utils.js';
+import { getBuildingHoverThemePaint, getBuildingThemePaint } from '../../services/map/map-theme-utils.js';
 import {
   buildRegionSourceId,
   getActiveRegionPmtiles,
@@ -60,6 +62,7 @@ type MapRegionLayersControllerOptions = {
   onApplyBuildingThemePaint?: (theme: unknown) => void;
   onApplyLabelLayerVisibility?: (visible: boolean | null | undefined) => void;
   onApplyBuildingPartsLayerVisibility?: () => void;
+  onRefreshHoverFromPointer?: () => void;
   onRefreshFilterDebugState?: (active: boolean) => void;
   onReapplyFilteredHighlight?: () => void;
 };
@@ -80,6 +83,7 @@ export function createMapRegionLayersController({
   onApplyBuildingThemePaint,
   onApplyLabelLayerVisibility,
   onApplyBuildingPartsLayerVisibility,
+  onRefreshHoverFromPointer,
   onRefreshFilterDebugState,
   onReapplyFilteredHighlight
 }: MapRegionLayersControllerOptions = {}) {
@@ -97,6 +101,8 @@ export function createMapRegionLayersController({
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles),
+      buildingHoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles),
+      buildingHoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegionPmtiles),
@@ -115,6 +121,8 @@ export function createMapRegionLayersController({
       ...layerIds.filterHighlightLineLayerIds,
       ...layerIds.buildingPartFilterHighlightFillLayerIds,
       ...layerIds.buildingPartFilterHighlightLineLayerIds,
+      ...layerIds.buildingHoverFillLayerIds,
+      ...layerIds.buildingHoverLineLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -132,6 +140,8 @@ export function createMapRegionLayersController({
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(regions),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(regions),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(regions),
+      buildingHoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(regions),
+      buildingHoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(regions),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(regions),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(regions),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(regions),
@@ -160,6 +170,8 @@ export function createMapRegionLayersController({
       ...layerIds.filterHighlightLineLayerIds,
       ...layerIds.buildingPartFilterHighlightFillLayerIds,
       ...layerIds.buildingPartFilterHighlightLineLayerIds,
+      ...layerIds.buildingHoverFillLayerIds,
+      ...layerIds.buildingHoverLineLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -293,6 +305,7 @@ export function createMapRegionLayersController({
     if (!map) return;
     const theme = getCurrentTheme?.();
     const buildingPaint = getBuildingThemePaint(theme);
+    const hoverPaint = getBuildingHoverThemePaint(theme);
     const nextActiveRegions = getViewportActiveRegionPmtiles(config);
     const regionsChanged = !areRegionSetsEqualById(activeRegionPmtiles, nextActiveRegions);
     const searchLayersReady = hasSearchResultLayersReady();
@@ -322,6 +335,7 @@ export function createMapRegionLayersController({
         map,
         region,
         buildingPaint,
+        hoverPaint,
         origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : '',
         buildingPartsVisible: partsVisible,
         buildingPartHighlightVisible: partsVisible || hasActiveBuildingFilters
@@ -338,6 +352,7 @@ export function createMapRegionLayersController({
     onApplyBuildingThemePaint?.(theme);
     onApplyLabelLayerVisibility?.(getMapLabelsVisible?.());
     onApplyBuildingPartsLayerVisibility?.();
+    onRefreshHoverFromPointer?.();
     scheduleCoverageCheck();
     if (force || searchLayersChanged || regionLayersChanged) {
       const activeFilterLayers = getBuildingFilterLayers?.() || [];
