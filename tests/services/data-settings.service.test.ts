@@ -213,6 +213,9 @@ test('filter tag allowlist uses important defaults when DB config is absent', as
   assert.equal(settings.source, 'default');
   assert.deepEqual(settings.allowlist, DEFAULT_FILTER_TAG_ALLOWLIST);
   assert.deepEqual(settings.defaultAllowlist, DEFAULT_FILTER_TAG_ALLOWLIST);
+  for (const key of ['design', 'design:ref', 'design:year', 'building:material:concrete']) {
+    assert.ok(settings.allowlist.includes(key), `default allowlist should include ${key}`);
+  }
 });
 
 test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () => {
