@@ -10,6 +10,10 @@ async function loadSelectionUtils() {
   return import(pathToFileURL(modulePath).href);
 }
 
+async function loadModule(modulePath) {
+  return import(pathToFileURL(path.join(process.cwd(), modulePath)).href);
+}
+
 async function loadMapSelectionController() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'components', 'map', 'map-selection-controller.ts');
   return import(`${pathToFileURL(modulePath).href}?v=${controllerImportCounter += 1}`);
@@ -59,6 +63,21 @@ test('getSelectionFilter is deterministic for same building and switches for dif
 
   assert.deepEqual(first, firstAgain);
   assert.notDeepEqual(first, second);
+});
+
+test('getSelectionFilter supports multiple selected buildings', async () => {
+  const { getSelectionFilter, encodeOsmFeatureId } = await loadSelectionUtils();
+
+  const filter = getSelectionFilter(null, [
+    { osmType: 'way', osmId: 10 },
+    { osmType: 'relation', osmId: 11 }
+  ]);
+
+  assert.deepEqual(filter, [
+    'any',
+    ['==', ['id'], encodeOsmFeatureId('way', 10)],
+    ['==', ['id'], encodeOsmFeatureId('relation', 11)]
+  ]);
 });
 
 test('createMapSelectionController queries part layers in the building hit test', async () => {
@@ -111,5 +130,112 @@ test('createMapSelectionController queries part layers in the building hit test'
   assert.equal(dispatches[0].osmType, 'way');
   assert.equal(dispatches[0].osmId, 42);
   assert.equal(dispatches[0].feature.layer.id, 'region-buildings-7-part-fill');
+});
+
+test('createMapSelectionController skips zoom on shift-click and forwards feature kind', async () => {
+  const { createMapSelectionController } = await loadMapSelectionController();
+  const { setMapSelectionShiftKey } = await loadModule('frontend/src/lib/stores/map.ts');
+  const dispatches = [];
+  let easeToCalls = 0;
+  const map = {
+    getLayer(layerId) {
+      return { id: layerId };
+    },
+    queryRenderedFeatures(point, options = {}) {
+      if (Array.isArray(options.layers) && options.layers.length === 2) {
+        return [];
+      }
+      return [{
+        id: 248,
+        layer: { id: 'region-buildings-7-fill' },
+        properties: {
+          osm_type: 'way',
+          osm_id: 42,
+          feature_kind: 'building_part'
+        }
+      }];
+    },
+    setFilter() {},
+    setLayoutProperty() {},
+    on() {},
+    off() {},
+    once() {},
+    easeTo() {
+      easeToCalls += 1;
+    }
+  };
+
+  const controller = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => [{ id: 7 }],
+    recordDebugSetFilter: () => {},
+    debugSelectionLog: () => {},
+    dispatchBuildingClick: (payload) => dispatches.push(payload)
+  });
+
+  try {
+    setMapSelectionShiftKey(false);
+    controller.handleMapBuildingClick({
+      originalEvent: { timeStamp: 4321, shiftKey: true },
+      point: { x: 11, y: 17 },
+      lngLat: { lng: 37.5, lat: 55.7 }
+    });
+
+    setMapSelectionShiftKey(true);
+    controller.handleMapBuildingClick({
+      originalEvent: { timeStamp: 4322, shiftKey: false },
+      point: { x: 12, y: 18 },
+      lngLat: { lng: 37.6, lat: 55.8 }
+    });
+  } finally {
+    setMapSelectionShiftKey(false);
+  }
+
+  assert.equal(easeToCalls, 0);
+  assert.equal(dispatches.length, 2);
+  assert.equal(dispatches[0].shiftKey, true);
+  assert.equal(dispatches[1].shiftKey, true);
+  assert.equal(dispatches[0].featureKind, 'building_part');
+  assert.equal(dispatches[1].featureKind, 'building_part');
+});
+
+test('createMapSelectionController applies selection filters for multi-selection store values', async () => {
+  const { createMapSelectionController } = await loadMapSelectionController();
+  const filters = [];
+  const map = {
+    getLayer(layerId) {
+      return { id: layerId };
+    },
+    queryRenderedFeatures() {
+      return [];
+    },
+    setFilter(layerId, filter) {
+      filters.push({ layerId, filter });
+    },
+    setLayoutProperty() {},
+    on() {},
+    off() {},
+    once() {},
+    easeTo() {}
+  };
+
+  const controller = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => [{ id: 7 }],
+    recordDebugSetFilter: () => {},
+    debugSelectionLog: () => {}
+  });
+
+  controller.applySelectionFromStore([
+    { osmType: 'way', osmId: 10 },
+    { osmType: 'relation', osmId: 11 }
+  ]);
+
+  assert.ok(filters.length > 0);
+  assert.deepEqual(filters[0].filter, [
+    'any',
+    ['==', ['id'], 20],
+    ['==', ['id'], 23]
+  ]);
 });
 

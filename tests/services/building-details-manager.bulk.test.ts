@@ -1,0 +1,191 @@
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const test = require('node:test');
+
+async function loadModule(modulePath) {
+  return import(pathToFileURL(path.join(process.cwd(), modulePath)).href);
+}
+
+function createJsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json'
+    }
+  });
+}
+
+test('bulk edit submits the same allowed changes to every selected building', async () => {
+  const { get } = await import('svelte/store');
+  const { session } = await loadModule('frontend/src/lib/stores/auth.ts');
+  const { clearSelectedBuildings, selectedBuildings } = await loadModule('frontend/src/lib/stores/map.ts');
+  const { createBuildingDetailsManager } = await loadModule('frontend/src/lib/services/building-details-manager.ts');
+
+  const originalFetch = global.fetch;
+  const requests = [];
+
+  session.set({
+    loading: false,
+    authenticated: true,
+    csrfToken: 'csrf-token',
+    user: {
+      email: 'editor@example.com'
+    }
+  });
+  clearSelectedBuildings();
+
+  global.fetch = async (input, init = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+    let body = null;
+    if (typeof init.body === 'string') {
+      try {
+        body = JSON.parse(init.body);
+      } catch {
+        body = init.body;
+      }
+    }
+    requests.push({
+      url,
+      method,
+      headers: Object.fromEntries(new Headers(init.headers || {}).entries()),
+      body
+    });
+
+    if (method === 'GET' && url.endsWith('/api/building-info/way/1')) {
+      return createJsonResponse({
+        feature_kind: 'building',
+        region_slugs: [],
+        name: 'Alpha House',
+        style: 'old-style',
+        material: 'brick',
+        colour: '#222222',
+        levels: '3',
+        year_built: '1988',
+        architect: 'Alice',
+        address: 'Main street, 1',
+        archimap_description: 'Initial'
+      });
+    }
+
+    if (method === 'GET' && url.endsWith('/api/building/way/1')) {
+      return createJsonResponse({
+        properties: {
+          feature_kind: 'building',
+          source_tags: {}
+        }
+      });
+    }
+
+    if (method === 'GET' && url.endsWith('/api/building-info/way/2')) {
+      return createJsonResponse({
+        feature_kind: 'building',
+        region_slugs: [],
+        name: 'Beta House',
+        style: 'neo-classical',
+        material: 'glass',
+        colour: '#333333',
+        levels: '5',
+        year_built: '1991',
+        architect: 'Bob',
+        address: 'Main street, 2',
+        archimap_description: 'Second'
+      });
+    }
+
+    if (method === 'GET' && url.endsWith('/api/building/way/2')) {
+      return createJsonResponse({
+        properties: {
+          feature_kind: 'building',
+          source_tags: {}
+        }
+      });
+    }
+
+    if (method === 'POST' && url.endsWith('/api/building-info')) {
+      return createJsonResponse({
+        ok: true,
+        editId: 1,
+        status: 'pending'
+      });
+    }
+
+    return createJsonResponse({});
+  };
+
+  try {
+    const manager = createBuildingDetailsManager();
+    const stateSnapshots = [];
+    const unsubscribe = manager.subscribe((value) => {
+      stateSnapshots.push(value);
+    });
+
+    manager.selectBuilding({
+      osmType: 'way',
+      osmId: 1,
+      lon: 37.5,
+      lat: 55.7,
+      featureKind: 'building'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    manager.selectBuilding({
+      osmType: 'way',
+      osmId: 2,
+      lon: 37.6,
+      lat: 55.8,
+      featureKind: 'building',
+      shiftKey: true
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const selectionState = get(selectedBuildings);
+    assert.equal(selectionState.length, 2);
+    const beforeSaveState = stateSnapshots[stateSnapshots.length - 1];
+    assert.equal(beforeSaveState?.selectedBuildingDetails?.length, 2);
+
+    await manager.saveEdit({
+      osmType: 'way',
+      osmId: 1,
+      name: 'Alpha House',
+      style: 'neo-classical',
+      material: 'brick',
+      colour: '#111111',
+      levels: '4',
+      yearBuilt: '1990',
+      architect: 'Alice',
+      address: 'Updated address',
+      archimapDescription: 'Updated note',
+      editedFields: ['style', 'address']
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const postRequests = requests.filter((request) => request.method === 'POST' && request.url.endsWith('/api/building-info'));
+    assert.equal(postRequests.length, 2);
+    assert.deepEqual(postRequests.map((request) => request.body.osmId), [1, 2]);
+    assert.deepEqual(postRequests.map((request) => request.body.editedFields), [
+      ['style'],
+      ['style']
+    ]);
+    assert.equal(postRequests.every((request) => request.body.address === null), true);
+    assert.equal(postRequests.every((request) => request.headers['x-csrf-token'] === 'csrf-token'), true);
+
+    const latestState = stateSnapshots[stateSnapshots.length - 1];
+    assert.ok(String(latestState?.saveStatus || '').length > 0);
+
+    unsubscribe();
+    manager.destroy();
+  } finally {
+    clearSelectedBuildings();
+    session.set({
+      loading: false,
+      authenticated: false,
+      csrfToken: null,
+      user: null
+    });
+    global.fetch = originalFetch;
+  }
+});

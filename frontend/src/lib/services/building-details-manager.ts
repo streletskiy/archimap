@@ -3,13 +3,20 @@ import { translateNow } from '$lib/i18n/index';
 import { getRuntimeConfig } from '$lib/services/config';
 import { apiJson } from '$lib/services/http';
 import { session } from '$lib/stores/auth';
-import { selectedBuilding, setSelectedBuilding } from '$lib/stores/map';
+import {
+  clearSelectedBuildings,
+  selectedBuilding,
+  selectedBuildings,
+  setSelectedBuilding,
+  setSelectedBuildings
+} from '$lib/stores/map';
 import { closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
 import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
 import {
   normalizeBuildingMaterialSelection,
   splitBuildingMaterialSelection
 } from '$lib/utils/building-material';
+import { filterBuildingEditedFields } from '$lib/utils/building-edit-fields';
 import { resolveAddressText } from '$lib/utils/building-address';
 import { isAbortError } from '$lib/utils/error';
 import {
@@ -21,6 +28,8 @@ import {
 
 const initialState = {
   buildingDetails: null,
+  selectedBuildingDetails: [],
+  selectedBuildingDetailKeys: [],
   savePending: false,
   saveStatus: '',
   selectedBuildingIdentity: null
@@ -30,7 +39,8 @@ function isSelectionDebugEnabled() {
   const cfg = getRuntimeConfig();
   const isLocalRuntime = typeof window !== 'undefined'
     && ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  return Boolean(cfg?.mapSelection?.debug || import.meta.env.DEV || isLocalRuntime);
+  const meta = import.meta as LooseRecord;
+  return Boolean(cfg?.mapSelection?.debug || meta?.env?.DEV || isLocalRuntime);
 }
 
 function debugSelectionLog(eventName, payload: LooseRecord = {}) {
@@ -95,9 +105,9 @@ function normalizeArchiInfo(payload: LooseRecord) {
   };
 }
 
-function createFallbackBuildingDetails() {
+function createFallbackBuildingDetails(detail = null) {
   return {
-    feature_kind: null,
+    feature_kind: detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
     region_slugs: [],
     properties: {
       archiInfo: {
@@ -122,13 +132,24 @@ function normalizeBuildingSelection(detail) {
   const osmType = String(detail?.osmType || '').trim();
   const osmId = Number(detail?.osmId);
   if (!osmType || !Number.isInteger(osmId) || osmId <= 0) return null;
+  const lonRaw = detail?.lon;
+  const latRaw = detail?.lat;
+  const lon = lonRaw == null || lonRaw === '' ? null : Number(lonRaw);
+  const lat = latRaw == null || latRaw === '' ? null : Number(latRaw);
   return {
     osmType,
     osmId,
-    lon: Number.isFinite(Number(detail?.lon)) ? Number(detail.lon) : null,
-    lat: Number.isFinite(Number(detail?.lat)) ? Number(detail.lat) : null,
-    feature: detail?.feature || null
+    lon: lon != null && Number.isFinite(lon) ? lon : null,
+    lat: lat != null && Number.isFinite(lat) ? lat : null,
+    featureKind: String(detail?.featureKind || detail?.feature_kind || detail?.feature?.properties?.feature_kind || '').trim() || null
   };
+}
+
+function getSelectionKey(selection) {
+  const osmType = String(selection?.osmType || '').trim();
+  const osmId = Number(selection?.osmId);
+  if (!osmType || !Number.isInteger(osmId) || osmId <= 0) return '';
+  return `${osmType}/${osmId}`;
 }
 
 function toDisplayArchiInfoFromPayload(currentInfo, payload: LooseRecord, editedFields: LooseRecord[] = []) {
@@ -179,17 +200,7 @@ export function createBuildingDetailsManager() {
     }));
   }
 
-  async function loadBuildingDetails(detail) {
-    const token = ++activeBuildingDetailsToken;
-    if (activeBuildingDetailsAbortController) {
-      activeBuildingDetailsAbortController.abort();
-    }
-    activeBuildingDetailsAbortController = new AbortController();
-    const signal = activeBuildingDetailsAbortController.signal;
-    debugSelectionLog('details-load-start', {
-      selectionKey: `${detail.osmType}/${detail.osmId}`
-    });
-
+  async function fetchBuildingDetails(detail, signal) {
     let feature = null;
     try {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
@@ -204,48 +215,92 @@ export function createBuildingDetailsManager() {
           throw featureError;
         }
       }
-      if (token !== activeBuildingDetailsToken) return;
-      updateState({
-        buildingDetails: {
-          feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.feature?.properties?.feature_kind || null,
-          region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
+      return {
+        feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+        region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
+        properties: {
+          archiInfo: normalizeArchiInfo({
+            ...data,
+            _sourceTags: sourceTags
+          })
+        }
+      };
+    } catch (primaryError) {
+      if (isAbortError(primaryError)) throw primaryError;
+      try {
+        feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
+        const archiInfo = feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
+        return {
+          feature_kind: feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+          region_slugs: [],
           properties: {
             archiInfo: normalizeArchiInfo({
-              ...data,
-              _sourceTags: sourceTags
+              ...archiInfo,
+              _sourceTags: feature?.properties?.source_tags || {}
             })
           }
-        }
+        };
+      } catch (fallbackError) {
+        if (isAbortError(fallbackError)) throw fallbackError;
+        return createFallbackBuildingDetails(detail);
+      }
+    }
+  }
+
+  async function loadSelectionDetails(selectionItems = []) {
+    const normalizedSelections = (Array.isArray(selectionItems) ? selectionItems : [])
+      .map((item) => normalizeBuildingSelection(item))
+      .filter(Boolean);
+    if (normalizedSelections.length === 0) return;
+
+    const token = ++activeBuildingDetailsToken;
+    if (activeBuildingDetailsAbortController) {
+      activeBuildingDetailsAbortController.abort();
+    }
+    activeBuildingDetailsAbortController = new AbortController();
+    const signal = activeBuildingDetailsAbortController.signal;
+    const selectionKeys = normalizedSelections.map((item) => getSelectionKey(item));
+
+    debugSelectionLog('details-load-start', {
+      selectionKey: selectionKeys[0] || '',
+      selectionCount: normalizedSelections.length
+    });
+
+    try {
+      const detailItems = await Promise.all(
+        normalizedSelections.map((item) => fetchBuildingDetails(item, signal))
+      );
+      if (token !== activeBuildingDetailsToken) return;
+      updateState({
+        buildingDetails: detailItems[0] || null,
+        selectedBuildingDetails: detailItems,
+        selectedBuildingDetailKeys: selectionKeys,
+        selectedBuildingIdentity: normalizedSelections[0]
+          ? {
+              osmType: normalizedSelections[0].osmType,
+              osmId: normalizedSelections[0].osmId
+            }
+          : null
       });
       debugSelectionLog('details-load-success', {
-        selectionKey: `${detail.osmType}/${detail.osmId}`
+        selectionKey: selectionKeys[0] || '',
+        selectionCount: detailItems.length
       });
-      return;
-    } catch (primaryError) {
-      if (isAbortError(primaryError)) return;
-      try {
-        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
-        const archiInfo = feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
-        if (token !== activeBuildingDetailsToken) return;
-        updateState({
-          buildingDetails: {
-            feature_kind: feature?.properties?.feature_kind || detail?.feature?.properties?.feature_kind || null,
-            region_slugs: [],
-            properties: {
-              archiInfo: normalizeArchiInfo({
-                ...archiInfo,
-                _sourceTags: feature?.properties?.source_tags || {}
-              })
+    } catch (error) {
+      if (isAbortError(error)) return;
+      if (token !== activeBuildingDetailsToken) return;
+      const fallbackDetails = normalizedSelections.map((item) => createFallbackBuildingDetails(item));
+      updateState({
+        buildingDetails: fallbackDetails[0] || null,
+        selectedBuildingDetails: fallbackDetails,
+        selectedBuildingDetailKeys: selectionKeys,
+        selectedBuildingIdentity: normalizedSelections[0]
+          ? {
+              osmType: normalizedSelections[0].osmType,
+              osmId: normalizedSelections[0].osmId
             }
-          }
-        });
-      } catch (fallbackError) {
-        if (isAbortError(fallbackError)) return;
-        if (token !== activeBuildingDetailsToken) return;
-        updateState({
-          buildingDetails: createFallbackBuildingDetails()
-        });
-      }
+          : null
+      });
     } finally {
       if (activeBuildingDetailsAbortController?.signal === signal) {
         activeBuildingDetailsAbortController = null;
@@ -256,14 +311,57 @@ export function createBuildingDetailsManager() {
   function selectBuilding(detail) {
     const normalized = normalizeBuildingSelection(detail);
     if (!normalized) return;
+    const shiftKey = Boolean(detail?.shiftKey);
+    const currentSelections = Array.isArray(get(selectedBuildings)) ? get(selectedBuildings) : [];
+    const currentPrimary = currentSelections[0] || null;
+    const currentPrimaryKey = getSelectionKey(currentPrimary);
+    const normalizedKey = getSelectionKey(normalized);
+
+    if (shiftKey) {
+      const existingIndex = currentSelections.findIndex((item) => getSelectionKey(item) === normalizedKey);
+      const nextSelections = existingIndex >= 0
+        ? currentSelections.filter((_, index) => index !== existingIndex)
+        : [...currentSelections, normalized];
+
+      if (nextSelections.length === 0) {
+        clearSelection();
+        return;
+      }
+
+      setSelectedBuildings(nextSelections);
+      const nextPrimary = nextSelections[0] || null;
+      const nextPrimaryKey = getSelectionKey(nextPrimary);
+      openBuildingModal();
+      updateState({
+        buildingDetails: nextPrimaryKey !== currentPrimaryKey ? null : get(state).buildingDetails,
+        selectedBuildingDetails: [],
+        selectedBuildingDetailKeys: [],
+        saveStatus: '',
+        selectedBuildingIdentity: {
+          osmType: nextPrimary.osmType,
+          osmId: nextPrimary.osmId
+        }
+      });
+      void loadSelectionDetails(nextSelections);
+      debugSelectionLog('panel-open', {
+        selectionKey: nextPrimaryKey || normalizedKey,
+        selectionCount: nextSelections.length,
+        shiftKey: true
+      });
+      return;
+    }
+
     setSelectedBuilding({
       osmType: normalized.osmType,
       osmId: normalized.osmId,
       lon: normalized.lon,
-      lat: normalized.lat
+      lat: normalized.lat,
+      featureKind: normalized.featureKind
     });
     updateState({
       buildingDetails: null,
+      selectedBuildingDetails: [],
+      selectedBuildingDetailKeys: [],
       saveStatus: '',
       selectedBuildingIdentity: {
         osmType: normalized.osmType,
@@ -271,10 +369,12 @@ export function createBuildingDetailsManager() {
       }
     });
     debugSelectionLog('panel-open', {
-      selectionKey: `${normalized.osmType}/${normalized.osmId}`
+      selectionKey: normalizedKey,
+      selectionCount: 1,
+      shiftKey: false
     });
     openBuildingModal();
-    void loadBuildingDetails(normalized);
+    void loadSelectionDetails([normalized]);
   }
 
   function clearSelection() {
@@ -283,9 +383,13 @@ export function createBuildingDetailsManager() {
       activeBuildingDetailsAbortController = null;
     }
     updateState({
-      buildingDetails: null
+      buildingDetails: null,
+      selectedBuildingDetails: [],
+      selectedBuildingDetailKeys: [],
+      saveStatus: '',
+      selectedBuildingIdentity: null
     });
-    setSelectedBuilding(null);
+    clearSelectedBuildings();
     closeBuildingModal();
   }
 
@@ -293,18 +397,21 @@ export function createBuildingDetailsManager() {
     const normalized = normalizeBuildingSelection(detail);
     if (!normalized) return;
     const currentState = get(state);
-    const isBuildingPartFeature = currentState.buildingDetails?.feature_kind === 'building_part';
-    const allowedPartFields = new Set(['levels', 'colour', 'style', 'material', 'yearBuilt']);
+    const activeSelections = Array.isArray(get(selectedBuildings)) ? get(selectedBuildings) : [];
+    const selectionItems = activeSelections.length > 0 ? activeSelections : [normalized];
+    const isBulkSelection = selectionItems.length > 1;
+    const hasBuildingPartSelection = currentState.buildingDetails?.feature_kind === 'building_part'
+      || selectionItems.some((item) => item?.featureKind === 'building_part');
 
     if (!get(session).authenticated) {
       updateState({ saveStatus: translateNow('mapPage.authRequired') });
       return;
     }
 
-    const editedFields = normalizeEditedBuildingFields(detail.editedFields);
-    const outgoingEditedFields = isBuildingPartFeature
-      ? editedFields.filter((field) => allowedPartFields.has(field))
-      : editedFields;
+    const outgoingEditedFields = filterBuildingEditedFields(detail.editedFields, {
+      isBulkSelection,
+      hasBuildingPartSelection
+    });
     if (outgoingEditedFields.length === 0) {
       updateState({ saveStatus: translateNow('buildingModal.noChanges') });
       return;
@@ -318,33 +425,57 @@ export function createBuildingDetailsManager() {
     const payload = {
       osmType: normalized.osmType,
       osmId: normalized.osmId,
-      name: isBuildingPartFeature ? null : coerceNullableText(detail.name),
+      name: hasBuildingPartSelection ? null : coerceNullableText(detail.name),
       style: coerceNullableText(normalizeArchitectureStyleKey(detail.style)),
       material: coerceNullableText(normalizeBuildingMaterialSelection(detail.material)),
       colour: coerceNullableText(detail.colour),
       levels: coerceNullableIntegerText(detail.levels, 0, 300),
       yearBuilt: coerceNullableIntegerText(detail.yearBuilt, 1000, 2100),
-      architect: isBuildingPartFeature ? null : coerceNullableText(detail.architect),
-      address: isBuildingPartFeature ? null : coerceNullableText(detail.address),
-      archimapDescription: isBuildingPartFeature ? null : coerceNullableText(detail.archimapDescription),
+      architect: hasBuildingPartSelection ? null : coerceNullableText(detail.architect),
+      address: isBulkSelection || hasBuildingPartSelection ? null : coerceNullableText(detail.address),
+      archimapDescription: hasBuildingPartSelection ? null : coerceNullableText(detail.archimapDescription),
       editedFields: outgoingEditedFields
     };
 
     try {
-      await apiJson('/api/building-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      for (const item of selectionItems) {
+        await apiJson('/api/building-info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...payload,
+            osmType: item.osmType,
+            osmId: item.osmId
+          })
+        });
+      }
 
       state.update((current) => {
         const isSameSelection = current.selectedBuildingIdentity
           && current.selectedBuildingIdentity.osmType === payload.osmType
           && current.selectedBuildingIdentity.osmId === payload.osmId;
-
-        return {
-          ...current,
-          buildingDetails: isSameSelection
+        const selectionKeys = selectionItems.map((item) => getSelectionKey(item));
+        const canPatchSelectedDetails = isSameSelection
+          && Array.isArray(current.selectedBuildingDetails)
+          && current.selectedBuildingDetails.length === selectionItems.length
+          && Array.isArray(current.selectedBuildingDetailKeys)
+          && current.selectedBuildingDetailKeys.length === selectionKeys.length
+          && current.selectedBuildingDetailKeys.every((key, index) => key === selectionKeys[index]);
+        const nextSelectedBuildingDetails = canPatchSelectedDetails
+          ? current.selectedBuildingDetails.map((detail) => ({
+              ...detail,
+              properties: {
+                archiInfo: toDisplayArchiInfoFromPayload(
+                  detail?.properties?.archiInfo,
+                  payload,
+                  outgoingEditedFields
+                )
+              }
+            }))
+          : current.selectedBuildingDetails;
+        const nextBuildingDetails = canPatchSelectedDetails
+          ? nextSelectedBuildingDetails[0] || current.buildingDetails
+          : (isSameSelection
             ? {
                 ...current.buildingDetails,
                 feature_kind: current.buildingDetails?.feature_kind || null,
@@ -359,8 +490,15 @@ export function createBuildingDetailsManager() {
                   )
                 }
               }
-            : current.buildingDetails,
-          saveStatus: translateNow('mapPage.submitted')
+            : current.buildingDetails);
+
+        return {
+          ...current,
+          buildingDetails: nextBuildingDetails,
+          selectedBuildingDetails: nextSelectedBuildingDetails,
+          saveStatus: isBulkSelection
+            ? translateNow('buildingModal.bulkSaved', { count: selectionItems.length })
+            : translateNow('mapPage.submitted')
         };
       });
     } catch (error) {

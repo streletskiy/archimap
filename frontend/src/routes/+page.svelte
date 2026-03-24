@@ -132,6 +132,7 @@
 {/if}
 <BuildingModal
   buildingDetails={$buildingDetailsManager.buildingDetails}
+  selectedBuildingDetails={$buildingDetailsManager.selectedBuildingDetails}
   isAuthenticated={$session.authenticated}
   canEditBuildings={Boolean($session.user?.canEditBuildings || $session.user?.isAdmin)}
   savePending={$buildingDetailsManager.savePending}

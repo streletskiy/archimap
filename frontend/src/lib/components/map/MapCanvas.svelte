@@ -40,9 +40,11 @@
     mapFocusRequest,
     mapLabelsVisible,
     mapBuildingPartsVisible,
+    setMapSelectionShiftKey,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
     selectedBuilding,
+    selectedBuildings,
     setMapCenter,
     setMapReady,
     setMapViewport,
@@ -87,6 +89,32 @@
     }
   });
 
+  onMount(() => {
+    const setShiftKeyState = (value) => {
+      setMapSelectionShiftKey(value);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Shift') setShiftKeyState(true);
+    };
+    const handleKeyUp = (event) => {
+      if (event.key === 'Shift') setShiftKeyState(false);
+    };
+    const resetShiftKey = () => setShiftKeyState(false);
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', resetShiftKey);
+    document.addEventListener('visibilitychange', resetShiftKey);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', resetShiftKey);
+      document.removeEventListener('visibilitychange', resetShiftKey);
+      setShiftKeyState(false);
+    };
+  });
+
   function getFilterStatusOverlayText(statusCode) {
     const code = String(statusCode || 'idle');
     if (code === 'refining') return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
@@ -119,12 +147,23 @@
     mapDebug.recordSetFilter(layerId);
   }
 
+  function getSelectionSignature(selection = []) {
+    return (Array.isArray(selection) ? selection : [])
+      .map((item) => `${String(item?.osmType || '').trim()}/${Number(item?.osmId) || ''}`)
+      .filter((item) => item !== '/')
+      .join('|');
+  }
+
   const regionLayersController = createMapRegionLayersController({
     getMap: () => map,
     getRuntimeConfig: () => runtimeConfig,
     getCurrentTheme,
     getSearchItems: () => $searchMapState.items,
-    getSelectedBuilding: () => $selectedBuilding,
+    getSelectedBuilding: () => (
+      Array.isArray($selectedBuildings) && $selectedBuildings.length > 0
+        ? $selectedBuildings
+        : ($selectedBuilding?.osmType && $selectedBuilding?.osmId ? [$selectedBuilding] : [])
+    ),
     getMapLabelsVisible: () => $mapLabelsVisible,
     getBuildingPartsVisible: () => $mapBuildingPartsVisible,
     getBuildingFilterLayers: () => currentBuildingFilterLayers,
@@ -297,19 +336,24 @@
     restoreCustomLayersAfterStyleChange();
   }
 
-  $: if (map && !$selectedBuilding) {
-    lastSelectedKey = null;
-    selectionController.clearSelectedFeature();
-    void lastSelectedKey;
-  }
-
-  $: if (map && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
-    const key = `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`;
-    if (key !== lastSelectedKey) {
-      lastSelectedKey = key;
-      selectionController.applySelectionFromStore($selectedBuilding);
+  $: {
+    const currentSelection = Array.isArray($selectedBuildings) && $selectedBuildings.length > 0
+      ? $selectedBuildings
+      : ($selectedBuilding?.osmType && $selectedBuilding?.osmId ? [$selectedBuilding] : []);
+    if (!map) {
+      void lastSelectedKey;
+    } else if (currentSelection.length === 0) {
+      lastSelectedKey = null;
+      selectionController.clearSelectedFeature();
+      void lastSelectedKey;
+    } else {
+      const key = getSelectionSignature(currentSelection);
+      if (key !== lastSelectedKey) {
+        lastSelectedKey = key;
+        selectionController.applySelectionFromStore(currentSelection);
+      }
+      void lastSelectedKey;
     }
-    void lastSelectedKey;
   }
 
   $: if (map) {
@@ -393,6 +437,8 @@
         zoom: Number(initialCamera.z),
         attributionControl: false
       });
+      // Reserve Shift+Click for bulk building selection on the main map surface.
+      map.boxZoom?.disable?.();
       map.addControl(new maplibregl.AttributionControl({
         compact: true,
         customAttribution: CUSTOM_MAP_ATTRIBUTION

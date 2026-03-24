@@ -122,6 +122,18 @@ When a new control is needed:
 - Layer/rule editing UI is shared between map and admin preset management through one reusable component (`FilterLayersEditor.svelte`), and map/admin surfaces should compose it instead of duplicating layer editor markup/logic.
 - Map preset buttons are runtime data-driven (`/api/filter-presets`), while admin preset labels are editable persisted data with per-locale `nameI18n` values (not locale keys).
 
+### Bulk Map Selection
+
+- Shift+Click on the map toggles buildings into a temporary multi-selection used for bulk edit.
+- On the main map route, Shift is reserved for bulk selection and the default MapLibre box-zoom handler is disabled.
+- The building details modal does not block map clicks, so the user can keep the panel open while selecting another building or extending a bulk selection with Shift+Click.
+- When multi-selection is active, the building modal header shows the selected-building count; there is no separate selection chip under the navigation bar.
+- Bulk edit hides `name` and address fields entirely.
+- In bulk edit mode, the modal hides single-object metadata that is misleading for a group, including the OSM id badge and the full OSM tag dump.
+- Mixed editable values are shown as mixed-state inputs with sample current values; leaving such a field untouched preserves per-building differences.
+- The bulk-only `Clear for all` control writes an explicit empty value for that field to the whole selection when the edit is saved.
+- If any selected building is a building part, bulk edit narrows the form to the shared part-safe fields only.
+
 ### Date Range
 
 - `UiDateRangePicker` is the standard date-range filter for edit history and moderation history views.

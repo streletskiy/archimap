@@ -5,6 +5,16 @@ User-side:
 - User submits building changes via `POST /api/building-info`.
 - Supported editable fields: `name`, `style`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
 - `material` accepts the concrete variants `concrete_panels`, `concrete_blocks`, and `concrete_monolith` in addition to the regular material list.
+- Bulk edit is started with Shift+Click on the map to build a temporary multi-selection.
+- On the main map, Shift is reserved for bulk selection, so the default MapLibre Shift-drag box zoom is disabled there.
+- The building modal stays open during map editing and does not block clicks on the map, so you can keep adding or removing buildings while the panel is open.
+- The selected-building count is shown inside the building modal header; there is no separate top-of-map bulk-selection chip.
+- In bulk edit mode, `name` and address tags are read-only and are not sent to the save endpoint.
+- In bulk edit mode, the modal hides single-building metadata that no longer has a clear meaning for a group, such as the primary OSM id badge and the raw OSM tag dump.
+- If selected buildings disagree on an editable field, the modal shows that field as mixed, lists current sample values, and leaves it unchanged until the user explicitly enters, selects, or clears a value for the whole group.
+- The bulk-only `Clear for all` control writes an explicit empty value for that field to every selected building when the edit is saved.
+- If any selected building is a `building_part`, bulk edit narrows the editable fields to `levels`, `colour`, `style`, `material`, and `yearBuilt`.
+- When a bulk edit is submitted, the same allowed field changes are applied to every selected building one by one.
 - When `material` is one of the concrete variants, the server persists `building:material=concrete` plus `building:material:concrete=<panels|blocks|monolith>` in the local merged state and user edit rows.
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;

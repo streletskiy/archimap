@@ -3,17 +3,21 @@
   import { fade, fly } from 'svelte/transition';
   import { UiBadge, UiButton, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
-  import { selectedBuilding } from '$lib/stores/map';
+  import { selectedBuilding, selectedBuildings } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
+  import BulkClearAction from '$lib/components/shell/BulkClearAction.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
   import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
   import { getBuildingMaterialOptions, toHumanBuildingMaterial } from '$lib/utils/building-material';
+  import { filterBuildingEditedFields } from '$lib/utils/building-edit-fields';
   import { styleRegionOverrides } from '$lib/stores/style-overrides';
   import {
     buildAddressFromBuildingForm,
     buildBuildingComparableSnapshot,
+    buildBulkBuildingFormState,
     createEmptyBuildingComparable,
+    createEmptyBulkBuildingFieldState,
     createEmptyBuildingForm,
     getEditedBuildingFields,
     hydrateBuildingForm,
@@ -25,6 +29,7 @@
   } from '$lib/utils/text';
 
   export let buildingDetails = null;
+  export let selectedBuildingDetails = [];
   export let isAuthenticated = false;
   export let canEditBuildings = false;
   export let savePending = false;
@@ -51,21 +56,72 @@
     '#6b5b4b',
     '#4f4f4f'
   ];
+  const BULK_FIELD_KEYS = Object.freeze([
+    'name',
+    'style',
+    'material',
+    'colour',
+    'levels',
+    'yearBuilt',
+    'architect',
+    'address',
+    'archimapDescription'
+  ]);
+  const BULK_TEXT_CLEARABLE_FIELDS = new Set(['levels', 'yearBuilt', 'architect', 'archimapDescription']);
 
-  let lastBuildingKey = null;
   let form = createEmptyBuildingForm();
   let initialComparable = createEmptyBuildingComparable();
   let canEditAddressFull = true;
   let osmTagEntries = [];
+  let bulkFieldState = createEmptyBulkBuildingFieldState();
+  let bulkFieldOverrides = {};
+  let bulkRegionSlugs = [];
   let modalEl = null;
   let hadOpenState;
+  let selectionState = {
+    selectedBuildingItems: [],
+    selectedBuildingCount: 0,
+    isBulkSelection: false,
+    isPartEditMode: false,
+    editableEditedFields: [],
+    hasEditableFields: false,
+    bulkSelectionNotice: ''
+  };
 
-  function hydrateForm(details) {
+  function createEmptyBulkFieldOverrides() {
+    return {
+      name: false,
+      style: false,
+      material: false,
+      colour: false,
+      levels: false,
+      yearBuilt: false,
+      architect: false,
+      address: false,
+      archimapDescription: false
+    };
+  }
+
+  function hydrateSingleForm(details) {
     const nextState = hydrateBuildingForm(details);
     form = nextState.form;
     initialComparable = nextState.initialComparable;
     canEditAddressFull = nextState.canEditAddressFull;
     osmTagEntries = nextState.osmTagEntries;
+    bulkFieldState = createEmptyBulkBuildingFieldState();
+    bulkFieldOverrides = createEmptyBulkFieldOverrides();
+    bulkRegionSlugs = Array.isArray(details?.region_slugs) ? details.region_slugs : [];
+  }
+
+  function hydrateBulkForm(detailsList) {
+    const nextState = buildBulkBuildingFormState(detailsList);
+    form = nextState.form;
+    initialComparable = nextState.initialComparable;
+    canEditAddressFull = false;
+    osmTagEntries = [];
+    bulkFieldState = nextState.fieldState;
+    bulkFieldOverrides = createEmptyBulkFieldOverrides();
+    bulkRegionSlugs = Array.isArray(nextState.regionSlugs) ? nextState.regionSlugs : [];
   }
 
   function buildAddressFromForm(formValue = form) {
@@ -80,15 +136,150 @@
     return getEditedBuildingFields(currentSnapshot, initialSnapshot);
   }
 
+  function getBulkEditedFields(currentSnapshot, initialSnapshot, fieldState, overrides) {
+    return BULK_FIELD_KEYS.filter((field) => {
+      if (fieldState?.[field]?.isMixed) return Boolean(overrides?.[field]);
+      return String(currentSnapshot?.[field] || '') !== String(initialSnapshot?.[field] || '');
+    });
+  }
+
+  function markBulkFieldOverride(field) {
+    if (!isBulkSelection || !field) return;
+    if (bulkFieldOverrides?.[field]) return;
+    bulkFieldOverrides = {
+      ...bulkFieldOverrides,
+      [field]: true
+    };
+  }
+
+  function clearBulkField(field, formKey = field) {
+    form = {
+      ...form,
+      [formKey]: ''
+    };
+    markBulkFieldOverride(field);
+  }
+
+  function handleColourChange(event) {
+    form = {
+      ...form,
+      colour: String(event?.detail?.value || '')
+    };
+    markBulkFieldOverride('colour');
+  }
+
+  function resolveBulkFieldDisplayValue(field, value) {
+    const normalized = pickFirstText(value);
+    if (!normalized) return $t('buildingModal.notSpecified');
+    if (field === 'style') return resolveDisplayStyle(normalized, $locale) || normalized;
+    if (field === 'material') return toHumanBuildingMaterial(normalized, $locale) || normalized;
+    return normalized;
+  }
+
+  function getBulkFieldPreview(field) {
+    const sampleValues = Array.isArray(bulkFieldState?.[field]?.sampleValues)
+      ? bulkFieldState[field].sampleValues
+      : [];
+    const labels = [];
+    const seen = new Set();
+    for (const value of sampleValues) {
+      const label = resolveBulkFieldDisplayValue(field, value);
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      labels.push(label);
+    }
+    const visibleLabels = labels.slice(0, 3);
+    if (labels.length > visibleLabels.length) {
+      visibleLabels.push($t('buildingModal.bulkMixedValuesMore', {
+        count: labels.length - visibleLabels.length
+      }));
+    }
+    return visibleLabels.join(', ');
+  }
+
+  function getBulkFieldNote(field) {
+    if (!isBulkSelection || !bulkFieldState?.[field]?.isMixed) return '';
+    const values = getBulkFieldPreview(field);
+    return values
+      ? $t('buildingModal.bulkMixedValues', { values })
+      : $t('buildingModal.mixedValuesLabel');
+  }
+
+  function getFieldPlaceholder(field) {
+    if (isBulkSelection && bulkFieldState?.[field]?.isMixed) {
+      return $t('buildingModal.bulkMixedPlaceholder');
+    }
+    return $t('buildingModal.notSpecified');
+  }
+
+  function getTextFieldPlaceholder(field) {
+    return isBulkSelection && bulkFieldState?.[field]?.isMixed
+      ? $t('buildingModal.bulkMixedPlaceholder')
+      : '';
+  }
+
+  function getSummaryValue(field, value) {
+    if (isBulkSelection && bulkFieldState?.[field]?.isMixed) {
+      return $t('buildingModal.mixedValuesLabel');
+    }
+    return pickFirstText(value);
+  }
+
+  function shouldShowBulkClearAction(field, currentValue = '') {
+    return isBulkSelection
+      && BULK_TEXT_CLEARABLE_FIELDS.has(field)
+      && (bulkFieldState?.[field]?.isMixed || Boolean(pickFirstText(currentValue)));
+  }
+
   $: currentComparable = buildComparableSnapshot(form);
-  $: editedFields = getEditedFields(currentComparable, initialComparable);
-  $: hasEditedFields = editedFields.length > 0;
+  $: selectedBuildingItems = Array.isArray($selectedBuildings) && $selectedBuildings.length > 0
+    ? $selectedBuildings
+    : ($selectedBuilding?.osmType && $selectedBuilding?.osmId
+      ? [{
+          osmType: $selectedBuilding.osmType,
+          osmId: Number($selectedBuilding.osmId),
+          lon: $selectedBuilding?.lon == null || $selectedBuilding?.lon === ''
+            ? null
+            : (Number.isFinite(Number($selectedBuilding.lon)) ? Number($selectedBuilding.lon) : null),
+          lat: $selectedBuilding?.lat == null || $selectedBuilding?.lat === ''
+            ? null
+            : (Number.isFinite(Number($selectedBuilding.lat)) ? Number($selectedBuilding.lat) : null),
+          featureKind: null
+        }]
+      : []);
+  $: selectedBuildingCount = selectedBuildingItems.length;
+  $: isBulkSelection = selectedBuildingCount > 1;
+  $: bulkDetailsReady = !isBulkSelection || (
+    Array.isArray(selectedBuildingDetails) && selectedBuildingDetails.length === selectedBuildingCount
+  );
+  $: isPartEditMode = (buildingDetails?.feature_kind === 'building_part')
+    || selectedBuildingItems.some((item) => item?.featureKind === 'building_part');
+  $: editedFields = isBulkSelection
+    ? getBulkEditedFields(currentComparable, initialComparable, bulkFieldState, bulkFieldOverrides)
+    : getEditedFields(currentComparable, initialComparable);
+  $: editableEditedFields = filterBuildingEditedFields(editedFields, {
+    isBulkSelection,
+    hasBuildingPartSelection: isPartEditMode
+  });
+  $: selectionState = {
+    selectedBuildingItems,
+    selectedBuildingCount,
+    isBulkSelection,
+    isPartEditMode,
+    editableEditedFields,
+    hasEditableFields: editableEditedFields.length > 0,
+    bulkSelectionNotice: isBulkSelection
+      ? (isPartEditMode
+        ? $t('buildingModal.bulkSelectionPartNotice')
+        : $t('buildingModal.bulkSelectionNotice'))
+      : ''
+  };
 
   function submitEdit(event) {
     event.preventDefault();
     const selection = $selectedBuilding;
     if (!selection?.osmType || !selection?.osmId || !canEditBuildings || savePending) return;
-    if (!hasEditedFields) return;
+    if (!selectionState.hasEditableFields) return;
     const snapshot = currentComparable;
     dispatch('save', {
       osmType: selection.osmType,
@@ -102,7 +293,7 @@
       architect: snapshot.architect,
       address: snapshot.address,
       archimapDescription: snapshot.archimapDescription,
-      editedFields
+      editedFields: selectionState.editableEditedFields
     });
   }
 
@@ -120,16 +311,12 @@
     return resolveDisplayBuildingStyle(value, localeValue);
   }
 
-  $: if ($buildingModalOpen && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
-    const key = `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`;
-    if (key !== lastBuildingKey) {
-      lastBuildingKey = key;
-      hydrateForm(buildingDetails);
-    }
+  $: if ($buildingModalOpen && !isBulkSelection && buildingDetails) {
+    hydrateSingleForm(buildingDetails);
   }
 
-  $: if ($buildingModalOpen && buildingDetails && lastBuildingKey) {
-    hydrateForm(buildingDetails);
+  $: if ($buildingModalOpen && isBulkSelection && bulkDetailsReady) {
+    hydrateBulkForm(selectedBuildingDetails);
   }
 
   $: if ($buildingModalOpen && !hadOpenState) {
@@ -141,20 +328,32 @@
   $: void hadOpenState;
 
   $: archiInfo = buildingDetails?.properties?.archiInfo || {};
-  $: isBuildingPartFeature = buildingDetails?.feature_kind === 'building_part';
-  $: buildingKey = $selectedBuilding?.osmType && $selectedBuilding?.osmId
+  $: buildingKey = !isBulkSelection && $selectedBuilding?.osmType && $selectedBuilding?.osmId
     ? `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`
-    : '-';
-  $: displayName = pickFirstText(form.name, archiInfo.name) || buildingKey;
-  $: displayAddress = pickFirstText(buildAddressFromForm(), archiInfo.address);
-  $: displayStyle = resolveDisplayStyle(form.style || archiInfo.styleRaw || archiInfo.style, $locale);
-  $: displayMaterialRaw = pickFirstText(form.material, archiInfo.material);
+    : '';
+  $: displayName = isBulkSelection
+    ? (!bulkDetailsReady || bulkFieldState?.name?.isMixed
+      ? $t('buildingModal.bulkSelectionTitle')
+      : (pickFirstText(form.name) || $t('buildingModal.bulkSelectionTitle')))
+    : (pickFirstText(form.name, archiInfo.name) || buildingKey || $t('buildingModal.title'));
+  $: displayAddress = isBulkSelection ? '' : pickFirstText(buildAddressFromForm(), archiInfo.address);
+  $: displayStyleRaw = isBulkSelection
+    ? pickFirstText(form.style)
+    : pickFirstText(form.style, archiInfo.styleRaw, archiInfo.style);
+  $: displayStyle = resolveDisplayStyle(displayStyleRaw, $locale);
+  $: displayMaterialRaw = isBulkSelection
+    ? pickFirstText(form.material)
+    : pickFirstText(form.material, archiInfo.material);
   $: displayMaterial = displayMaterialRaw
     ? (toHumanBuildingMaterial(displayMaterialRaw, $locale) || displayMaterialRaw)
     : '';
-  $: displayColour = pickFirstText(form.colour, archiInfo.colour);
-  $: displayDescription = pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
-  $: currentRegionSlugs = Array.isArray(buildingDetails?.region_slugs) ? buildingDetails.region_slugs : [];
+  $: displayColour = isBulkSelection ? pickFirstText(form.colour) : pickFirstText(form.colour, archiInfo.colour);
+  $: displayDescription = isBulkSelection
+    ? (bulkFieldState?.archimapDescription?.isMixed ? '' : pickFirstText(form.archimapDescription))
+    : pickFirstText(form.archimapDescription, archiInfo.archimap_description, archiInfo.description);
+  $: currentRegionSlugs = isBulkSelection
+    ? bulkRegionSlugs
+    : (Array.isArray(buildingDetails?.region_slugs) ? buildingDetails.region_slugs : []);
   $: availableArchitectureStyleItems = getArchitectureStyleOptions($locale, currentRegionSlugs, $styleRegionOverrides).map((option) => ({
     value: option.value,
     label: option.label
@@ -180,14 +379,15 @@
     && !availableBuildingMaterialItems.some((option) => option.value === currentBuildingMaterialItem.value)
     ? [currentBuildingMaterialItem, ...availableBuildingMaterialItems]
     : availableBuildingMaterialItems;
+  $: hasReadyDetails = isBulkSelection ? bulkDetailsReady : Boolean(buildingDetails);
   $: summaryItems = [
-    { label: $t('buildingModal.style'), value: displayStyle },
-    { label: $t('buildingModal.material'), value: displayMaterial },
-    { label: $t('buildingModal.colour'), value: displayColour },
-    { label: $t('buildingModal.levels'), value: pickFirstText(form.levels, archiInfo.levels) },
-    { label: $t('buildingModal.yearBuilt'), value: pickFirstText(form.yearBuilt, archiInfo.year_built) },
-    { label: $t('buildingModal.architect'), value: pickFirstText(form.architect, archiInfo.architect) }
-  ].filter((item) => pickFirstText(item.value) && item.value !== '-');
+    { label: $t('buildingModal.style'), value: getSummaryValue('style', displayStyle) },
+    { label: $t('buildingModal.material'), value: getSummaryValue('material', displayMaterial) },
+    { label: $t('buildingModal.colour'), value: getSummaryValue('colour', displayColour) },
+    { label: $t('buildingModal.levels'), value: getSummaryValue('levels', isBulkSelection ? form.levels : pickFirstText(form.levels, archiInfo.levels)) },
+    { label: $t('buildingModal.yearBuilt'), value: getSummaryValue('yearBuilt', isBulkSelection ? form.yearBuilt : pickFirstText(form.yearBuilt, archiInfo.year_built)) },
+    { label: $t('buildingModal.architect'), value: getSummaryValue('architect', isBulkSelection ? form.architect : pickFirstText(form.architect, archiInfo.architect)) }
+  ].filter((item) => pickFirstText(item.value));
 </script>
 
 {#if $buildingModalOpen}
@@ -196,14 +396,6 @@
     in:fade={{ duration: 160 }}
     out:fade={{ duration: 150 }}
   >
-    <button
-      type="button"
-      class="backdrop-dismiss-layer"
-      tabindex="-1"
-      aria-label={$t('common.close')}
-      on:click={closeModal}
-    ></button>
-
     <div
       id="building-modal"
       class="modal"
@@ -221,13 +413,22 @@
           <p class="ui-kicker">{$t('buildingModal.overview')}</p>
           <h3 id="building-modal-title">{displayName}</h3>
           <div class="modal-header-meta">
-            <UiBadge
-              variant="accent"
-              className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
-            >
-              {buildingKey}
-            </UiBadge>
-            {#if displayAddress}
+            {#if selectionState.isBulkSelection}
+              <UiBadge
+                variant="info"
+                className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold"
+              >
+                {$t('buildingModal.bulkSelectionLabel', { count: selectionState.selectedBuildingCount })}
+              </UiBadge>
+            {:else}
+              <UiBadge
+                variant="accent"
+                className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
+              >
+                {buildingKey}
+              </UiBadge>
+            {/if}
+            {#if !selectionState.isBulkSelection && displayAddress}
               <span class="modal-address">{displayAddress}</span>
             {/if}
           </div>
@@ -244,7 +445,7 @@
         </UiButton>
       </header>
 
-      {#if buildingDetails}
+      {#if hasReadyDetails}
         <section class="overview-card">
           <div class="overview-head">
             <div>
@@ -267,6 +468,12 @@
           {/if}
         </section>
 
+        {#if selectionState.isBulkSelection}
+          <section class="bulk-selection-note" aria-live="polite">
+            <strong>{selectionState.bulkSelectionNotice}</strong>
+          </section>
+        {/if}
+
         {#if canEditBuildings}
           <form class="edit-form" on:submit={submitEdit}>
             <section class="form-section">
@@ -274,120 +481,281 @@
                 <h4>{$t('buildingModal.primarySection')}</h4>
               </div>
 
-              {#if isBuildingPartFeature}
+              {#if selectionState.isPartEditMode}
                 <div class="grid2">
-                  <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
-                    <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  <FormRow
+                    forId="building-levels"
+                    label={$t('buildingModal.levels')}
+                    note={getBulkFieldNote('levels')}
+                  >
+                    <BulkClearAction
+                      show={shouldShowBulkClearAction('levels', form.levels)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('levels')}
+                    >
+                      <UiInput
+                        id="building-levels"
+                        type="number"
+                        min="0"
+                        max="300"
+                        bind:value={form.levels}
+                        placeholder={getTextFieldPlaceholder('levels')}
+                        oninput={() => markBulkFieldOverride('levels')}
+                      />
+                    </BulkClearAction>
                   </FormRow>
 
-                  <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
-                    <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  <FormRow
+                    forId="building-year"
+                    label={$t('buildingModal.yearBuilt')}
+                    note={getBulkFieldNote('yearBuilt')}
+                  >
+                    <BulkClearAction
+                      show={shouldShowBulkClearAction('yearBuilt', form.yearBuilt)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('yearBuilt')}
+                    >
+                      <UiInput
+                        id="building-year"
+                        type="number"
+                        min="1000"
+                        max="2100"
+                        bind:value={form.yearBuilt}
+                        placeholder={getTextFieldPlaceholder('yearBuilt')}
+                        oninput={() => markBulkFieldOverride('yearBuilt')}
+                      />
+                    </BulkClearAction>
                   </FormRow>
                 </div>
 
-                <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
+                <FormRow
+                  forId="building-style-select"
+                  label={$t('buildingModal.style')}
+                  note={getBulkFieldNote('style')}
+                >
                   <UiSelect
                     items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
                     bind:value={form.style}
-                    placeholder={$t('buildingModal.notSpecified')}
+                    placeholder={getFieldPlaceholder('style')}
                     contentClassName="ui-floating-layer-building-modal"
+                    onchange={() => markBulkFieldOverride('style')}
                   />
                 </FormRow>
 
-                <FormRow forId="building-material-select" label={$t('buildingModal.material')}>
+                <FormRow
+                  forId="building-material-select"
+                  label={$t('buildingModal.material')}
+                  note={getBulkFieldNote('material')}
+                >
                   <UiSelect
                     items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...buildingMaterialItems]}
                     bind:value={form.material}
-                    placeholder={$t('buildingModal.notSpecified')}
+                    placeholder={getFieldPlaceholder('material')}
                     contentClassName="ui-floating-layer-building-modal"
+                    onchange={() => markBulkFieldOverride('material')}
                   />
                 </FormRow>
 
-                <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
-                  <div class="colour-picker-row">
-                    <UiColorPicker
-                      value={form.colour}
-                      label={$t('buildingModal.colour')}
-                      swatches={buildingColourSwatches}
-                      contentClassName="ui-floating-layer-building-modal"
-                      onchange={(event) => (form.colour = String(event?.detail?.value || ''))}
-                    />
-                    <UiButton
-                      type="button"
-                      variant="secondary"
-                      size="xs"
-                      disabled={!form.colour}
-                      onclick={() => (form.colour = '')}
+                <FormRow
+                  forId="building-colour"
+                  label={$t('buildingModal.colour')}
+                  note={getBulkFieldNote('colour')}
+                >
+                  <BulkClearAction
+                    show={selectionState.isBulkSelection && shouldShowBulkClearAction('colour', form.colour)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('colour')}
                     >
-                      {$t('common.clear')}
-                    </UiButton>
-                  </div>
+                      <div class="colour-picker-row">
+                      <UiColorPicker
+                        value={form.colour}
+                          label={$t('buildingModal.colour')}
+                          swatches={buildingColourSwatches}
+                          contentClassName="ui-floating-layer-building-modal"
+                          onchange={handleColourChange}
+                        />
+                      {#if !selectionState.isBulkSelection}
+                        <UiButton
+                          type="button"
+                          variant="secondary"
+                          size="xs"
+                          disabled={!form.colour}
+                          onclick={() => clearBulkField('colour')}
+                        >
+                          {$t('common.clear')}
+                        </UiButton>
+                      {/if}
+                    </div>
+                  </BulkClearAction>
                 </FormRow>
               {:else}
-                <FormRow forId="building-name" label={$t('buildingModal.name')}>
-                  <UiInput id="building-name" type="text" bind:value={form.name} />
-                </FormRow>
+                {#if !selectionState.isBulkSelection}
+                  <FormRow
+                    forId="building-name"
+                    label={$t('buildingModal.name')}
+                  >
+                    <UiInput id="building-name" type="text" bind:value={form.name} />
+                  </FormRow>
+                {/if}
 
                 <div class="grid2">
-                  <FormRow forId="building-levels" label={$t('buildingModal.levels')}>
-                    <UiInput id="building-levels" type="number" min="0" max="300" bind:value={form.levels} />
+                  <FormRow
+                    forId="building-levels"
+                    label={$t('buildingModal.levels')}
+                    note={getBulkFieldNote('levels')}
+                  >
+                    <BulkClearAction
+                      show={shouldShowBulkClearAction('levels', form.levels)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('levels')}
+                    >
+                      <UiInput
+                        id="building-levels"
+                        type="number"
+                      min="0"
+                      max="300"
+                      bind:value={form.levels}
+                      placeholder={getTextFieldPlaceholder('levels')}
+                      oninput={() => markBulkFieldOverride('levels')}
+                    />
+                    </BulkClearAction>
                   </FormRow>
 
-                  <FormRow forId="building-year" label={$t('buildingModal.yearBuilt')}>
-                    <UiInput id="building-year" type="number" min="1000" max="2100" bind:value={form.yearBuilt} />
+                  <FormRow
+                    forId="building-year"
+                    label={$t('buildingModal.yearBuilt')}
+                    note={getBulkFieldNote('yearBuilt')}
+                  >
+                    <BulkClearAction
+                      show={shouldShowBulkClearAction('yearBuilt', form.yearBuilt)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('yearBuilt')}
+                    >
+                      <UiInput
+                        id="building-year"
+                        type="number"
+                      min="1000"
+                      max="2100"
+                      bind:value={form.yearBuilt}
+                      placeholder={getTextFieldPlaceholder('yearBuilt')}
+                      oninput={() => markBulkFieldOverride('yearBuilt')}
+                    />
+                    </BulkClearAction>
                   </FormRow>
                 </div>
 
-                <FormRow forId="building-architect" label={$t('buildingModal.architect')}>
-                  <UiInput id="building-architect" type="text" bind:value={form.architect} />
+                <FormRow
+                  forId="building-architect"
+                  label={$t('buildingModal.architect')}
+                  note={getBulkFieldNote('architect')}
+                >
+                  <BulkClearAction
+                    show={shouldShowBulkClearAction('architect', form.architect)}
+                    ariaLabel={$t('buildingModal.bulkClearField')}
+                    title={$t('buildingModal.bulkClearField')}
+                    onclick={() => clearBulkField('architect')}
+                  >
+                    <UiInput
+                      id="building-architect"
+                      type="text"
+                      bind:value={form.architect}
+                      placeholder={getTextFieldPlaceholder('architect')}
+                      oninput={() => markBulkFieldOverride('architect')}
+                    />
+                  </BulkClearAction>
                 </FormRow>
 
-                <FormRow forId="building-style-select" label={$t('buildingModal.style')}>
+                <FormRow
+                  forId="building-style-select"
+                  label={$t('buildingModal.style')}
+                  note={getBulkFieldNote('style')}
+                >
                   <UiSelect
                     items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...architectureStyleItems]}
                     bind:value={form.style}
-                    placeholder={$t('buildingModal.notSpecified')}
+                    placeholder={getFieldPlaceholder('style')}
                     contentClassName="ui-floating-layer-building-modal"
+                    onchange={() => markBulkFieldOverride('style')}
                   />
                 </FormRow>
 
-                <FormRow forId="building-material-select" label={$t('buildingModal.material')}>
+                <FormRow
+                  forId="building-material-select"
+                  label={$t('buildingModal.material')}
+                  note={getBulkFieldNote('material')}
+                >
                   <UiSelect
                     items={[{ value: '', label: $t('buildingModal.notSpecified') }, ...buildingMaterialItems]}
                     bind:value={form.material}
-                    placeholder={$t('buildingModal.notSpecified')}
+                    placeholder={getFieldPlaceholder('material')}
                     contentClassName="ui-floating-layer-building-modal"
+                    onchange={() => markBulkFieldOverride('material')}
                   />
                 </FormRow>
 
-                <FormRow forId="building-colour" label={$t('buildingModal.colour')}>
-                  <div class="colour-picker-row">
-                    <UiColorPicker
-                      value={form.colour}
-                      label={$t('buildingModal.colour')}
-                      swatches={buildingColourSwatches}
-                      contentClassName="ui-floating-layer-building-modal"
-                      onchange={(event) => (form.colour = String(event?.detail?.value || ''))}
-                    />
-                    <UiButton
-                      type="button"
-                      variant="secondary"
-                      size="xs"
-                      disabled={!form.colour}
-                      onclick={() => (form.colour = '')}
-                    >
-                      {$t('common.clear')}
-                    </UiButton>
-                  </div>
+                <FormRow
+                  forId="building-colour"
+                  label={$t('buildingModal.colour')}
+                  note={getBulkFieldNote('colour')}
+                >
+                  <BulkClearAction
+                    show={selectionState.isBulkSelection && shouldShowBulkClearAction('colour', form.colour)}
+                    ariaLabel={$t('buildingModal.bulkClearField')}
+                    title={$t('buildingModal.bulkClearField')}
+                    onclick={() => clearBulkField('colour')}
+                  >
+                    <div class="colour-picker-row">
+                      <UiColorPicker
+                        value={form.colour}
+                        label={$t('buildingModal.colour')}
+                        swatches={buildingColourSwatches}
+                        contentClassName="ui-floating-layer-building-modal"
+                        onchange={handleColourChange}
+                      />
+                      {#if !selectionState.isBulkSelection}
+                        <UiButton
+                          type="button"
+                          variant="secondary"
+                          size="xs"
+                          disabled={!form.colour}
+                          onclick={() => clearBulkField('colour')}
+                        >
+                          {$t('common.clear')}
+                        </UiButton>
+                      {/if}
+                    </div>
+                  </BulkClearAction>
                 </FormRow>
 
-                <FormRow forId="building-archimap-description" label={$t('buildingModal.extraInfo')}>
-                  <UiTextarea id="building-archimap-description" rows="4" bind:value={form.archimapDescription}></UiTextarea>
+                <FormRow
+                  forId="building-archimap-description"
+                  label={$t('buildingModal.extraInfo')}
+                  note={getBulkFieldNote('archimapDescription')}
+                >
+                  <BulkClearAction
+                    show={shouldShowBulkClearAction('archimapDescription', form.archimapDescription)}
+                    ariaLabel={$t('buildingModal.bulkClearField')}
+                    title={$t('buildingModal.bulkClearField')}
+                    onclick={() => clearBulkField('archimapDescription')}
+                  >
+                    <UiTextarea
+                      id="building-archimap-description"
+                      rows="4"
+                      bind:value={form.archimapDescription}
+                      placeholder={getTextFieldPlaceholder('archimapDescription')}
+                      oninput={() => markBulkFieldOverride('archimapDescription')}
+                    ></UiTextarea>
+                  </BulkClearAction>
                 </FormRow>
               {/if}
             </section>
 
-            {#if !isBuildingPartFeature}
+            {#if !selectionState.isBulkSelection && !selectionState.isPartEditMode}
               <section class="form-section">
                 <div class="section-head">
                   <h4>{$t('buildingModal.addressSection')}</h4>
@@ -425,6 +793,67 @@
               </section>
             {/if}
 
+            {#if !selectionState.isBulkSelection}
+              <details class="osm-tags">
+                <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
+                {#if osmTagEntries.length > 0}
+                  <UiScrollArea className="max-h-[18rem]" contentClassName="mt-[0.8rem] grid gap-[0.55rem] pr-[0.15rem]">
+                    {#each osmTagEntries as item (item.key)}
+                      <div class="osm-tag-row">
+                        <code class="osm-tag-key">{item.key}</code>
+                        <code class="osm-tag-value">{item.value || '-'}</code>
+                      </div>
+                    {/each}
+                  </UiScrollArea>
+                {:else}
+                  <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
+                {/if}
+              </details>
+            {/if}
+
+            <div class="form-footer">
+              <p class="status" data-filled={saveStatus ? 'true' : 'false'}>{saveStatus || ''}</p>
+              <UiButton type="submit" disabled={savePending || !selectionState.hasEditableFields}>
+                {savePending ? $t('buildingModal.saving') : $t('buildingModal.save')}
+              </UiButton>
+            </div>
+          </form>
+        {:else}
+          {#if isAuthenticated}
+            <p class="warning">{$t('buildingModal.editDenied')}</p>
+          {/if}
+
+          <section class="read-grid">
+            {#if !selectionState.isBulkSelection}
+              <article class="read-card">
+                <span>{$t('buildingModal.osmKey')}</span>
+                <strong>{buildingKey}</strong>
+              </article>
+            {/if}
+
+            {#if !selectionState.isBulkSelection}
+              <article class="read-card">
+                <span>{$t('search.address')}</span>
+                <strong>{formatDisplayText(displayAddress)}</strong>
+              </article>
+            {/if}
+
+            {#each summaryItems as item}
+              <article class="read-card">
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </article>
+            {/each}
+
+            {#if displayDescription}
+              <article class="read-card read-card-wide">
+                <span>{$t('buildingModal.description')}</span>
+                <strong>{formatDisplayText(displayDescription)}</strong>
+              </article>
+            {/if}
+          </section>
+
+          {#if !selectionState.isBulkSelection}
             <details class="osm-tags">
               <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
               {#if osmTagEntries.length > 0}
@@ -440,58 +869,7 @@
                 <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
               {/if}
             </details>
-
-            <div class="form-footer">
-              <p class="status" data-filled={saveStatus ? 'true' : 'false'}>{saveStatus || ''}</p>
-              <UiButton type="submit" disabled={savePending || !hasEditedFields}>
-                {savePending ? $t('buildingModal.saving') : $t('buildingModal.save')}
-              </UiButton>
-            </div>
-          </form>
-        {:else}
-          {#if isAuthenticated}
-            <p class="warning">{$t('buildingModal.editDenied')}</p>
           {/if}
-
-          <section class="read-grid">
-            <article class="read-card">
-              <span>{$t('buildingModal.osmKey')}</span>
-              <strong>{buildingKey}</strong>
-            </article>
-
-            <article class="read-card">
-              <span>{$t('search.address')}</span>
-              <strong>{formatDisplayText(displayAddress)}</strong>
-            </article>
-
-            {#each summaryItems as item}
-              <article class="read-card">
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-              </article>
-            {/each}
-
-            <article class="read-card read-card-wide">
-              <span>{$t('buildingModal.description')}</span>
-              <strong>{formatDisplayText(displayDescription)}</strong>
-            </article>
-          </section>
-
-          <details class="osm-tags">
-            <summary>{$t('buildingModal.osmTagsTitle')} ({osmTagEntries.length})</summary>
-            {#if osmTagEntries.length > 0}
-              <UiScrollArea className="max-h-[18rem]" contentClassName="mt-[0.8rem] grid gap-[0.55rem] pr-[0.15rem]">
-                {#each osmTagEntries as item (item.key)}
-                  <div class="osm-tag-row">
-                    <code class="osm-tag-key">{item.key}</code>
-                    <code class="osm-tag-value">{item.value || '-'}</code>
-                  </div>
-                {/each}
-              </UiScrollArea>
-            {:else}
-              <p class="osm-tags-empty">{$t('buildingModal.osmTagsEmpty')}</p>
-            {/if}
-          </details>
         {/if}
       {:else}
         <p class="loading-state">{$t('buildingModal.loading')}</p>
@@ -513,14 +891,11 @@
     justify-content: flex-end;
     padding: var(--building-modal-top-gap) var(--building-modal-side-gap) var(--building-modal-bottom-gap);
     background: transparent;
+    pointer-events: none;
   }
 
-  .backdrop-dismiss-layer {
-    position: absolute;
-    inset: 0;
-    border: 0;
-    padding: 0;
-    background: transparent;
+  .backdrop .modal {
+    pointer-events: auto;
   }
 
   .modal {
@@ -652,6 +1027,21 @@
     color: var(--ui-text-warning-strong);
     font-size: 0.9rem;
     line-height: 1.45;
+  }
+
+  .bulk-selection-note {
+    margin: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--ui-text-info) 26%, var(--panel-border));
+    border-radius: 1rem;
+    background: var(--ui-surface-info);
+    color: var(--ui-text-info);
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  .bulk-selection-note strong {
+    font-weight: 700;
   }
 
   .edit-form {

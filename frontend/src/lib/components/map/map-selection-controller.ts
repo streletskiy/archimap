@@ -1,3 +1,4 @@
+import { get } from 'svelte/store';
 import {
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
@@ -11,6 +12,7 @@ import {
   SEARCH_RESULTS_LAYER_ID,
   SEARCH_RESULTS_SOURCE_ID
 } from '../../services/map/map-search-utils.js';
+import { mapSelectionShiftKey } from '$lib/stores/map';
 import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter } from './selection-utils.js';
 import type { FilterMapLike } from '../../services/map/filter-types.js';
 
@@ -45,6 +47,8 @@ type SelectionFeatureLike = {
 type SelectionDispatchPayload = SelectionIdentity & {
   lon: number | null;
   lat: number | null;
+  shiftKey: boolean;
+  featureKind: string | null;
   feature: SelectionFeatureLike;
 };
 
@@ -64,6 +68,33 @@ export function createMapSelectionController({
   dispatchBuildingClick
 }: MapSelectionControllerOptions = {}) {
   let lastHandledBuildingClickSig = null;
+
+  function getFeatureKind(feature: SelectionFeatureLike) {
+    return String(feature?.properties?.feature_kind || '').trim() || null;
+  }
+
+  function getEventShiftKey(event: {
+    shiftKey?: boolean;
+    originalEvent?: {
+      shiftKey?: boolean;
+      getModifierState?: (key: string) => boolean;
+      srcEvent?: { shiftKey?: boolean };
+    };
+    srcEvent?: { shiftKey?: boolean };
+  } | null | undefined) {
+    if (event?.shiftKey) return true;
+    if (event?.srcEvent?.shiftKey) return true;
+    if (event?.originalEvent?.shiftKey) return true;
+    if (event?.originalEvent?.srcEvent?.shiftKey) return true;
+    if (typeof event?.originalEvent?.getModifierState === 'function') {
+      try {
+        if (event.originalEvent.getModifierState('Shift')) return true;
+      } catch {
+        // ignore modifier-state lookup failures from synthetic event wrappers
+      }
+    }
+    return Boolean(get(mapSelectionShiftKey));
+  }
 
   function getPrimaryBuildingFeature(event: { point?: SelectionPointLike | null }) {
     const map = getMap?.();
@@ -92,11 +123,13 @@ export function createMapSelectionController({
   function focusSelectedFeature({
     feature,
     identity,
-    lngLat
+    lngLat,
+    shouldZoom = true
   }: {
     feature: SelectionFeatureLike;
     identity: SelectionIdentity;
     lngLat?: SelectionLngLat | null;
+    shouldZoom?: boolean;
   }) {
     const map = getMap?.();
     if (!map) return;
@@ -121,7 +154,7 @@ export function createMapSelectionController({
         : null
     });
 
-    if (!lngLat) return;
+    if (!lngLat || !shouldZoom) return;
     const desktopOffsetX = typeof window !== 'undefined' && window.innerWidth >= 1024
       ? -Math.round(window.innerWidth * 0.18)
       : 0;
@@ -148,7 +181,8 @@ export function createMapSelectionController({
     identity,
     lngLat,
     lon = null,
-    lat = null
+    lat = null,
+    shiftKey = false
   }: {
     source: string;
     feature: SelectionFeatureLike;
@@ -156,12 +190,20 @@ export function createMapSelectionController({
     lngLat?: SelectionLngLat | null;
     lon?: number | null;
     lat?: number | null;
+    shiftKey?: boolean;
   }) {
-    focusSelectedFeature({ feature, identity, lngLat });
+    focusSelectedFeature({
+      feature,
+      identity,
+      lngLat,
+      shouldZoom: !shiftKey
+    });
     debugSelectionLog?.('building-click', {
       source,
+      shiftKey: Boolean(shiftKey),
       layerId: feature?.layer?.id || null,
       featureId: feature?.id ?? null,
+      featureKind: getFeatureKind(feature),
       properties: feature?.properties || null,
       selectionKey: `${identity.osmType}/${identity.osmId}`
     });
@@ -169,13 +211,15 @@ export function createMapSelectionController({
       ...identity,
       lon: Number.isFinite(Number(lon)) ? Number(lon) : null,
       lat: Number.isFinite(Number(lat)) ? Number(lat) : null,
+      shiftKey: Boolean(shiftKey),
+      featureKind: getFeatureKind(feature),
       feature
     });
   }
 
   function handleMapBuildingClick(event: {
     point?: SelectionPointLike;
-    originalEvent?: { timeStamp?: number };
+    originalEvent?: { timeStamp?: number; shiftKey?: boolean };
     lngLat?: SelectionLngLat;
   }) {
     const feature = getPrimaryBuildingFeature(event);
@@ -185,11 +229,13 @@ export function createMapSelectionController({
     const clickSig = `${event?.originalEvent?.timeStamp || ''}:${event?.point?.x || ''}:${event?.point?.y || ''}:${identity.osmType}/${identity.osmId}`;
     if (clickSig === lastHandledBuildingClickSig) return;
     lastHandledBuildingClickSig = clickSig;
+    const shiftKey = getEventShiftKey(event);
     selectBuildingOnMap({
       source: 'map-click',
       feature,
       identity,
-      lngLat: event?.lngLat
+      lngLat: event?.lngLat,
+      shiftKey
     });
   }
 
@@ -209,15 +255,11 @@ export function createMapSelectionController({
     }
   }
 
-  function applySelectionFromStore(selection: { osmType?: string | null; osmId?: number | string | null } | null | undefined) {
+  function applySelectionFromStore(selection: { osmType?: string | null; osmId?: number | string | null } | Array<{ osmType?: string | null; osmId?: number | string | null }> | null | undefined) {
     const map = getMap?.();
-    if (!map || !selection?.osmType || !selection?.osmId) return;
+    if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
-    const identity = {
-      osmType: selection.osmType,
-      osmId: Number(selection.osmId)
-    };
-    const filter = getSelectionFilter(null, identity);
+    const filter = getSelectionFilter(null, selection);
     for (const layerId of getCurrentSelectedFillLayerIds(activeRegions)) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);

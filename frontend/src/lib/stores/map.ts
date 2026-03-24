@@ -128,6 +128,8 @@ function getInitialBuildingPartsVisibility() {
 }
 
 export const selectedBuilding = writable(null);
+export const selectedBuildings = writable([]);
+export const mapSelectionShiftKey = writable(false);
 export const mapReady = writable(false);
 export const mapCenter = writable(null);
 export const mapZoom = writable(null);
@@ -137,8 +139,85 @@ export const mapLabelsVisible = writable(getInitialLabelsVisibility());
 export const mapBuildingPartsVisible = writable(getInitialBuildingPartsVisibility());
 export const lastMapCamera = writable(getInitialLastMapCamera());
 
+function getSelectedBuildingKey(selection) {
+  const osmType = String(selection?.osmType || '').trim();
+  const osmId = Number(selection?.osmId);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
+    return '';
+  }
+  return `${osmType}/${osmId}`;
+}
+
+function normalizeSelectedBuilding(item) {
+  const osmType = String(item?.osmType ?? item?.osm_type ?? '').trim();
+  const osmId = Number(item?.osmId ?? item?.osm_id);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return null;
+
+  const lonRaw = item?.lon;
+  const latRaw = item?.lat;
+  const lon = lonRaw == null || lonRaw === '' ? null : Number(lonRaw);
+  const lat = latRaw == null || latRaw === '' ? null : Number(latRaw);
+
+  return {
+    osmType,
+    osmId,
+    lon: lon != null && Number.isFinite(lon) ? lon : null,
+    lat: lat != null && Number.isFinite(lat) ? lat : null,
+    featureKind: String(item?.featureKind ?? item?.feature_kind ?? '').trim() || null
+  };
+}
+
+function normalizeSelectedBuildings(items) {
+  const normalized = [];
+  const seen = new Set();
+  for (const item of Array.isArray(items) ? items : []) {
+    const selection = normalizeSelectedBuilding(item);
+    if (!selection) continue;
+    const key = getSelectedBuildingKey(selection);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(selection);
+  }
+  return normalized;
+}
+
+function syncSelectedBuildingSelection(items) {
+  const normalized = normalizeSelectedBuildings(items);
+  selectedBuildings.set(normalized);
+  selectedBuilding.set(normalized[0] || null);
+  return normalized;
+}
+
 export function setSelectedBuilding(item) {
-  selectedBuilding.set(item || null);
+  syncSelectedBuildingSelection(item ? [item] : []);
+}
+
+export function setSelectedBuildings(items) {
+  syncSelectedBuildingSelection(items);
+}
+
+export function toggleSelectedBuilding(item) {
+  const selection = normalizeSelectedBuilding(item);
+  if (!selection) return;
+  const current = get(selectedBuildings);
+  const key = getSelectedBuildingKey(selection);
+  const index = current.findIndex((entry) => getSelectedBuildingKey(entry) === key);
+  if (index >= 0) {
+    syncSelectedBuildingSelection([
+      ...current.slice(0, index),
+      ...current.slice(index + 1)
+    ]);
+    return;
+  }
+  syncSelectedBuildingSelection([...current, selection]);
+}
+
+export function clearSelectedBuildings() {
+  syncSelectedBuildingSelection([]);
+}
+
+export function setMapSelectionShiftKey(value) {
+  mapSelectionShiftKey.set(Boolean(value));
 }
 
 export function setMapReady(value) {
