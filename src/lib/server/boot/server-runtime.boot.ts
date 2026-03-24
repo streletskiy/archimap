@@ -42,7 +42,6 @@ const { registerServerRuntimeRoutes } = require('./server-runtime.routes');
 
 async function runPostDbStartupTasks(runtime: LooseRecord) {
   runtime.refreshRuntimeSettings();
-  runtime.scheduleFilterTagKeysCacheRebuild('startup');
   try {
     await Promise.resolve(runtime.refreshDesignRefSuggestionsCache?.('startup'));
   } catch (error) {

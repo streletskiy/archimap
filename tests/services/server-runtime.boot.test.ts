@@ -47,7 +47,7 @@ test('runPostDbStartupTasks defers startup search rebuild while sync is already 
 
   await runPostDbStartupTasks(runtime);
 
-  assert.deepEqual(events, ['refresh', 'filter:startup', 'design-ref:startup', 'sync:init']);
+  assert.deepEqual(events, ['refresh', 'design-ref:startup', 'sync:init']);
   assert.equal(logs.some((item) => item.code === 'search_rebuild_startup_deferred'), true);
   assert.equal(logs.some((item) => item.code === 'auto_sync_init_failed'), false);
 });
@@ -95,7 +95,7 @@ test('runPostDbStartupTasks starts startup search rebuild when sync is idle', as
   await runPostDbStartupTasks(runtime);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(events, ['refresh', 'filter:startup', 'design-ref:startup', 'sync:init', 'search:startup', 'rtree:startup']);
+  assert.deepEqual(events, ['refresh', 'design-ref:startup', 'sync:init', 'search:startup', 'rtree:startup']);
   assert.equal(logs.some((item) => item.code === 'search_rebuild_startup_deferred'), false);
   assert.equal(logs.some((item) => item.code === 'search_rebuild_startup_failed'), false);
 });

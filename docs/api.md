@@ -23,7 +23,9 @@ System notes:
   - Result items include `name`, `address`, `style`, `architect`, and optional `designRef` when present.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`
-  - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`, plus `warmingUp`.
+  - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`.
+  - The runtime reuses the persisted `filter_tag_keys_cache` after restarts and only cold-starts a rebuild when the cache is empty.
+  - `warmingUp` stays true while the cache is empty or a background rebuild is running.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
 - `GET /api/filter-presets`
   - Returns runtime map filter presets from DB-backed admin settings storage.
