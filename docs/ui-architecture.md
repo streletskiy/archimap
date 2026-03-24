@@ -128,7 +128,7 @@ When a new control is needed:
 - On the main map route, Shift is reserved for bulk selection and the default MapLibre box-zoom handler is disabled.
 - The building details modal does not block map clicks, so the user can keep the panel open while selecting another building or extending a bulk selection with Shift+Click.
 - When multi-selection is active, the building modal header shows the selected-building count; there is no separate selection chip under the navigation bar.
-- Bulk edit hides `name` and address fields entirely.
+- Bulk edit hides `name` and address fields entirely, and skips any selected building that ends up unchanged so empty pending edits are not created.
 - In bulk edit mode, the modal hides single-object metadata that is misleading for a group, including the OSM id badge and the full OSM tag dump.
 - Mixed editable values are shown as mixed-state inputs with sample current values; leaving such a field untouched preserves per-building differences.
 - The bulk-only `Clear for all` control writes an explicit empty value for that field to the whole selection when the edit is saved.

@@ -14,7 +14,7 @@ User-side:
 - If selected buildings disagree on an editable field, the modal shows that field as mixed, lists current sample values, and leaves it unchanged until the user explicitly enters, selects, or clears a value for the whole group.
 - The bulk-only `Clear for all` control writes an explicit empty value for that field to every selected building when the edit is saved.
 - If any selected building is a `building_part`, bulk edit narrows the editable fields to `levels`, `colour`, `style`, `material`, and `yearBuilt`.
-- When a bulk edit is submitted, the same allowed field changes are applied to every selected building one by one.
+- When a bulk edit is submitted, the same allowed field changes are applied to every selected building one by one, but any building whose effective values do not change is skipped so that no empty edit row is created.
 - When `material` is one of the concrete variants, the server persists `building:material=concrete` plus `building:material:concrete=<panels|blocks|monolith>` in the local merged state and user edit rows.
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;

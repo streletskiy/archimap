@@ -25,6 +25,7 @@ import {
   normalizeEditedBuildingFields,
   pickNullableText
 } from '$lib/utils/text';
+import { getEditedBuildingFields, hydrateBuildingForm } from '$lib/utils/building-mapper';
 
 const initialState = {
   buildingDetails: null,
@@ -183,6 +184,61 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload: LooseRecord, edited
 
   next._sourceTags = currentInfo?._sourceTags || {};
   return next;
+}
+
+function getComparableFromSelectedBuildingDetail(detail) {
+  if (!detail || typeof detail !== 'object') return null;
+  try {
+    const hydrated = hydrateBuildingForm(detail);
+    return hydrated?.initialComparable && typeof hydrated.initialComparable === 'object'
+      ? hydrated.initialComparable
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getBulkSaveTargets(options: {
+  selectionItems?: LooseRecord[];
+  currentState?: LooseRecord;
+  snapshot?: LooseRecord | null;
+  outgoingEditedFields?: string[];
+} = {}) {
+  const {
+    selectionItems = [],
+    currentState = {},
+    snapshot = null,
+    outgoingEditedFields = []
+  } = /** @type {LooseRecord} */ (options);
+  const items = Array.isArray(selectionItems) ? selectionItems : [];
+  if (items.length === 0) return [];
+  const isBulkSelection = items.length > 1;
+
+  const selectionKeys = items.map((item) => getSelectionKey(item));
+  const currentSelectionDetails = Array.isArray(currentState.selectedBuildingDetails)
+    ? currentState.selectedBuildingDetails
+    : [];
+  const currentSelectionKeys = Array.isArray(currentState.selectedBuildingDetailKeys)
+    ? currentState.selectedBuildingDetailKeys
+    : [];
+  const canCompareSelectionDetails = currentSelectionDetails.length === items.length
+    && currentSelectionKeys.length === selectionKeys.length
+    && currentSelectionKeys.every((key, index) => key === selectionKeys[index]);
+  const selectionDetailsByKey = canCompareSelectionDetails
+    ? new Map(selectionKeys.map((key, index) => [key, currentSelectionDetails[index]]))
+    : null;
+
+  return items.map((item, index) => {
+    const itemKey = selectionKeys[index];
+    const itemDetail = selectionDetailsByKey?.get(itemKey)
+      || (!isBulkSelection ? (currentState.buildingDetails || currentSelectionDetails[0] || null) : null);
+    const itemComparable = getComparableFromSelectedBuildingDetail(itemDetail);
+    const itemChangedFields = itemComparable ? getEditedBuildingFields(snapshot, itemComparable) : outgoingEditedFields;
+    const itemEditedFields = itemChangedFields.filter((field) => outgoingEditedFields.includes(field));
+    return itemEditedFields.length > 0
+      ? { item, editedFields: itemEditedFields }
+      : null;
+  }).filter(Boolean);
 }
 
 export function createBuildingDetailsManager() {
@@ -417,6 +473,17 @@ export function createBuildingDetailsManager() {
       return;
     }
 
+    const saveTargets = getBulkSaveTargets({
+      selectionItems,
+      currentState,
+      snapshot: detail,
+      outgoingEditedFields
+    });
+    if (saveTargets.length === 0) {
+      updateState({ saveStatus: translateNow('buildingModal.noChanges') });
+      return;
+    }
+
     updateState({
       savePending: true,
       saveStatus: translateNow('mapPage.saving')
@@ -438,14 +505,15 @@ export function createBuildingDetailsManager() {
     };
 
     try {
-      for (const item of selectionItems) {
+      for (const target of saveTargets) {
         await apiJson('/api/building-info', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...payload,
-            osmType: item.osmType,
-            osmId: item.osmId
+            osmType: target.item.osmType,
+            osmId: target.item.osmId,
+            editedFields: target.editedFields
           })
         });
       }
@@ -497,7 +565,7 @@ export function createBuildingDetailsManager() {
           buildingDetails: nextBuildingDetails,
           selectedBuildingDetails: nextSelectedBuildingDetails,
           saveStatus: isBulkSelection
-            ? translateNow('buildingModal.bulkSaved', { count: selectionItems.length })
+            ? translateNow('buildingModal.bulkSaved', { count: saveTargets.length })
             : translateNow('mapPage.submitted')
         };
       });

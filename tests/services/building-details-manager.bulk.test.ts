@@ -16,7 +16,7 @@ function createJsonResponse(body, status = 200) {
   });
 }
 
-test('bulk edit submits the same allowed changes to every selected building', async () => {
+test('bulk edit skips buildings that already match the target values', async () => {
   const { get } = await import('svelte/store');
   const { session } = await loadModule('frontend/src/lib/stores/auth.ts');
   const { clearSelectedBuildings, selectedBuildings } = await loadModule('frontend/src/lib/stores/map.ts');
@@ -164,10 +164,9 @@ test('bulk edit submits the same allowed changes to every selected building', as
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const postRequests = requests.filter((request) => request.method === 'POST' && request.url.endsWith('/api/building-info'));
-    assert.equal(postRequests.length, 2);
-    assert.deepEqual(postRequests.map((request) => request.body.osmId), [1, 2]);
+    assert.equal(postRequests.length, 1);
+    assert.deepEqual(postRequests.map((request) => request.body.osmId), [1]);
     assert.deepEqual(postRequests.map((request) => request.body.editedFields), [
-      ['style'],
       ['style']
     ]);
     assert.equal(postRequests.every((request) => request.body.address === null), true);
