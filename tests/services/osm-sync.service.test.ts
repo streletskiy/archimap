@@ -185,6 +185,33 @@ test('saveSettings encrypts the client secret and OAuth callback stores connecte
   assert.equal(result.osm.hasRefreshToken, true);
 });
 
+test('startOAuth rejects when the OSM client secret is missing', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({
+    db,
+    settingsSecret: 'test-secret'
+  });
+
+  await service.saveSettings({
+    providerName: 'OpenStreetMap',
+    authBaseUrl: 'https://www.openstreetmap.org',
+    apiBaseUrl: 'https://api.openstreetmap.org',
+    clientId: 'client-id',
+    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+  }, 'admin@example.com');
+
+  await assert.rejects(
+    () => service.startOAuth('admin@example.com'),
+    (error) => {
+      assert.equal(error.code, 'OSM_SYNC_CLIENT_SECRET_MISSING');
+      assert.equal(error.status, 503);
+      return true;
+    }
+  );
+});
+
 test('saveSettings only maps the OSM master auth host to the master API host', async () => {
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
@@ -673,6 +700,20 @@ test('syncCandidateToOsm rejects already published read-only candidates', async 
   );
 
   restore();
+});
+
+test('syncCandidateToOsm rejects when OSM account is not connected', async () => {
+  const db = createTestDb();
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  await assert.rejects(
+    () => service.syncCandidateToOsm('way', 101, 'admin@example.com'),
+    (error) => {
+      assert.equal(error.code, 'OSM_SYNC_NOT_CONNECTED');
+      assert.equal(error.status, 503);
+      return true;
+    }
+  );
 });
 
 test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite and preserves history', async () => {

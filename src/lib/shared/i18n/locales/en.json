@@ -546,6 +546,7 @@
       "connection": "Connection",
       "count": "Candidates",
       "noConnectedUser": "No OSM account connected yet",
+      "connectedUserUnknown": "OSM account is connected, but the user name was not saved",
       "masterOnly": "Only master admin can change OSM settings and publish edits.",
       "loading": "Loading OSM sync data...",
       "settings": {
@@ -575,7 +576,10 @@
         "selectAll": "Select all",
         "clearSelection": "Clear selection",
         "syncSelected": "Sync selected",
-        "selected": "Selected: {count}"
+        "selected": "Selected: {count}",
+        "selectedNotSyncable": "Selected items are not currently syncable",
+        "syncRequiresConnection": "Connect OSM to sync selected items",
+        "connectConfigMissing": "Fill client ID, client secret, and redirect URI before connecting OSM."
       },
       "detail": {
         "title": "Sync details",
@@ -986,6 +990,10 @@
       "ERR_RATE_LIMITED": "Too many requests. Please try again later",
       "ERR_QUERY_TOO_SHORT": "Enter at least 2 characters",
       "ERR_QUERY_TOO_LONG": "Search query is too long",
+      "OSM_SYNC_NOT_CONNECTED": "Connect OSM before syncing selected items.",
+      "OSM_SYNC_CLIENT_ID_MISSING": "Fill the OSM client ID before connecting.",
+      "OSM_SYNC_CLIENT_SECRET_MISSING": "Fill the OSM client secret before connecting.",
+      "OSM_SYNC_REDIRECT_URI_MISSING": "Set a valid OSM redirect URI before connecting.",
       "EDIT_SYNC_LOCKED": "This edit has already been synchronized and can only be viewed.",
       "EDIT_SYNC_IN_PROGRESS": "This edit is currently being synchronized and cannot be changed right now.",
       "OSM_SYNC_ALREADY_PUBLISHED": "This building group has already been synchronized and is now read-only.",

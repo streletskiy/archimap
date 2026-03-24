@@ -127,6 +127,8 @@ System notes:
 - `POST /api/admin/app-settings/osm/oauth/start`
   - Master-admin only.
   - Starts the OAuth2 authorization-code flow and returns the provider authorize URL plus `state`.
+  - Requires OSM client ID, client secret, and redirect URI to be configured.
+  - Returns explicit `OSM_SYNC_*` error codes when required OAuth settings are missing.
 - `GET /api/admin/app-settings/osm/oauth/callback`
   - Master-admin only.
   - OAuth callback endpoint used by OpenStreetMap to exchange `code` + `state` for access tokens.

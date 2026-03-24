@@ -265,13 +265,11 @@ function registerAdminRoutes(deps: LooseRecord) {
   }));
 
   app.get('/api/admin/app-settings/osm/oauth/callback', requireAuth, requireAdmin, requireMasterAdmin, withAdminError(async (req, res) => {
-    const result = await osmSyncService.handleOauthCallback({
+    await osmSyncService.handleOauthCallback({
       code: req.query?.code,
       state: req.query?.state
     });
-    const message = encodeURIComponent('osm-connected');
-    const user = encodeURIComponent(result?.osm?.connectedUser || '');
-    return res.redirect(`/admin/osm?osmSync=${message}${user ? `&user=${user}` : ''}`);
+    return res.redirect('/admin/osm');
   }, {
     status: 500,
     message: 'OSM OAuth callback failed'

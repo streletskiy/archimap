@@ -25,6 +25,18 @@ function createOsmSyncService(options: LooseRecord = {}) {
     return text ? text.slice(0, Math.max(1, maxLength)) : null;
   }
 
+  function makeOsmError(message, { status = 500, code = null, details = null } = {}) {
+    const error = new Error(String(message || 'OSM sync error')) as LooseOsmError;
+    error.status = status;
+    if (code) {
+      error.code = code;
+    }
+    if (details) {
+      error.details = details;
+    }
+    return error;
+  }
+
   function normalizeBaseUrl(value, fallback) {
     const text = String(value || '').trim();
     if (!text) return fallback;
@@ -110,13 +122,13 @@ function createOsmSyncService(options: LooseRecord = {}) {
   }
 
   async function createPkceChallenge(verifier) {
-    const subtle = crypto.webcrypto?.subtle;
-    if (!subtle) {
-      throw new Error('crypto.webcrypto.subtle is required for PKCE challenge generation');
-    }
     const verifierBytes = Buffer.from(String(verifier || ''), 'utf8');
-    const digest = await subtle.digest('SHA-256', verifierBytes);
-    return Buffer.from(digest).toString('base64url');
+    const subtle = crypto.webcrypto?.subtle;
+    if (subtle) {
+      const digest = await subtle.digest('SHA-256', verifierBytes);
+      return Buffer.from(digest).toString('base64url');
+    }
+    return crypto.createHash('sha256').update(verifierBytes).digest('base64url');
   }
 
   function stableJson(value) {
@@ -381,7 +393,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
       source: row ? 'db' : 'default',
       osm: settings,
       oauth: {
-        canConnect: Boolean(settings.clientId && settings.redirectUri),
+        canConnect: Boolean(settings.clientId && settings.redirectUri && settings.hasClientSecret),
         authBaseUrl: settings.authBaseUrl,
         apiBaseUrl: settings.apiBaseUrl,
         redirectUri: settings.redirectUri || normalizeRedirectUri('', general.appBaseUrl || '')
@@ -424,9 +436,24 @@ function createOsmSyncService(options: LooseRecord = {}) {
 
   async function startOAuth(requestedBy = null) {
     const creds = await getCredentials();
-    if (!creds.settings.clientId) throw new Error('OSM client id is not configured');
-    if (!creds.clientSecret) throw new Error('OSM client secret is not configured');
-    if (!creds.redirectUri) throw new Error('OSM redirect URI is not configured');
+    if (!creds.settings.clientId) {
+      throw makeOsmError('OSM client id is not configured', {
+        status: 503,
+        code: 'OSM_SYNC_CLIENT_ID_MISSING'
+      });
+    }
+    if (!creds.clientSecret) {
+      throw makeOsmError('OSM client secret is not configured', {
+        status: 503,
+        code: 'OSM_SYNC_CLIENT_SECRET_MISSING'
+      });
+    }
+    if (!creds.redirectUri) {
+      throw makeOsmError('OSM redirect URI is not configured', {
+        status: 503,
+        code: 'OSM_SYNC_REDIRECT_URI_MISSING'
+      });
+    }
     const stateRow = await createOauthState(requestedBy);
     const challenge = await createPkceChallenge(stateRow.verifier);
     const authorizeUrl = new URL('/oauth2/authorize', creds.authBaseUrl);

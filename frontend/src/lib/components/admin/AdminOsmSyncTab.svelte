@@ -1,6 +1,5 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
-  import { page } from '$app/stores';
   import { fade } from 'svelte/transition';
 
   import {
@@ -39,6 +38,7 @@
   let activeCandidates = [];
   let archivedCandidates = [];
   let syncableCandidates = [];
+  let selectedSyncCandidates = [];
 
   let draft = {
     providerName: 'OpenStreetMap',
@@ -81,8 +81,19 @@
     return normalized === 'synced' || normalized === 'cleaned';
   }
 
+  function isOsmConnected() {
+    return Boolean(settings?.osm?.hasAccessToken);
+  }
+
   function canSyncCandidate(candidate) {
-    return Boolean(candidate?.canSync) && !isArchivedCandidate(candidate);
+    return isOsmConnected() && Boolean(candidate?.canSync) && !isArchivedCandidate(candidate);
+  }
+
+  function canStartOsmOAuth() {
+    const clientId = String(draft.clientId || settings?.osm?.clientId || '').trim();
+    const clientSecret = String(draft.clientSecret || '').trim() || Boolean(settings?.osm?.hasClientSecret);
+    const redirectUri = String(draft.redirectUri || settings?.oauth?.redirectUri || settings?.osm?.redirectUri || '').trim();
+    return Boolean(clientId && clientSecret && redirectUri);
   }
 
   function selectedCount() {
@@ -124,6 +135,14 @@
 
   function clearSelection() {
     selectedCandidateKeys = [];
+  }
+
+  function resolveSelectedSyncCandidates(sourceCandidates = candidates, selectedKeys = selectedCandidateKeys) {
+    if (!Array.isArray(sourceCandidates) || !Array.isArray(selectedKeys) || selectedKeys.length === 0) {
+      return [];
+    }
+    const selected = new Set(selectedKeys);
+    return sourceCandidates.filter((item) => selected.has(candidateKey(item)) && canSyncCandidate(item));
   }
 
   function snapshotSettings(item) {
@@ -266,8 +285,15 @@
 
   async function syncSelectedCandidates() {
     if (!isMasterAdmin || syncBusy || selectedCandidateKeys.length === 0) return;
-    const selectedItems = activeCandidates.filter((item) => selectedCandidateKeys.includes(candidateKey(item)) && canSyncCandidate(item));
-    if (selectedItems.length === 0) return;
+    if (!isOsmConnected()) {
+      settingsStatus = translateNow('admin.osm.list.syncRequiresConnection');
+      return;
+    }
+    const selectedItems = selectedSyncCandidates;
+    if (selectedItems.length === 0) {
+      settingsStatus = translateNow('admin.osm.list.selectedNotSyncable');
+      return;
+    }
 
     syncBusy = true;
     settingsStatus = translateNow('admin.osm.status.syncing');
@@ -307,6 +333,7 @@
   $: activeCandidates = candidates.filter((item) => !isArchivedCandidate(item));
   $: archivedCandidates = candidates.filter((item) => isArchivedCandidate(item));
   $: syncableCandidates = activeCandidates.filter((item) => canSyncCandidate(item));
+  $: selectedSyncCandidates = resolveSelectedSyncCandidates(candidates, selectedCandidateKeys);
   $: pruneSelectedCandidates();
   $: dispatch('summary', { total: activeCandidates.length, archived: archivedCandidates.length });
 
@@ -336,13 +363,6 @@
 
   onMount(() => {
     void loadState();
-    const unsubscribe = page.subscribe(($pageState) => {
-      const syncState = String($pageState.url.searchParams.get('osmSync') || '').trim().toLowerCase();
-      if (syncState === 'osm-connected') {
-        settingsStatus = translateNow('admin.osm.status.connected');
-      }
-    });
-    return () => unsubscribe();
   });
 </script>
 
@@ -357,7 +377,7 @@
         {$t('common.refresh')}
       </UiButton>
       {#if isMasterAdmin}
-        <UiButton type="button" variant="secondary" size="xs" onclick={startOAuth} disabled={connectBusy || saveBusy || syncBusy}>
+        <UiButton type="button" variant="secondary" size="xs" onclick={startOAuth} disabled={connectBusy || saveBusy || syncBusy || !canStartOsmOAuth()}>
           {$t('admin.osm.connect')}
         </UiButton>
       {/if}
@@ -367,15 +387,20 @@
   <div class="grid gap-3 lg:grid-cols-3">
     <article class="osm-summary-card rounded-xl p-3 text-sm ui-text-body lg:col-span-2">
       <div class="flex flex-wrap items-center gap-2">
-        <UiBadge variant={settings?.osm?.hasAccessToken ? 'accent' : 'default'}>
-          <strong>{$t('admin.osm.connection')}</strong>{settings?.osm?.hasAccessToken ? $t('admin.osm.connected') : $t('admin.osm.disconnected')}
+        <UiBadge variant={settings?.osm?.hasAccessToken ? 'success' : 'default'}>
+          {settings?.osm?.hasAccessToken ? $t('admin.osm.connected') : $t('admin.osm.disconnected')}
         </UiBadge>
         <UiBadge variant="default">
           <strong>{$t('admin.osm.count')}</strong>{activeCandidates.length}
         </UiBadge>
       </div>
-      <p class="mt-2 text-xs ui-text-subtle break-words">{settings?.osm?.connectedUser || $t('admin.osm.noConnectedUser')}</p>
+      {#if settings?.osm?.connectedUser}
+        <p class="mt-2 text-xs ui-text-subtle break-words">{settings.osm.connectedUser}</p>
+      {/if}
       <p class="mt-1 text-xs ui-text-subtle break-words">{settings?.oauth?.redirectUri || draft.redirectUri || '---'}</p>
+      {#if settings && !isOsmConnected() && !canStartOsmOAuth()}
+        <p class="mt-2 text-xs ui-text-warning">{$t('admin.osm.list.connectConfigMissing')}</p>
+      {/if}
       {#if settingsStatus}
         <p class="mt-2 text-sm ui-text-muted">{settingsStatus}</p>
       {/if}
@@ -424,10 +449,13 @@
         <UiButton type="button" onclick={saveSettings} disabled={saveBusy || connectBusy || loading}>
           {saveBusy ? $t('admin.osm.settings.saving') : $t('admin.osm.settings.save')}
         </UiButton>
-        <UiButton type="button" variant="secondary" onclick={startOAuth} disabled={connectBusy || saveBusy || loading}>
+        <UiButton type="button" variant="secondary" onclick={startOAuth} disabled={connectBusy || saveBusy || loading || !canStartOsmOAuth()}>
           {connectBusy ? $t('admin.osm.settings.connecting') : $t('admin.osm.connect')}
         </UiButton>
       </div>
+      {#if !isOsmConnected() && !canStartOsmOAuth()}
+        <p class="text-xs ui-text-warning">{$t('admin.osm.list.connectConfigMissing')}</p>
+      {/if}
     </section>
   {:else}
     <p class="text-sm ui-text-muted">{$t('admin.osm.masterOnly')}</p>
@@ -444,15 +472,24 @@
         <UiButton type="button" variant="secondary" size="xs" onclick={selectAllCandidates} disabled={syncBusy || loading}>
           {$t('admin.osm.list.selectAll')}
         </UiButton>
-        <UiButton type="button" variant="secondary" size="xs" onclick={clearSelection} disabled={syncBusy || loading || selectedCandidateKeys.length === 0}>
-          {$t('admin.osm.list.clearSelection')}
-        </UiButton>
-        <UiButton type="button" size="xs" onclick={syncSelectedCandidates} disabled={syncBusy || loading || selectedCandidateKeys.length === 0}>
-          {$t('admin.osm.list.syncSelected')}
-        </UiButton>
-        <span class="text-xs ui-text-subtle">{$t('admin.osm.list.selected', { count: selectedCandidateKeys.length })}</span>
-      </div>
-    {/if}
+      <UiButton type="button" variant="secondary" size="xs" onclick={clearSelection} disabled={syncBusy || loading || selectedCandidateKeys.length === 0}>
+        {$t('admin.osm.list.clearSelection')}
+      </UiButton>
+      <UiButton type="button" size="xs" onclick={syncSelectedCandidates} disabled={syncBusy || loading || !isOsmConnected() || selectedSyncCandidates.length === 0}>
+        {syncBusy ? $t('admin.osm.status.syncingState') : $t('admin.osm.list.syncSelected')}
+      </UiButton>
+      <span class="text-xs ui-text-subtle">{$t('admin.osm.list.selected', { count: selectedCandidateKeys.length })}</span>
+      {#if !isOsmConnected() && activeCandidates.length > 0}
+        <span class="text-xs ui-text-warning">{$t('admin.osm.list.syncRequiresConnection')}</span>
+      {/if}
+      {#if selectedCandidateKeys.length > 0 && selectedSyncCandidates.length !== selectedCandidateKeys.length}
+        <span class="text-xs ui-text-warning">{$t('admin.osm.list.selectedNotSyncable')}</span>
+      {/if}
+      {#if syncBusy || settingsStatus}
+        <span class="text-xs ui-text-subtle">{syncBusy ? $t('admin.osm.status.syncing') : settingsStatus}</span>
+      {/if}
+    </div>
+  {/if}
 
     {#if loading}
       <p class="osm-summary-card rounded-xl px-3 py-2 text-sm ui-text-subtle">{$t('admin.osm.loading')}</p>
