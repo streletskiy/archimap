@@ -57,7 +57,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 ## Search/filter/building APIs
 
 - Existing building/search/filter APIs continue to read the union dataset from `osm.building_contours`.
-- Search source rows are normalized in Node.js from raw `tags_json` plus `local.architectural_info` via `src/lib/server/services/search-index-source.service.ts`, shared by incremental updates and full rebuild worker.
+- Search source rows are normalized in Node.js from raw `tags_json` plus `local.architectural_info` via `src/lib/server/services/search-index-source.service.ts`, shared by incremental updates and full rebuild worker. The normalized search text now also includes `design:ref` / `design_ref`.
 - This keeps `/api/building/*`, `/api/building-info/*`, `/api/search-buildings`, and filter endpoints aligned in single-region and multi-region setups.
 
 ## Operational notes

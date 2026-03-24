@@ -17,7 +17,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
   }
 
   function mergeLocalInfoForReassign(sourceRow: LooseRecord, targetRow: LooseRecord, { force = false }: LooseRecord = {}) {
-    const fields = ['name', 'style', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+    const fields = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
     const conflicts: string[] = [];
     const merged: LooseRecord = {};
 
@@ -121,12 +121,15 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
+          design = excluded.design,
+          design_ref = excluded.design_ref,
+          design_year = excluded.design_year,
           material = excluded.material,
           material_concrete = excluded.material_concrete,
           colour = excluded.colour,
@@ -142,6 +145,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
         targetOsmId,
         merged.name ?? null,
         merged.style ?? null,
+        merged.design ?? null,
+        merged.design_ref ?? null,
+        merged.design_year ?? null,
         merged.material ?? null,
         merged.material_concrete ?? null,
         merged.colour ?? null,

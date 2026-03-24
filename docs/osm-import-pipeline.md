@@ -197,7 +197,7 @@ flowchart TD
 
 - PostgreSQL keeps only searchable rows in `building_search_source` and derives `search_tsv` there through a generated column.
 - SQLite keeps `building_search_source` plus `building_search_fts`.
-- Parsing and fallback composition for `name`, `address`, `style`, and `architect` happens in Node.js via `src/lib/server/services/search-index-source.service.ts`.
+- Parsing and fallback composition for `name`, `address`, `style`, `architect`, and `design_ref` happens in Node.js via `src/lib/server/services/search-index-source.service.ts`.
 - pure `building:part` rows are excluded from the search read model so part geometries do not create duplicate search hits for the same visible building; rows that also have a `building` tag stay searchable as normal buildings.
 - The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 

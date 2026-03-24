@@ -5,7 +5,7 @@ const {
   parseOsmTarget,
   parsePositiveId
 } = require('./shared');
-const { splitBuildingMaterialSelection } = require('../edits.service');
+const { splitBuildingMaterialSelection, sanitizeProjectYear } = require('../edits.service');
 
 function createAdminEditsService(options: LooseRecord = {}) {
   const {
@@ -21,6 +21,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     reassignUserEdit,
     deleteUserEdit,
     enqueueSearchIndexRefresh,
+    refreshDesignRefSuggestionsCache,
     ARCHI_FIELD_SET
   } = options;
   const MUTABLE_SYNC_STATUSES = new Set(['unsynced', 'failed']);
@@ -202,6 +203,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       if (updated?.osmType && Number.isInteger(Number(updated.osmId))) {
         enqueueSearchIndexRefresh(updated.osmType, updated.osmId);
       }
+      await Promise.resolve(refreshDesignRefSuggestionsCache?.('admin-reassign'));
       return updated;
     } catch (error) {
       const message = String(error?.message || error || 'Failed to reassign edit');
@@ -252,6 +254,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       if (deleted?.osmType && Number.isInteger(Number(deleted.osmId))) {
         enqueueSearchIndexRefresh(deleted.osmType, deleted.osmId);
       }
+      await Promise.resolve(refreshDesignRefSuggestionsCache?.('admin-delete'));
       return deleted;
     } catch (error) {
       const message = String(error?.message || error || 'Failed to delete edit');
@@ -288,6 +291,14 @@ function createAdminEditsService(options: LooseRecord = {}) {
         sanitizedValues[key] = parsedYearBuilt;
         continue;
       }
+      if (key === 'design_year') {
+        const parsedDesignYear = sanitizeProjectYear(source[key]);
+        if (parsedDesignYear == null && String(source[key] ?? '').trim() !== '') {
+          throw createAdminError(400, 'Design year must be an integer between 1000 and 2100');
+        }
+        sanitizedValues[key] = parsedDesignYear;
+        continue;
+      }
       if (key === 'levels') {
         const parsedLevels = sanitizeLevels(source[key]);
         if (parsedLevels == null && String(source[key] ?? '').trim() !== '') {
@@ -302,7 +313,10 @@ function createAdminEditsService(options: LooseRecord = {}) {
         sanitizedValues.material_concrete = selection.material_concrete;
         continue;
       }
-      sanitizedValues[key] = sanitizeFieldText(source[key], key === 'archimap_description' ? 1000 : 300);
+      const maxLen = key === 'archimap_description'
+        ? 1000
+        : (key === 'design_ref' ? 500 : 300);
+      sanitizedValues[key] = sanitizeFieldText(source[key], maxLen);
     }
 
     return sanitizedValues;
@@ -318,7 +332,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       editCreatedTs,
       currentMergedTs,
       editSource: (await db.prepare(`
-        SELECT name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
+        SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
@@ -326,6 +340,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
       mergedCandidate: {
         name: currentMerged.name ?? null,
         style: currentMerged.style ?? null,
+        design: currentMerged.design ?? null,
+        design_ref: currentMerged.design_ref ?? null,
+        design_year: currentMerged.design_year ?? null,
         material: currentMerged.material ?? null,
         material_concrete: currentMerged.material_concrete ?? null,
         colour: currentMerged.colour ?? null,
@@ -419,12 +436,15 @@ function createAdminEditsService(options: LooseRecord = {}) {
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
+          design = excluded.design,
+          design_ref = excluded.design_ref,
+          design_year = excluded.design_year,
           material = excluded.material,
           material_concrete = excluded.material_concrete,
           colour = excluded.colour,
@@ -440,6 +460,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
         item.osmId,
         mergedCandidate.name,
         mergedCandidate.style,
+        mergedCandidate.design,
+        mergedCandidate.design_ref,
+        mergedCandidate.design_year,
         mergedCandidate.material,
         mergedCandidate.material_concrete,
         mergedCandidate.colour,
@@ -486,6 +509,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     }
 
     enqueueSearchIndexRefresh(item.osmType, item.osmId);
+    await Promise.resolve(refreshDesignRefSuggestionsCache?.('admin-merge'));
     return {
       ok: true,
       editId,

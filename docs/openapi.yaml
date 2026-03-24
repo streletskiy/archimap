@@ -78,7 +78,7 @@ paths:
           description: Building not found
   /api/building-info/{osmType}/{osmId}:
     get:
-      summary: Get merged building information by OSM id
+      summary: Get merged building information by OSM id, including design project fields and cached design-ref suggestions
       parameters:
         - in: path
           name: osmType
@@ -124,6 +124,12 @@ paths:
                   type: string
                 style:
                   type: string
+                design:
+                  type: string
+                designRef:
+                  type: string
+                designYear:
+                  type: integer
                 levels:
                   type: integer
                 yearBuilt:
@@ -546,7 +552,7 @@ paths:
             type: integer
       responses:
         '200':
-          description: Search result page
+          description: Search result page. Result items may include optional designRef values.
         '400':
           description: Invalid query
   /api/account/profile:

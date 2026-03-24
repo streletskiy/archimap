@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { UiBadge, UiButton, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
+  import { UiBadge, UiButton, UiCheckbox, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
   import { selectedBuilding, selectedBuildings } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
@@ -59,6 +59,9 @@
   const BULK_FIELD_KEYS = Object.freeze([
     'name',
     'style',
+    'design',
+    'designRef',
+    'designYear',
     'material',
     'colour',
     'levels',
@@ -67,7 +70,15 @@
     'address',
     'archimapDescription'
   ]);
-  const BULK_TEXT_CLEARABLE_FIELDS = new Set(['levels', 'yearBuilt', 'architect', 'archimapDescription']);
+  const BULK_TEXT_CLEARABLE_FIELDS = new Set([
+    'design',
+    'designRef',
+    'designYear',
+    'levels',
+    'yearBuilt',
+    'architect',
+    'archimapDescription'
+  ]);
 
   let form = createEmptyBuildingForm();
   let initialComparable = createEmptyBuildingComparable();
@@ -92,6 +103,9 @@
     return {
       name: false,
       style: false,
+      design: false,
+      designRef: false,
+      designYear: false,
       material: false,
       colour: false,
       levels: false,
@@ -166,6 +180,18 @@
       colour: String(event?.detail?.value || '')
     };
     markBulkFieldOverride('colour');
+  }
+
+  function handleDesignChange(event) {
+    const checked = Boolean(event?.detail?.checked);
+    const currentDesign = pickFirstText(form.design);
+    form = {
+      ...form,
+      design: checked
+        ? 'typical'
+        : (currentDesign === 'typical' ? '' : currentDesign)
+    };
+    markBulkFieldOverride('design');
   }
 
   function resolveBulkFieldDisplayValue(field, value) {
@@ -286,6 +312,9 @@
       osmId: Number(selection.osmId),
       name: snapshot.name,
       style: snapshot.style,
+      design: snapshot.design,
+      designRef: snapshot.designRef,
+      designYear: snapshot.designYear,
       material: snapshot.material,
       colour: snapshot.colour,
       levels: snapshot.levels,
@@ -341,6 +370,15 @@
     ? pickFirstText(form.style)
     : pickFirstText(form.style, archiInfo.styleRaw, archiInfo.style);
   $: displayStyle = resolveDisplayStyle(displayStyleRaw, $locale);
+  $: displayDesign = isBulkSelection
+    ? pickFirstText(form.design)
+    : pickFirstText(form.design, archiInfo.design);
+  $: displayDesignRef = isBulkSelection
+    ? pickFirstText(form.designRef)
+    : pickFirstText(form.designRef, archiInfo.design_ref);
+  $: displayDesignYear = isBulkSelection
+    ? pickFirstText(form.designYear)
+    : pickFirstText(form.designYear, archiInfo.design_year);
   $: displayMaterialRaw = isBulkSelection
     ? pickFirstText(form.material)
     : pickFirstText(form.material, archiInfo.material);
@@ -379,9 +417,29 @@
     && !availableBuildingMaterialItems.some((option) => option.value === currentBuildingMaterialItem.value)
     ? [currentBuildingMaterialItem, ...availableBuildingMaterialItems]
     : availableBuildingMaterialItems;
+  $: rawDesignRefSuggestions = isBulkSelection
+    ? selectedBuildingDetails?.[0]?.design_ref_suggestions
+    : buildingDetails?.design_ref_suggestions;
+  $: designRefSuggestions = Array.isArray(rawDesignRefSuggestions)
+    ? Array.from(new Set(rawDesignRefSuggestions.map((value) => pickFirstText(value)).filter(Boolean)))
+    : [];
+  $: designCheckboxChecked = pickFirstText(displayDesign) === 'typical';
+  $: designFieldsEnabled = designCheckboxChecked;
+  $: designCheckboxIndeterminate = Boolean(
+    isBulkSelection
+      && bulkFieldState?.design?.isMixed
+      && !bulkFieldOverrides?.design
+      && !pickFirstText(displayDesign)
+  );
   $: hasReadyDetails = isBulkSelection ? bulkDetailsReady : Boolean(buildingDetails);
   $: summaryItems = [
     { label: $t('buildingModal.style'), value: getSummaryValue('style', displayStyle) },
+    {
+      label: designCheckboxChecked ? $t('buildingModal.designBuilding') : $t('buildingModal.design'),
+      value: designCheckboxChecked ? $t('common.yes') : getSummaryValue('design', displayDesign)
+    },
+    { label: $t('buildingModal.designRef'), value: getSummaryValue('designRef', displayDesignRef) },
+    { label: $t('buildingModal.designYear'), value: getSummaryValue('designYear', displayDesignYear) },
     { label: $t('buildingModal.material'), value: getSummaryValue('material', displayMaterial) },
     { label: $t('buildingModal.colour'), value: getSummaryValue('colour', displayColour) },
     { label: $t('buildingModal.levels'), value: getSummaryValue('levels', isBulkSelection ? form.levels : pickFirstText(form.levels, archiInfo.levels)) },
@@ -685,6 +743,84 @@
                 </FormRow>
 
                 <FormRow
+                  forId="building-design"
+                  label={$t('buildingModal.design')}
+                  note={getBulkFieldNote('design')}
+                >
+                  <BulkClearAction
+                    show={shouldShowBulkClearAction('design', form.design)}
+                    ariaLabel={$t('buildingModal.bulkClearField')}
+                    title={$t('buildingModal.bulkClearField')}
+                    onclick={() => clearBulkField('design')}
+                  >
+                    <div class="design-toggle-row">
+                      <UiCheckbox
+                        checked={designCheckboxChecked}
+                        indeterminate={designCheckboxIndeterminate}
+                        className="design-toggle-checkbox"
+                        onchange={handleDesignChange}
+                      />
+                      {#if displayDesign && displayDesign !== 'typical'}
+                        <UiInput
+                          value={displayDesign}
+                          readonly
+                          className="design-toggle-value-input"
+                        />
+                      {/if}
+                    </div>
+                  </BulkClearAction>
+                </FormRow>
+
+                <div class="grid2">
+                  <FormRow
+                    forId="building-design-ref"
+                    label={$t('buildingModal.designRef')}
+                    note={getBulkFieldNote('designRef')}
+                  >
+                    <BulkClearAction
+                      show={designFieldsEnabled && shouldShowBulkClearAction('designRef', form.designRef)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('designRef')}
+                    >
+                      <UiInput
+                        id="building-design-ref"
+                        type="text"
+                        list="building-design-ref-suggestions"
+                        bind:value={form.designRef}
+                        disabled={!designFieldsEnabled}
+                        placeholder={getTextFieldPlaceholder('designRef')}
+                        oninput={() => markBulkFieldOverride('designRef')}
+                      />
+                    </BulkClearAction>
+                  </FormRow>
+
+                  <FormRow
+                    forId="building-design-year"
+                    label={$t('buildingModal.designYear')}
+                    note={getBulkFieldNote('designYear')}
+                  >
+                    <BulkClearAction
+                      show={designFieldsEnabled && shouldShowBulkClearAction('designYear', form.designYear)}
+                      ariaLabel={$t('buildingModal.bulkClearField')}
+                      title={$t('buildingModal.bulkClearField')}
+                      onclick={() => clearBulkField('designYear')}
+                    >
+                      <UiInput
+                        id="building-design-year"
+                        type="number"
+                        min="1000"
+                        max="2100"
+                        bind:value={form.designYear}
+                        disabled={!designFieldsEnabled}
+                        placeholder={getTextFieldPlaceholder('designYear')}
+                        oninput={() => markBulkFieldOverride('designYear')}
+                      />
+                    </BulkClearAction>
+                  </FormRow>
+                </div>
+
+                <FormRow
                   forId="building-material-select"
                   label={$t('buildingModal.material')}
                   note={getBulkFieldNote('material')}
@@ -812,6 +948,11 @@
             {/if}
 
             <div class="form-footer">
+              <datalist id="building-design-ref-suggestions">
+                {#each designRefSuggestions as suggestion}
+                  <option value={suggestion}></option>
+                {/each}
+              </datalist>
               <p class="status" data-filled={saveStatus ? 'true' : 'false'}>{saveStatus || ''}</p>
               <UiButton type="submit" disabled={savePending || !selectionState.hasEditableFields}>
                 {savePending ? $t('buildingModal.saving') : $t('buildingModal.save')}
@@ -1072,6 +1213,22 @@
     display: grid;
     gap: 0.75rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .design-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+  }
+
+  :global(.design-toggle-checkbox) {
+    flex: 0 0 auto;
+  }
+
+  :global(.design-toggle-value-input) {
+    flex: 1 1 12rem;
+    min-width: 14rem;
   }
 
   .colour-picker-row {

@@ -75,6 +75,13 @@ function normalizeArchiInfo(payload: LooseRecord) {
     name: pickNullableText(info.name, info['name:ru'], info['name:en']),
     style: styleRaw,
     styleRaw,
+    design: pickNullableText(info.design, sourceTags?.design),
+    design_ref: pickNullableText(info.design_ref, info['design:ref'], sourceTags?.['design:ref'], sourceTags?.design_ref),
+    design_year: coerceNullableIntegerText(
+      info.design_year ?? info['design:year'] ?? sourceTags?.['design:year'] ?? sourceTags?.design_year,
+      1000,
+      2100
+    ),
     levels: coerceNullableIntegerText(info.levels ?? info['building:levels'], 0, 300),
     year_built: coerceNullableIntegerText(
       info.year_built ?? info['building:year'] ?? info.start_date,
@@ -102,6 +109,11 @@ function normalizeArchiInfo(payload: LooseRecord) {
     address: resolveAddressText(info, pickNullableText, info.address),
     description: pickNullableText(info.description),
     archimap_description: pickNullableText(info.archimap_description, info.description),
+    design_ref_suggestions: Array.isArray(info.design_ref_suggestions)
+      ? info.design_ref_suggestions
+        .map((value) => pickNullableText(value))
+        .filter(Boolean)
+      : [],
     _sourceTags: info._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {}
   };
 }
@@ -115,6 +127,9 @@ function createFallbackBuildingDetails(detail = null) {
         name: null,
         style: null,
         styleRaw: null,
+        design: null,
+        design_ref: null,
+        design_year: null,
         levels: null,
         year_built: null,
         architect: null,
@@ -123,9 +138,11 @@ function createFallbackBuildingDetails(detail = null) {
         materialConcrete: null,
         colour: null,
         address: null,
+        design_ref_suggestions: [],
         _sourceTags: {}
       }
-    }
+    },
+    design_ref_suggestions: []
   };
 }
 
@@ -158,6 +175,9 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload: LooseRecord, edited
     ? { ...currentInfo }
     : { _sourceTags: {} };
   const rawStyle = coerceNullableText(payload?.style);
+  const rawDesign = coerceNullableText(payload?.design);
+  const rawDesignRef = coerceNullableText(payload?.designRef);
+  const rawDesignYear = coerceNullableIntegerText(payload?.designYear, 1000, 2100);
   const materialSelection = normalizeBuildingMaterialSelection(payload?.material);
   const splitMaterial = splitBuildingMaterialSelection(materialSelection);
   const editedFieldSet = new Set(normalizeEditedBuildingFields(editedFields));
@@ -168,6 +188,11 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload: LooseRecord, edited
     next.styleRaw = rawStyle;
     next.style = rawStyle;
   }
+  if (applyAll || editedFieldSet.has('design')) {
+    next.design = rawDesign;
+  }
+  if (applyAll || editedFieldSet.has('designRef')) next.design_ref = rawDesignRef;
+  if (applyAll || editedFieldSet.has('designYear')) next.design_year = rawDesignYear;
   if (applyAll || editedFieldSet.has('material')) {
     next.material = coerceNullableText(splitMaterial.material);
     next.material_concrete = coerceNullableText(splitMaterial.materialConcrete);
@@ -274,6 +299,7 @@ export function createBuildingDetailsManager() {
       return {
         feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
         region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
+        design_ref_suggestions: Array.isArray(data?.design_ref_suggestions) ? data.design_ref_suggestions : [],
         properties: {
           archiInfo: normalizeArchiInfo({
             ...data,
@@ -289,6 +315,7 @@ export function createBuildingDetailsManager() {
         return {
           feature_kind: feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
           region_slugs: [],
+          design_ref_suggestions: [],
           properties: {
             archiInfo: normalizeArchiInfo({
               ...archiInfo,
@@ -494,6 +521,9 @@ export function createBuildingDetailsManager() {
       osmId: normalized.osmId,
       name: hasBuildingPartSelection ? null : coerceNullableText(detail.name),
       style: coerceNullableText(normalizeArchitectureStyleKey(detail.style)),
+      design: hasBuildingPartSelection ? null : coerceNullableText(detail.design),
+      designRef: hasBuildingPartSelection ? null : coerceNullableText(detail.designRef),
+      designYear: hasBuildingPartSelection ? null : coerceNullableIntegerText(detail.designYear, 1000, 2100),
       material: coerceNullableText(normalizeBuildingMaterialSelection(detail.material)),
       colour: coerceNullableText(detail.colour),
       levels: coerceNullableIntegerText(detail.levels, 0, 300),

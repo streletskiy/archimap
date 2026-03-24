@@ -19,6 +19,9 @@ function createTestDb() {
       created_by TEXT NOT NULL,
       name TEXT,
       style TEXT,
+      design TEXT,
+      design_ref TEXT,
+      design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
       colour TEXT,
@@ -59,6 +62,9 @@ function createTestDb() {
       osm_id INTEGER NOT NULL,
       name TEXT,
       style TEXT,
+      design TEXT,
+      design_ref TEXT,
+      design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
       colour TEXT,
@@ -248,6 +254,50 @@ test('buildChangesFromRows treats concrete material variants as one selection', 
 
   const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));
   assert.equal(fields.has('material'), false);
+});
+
+test('getUserEditDetailsById exposes design project changes and values', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2202,
+    JSON.stringify({
+      name: 'Дом с типовым тегом',
+      'design:ref': '1-447С-42'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, design, design_ref, design_year, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    22,
+    'way',
+    2202,
+    'user@example.com',
+    'Дом с типовым тегом',
+    'typical',
+    '1-447С-43',
+    1972,
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(22);
+  assert.ok(item);
+  assert.equal(item?.values.design, 'typical');
+  assert.equal(item?.values.design_ref, '1-447С-43');
+  assert.equal(item?.values.design_year, 1972);
+  const fields = new Set((item?.changes || []).map((change) => String(change.field || '')));
+  assert.equal(fields.has('design'), true);
+  assert.equal(fields.has('design_ref'), true);
+  assert.equal(fields.has('design_year'), true);
 });
 
 test('getUserEditsList marks accepted edit as orphaned when contour is missing', async () => {

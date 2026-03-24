@@ -13,7 +13,7 @@ type LooseOsmError = Error & {
 };
 
 function createOsmSyncService(options: LooseRecord = {}) {
-  const { db, settingsSecret, appSettingsService, enqueueSearchIndexRefresh } = options;
+  const { db, settingsSecret, appSettingsService, enqueueSearchIndexRefresh, refreshDesignRefSuggestionsCache } = options;
   if (!db) throw new Error('createOsmSyncService: db is required');
   const secret = String(settingsSecret || '').trim();
   if (!secret) throw new Error('createOsmSyncService: settingsSecret is required');
@@ -636,6 +636,9 @@ function createOsmSyncService(options: LooseRecord = {}) {
         ue.created_at,
         ai.name AS local_name,
         ai.style AS local_style,
+        ai.design AS local_design,
+        ai.design_ref AS local_design_ref,
+        ai.design_year AS local_design_year,
         ai.material AS local_material,
         ai.material_concrete AS local_material_concrete,
         ai.colour AS local_colour,
@@ -690,6 +693,9 @@ function createOsmSyncService(options: LooseRecord = {}) {
     return {
       name: normalizeStateValue(row.local_name),
       style: normalizeStateValue(row.local_style),
+      design: normalizeStateValue(row.local_design),
+      design_ref: normalizeStateValue(row.local_design_ref),
+      design_year: normalizeStateValue(row.local_design_year),
       material: normalizeMaterialValue(row.local_material, row.local_material_concrete),
       colour: normalizeStateValue(row.local_colour),
       levels: normalizeStateValue(row.local_levels),
@@ -704,6 +710,9 @@ function createOsmSyncService(options: LooseRecord = {}) {
     return {
       name: normalizeStateValue(tags.name),
       style: normalizeStateValue(tags['building:architecture'] || tags.architecture || tags.style),
+      design: normalizeStateValue(tags.design),
+      design_ref: normalizeStateValue(tags['design:ref'] || tags.design_ref),
+      design_year: normalizeStateValue(tags['design:year'] || tags.design_year),
       material: normalizeMaterialValue(tags['building:material'] || tags.material),
       colour: normalizeStateValue(tags['building:colour'] || tags.colour),
       levels: normalizeStateValue(tags['building:levels'] || tags.levels),
@@ -716,7 +725,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
 
   function diffStates(before: LooseRecord = {}, after: LooseRecord = {}) {
     const changed = [];
-    const keys = ['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description'];
+    const keys = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description'];
     for (const key of keys) {
       if (before[key] !== after[key]) {
         changed.push({ key, before: before[key] ?? null, after: after[key] ?? null });
@@ -788,6 +797,12 @@ function createOsmSyncService(options: LooseRecord = {}) {
         return ['name', 'name:ru', 'official_name'];
       case 'style':
         return ['building:architecture', 'architecture', 'style'];
+      case 'design':
+        return ['design'];
+      case 'design_ref':
+        return ['design:ref', 'design_ref'];
+      case 'design_year':
+        return ['design:year', 'design_year'];
       case 'material':
         return ['building:material', 'material', 'building:material:concrete', 'material_concrete'];
       case 'colour':
@@ -828,6 +843,17 @@ function createOsmSyncService(options: LooseRecord = {}) {
         delete tags.architecture;
         delete tags.style;
         return ['architecture', 'style'];
+      case 'design':
+        tags.design = normalized;
+        return [];
+      case 'design_ref':
+        tags['design:ref'] = normalized;
+        delete tags.design_ref;
+        return [];
+      case 'design_year':
+        tags['design:year'] = normalized;
+        delete tags.design_year;
+        return [];
       case 'material':
         if (normalized.startsWith('concrete_')) {
           tags['building:material'] = 'concrete';
@@ -1078,6 +1104,9 @@ function createOsmSyncService(options: LooseRecord = {}) {
         ue.created_at,
         ai.name AS local_name,
         ai.style AS local_style,
+        ai.design AS local_design,
+        ai.design_ref AS local_design_ref,
+        ai.design_year AS local_design_year,
         ai.material AS local_material,
         ai.material_concrete AS local_material_concrete,
         ai.colour AS local_colour,
@@ -1406,6 +1435,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
         if (typeof enqueueSearchIndexRefresh === 'function') {
           enqueueSearchIndexRefresh(item.summaryBase.osmType, item.summaryBase.osmId);
         }
+        await Promise.resolve(refreshDesignRefSuggestionsCache?.('osm-sync-publish'));
         syncedResults.push({
           osmType: item.summaryBase.osmType,
           osmId: item.summaryBase.osmId,
@@ -1545,6 +1575,7 @@ function createOsmSyncService(options: LooseRecord = {}) {
         if (typeof enqueueSearchIndexRefresh === 'function') {
           enqueueSearchIndexRefresh(candidate.osmType, candidate.osmId);
         }
+        await Promise.resolve(refreshDesignRefSuggestionsCache?.('osm-sync-cleanup'));
       } catch (error) {
         // Continue cleaning other buildings if one fails.
         console.error('osm_sync_cleanup_failed', {

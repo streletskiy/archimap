@@ -12,16 +12,35 @@ const FILTER_RULE_OPS = new Set([
 ]);
 
 const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
-const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description', 'design:ref', 'design:year']);
+const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+
+function normalizeArchiRuleKey(ruleKey) {
+  const key = String(ruleKey || '').trim();
+  if (key.startsWith('archi.')) {
+    return `archi.${normalizeArchiRuleKey(key.slice(6))}`;
+  }
+  if (key === 'design:ref') return 'design_ref';
+  if (key === 'design:year') return 'design_year';
+  return key;
+}
 
 function getPostgresRuleTagKeys(ruleKey) {
-  const key = String(ruleKey || '');
+  const key = normalizeArchiRuleKey(ruleKey);
   if (key === 'colour' || key === 'archi.colour') {
     return ['building:colour', 'colour'];
   }
   if (key === 'material' || key === 'archi.material') {
     return ['building:material', 'material'];
+  }
+  if (key === 'style' || key === 'archi.style') {
+    return ['building:architecture', 'architecture', 'style'];
+  }
+  if (key === 'design_ref' || key === 'archi.design_ref') {
+    return ['design:ref'];
+  }
+  if (key === 'design_year' || key === 'archi.design_year') {
+    return ['design:year'];
   }
   return [key];
 }
@@ -45,6 +64,9 @@ function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
   const alias = String(rowAlias || 'src').trim() || 'src';
   if (key === 'name') return `${alias}.name`;
   if (key === 'style') return `${alias}.style`;
+  if (key === 'design') return `${alias}.design`;
+  if (key === 'design_ref') return `${alias}.design_ref`;
+  if (key === 'design_year') return `${alias}.design_year::text`;
   if (key === 'material') return `${alias}.material`;
   if (key === 'colour') return `${alias}.colour`;
   if (key === 'levels') return `${alias}.levels::text`;
@@ -57,10 +79,10 @@ function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
 }
 
 function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${rowAlias}.tags_jsonb` } = {}) {
-  const key = String(ruleKey || '');
+  const key = normalizeArchiRuleKey(ruleKey);
   let fallbackKey = null;
   if (key.startsWith('archi.')) {
-    fallbackKey = key.slice(6);
+    fallbackKey = normalizeArchiRuleKey(key.slice(6));
   } else if (ARCHI_RULE_KEYS.has(key)) {
     fallbackKey = key;
   }
@@ -94,7 +116,7 @@ function parseNumericFilterValue(rawValue) {
 }
 
 function usesArchiFallbackRuleKey(ruleKey) {
-  const key = String(ruleKey || '');
+  const key = normalizeArchiRuleKey(ruleKey);
   if (!key) return false;
   return key.startsWith('archi.') || ARCHI_RULE_KEYS.has(key);
 }
@@ -115,10 +137,10 @@ function splitPostgresPushdownRules(rules) {
 function collectRequiredArchiColumns(rules) {
   const required = new Set();
   for (const rule of Array.isArray(rules) ? rules : []) {
-    const key = String(rule?.key || '');
+    const key = normalizeArchiRuleKey(rule?.key);
     let fallbackKey = null;
     if (key.startsWith('archi.')) {
-      fallbackKey = key.slice(6);
+      fallbackKey = normalizeArchiRuleKey(key.slice(6));
     } else if (ARCHI_RULE_KEYS.has(key)) {
       fallbackKey = key;
     }

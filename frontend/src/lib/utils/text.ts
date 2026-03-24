@@ -3,6 +3,9 @@ export const EMPTY_TEXT_TOKENS = new Set(['-', '--', '—', 'n/a', 'na', 'null']
 export const BUILDING_EDITABLE_FIELDS = Object.freeze([
   'name',
   'style',
+  'design',
+  'designRef',
+  'designYear',
   'material',
   'colour',
   'levels',

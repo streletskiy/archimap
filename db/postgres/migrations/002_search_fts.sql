@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS public.building_search_fts (
   name TEXT NOT NULL DEFAULT '',
   address TEXT NOT NULL DEFAULT '',
   style TEXT NOT NULL DEFAULT '',
-  architect TEXT NOT NULL DEFAULT ''
+  architect TEXT NOT NULL DEFAULT '',
+  design_ref TEXT NOT NULL DEFAULT ''
 );
 
 ALTER TABLE public.building_search_fts
@@ -16,7 +17,8 @@ ALTER TABLE public.building_search_fts
   ALTER COLUMN name SET NOT NULL,
   ALTER COLUMN address SET NOT NULL,
   ALTER COLUMN style SET NOT NULL,
-  ALTER COLUMN architect SET NOT NULL;
+  ALTER COLUMN architect SET NOT NULL,
+  ALTER COLUMN design_ref SET NOT NULL;
 
 ALTER TABLE public.building_search_fts
   ADD COLUMN IF NOT EXISTS search_tsv tsvector
@@ -26,7 +28,8 @@ ALTER TABLE public.building_search_fts
       coalesce(name, '') || ' ' ||
       coalesce(address, '') || ' ' ||
       coalesce(style, '') || ' ' ||
-      coalesce(architect, '')
+      coalesce(architect, '') || ' ' ||
+      coalesce(design_ref, '')
     )
   ) STORED;
 

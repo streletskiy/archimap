@@ -70,7 +70,7 @@ function hasMeaningfulValue(value) {
 function getRuleValue(item, key) {
   const archiInfo = item?.archiInfo && typeof item.archiInfo === 'object' ? item.archiInfo : {};
   if (key.startsWith('archi.')) {
-    return archiInfo[key.slice(6)];
+    return getRuleValue(item, key.slice(6));
   }
   const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
   
@@ -108,6 +108,19 @@ function getRuleValue(item, key) {
   if (key === 'description' || key === 'archimap_description') {
      if (hasMeaningfulValue(archiInfo.archimap_description)) return archiInfo.archimap_description;
      if (hasMeaningfulValue(archiInfo.description)) return archiInfo.description;
+  }
+  if (key === 'design') {
+     if (hasMeaningfulValue(archiInfo.design)) return archiInfo.design;
+  }
+  if (key === 'design:ref' || key === 'design_ref') {
+     if (hasMeaningfulValue(archiInfo.design_ref)) return archiInfo.design_ref;
+     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design:ref')) return sourceTags['design:ref'];
+     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design_ref')) return sourceTags.design_ref;
+  }
+  if (key === 'design:year' || key === 'design_year') {
+     if (hasMeaningfulValue(archiInfo.design_year)) return archiInfo.design_year;
+     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design:year')) return sourceTags['design:year'];
+     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design_year')) return sourceTags.design_year;
   }
 
   if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) return archiInfo[key];

@@ -4,14 +4,15 @@ const { EventEmitter } = require('node:events');
 
 const { createSearchIndexBoot } = require('../../src/lib/server/boot/search-index.boot');
 
-function createDbStub() {
+function createDbStub(snapshot = {}) {
   const statement = {
     get() {
       return {
         search_source_count: 0,
         search_fts_count: 0,
         searchable_rows_expected: false,
-        search_tsv_index_present: true
+        search_tsv_index_present: true,
+        ...snapshot
       };
     },
     run() {},
@@ -64,4 +65,37 @@ test('search index rebuild worker is spawned through tsx', async () => {
 
   assert.equal(spawnCalls.length, 1);
   assert.deepEqual(spawnCalls[0].args, ['--import', 'tsx', 'scripts/rebuild-search-index.ts']);
+});
+
+test('search index rebuild starts again when PostgreSQL source index is missing', async () => {
+  const spawnCalls = [];
+  const boot = createSearchIndexBoot({
+    db: createDbStub({
+      search_source_count: 128,
+      searchable_rows_expected: true,
+      search_tsv_index_present: false
+    }),
+    dbProvider: 'postgres',
+    logger: { info() {}, error() {} },
+    spawn: (_execPath, args, options) => {
+      const child = createChildProcessStub();
+      spawnCalls.push({ args, options });
+      return child;
+    },
+    processExecPath: 'node',
+    rootDir: '/app',
+    searchRebuildScriptPath: 'scripts/rebuild-search-index.ts',
+    batchSize: 100,
+    env: {},
+    sqlite: {
+      dbPath: '/tmp/archimap.db',
+      osmDbPath: '/tmp/osm.db',
+      localEditsDbPath: '/tmp/local-edits.db'
+    },
+    isShuttingDown: () => false
+  });
+
+  await boot.rebuildSearchIndex('startup');
+
+  assert.equal(spawnCalls.length, 1);
 });

@@ -5,6 +5,7 @@ const path = require('path');
 const { Client } = require('pg');
 const { getDbProvider, getPostgresConnectionString } = require('../scripts/lib/postgres-config');
 const {
+  BUILDING_SEARCH_FTS_INSERT_SQL,
   BUILDING_SEARCH_SOURCE_INSERT_SQL,
   buildRawSearchSourceQuery,
   normalizeSearchSourceRows
@@ -42,6 +43,7 @@ const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
     address,
     style,
     architect,
+    design_ref,
     local_priority,
     center_lon,
     center_lat,
@@ -59,6 +61,7 @@ const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
       NULLIF(btrim(ai.address), '') AS local_address,
       NULLIF(btrim(ai.style), '') AS local_style,
       NULLIF(btrim(ai.architect), '') AS local_architect,
+      NULLIF(btrim(ai.design_ref), '') AS local_design_ref,
       CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
       COALESCE((bc.min_lon + bc.max_lon) / 2.0, 0) AS center_lon,
       COALESCE((bc.min_lat + bc.max_lat) / 2.0, 0) AS center_lat
@@ -115,6 +118,11 @@ const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
         NULLIF(btrim(base.tags_jsonb ->> 'architect'), ''),
         NULLIF(btrim(base.tags_jsonb ->> 'architect_name'), '')
       ) AS architect,
+      COALESCE(
+        base.local_design_ref,
+        NULLIF(btrim(base.tags_jsonb ->> 'design:ref'), ''),
+        NULLIF(btrim(base.tags_jsonb ->> 'design_ref'), '')
+      ) AS design_ref,
       base.local_priority,
       base.center_lon,
       base.center_lat,
@@ -129,6 +137,7 @@ const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
     resolved.address,
     resolved.style,
     resolved.architect,
+    resolved.design_ref,
     resolved.local_priority,
     resolved.center_lon,
     resolved.center_lat,
@@ -138,6 +147,7 @@ const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
      OR resolved.address IS NOT NULL
      OR resolved.style IS NOT NULL
      OR resolved.architect IS NOT NULL
+     OR resolved.design_ref IS NOT NULL
 `;
 
 const POSTGRES_CREATE_SOURCE_TSV_INDEX_SQL = `
@@ -399,11 +409,35 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
   if (!localInfoColumns.has('archimap_description')) {
     db.exec('ALTER TABLE local.architectural_info ADD COLUMN archimap_description TEXT;');
   }
+  if (!localInfoColumns.has('design_ref')) {
+    db.exec('ALTER TABLE local.architectural_info ADD COLUMN design_ref TEXT;');
+  }
 
   const searchSourceColumns = db.prepare('PRAGMA table_info(building_search_source)').all();
   const searchSourceColumnNames = new Set(searchSourceColumns.map((column) => String(column?.name || '').trim()));
   if (!searchSourceColumnNames.has('local_priority')) {
     db.exec('ALTER TABLE building_search_source ADD COLUMN local_priority INTEGER NOT NULL DEFAULT 0;');
+  }
+  if (!searchSourceColumnNames.has('design_ref')) {
+    db.exec('ALTER TABLE building_search_source ADD COLUMN design_ref TEXT;');
+  }
+
+  const searchFtsColumns = db.prepare('PRAGMA table_info(building_search_fts)').all();
+  const searchFtsColumnNames = new Set(searchFtsColumns.map((column) => String(column?.name || '').trim()));
+  if (!searchSourceColumnNames.has('design_ref') || !searchFtsColumnNames.has('design_ref')) {
+    db.exec('DROP TABLE IF EXISTS building_search_fts;');
+    db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS building_search_fts
+USING fts5(
+  osm_key UNINDEXED,
+  name,
+  address,
+  style,
+  architect,
+  design_ref,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+`);
   }
 }
 
@@ -428,7 +462,7 @@ function createSqliteDriver() {
   const countContours = db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours');
   const selectRawBatch = db.prepare(RAW_SEARCH_SOURCE_BATCH_SQL);
   const insertSource = db.prepare(BUILDING_SEARCH_SOURCE_INSERT_SQL);
-  const insertFts = db.prepare('INSERT INTO building_search_fts (osm_key, name, address, style, architect) VALUES (?, ?, ?, ?, ?)');
+  const insertFts = db.prepare(BUILDING_SEARCH_FTS_INSERT_SQL);
   const countTotals = db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM osm.building_contours) AS contours_total,
@@ -469,6 +503,7 @@ function createSqliteDriver() {
             row.address,
             row.style,
             row.architect,
+            row.design_ref,
             row.local_priority,
             row.center_lon,
             row.center_lat
@@ -478,7 +513,8 @@ function createSqliteDriver() {
             row.name || '',
             row.address || '',
             row.style || '',
-            row.architect || ''
+            row.architect || '',
+            row.design_ref || ''
           );
         }
         db.exec('COMMIT');

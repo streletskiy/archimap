@@ -13,6 +13,9 @@ test('getBuildingEditableFields returns the full set for a single building', asy
   assert.deepEqual(getBuildingEditableFields(), [
     'name',
     'style',
+    'design',
+    'designRef',
+    'designYear',
     'material',
     'colour',
     'levels',
@@ -27,6 +30,9 @@ test('getBuildingEditableFields removes address fields in bulk mode', async () =
   const { getBuildingEditableFields } = await loadModule();
   assert.deepEqual(getBuildingEditableFields({ isBulkSelection: true }), [
     'style',
+    'design',
+    'designRef',
+    'designYear',
     'material',
     'colour',
     'levels',
@@ -49,7 +55,7 @@ test('getBuildingEditableFields narrows bulk edits to part-safe fields when need
     'yearBuilt'
   ]);
 
-  assert.deepEqual(filterBuildingEditedFields(['name', 'style', 'address', 'colour'], {
+  assert.deepEqual(filterBuildingEditedFields(['name', 'style', 'design', 'designRef', 'designYear', 'address', 'colour'], {
     isBulkSelection: true,
     hasBuildingPartSelection: true
   }), [

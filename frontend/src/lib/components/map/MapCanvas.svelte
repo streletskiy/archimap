@@ -469,6 +469,7 @@
         cameraStoreSyncEnabled = true;
         filterPipeline.registerFilterMoveEnd();
         syncMapCameraStores();
+        regionLayersController.syncMapRegionSources();
         setMapReady(true);
         filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();

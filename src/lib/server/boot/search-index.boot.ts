@@ -52,6 +52,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(btrim(ai.address), '') IS NOT NULL
               OR NULLIF(btrim(ai.style), '') IS NOT NULL
               OR NULLIF(btrim(ai.architect), '') IS NOT NULL
+              OR NULLIF(btrim(ai.design_ref), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'name'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'name:ru'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'official_name'), '') IS NOT NULL
@@ -66,6 +67,8 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(btrim(tags.tags_jsonb ->> 'style'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'architect'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'architect_name'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'design:ref'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'design_ref'), '') IS NOT NULL
             )
           LIMIT 1
         ) AS searchable_rows_expected,
@@ -96,6 +99,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(trim(ai.address), '') IS NOT NULL
               OR NULLIF(trim(ai.style), '') IS NOT NULL
               OR NULLIF(trim(ai.architect), '') IS NOT NULL
+              OR NULLIF(trim(ai.design_ref), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.name') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."name:ru"') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.official_name') END), '') IS NOT NULL
@@ -110,6 +114,8 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.style') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect_name') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."design:ref"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.design_ref') END), '') IS NOT NULL
             )
           LIMIT 1
         ) AS searchable_rows_expected

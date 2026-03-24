@@ -3,8 +3,9 @@
 User-side:
 
 - User submits building changes via `POST /api/building-info`.
-- Supported editable fields: `name`, `style`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
+- Supported editable fields: `name`, `style`, `design`, `designRef`, `designYear`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
 - `material` accepts the concrete variants `concrete_panels`, `concrete_blocks`, and `concrete_monolith` in addition to the regular material list.
+- When `design` is enabled as a typical project, `designRef` and `designYear` become editable; `designRef` suggestions come from a cached list of values already present in the database.
 - Bulk edit is started with Shift+Click on the map to build a temporary multi-selection.
 - On the main map, Shift is reserved for bulk selection, so the default MapLibre Shift-drag box zoom is disabled there.
 - The building modal stays open during map editing and does not block clicks on the map, so you can keep adding or removing buildings while the panel is open.
@@ -39,6 +40,8 @@ OSM publish flow:
 - Sync works on a building group (`osm_type` + `osm_id`), not on an individual history row.
 - The sync queue supports selecting multiple building groups and publishing them in one OSM changeset.
 - Style edits are published as `building:architecture`.
+- `design` is published as `design=typical` when the checkbox is enabled, and the tag is omitted when it is disabled.
+- `design:ref` and `design:year` are published together with the typical-project flag when those fields are filled in.
 - Before publishing, the runtime fetches the live OSM element and compares it with the stored source snapshot; if the upstream OSM state drifted, sync is blocked with `409 OSM_SYNC_SOURCE_DRIFT`.
 - On success, the runtime opens an OSM changeset with a compact `comment`, `source`, and `created_by` metadata payload, pushes one or more merged element updates as standard OSM XML documents wrapped in `<osm version="0.6">`, closes the changeset, and marks all accepted / partially accepted rows for the synced building groups as `synced`.
 - Changeset comments begin with `Update architectural info:` in all OSM sync cases.

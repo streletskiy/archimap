@@ -33,6 +33,7 @@ const { createRateLimiters } = require('./rate-limiters.boot');
 const { createRuntimeSettingsBoot } = require('./runtime-settings.boot');
 const { createDbRuntimeBoot } = require('./db-runtime.boot');
 const { createFilterTagKeysBoot } = require('./filter-tag-keys.boot');
+const { createDesignRefSuggestionsBoot } = require('./design-ref-suggestions.boot');
 const { createSearchIndexBoot } = require('./search-index.boot');
 const { createRegionPmtilesBoot } = require('./region-pmtiles.boot');
 const { createServerRuntimeConfig } = require('./server-runtime.config');
@@ -42,6 +43,11 @@ const { registerServerRuntimeRoutes } = require('./server-runtime.routes');
 async function runPostDbStartupTasks(runtime: LooseRecord) {
   runtime.refreshRuntimeSettings();
   runtime.scheduleFilterTagKeysCacheRebuild('startup');
+  try {
+    await Promise.resolve(runtime.refreshDesignRefSuggestionsCache?.('startup'));
+  } catch (error) {
+    runtime.logger.error('design_ref_suggestions_startup_failed', { error: String(error?.message || error) });
+  }
 
   if (runtime.syncWorkers) {
     try {
@@ -228,6 +234,15 @@ class ServerRuntime {
     this.stopFilterTagKeysBoot = filterTagKeysBoot.stop;
     this.isFilterTagKeysRebuildInProgress = filterTagKeysBoot.isFilterTagKeysRebuildInProgress;
 
+    const designRefSuggestionsBoot = createDesignRefSuggestionsBoot({
+      db: this.db,
+      dbProvider: this.config.dbProvider,
+      logger: this.logger
+    });
+    this.getDesignRefSuggestionsCached = designRefSuggestionsBoot.getDesignRefSuggestionsCached;
+    this.refreshDesignRefSuggestionsCache = designRefSuggestionsBoot.refreshDesignRefSuggestionsCache;
+    this.resetDesignRefSuggestionsCache = designRefSuggestionsBoot.resetDesignRefSuggestionsCache;
+
     const searchIndexBoot = createSearchIndexBoot({
       db: this.db,
       dbProvider: this.config.dbProvider,
@@ -255,7 +270,8 @@ class ServerRuntime {
       db: this.db,
       settingsSecret: String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
       appSettingsService: this.appSettingsService,
-      enqueueSearchIndexRefresh: this.enqueueSearchIndexRefresh
+      enqueueSearchIndexRefresh: this.enqueueSearchIndexRefresh,
+      refreshDesignRefSuggestionsCache: this.refreshDesignRefSuggestionsCache
     });
 
     Object.assign(this, createRegionPmtilesBoot({
@@ -345,6 +361,7 @@ class ServerRuntime {
         await this.rebuildSearchIndex(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
         this.resetFilterTagKeysCache();
         this.scheduleFilterTagKeysCacheRebuild(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
+        await this.refreshDesignRefSuggestionsCache?.(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
       }
     });
   }

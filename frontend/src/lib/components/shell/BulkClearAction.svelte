@@ -38,6 +38,7 @@
   :global(.bulk-clear-shell--shown > .ui-select-trigger),
   :global(.bulk-clear-shell--shown > .ui-date-trigger),
   :global(.bulk-clear-shell--shown > .ui-color-picker),
+  :global(.bulk-clear-shell--shown > .design-toggle-row),
   :global(.bulk-clear-shell--shown > .colour-picker-row) {
     padding-right: 2.25rem;
   }

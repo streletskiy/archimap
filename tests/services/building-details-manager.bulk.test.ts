@@ -188,3 +188,115 @@ test('bulk edit skips buildings that already match the target values', async () 
     global.fetch = originalFetch;
   }
 });
+
+test('building details manager keeps design project suggestions and sends design project fields', async () => {
+  const { get } = await import('svelte/store');
+  const { session } = await loadModule('frontend/src/lib/stores/auth.ts');
+  const { clearSelectedBuildings } = await loadModule('frontend/src/lib/stores/map.ts');
+  const { createBuildingDetailsManager } = await loadModule('frontend/src/lib/services/building-details-manager.ts');
+
+  const originalFetch = global.fetch;
+  const requests = [];
+
+  session.set({
+    loading: false,
+    authenticated: true,
+    csrfToken: 'csrf-token',
+    user: {
+      email: 'editor@example.com'
+    }
+  });
+  clearSelectedBuildings();
+
+  global.fetch = async (input, init = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+    let body = null;
+    if (typeof init.body === 'string') {
+      try {
+        body = JSON.parse(init.body);
+      } catch {
+        body = init.body;
+      }
+    }
+    requests.push({ url, method, body });
+
+    if (method === 'GET' && url.endsWith('/api/building-info/way/11')) {
+      return createJsonResponse({
+        feature_kind: 'building',
+        region_slugs: [],
+        design: 'typical',
+        design_ref: '1-335',
+        design_year: '1964',
+        design_ref_suggestions: ['1-335', '1-464', '1-335']
+      });
+    }
+
+    if (method === 'GET' && url.endsWith('/api/building/way/11')) {
+      return createJsonResponse({
+        properties: {
+          feature_kind: 'building',
+          source_tags: {
+            design: 'typical'
+          }
+        }
+      });
+    }
+
+    if (method === 'POST' && url.endsWith('/api/building-info')) {
+      return createJsonResponse({
+        ok: true,
+        editId: 2,
+        status: 'pending'
+      });
+    }
+
+    return createJsonResponse({});
+  };
+
+  try {
+    const manager = createBuildingDetailsManager();
+    manager.selectBuilding({
+      osmType: 'way',
+      osmId: 11,
+      lon: 37.6,
+      lat: 55.75,
+      featureKind: 'building'
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const beforeSave = get(manager);
+    assert.equal(beforeSave.buildingDetails?.properties?.archiInfo?.design_ref, '1-335');
+    assert.equal(beforeSave.buildingDetails?.properties?.archiInfo?.design_year, '1964');
+    assert.deepEqual(beforeSave.buildingDetails?.design_ref_suggestions, ['1-335', '1-464', '1-335']);
+
+    await manager.saveEdit({
+      osmType: 'way',
+      osmId: 11,
+      design: 'typical',
+      designRef: '1-464',
+      designYear: '1968',
+      editedFields: ['design', 'designRef', 'designYear']
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const postRequest = requests.find((request) => request.method === 'POST' && request.url.endsWith('/api/building-info'));
+    assert.ok(postRequest);
+    assert.equal(postRequest.body.design, 'typical');
+    assert.equal(postRequest.body.designRef, '1-464');
+    assert.equal(postRequest.body.designYear, '1968');
+
+    manager.destroy();
+  } finally {
+    clearSelectedBuildings();
+    session.set({
+      loading: false,
+      authenticated: false,
+      csrfToken: null,
+      user: null
+    });
+    global.fetch = originalFetch;
+  }
+});

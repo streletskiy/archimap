@@ -20,6 +20,7 @@ System notes:
   - Cache: `Cache-Control: no-store`.
 - `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...`
   - Returns paginated building search results.
+  - Result items include `name`, `address`, `style`, `architect`, and optional `designRef` when present.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`, plus `warmingUp`.
@@ -47,7 +48,8 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
-  - Editable merged fields include `name`, `style`, `material`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
+  - Editable merged fields include `name`, `style`, `design`, `design_ref`, `design_year`, `material`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
+  - Response also includes `design_ref_suggestions[]`, backed by a startup-warmed in-memory cache of known project numbers.
   - `material` can represent the concrete subtypes `concrete_panels`, `concrete_blocks`, and `concrete_monolith`; the runtime stores them as `material=concrete` plus `material_concrete`.
   - Includes `region_slugs[]` for the building's current region memberships.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).

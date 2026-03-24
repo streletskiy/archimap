@@ -14,8 +14,11 @@ export function createEmptyBuildingForm() {
     name: '',
     levels: '',
     yearBuilt: '',
+    designYear: '',
     architect: '',
     style: '',
+    design: '',
+    designRef: '',
     material: '',
     colour: '',
     archimapDescription: '',
@@ -33,8 +36,11 @@ export function createEmptyBuildingComparable() {
     name: '',
     levels: '',
     yearBuilt: '',
+    designYear: '',
     architect: '',
     style: '',
+    design: '',
+    designRef: '',
     material: '',
     colour: '',
     archimapDescription: '',
@@ -46,6 +52,9 @@ export function createEmptyBulkBuildingFieldState() {
   return {
     name: { isMixed: false, sampleValues: [], initialValue: '' },
     style: { isMixed: false, sampleValues: [], initialValue: '' },
+    design: { isMixed: false, sampleValues: [], initialValue: '' },
+    designRef: { isMixed: false, sampleValues: [], initialValue: '' },
+    designYear: { isMixed: false, sampleValues: [], initialValue: '' },
     material: { isMixed: false, sampleValues: [], initialValue: '' },
     colour: { isMixed: false, sampleValues: [], initialValue: '' },
     levels: { isMixed: false, sampleValues: [], initialValue: '' },
@@ -59,6 +68,9 @@ export function createEmptyBulkBuildingFieldState() {
 const BULK_FIELD_FORM_MAP = Object.freeze({
   name: ['name'],
   style: ['style'],
+  design: ['design'],
+  designRef: ['designRef'],
+  designYear: ['designYear'],
   material: ['material'],
   colour: ['colour'],
   levels: ['levels'],
@@ -161,6 +173,9 @@ export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingF
   return {
     name: pickFirstText(formValue.name),
     style: normalizeArchitectureStyleKey(formValue.style),
+    design: pickFirstText(formValue.design),
+    designRef: pickFirstText(formValue.designRef),
+    designYear: pickFirstText(formValue.designYear),
     material: normalizeBuildingMaterialSelection(formValue.material),
     colour: pickFirstText(formValue.colour).toLowerCase(),
     levels: pickFirstText(formValue.levels),
@@ -210,10 +225,17 @@ export function hydrateBuildingForm(details) {
       1000,
       2100
     ),
+    designYear: normalizeIntegerField(
+      info.design_year ?? sourceTags?.['design:year'] ?? sourceTags?.design_year,
+      1000,
+      2100
+    ),
     architect: pickFirstText(info.architect, sourceTags?.architect, sourceTags?.architect_name),
     style: normalizeStyleForBuildingForm(
       info.styleRaw ?? info.style ?? sourceTags?.['building:architecture'] ?? sourceTags?.architecture ?? sourceTags?.style
     ),
+    design: pickFirstText(info.design, sourceTags?.design),
+    designRef: pickFirstText(info.design_ref, sourceTags?.['design:ref'], sourceTags?.design_ref),
     material: materialSelection,
     colour: pickFirstText(info.colour, sourceTags?.['building:colour'], sourceTags?.colour),
     archimapDescription: pickFirstText(info.archimap_description, info.description),
@@ -227,6 +249,9 @@ export function hydrateBuildingForm(details) {
 
   const synthesizedTags = { ...sourceTags };
   if (pickFirstText(info.style)) synthesizedTags['building:architecture'] = info.style;
+  if (pickFirstText(info.design)) synthesizedTags.design = info.design;
+  if (pickFirstText(info.design_ref)) synthesizedTags['design:ref'] = info.design_ref;
+  if (pickFirstText(info.design_year)) synthesizedTags['design:year'] = info.design_year;
   if (pickFirstText(info.material)) {
     const split = splitBuildingMaterialSelection(info.material);
     

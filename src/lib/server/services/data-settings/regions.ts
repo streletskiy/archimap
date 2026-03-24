@@ -445,7 +445,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
   async function listRuntimePmtilesRegions() {
     await ensureBootstrapped();
     return (await listRegions({ includeDisabled: false }))
-      .filter((region) => region.enabled && region.bounds && region.lastSuccessfulSyncAt)
+      .filter((region) => region.enabled && region.bounds)
       .map((region) => ({
         id: region.id,
         slug: region.slug,

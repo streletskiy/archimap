@@ -36,7 +36,9 @@ function registerBuildingsRoutes(deps) {
     normalizeUserEditStatus,
     sanitizeArchiPayload,
     sanitizeEditedFields,
-    supersedePendingUserEdits
+    supersedePendingUserEdits,
+    getDesignRefSuggestionsCached,
+    refreshDesignRefSuggestionsCache
   } = deps;
   const isPostgres = db.provider === 'postgres';
   const filtersService = createBuildingFiltersService({
@@ -128,9 +130,10 @@ function registerBuildingsRoutes(deps) {
       return res.status(400).json({ code: 'ERR_INVALID_BUILDING_ID', error: 'Invalid building id' });
     }
 
-    const [merged, contour] = await Promise.all([
+    const [merged, contour, designRefSuggestions] = await Promise.all([
       getMergedInfoRow(osmType, osmId),
-      getOsmContourRow(osmType, osmId)
+      getOsmContourRow(osmType, osmId),
+      typeof getDesignRefSuggestionsCached === 'function' ? getDesignRefSuggestionsCached() : []
     ]);
     const actorKey = getSessionEditActorKey(req);
     const personal = actorKey ? await getLatestUserEditRow(osmType, osmId, actorKey, ['pending', 'rejected']) : null;
@@ -149,6 +152,9 @@ function registerBuildingsRoutes(deps) {
       feature_kind: featureKind,
       name: row?.name ?? null,
       style: row?.style ?? null,
+      design: row?.design ?? null,
+      design_ref: row?.design_ref ?? null,
+      design_year: row?.design_year ?? null,
       material: row?.material ?? null,
       material_concrete: row?.material_concrete ?? null,
       colour: row?.colour ?? null,
@@ -163,7 +169,8 @@ function registerBuildingsRoutes(deps) {
       review_status: personal ? normalizeUserEditStatus(personal.status) : 'accepted',
       admin_comment: personal?.admin_comment ?? null,
       user_edit_id: personal ? Number(personal.id || 0) : null,
-      region_slugs: regionSlugs
+      region_slugs: regionSlugs,
+      design_ref_suggestions: Array.isArray(designRefSuggestions) ? designRefSuggestions : []
     }, {
       cacheControl: 'private, no-cache',
       lastModified: row?.updated_at || contour?.updated_at || undefined
@@ -199,7 +206,7 @@ function registerBuildingsRoutes(deps) {
     if (featureKind === 'building_part') {
       const allowedFields = new Set(['levels', 'colour', 'style', 'material', 'year_built']);
       const hasDisallowedRequestedFields = requestedEditedFields.some((field) => !allowedFields.has(field));
-      const hasDisallowedPayloadFields = ['name', 'architect', 'address', 'archimap_description']
+      const hasDisallowedPayloadFields = ['name', 'design', 'design_ref', 'design_year', 'architect', 'address', 'archimap_description']
         .some((field) => validated.value?.[field] != null);
       if (hasDisallowedRequestedFields || hasDisallowedPayloadFields) {
         return res.status(400).json({
@@ -224,6 +231,9 @@ function registerBuildingsRoutes(deps) {
             source_osm_version = @source_osm_version,
             name = @name,
             style = @style,
+            design = @design,
+            design_ref = @design_ref,
+            design_year = @design_year,
             material = @material,
             material_concrete = @material_concrete,
             colour = @colour,
@@ -265,16 +275,16 @@ function registerBuildingsRoutes(deps) {
       await supersedePendingUserEdits(osmType, osmId, actorKey, null);
       if (isPostgres) {
         const inserted = await db.prepare(`
-          INSERT INTO user_edits.building_user_edits (
-            osm_type, osm_id, created_by, source_osm_version,
-            name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
-            status, sync_status, created_at, updated_at
-          )
-          VALUES (
-            @osm_type, @osm_id, @created_by, @source_osm_version,
-            @name, @style, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
-            'pending', 'unsynced', datetime('now'), datetime('now')
-          )
+        INSERT INTO user_edits.building_user_edits (
+          osm_type, osm_id, created_by, source_osm_version,
+          name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+          status, sync_status, created_at, updated_at
+        )
+        VALUES (
+          @osm_type, @osm_id, @created_by, @source_osm_version,
+          @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+          'pending', 'unsynced', datetime('now'), datetime('now')
+        )
           RETURNING id
         `).get({
           osm_type: osmType,
@@ -291,12 +301,12 @@ function registerBuildingsRoutes(deps) {
       const inserted = await db.prepare(`
       INSERT INTO user_edits.building_user_edits (
         osm_type, osm_id, created_by, source_osm_version,
-        name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+        name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
         status, sync_status, created_at, updated_at
       )
       VALUES (
         @osm_type, @osm_id, @created_by, @source_osm_version,
-        @name, @style, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+        @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
         'pending', 'unsynced', datetime('now'), datetime('now')
       )
       `).run({
@@ -312,6 +322,7 @@ function registerBuildingsRoutes(deps) {
     });
 
     const editId = await tx();
+    await Promise.resolve(refreshDesignRefSuggestionsCache?.('building-info-save'));
     return res.json({ ok: true, editId, status: 'pending' });
   });
 

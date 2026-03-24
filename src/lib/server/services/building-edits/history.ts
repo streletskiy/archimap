@@ -84,10 +84,13 @@ function createBuildingEditHistoryService(context) {
     mapped.tags = tags;
     mapped.currentTags = parseTagsJsonSafe(row.tags_json);
     mapped.sourceTags = parseTagsJsonSafe(row.source_tags_json);
-      mapped.latestMerged = mergedInfoRow
+    mapped.latestMerged = mergedInfoRow
       ? {
         name: mergedInfoRow.name ?? null,
         style: mergedInfoRow.style ?? null,
+        design: mergedInfoRow.design ?? null,
+        design_ref: mergedInfoRow.design_ref ?? null,
+        design_year: mergedInfoRow.design_year ?? null,
         material: mergedInfoRow.material === 'concrete' && mergedInfoRow.material_concrete
           ? `concrete_${mergedInfoRow.material_concrete}`
           : (mergedInfoRow.material ?? null),
