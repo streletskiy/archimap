@@ -49,5 +49,5 @@ Conventional commit style is recommended:
 
 - Scope is focused and clearly described.
 - Tests added/updated for behavioral changes.
-- Docs updated ([README](README.md), [env docs](docs/dev/env.md), [API docs](docs/api.md), [legal docs](legal/)) when needed.
+- Docs updated ([README](README.md), [env docs](docs/dev/env.md), [OpenAPI contract](docs/openapi.yaml), [API docs](docs/api.md), [legal docs](legal/)) when needed.
 - No secrets or credentials in code or logs.

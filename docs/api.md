@@ -1,5 +1,7 @@
 # API
 
+This page is a human-readable companion to [OpenAPI](openapi.yaml). `docs/openapi.yaml` is the canonical contract for request and response shapes; keep this summary aligned with it.
+
 ## Runtime routing
 
 - Public HTTP runtime is `server.sveltekit.ts`.
@@ -10,6 +12,8 @@
 
 System notes:
 
+- `GET /healthz` returns `200` when the process is alive.
+- `GET /readyz` returns `200` when the runtime is ready and `503` otherwise.
 - `GET /metrics` returns Prometheus-style text payload when `METRICS_ENABLED=true` and an HTTP `Authorization: Bearer <token>` header is provided. The token can be generated in the Admin Settings UI.
 - `GET /metrics` returns `404` when metrics are disabled, and `401` if an invalid token is provided.
 
@@ -18,9 +22,13 @@ System notes:
 - `GET /api/version`
   - Returns build/runtime version payload.
   - Cache: `Cache-Control: no-store`.
-- `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...`
+- `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...&west=...&south=...&east=...&north=...`
   - Returns paginated building search results.
   - Result items include `name`, `address`, `style`, `architect`, and optional `designRef` when present.
+  - Cache: `Cache-Control: public, max-age=15`, `ETag`.
+- `GET /api/search-buildings-map?q=...&west=...&south=...&east=...&north=...&limit=...&lon=...&lat=...`
+  - Map-oriented search variant that requires a bbox.
+  - Returns `items[]`, `total`, and `truncated`.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`.
@@ -45,6 +53,11 @@ System notes:
   - Numeric operators expect a numeric `value`; `exists` / `not_exists` ignore `value`.
   - Returns `{ matchedKeys[], matchedFeatureIds[], meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
   - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket`), per-request `meta.cacheHit`.
+- `POST /api/buildings/filter-matches-batch`
+  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, requests[] }`.
+  - Each batch item uses the same flat `rules[]` contract as `POST /api/buildings/filter-matches`, with its own optional `id`, `rulesHash?`, and `maxResults?`.
+  - Returns `items[]`, each item containing `matchedKeys`, `matchedFeatureIds`, and per-item `meta`.
+  - Batch meta includes overall `elapsedMs` and `cacheHit`.
 - `GET /api/building/:osmType/:osmId`
   - Returns GeoJSON feature.
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
@@ -55,6 +68,10 @@ System notes:
   - `material` can represent the concrete subtypes `concrete_panels`, `concrete_blocks`, and `concrete_monolith`; the runtime stores them as `material=concrete` plus `material_concrete`.
   - Includes `region_slugs[]` for the building's current region memberships.
   - Cache: `Cache-Control: private, no-cache`, `ETag`, `Last-Modified` (if known).
+- `POST /api/building-info`
+  - Submits or updates a user building edit.
+  - Uses the same merged field vocabulary as `GET /api/building-info/:osmType/:osmId`.
+  - Requires CSRF for session-authenticated writes.
 - `GET /api/style-overrides`
   - Public list of active style-region override rules used by the frontend style picker.
   - Returns `{ items[] }`, where each item contains `id`, `region_pattern`, `style_key`, `is_allowed`.
@@ -75,8 +92,11 @@ System notes:
 - `POST /api/account/profile`, `POST /api/account/change-password`
 - `GET /api/admin/users`, `GET /api/admin/users/:email`, `GET /api/admin/users/:email/edits`
 - `POST /api/admin/users/edit-permission`, `POST /api/admin/users/role`
-- `GET/POST /api/admin/app-settings/general`
-- `GET/POST /api/admin/app-settings/smtp`, `POST /api/admin/app-settings/smtp/test`
+- `GET /api/admin/app-settings/general`
+- `POST /api/admin/app-settings/general`
+- `GET /api/admin/app-settings/smtp`
+- `POST /api/admin/app-settings/smtp`
+- `POST /api/admin/app-settings/smtp/test`
 - `GET /api/admin/app-settings/data`
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.

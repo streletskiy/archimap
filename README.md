@@ -55,12 +55,12 @@ docker compose up --build
 - Setup -> [docs/dev/setup.md](docs/dev/setup.md)
 - Environment -> [docs/dev/env.md](docs/dev/env.md)
 - Docker -> [docs/dev/docker.md](docs/dev/docker.md)
-- API -> [docs/api.md](docs/api.md)
+- OpenAPI contract -> [docs/openapi.yaml](docs/openapi.yaml)
+- API guide -> [docs/api.md](docs/api.md)
 - OSM import pipeline -> [docs/osm-import-pipeline.md](docs/osm-import-pipeline.md)
 - Edits workflow -> [docs/edits-workflow.md](docs/edits-workflow.md)
 - Runbook -> [docs/runbook.md](docs/runbook.md)
 - Security -> [docs/security.md](docs/security.md)
-- OpenAPI -> [docs/openapi.yaml](docs/openapi.yaml)
 
 ## License
 

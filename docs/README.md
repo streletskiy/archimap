@@ -4,8 +4,8 @@
 
 - [Architecture](architecture.md)
 - [UI Architecture](ui-architecture.md)
-- [API](api.md)
-- [OpenAPI](openapi.yaml)
+- [OpenAPI](openapi.yaml) - canonical HTTP contract
+- [API](api.md) - human-readable companion to OpenAPI
 - [Data Flow](data-flow.md)
 - [OSM Import Pipeline](osm-import-pipeline.md)
 - [Runbook](runbook.md)
