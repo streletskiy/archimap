@@ -42,6 +42,7 @@ OSM publish flow:
 - The sync queue supports selecting multiple building groups and publishing them in one OSM changeset.
 - Candidates whose local state already matches the live OSM element are marked `noChange`, skipped from the write list, and counted as synced without sending a new OSM element update.
 - Style edits are published as `building:architecture`.
+- Levels, colour, and architect edits are published as `building:levels`, `building:colour`, and `architect` only; the legacy `levels`, `colour`, and `architect_name` tags are still read for older OSM data, but new edits do not write them.
 - `design` is published as `design=typical` when the checkbox is enabled, and the tag is omitted when it is disabled.
 - `design:ref` and `design:year` are published together with the typical-project flag when those fields are filled in.
 - Before publishing, the runtime fetches the live OSM element and compares it with the stored source snapshot; if the upstream OSM state drifted, sync is blocked with `409 OSM_SYNC_SOURCE_DRIFT`.

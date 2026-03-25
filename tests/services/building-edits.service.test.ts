@@ -218,6 +218,87 @@ test('buildChangesFromRows does not report levels diff for numeric-equivalent va
   assert.equal(fields.has('levels'), false);
 });
 
+test('buildChangesFromRows labels levels changes with building:levels', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2302,
+    JSON.stringify({
+      name: 'Дом с этажностью',
+      'building:levels': '2'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    23,
+    'way',
+    2302,
+    'user@example.com',
+    'Дом с этажностью',
+    null,
+    5,
+    null,
+    null,
+    null,
+    null,
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(23);
+  const levelsChange = (item?.changes || []).find((change) => String(change.field || '') === 'levels');
+  assert.ok(levelsChange);
+  assert.equal(levelsChange?.osmTag, 'building:levels');
+});
+
+test('buildChangesFromRows labels colour and architect changes with modern tags', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2402,
+    JSON.stringify({
+      name: 'Дом с цветом и архитектором',
+      'building:colour': '#aabbcc',
+      architect: 'Old Architect'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, colour, architect, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    24,
+    'way',
+    2402,
+    'user@example.com',
+    'Дом с цветом и архитектором',
+    '#112233',
+    'New Architect',
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(24);
+  const byField = new Map((item?.changes || []).map((change) => [String(change.field || ''), change]));
+  assert.equal(byField.get('colour')?.osmTag, 'building:colour');
+  assert.equal(byField.get('architect')?.osmTag, 'architect');
+});
+
 test('buildChangesFromRows treats concrete material variants as one selection', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });

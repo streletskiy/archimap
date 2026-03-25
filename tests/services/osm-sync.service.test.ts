@@ -557,6 +557,102 @@ test('syncCandidateToOsm writes style only to building:architecture and removes 
   assert.equal(putBodies[0].includes('k="style"'), false);
 });
 
+test('syncCandidateToOsm writes colour and architect only to modern tags and removes legacy aliases', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+
+  const putBodies = [];
+  const restore = installFetchMock([
+    (url, init) => {
+      if (url.endsWith('/oauth2/token')) {
+        return createFetchResponse({
+          access_token: 'access-token',
+          refresh_token: 'refresh-token',
+          token_type: 'Bearer',
+          scope: 'write_api write_changeset_comments'
+        });
+      }
+      if (url.endsWith('/api/0.6/user/details')) {
+        return createFetchResponse('<osm><user display_name="Test User"/></osm>');
+      }
+      if (url.endsWith('/api/0.6/way/104') && (!init.method || init.method === 'GET')) {
+        return createFetchResponse('<osm><way id="104" version="6" visible="true"><tag k="colour" v="#778899"/><tag k="architect_name" v="Old Architect"/></way></osm>');
+      }
+      if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
+        return createFetchResponse('127');
+      }
+      if (url.endsWith('/api/0.6/way/104') && init.method === 'PUT') {
+        putBodies.push(String(init.body || ''));
+        return createFetchResponse('');
+      }
+      if (url.endsWith('/api/0.6/changeset/127/close') && init.method === 'PUT') {
+        return createFetchResponse('');
+      }
+      return null;
+    }
+  ]);
+
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+  await service.saveSettings({
+    providerName: 'OpenStreetMap',
+    authBaseUrl: 'https://www.openstreetmap.org',
+    apiBaseUrl: 'https://api.openstreetmap.org',
+    clientId: 'client-id',
+    clientSecret: 'client-secret',
+    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+  }, 'admin@example.com');
+  const oauth = await service.startOAuth('admin@example.com');
+  await service.handleOauthCallback({
+    code: 'auth-code',
+    state: oauth.state
+  });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run(
+    'way',
+    104,
+    JSON.stringify({ colour: '#778899', architect_name: 'Old Architect' }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(`
+    INSERT INTO local.architectural_info (osm_type, osm_id, colour, architect, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run('way', 104, '#112233', 'New Architect', '2026-01-02T00:00:00Z');
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, colour, architect, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    14,
+    'way',
+    104,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['colour', 'architect']),
+    JSON.stringify({ colour: '#778899', architect_name: 'Old Architect' }),
+    '2026-01-01T00:00:00Z',
+    '#112233',
+    'New Architect',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+
+  const result = await service.syncCandidateToOsm('way', 104, 'admin@example.com');
+  restore();
+
+  assert.equal(result.ok, true);
+  assert.equal(putBodies.length, 1);
+  assert.match(putBodies[0], /<tag k="building:colour" v="#112233"\/>/);
+  assert.match(putBodies[0], /<tag k="architect" v="New Architect"\/>/);
+  assert.equal(/<tag k="colour" v="/.test(putBodies[0]), false);
+  assert.equal(/<tag k="architect_name" v="/.test(putBodies[0]), false);
+});
+
 test('syncCandidateToOsm writes design project tags into OSM XML', async () => {
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)

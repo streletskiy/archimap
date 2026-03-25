@@ -165,15 +165,15 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   const ARCHI_EDIT_FIELDS = Object.freeze([
     { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
     { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
-    { key: 'levels', label: 'Этажей', osmTag: 'building:levels | levels' },
+    { key: 'levels', label: 'Этажей', osmTag: 'building:levels' },
     { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
-    { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
+    { key: 'architect', label: 'Архитектор', osmTag: 'architect' },
     { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture' },
     { key: 'design', label: 'Типовой проект', osmTag: 'design' },
     { key: 'design_ref', label: 'Номер проекта', osmTag: 'design:ref' },
     { key: 'design_year', label: 'Год проекта', osmTag: 'design:year' },
     { key: 'material', label: 'Материал', osmTag: 'building:material | material' },
-    { key: 'colour', label: 'Цвет', osmTag: 'building:colour | colour' },
+    { key: 'colour', label: 'Цвет', osmTag: 'building:colour' },
     { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
   ]);
 

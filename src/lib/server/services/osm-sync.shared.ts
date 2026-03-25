@@ -361,19 +361,19 @@ function applyFieldToTagMap(tags: LooseRecord, field, value, explicitlyEdited = 
       return ['material', 'material_concrete'];
     case 'colour':
       tags['building:colour'] = normalized;
-      tags.colour = normalized;
-      return [];
+      delete tags.colour;
+      return ['colour'];
     case 'levels':
       tags['building:levels'] = normalized;
-      tags.levels = normalized;
-      return [];
+      delete tags.levels;
+      return ['levels'];
     case 'year_built':
       tags['building:year'] = normalized;
       return [];
     case 'architect':
       tags.architect = normalized;
-      tags.architect_name = normalized;
-      return [];
+      delete tags.architect_name;
+      return ['architect_name'];
     case 'address':
       tags['addr:full'] = normalized;
       delete tags['addr:full:en'];
