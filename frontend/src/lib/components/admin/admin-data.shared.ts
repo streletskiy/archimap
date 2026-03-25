@@ -1,6 +1,17 @@
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '$lib/i18n/config';
 import { createBuildingFilterLayerDraft } from '$lib/stores/filters';
-import { normalizeFilterLayers } from '$lib/components/map/filter-pipeline-utils';
+import { normalizeFilterLayerMode, normalizeFilterLayers } from '$lib/components/map/filter-pipeline-utils';
+import type {
+  AdminDataSettings,
+  FilterPreset as ApiFilterPreset,
+  FilterPresetDraft,
+  FilterPresetLayer,
+  FilterPresetRule,
+  FilterPresetState,
+  Region,
+  RegionDraft,
+  RegionResolutionStatus
+} from '$shared/types';
 
 const MAP_REGION_NAME_KEYS = Object.freeze(['Name', 'name']);
 const MAP_REGION_SLUG_KEYS = Object.freeze(['Slug', 'slug']);
@@ -11,14 +22,14 @@ const FILTER_PRESET_NAME_LOCALES = Object.freeze([...(Array.isArray(SUPPORTED_LO
 
 export type DataTranslator = (key: string, params?: LooseRecord) => string;
 
-function createEmptyFilterPresetState() {
+function createEmptyFilterPresetState(): FilterPresetState {
   return {
     source: 'db',
     items: []
   };
 }
 
-function createEmptyDataSettings() {
+function createEmptyDataSettings(): AdminDataSettings {
   return {
     source: 'db',
     bootstrap: { completed: false, source: null },
@@ -35,7 +46,7 @@ function createEmptyDataSettings() {
   };
 }
 
-function createRegionDraft(region = null) {
+function createRegionDraft(region: Partial<Region> | null = null): RegionDraft {
   return {
     id: Number(region?.id || 0) || null,
     name: String(region?.name || ''),
@@ -44,7 +55,7 @@ function createRegionDraft(region = null) {
     extractSource: String(region?.extractSource || ''),
     extractId: String(region?.extractId || ''),
     extractLabel: String(region?.extractLabel || ''),
-    extractResolutionStatus: String(region?.extractResolutionStatus || 'needs_resolution'),
+    extractResolutionStatus: normalizeRegionResolutionStatus(region?.extractResolutionStatus, 'needs_resolution'),
     extractResolutionError: region?.extractResolutionError ? String(region.extractResolutionError) : null,
     enabled: region?.enabled !== false,
     autoSyncEnabled: region?.autoSyncEnabled !== false,
@@ -54,6 +65,17 @@ function createRegionDraft(region = null) {
     pmtilesMaxZoom: Number(region?.pmtilesMaxZoom ?? 16) || 0,
     sourceLayer: String(region?.sourceLayer || 'buildings')
   };
+}
+
+function normalizeRegionResolutionStatus(
+  value: unknown,
+  fallbackValue: RegionResolutionStatus = 'needs_resolution'
+): RegionResolutionStatus {
+  const raw = String(value || fallbackValue || '').trim().toLowerCase();
+  if (raw === 'resolved' || raw === 'needs_resolution' || raw === 'resolution_required' || raw === 'resolution_error') {
+    return raw as RegionResolutionStatus;
+  }
+  return fallbackValue;
 }
 
 function normalizeFilterPresetKey(value) {
@@ -81,8 +103,10 @@ function normalizeFilterPresetName(value) {
 }
 
 function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
-  const source = nameI18n && typeof nameI18n === 'object' && !Array.isArray(nameI18n) ? nameI18n : {};
-  const normalized = {};
+  const source = nameI18n && typeof nameI18n === 'object' && !Array.isArray(nameI18n)
+    ? nameI18n
+    : {};
+  const normalized: Record<string, string> = {};
   for (const [rawLocale, rawName] of Object.entries(source)) {
     const localeValue = normalizeFilterPresetLocale(rawLocale);
     if (!localeValue) continue;
@@ -99,7 +123,7 @@ function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
 }
 
 function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
-  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n : {};
+  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n as Record<string, string> : {};
   const defaultName = normalizeFilterPresetName(source?.[DEFAULT_LOCALE]);
   if (defaultName) return defaultName;
 
@@ -116,8 +140,11 @@ function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
   return normalizeFilterPresetName(fallback);
 }
 
-function normalizeFilterPresetRule(rule: LooseRecord = {}, options: LooseRecord = {}) {
-  const normalized: LooseRecord = {
+function normalizeFilterPresetRule(
+  rule: Partial<FilterPresetLayer['rules'][number]> | LooseRecord = {},
+  options: LooseRecord = {}
+): FilterPresetRule {
+  const normalized: FilterPresetRule = {
     key: String(rule?.key || '').trim(),
     op: String(rule?.op || 'contains').trim(),
     value: String(rule?.value || '').trim()
@@ -133,7 +160,7 @@ function normalizeFilterPresetRule(rule: LooseRecord = {}, options: LooseRecord 
   return normalized;
 }
 
-function normalizeFilterPresetLayersForDraft(layers: LooseRecord[] = []) {
+function normalizeFilterPresetLayersForDraft(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []): FilterPresetLayer[] {
   const source = Array.isArray(layers) ? layers : [];
   if (source.length === 0) {
     return [createBuildingFilterLayerDraft()];
@@ -154,9 +181,9 @@ function normalizeFilterPresetLayersForDraft(layers: LooseRecord[] = []) {
   );
 }
 
-function normalizeFilterPresetLayersForSave(layers: LooseRecord[] = [], options: LooseRecord = {}) {
+function normalizeFilterPresetLayersForSave(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = [], options: LooseRecord = {}) {
   const dataT = typeof options?.dataT === 'function' ? options.dataT : (key) => key;
-  const normalized = normalizeFilterLayers(Array.isArray(layers) ? layers : [], { preserveEmpty: false });
+  const normalized = normalizeFilterLayers(Array.isArray(layers) ? (layers as LooseRecord[]) : [], { preserveEmpty: false });
   if (normalized.invalidReason) {
     return {
       layers: [],
@@ -174,15 +201,15 @@ function normalizeFilterPresetLayersForSave(layers: LooseRecord[] = [], options:
       id: String(layer?.id || `filter-layer-${index + 1}`),
       color: String(layer?.color || '').trim(),
       priority: index,
-      mode: String(layer?.mode || 'layer').trim(),
+      mode: normalizeFilterLayerMode(layer?.mode),
       rules: (Array.isArray(layer?.rules) ? layer.rules : []).map((rule) => normalizeFilterPresetRule(rule))
     })),
     error: null
   };
 }
 
-function normalizeFilterPresetItem(preset: LooseRecord | null = null) {
-  const source = preset && typeof preset === 'object' ? preset : {};
+function normalizeFilterPresetItem(preset: ApiFilterPreset | FilterPresetDraft | LooseRecord | null = null): FilterPresetDraft {
+  const source = (preset && typeof preset === 'object' ? preset : {}) as Partial<FilterPresetDraft> & LooseRecord;
   const id = Number(source?.id || 0);
   const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
   const name = normalizeFilterPresetName(source?.name) || getPreferredFilterPresetName(nameI18n);
@@ -199,15 +226,15 @@ function normalizeFilterPresetItem(preset: LooseRecord | null = null) {
   };
 }
 
-function buildFilterPresetDraftRecord(draft: LooseRecord | null = null) {
-  const source = draft && typeof draft === 'object' ? draft : {};
+function buildFilterPresetDraftRecord(draft: FilterPresetDraft | LooseRecord | null = null): FilterPresetDraft {
+  const source = (draft && typeof draft === 'object' ? draft : {}) as Partial<FilterPresetDraft> & LooseRecord;
   return normalizeFilterPresetItem({
     ...source,
     layers: source.layers
   });
 }
 
-function createFilterPresetDraft(preset: LooseRecord | null = null) {
+function createFilterPresetDraft(preset: FilterPresetDraft | LooseRecord | null = null): FilterPresetDraft {
   return buildFilterPresetDraftRecord(preset);
 }
 
@@ -253,15 +280,15 @@ function buildRegionExtractIdentity(extractSource, extractId) {
   return `${normalizeLookupValue(extractSource) || 'osmfr'}:${normalizedExtractId}`;
 }
 
-function normalizeDataSettings(nextSettings, fallback) {
-  const value = nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback;
+function normalizeDataSettings(nextSettings: AdminDataSettings | LooseRecord | null, fallback: AdminDataSettings | LooseRecord): AdminDataSettings {
+  const value = (nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback) as Partial<AdminDataSettings> & LooseRecord;
   return {
     source: String(value?.source || 'db'),
     bootstrap: {
       completed: Boolean(value?.bootstrap?.completed),
       source: value?.bootstrap?.source ? String(value.bootstrap.source) : null
     },
-    regions: Array.isArray(value?.regions) ? value.regions : [],
+    regions: Array.isArray(value?.regions) ? (value.regions as Region[]) : [],
     filterTags: {
       source: String(value?.filterTags?.source || 'default'),
       allowlist: Array.isArray(value?.filterTags?.allowlist) ? value.filterTags.allowlist : [],
@@ -273,7 +300,9 @@ function normalizeDataSettings(nextSettings, fallback) {
     filterPresets: {
       source: String(value?.filterPresets?.source || 'db'),
       items: Array.isArray(value?.filterPresets?.items)
-        ? value.filterPresets.items.map((item) => normalizeFilterPresetItem(item)).filter((item) => item.id != null)
+        ? (value.filterPresets.items as Array<ApiFilterPreset | FilterPresetDraft | LooseRecord>)
+          .map((item) => normalizeFilterPresetItem(item))
+          .filter((item) => item.id != null)
         : []
     }
   };
@@ -335,7 +364,7 @@ function sortFilterTagKeys(keys: readonly string[] = [], selected: readonly stri
   });
 }
 
-function sortFilterPresetItems(items: ReturnType<typeof normalizeFilterPresetItem>[] = []) {
+function sortFilterPresetItems(items: FilterPresetDraft[] = []): FilterPresetDraft[] {
   return [...(Array.isArray(items) ? items : [])].sort((left, right) => {
     const leftName = String(getFilterPresetDisplayName(left, DEFAULT_LOCALE) || left?.key || '').trim();
     const rightName = String(getFilterPresetDisplayName(right, DEFAULT_LOCALE) || right?.key || '').trim();

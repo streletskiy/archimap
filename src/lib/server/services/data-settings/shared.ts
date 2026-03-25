@@ -1,3 +1,5 @@
+import type { Region, RegionBounds, RegionResolutionStatus } from '$shared/types';
+
 const RUN_SELECT_FIELDS = `
   id,
   region_id,
@@ -118,15 +120,15 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     return safe.slice(0, 64) || 'buildings';
   }
 
-  function normalizeExtractResolutionStatus(value, fallbackValue = 'needs_resolution') {
+  function normalizeExtractResolutionStatus(value, fallbackValue: RegionResolutionStatus = 'needs_resolution'): RegionResolutionStatus {
     const raw = String(value || fallbackValue || '').trim().toLowerCase();
     if (['resolved', 'needs_resolution', 'resolution_required', 'resolution_error'].includes(raw)) {
-      return raw;
+      return raw as RegionResolutionStatus;
     }
     return fallbackValue;
   }
 
-  function normalizeBounds(raw) {
+  function normalizeBounds(raw): RegionBounds | null {
     if (!raw || typeof raw !== 'object') return null;
     const west = Number(raw.west);
     const south = Number(raw.south);
@@ -139,7 +141,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     return { west, south, east, north };
   }
 
-  function boundsFromRow(row) {
+  function boundsFromRow(row): RegionBounds | null {
     const bounds = normalizeBounds({
       west: row?.bounds_west,
       south: row?.bounds_south,
@@ -228,7 +230,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     return Boolean(extractSource && extractId && resolutionStatus === 'resolved');
   }
 
-  function rowToRegion(row) {
+  function rowToRegion(row): Region | null {
     if (!row) return null;
     const extractSource = String(row.extract_source || '').trim();
     const extractId = String(row.extract_id || '').trim();
@@ -245,7 +247,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       id: Number(row.id),
       slug: String(row.slug || ''),
       name: String(row.name || ''),
-      sourceType: String(row.source_type || 'extract'),
+      sourceType: 'extract',
       searchQuery: String(row.source_value || ''),
       extractSource,
       extractId,

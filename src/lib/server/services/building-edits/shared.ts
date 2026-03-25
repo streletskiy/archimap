@@ -1,3 +1,9 @@
+import type {
+  BuildingEdit,
+  BuildingEditFieldChange,
+  BuildingEditMergedInfo
+} from '$shared/types';
+
 const { sanitizeEditedFields } = require('../edits.service');
 
 function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
@@ -86,9 +92,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     const normalizedMaterial = normalizeInfoForDiff(material);
     const normalizedConcrete = normalizeInfoForDiff(materialConcrete);
     if (normalizedMaterial === 'concrete' && normalizedConcrete) {
-      return `concrete_${normalizedConcrete}`;
+      return `concrete_${String(normalizedConcrete)}`;
     }
-    if (normalizedMaterial) return normalizedMaterial;
+    if (normalizedMaterial != null) return String(normalizedMaterial);
     return null;
   }
 
@@ -279,7 +285,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     `).run(osmType, osmId, author);
   }
 
-  function buildChangesFromRows(editRow, tags) {
+  function buildChangesFromRows(editRow, tags): BuildingEditFieldChange[] {
     const osmBaseline = {
       name: pickTagValue(tags, ['name', 'name:ru', 'official_name']),
       style: pickTagValue(tags, ['building:architecture', 'architecture', 'style']),
@@ -359,7 +365,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return username || null;
   }
 
-  function normalizeMergedInfoRow(row) {
+  function normalizeMergedInfoRow(row): BuildingEditMergedInfo | null {
     if (!row) return null;
     const hasMergedValue = row.name != null
       || row.style != null
@@ -397,7 +403,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function getMergedInfoRowFromUserEditRow(row) {
+  function getMergedInfoRowFromUserEditRow(row): BuildingEditMergedInfo | null {
     return normalizeMergedInfoRow({
       name: row?.merged_name,
       style: row?.merged_style,
@@ -451,7 +457,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function mapUserEditRow(row, tags, mergedInfoRow) {
+  function mapUserEditRow(row, tags, mergedInfoRow): BuildingEdit {
     const runtimeState = buildEditRuntimeState(row, mergedInfoRow);
     const changes = buildChangesFromRows(row, tags);
     const editedFields = getEditedFieldsFromRow(row);
@@ -527,7 +533,11 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function mapDetailedUserEditRow(row) {
+  function mapDetailedUserEditRow(row): {
+    tags: Record<string, string>;
+    mergedInfoRow: BuildingEditMergedInfo | null;
+    mapped: BuildingEdit;
+  } {
     const tags = parseTagsJsonSafe(row?.source_tags_json || row?.tags_json);
     const mergedInfoRow = getMergedInfoRowFromUserEditRow(row);
     return {

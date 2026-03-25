@@ -6,6 +6,12 @@ const {
   parsePositiveId
 } = require('./shared');
 const { splitBuildingMaterialSelection, sanitizeProjectYear } = require('../edits.service');
+import type {
+  BuildingEdit,
+  BuildingEditListQuery,
+  BuildingEditMergeCandidate,
+  BuildingEditMergeValues
+} from '$shared/types';
 
 function createAdminEditsService(options: LooseRecord = {}) {
   const {
@@ -53,14 +59,14 @@ function createAdminEditsService(options: LooseRecord = {}) {
     return String(row?.sync_status || 'unsynced').trim().toLowerCase();
   }
 
-  async function listBuildingEdits({ status, limit }: LooseRecord = {}) {
+  async function listBuildingEdits({ status, limit }: BuildingEditListQuery = {}): Promise<BuildingEdit[]> {
     const statusRaw = String(status || '').trim().toLowerCase();
     const normalizedStatus = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const normalizedLimit = parseLimit(limit, 200, 1, 1000);
     return getUserEditsList({ status: normalizedStatus, limit: normalizedLimit, summary: false });
   }
 
-  async function getBuildingEditDetails(editIdRaw) {
+  async function getBuildingEditDetails(editIdRaw): Promise<BuildingEdit> {
     const editId = parsePositiveId(editIdRaw);
     if (!editId) {
       throw createAdminError(400, 'Invalid edit id');
@@ -131,7 +137,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     return getUserEditsList({ createdBy: email, limit, summary: true });
   }
 
-  async function rejectBuildingEdit(editIdRaw, { comment, reviewer }: LooseRecord = {}) {
+  async function rejectBuildingEdit(editIdRaw, { comment, reviewer }: { comment?: string; reviewer?: string | null } = {}) {
     const row = await getBuildingEditDetails(editIdRaw);
     assertMutableEdit(row);
     if (normalizeUserEditStatus(row.status) !== 'pending') {
@@ -164,7 +170,10 @@ function createAdminEditsService(options: LooseRecord = {}) {
     };
   }
 
-  async function reassignBuildingEdit(editIdRaw, { target, actor, force }: LooseRecord = {}) {
+  async function reassignBuildingEdit(
+    editIdRaw,
+    { target, actor, force }: { target?: string | null; actor?: string | null; force?: boolean } = {}
+  ) {
     const editId = parsePositiveId(editIdRaw);
     if (!editId) {
       throw createAdminError(400, 'Invalid edit id');
@@ -277,7 +286,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     }
   }
 
-  function sanitizeMergeValues(fieldsToMerge, valuesRaw) {
+  function sanitizeMergeValues(fieldsToMerge, valuesRaw: BuildingEditMergeValues | Record<string, unknown> = {}) {
     const source: LooseRecord = valuesRaw && typeof valuesRaw === 'object' ? valuesRaw : {};
     const sanitizedValues: LooseRecord = {};
 
@@ -322,40 +331,88 @@ function createAdminEditsService(options: LooseRecord = {}) {
     return sanitizedValues;
   }
 
-  async function buildMergedCandidate(item, editId) {
-    const currentMerged: LooseRecord = await getMergedInfoRow(item.osmType, item.osmId) || {};
+  async function buildMergedCandidate(item: BuildingEdit, editId): Promise<BuildingEditMergeCandidate> {
+    const currentMergedRow = (await getMergedInfoRow(item.osmType, item.osmId)) as LooseRecord | null;
     const editCreatedTs = item.createdAt ? Date.parse(String(item.createdAt)) : NaN;
-    const currentMergedTs = currentMerged?.updated_at ? Date.parse(String(currentMerged.updated_at)) : NaN;
+    const currentMergedTs = currentMergedRow?.updated_at ? Date.parse(String(currentMergedRow.updated_at)) : NaN;
+    const currentMerged: BuildingEditMergeCandidate['currentMerged'] = {
+      osm_type: currentMergedRow?.osm_type ?? undefined,
+      osm_id: currentMergedRow?.osm_id == null ? undefined : Number(currentMergedRow.osm_id),
+      name: currentMergedRow?.name ?? null,
+      style: currentMergedRow?.style ?? null,
+      design: currentMergedRow?.design ?? null,
+      design_ref: currentMergedRow?.design_ref ?? null,
+      design_year: currentMergedRow?.design_year ?? null,
+      material: currentMergedRow?.material ?? null,
+      material_concrete: currentMergedRow?.material_concrete ?? null,
+      colour: currentMergedRow?.colour ?? null,
+      levels: currentMergedRow?.levels ?? null,
+      year_built: currentMergedRow?.year_built ?? null,
+      architect: currentMergedRow?.architect ?? null,
+      address: currentMergedRow?.address ?? null,
+      description: currentMergedRow?.description ?? null,
+      archimap_description: currentMergedRow?.archimap_description ?? null,
+      updated_by: currentMergedRow?.updated_by ?? null,
+      updated_at: currentMergedRow?.updated_at ?? null
+    };
+    const editSourceRow = (await db.prepare(`
+        SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
+        FROM user_edits.building_user_edits
+        WHERE id = ?
+        LIMIT 1
+      `).get(editId)) || {};
+    const editSource: BuildingEditMergeCandidate['editSource'] = {
+      name: editSourceRow.name ?? null,
+      style: editSourceRow.style ?? null,
+      design: editSourceRow.design ?? null,
+      design_ref: editSourceRow.design_ref ?? null,
+      design_year: editSourceRow.design_year ?? null,
+      material: editSourceRow.material ?? null,
+      material_raw: editSourceRow.material == null ? null : String(editSourceRow.material),
+      material_concrete: editSourceRow.material_concrete ?? null,
+      colour: editSourceRow.colour ?? null,
+      levels: editSourceRow.levels ?? null,
+      year_built: editSourceRow.year_built ?? null,
+      architect: editSourceRow.architect ?? null,
+      address: editSourceRow.address ?? null,
+      archimap_description: editSourceRow.archimap_description ?? null
+    };
+    const mergedCandidate: BuildingEditMergeCandidate['mergedCandidate'] = {
+      name: currentMerged?.name ?? null,
+      style: currentMerged?.style ?? null,
+      design: currentMerged?.design ?? null,
+      design_ref: currentMerged?.design_ref ?? null,
+      design_year: currentMerged?.design_year ?? null,
+      material: currentMerged?.material ?? null,
+      material_raw: currentMerged?.material == null ? null : String(currentMerged.material),
+      material_concrete: currentMerged?.material_concrete ?? null,
+      colour: currentMerged?.colour ?? null,
+      levels: currentMerged?.levels ?? null,
+      year_built: currentMerged?.year_built ?? null,
+      architect: currentMerged?.architect ?? null,
+      address: currentMerged?.address ?? null,
+      archimap_description: currentMerged?.archimap_description ?? null
+    };
 
     return {
       currentMerged,
       editCreatedTs,
       currentMergedTs,
-      editSource: (await db.prepare(`
-        SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
-        FROM user_edits.building_user_edits
-        WHERE id = ?
-        LIMIT 1
-      `).get(editId) || {}) as LooseRecord,
-      mergedCandidate: {
-        name: currentMerged.name ?? null,
-        style: currentMerged.style ?? null,
-        design: currentMerged.design ?? null,
-        design_ref: currentMerged.design_ref ?? null,
-        design_year: currentMerged.design_year ?? null,
-        material: currentMerged.material ?? null,
-        material_concrete: currentMerged.material_concrete ?? null,
-        colour: currentMerged.colour ?? null,
-        levels: currentMerged.levels ?? null,
-        year_built: currentMerged.year_built ?? null,
-        architect: currentMerged.architect ?? null,
-        address: currentMerged.address ?? null,
-        archimap_description: currentMerged.archimap_description ?? null
-      } as LooseRecord
+      editSource,
+      mergedCandidate
     };
   }
 
-  async function mergeBuildingEdit(editIdRaw, { force, fields, values, comment, reviewer }: LooseRecord = {}) {
+  async function mergeBuildingEdit(
+    editIdRaw,
+    { force, fields, values, comment, reviewer }: {
+      force?: boolean;
+      fields?: string[];
+      values?: BuildingEditMergeValues | Record<string, unknown>;
+      comment?: string;
+      reviewer?: string;
+    } = {}
+  ) {
     const item = await getBuildingEditDetails(editIdRaw);
     assertMutableEdit(item);
     if (normalizeUserEditStatus(item.status) !== 'pending') {
@@ -404,7 +461,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       throw createAdminError(409, 'Edit is outdated because the building data changed after the edit was created. Refresh the edit or run merge with force.', {
         code: 'EDIT_OUTDATED',
         details: {
-          currentUpdatedAt: currentMerged.updated_at || null,
+          currentUpdatedAt: currentMerged?.updated_at || null,
           editCreatedAt: item.createdAt || null
         }
       });

@@ -8,6 +8,17 @@ import { normalizeFilterLayers } from '$lib/components/map/filter-pipeline-utils
 import { createFilterSettingsController as createFilterSettingsControllerModule } from './filter-settings-controller';
 import { createFilterPresetController as createFilterPresetControllerModule } from './filter-preset-controller';
 import { createMapRegionController as createMapRegionControllerModule } from './region-controller';
+import type {
+  AdminDataSettings,
+  FilterPreset as ApiFilterPreset,
+  FilterPresetDraft as SharedFilterPresetDraft,
+  FilterPresetLayer,
+  FilterPresetRule,
+  FilterPresetState,
+  Region as DataRegion,
+  RegionDraft as SharedRegionDraft,
+  RegionExtractCandidate
+} from '$shared/types';
 
 const DATA_I18N_PREFIX = 'admin.data';
 const FILTER_PRESET_LOCALE_RE = /^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i;
@@ -16,7 +27,7 @@ const FILTER_PRESET_NAME_LOCALES = Object.freeze([...(Array.isArray(SUPPORTED_LO
 const msg = (error, fallback) => String(error?.message || fallback);
 const dataT = (key, params = {}) => translateNow(`${DATA_I18N_PREFIX}.${key}`, params);
 
-function createEmptyDataSettings() {
+function createEmptyDataSettings(): AdminDataSettings {
   return {
     source: 'db',
     bootstrap: { completed: false, source: null },
@@ -33,7 +44,7 @@ function createEmptyDataSettings() {
   };
 }
 
-function createRegionDraft(region = null) {
+function createRegionDraft(region: Partial<DataRegion> | null = null): SharedRegionDraft {
   return {
     id: Number(region?.id || 0) || null,
     name: String(region?.name || ''),
@@ -42,7 +53,7 @@ function createRegionDraft(region = null) {
     extractSource: String(region?.extractSource || ''),
     extractId: String(region?.extractId || ''),
     extractLabel: String(region?.extractLabel || ''),
-    extractResolutionStatus: String(region?.extractResolutionStatus || 'needs_resolution'),
+    extractResolutionStatus: String(region?.extractResolutionStatus || 'needs_resolution') as SharedRegionDraft['extractResolutionStatus'],
     extractResolutionError: region?.extractResolutionError ? String(region.extractResolutionError) : null,
     enabled: region?.enabled !== false,
     autoSyncEnabled: region?.autoSyncEnabled !== false,
@@ -54,33 +65,12 @@ function createRegionDraft(region = null) {
   };
 }
 
-type DataSettings = ReturnType<typeof createEmptyDataSettings>;
-type RegionDraft = ReturnType<typeof createRegionDraft>;
-type FilterPresetRuleDraft = LooseRecord & {
-  id?: string;
-  key: string;
-  op: string;
-  value: string;
-};
-type FilterPresetLayerDraft = LooseRecord & {
-  id?: string;
-  color?: string;
-  priority?: number;
-  mode?: string;
-  rules?: FilterPresetRuleDraft[];
-};
-type FilterPresetItem = ReturnType<typeof normalizeFilterPresetItem>;
-type FilterPresetDraft = LooseRecord & {
-  id: number | null;
-  key: string;
-  name: string;
-  nameI18n: LooseRecord;
-  description: string | null;
-  layers: FilterPresetLayerDraft[];
-  createdAt: string | null;
-  updatedAt: string | null;
-  updatedBy: string | null;
-};
+type DataSettings = AdminDataSettings;
+type RegionDraft = SharedRegionDraft;
+type FilterPresetRuleDraft = FilterPresetRule;
+type FilterPresetLayerDraft = FilterPresetLayer;
+type FilterPresetItem = SharedFilterPresetDraft;
+type FilterPresetDraft = SharedFilterPresetDraft;
 function normalizeFilterPresetKey(value) {
   return String(value || '')
     .trim()
@@ -107,7 +97,7 @@ function normalizeFilterPresetName(value) {
 
 function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
   const source = nameI18n && typeof nameI18n === 'object' && !Array.isArray(nameI18n) ? nameI18n : {};
-  const normalized = {};
+  const normalized: Record<string, string> = {};
   for (const [rawLocale, rawName] of Object.entries(source)) {
     const locale = normalizeFilterPresetLocale(rawLocale);
     if (!locale) continue;
@@ -124,7 +114,7 @@ function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
 }
 
 function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
-  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n : {};
+  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n as Record<string, string> : {};
   const defaultName = normalizeFilterPresetName(source?.[DEFAULT_LOCALE]);
   if (defaultName) return defaultName;
 
@@ -141,10 +131,10 @@ function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
   return normalizeFilterPresetName(fallback);
 }
 
-function normalizeFilterPresetRule(rule: LooseRecord = {}, options: LooseRecord = {}) {
-  const normalized: LooseRecord = {
+function normalizeFilterPresetRule(rule: Partial<FilterPresetRule> | LooseRecord = {}, options: { preserveId?: boolean } = {}): FilterPresetRule {
+  const normalized: FilterPresetRule = {
     key: String(rule?.key || '').trim(),
-    op: String(rule?.op || 'contains').trim(),
+    op: String(rule?.op || 'contains').trim() as FilterPresetRule['op'],
     value: String(rule?.value || '').trim()
   };
 
@@ -158,7 +148,7 @@ function normalizeFilterPresetRule(rule: LooseRecord = {}, options: LooseRecord 
   return normalized;
 }
 
-function normalizeFilterPresetLayersForDraft(layers: LooseRecord[] = []) {
+function normalizeFilterPresetLayersForDraft(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []): FilterPresetLayer[] {
   const source = Array.isArray(layers) ? layers : [];
   if (source.length === 0) {
     return [createBuildingFilterLayerDraft()];
@@ -172,8 +162,8 @@ function normalizeFilterPresetLayersForDraft(layers: LooseRecord[] = []) {
   }, list.slice(0, index)));
 }
 
-function normalizeFilterPresetLayersForSave(layers: LooseRecord[] = []) {
-  const normalized = normalizeFilterLayers(Array.isArray(layers) ? layers : [], { preserveEmpty: false });
+function normalizeFilterPresetLayersForSave(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []) {
+  const normalized = normalizeFilterLayers(Array.isArray(layers) ? (layers as LooseRecord[]) : [], { preserveEmpty: false });
   if (normalized.invalidReason) {
     return {
       layers: [],
@@ -191,15 +181,15 @@ function normalizeFilterPresetLayersForSave(layers: LooseRecord[] = []) {
       id: String(layer?.id || `filter-layer-${index + 1}`),
       color: String(layer?.color || '').trim(),
       priority: index,
-      mode: String(layer?.mode || 'layer').trim(),
+      mode: String(layer?.mode || 'layer').trim() as FilterPresetLayer['mode'],
       rules: (Array.isArray(layer?.rules) ? layer.rules : []).map((rule) => normalizeFilterPresetRule(rule))
     })),
     error: null
   };
 }
 
-function normalizeFilterPresetItem(preset: LooseRecord | null = null) {
-  const source = preset && typeof preset === 'object' ? preset : {};
+function normalizeFilterPresetItem(preset: ApiFilterPreset | SharedFilterPresetDraft | LooseRecord | null = null): FilterPresetItem {
+  const source = (preset && typeof preset === 'object' ? preset : {}) as Partial<FilterPresetItem> & LooseRecord;
   const id = Number(source?.id || 0);
   const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
   const name = normalizeFilterPresetName(source?.name) || getPreferredFilterPresetName(nameI18n);
@@ -216,34 +206,31 @@ function normalizeFilterPresetItem(preset: LooseRecord | null = null) {
   };
 }
 
-function buildFilterPresetDraftRecord(draft: LooseRecord | null = null) {
-  const source = draft && typeof draft === 'object' ? draft : {};
-  return normalizeFilterPresetItem({
-    ...source,
-    layers: source.layers
-  });
+function buildFilterPresetDraftRecord(draft: FilterPresetDraft | null = null): FilterPresetDraft {
+  const source = (draft && typeof draft === 'object' ? draft : {}) as Partial<FilterPresetDraft> & LooseRecord;
+  return normalizeFilterPresetItem(source);
 }
 
-function createFilterPresetDraft(preset: LooseRecord | null = null) {
+function createFilterPresetDraft(preset: FilterPresetDraft | null = null): FilterPresetDraft {
   return buildFilterPresetDraftRecord(preset);
 }
 
-function createEmptyFilterPresetState() {
+function createEmptyFilterPresetState(): FilterPresetState {
   return {
     source: 'db',
     items: []
   };
 }
 
-function normalizeDataSettings(nextSettings, fallback) {
-  const value = nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback;
+function normalizeDataSettings(nextSettings, fallback): DataSettings {
+  const value = (nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback) as Partial<DataSettings> & LooseRecord;
   return {
     source: String(value?.source || 'db'),
     bootstrap: {
       completed: Boolean(value?.bootstrap?.completed),
       source: value?.bootstrap?.source ? String(value.bootstrap.source) : null
     },
-    regions: Array.isArray(value?.regions) ? value.regions : [],
+    regions: Array.isArray(value?.regions) ? (value.regions as DataRegion[]) : [],
     filterTags: {
       source: String(value?.filterTags?.source || 'default'),
       allowlist: Array.isArray(value?.filterTags?.allowlist) ? value.filterTags.allowlist : [],
@@ -281,12 +268,16 @@ function buildStorageSummary(regions = []) {
   );
 }
 
-function getSavedFilterTagAllowlist(dataSettings: LooseRecord) {
+function getSavedFilterTagAllowlist(dataSettings: DataSettings) {
   return Array.isArray(dataSettings?.filterTags?.allowlist) ? dataSettings.filterTags.allowlist : [];
 }
 
-function buildFilterTagDraftStateByKey(keys: readonly string[] = [], saved: readonly string[] = [], draft: readonly string[] = []) {
-  const result: LooseRecord = {};
+function buildFilterTagDraftStateByKey(
+  keys: readonly string[] = [],
+  saved: readonly string[] = [],
+  draft: readonly string[] = []
+): Record<string, 'enabled_pending' | 'disabled_pending' | 'unchanged'> {
+  const result: Record<string, 'enabled_pending' | 'disabled_pending' | 'unchanged'> = {};
   const savedSet = new Set(Array.isArray(saved) ? saved : []);
   const draftSet = new Set(Array.isArray(draft) ? draft : []);
 
@@ -334,7 +325,7 @@ export function createAdminDataController() {
   const regionDeleting: Writable<boolean> = writable(false);
   const regionSyncBusy: Writable<boolean> = writable(false);
   const regionResolveBusy: Writable<boolean> = writable(false);
-  const regionExtractCandidates: Writable<LooseRecord[]> = writable([]);
+  const regionExtractCandidates: Writable<RegionExtractCandidate[]> = writable([]);
   const selectedDataRegionId: Writable<number | null> = writable(null);
   const regionRuns: Writable<LooseRecord[]> = writable([]);
   const regionRunsLoading: Writable<boolean> = writable(false);
@@ -436,7 +427,7 @@ export function createAdminDataController() {
     ([$filterTagAllowlistDirty, $filterPresetDirty]) => Boolean($filterTagAllowlistDirty || $filterPresetDirty)
   );
 
-  function patchRegionDraft(patch) {
+  function patchRegionDraft(patch: Partial<RegionDraft>) {
     regionDraft.update((current) => ({
       ...current,
       ...(patch && typeof patch === 'object' ? patch : {})
@@ -479,37 +470,42 @@ export function createAdminDataController() {
     return filterSettingsController.seedFilterTagAllowlistDraft(filterTags);
   }
 
-  function seedFilterPresetItems(filterPresets = null, options = {}) {
+  function seedFilterPresetItems(filterPresets: FilterPresetState | null = null, options: { preserveSelection?: boolean; skipDraftSync?: boolean } = {}) {
     return filterPresetController.seedFilterPresetItems(filterPresets, options);
   }
 
-  function getMapRegionFeatureMeta(feature) {
+  function getMapRegionFeatureMeta(feature: { properties?: Record<string, unknown> | null } | null) {
     return mapRegionController.getMapRegionFeatureMeta(feature);
   }
 
-  function findRegionByMapFeature(feature, regions = null) {
+  function findRegionByMapFeature(feature: { properties?: Record<string, unknown> | null } | null, regions: DataRegion[] | null = null) {
     return mapRegionController.findRegionByMapFeature(feature, regions);
   }
 
-  function applyRegionDraftFromMapFeature(feature) {
+  function applyRegionDraftFromMapFeature(feature: { properties?: Record<string, unknown> | null } | null) {
     return mapRegionController.applyRegionDraftFromMapFeature(feature);
   }
 
-  function applyRegionExtractCandidate(candidate, options = {}) {
+  function applyRegionExtractCandidate(candidate: RegionExtractCandidate | null, options: { setStatus?: boolean } = {}) {
     return mapRegionController.applyRegionExtractCandidate(candidate, options);
   }
 
-  function getRegionById(regionId: number | string) {
+  function getRegionById(regionId: number | string): DataRegion | null {
     return get(dataSettings).regions.find((item) => Number(item?.id || 0) === Number(regionId)) || null;
   }
 
-  function buildRegionSnapshot(region: LooseRecord | null, fallback: LooseRecord | null = null, overrides: LooseRecord = {}) {
-    const source = region && typeof region === 'object' ? region : {};
-    const base = fallback && typeof fallback === 'object' ? fallback : {};
+  function buildRegionSnapshot(
+    region: Partial<DataRegion> | null,
+    fallback: Partial<DataRegion> | null = null,
+    overrides: Partial<DataRegion> = {}
+  ): DataRegion {
+    const source = (region && typeof region === 'object' ? region : {}) as Partial<DataRegion> & LooseRecord;
+    const base = (fallback && typeof fallback === 'object' ? fallback : {}) as Partial<DataRegion> & LooseRecord;
 
     return {
       ...source,
       id: Number(source?.id || base?.id || 0) || null,
+      sourceType: 'extract',
       name: String(source?.name || base?.name || ''),
       slug: String(source?.slug || base?.slug || ''),
       searchQuery: String(source?.searchQuery || base?.searchQuery || ''),
@@ -518,8 +514,10 @@ export function createAdminDataController() {
       extractLabel: String(source?.extractLabel || base?.extractLabel || ''),
       extractResolutionStatus: String(
         source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved'
-      ),
+      ) as SharedRegionDraft['extractResolutionStatus'],
       extractResolutionError: source?.extractResolutionError ?? base?.extractResolutionError ?? null,
+      resolutionRequired:
+        String(source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved') !== 'resolved',
       enabled: source?.enabled ?? base?.enabled ?? true,
       autoSyncEnabled: source?.autoSyncEnabled ?? base?.autoSyncEnabled ?? true,
       autoSyncOnStart: source?.autoSyncOnStart ?? base?.autoSyncOnStart ?? false,
@@ -538,7 +536,7 @@ export function createAdminDataController() {
       bounds: source?.bounds ?? base?.bounds ?? null,
       __optimistic: Boolean(source?.__optimistic ?? base?.__optimistic),
       ...overrides
-    };
+    } as DataRegion;
   }
 
   function getRegionIdentityKey(region) {
@@ -561,7 +559,7 @@ export function createAdminDataController() {
     return Boolean(region?.__optimistic) && Number(region?.id || 0) <= 0;
   }
 
-  function compareRegions(left: LooseRecord | null, right: LooseRecord | null) {
+  function compareRegions(left: Partial<DataRegion> | null, right: Partial<DataRegion> | null) {
     const leftOptimistic = isOptimisticRegion(left);
     const rightOptimistic = isOptimisticRegion(right);
     if (leftOptimistic !== rightOptimistic) return leftOptimistic ? -1 : 1;
@@ -588,7 +586,7 @@ export function createAdminDataController() {
     pendingOptimisticRegions.delete(numericRegionId);
   }
 
-  function mergePendingOptimisticRegions(regions: LooseRecord[] = []) {
+  function mergePendingOptimisticRegions(regions: DataRegion[] = []): DataRegion[] {
     const nextRegions = Array.isArray(regions) ? [...regions] : [];
     const existingKeys = new Set(nextRegions.map((item) => getRegionIdentityKey(item)).filter(Boolean));
 
@@ -602,19 +600,19 @@ export function createAdminDataController() {
     return nextRegions.sort(compareRegions);
   }
 
-  function upsertRegionSnapshot(region: LooseRecord | null) {
-    const snapshot = region && typeof region === 'object' ? region : null;
+  function upsertRegionSnapshot(region: Partial<DataRegion> | null): DataRegion | null {
+    const snapshot = (region && typeof region === 'object' ? region : null) as Partial<DataRegion> | null;
     const numericRegionId = Number(snapshot?.id || 0);
     if (!snapshot || !Number.isInteger(numericRegionId)) return null;
 
-    let mergedRegion = null;
+    let mergedRegion: DataRegion | null = null;
     dataSettings.update((current) => {
-      const regions = Array.isArray(current?.regions) ? current.regions : [];
+      const regions = Array.isArray(current?.regions) ? current.regions as DataRegion[] : [];
       const existingRegion = regions.find((item) => Number(item?.id || 0) === numericRegionId) || null;
       mergedRegion = {
         ...(existingRegion && typeof existingRegion === 'object' ? existingRegion : {}),
         ...snapshot
-      };
+      } as DataRegion;
 
       const nextRegions = [
         ...regions.filter((item) => Number(item?.id || 0) !== numericRegionId),
@@ -636,7 +634,7 @@ export function createAdminDataController() {
 
     let removed = false;
     dataSettings.update((current) => {
-      const regions = Array.isArray(current?.regions) ? current.regions : [];
+      const regions = Array.isArray(current?.regions) ? (current.regions as DataRegion[]) : [];
       const nextRegions = regions.filter((item) => {
         const shouldKeep = Number(item?.id || 0) !== numericRegionId;
         if (!shouldKeep) {
@@ -655,7 +653,7 @@ export function createAdminDataController() {
     return removed;
   }
 
-  function selectRegionLocally(region: LooseRecord | null, options: LooseRecord = {}) {
+  function selectRegionLocally(region: DataRegion | null, options: { resetRuns?: boolean } = {}) {
     const nextRegion = region && typeof region === 'object' ? region : null;
     const numericRegionId = Number(nextRegion?.id || 0);
     const nextSelectedRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0 ? numericRegionId : null;
@@ -681,7 +679,7 @@ export function createAdminDataController() {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
-      nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions);
+      nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
 
       dataSettings.set(nextSettings);
       seedFilterTagAllowlistDraft(nextSettings.filterTags);
@@ -759,7 +757,7 @@ export function createAdminDataController() {
     }
   }
 
-  async function selectDataRegion(region: LooseRecord | null) {
+  async function selectDataRegion(region: DataRegion | null) {
     if (isOptimisticRegion(region)) return;
 
     const numericRegionId = Number(region?.id || 0);
@@ -793,7 +791,7 @@ export function createAdminDataController() {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
-      nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions);
+      nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
 
       dataSettings.set(nextSettings);
       seedFilterTagAllowlistDraft(nextSettings.filterTags);
@@ -838,11 +836,11 @@ export function createAdminDataController() {
     return filterPresetController.getFilterPresetById(id);
   }
 
-  function patchFilterPresetDraft(patch = {}) {
+  function patchFilterPresetDraft(patch: Partial<FilterPresetDraft> = {}) {
     return filterPresetController.patchFilterPresetDraft(patch);
   }
 
-  function setFilterPresetDraftLayers(layers = []) {
+  function setFilterPresetDraftLayers(layers: FilterPresetLayer[] = []) {
     return filterPresetController.setFilterPresetDraftLayers(layers);
   }
 
@@ -854,7 +852,7 @@ export function createAdminDataController() {
     return filterPresetController.selectFilterPresetById(id);
   }
 
-  async function loadFilterPresets(options = {}) {
+  async function loadFilterPresets(options: { preserveSelection?: boolean; ignoreUnsaved?: boolean } = {}) {
     return filterPresetController.loadFilterPresets(options);
   }
 

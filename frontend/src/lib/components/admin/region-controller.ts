@@ -12,16 +12,23 @@ import {
   normalizeLookupValue,
   slugifyLoose
 } from './admin-data.shared';
+import type {
+  AdminDataSettings,
+  Region as DataRegion,
+  RegionDraft,
+  RegionExtractCandidate
+} from '$shared/types';
 
 type DataTranslator = (key: string, params?: LooseRecord) => string;
+type FeatureLike = { properties?: Record<string, unknown> | null } | null;
 
 type RegionControllerArgs = {
-  dataSettings: Writable<LooseRecord>;
+  dataSettings: Writable<AdminDataSettings>;
   dataStatus: Writable<string>;
-  regionDraft: Writable<LooseRecord>;
+  regionDraft: Writable<RegionDraft>;
   regionResolveBusy: Writable<boolean>;
-  regionExtractCandidates: Writable<LooseRecord[]>;
-  patchRegionDraft: (patch: LooseRecord) => void;
+  regionExtractCandidates: Writable<RegionExtractCandidate[]>;
+  patchRegionDraft: (patch: Partial<RegionDraft>) => void;
   dataT: DataTranslator;
 };
 
@@ -36,7 +43,7 @@ function createMapRegionController({
 }: RegionControllerArgs) {
   const regionLookupCache = new WeakMap();
 
-  function getMapRegionFeatureMeta(feature: LooseRecord | null) {
+  function getMapRegionFeatureMeta(feature: FeatureLike) {
     const properties = feature?.properties && typeof feature.properties === 'object' ? feature.properties : {};
     const name = getRecordTextValue(properties, MAP_REGION_NAME_KEYS);
     const slug = getRecordTextValue(properties, MAP_REGION_SLUG_KEYS) || slugifyLoose(name);
@@ -51,7 +58,7 @@ function createMapRegionController({
     };
   }
 
-  function getRegionLookup(regions: LooseRecord[] = []) {
+  function getRegionLookup(regions: DataRegion[] = []) {
     const items = Array.isArray(regions) ? regions : [];
     const cached = regionLookupCache.get(items);
     if (cached) return cached;
@@ -92,7 +99,7 @@ function createMapRegionController({
     return nextLookup;
   }
 
-  function findRegionByMapFeature(feature: LooseRecord | null, regions: LooseRecord[] | null = null) {
+  function findRegionByMapFeature(feature: FeatureLike, regions: DataRegion[] | null = null) {
     const items = Array.isArray(regions) ? regions : get(dataSettings).regions;
     const meta = getMapRegionFeatureMeta(feature);
     const featureSlug = normalizeLookupValue(meta.slug);
@@ -122,7 +129,7 @@ function createMapRegionController({
     return null;
   }
 
-  function applyRegionDraftFromMapFeature(feature: LooseRecord | null) {
+  function applyRegionDraftFromMapFeature(feature: FeatureLike) {
     const meta = getMapRegionFeatureMeta(feature);
     if (!meta.name && !meta.slug && !meta.extractId) return false;
 
@@ -152,8 +159,26 @@ function createMapRegionController({
     });
   }
 
-  function applyRegionExtractCandidate(candidate: LooseRecord | null, options: LooseRecord = {}) {
-    const next = candidate && typeof candidate === 'object' ? candidate : {};
+  function normalizeRegionExtractCandidate(candidate: LooseRecord = {}): RegionExtractCandidate | null {
+    const extractSource = String(candidate?.extractSource ?? candidate?.source ?? '').trim();
+    const extractId = String(candidate?.extractId ?? candidate?.fileName ?? candidate?.id ?? '').trim();
+    if (!extractSource || !extractId) return null;
+    const extractLabel = String(candidate?.extractLabel ?? candidate?.label ?? candidate?.name ?? extractId).trim();
+    return {
+      extractSource,
+      extractId,
+      extractLabel: extractLabel || extractId,
+      downloadUrl: candidate?.downloadUrl != null ? String(candidate.downloadUrl) : (candidate?.url != null ? String(candidate.url) : null),
+      matchKind: candidate?.matchKind != null ? String(candidate.matchKind) : null,
+      exact: candidate?.exact === true
+    };
+  }
+
+  function applyRegionExtractCandidate(
+    candidate: RegionExtractCandidate | null,
+    options: { setStatus?: boolean } = {}
+  ) {
+    const next = (candidate && typeof candidate === 'object' ? candidate : {}) as Partial<RegionExtractCandidate> & LooseRecord;
     patchRegionDraft({
       extractSource: String(next.extractSource || '').trim(),
       extractId: String(next.extractId || '').trim(),
@@ -198,7 +223,9 @@ function createMapRegionController({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query })
       });
-      const items = Array.isArray(data?.items) ? data.items : [];
+      const items = Array.isArray(data?.items)
+        ? data.items.map((item) => normalizeRegionExtractCandidate(item)).filter((item): item is RegionExtractCandidate => Boolean(item))
+        : [];
       regionExtractCandidates.set(items);
 
       if (items.length === 1) {
@@ -220,7 +247,7 @@ function createMapRegionController({
     }
   }
 
-  function getRegionSyncState(region) {
+  function getRegionSyncState(region: Partial<DataRegion> | null) {
     const code = String(region?.lastSyncStatus || '')
       .trim()
       .toLowerCase();

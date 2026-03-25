@@ -10,6 +10,7 @@ const { createRegionsDomain } = require('./data-settings/regions');
 const { createSyncRunsDomain } = require('./data-settings/sync-runs');
 const { createPresetsDomain } = require('./data-settings/presets');
 const { createPythonExtractResolver } = require('../../../../scripts/region-sync/python-extractor');
+import type { AdminDataSettings, Region } from '$shared/types';
 
 function normalizeRegionPmtilesSlug(regionOrSlug) {
   const raw = typeof regionOrSlug === 'object' && regionOrSlug
@@ -100,6 +101,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
       source: storedAllowlist ? 'db' : 'default',
       allowlist,
       defaultAllowlist: [...DEFAULT_FILTER_TAG_ALLOWLIST],
+      availableKeys: [],
       updatedBy: settingsRow?.updated_by ? String(settingsRow.updated_by) : null,
       updatedAt: settingsRow?.updated_at ? String(settingsRow.updated_at) : null
     };
@@ -184,7 +186,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
     return fallbackBytes == null ? null : Number(fallbackBytes);
   }
 
-  async function enrichRegionsWithStorageStats(regions = []) {
+  async function enrichRegionsWithStorageStats(regions: Region[] = []): Promise<Region[]> {
     const items = Array.isArray(regions) ? regions : [];
     if (items.length === 0) return [];
 
@@ -224,7 +226,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
   const syncRunsDomain = createSyncRunsDomain(context);
   const presetsDomain = createPresetsDomain(context);
 
-  async function getDataSettingsForAdmin() {
+  async function getDataSettingsForAdmin(): Promise<AdminDataSettings> {
     await bootstrapDomain.ensureBootstrapped();
     const bootstrap = await bootstrapDomain.getBootstrapState();
     const regions = await regionsDomain.listRegions({ includeStorageStats: true });

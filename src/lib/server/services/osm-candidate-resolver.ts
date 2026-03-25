@@ -13,6 +13,7 @@ import {
 } from './osm-sync.shared';
 import { fetchOsmElement } from './osm-api-client';
 import { buildChangesetTags, closeChangeset, createChangeset, updateOsmElement } from './osm-changeset-builder';
+import type { SyncCandidate, SyncCandidateSummary } from '$shared/types';
 
 type CandidateResolverDeps = {
   db: any;
@@ -75,7 +76,7 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     `).all(osmType, osmId);
   }
 
-  function buildCandidateRecord(rows: LooseRecord[]) {
+  function buildCandidateRecord(rows: LooseRecord[]): SyncCandidateSummary {
     const latestRow: LooseRecord = rows[0] || {};
     const latestLocalState = stateFromLocalRow(latestRow);
     const contourState = stateFromContourTags(parseTags(latestRow?.contour_tags_json));
@@ -123,7 +124,7 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     };
   }
 
-  async function listSyncCandidates(limit = 200) {
+  async function listSyncCandidates(limit = 200): Promise<SyncCandidateSummary[]> {
     const cap = Math.max(1, Math.min(500, Number(limit) || 200));
     const rows = await db.prepare(`
       SELECT
@@ -182,7 +183,7 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     return [...grouped.values()].map((group) => buildCandidateRecord(group));
   }
 
-  async function getSyncCandidate(osmType, osmId) {
+  async function getSyncCandidate(osmType, osmId): Promise<SyncCandidate | null> {
     const rows = await readCandidateRows(osmType, osmId);
     if (!Array.isArray(rows) || rows.length === 0) return null;
     const grouped = buildCandidateRecord(rows);
@@ -264,7 +265,7 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     );
   }
 
-  async function prepareSyncCandidateSyncData(osmType, osmId, candidate: LooseRecord = null) {
+  async function prepareSyncCandidateSyncData(osmType, osmId, candidate: SyncCandidate | null = null) {
     const syncCandidate = candidate || await getSyncCandidate(osmType, osmId);
     if (!syncCandidate) {
       return null;

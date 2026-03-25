@@ -16,15 +16,23 @@ import {
   normalizeFilterPresetNameI18n,
   sortFilterPresetItems
 } from './admin-data.shared';
+import type {
+  AdminDataSettings,
+  FilterPreset as ApiFilterPreset,
+  FilterPresetDraft,
+  FilterPresetInput,
+  FilterPresetLayer,
+  FilterPresetState
+} from '$shared/types';
 
 type DataTranslator = (key: string, params?: LooseRecord) => string;
 
 type FilterPresetControllerArgs = {
-  dataSettings: Writable<LooseRecord>;
+  dataSettings: Writable<AdminDataSettings>;
   dataStatus: Writable<string>;
-  filterPresetItems: Writable<ReturnType<typeof normalizeFilterPresetItem>[]>;
+  filterPresetItems: Writable<FilterPresetDraft[]>;
   selectedFilterPresetId: Writable<number | null>;
-  filterPresetDraft: Writable<LooseRecord>;
+  filterPresetDraft: Writable<FilterPresetDraft>;
   filterPresetLoading: Writable<boolean>;
   filterPresetSaving: Writable<boolean>;
   filterPresetDeleting: Writable<boolean>;
@@ -46,7 +54,7 @@ function createFilterPresetController({
   filterPresetDirty,
   dataT
 }: FilterPresetControllerArgs) {
-  function applyFilterPresetItems(items: LooseRecord[] = [], source = 'db') {
+  function applyFilterPresetItems(items: ApiFilterPreset[] = [], source = 'db'): FilterPresetDraft[] {
     const normalizedItems = sortFilterPresetItems(
       (Array.isArray(items) ? items : [])
         .map((item) => normalizeFilterPresetItem(item))
@@ -69,7 +77,7 @@ function createFilterPresetController({
     return get(filterPresetItems).find((item) => Number(item?.id || 0) === numericId) || null;
   }
 
-  function selectFilterPresetLocally(preset: LooseRecord | null) {
+  function selectFilterPresetLocally(preset: FilterPresetDraft | null) {
     const next = preset && typeof preset === 'object' ? preset : null;
     selectedFilterPresetId.set(next?.id ? Number(next.id) : null);
     filterPresetDraft.set(createFilterPresetDraft(next));
@@ -85,8 +93,11 @@ function createFilterPresetController({
     return confirmDiscardFilterPresetChanges();
   }
 
-  function seedFilterPresetItems(filterPresets: LooseRecord | null = null, options: LooseRecord = {}) {
-    const current = filterPresets && typeof filterPresets === 'object' ? filterPresets : {};
+  function seedFilterPresetItems(
+    filterPresets: FilterPresetState | null = null,
+    options: { preserveSelection?: boolean; skipDraftSync?: boolean } = {}
+  ) {
+    const current = (filterPresets && typeof filterPresets === 'object' ? filterPresets : {}) as Partial<FilterPresetState> & LooseRecord;
     const preserveSelection = options.preserveSelection !== false;
     const skipDraftSync = options.skipDraftSync === true;
 
@@ -110,7 +121,10 @@ function createFilterPresetController({
     }
   }
 
-  function buildFilterPresetPayload(draft: LooseRecord | null = null, options: LooseRecord = {}) {
+  function buildFilterPresetPayload(
+    draft: FilterPresetDraft | null = null,
+    options: { requireName?: boolean } = {}
+  ): { preset: FilterPresetInput | null; error: string | null } {
     const candidate = buildFilterPresetDraftRecord(draft || get(filterPresetDraft));
     const requireName = options.requireName !== false;
     const nameI18n = normalizeFilterPresetNameI18n(candidate.nameI18n, candidate.name);
@@ -173,7 +187,7 @@ function createFilterPresetController({
     return JSON.stringify(getFilterPresetDraftCanonical(), null, 2);
   }
 
-  function patchFilterPresetDraft(patch: LooseRecord = {}) {
+  function patchFilterPresetDraft(patch: Partial<FilterPresetDraft> = {}) {
     filterPresetDraft.update((current) => {
       const nextPatch = patch && typeof patch === 'object' ? patch : {};
       return {
@@ -183,7 +197,7 @@ function createFilterPresetController({
     });
   }
 
-  function setFilterPresetDraftLayers(layers: LooseRecord[] = []) {
+  function setFilterPresetDraftLayers(layers: FilterPresetLayer[] = []) {
     patchFilterPresetDraft({
       layers: normalizeFilterPresetLayersForDraft(layers)
     });
@@ -204,7 +218,7 @@ function createFilterPresetController({
     return true;
   }
 
-  async function loadFilterPresets(options: LooseRecord = {}) {
+  async function loadFilterPresets(options: { preserveSelection?: boolean; ignoreUnsaved?: boolean } = {}) {
     const preserveSelection = options.preserveSelection !== false;
     const ignoreUnsaved = options.ignoreUnsaved === true;
     if (!ignoreUnsaved && !ensureFilterPresetChangesDiscarded()) {
@@ -325,4 +339,3 @@ function createFilterPresetController({
 }
 
 export { createFilterPresetController };
-

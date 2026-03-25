@@ -1,3 +1,12 @@
+import type {
+  FilterPreset,
+  FilterPresetInput,
+  FilterPresetLayer,
+  FilterPresetNameI18n,
+  FilterPresetRule,
+  FilterPresetState
+} from '$shared/types';
+
 const { DEFAULT_FILTER_PRESETS } = require('../filter-presets-defaults');
 
 const FILTER_PRESET_LAYER_MODES = new Set(['and', 'or', 'layer']);
@@ -72,7 +81,7 @@ function normalizePresetNameI18n(value) {
   return Object.fromEntries(entries);
 }
 
-function pickPreferredName(nameI18n: LooseRecord = {}, fallback = null) {
+function pickPreferredName(nameI18n: FilterPresetNameI18n = {}, fallback = null) {
   const source = nameI18n && typeof nameI18n === 'object' ? nameI18n : {};
   for (const locale of ['en', 'ru']) {
     const candidate = normalizePresetName(source[locale]);
@@ -118,7 +127,7 @@ function normalizeLayerColor(value) {
   return FILTER_PRESET_COLOR_RE.test(color) ? color.toLowerCase() : null;
 }
 
-function normalizeRule(rawRule: LooseRecord = {}) {
+function normalizeRule(rawRule: LooseRecord = {}): { value: FilterPresetRule | null; error: string | null } {
   const key = String(rawRule?.key || '').trim();
   if (!key) return { value: null, error: 'Rule key is required' };
 
@@ -139,14 +148,14 @@ function normalizeRule(rawRule: LooseRecord = {}) {
   return {
     value: {
       key,
-      op,
+      op: op as FilterPresetRule['op'],
       value
     },
     error: null
   };
 }
 
-function normalizeLayers(rawLayers = []) {
+function normalizeLayers(rawLayers = []): { layers: FilterPresetLayer[]; error: string | null } {
   const input = Array.isArray(rawLayers) ? rawLayers : [];
   if (input.length === 0) {
     return { layers: [], error: 'Preset must contain at least one layer' };
@@ -182,7 +191,11 @@ function normalizeLayers(rawLayers = []) {
       if (normalizedRule.error) {
         return { layers: [], error: normalizedRule.error };
       }
-      rules.push(normalizedRule.value);
+      const normalizedValue = normalizedRule.value;
+      if (!normalizedValue) {
+        return { layers: [], error: 'Invalid preset rule' };
+      }
+      rules.push(normalizedValue);
     }
 
     layers.push({
@@ -201,7 +214,7 @@ function clonePresetLayers(layers = []) {
   return JSON.parse(JSON.stringify(Array.isArray(layers) ? layers : []));
 }
 
-function mapPresetRow(row: LooseRecord) {
+function mapPresetRow(row: LooseRecord): FilterPreset | null {
   if (!row || typeof row !== 'object') return null;
   let parsedLayers: LooseRecord[];
   try {
@@ -313,12 +326,14 @@ function createPresetsDomain(context: LooseRecord = {}) {
   let defaultBootstrapDone = false;
   let defaultBootstrapPromise = null;
 
-  async function listFilterPresets() {
+  async function listFilterPresets(): Promise<FilterPreset[]> {
     const rows = await selectAllPresets.all();
-    return (Array.isArray(rows) ? rows : []).map(mapPresetRow).filter(Boolean);
+    return (Array.isArray(rows) ? rows : [])
+      .map(mapPresetRow)
+      .filter((item): item is FilterPreset => Boolean(item));
   }
 
-  async function getFilterPresetById(id) {
+  async function getFilterPresetById(id): Promise<FilterPreset | null> {
     const presetId = normalizePresetId(id);
     if (!presetId) return null;
     return mapPresetRow(await selectPresetById.get(presetId));
@@ -365,7 +380,7 @@ function createPresetsDomain(context: LooseRecord = {}) {
     }
   }
 
-  async function getFilterPresetsForAdmin() {
+  async function getFilterPresetsForAdmin(): Promise<FilterPresetState> {
     await ensureBootstrapped();
     await ensureDefaultFilterPresets('preset-bootstrap');
     return {
@@ -374,13 +389,13 @@ function createPresetsDomain(context: LooseRecord = {}) {
     };
   }
 
-  async function getFilterPresetsForRuntime() {
+  async function getFilterPresetsForRuntime(): Promise<FilterPreset[]> {
     await ensureBootstrapped();
     await ensureDefaultFilterPresets('preset-bootstrap');
     return await listFilterPresets();
   }
 
-  async function saveFilterPreset(input: LooseRecord = {}, actor = null) {
+  async function saveFilterPreset(input: FilterPresetInput = {}, actor = null): Promise<FilterPreset | null> {
     await ensureBootstrapped();
     await ensureDefaultFilterPresets('preset-bootstrap');
 
@@ -473,7 +488,7 @@ function createPresetsDomain(context: LooseRecord = {}) {
     return getFilterPresetById(savedId);
   }
 
-  async function deleteFilterPresetById(id) {
+  async function deleteFilterPresetById(id): Promise<FilterPreset> {
     await ensureBootstrapped();
     await ensureDefaultFilterPresets('preset-bootstrap');
     const presetId = normalizePresetId(id);
