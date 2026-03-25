@@ -549,7 +549,7 @@ test('deleteUserEdit blocks deleting accepted edit when merged state is shared',
   assert.ok(localRow);
 });
 
-test('synced edits are read only in admin moderation actions', async () => {
+test('synced, cleaned, and syncing edits are read only in admin moderation actions', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
@@ -557,23 +557,38 @@ test('synced edits are read only in admin moderation actions', async () => {
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, sync_status, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(10, 'way', 3010, 'user@example.com', 'Synced building', 'accepted', 'synced');
-
-  await assert.rejects(
-    () => service.reassignUserEdit(10, { osmType: 'way', osmId: 3011 }, { actor: 'admin@example.com' }),
-    (error) => {
-      assert.match(error.message, /synchronized/i);
-      return true;
-    }
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
+      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
+      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    10, 'way', 3010, 'user@example.com', 'Synced building', 'accepted', 'synced',
+    11, 'way', 3011, 'user@example.com', 'Cleaned building', 'accepted', 'cleaned',
+    12, 'way', 3012, 'user@example.com', 'Syncing building', 'accepted', 'syncing'
   );
 
-  await assert.rejects(
-    () => service.deleteUserEdit(10),
-    (error) => {
-      assert.match(error.message, /synchronized/i);
-      return true;
-    }
-  );
+  const cases = [
+    { editId: 10, message: /already been synchronized/i },
+    { editId: 11, message: /already been synchronized/i },
+    { editId: 12, message: /currently being synchronized/i }
+  ];
+
+  for (const { editId, message } of cases) {
+    await assert.rejects(
+      () => service.reassignUserEdit(editId, { osmType: 'way', osmId: editId + 1 }, { actor: 'admin@example.com' }),
+      (error) => {
+        assert.match(error.message, message);
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      () => service.deleteUserEdit(editId),
+      (error) => {
+        assert.match(error.message, message);
+        return true;
+      }
+    );
+  }
 });
 

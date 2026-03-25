@@ -6,6 +6,7 @@ const {
   parsePositiveId
 } = require('./shared');
 const { splitBuildingMaterialSelection, sanitizeProjectYear } = require('../edits.service');
+const { assertMutableSyncStatus } = require('../building-edits/shared');
 import type {
   BuildingEdit,
   BuildingEditListQuery,
@@ -30,34 +31,6 @@ function createAdminEditsService(options: LooseRecord = {}) {
     refreshDesignRefSuggestionsCache,
     ARCHI_FIELD_SET
   } = options;
-  const MUTABLE_SYNC_STATUSES = new Set(['unsynced', 'failed']);
-
-  function assertMutableEdit(item) {
-    const syncStatus = String(item?.syncStatus || 'unsynced').trim().toLowerCase();
-    if (syncStatus === 'synced' || syncStatus === 'cleaned') {
-      throw createAdminError(409, 'This edit has already been synchronized and can only be viewed.', {
-        code: 'EDIT_SYNC_LOCKED'
-      });
-    }
-    if (syncStatus === 'syncing') {
-      throw createAdminError(409, 'This edit is currently being synchronized and cannot be changed right now.', {
-        code: 'EDIT_SYNC_IN_PROGRESS'
-      });
-    }
-    if (!MUTABLE_SYNC_STATUSES.has(syncStatus) && syncStatus !== 'syncing') {
-      return;
-    }
-  }
-
-  async function getRawEditSyncStatus(editId) {
-    const row = await db.prepare(`
-      SELECT sync_status
-      FROM user_edits.building_user_edits
-      WHERE id = ?
-      LIMIT 1
-    `).get(editId);
-    return String(row?.sync_status || 'unsynced').trim().toLowerCase();
-  }
 
   async function listBuildingEdits({ status, limit }: BuildingEditListQuery = {}): Promise<BuildingEdit[]> {
     const statusRaw = String(status || '').trim().toLowerCase();
@@ -139,7 +112,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
 
   async function rejectBuildingEdit(editIdRaw, { comment, reviewer }: { comment?: string; reviewer?: string | null } = {}) {
     const row = await getBuildingEditDetails(editIdRaw);
-    assertMutableEdit(row);
+    assertMutableSyncStatus(row.syncStatus);
     if (normalizeUserEditStatus(row.status) !== 'pending') {
       throw createAdminError(409, 'Edit has already been processed');
     }
@@ -188,18 +161,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     if (!before) {
       throw createAdminError(404, 'Edit not found');
     }
-    const rawSyncStatus = await getRawEditSyncStatus(editId);
-    if (rawSyncStatus === 'synced' || rawSyncStatus === 'cleaned') {
-      throw createAdminError(409, 'This edit has already been synchronized and can only be viewed.', {
-        code: 'EDIT_SYNC_LOCKED'
-      });
-    }
-    if (rawSyncStatus === 'syncing') {
-      throw createAdminError(409, 'This edit is currently being synchronized and cannot be changed right now.', {
-        code: 'EDIT_SYNC_IN_PROGRESS'
-      });
-    }
-    assertMutableEdit(before);
+    assertMutableSyncStatus(before.syncStatus);
 
     try {
       const updated = await reassignUserEdit(editId, parsedTarget, {
@@ -245,18 +207,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     if (!before) {
       throw createAdminError(404, 'Edit not found');
     }
-    const rawSyncStatus = await getRawEditSyncStatus(editId);
-    if (rawSyncStatus === 'synced' || rawSyncStatus === 'cleaned') {
-      throw createAdminError(409, 'This edit has already been synchronized and can only be viewed.', {
-        code: 'EDIT_SYNC_LOCKED'
-      });
-    }
-    if (rawSyncStatus === 'syncing') {
-      throw createAdminError(409, 'This edit is currently being synchronized and cannot be changed right now.', {
-        code: 'EDIT_SYNC_IN_PROGRESS'
-      });
-    }
-    assertMutableEdit(before);
+    assertMutableSyncStatus(before.syncStatus);
 
     try {
       const deleted = await deleteUserEdit(editId);
@@ -414,7 +365,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
     } = {}
   ) {
     const item = await getBuildingEditDetails(editIdRaw);
-    assertMutableEdit(item);
+    assertMutableSyncStatus(item.syncStatus);
     if (normalizeUserEditStatus(item.status) !== 'pending') {
       throw createAdminError(409, 'Edit has already been processed');
     }

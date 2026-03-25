@@ -5,6 +5,23 @@ import type {
 } from '$shared/types';
 
 const { sanitizeEditedFields } = require('../edits.service');
+const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
+
+function assertMutableSyncStatus(syncStatusRaw) {
+  const syncStatus = String(syncStatusRaw || 'unsynced').trim().toLowerCase();
+  if (syncStatus === 'syncing') {
+    const error = new Error('This edit is currently being synchronized and cannot be changed right now.');
+    error.status = 409;
+    error.code = 'EDIT_SYNC_IN_PROGRESS';
+    throw error;
+  }
+  if (READ_ONLY_SYNC_STATUSES.has(syncStatus)) {
+    const error = new Error('This edit has already been synchronized and can only be viewed.');
+    error.status = 409;
+    error.code = 'EDIT_SYNC_LOCKED';
+    throw error;
+  }
+}
 
 function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   if (!db) {
@@ -17,7 +34,6 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   const isPostgres = db.provider === 'postgres';
   const REASSIGNABLE_EDIT_STATUSES = new Set(['pending', 'accepted', 'partially_accepted']);
   const MERGED_EDIT_STATUSES = new Set(['accepted', 'partially_accepted']);
-  const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
   const MERGED_EDITS_FOR_TARGET_SQL = `
         (
           SELECT COUNT(*)
@@ -558,6 +574,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     REASSIGNABLE_EDIT_STATUSES,
     READ_ONLY_SYNC_STATUSES,
     USER_EDITS_ORDER_BY_SQL,
+    assertMutableSyncStatus,
     applyUserEditRowToInfo,
     buildChangesFromRows,
     countMergedEditsForTarget,
@@ -580,5 +597,6 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 }
 
 module.exports = {
+  assertMutableSyncStatus,
   createBuildingEditsContext
 };
