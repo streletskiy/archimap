@@ -13,7 +13,7 @@
 - `frontend/src/lib/components/ui/**`: generated `shadcn-svelte` primitives kept close to upstream.
 - `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
-- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
+- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`, plus tab-local subcomponents for list/filter/detail panes (`EditListFilters`, `EditDetailPane`, `SyncCandidateCard`, `SyncCandidateDetailPane`, `AdminDataForm`, `AdminDataRegionList`, `AdminDataHistorySection`, `AdminFilterTagsSection`, `AdminFilterPresetsSection`, `StyleOverridesDialog`, `StyleDefaultsSection`).
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
@@ -59,6 +59,7 @@
   - `src/lib/server/services/admin/admin-settings.service.ts`: email-preview, app-settings, data-settings, and region-sync orchestration
   - `src/lib/server/services/admin/admin-edits.service.ts`: admin edit moderation, merge flows, and admin user detail queries
   - `src/lib/server/services/style-region-overrides.service.ts`: public/admin style-region override rule persistence and validation
+  - `src/lib/server/services/osm-sync.service.ts`: thin façade over `osm-oauth.ts`, `osm-api-client.ts`, `osm-changeset-builder.ts`, and `osm-candidate-resolver.ts` for OSM admin sync and OAuth flows
 - Frontend map filter decomposition:
   - `frontend/src/lib/services/map/map-filter-pipeline.ts`: filter lifecycle orchestration entrypoint for viewport events and status transitions
   - `frontend/src/lib/services/map/filter-request-planner.ts`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping

@@ -185,6 +185,7 @@ When a new control is needed:
 - Shell components define application composition and shared UX language.
 - Routes should stay thin when possible and delegate behavior to shell components, services, and stores.
 - Base controls define the contract; shells define composition; routes wire data and lifecycle.
+- When a shell grows into a large admin tab, split repeated filter rows, list cards, and detail panes into tab-local subcomponents instead of keeping one monolithic file.
 
 ## Workflow For New UI Work
 
@@ -193,7 +194,8 @@ When a new control is needed:
 3. Wrap it in `base/**`.
 4. Map shared styling into semantic classes and tokens in `frontend/src/app.css`.
 5. Migrate feature code to the base wrapper.
-6. Update this document if a new shared pattern or rule was introduced.
+6. Split large admin or settings tabs into local subcomponents when a tab starts mixing filters, list rows, and detail panes; keep tag-management, preset-management, and detail panes separate instead of embedding them in one monolith.
+7. Update this document if a new shared pattern or rule was introduced.
 
 ## Build And Verification
 
