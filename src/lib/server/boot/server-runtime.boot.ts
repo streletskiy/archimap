@@ -294,6 +294,7 @@ class ServerRuntime {
     this.getUserEditDetailsById = buildingEditsService.getUserEditDetailsById;
     this.reassignUserEdit = buildingEditsService.reassignUserEdit;
     this.deleteUserEdit = buildingEditsService.deleteUserEdit;
+    this.withdrawPendingUserEdit = buildingEditsService.withdrawPendingUserEdit;
     this.mergePersonalEditsIntoFeatureInfo = buildingEditsService.mergePersonalEditsIntoFeatureInfo;
     this.applyPersonalEditsToFilterItems = buildingEditsService.applyPersonalEditsToFilterItems;
 

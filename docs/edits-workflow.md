@@ -20,6 +20,7 @@ User-side:
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;
   - stale extra `pending` rows are marked as `superseded`.
+- In the account history, a user can withdraw their own `pending` edit before moderation; the action deletes that pending row.
 - In account history user can see moderation statuses and admin comment.
 
 Admin-side moderation:

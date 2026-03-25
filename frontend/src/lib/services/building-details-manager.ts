@@ -121,6 +121,11 @@ function normalizeArchiInfo(payload: LooseRecord) {
 function createFallbackBuildingDetails(detail = null) {
   return {
     feature_kind: detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+    review_status: null,
+    admin_comment: null,
+    user_edit_id: null,
+    updated_by: null,
+    updated_at: null,
     region_slugs: [],
     properties: {
       archiInfo: {
@@ -285,6 +290,8 @@ export function createBuildingDetailsManager() {
     let feature = null;
     try {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
+      const reviewStatus = String(data?.review_status || '').trim().toLowerCase() || null;
+      const userEditId = Number(data?.user_edit_id || 0);
       let sourceTags = {};
       try {
         feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
@@ -298,6 +305,11 @@ export function createBuildingDetailsManager() {
       }
       return {
         feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+        review_status: reviewStatus,
+        admin_comment: coerceNullableText(data?.admin_comment),
+        user_edit_id: Number.isInteger(userEditId) && userEditId > 0 ? userEditId : null,
+        updated_by: coerceNullableText(data?.updated_by),
+        updated_at: coerceNullableText(data?.updated_at),
         region_slugs: Array.isArray(data?.region_slugs) ? data.region_slugs : [],
         design_ref_suggestions: Array.isArray(data?.design_ref_suggestions) ? data.design_ref_suggestions : [],
         properties: {
@@ -314,6 +326,11 @@ export function createBuildingDetailsManager() {
         const archiInfo = feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
         return {
           feature_kind: feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+          review_status: null,
+          admin_comment: null,
+          user_edit_id: null,
+          updated_by: null,
+          updated_at: null,
           region_slugs: [],
           design_ref_suggestions: [],
           properties: {
@@ -535,8 +552,9 @@ export function createBuildingDetailsManager() {
     };
 
     try {
+      let lastSaveResult = null;
       for (const target of saveTargets) {
-        await apiJson('/api/building-info', {
+        lastSaveResult = await apiJson('/api/building-info', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -547,6 +565,8 @@ export function createBuildingDetailsManager() {
           })
         });
       }
+      const savedEditId = Number(lastSaveResult?.editId || 0);
+      const savedReviewStatus = String(lastSaveResult?.status || '').trim().toLowerCase() || 'pending';
 
       state.update((current) => {
         const isSameSelection = current.selectedBuildingIdentity
@@ -562,6 +582,8 @@ export function createBuildingDetailsManager() {
         const nextSelectedBuildingDetails = canPatchSelectedDetails
           ? current.selectedBuildingDetails.map((detail) => ({
               ...detail,
+              review_status: savedReviewStatus,
+              user_edit_id: Number.isInteger(savedEditId) && savedEditId > 0 ? savedEditId : detail?.user_edit_id ?? null,
               properties: {
                 archiInfo: toDisplayArchiInfoFromPayload(
                   detail?.properties?.archiInfo,
@@ -576,6 +598,8 @@ export function createBuildingDetailsManager() {
           : (isSameSelection
             ? {
                 ...current.buildingDetails,
+                review_status: savedReviewStatus,
+                user_edit_id: Number.isInteger(savedEditId) && savedEditId > 0 ? savedEditId : current.buildingDetails?.user_edit_id ?? null,
                 feature_kind: current.buildingDetails?.feature_kind || null,
                 region_slugs: Array.isArray(current.buildingDetails?.region_slugs)
                   ? current.buildingDetails.region_slugs

@@ -154,7 +154,8 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     getSessionEditActorKey: runtime.getSessionEditActorKey,
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
     getUserEditsList: runtime.getUserEditsList,
-    getUserEditDetailsById: runtime.getUserEditDetailsById
+    getUserEditDetailsById: runtime.getUserEditDetailsById,
+    withdrawPendingUserEdit: runtime.withdrawPendingUserEdit
   });
 
   registerContoursStatusRoute(runtime.app, runtime.db, runtime.rateLimiters.contoursStatusRateLimiter);

@@ -1,10 +1,12 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
+  import { page } from '$app/stores';
   import { fade, fly } from 'svelte/transition';
   import { UiBadge, UiButton, UiCheckbox, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
   import { selectedBuilding, selectedBuildings } from '$lib/stores/map';
   import { locale, t } from '$lib/i18n/index';
+  import { buildAccountEditUrl } from '$lib/client/section-routes';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import BulkClearAction from '$lib/components/shell/BulkClearAction.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
@@ -360,6 +362,13 @@
   $: buildingKey = !isBulkSelection && $selectedBuilding?.osmType && $selectedBuilding?.osmId
     ? `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`
     : '';
+  $: reviewStatus = String(buildingDetails?.review_status || '').trim().toLowerCase();
+  $: pendingEditId = Number(buildingDetails?.user_edit_id || 0);
+  $: hasPendingEdit = !isBulkSelection && reviewStatus === 'pending' && Number.isInteger(pendingEditId) && pendingEditId > 0;
+  $: pendingEditUrl = hasPendingEdit ? buildAccountEditUrl($page.url, pendingEditId) : null;
+  $: pendingEditHref = pendingEditUrl
+    ? `${pendingEditUrl.pathname}${pendingEditUrl.search}${pendingEditUrl.hash}`
+    : '';
   $: displayName = isBulkSelection
     ? (!bulkDetailsReady || bulkFieldState?.name?.isMixed
       ? $t('buildingModal.bulkSelectionTitle')
@@ -485,6 +494,16 @@
               >
                 {buildingKey}
               </UiBadge>
+              {#if hasPendingEdit}
+                <UiBadge
+                  href={pendingEditHref}
+                  variant="warning"
+                  className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold cursor-pointer"
+                  title={$t('buildingModal.pendingEditOpen')}
+                >
+                  {$t('buildingModal.pendingEdit')}
+                </UiBadge>
+              {/if}
             {/if}
             {#if !selectionState.isBulkSelection && displayAddress}
               <span class="modal-address">{displayAddress}</span>

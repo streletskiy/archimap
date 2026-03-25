@@ -1,4 +1,5 @@
 const { sendCachedJson } = require('../infra/http-cache.infra');
+const { requireCsrfSession } = require('../services/csrf.service');
 
 function registerAccountRoutes({
   app,
@@ -7,7 +8,8 @@ function registerAccountRoutes({
   getSessionEditActorKey,
   normalizeUserEditStatus,
   getUserEditsList,
-  getUserEditDetailsById
+  getUserEditDetailsById,
+  withdrawPendingUserEdit
 }) {
   function parseLimit(raw, fallback = 200, min = 1, max = 500) {
     const n = Number(raw);
@@ -50,6 +52,28 @@ function registerAccountRoutes({
       cacheControl: 'private, no-cache',
       lastModified: item.updatedAt || undefined
     });
+  });
+
+  app.delete('/api/account/edits/:editId', requireCsrfSession, requireAuth, async (req, res) => {
+    const actorKey = getSessionEditActorKey(req);
+    if (!actorKey) {
+      return res.status(400).json({ code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve current user' });
+    }
+    if (typeof withdrawPendingUserEdit !== 'function') {
+      return res.status(500).json({ code: 'ERR_REQUEST_FAILED', error: 'Account edit cancellation is unavailable' });
+    }
+
+    try {
+      const item = await withdrawPendingUserEdit(req.params.editId, actorKey);
+      return res.json({ ok: true, item });
+    } catch (error) {
+      const status = Number(error?.status) || 500;
+      const code = String(error?.code || '').trim() || 'ERR_REQUEST_FAILED';
+      return res.status(status).json({
+        code,
+        error: String(error?.message || 'Account edit cancellation failed')
+      });
+    }
   });
 }
 

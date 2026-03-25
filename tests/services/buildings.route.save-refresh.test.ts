@@ -48,6 +48,8 @@ function createRouteApp(options: LooseRecord = {}) {
   app.use(jsonMiddleware());
 
   const savedEdits: LooseRecord[] = [];
+  const updatedEdits: LooseRecord[] = [];
+  const supersedeCalls: LooseRecord[] = [];
   const refreshCalls: string[] = [];
   let resolveRefresh: (() => void) | null = null;
   const refreshPromise = new Promise<void>((resolve) => {
@@ -85,11 +87,13 @@ function createRouteApp(options: LooseRecord = {}) {
       tags_json: JSON.stringify({ building: 'yes' }),
       updated_at: '2026-03-25T00:00:00Z'
     },
-    getLatestUserEditRow: async () => null,
+    getLatestUserEditRow: async () => options.latestPendingEdit || null,
     normalizeUserEditStatus,
     sanitizeArchiPayload,
     sanitizeEditedFields,
-    supersedePendingUserEdits: async () => {},
+    supersedePendingUserEdits: async (...args) => {
+      supersedeCalls.push(args);
+    },
     getDesignRefSuggestionsCached: async () => [],
     refreshDesignRefSuggestionsCache: () => {
       refreshCalls.push('building-info-save');
@@ -100,13 +104,17 @@ function createRouteApp(options: LooseRecord = {}) {
         savedEdits.push(values);
         return savedEdits.length;
       },
-      updatePendingUserEditById: async () => {}
+      updatePendingUserEditById: async (editId, values = {}) => {
+        updatedEdits.push({ editId, values });
+      }
     }
   });
 
   return {
     app,
     savedEdits,
+    updatedEdits,
+    supersedeCalls,
     refreshCalls,
     resolveRefresh: resolveRefresh || (() => {}),
     refreshPromise
@@ -192,4 +200,45 @@ test('building-info save queues design-ref suggestion refresh without blocking t
 
   resolveRefresh?.();
   await refreshPromise;
+});
+
+test('building-info save updates an existing pending edit in place', async (t) => {
+  const { app, savedEdits, updatedEdits, supersedeCalls } = createRouteApp({
+    latestPendingEdit: {
+      id: 501,
+      osm_type: 'way',
+      osm_id: 5010,
+      createdBy: 'editor@example.com',
+      edited_fields_json: JSON.stringify(['name']),
+      status: 'pending'
+    }
+  });
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const port = (() => {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Server is not listening');
+    return address.port;
+  })();
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/building-info`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      osmType: 'way',
+      osmId: 5010,
+      name: 'Updated draft',
+      editedFields: ['name']
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(savedEdits.length, 0);
+  assert.equal(updatedEdits.length, 1);
+  assert.equal(Number(updatedEdits[0]?.editId), 501);
+  assert.equal(supersedeCalls.length, 1);
+  assert.deepEqual(supersedeCalls[0], ['way', 5010, 'editor@example.com', 501]);
 });

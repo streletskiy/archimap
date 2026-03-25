@@ -192,6 +192,11 @@ System notes:
   - Admin-only delete for a style-region override rule.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
   - Account history uses the same sync metadata fields as admin edit details and keeps them visible after local overwrite cleanup.
+- `DELETE /api/account/edits/:editId`
+  - Current-user only.
+  - Withdraws one of the user's own `pending` edits before moderation and removes that history row.
+  - Returns `403 EDIT_ACCESS_DENIED` when the edit belongs to another user.
+  - Returns `409 EDIT_NOT_PENDING` when the edit has already been moderated or withdrawn.
 
 ## Runtime config payload
 

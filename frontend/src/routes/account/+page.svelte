@@ -5,7 +5,13 @@
   import { page } from '$app/stores';
   import { fade } from 'svelte/transition';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
-  import { buildAccountUrl, buildInfoUrl, resolveAccountTabFromUrl } from '$lib/client/section-routes';
+  import {
+    buildAccountEditUrl,
+    buildAccountUrl,
+    buildInfoUrl,
+    resolveAccountEditIdFromUrl,
+    resolveAccountTabFromUrl
+  } from '$lib/client/section-routes';
   import {
     UiBadge,
     UiButton,
@@ -74,6 +80,7 @@
   let detailLoading = false;
   let detailStatus = '';
   let detailPaneVisible = false;
+  let editActionBusy = false;
   let detailRequestToken = 0;
 
   let mapEl;
@@ -99,6 +106,11 @@
   }
 
   const msg = (e, f) => String(e?.message || f);
+
+  function getSelectedEditId(item = selectedEdit) {
+    const id = Number(item?.editId || item?.id || 0);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }
 
   async function ensureMapRuntime() {
     if (!mapRuntimePromise) {
@@ -339,19 +351,27 @@
     }
   }
 
-  async function openEdit(editId) {
+  async function openEdit(editId, { syncUrl = true } = {}) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) return;
     const requestToken = ++detailRequestToken;
     detailPaneVisible = true;
     detailLoading = true;
+    editActionBusy = false;
     detailStatus = translateNow('account.edits.loading');
     selectedEdit = null;
     try {
       const data = await apiJson(`/api/account/edits/${id}`);
       if (requestToken !== detailRequestToken) return;
       selectedEdit = data?.item || null;
+      if (!selectedEdit) {
+        detailStatus = translateNow('account.edits.detailsLoadFailed');
+        return;
+      }
       detailStatus = '';
+      if (syncUrl) {
+        await replaceAccountUrl(activeTab, id);
+      }
       try {
         const feature = await apiJson(`/api/building/${encodeURIComponent(selectedEdit.osmType)}/${encodeURIComponent(selectedEdit.osmId)}`);
         if (requestToken !== detailRequestToken) return;
@@ -367,6 +387,40 @@
     }
   }
 
+  async function cancelSelectedEdit() {
+    const id = getSelectedEditId();
+    if (!id || !selectedEdit || selectedEdit.status !== 'pending' || editActionBusy) return;
+
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(
+        translateNow('account.edits.cancelPendingConfirm', { id })
+      );
+      if (!confirmed) return;
+    }
+
+    editActionBusy = true;
+    detailStatus = translateNow('account.edits.cancelPendingWorking');
+    try {
+      await apiJson(`/api/account/edits/${id}`, {
+        method: 'DELETE'
+      });
+      selectedEdit = null;
+      detailLoading = false;
+      detailStatus = translateNow('account.edits.cancelPendingSuccess');
+      if (map?.getSource('selected-building')) {
+        map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
+      }
+      if (activeTab === 'edits') {
+        await replaceAccountUrl(activeTab, null);
+        await loadEdits();
+      }
+    } catch (e) {
+      detailStatus = msg(e, translateNow('account.edits.cancelPendingFailed'));
+    } finally {
+      editActionBusy = false;
+    }
+  }
+
   function closeEditPanel() {
     detailRequestToken += 1;
     detailPaneVisible = false;
@@ -378,6 +432,7 @@
     selectedEdit = null;
     detailLoading = false;
     detailStatus = '';
+    editActionBusy = false;
     if (map?.getSource('selected-building')) {
       map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
     }
@@ -388,6 +443,7 @@
     selectedEdit = null;
     detailLoading = false;
     detailStatus = '';
+    editActionBusy = false;
     if (map?.getSource('selected-building')) {
       map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
     }
@@ -402,9 +458,14 @@
     return { cls: 'ui-surface-soft ui-text-muted', text: $t('account.edits.syncUnsynced') };
   }
 
-  async function replaceAccountUrl(tab) {
+  async function replaceAccountUrl(tab, editId = null) {
     if (typeof window === 'undefined') return;
-    const next = buildAccountUrl(window.location.href, tab);
+    const next = Number.isInteger(Number(editId)) && Number(editId) > 0 && tab === 'edits'
+      ? buildAccountEditUrl(window.location.href, editId)
+      : buildAccountUrl(window.location.href, tab);
+    if (!(Number.isInteger(Number(editId)) && Number(editId) > 0 && tab === 'edits')) {
+      next.searchParams.delete('editId');
+    }
     const current = new URL(window.location.href);
     if (next.toString() === current.toString()) return;
     accountUrlSyncBusy = true;
@@ -439,8 +500,12 @@
   }
 
   async function switchTab(tab) {
+    if (activeTab === tab) {
+      await replaceAccountUrl(tab, tab === 'edits' ? getSelectedEditId() : null);
+      return;
+    }
     await activateTab(tab);
-    await replaceAccountUrl(tab);
+    await replaceAccountUrl(tab, tab === 'edits' ? getSelectedEditId() : null);
   }
 
   async function handleTabNavChange(event) {
@@ -488,10 +553,21 @@
     const unsubscribePage = page.subscribe(($pageState) => {
       if (accountUrlSyncBusy) return;
       const nextTab = resolveAccountTabFromUrl($pageState.url);
+      const nextEditId = resolveAccountEditIdFromUrl($pageState.url);
       void (async () => {
         tabNavValue = nextTab;
         await activateTab(nextTab);
-        await replaceAccountUrl(nextTab);
+        if (nextTab === 'edits') {
+          if (nextEditId) {
+            const currentEditId = getSelectedEditId();
+            if (currentEditId !== nextEditId || !detailPaneVisible || detailLoading) {
+              await openEdit(nextEditId, { syncUrl: false });
+            }
+          } else if (detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus)) {
+            closeEditPanel();
+          }
+        }
+        await replaceAccountUrl(nextTab, nextTab === 'edits' ? nextEditId : null);
       })();
     });
     if (activeTab === 'edits') {
@@ -735,15 +811,34 @@
         <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-base font-bold ui-text-strong">{$t('account.edits.detailTitle')}</h3>
-            <UiButton type="button" variant="secondary" size="close" aria-label={$t('account.edits.closeDetail')} onclick={closeEditPanel}><CloseIcon class="ui-close-icon" /></UiButton>
+            <UiButton type="button" variant="secondary" size="close" aria-label={$t('account.edits.closeDetail')} disabled={editActionBusy} onclick={closeEditPanel}><CloseIcon class="ui-close-icon" /></UiButton>
           </div>
           {#if detailLoading}
             <p class="text-sm ui-text-subtle">{$t('account.edits.loading')}</p>
+          {:else if !selectedEdit && detailStatus}
+            <p class="text-sm ui-text-muted">{detailStatus}</p>
           {:else if !selectedEdit}
             <p class="text-sm ui-text-subtle">{$t('account.edits.selectHint')}</p>
           {:else}
                 {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
             <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
+            {#if selectedEdit.status === 'pending'}
+              <div class="rounded-xl border ui-border ui-surface-warning p-3 text-sm ui-text-body">
+                <p class="text-sm font-semibold ui-text-strong">{$t('account.edits.pendingEditTitle')}</p>
+                <p class="mt-1 text-sm ui-text-subtle">{$t('account.edits.pendingEditHelp')}</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <UiButton
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    disabled={editActionBusy}
+                    onclick={cancelSelectedEdit}
+                  >
+                    {editActionBusy ? $t('account.edits.cancelPendingWorking') : $t('account.edits.cancelPending')}
+                  </UiButton>
+                </div>
+              </div>
+            {/if}
             {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
               <div class="rounded-xl border ui-border ui-surface-muted p-3 text-sm ui-text-body">
                 <p><strong>{$t('account.edits.syncStatus')}:</strong> {getSyncBadgeMeta(selectedEdit.syncStatus).text}</p>

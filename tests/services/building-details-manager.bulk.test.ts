@@ -321,3 +321,134 @@ test('building details manager keeps design project suggestions and sends design
     global.fetch = originalFetch;
   }
 });
+
+test('building details manager preserves pending review metadata for a single building', async () => {
+  const { get } = await import('svelte/store');
+  const { session } = await loadModule('frontend/src/lib/stores/auth.ts');
+  const { clearSelectedBuildings } = await loadModule('frontend/src/lib/stores/map.ts');
+  const { createBuildingDetailsManager } = await loadModule('frontend/src/lib/services/building-details-manager.ts');
+
+  const originalFetch = global.fetch;
+  const requests: RequestRecord[] = [];
+
+  session.set({
+    loading: false,
+    authenticated: true,
+    csrfToken: 'csrf-token',
+    user: {
+      email: 'editor@example.com'
+    }
+  });
+  clearSelectedBuildings();
+
+  global.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+    let body = null;
+    if (typeof init.body === 'string') {
+      try {
+        body = JSON.parse(init.body);
+      } catch {
+        body = init.body;
+      }
+    }
+    requests.push({
+      url,
+      method,
+      headers: copyHeaders(init.headers),
+      body
+    });
+
+    if (method === 'GET' && url.endsWith('/api/building-info/way/21')) {
+      return createJsonResponse({
+        feature_kind: 'building',
+        review_status: 'pending',
+        user_edit_id: 41,
+        admin_comment: 'Needs review',
+        region_slugs: [],
+        name: 'Pending House',
+        style: 'modernism',
+        material: 'brick',
+        colour: '#222222',
+        levels: '4',
+        year_built: '1999',
+        architect: 'Alice',
+        address: 'Main street, 21',
+        archimap_description: 'Waiting for moderation'
+      });
+    }
+
+    if (method === 'GET' && url.endsWith('/api/building/way/21')) {
+      return createJsonResponse({
+        properties: {
+          feature_kind: 'building',
+          source_tags: {}
+        }
+      });
+    }
+
+    if (method === 'POST' && url.endsWith('/api/building-info')) {
+      return createJsonResponse({
+        ok: true,
+        editId: 41,
+        status: 'pending'
+      });
+    }
+
+    return createJsonResponse({});
+  }) as typeof fetch;
+
+  try {
+    const manager = createBuildingDetailsManager();
+    manager.selectBuilding({
+      osmType: 'way',
+      osmId: 21,
+      lon: 37.6,
+      lat: 55.75,
+      featureKind: 'building'
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const loadedState = get(manager) as any;
+    assert.equal(loadedState.buildingDetails?.review_status, 'pending');
+    assert.equal(loadedState.buildingDetails?.user_edit_id, 41);
+    assert.equal(loadedState.buildingDetails?.admin_comment, 'Needs review');
+
+    await manager.saveEdit({
+      osmType: 'way',
+      osmId: 21,
+      name: 'Pending House',
+      style: 'art-deco',
+      material: 'brick',
+      colour: '#222222',
+      levels: '4',
+      yearBuilt: '1999',
+      architect: 'Alice',
+      address: 'Main street, 21',
+      archimapDescription: 'Waiting for moderation',
+      editedFields: ['style']
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const latestState = get(manager) as any;
+    assert.equal(latestState.buildingDetails?.review_status, 'pending');
+    assert.equal(latestState.buildingDetails?.user_edit_id, 41);
+    assert.equal(latestState.buildingDetails?.properties?.archiInfo?.styleRaw, 'art-deco');
+
+    const postRequest = requests.find((request) => request.method === 'POST' && request.url.endsWith('/api/building-info'));
+    assert.equal(postRequest?.body?.editedFields?.[0], 'style');
+
+    manager.destroy();
+  } finally {
+    clearSelectedBuildings();
+    session.set({
+      loading: false,
+      authenticated: false,
+      csrfToken: null,
+      user: null
+    });
+    global.fetch = originalFetch;
+  }
+});

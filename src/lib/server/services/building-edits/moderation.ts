@@ -226,9 +226,85 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     return tx();
   }
 
+  async function withdrawPendingUserEdit(editId, actor) {
+    const id = Number(editId);
+    if (!Number.isInteger(id) || id <= 0) {
+      const error = new Error('Invalid edit id');
+      error.status = 400;
+      error.code = 'ERR_INVALID_EDIT_ID';
+      throw error;
+    }
+
+    const owner = String(actor || '').trim().toLowerCase();
+    if (!owner) {
+      const error = new Error('Failed to resolve current user');
+      error.status = 400;
+      error.code = 'ERR_CURRENT_USER_UNRESOLVED';
+      throw error;
+    }
+
+    const tx = db.transaction(async () => {
+      const row = await db.prepare(`
+        SELECT id, osm_type, osm_id, created_by, status, sync_status
+        FROM user_edits.building_user_edits
+        WHERE id = ?
+        LIMIT 1
+      `).get(id);
+
+      if (!row) {
+        const error = new Error('Edit not found');
+        error.status = 404;
+        error.code = 'EDIT_NOT_FOUND';
+        throw error;
+      }
+
+      if (String(row.created_by || '').trim().toLowerCase() !== owner) {
+        const error = new Error('You can only cancel your own pending edits');
+        error.status = 403;
+        error.code = 'EDIT_ACCESS_DENIED';
+        throw error;
+      }
+
+      const status = normalizeUserEditStatus(row.status);
+      if (status !== 'pending') {
+        const error = new Error('This edit is no longer pending review.');
+        error.status = 409;
+        error.code = 'EDIT_NOT_PENDING';
+        throw error;
+      }
+
+      assertMutableSyncStatus(row.sync_status);
+
+      const result = await db.prepare(`
+        DELETE FROM user_edits.building_user_edits
+        WHERE id = ?
+          AND lower(trim(created_by)) = ?
+          AND status = 'pending'
+      `).run(id, owner);
+
+      if (Number(result?.changes || 0) === 0) {
+        const error = new Error('Edit not found');
+        error.status = 404;
+        error.code = 'EDIT_NOT_FOUND';
+        throw error;
+      }
+
+      return {
+        editId: id,
+        osmType: row.osm_type,
+        osmId: Number(row.osm_id),
+        status: 'pending',
+        deletedMergedLocal: false
+      };
+    });
+
+    return tx();
+  }
+
   return {
     deleteUserEdit,
-    reassignUserEdit
+    reassignUserEdit,
+    withdrawPendingUserEdit
   };
 }
 

@@ -53,6 +53,7 @@ function parseLegacyInfoTab(searchParams) {
 }
 
 function parseLegacyAccountTab(searchParams) {
+  if (searchParams.has('editId') || searchParams.has('edit')) return 'edits';
   const tabRaw = String(searchParams.get('tab') || searchParams.get('section') || '').trim().toLowerCase();
   if (tabRaw === 'edits' || tabRaw === 'history') return 'edits';
   return 'settings';
@@ -96,6 +97,13 @@ export function resolveAccountTabFromUrl(input) {
   return parseLegacyAccountTab(url.searchParams);
 }
 
+export function resolveAccountEditIdFromUrl(input) {
+  const url = toUrl(input);
+  const editId = Number(url.searchParams.get('editId'));
+  if (!Number.isInteger(editId) || editId <= 0) return null;
+  return editId;
+}
+
 export function resolveAdminTabFromUrl(input) {
   const url = toUrl(input);
   if (url.searchParams.has('edit') || url.searchParams.has('adminEdit')) return 'edits';
@@ -132,6 +140,18 @@ export function buildAccountUrl(input, tab) {
   next.pathname = buildSectionPath(current.pathname, 'account', slug);
   next.searchParams.delete('tab');
   next.searchParams.delete('section');
+  return next;
+}
+
+export function buildAccountEditUrl(input, editId) {
+  const current = toUrl(input);
+  const next = buildAccountUrl(current, 'edits');
+  const normalizedEditId = Number(editId);
+  if (Number.isInteger(normalizedEditId) && normalizedEditId > 0) {
+    next.searchParams.set('editId', String(normalizedEditId));
+  } else {
+    next.searchParams.delete('editId');
+  }
   return next;
 }
 

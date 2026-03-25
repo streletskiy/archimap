@@ -545,6 +545,67 @@ test('deleteUserEdit removes pending edit history row', async () => {
   assert.equal(row, undefined);
 });
 
+test('withdrawPendingUserEdit removes the current user pending edit', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(60, 'way', 6060, 'user@example.com', 'Черновик', 'pending');
+
+  const withdrawn = await service.withdrawPendingUserEdit(60, 'user@example.com');
+  assert.equal(withdrawn?.editId, 60);
+  assert.equal(withdrawn?.status, 'pending');
+  assert.equal(withdrawn?.deletedMergedLocal, false);
+
+  const row = db.prepare(`
+    SELECT 1
+    FROM user_edits.building_user_edits
+    WHERE id = ?
+  `).get(60);
+  assert.equal(row, undefined);
+});
+
+test('withdrawPendingUserEdit blocks edits from other users and non-pending rows', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, created_at, updated_at
+    )
+    VALUES
+      (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
+      (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    61,
+    'way',
+    6061,
+    'other@example.com',
+    'Чужая правка',
+    'pending',
+    62,
+    'way',
+    6062,
+    'user@example.com',
+    'Уже рассмотрено',
+    'rejected'
+  );
+
+  await assert.rejects(
+    () => service.withdrawPendingUserEdit(61, 'user@example.com'),
+    (error) => error?.code === 'EDIT_ACCESS_DENIED'
+  );
+
+  await assert.rejects(
+    () => service.withdrawPendingUserEdit(62, 'user@example.com'),
+    (error) => error?.code === 'EDIT_NOT_PENDING'
+  );
+});
+
 test('deleteUserEdit removes lone accepted edit together with merged local data', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
