@@ -85,6 +85,7 @@ function createServerRuntimeConfig(options: LooseRecord = {}) {
       cspScriptHashes: collectInlineScriptHashesFromFile(frontendIndexPath),
       syncRegionScriptPath: path.join(rootDir, 'scripts', 'sync-osm-region.ts'),
       searchRebuildScriptPath: path.join(rootDir, 'workers', 'rebuild-search-index.worker.ts'),
+      searchRefreshWorkerScriptPath: path.join(rootDir, 'workers', 'refresh-search-index.worker.ts'),
       filterTagKeysRebuildScriptPath: path.join(rootDir, 'workers', 'rebuild-filter-tag-keys-cache.worker.ts')
     }
   };

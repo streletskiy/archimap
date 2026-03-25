@@ -6,6 +6,7 @@ const {
   parsePositiveId
 } = require('./shared');
 const { splitBuildingMaterialSelection, sanitizeProjectYear } = require('../edits.service');
+const { hasSearchIndexRelevantFieldChange } = require('../search-index-fields');
 const { assertMutableSyncStatus } = require('../building-edits/shared');
 import type {
   BuildingEdit,
@@ -110,6 +111,15 @@ function createAdminEditsService(options: LooseRecord = {}) {
     return getUserEditsList({ createdBy: email, limit, summary: true });
   }
 
+  function queueDesignRefSuggestionsRefresh(reason, shouldRefresh) {
+    if (!shouldRefresh) return;
+    void Promise.resolve(refreshDesignRefSuggestionsCache?.(reason)).catch(() => {});
+  }
+
+  function shouldRefreshSearchIndexForChanges(changes) {
+    return hasSearchIndexRelevantFieldChange(changes);
+  }
+
   async function rejectBuildingEdit(editIdRaw, { comment, reviewer }: { comment?: string; reviewer?: string | null } = {}) {
     const row = await getBuildingEditDetails(editIdRaw);
     assertMutableSyncStatus(row.syncStatus);
@@ -168,13 +178,21 @@ function createAdminEditsService(options: LooseRecord = {}) {
         actor: actor || 'admin',
         force: Boolean(force === true)
       });
-      if (before.osmType && Number.isInteger(Number(before.osmId))) {
-        enqueueSearchIndexRefresh(before.osmType, before.osmId);
+      const beforeOsmType = String(before.osmType || '').trim();
+      const beforeOsmId = Number(before.osmId);
+      const afterOsmType = String(updated?.osmType || '').trim();
+      const afterOsmId = Number(updated?.osmId);
+      const shouldRefreshSearchIndex = shouldRefreshSearchIndexForChanges(before.changes)
+        && normalizeUserEditStatus(before.status) !== 'pending'
+        && Number.isInteger(beforeOsmId)
+        && beforeOsmType
+        && (beforeOsmType !== afterOsmType || beforeOsmId !== afterOsmId);
+      if (shouldRefreshSearchIndex) {
+        enqueueSearchIndexRefresh(beforeOsmType, beforeOsmId);
+        if (afterOsmType && Number.isInteger(afterOsmId) && (beforeOsmType !== afterOsmType || beforeOsmId !== afterOsmId)) {
+          enqueueSearchIndexRefresh(afterOsmType, afterOsmId);
+        }
       }
-      if (updated?.osmType && Number.isInteger(Number(updated.osmId))) {
-        enqueueSearchIndexRefresh(updated.osmType, updated.osmId);
-      }
-      await Promise.resolve(refreshDesignRefSuggestionsCache?.('admin-reassign'));
       return updated;
     } catch (error) {
       const message = String(error?.message || error || 'Failed to reassign edit');
@@ -211,10 +229,14 @@ function createAdminEditsService(options: LooseRecord = {}) {
 
     try {
       const deleted = await deleteUserEdit(editId);
-      if (deleted?.osmType && Number.isInteger(Number(deleted.osmId))) {
+      if (deleted?.deletedMergedLocal && shouldRefreshSearchIndexForChanges(before.changes) && deleted?.osmType && Number.isInteger(Number(deleted.osmId))) {
         enqueueSearchIndexRefresh(deleted.osmType, deleted.osmId);
       }
-      await Promise.resolve(refreshDesignRefSuggestionsCache?.('admin-delete'));
+      queueDesignRefSuggestionsRefresh(
+        'admin-delete',
+        Array.isArray(before?.changes)
+          && before.changes.some((change) => String(change?.field || '') === 'design_ref')
+      );
       return deleted;
     } catch (error) {
       const message = String(error?.message || error || 'Failed to delete edit');
@@ -516,8 +538,10 @@ function createAdminEditsService(options: LooseRecord = {}) {
       throw createAdminError(409, 'Edit has already been processed by another administrator');
     }
 
-    enqueueSearchIndexRefresh(item.osmType, item.osmId);
-    await Promise.resolve(refreshDesignRefSuggestionsCache?.('admin-merge'));
+    if (shouldRefreshSearchIndexForChanges(fieldsToMerge)) {
+      enqueueSearchIndexRefresh(item.osmType, item.osmId);
+    }
+    queueDesignRefSuggestionsRefresh('admin-merge', fieldsToMerge.includes('design_ref'));
     return {
       ok: true,
       editId,

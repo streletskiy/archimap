@@ -93,6 +93,8 @@
 - PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.ts`.
 - In-process LRU: `src/lib/server/infra/lru-cache.infra.ts` (search hot-paths plus building filter bbox/match caches via `building-filters.service.ts`).
 - Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.ts`.
+- Design-ref suggestions cache: `src/lib/server/boot/design-ref-suggestions.boot.ts` is startup-warmed and refreshed when `design_ref`-affecting writes or import/rebuild paths need it; OSM publish itself no longer waits on a full suggestions rebuild.
+- Search index maintenance: `src/lib/server/boot/search-index.boot.ts` keeps incremental building refreshes in a keyed in-process queue, coalesces repeated refreshes for the same `osm_key`, and defers queued work while a full rebuild is running. Incremental refreshes are dispatched to a dedicated worker process (`workers/refresh-search-index.worker.ts`) so request handlers do not wait on the DB update or the worker response, and call sites only enqueue refreshes for search-affecting fields (`name`, `address`, `style`, `architect`, `design_ref`); OSM publish/sync metadata updates do not enqueue search refreshes.
 
 ## i18n
 
@@ -170,5 +172,5 @@ SvelteKit Node runtime (server.sveltekit.ts)
   |
   +--> SQLite (main + osm + local/user edits + auth)
   +--> Redis session store (optional, prod)
-  +--> workers/scripts (region-sync pipeline, search index rebuild, tag cache rebuild)
+  +--> workers/scripts (region-sync pipeline, search index rebuild, search index refresh, tag cache rebuild)
 ```

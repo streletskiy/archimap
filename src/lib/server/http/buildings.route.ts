@@ -179,6 +179,7 @@ function registerBuildingsRoutes(deps) {
     if (requestedEditedFields.length === 0) {
       return res.status(409).json({ code: 'ERR_EDIT_NO_CHANGES', error: 'Edit payload does not contain changes' });
     }
+    const shouldRefreshDesignRefSuggestions = requestedEditedFields.includes('design_ref');
     if (featureKind === 'building_part') {
       const allowedFields = new Set(['levels', 'colour', 'style', 'material', 'year_built']);
       const hasDisallowedRequestedFields = requestedEditedFields.some((field) => !allowedFields.has(field));
@@ -222,7 +223,10 @@ function registerBuildingsRoutes(deps) {
     });
 
     const editId = await tx();
-    await Promise.resolve(refreshDesignRefSuggestionsCache?.('building-info-save'));
+    if (shouldRefreshDesignRefSuggestions) {
+      // Refreshing suggestions scans the full design-ref corpus, so keep it off the save path.
+      void Promise.resolve(refreshDesignRefSuggestionsCache?.('building-info-save')).catch(() => {});
+    }
     return res.json({ ok: true, editId, status: 'pending' });
   });
 

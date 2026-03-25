@@ -13,6 +13,7 @@ import {
 } from './osm-sync.shared';
 import { fetchOsmElement } from './osm-api-client';
 import { buildChangesetTags, closeChangeset, createChangeset, updateOsmElement } from './osm-changeset-builder';
+import { hasSearchIndexRelevantValues } from './search-index-fields';
 import type { SyncCandidate, SyncCandidateSummary } from '$shared/types';
 
 type CandidateResolverDeps = {
@@ -24,7 +25,7 @@ type CandidateResolverDeps = {
 };
 
 function createOsmCandidateResolver(deps: CandidateResolverDeps) {
-  const { db, getCredentials, enqueueSearchIndexRefresh, refreshDesignRefSuggestionsCache } = deps;
+  const { db, getCredentials, enqueueSearchIndexRefresh } = deps;
   if (!db) throw new Error('createOsmCandidateResolver: db is required');
   if (typeof getCredentials !== 'function') throw new Error('createOsmCandidateResolver: getCredentials is required');
 
@@ -477,10 +478,6 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
           syncSummaryJson: JSON.stringify(summary),
           syncErrorText: null
         });
-        if (typeof enqueueSearchIndexRefresh === 'function') {
-          enqueueSearchIndexRefresh(item.summaryBase.osmType, item.summaryBase.osmId);
-        }
-        await Promise.resolve(refreshDesignRefSuggestionsCache?.('osm-sync-publish'));
         syncedResults.push({
           osmType: item.summaryBase.osmType,
           osmId: item.summaryBase.osmId,
@@ -617,10 +614,9 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
           osmType: candidate.osmType,
           osmId: candidate.osmId
         });
-        if (typeof enqueueSearchIndexRefresh === 'function') {
+        if (typeof enqueueSearchIndexRefresh === 'function' && hasSearchIndexRelevantValues(candidate.localState)) {
           enqueueSearchIndexRefresh(candidate.osmType, candidate.osmId);
         }
-        await Promise.resolve(refreshDesignRefSuggestionsCache?.('osm-sync-cleanup'));
       } catch (error) {
         console.error('osm_sync_cleanup_failed', {
           osmType: candidate.osmType,

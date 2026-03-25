@@ -250,6 +250,7 @@ class ServerRuntime {
       processExecPath: this.config.processRef.execPath,
       rootDir: this.config.rootDir,
       searchRebuildScriptPath: this.config.paths.searchRebuildScriptPath,
+      searchRefreshWorkerScriptPath: this.config.paths.searchRefreshWorkerScriptPath,
       batchSize: this.config.searchIndexBatchSize,
       env: this.config.rawEnv,
       sqlite: {

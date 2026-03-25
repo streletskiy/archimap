@@ -134,6 +134,18 @@ function installFetchMock(handlers) {
   };
 }
 
+async function withTimeout(promise, timeoutMs = 1000) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 test('saveSettings encrypts the client secret and OAuth callback stores connected token state', async () => {
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
@@ -628,6 +640,8 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
 
   const changesetBodies = [];
   const putBodies = [];
+  let refreshCalls = 0;
+  let searchRefreshCalls = 0;
   const restore = installFetchMock([
     (url, init) => {
       if (url.endsWith('/oauth2/token')) {
@@ -662,7 +676,14 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
     }
   ]);
 
-  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+  const enqueueSearchIndexRefresh = () => {
+    searchRefreshCalls += 1;
+  };
+  const service = createOsmSyncService({
+    db,
+    settingsSecret: 'test-secret',
+    enqueueSearchIndexRefresh
+  });
   await service.saveSettings({
     providerName: 'OpenStreetMap',
     authBaseUrl: 'https://www.openstreetmap.org',
@@ -698,11 +719,12 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(12, 'way', 202, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Two' }), '2026-01-01T00:00:00Z', 'New Two', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
 
-  const result = await service.syncCandidatesToOsm([
+  const result = await withTimeout(service.syncCandidatesToOsm([
     { osmType: 'way', osmId: 201 },
     { osmType: 'way', osmId: 202 }
-  ], 'admin@example.com');
+  ], 'admin@example.com'), 1000);
   restore();
+  await new Promise((resolve) => setTimeout(resolve, 25));
 
   assert.equal(result.ok, true);
   assert.equal(result.changesetId, 125);
@@ -719,6 +741,8 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
   `).all();
   assert.deepEqual(syncedRows.map((row) => row.sync_status), ['synced', 'synced']);
   assert.deepEqual(syncedRows.map((row) => Number(row.sync_changeset_id)), [125, 125]);
+  assert.equal(refreshCalls, 0);
+  assert.equal(searchRefreshCalls, 0);
 });
 
 test('syncCandidateToOsm rejects already published read-only candidates', async () => {
@@ -802,7 +826,19 @@ test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite a
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
     .run('archimap', 'https://archimap.local');
-  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+  let refreshCalls = 0;
+  let searchRefreshCalls = 0;
+  const service = createOsmSyncService({
+    db,
+    settingsSecret: 'test-secret',
+    enqueueSearchIndexRefresh: () => {
+      searchRefreshCalls += 1;
+    },
+    refreshDesignRefSuggestionsCache: () => {
+      refreshCalls += 1;
+      return new Promise(() => {});
+    }
+  });
 
   db.prepare(`
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
@@ -856,13 +892,22 @@ test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite a
   `).get();
   assert.equal(syncRow.sync_status, 'cleaned');
   assert.ok(syncRow.sync_cleaned_at);
+  assert.equal(refreshCalls, 0);
+  assert.equal(searchRefreshCalls, 1);
 });
 
 test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes outside synced fields', async () => {
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
     .run('archimap', 'https://archimap.local');
-  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+  let searchRefreshCalls = 0;
+  const service = createOsmSyncService({
+    db,
+    settingsSecret: 'test-secret',
+    enqueueSearchIndexRefresh: () => {
+      searchRefreshCalls += 1;
+    }
+  });
 
   db.prepare(`
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
@@ -916,4 +961,58 @@ test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes 
     WHERE osm_type = ? AND osm_id = ?
   `).get('way', 102);
   assert.equal(Number(localRow.total || 0), 0);
+  assert.equal(searchRefreshCalls, 1);
+});
+
+test('cleanupSyncedLocalOverwritesAfterImport skips search index refresh for material-only overwrites', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  let searchRefreshCalls = 0;
+  const service = createOsmSyncService({
+    db,
+    settingsSecret: 'test-secret',
+    enqueueSearchIndexRefresh: () => {
+      searchRefreshCalls += 1;
+    }
+  });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run('way', 103, JSON.stringify({ material: 'brick' }), '2026-01-10T00:00:00Z');
+  db.prepare(`
+    INSERT INTO local.architectural_info (osm_type, osm_id, material, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run('way', 103, 'brick', '2026-01-10T00:00:00Z');
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, material, sync_status, sync_attempted_at, sync_succeeded_at,
+      sync_changeset_id, sync_summary_json, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    3,
+    'way',
+    103,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['material']),
+    JSON.stringify({ material: 'brick' }),
+    '2026-01-01T00:00:00Z',
+    'brick',
+    'synced',
+    '2026-01-10T00:00:00Z',
+    '2026-01-10T00:01:00Z',
+    125,
+    JSON.stringify({ changesetId: 125, syncedAt: '2026-01-10T00:01:00Z' }),
+    '2026-01-10T00:01:00Z',
+    '2026-01-10T00:00:00Z'
+  );
+
+  const result = await service.cleanupSyncedLocalOverwritesAfterImport();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.cleaned.length, 1);
+  assert.equal(searchRefreshCalls, 0);
 });
