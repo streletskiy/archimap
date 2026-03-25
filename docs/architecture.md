@@ -47,6 +47,8 @@
   - `src/lib/server/services/building-edits/history.ts`: edit list/details queries and response shaping
   - `src/lib/server/services/building-edits/moderation.ts`: reassignment/delete flows and merged-local-state safety checks
   - `src/lib/server/services/building-edits/personal-overlays.ts`: pending/rejected personal overlay lookup for feature info and filter payloads
+- Building data access:
+  - `src/lib/server/services/buildings.repository.ts`: SQL access for building contour lookups, region slug resolution, local architectural info attachment, and pending building-info draft persistence shared by `buildings.route.ts` and `feature-info.http.ts`
 - Auth backend decomposition:
   - `src/lib/server/auth/index.ts`: auth bootstrap and route registration entrypoint
   - `src/lib/server/auth/schema.ts`: auth schema bootstrap for SQLite

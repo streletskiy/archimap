@@ -3,6 +3,7 @@ const {
   buildFilterMatchBatchResults,
   createBuildingFiltersService
 } = require('../services/building-filters.service');
+const { createBuildingsRepository } = require('../services/buildings.repository');
 const {
   compilePostgresFilterRuleGuardPredicate,
   compilePostgresFilterRulePredicate,
@@ -40,38 +41,13 @@ function registerBuildingsRoutes(deps) {
     getDesignRefSuggestionsCached,
     refreshDesignRefSuggestionsCache
   } = deps;
-  const isPostgres = db.provider === 'postgres';
   const filtersService = createBuildingFiltersService({
     db,
     rtreeState,
     isFilterTagAllowed,
     applyPersonalEditsToFilterItems
   });
-
-  const selectBuildingById = db.prepare(isPostgres
-    ? `
-      SELECT
-        osm_type,
-        osm_id,
-        tags_json,
-        ST_AsGeoJSON(geom)::text AS geometry_json
-      FROM osm.building_contours
-      WHERE osm_type = ? AND osm_id = ?
-    `
-    : `
-      SELECT osm_type, osm_id, tags_json, geometry_json
-      FROM osm.building_contours
-      WHERE osm_type = ? AND osm_id = ?
-    `);
-
-  const selectBuildingRegionSlugsById = db.prepare(`
-    SELECT region.slug
-    FROM data_region_memberships membership
-    INNER JOIN data_sync_regions region
-      ON region.id = membership.region_id
-    WHERE membership.osm_type = ? AND membership.osm_id = ?
-    ORDER BY LENGTH(region.slug) DESC, region.slug ASC
-  `);
+  const buildingsRepository = deps.buildingsRepository || createBuildingsRepository({ db });
 
   app.post('/api/buildings/filter-data', filterDataRateLimiter, async (req, res) => {
     const result = await filtersService.getFilterDataByKeys(req.body?.keys, getSessionEditActorKey(req));
@@ -142,7 +118,7 @@ function registerBuildingsRoutes(deps) {
       return res.status(404).json({ code: 'ERR_BUILDING_INFO_NOT_FOUND', error: 'Building info was not found' });
     }
     const featureKind = getFeatureKindFromTagsJson(contour?.tags_json);
-    const regionSlugs = (await selectBuildingRegionSlugsById.all(osmType, osmId))
+    const regionSlugs = (await buildingsRepository.getBuildingRegionSlugsById(osmType, osmId))
       .map((item) => String(item?.slug || '').trim())
       .filter(Boolean);
 
@@ -220,105 +196,29 @@ function registerBuildingsRoutes(deps) {
       const latest = await getLatestUserEditRow(osmType, osmId, actorKey, ['pending']);
       const previousEditedFields = sanitizeEditedFields(latest?.edited_fields_json);
       const nextEditedFields = [...new Set([...previousEditedFields, ...requestedEditedFields])];
-      const payload = {
+      const pendingEdit = {
         ...validated.value,
-        edited_fields_json: nextEditedFields.length > 0 ? JSON.stringify(nextEditedFields) : null
+        edited_fields_json: nextEditedFields.length > 0 ? JSON.stringify(nextEditedFields) : null,
+        source_osm_version: null,
+        source_tags_json: currentContour.tags_json ?? null,
+        source_osm_updated_at: currentContour.updated_at ?? null
       };
       if (latest && Number.isInteger(Number(latest.id)) && Number(latest.id) > 0) {
-        await db.prepare(`
-          UPDATE user_edits.building_user_edits
-          SET
-            source_osm_version = @source_osm_version,
-            name = @name,
-            style = @style,
-            design = @design,
-            design_ref = @design_ref,
-            design_year = @design_year,
-            material = @material,
-            material_concrete = @material_concrete,
-            colour = @colour,
-            levels = @levels,
-            year_built = @year_built,
-            architect = @architect,
-            address = @address,
-            archimap_description = @archimap_description,
-            edited_fields_json = @edited_fields_json,
-            source_tags_json = @source_tags_json,
-            source_osm_updated_at = @source_osm_updated_at,
-            status = 'pending',
-            admin_comment = NULL,
-            reviewed_by = NULL,
-            reviewed_at = NULL,
-            merged_by = NULL,
-            merged_at = NULL,
-            merged_fields_json = NULL,
-            sync_status = 'unsynced',
-            sync_attempted_at = NULL,
-            sync_succeeded_at = NULL,
-            sync_cleaned_at = NULL,
-            sync_changeset_id = NULL,
-            sync_summary_json = NULL,
-            sync_error_text = NULL,
-            updated_at = datetime('now')
-          WHERE id = @id
-        `).run({
+        await buildingsRepository.updatePendingUserEditById(latest.id, {
           id: latest.id,
-          source_osm_version: null,
-          source_tags_json: currentContour.tags_json ?? null,
-          source_osm_updated_at: currentContour.updated_at ?? null,
-          ...payload
+          ...pendingEdit
         });
         await supersedePendingUserEdits(osmType, osmId, actorKey, Number(latest.id));
         return Number(latest.id || 0);
       }
 
       await supersedePendingUserEdits(osmType, osmId, actorKey, null);
-      if (isPostgres) {
-        const inserted = await db.prepare(`
-        INSERT INTO user_edits.building_user_edits (
-          osm_type, osm_id, created_by, source_osm_version,
-          name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
-          status, sync_status, created_at, updated_at
-        )
-        VALUES (
-          @osm_type, @osm_id, @created_by, @source_osm_version,
-          @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
-          'pending', 'unsynced', datetime('now'), datetime('now')
-        )
-          RETURNING id
-        `).get({
-          osm_type: osmType,
-          osm_id: osmId,
-          created_by: actorKey,
-          source_osm_version: null,
-          source_tags_json: currentContour.tags_json ?? null,
-          source_osm_updated_at: currentContour.updated_at ?? null,
-          ...payload
-        });
-        return Number(inserted?.id || 0);
-      }
-
-      const inserted = await db.prepare(`
-      INSERT INTO user_edits.building_user_edits (
-        osm_type, osm_id, created_by, source_osm_version,
-        name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
-        status, sync_status, created_at, updated_at
-      )
-      VALUES (
-        @osm_type, @osm_id, @created_by, @source_osm_version,
-        @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
-        'pending', 'unsynced', datetime('now'), datetime('now')
-      )
-      `).run({
+      return buildingsRepository.insertPendingUserEdit({
         osm_type: osmType,
         osm_id: osmId,
         created_by: actorKey,
-        source_osm_version: null,
-        source_tags_json: currentContour.tags_json ?? null,
-        source_osm_updated_at: currentContour.updated_at ?? null,
-        ...payload
+        ...pendingEdit
       });
-      return Number(inserted?.lastInsertRowid || 0);
     });
 
     const editId = await tx();
@@ -333,7 +233,7 @@ function registerBuildingsRoutes(deps) {
       return res.status(400).json({ code: 'ERR_INVALID_BUILDING_ID', error: 'Invalid building id' });
     }
 
-    const row = await selectBuildingById.get(osmType, osmId);
+    const row = await buildingsRepository.getBuildingById(osmType, osmId);
 
     if (!row) {
       return res.status(404).json({ code: 'ERR_BUILDING_NOT_FOUND', error: 'Building was not found in the local contours database' });
