@@ -116,9 +116,9 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').paint['fill-opacity'], 0);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').paint['line-opacity'], 0);
   assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-color'], '#c8bcae');
-  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.44);
+  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.3);
   assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-color'], '#7d7063');
-  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.9);
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.2);
   assert.equal(map.layers.get('region-buildings-7-part-fill').layout.visibility, 'visible');
   assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'visible');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').layout.visibility, 'none');
@@ -139,10 +139,10 @@ test('applyBuildingThemePaint updates hover layers with hover theme paint', asyn
   });
 
   assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-color'], '#7189a4');
-  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.44);
+  assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.3);
   assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-color'], '#d7e1ea');
-  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.9);
-  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-opacity'], 1);
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.2);
+  assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-opacity'], 0.9);
 });
 
 test('ensureRegionBuildingSourceAndLayers applies initial hidden state for building parts', async () => {

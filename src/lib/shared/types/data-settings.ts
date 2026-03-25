@@ -1,4 +1,4 @@
-import type { FilterPreset, FilterPresetInput, FilterPresetState } from './filter-presets';
+import type { FilterPresetInput, FilterPresetState } from './filter-presets';
 import type { OsmElementType } from './common';
 
 export type RegionResolutionStatus =

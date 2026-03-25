@@ -22,17 +22,17 @@ export const BUILDING_THEME = Object.freeze({
 export const BUILDING_HOVER_THEME = Object.freeze({
   light: {
     fillColor: '#c8bcae',
-    fillOpacity: 0.44,
+    fillOpacity: 0.3,
     lineColor: '#7d7063',
-    lineWidth: 1.9,
-    lineOpacity: 1
+    lineWidth: 1.2,
+    lineOpacity: 0.9
   },
   dark: {
     fillColor: '#7189a4',
-    fillOpacity: 0.44,
+    fillOpacity: 0.3,
     lineColor: '#d7e1ea',
-    lineWidth: 1.9,
-    lineOpacity: 1
+    lineWidth: 1.2,
+    lineOpacity: 0.9
   }
 });
 

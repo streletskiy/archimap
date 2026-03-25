@@ -67,8 +67,6 @@ function createRegionDraft(region: Partial<DataRegion> | null = null): SharedReg
 
 type DataSettings = AdminDataSettings;
 type RegionDraft = SharedRegionDraft;
-type FilterPresetRuleDraft = FilterPresetRule;
-type FilterPresetLayerDraft = FilterPresetLayer;
 type FilterPresetItem = SharedFilterPresetDraft;
 type FilterPresetDraft = SharedFilterPresetDraft;
 function normalizeFilterPresetKey(value) {
