@@ -17,7 +17,7 @@
   - Search and bbox responses reuse short-lived in-memory cache.
   - Map filter keeps a short-lived in-memory match cache for `/api/buildings/filter-matches` (`rulesHash+bboxHash+zoomBucket`), and per-building cache for fallback `/api/buildings/filter-data`.
 - Reduced unnecessary redraws:
-  - Filter updates guarded by request token, abort semantics, and worker-built diff plans.
+  - Filter updates guarded by request token, abort semantics, and worker-built request plans plus resolved highlight payload composition.
   - Filter highlight updates dedicated highlight layers via feature-state; base building layers are not re-filtered/hid.
   - Feature-state diff apply is chunked per animation frame to smooth map interactions under large diffs.
   - Primary filter path is bbox server-matching (not rendered-feature enumeration), reducing request fan-out.

@@ -58,7 +58,7 @@
 ## Worker messaging
 
 - Dedicated worker `message` handlers should validate the sender origin before processing payloads.
-- Chromium exposes an empty `event.origin` for same-origin messages sent to dedicated workers, so the building filter worker normalizes that case to the worker origin before comparing and only accepts `prepare-rules` messages from the trusted origin.
+- Chromium exposes an empty `event.origin` for same-origin messages sent to dedicated workers, so the building filter worker normalizes that case to the worker origin before comparing and only accepts `prepare-rules`, `build-request-plan`, and `build-resolved-payload` messages from the trusted origin.
 
 ## Logging and redaction
 

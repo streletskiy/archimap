@@ -135,7 +135,7 @@
   - `map-filter-pipeline.js`: top-level orchestration and runtime status
   - `filter-request-planner.js`: layer normalization, request planning, and resolved highlight payload shaping
   - `filter-match-cache-strategy.js`: authoritative request caching, optimistic reuse, and prefetch coordination
-  - `filter-worker-dispatcher.js`: lazy worker lifecycle for `prepare-rules` and `build-apply-plan`
+  - `filter-worker-dispatcher.js`: lazy worker lifecycle for `prepare-rules`, `build-request-plan`, and `build-resolved-payload`
   - `filter-diff-apply-strategy.js`: chunked highlight diff/apply over MapLibre paint properties
   - supporting utilities remain split into `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js`
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.

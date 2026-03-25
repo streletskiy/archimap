@@ -118,6 +118,72 @@ export type FilterWorkerPrepareResponse =
     invalidReason: string;
   };
 
+export type FilterWorkerBuildRequestPlanRequest = {
+  type: 'build-request-plan';
+  requestId: string;
+  layers?: FilterLayerInput[] | null;
+  rules?: FilterRuleInput[] | null;
+};
+
+export type FilterWorkerBuildRequestPlanResponse =
+  | {
+    type: 'build-request-plan-result';
+    requestId: string;
+    ok: true;
+    layers: FilterLayer[];
+    requestSpecs: FilterRequestSpec[];
+    combinedGroup: FilterPreparedGroup | null;
+    hasStandaloneLayers: boolean;
+    rulesHash: string;
+    heavy: boolean;
+  }
+  | {
+    type: 'build-request-plan-result';
+    requestId: string;
+    ok: false;
+    invalidReason: string;
+  };
+
+export type FilterWorkerResolvedPayloadInputItem = {
+  requestId: string;
+  payload: Pick<FilterMatchPayload, 'matchedKeys' | 'matchedFeatureIds' | 'meta'> | null;
+};
+
+export type FilterWorkerBuildResolvedPayloadRequest = {
+  type: 'build-resolved-payload';
+  requestId: string;
+  prepared: FilterPreparedRequest | FilterPreparedRequestPlan;
+  payloads: FilterWorkerResolvedPayloadInputItem[];
+  cacheHit?: boolean;
+};
+
+export type FilterWorkerBuildResolvedPayloadResponse =
+  | {
+    type: 'build-resolved-payload-result';
+    requestId: string;
+    ok: true;
+    highlightColorGroups: FilterColorGroup[];
+    matchedFeatureIds: number[];
+    matchedCount: number;
+    meta: FilterMatchMeta;
+  }
+  | {
+    type: 'build-resolved-payload-result';
+    requestId: string;
+    ok: false;
+    error: string;
+  };
+
+export type FilterWorkerRequest =
+  | FilterWorkerPrepareRequest
+  | FilterWorkerBuildRequestPlanRequest
+  | FilterWorkerBuildResolvedPayloadRequest;
+
+export type FilterWorkerResponse =
+  | FilterWorkerPrepareResponse
+  | FilterWorkerBuildRequestPlanResponse
+  | FilterWorkerBuildResolvedPayloadResponse;
+
 export type FilterWorkerFactory = () => Worker;
 
 export type FilterBuildingSourceConfig = {
@@ -240,6 +306,11 @@ export type FilterPreparedRequest = {
   hasStandaloneLayers: boolean;
 };
 
+export type FilterPreparedRequestPlan = FilterPreparedRequest & {
+  rulesHash: string;
+  heavy: boolean;
+};
+
 export type FilterMatchMeta = {
   rulesHash: string;
   bboxHash: string;
@@ -265,6 +336,13 @@ export type FilterRequestResolution = {
   payload: FilterMatchPayload;
   cacheHit: boolean;
   usedFallback: boolean;
+};
+
+export type FilterResolvedLayerPayload = {
+  highlightColorGroups: FilterColorGroup[];
+  matchedFeatureIds: number[];
+  matchedCount: number;
+  meta: FilterMatchMeta;
 };
 
 export type FilterCoverageWindow = CoverageWindowSnapshot & {

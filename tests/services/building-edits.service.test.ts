@@ -255,7 +255,10 @@ test('buildChangesFromRows labels levels changes with building:levels', async ()
   );
 
   const item = await service.getUserEditDetailsById(23);
-  const levelsChange = (item?.changes || []).find((change) => String(change.field || '') === 'levels');
+  const changes = Array.isArray(item?.changes)
+    ? item.changes
+    : [];
+  const levelsChange = changes.find((change) => String(change.field || '') === 'levels');
   assert.ok(levelsChange);
   assert.equal(levelsChange?.osmTag, 'building:levels');
 });
@@ -294,7 +297,9 @@ test('buildChangesFromRows labels colour and architect changes with modern tags'
   );
 
   const item = await service.getUserEditDetailsById(24);
-  const byField = new Map((item?.changes || []).map((change) => [String(change.field || ''), change]));
+  const byField = new Map<string, { osmTag?: string }>(
+    (item?.changes || []).map((change) => [String(change.field || ''), change])
+  );
   assert.equal(byField.get('colour')?.osmTag, 'building:colour');
   assert.equal(byField.get('architect')?.osmTag, 'architect');
 });
