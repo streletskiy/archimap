@@ -22,6 +22,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   let deferredSyncSuccessPayload = null;
   let initialized = false;
   let draining = false;
+  let reloadSchedulesPromise = null;
+  let reloadSchedulesRequested = false;
 
   function clearRegionTimers() {
     for (const timer of regionTimers.values()) {
@@ -72,12 +74,39 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     regionTimers.set(region.id, timer);
   }
 
-  async function reloadSchedules() {
+  async function refreshSchedulesOnce() {
     clearRegionTimers();
     const regions = await dataSettingsService.refreshAllNextSyncAt();
     for (const region of regions) {
       scheduleTimer(region);
     }
+  }
+
+  function reloadSchedules() {
+    reloadSchedulesRequested = true;
+    if (reloadSchedulesPromise) return reloadSchedulesPromise;
+
+    reloadSchedulesPromise = (async () => {
+      try {
+        while (reloadSchedulesRequested) {
+          reloadSchedulesRequested = false;
+          await refreshSchedulesOnce();
+        }
+      } finally {
+        reloadSchedulesPromise = null;
+        reloadSchedulesRequested = false;
+      }
+    })();
+
+    return reloadSchedulesPromise;
+  }
+
+  function reloadSchedulesInBackground(reason = 'manual') {
+    void reloadSchedules().catch((error) => {
+      log.error(
+        `[region-sync] failed to reload schedules${reason ? ` after ${reason}` : ''}: ${String(error?.message || error)}`
+      );
+    });
   }
 
   function buildFailureMessage({ code, signal, outputTail, error }: LooseRecord) {
@@ -310,7 +339,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         regionId: numericRegionId
       });
       queuedRegionIds.add(numericRegionId);
-      await reloadSchedules();
+      reloadSchedulesInBackground(`enqueue:${numericRegionId}`);
       await drainQueue();
       return {
         queued: true,

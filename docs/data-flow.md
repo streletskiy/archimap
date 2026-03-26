@@ -16,6 +16,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 1. Scheduler recalculates `nextSyncAt` per enabled region.
 2. Each region can have its own schedule, but execution always goes through one in-process queue.
    - Queue requests are deduplicated per region (`queued`/`running`) to prevent duplicate run rows from concurrent startup/scheduler/manual triggers.
+   - Schedule recomputation is coalesced and performed in the background so region save/sync requests do not wait for the full timer refresh.
 3. Queue launches [`scripts/sync-osm-region.ts`](../scripts/sync-osm-region.ts) for a concrete `regionId`.
 4. The sync script acts as an orchestrator and delegates the real stages to `scripts/region-sync/**`:
    - `python-extractor.ts`: Python detection/dependency checks + `sync-osm-buildings.py` invocation

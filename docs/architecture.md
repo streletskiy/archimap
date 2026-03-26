@@ -95,6 +95,7 @@
 - Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.ts`.
 - Design-ref suggestions cache: `src/lib/server/boot/design-ref-suggestions.boot.ts` is startup-warmed and refreshed when `design_ref`-affecting writes or import/rebuild paths need it; OSM publish itself no longer waits on a full suggestions rebuild.
 - Search index maintenance: `src/lib/server/boot/search-index.boot.ts` keeps incremental building refreshes in a keyed in-process queue, coalesces repeated refreshes for the same `osm_key`, and defers queued work while a full rebuild is running. Incremental refreshes are dispatched to a dedicated worker process (`workers/refresh-search-index.worker.ts`) so request handlers do not wait on the DB update or the worker response, and call sites only enqueue refreshes for search-affecting fields (`name`, `address`, `style`, `architect`, `design_ref`); OSM publish/sync metadata updates do not enqueue search refreshes.
+- Region deletes also trigger a full search rebuild through the existing worker, but the admin delete request does not wait for that rebuild to finish.
 
 ## i18n
 

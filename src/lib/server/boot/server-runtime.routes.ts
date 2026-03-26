@@ -95,11 +95,22 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
       }
       if (action === 'delete') {
         runtime.removeRegionPmtilesFiles(deleted?.region);
-        await runtime.rebuildSearchIndex(`region-delete:${deleted?.region?.id || 'unknown'}`);
+        void runtime.rebuildSearchIndex(`region-delete:${deleted?.region?.id || 'unknown'}`).catch((error) => {
+          runtime.logger.error('region_delete_search_rebuild_failed', {
+            error: String(error?.message || error)
+          });
+        });
         runtime.resetFilterTagKeysCache();
         runtime.scheduleFilterTagKeysCacheRebuild(`region-delete:${deleted?.region?.id || 'unknown'}`);
       }
-      return runtime.syncWorkers?.reloadSchedules?.();
+      const reloadSchedulesPromise = runtime.syncWorkers?.reloadSchedules?.();
+      if (reloadSchedulesPromise && typeof reloadSchedulesPromise.catch === 'function') {
+        void reloadSchedulesPromise.catch((error) => {
+          runtime.logger.error('region_sync_schedules_reload_failed', {
+            error: String(error?.message || error)
+          });
+        });
+      }
     },
     onRegionSyncRequested: (regionId, options) => runtime.syncWorkers?.requestRegionSync?.(regionId, options),
     appDisplayName: runtime.config.appDisplayName,

@@ -8,6 +8,20 @@ function waitForMicrotasks() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function createDeferredPromise() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return {
+    promise,
+    resolve,
+    reject
+  };
+}
+
 function createChildProcessStub() {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -20,11 +34,12 @@ function createChildProcessStub() {
   return child;
 }
 
-function createManagedDataSettingsService(regions = []) {
+function createManagedDataSettingsService(regions = [], overrides = {}) {
   let nextRunId = 1;
   let managedEnabled = true;
   const regionMap = new Map(regions.map((region) => [region.id, { ...region }]));
   const runMap = new Map();
+  const defaultRefreshAllNextSyncAt = async () => [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region }));
 
   return {
     setManagedEnabled(value) {
@@ -32,7 +47,7 @@ function createManagedDataSettingsService(regions = []) {
     },
     bootstrapFromEnvIfNeeded: async () => ({ imported: false }),
     recoverInterruptedRuns: async () => [],
-    refreshAllNextSyncAt: async () => [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region })),
+    refreshAllNextSyncAt: overrides.refreshAllNextSyncAt || defaultRefreshAllNextSyncAt,
     listRegions: async () => [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region })),
     getRegionById: async (regionId) => {
       const item = regionMap.get(Number(regionId));
@@ -98,7 +113,8 @@ function createManagedDataSettingsService(regions = []) {
         run: { ...run },
         region: region ? { ...region } : null
       };
-    }
+    },
+    ...overrides
   };
 }
 
@@ -154,6 +170,63 @@ test('managed sync workers execute region jobs through a single queue', async ()
 
   assert.equal(spawnCalls.length, 2);
   assert.deepEqual(spawnCalls[1], ['--import', 'tsx', 'managed.ts', '--region-id=2']);
+});
+
+test('managed sync workers return queued responses without waiting for schedule refresh', async () => {
+  const children = [];
+  const refreshGate = createDeferredPromise();
+  let refreshStarted = 0;
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 1,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ], {
+    refreshAllNextSyncAt: async () => {
+      refreshStarted += 1;
+      await refreshGate.promise;
+      return [];
+    }
+  });
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const requestPromise = workers.requestRegionSync(1, { triggerReason: 'manual', requestedBy: 'tester' });
+  await waitForMicrotasks();
+
+  assert.equal(refreshStarted, 1);
+  assert.equal(children.length, 1);
+
+  const queued = await Promise.race([
+    requestPromise,
+    new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 50))
+  ]);
+  assert.equal(queued?.timeout, undefined);
+  assert.equal(queued?.queued, true);
+
+  refreshGate.resolve();
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].emit('close', 0, null);
+
+  await waitForMicrotasks();
 });
 
 test('managed sync workers defer post-sync maintenance until the queue drains', async () => {
