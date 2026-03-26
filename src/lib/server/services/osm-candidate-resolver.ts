@@ -82,14 +82,11 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     const latestLocalState = stateFromLocalRow(latestRow);
     const contourState = stateFromContourTags(parseTags(latestRow?.contour_tags_json));
     const explicitFields = [...new Set(rows.flatMap((row) => parseEditedFields(row.edited_fields_json)))];
-    const latestSyncStatus = rows.reduce((acc, row) => {
-      const status = String(row.sync_status || 'unsynced');
-      if (status === 'failed') return 'failed';
-      if (status === 'syncing' && acc !== 'failed') return 'syncing';
-      if (status === 'synced' && !['failed', 'syncing'].includes(acc)) return 'synced';
-      if (status === 'cleaned' && !['failed', 'syncing', 'synced'].includes(acc)) return 'cleaned';
-      return acc;
-    }, 'unsynced');
+    const hasSyncingRow = rows.some((row) => String(row.sync_status || 'unsynced').trim().toLowerCase() === 'syncing');
+    // Keep a newer accepted/partially accepted edit from being hidden by older synced history rows.
+    const latestSyncStatus = hasSyncingRow
+      ? 'syncing'
+      : String(latestRow.sync_status || 'unsynced').trim().toLowerCase();
     const syncReadOnly = latestSyncStatus === 'synced' || latestSyncStatus === 'cleaned';
     const summary = parseSyncSummary(latestRow?.sync_summary_json);
     const changes = diffStates(contourState, latestLocalState);

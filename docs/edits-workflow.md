@@ -54,6 +54,7 @@ OSM publish flow:
 - Changeset comments begin with `Update architectural info:` in all OSM sync cases.
 - The original local history rows remain in place and carry sync metadata such as the changeset id, sync timestamps, and a compact JSON summary.
 - Synced / cleaned rows are treated as read-only in admin views: they move to compact archive sections, stay collapsed by default in the UI, and cannot be re-synced or re-moderated.
+- If the same building later gets a newer accepted / partially accepted edit, the sync queue shows it again as active; older synced rows stay in history, but they should not keep the whole building locked in the archive.
 - After the next successful OSM import, if the tags that were actually synchronized are already present in the imported contour data, the runtime can remove the redundant `local.architectural_info` overwrite while leaving the edit history row in compact form. Cleanup only refreshes the search index when the overwritten local row contained search-relevant fields.
 
 Corner cases handled:

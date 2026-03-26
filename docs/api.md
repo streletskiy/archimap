@@ -161,6 +161,7 @@ System notes:
   - Returns building-level sync candidates grouped by `osm_type` + `osm_id`.
   - Includes local merge state, sync status, last sync timestamps, and current contour snapshot data.
   - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the collapsed archive section of the admin UI, and are excluded from bulk sync selection.
+  - If a building receives a newer accepted / partially accepted edit after an earlier sync, the queue reactivates that building and shows the newest non-read-only edit state instead of keeping the old synced history in the archive.
 - `GET /api/admin/osm-sync/candidates/:osmType/:osmId`
   - Returns a detailed preflight snapshot for one building, including current live OSM state, local desired state, and drift/conflict diagnostics.
   - OAuth connection metadata is not included here; use `GET /api/admin/app-settings/osm` for OSM settings and connection state.

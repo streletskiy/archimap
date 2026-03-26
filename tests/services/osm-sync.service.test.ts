@@ -328,6 +328,72 @@ test('listSyncCandidates groups accepted edits by building and exposes sync stat
   assert.equal(second.canSync, true);
 });
 
+test('listSyncCandidates reactivates a building when a newer accepted edit is still unsynced', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run('way', 303, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
+  db.prepare(`
+    INSERT INTO local.architectural_info (
+      osm_type, osm_id, name, updated_at
+    ) VALUES (?, ?, ?, ?)
+  `).run('way', 303, 'New Name', '2026-01-04T00:00:00Z');
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    4,
+    'way',
+    303,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'synced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    5,
+    'way',
+    303,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-04T00:00:00Z',
+    '2026-01-04T00:00:00Z'
+  );
+
+  const candidates = await service.listSyncCandidates();
+  const candidate = candidates.find((item) => item.osmId === 303);
+
+  assert.ok(candidate);
+  assert.equal(candidate.totalEdits, 2);
+  assert.equal(candidate.latestEditId, 5);
+  assert.equal(candidate.syncStatus, 'unsynced');
+  assert.equal(candidate.syncReadOnly, false);
+  assert.equal(candidate.canSync, true);
+});
+
 test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can list candidates', async () => {
   const rows = [
     {
