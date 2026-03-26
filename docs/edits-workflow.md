@@ -26,6 +26,7 @@ User-side:
 Admin-side moderation:
 
 - Admin opens edit details in `/admin/` and reviews changed fields.
+- The moderation list also exposes row checkboxes for currently pending edits so several selected rows can be accepted in one action.
 - Decision is field-level:
   - accept field (optionally with corrected value);
   - reject field.
@@ -33,6 +34,7 @@ Admin-side moderation:
   - all accepted -> `accepted`;
   - accepted subset + rejected subset -> `partially_accepted`;
   - all rejected -> `rejected`.
+- Bulk accept still runs each edit through the same merge checks, so rows that were already processed or became stale can fail independently without aborting the rest of the batch.
 - Accepted fields are persisted to `local.architectural_info`; merged field list is saved to `merged_fields_json`.
 - Search index refresh is only queued when accepted, deleted, or reassigned local data touches search fields (`name`, `address`, `style`, `architect`, `design_ref`). Material/levels-only moderation does not touch the search index, and the refresh itself is handled by a dedicated background worker without waiting for a worker response on the admin request thread.
 

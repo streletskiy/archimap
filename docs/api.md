@@ -176,6 +176,10 @@ System notes:
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
   - Edit history items include sync metadata when available: `syncStatus`, `syncAttemptedAt`, `syncSucceededAt`, `syncCleanedAt`, `syncChangesetId`, `syncSummary`, `syncError`.
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
+- `POST /api/admin/building-edits/bulk-merge`
+  - Admin-only bulk accept for multiple pending edit rows selected in the moderation table.
+  - Body: `{ editIds: [1, 2, ...], force?: boolean, comment?: string }`.
+  - Each selected edit is processed independently through the same merge path as the single-edit action, so already-processed rows can fail without aborting the rest of the batch.
 - `POST /api/admin/building-edits/:editId/reassign`
 - `DELETE /api/admin/building-edits/:editId`
   - Master-admin only.

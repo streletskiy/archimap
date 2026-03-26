@@ -1354,6 +1354,37 @@ paths:
           description: Unauthorized
         '403':
           description: Admin required
+  /api/admin/building-edits/bulk-merge:
+    post:
+      summary: Merge multiple admin building edits
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                editIds:
+                  type: array
+                  items:
+                    type: integer
+                force:
+                  type: boolean
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Bulk merge result
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
   /api/admin/style-overrides:
     get:
       summary: List admin style overrides

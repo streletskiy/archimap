@@ -144,6 +144,8 @@ When a new control is needed:
 - `UiTable*` is the default table stack for product code.
 - Native `<table>` markup should remain only inside generated upstream primitives or content-rendering cases that are not part of product UI composition.
 - Interactive table rows must use `UiTableRow` with the `onclick` callback prop, not `on:click`, so row selection works consistently through the base wrapper.
+- When a moderation table adds a checkbox selection column for bulk actions, the checkbox cell must stop event propagation so the row click still opens the detail pane.
+- Bulk table selection should target only actionable rows and keep non-actionable rows visually separate from the selected set.
 - When a table sits inside a bordered card or scroll container, use `UiTable framed={false}` so the outer shell owns the contour and the table keeps only row and cell structure.
 
 ### Scrollable Areas

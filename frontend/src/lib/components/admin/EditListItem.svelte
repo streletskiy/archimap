@@ -6,11 +6,16 @@
     getStatusBadgeMeta
   } from '$lib/utils/edit-ui';
 
-  import { UiTableCell, UiTableRow } from '$lib/components/base';
+  import { UiCheckbox, UiTableCell, UiTableRow } from '$lib/components/base';
 
   export let edit = null;
   export let archived = false;
   export let onOpen = () => {};
+  export let onToggleSelection = () => {};
+  export let selected = false;
+  export let selectable = false;
+  export let selectionBusy = false;
+  export let showSelection = false;
 
   $: statusMeta = getStatusBadgeMeta(edit?.status, translateNow);
   $: counters = getChangeCounters(edit?.changes);
@@ -64,6 +69,15 @@
     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
     onclick={() => onOpen(edit.id || edit.editId)}
   >
+    {#if showSelection}
+      <UiTableCell className="w-10" onclick={(event) => event.stopPropagation()}>
+        <UiCheckbox
+          checked={selected}
+          disabled={selectionBusy || !selectable}
+          onchange={({ detail }) => onToggleSelection(edit, detail?.checked)}
+        />
+      </UiTableCell>
+    {/if}
     <UiTableCell className="min-w-0">
       <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(edit)}</p>
       <p class="text-xs ui-text-subtle truncate">ID: {edit.osmType}/{edit.osmId}</p>

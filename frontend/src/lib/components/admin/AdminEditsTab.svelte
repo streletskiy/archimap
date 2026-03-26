@@ -2,6 +2,8 @@
   import { createEventDispatcher, onMount } from 'svelte';
 
   import {
+    UiButton,
+    UiCheckbox,
     UiScrollArea,
     UiTable,
     UiTableBody,
@@ -67,6 +69,11 @@
   let fieldValues = {};
   let moderationComment = '';
   let moderationBusy = false;
+  let bulkModerationBusy = false;
+  let selectedEditIds = [];
+  let bulkSelectableEdits = [];
+  let selectedBulkEdits = [];
+  let showBulkSelection = false;
   let reassignTargetType = 'way';
   let reassignTargetId = '';
   let reassignForce = false;
@@ -93,6 +100,22 @@
     return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
   }
 
+  function getEditId(item) {
+    return normalizeEditId(item?.id || item?.editId);
+  }
+
+  function isPendingEdit(item) {
+    return String(item?.status || '').trim().toLowerCase() === 'pending' && !isSyncedArchiveEdit(item);
+  }
+
+  function resolveSelectedEdits(sourceEdits = activeEdits, selectedIds = selectedEditIds) {
+    if (!Array.isArray(sourceEdits) || !Array.isArray(selectedIds) || selectedIds.length === 0) {
+      return [];
+    }
+    const selected = new Set(selectedIds.map((id) => normalizeEditId(id)).filter(Boolean));
+    return sourceEdits.filter((item) => selected.has(getEditId(item)) && isPendingEdit(item));
+  }
+
   function resetReassignDraft() {
     reassignTargetType = 'way';
     reassignTargetId = '';
@@ -112,6 +135,49 @@
 
   function setSelectedFeature(feature) {
     selectedFeature = feature && typeof feature === 'object' ? feature : EMPTY_FEATURE_COLLECTION;
+  }
+
+  function pruneSelectedEdits() {
+    if (!Array.isArray(selectedEditIds) || selectedEditIds.length === 0) {
+      return;
+    }
+    const allowedIds = new Set(bulkSelectableEdits.map((item) => getEditId(item)).filter(Boolean));
+    const nextSelected = selectedEditIds
+      .map((id) => normalizeEditId(id))
+      .filter((id) => id && allowedIds.has(id));
+    const changed = nextSelected.length !== selectedEditIds.length || nextSelected.some((id, index) => id !== selectedEditIds[index]);
+    if (changed) {
+      selectedEditIds = nextSelected;
+    }
+  }
+
+  function toggleEditSelection(edit, checked) {
+    if (bulkModerationBusy || moderationBusy) return;
+    const editId = getEditId(edit);
+    if (!editId || !isPendingEdit(edit)) return;
+    if (checked) {
+      if (!selectedEditIds.includes(editId)) {
+        selectedEditIds = [...selectedEditIds, editId];
+      }
+      return;
+    }
+    selectedEditIds = selectedEditIds.filter((item) => item !== editId);
+  }
+
+  function selectAllPendingEdits() {
+    if (bulkModerationBusy || moderationBusy) return;
+    selectedEditIds = bulkSelectableEdits.map((item) => getEditId(item)).filter(Boolean);
+  }
+
+  function clearSelectedEdits() {
+    if (bulkModerationBusy || moderationBusy) return;
+    selectedEditIds = [];
+  }
+
+  async function refreshCurrentEditDetails() {
+    const currentId = normalizeEditId(selectedEdit?.editId || selectedEdit?.id);
+    if (!currentId) return;
+    await openEdit(currentId, { syncUrl: false, forceReload: true });
   }
 
   async function loadCenters(items) {
@@ -184,12 +250,12 @@
   }
 
   async function openEdit(editId, options = {}) {
-    const { syncUrl = true } = options;
+    const { syncUrl = true, forceReload = false } = options;
     const numericEditId = normalizeEditId(editId);
     if (!numericEditId) return;
 
     const currentId = normalizeEditId(selectedEdit?.editId || selectedEdit?.id);
-    if (detailPaneVisible && currentId === numericEditId && !detailLoading) {
+    if (!forceReload && detailPaneVisible && currentId === numericEditId && !detailLoading) {
       if (syncUrl) notifyEditIdChange(numericEditId);
       return;
     }
@@ -270,6 +336,45 @@
     setSelectedFeature(EMPTY_FEATURE_COLLECTION);
   }
 
+  async function bulkAcceptSelectedEdits() {
+    if (bulkModerationBusy || moderationBusy || selectedBulkEdits.length === 0) return;
+
+    bulkModerationBusy = true;
+    editsStatus = translateNow('admin.edits.bulkAccepting');
+    try {
+      const editIds = selectedBulkEdits.map((item) => getEditId(item)).filter(Boolean);
+      const response = await apiJson('/api/admin/building-edits/bulk-merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ editIds })
+      });
+      const summary = response?.item || {};
+      const successCount = Number(summary?.successCount || 0);
+      const failureCount = Number(summary?.failureCount || 0);
+      const totalCount = Number(summary?.totalCount || editIds.length);
+
+      selectedEditIds = [];
+      await loadEdits();
+      await refreshCurrentEditDetails();
+
+      if (successCount > 0 && failureCount > 0) {
+        editsStatus = translateNow('admin.edits.bulkAcceptedPartial', {
+          accepted: successCount,
+          total: totalCount,
+          failed: failureCount
+        });
+      } else if (successCount > 0) {
+        editsStatus = translateNow('admin.edits.bulkAccepted', { count: successCount });
+      } else {
+        editsStatus = translateNow('admin.edits.bulkAcceptFailed');
+      }
+    } catch (error) {
+      editsStatus = msg(error, translateNow('admin.edits.bulkAcceptFailed'));
+    } finally {
+      bulkModerationBusy = false;
+    }
+  }
+
   function setAll(decision) {
     const next = {};
     for (const field of Object.keys(fieldDecisions)) {
@@ -327,7 +432,7 @@
         }
       }
       await loadEdits();
-      await openEdit(editId, { syncUrl: false });
+      await openEdit(editId, { syncUrl: false, forceReload: true });
     } catch (error) {
       detailStatus = msg(error, translateNow('admin.edits.decisionFailed'));
     } finally {
@@ -359,7 +464,7 @@
         })
       });
       await loadEdits();
-      await openEdit(editId, { syncUrl: false });
+      await openEdit(editId, { syncUrl: false, forceReload: true });
       detailStatus = translateNow('admin.edits.reassignDone');
     } catch (error) {
       detailStatus = msg(error, translateNow('admin.edits.reassignFailed'));
@@ -449,6 +554,11 @@
     }
   }
 
+  $: bulkSelectableEdits = Array.isArray(activeEdits) ? activeEdits.filter(isPendingEdit) : [];
+  $: selectedBulkEdits = resolveSelectedEdits(bulkSelectableEdits, selectedEditIds);
+  $: showBulkSelection = bulkSelectableEdits.length > 0 || selectedBulkEdits.length > 0 || bulkModerationBusy;
+  $: pruneSelectedEdits();
+
   $: dispatch('summary', { total: edits.length, visible: activeEdits.length, archived: syncedEdits.length });
 
   $: {
@@ -494,6 +604,38 @@
 
     <p class="text-sm ui-text-muted">{editsStatus}</p>
 
+    {#if showBulkSelection}
+      <div class="flex flex-wrap items-center gap-2 rounded-xl border ui-border ui-surface-base px-3 py-2 text-sm ui-text-body">
+        <UiButton
+          type="button"
+          variant="secondary"
+          size="xs"
+          onclick={selectAllPendingEdits}
+          disabled={bulkModerationBusy || moderationBusy || editsLoading || bulkSelectableEdits.length === 0}
+        >
+          {$t('admin.edits.bulkSelectAll')}
+        </UiButton>
+        <UiButton
+          type="button"
+          variant="secondary"
+          size="xs"
+          onclick={clearSelectedEdits}
+          disabled={bulkModerationBusy || moderationBusy || editsLoading || selectedEditIds.length === 0}
+        >
+          {$t('admin.edits.bulkClearSelection')}
+        </UiButton>
+        <UiButton
+          type="button"
+          size="xs"
+          onclick={bulkAcceptSelectedEdits}
+          disabled={bulkModerationBusy || moderationBusy || editsLoading || selectedBulkEdits.length === 0}
+        >
+          {bulkModerationBusy ? $t('admin.edits.bulkAccepting') : $t('admin.edits.bulkAcceptSelected')}
+        </UiButton>
+        <span class="text-xs ui-text-subtle">{$t('admin.edits.bulkSelected', { count: selectedBulkEdits.length })}</span>
+      </div>
+    {/if}
+
     <AdminMap
       {visibleEdits}
       {centerByKey}
@@ -505,6 +647,16 @@
     <UiTable framed={false}>
       <UiTableHeader>
         <UiTableRow className="hover:[&>th]:bg-transparent">
+          {#if showBulkSelection}
+            <UiTableHead className="w-10">
+              <UiCheckbox
+                checked={bulkSelectableEdits.length > 0 && selectedBulkEdits.length === bulkSelectableEdits.length}
+                indeterminate={selectedBulkEdits.length > 0 && selectedBulkEdits.length < bulkSelectableEdits.length}
+                disabled={bulkSelectableEdits.length === 0 || bulkModerationBusy || moderationBusy || editsLoading}
+                onchange={({ detail }) => (detail?.checked ? selectAllPendingEdits() : clearSelectedEdits())}
+              />
+            </UiTableHead>
+          {/if}
           <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
           <UiTableHead>{$t('admin.edits.tableAuthor')}</UiTableHead>
           <UiTableHead>{$t('admin.edits.tableStatus')}</UiTableHead>
@@ -514,15 +666,23 @@
       <UiTableBody>
         {#if editsLoading}
           <UiTableRow>
-            <UiTableCell colspan="4" className="ui-text-subtle">{$t('admin.loading')}</UiTableCell>
+            <UiTableCell colspan={showBulkSelection ? 5 : 4} className="ui-text-subtle">{$t('admin.loading')}</UiTableCell>
           </UiTableRow>
         {:else if activeEdits.length === 0}
           <UiTableRow>
-            <UiTableCell colspan="4" className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
+            <UiTableCell colspan={showBulkSelection ? 5 : 4} className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
           </UiTableRow>
         {:else}
           {#each activeEdits as edit (`${edit.id || edit.editId}`)}
-            <EditListItem edit={edit} onOpen={openEdit} />
+            <EditListItem
+              edit={edit}
+              selected={selectedEditIds.includes(getEditId(edit))}
+              selectable={isPendingEdit(edit)}
+              selectionBusy={bulkModerationBusy || moderationBusy || editsLoading}
+              showSelection={showBulkSelection}
+              onOpen={openEdit}
+              onToggleSelection={toggleEditSelection}
+            />
           {/each}
         {/if}
       </UiTableBody>
