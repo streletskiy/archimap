@@ -50,8 +50,7 @@ def derive_feature_kind_from_tags_json(tags_json: str | None) -> str:
         return 'building'
     if 'building' in tags:
         return 'building'
-    raw_value = str(tags.get('building:part') or tags.get('building_part') or '').strip().lower()
-    if raw_value in {'yes', 'true', '1'}:
+    if 'building:part' in tags or 'building_part' in tags:
         return 'building_part'
     return 'building'
 

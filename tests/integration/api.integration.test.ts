@@ -443,7 +443,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           'way',
           102,
           JSON.stringify({
-            'building:part': 'yes',
+            'building:part': 'apartments',
             name: 'Integration test part'
           }),
           JSON.stringify({
@@ -472,7 +472,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           103,
           JSON.stringify({
             building: 'yes',
-            'building:part': 'yes',
+            'building:part': 'apartments',
             name: 'Integration test mixed building'
           }),
           JSON.stringify({
@@ -663,7 +663,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         assert.equal(pendingPartEdit?.levels, 4);
         assert.equal(pendingPartEdit?.year_built, 1989);
         assert.equal(pendingPartEdit?.name, null);
-        assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"yes"/);
+        assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"apartments"/);
       } finally {
         partUserEditsDb.close();
       }

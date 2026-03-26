@@ -22,8 +22,12 @@ function getFeatureKindFromTags(tags: LooseRecord = {}) {
   if (tags && typeof tags === 'object' && !Array.isArray(tags) && Object.prototype.hasOwnProperty.call(tags, 'building')) {
     return FEATURE_KIND_BUILDING;
   }
-  const rawValue = String(tags?.['building:part'] ?? tags?.building_part ?? '').trim().toLowerCase();
-  if (rawValue === 'yes' || rawValue === 'true' || rawValue === '1') {
+  const hasBuildingPartTag = tags
+    && typeof tags === 'object'
+    && !Array.isArray(tags)
+    && (Object.prototype.hasOwnProperty.call(tags, 'building:part')
+      || Object.prototype.hasOwnProperty.call(tags, 'building_part'));
+  if (hasBuildingPartTag) {
     return FEATURE_KIND_BUILDING_PART;
   }
   return FEATURE_KIND_BUILDING;

@@ -140,7 +140,7 @@ test('normalizeSearchSourceRow drops building parts from the search source', () 
     osm_type: 'way',
     osm_id: 12,
     tags_json: JSON.stringify({
-      'building:part': 'yes',
+      'building:part': 'apartments',
       name: 'Part of a building'
     }),
     local_name: null,
@@ -161,7 +161,7 @@ test('normalizeSearchSourceRow keeps buildings that also declare building:part',
     osm_id: 13,
     tags_json: JSON.stringify({
       building: 'yes',
-      'building:part': 'yes',
+      'building:part': 'apartments',
       name: 'Mixed building'
     }),
     local_name: null,

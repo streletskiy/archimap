@@ -5,7 +5,7 @@
 - Endpoint: `GET /api/data/regions/:regionId/pmtiles`.
 - Implementation: `src/lib/server/infra/pmtiles-stream.infra.ts`.
 - Uses `fs.createReadStream` with explicit byte window.
-- The regional archive contains both normal buildings and pure `building:part` features; the client splits them with the `feature_kind` property instead of fetching a second archive. If `building` is also present, the feature is treated as a normal building.
+- The regional archive contains both normal buildings and features carrying `building:part`; the client splits them with the `feature_kind` property instead of fetching a second archive. If `building` is also present, the feature is treated as a normal building.
 
 ## Supported features
 

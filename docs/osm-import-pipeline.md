@@ -58,7 +58,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - serialize tags to JSON
    - serialize geometry as WKB hex for PostgreSQL DB import handoff
    - serialize geometry as GeoJSON for SQLite import handoff and PMTiles build input
-   - derive `feature_kind` from tags so pure `building:part=yes` rows become `building_part`, while any row that also has a `building` tag stays `building`
+   - derive `feature_kind` from tags so rows with `building:part` become `building_part`, regardless of the tag value, while any row that also has a `building` tag stays `building`
    - compute `min_lon`, `min_lat`, `max_lon`, `max_lat`
 8. Filtered rows are exported as workspace artifacts:
    - PostgreSQL full sync: `region-import.ndjson` (WKB hex + bbox + tags), `region-build.ndjson` (GeoJSON features for `tippecanoe`), and `region-export-summary.json` (feature count + bounds)

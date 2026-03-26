@@ -33,8 +33,7 @@ function deriveFeatureKindFromTagsJson(tagsJson) {
     if (Object.prototype.hasOwnProperty.call(tags, 'building')) {
       return 'building';
     }
-    const rawValue = String(tags['building:part'] ?? tags.building_part ?? '').trim().toLowerCase();
-    if (rawValue === 'yes' || rawValue === 'true' || rawValue === '1') {
+    if (Object.prototype.hasOwnProperty.call(tags, 'building:part') || Object.prototype.hasOwnProperty.call(tags, 'building_part')) {
       return 'building_part';
     }
   } catch {
