@@ -25,6 +25,8 @@ ArchiMap is a self-hosted platform for architectural mapping and building analys
 
 ### Local development
 
+Use Node.js 24 LTS.
+
 ```bash
 npm ci
 npm --prefix frontend ci
