@@ -14,6 +14,7 @@ from typing import Any, Tuple
 
 import duckdb  # type: ignore
 import pandas as pd  # type: ignore
+from requests import HTTPError  # type: ignore
 from quackosm import PbfFileReader, convert_osm_extract_to_duckdb  # type: ignore
 from quackosm.osm_extracts import (  # type: ignore
     OSM_EXTRACT_SOURCE_INDEX_FUNCTION,
@@ -129,12 +130,22 @@ def tokenize_search_text(value: str) -> list[str]:
 def infer_extract_source(file_name: str) -> str:
     value = str(file_name or '').strip().casefold()
     if value.startswith('osmfr_'):
-      return 'osmfr'
+        return 'osmfr'
     if value.startswith('geofabrik_'):
-      return 'geofabrik'
+        return 'geofabrik'
     if value.startswith('bbbike_'):
-      return 'bbbike'
+        return 'bbbike'
     return 'any'
+
+
+def _is_quackosm_index_rate_limit_error(exc: HTTPError) -> bool:
+    response = getattr(exc, 'response', None)
+    status_code = getattr(response, 'status_code', None)
+    if status_code not in {403, 429}:
+        return False
+
+    details = f'{exc} {getattr(response, "text", "")}'.casefold()
+    return status_code == 429 or 'rate limit' in details or 'too many requests' in details
 
 
 def serialize_extract(extract: Any, *, match_kind: str | None = None, exact: bool | None = None) -> dict[str, Any]:
@@ -188,6 +199,23 @@ def build_path_aliases_for_row(row: Any) -> set[str]:
                 aliases.add(suffix_alias)
 
     return aliases
+
+
+def _load_extract_index(source: OsmExtractSource) -> Any:
+    loader = OSM_EXTRACT_SOURCE_INDEX_FUNCTION[source]
+    try:
+        return loader()
+    except HTTPError as exc:
+        if not _is_quackosm_index_rate_limit_error(exc):
+            raise
+
+        print(
+            'QuackOSM precalculated index download was rate-limited for '
+            f'source={source.value}; retrying with local recalculation.',
+            file=sys.stderr,
+            flush=True,
+        )
+        return loader(force_recalculation=True)
 
 
 @lru_cache(maxsize=None)
@@ -250,11 +278,14 @@ def get_extract_index(source: str) -> Any:
     source_enum = OsmExtractSource(source_name)
     if source_enum == OsmExtractSource.any:
         index = pd.concat(
-            [get_index_function() for get_index_function in OSM_EXTRACT_SOURCE_INDEX_FUNCTION.values()],
+            [
+                _load_extract_index(get_source_enum)
+                for get_source_enum in OSM_EXTRACT_SOURCE_INDEX_FUNCTION.keys()
+            ],
             ignore_index=True,
         )
     else:
-        index = OSM_EXTRACT_SOURCE_INDEX_FUNCTION[source_enum]()
+        index = _load_extract_index(source_enum)
 
     index = index.copy()
     index['source_name'] = index['file_name'].map(infer_extract_source)
@@ -266,6 +297,8 @@ def get_extract_index(source: str) -> Any:
 def resolve_exact_extract(query: str, source: str = 'any') -> dict[str, Any]:
     normalized_source = normalize_extract_source(source)
     raw_query = str(query or '').strip()
+    if raw_query:
+        get_extract_index(normalized_source)
     if '/' in raw_query or '\\' in raw_query:
         alias_result = resolve_exact_extract_alias(raw_query, normalized_source)
         if alias_result.get('candidate') or alias_result.get('errorCode') == 'multiple':
@@ -551,7 +584,9 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
 
 def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work_dir: Path, index: int) -> Path:
     resolved_query = str(extract_query or '').strip()
-    resolved = resolve_exact_extract_alias(resolved_query, extract_source)
+    normalized_source = normalize_extract_source(extract_source)
+    get_extract_index(normalized_source)
+    resolved = resolve_exact_extract_alias(resolved_query, normalized_source)
     if resolved.get('candidate'):
         resolved_query = str(resolved['candidate'].get('extractId') or resolved_query).strip() or resolved_query
 
@@ -564,7 +599,7 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
 
     convert_osm_extract_to_duckdb(
         osm_extract_query=resolved_query,
-        osm_extract_source=normalize_extract_source(extract_source),
+        osm_extract_source=normalized_source,
         tags_filter={'building': True, 'building:part': True},
         result_file_path=duckdb_path,
         keep_all_tags=True,

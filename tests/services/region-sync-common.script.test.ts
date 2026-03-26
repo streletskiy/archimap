@@ -94,6 +94,41 @@ test('summarizeImportRows counts WKB-only import rows and computes bounds', asyn
   }
 });
 
+test('summarizeImportRows handles import rows larger than the stream chunk size', async () => {
+  const workspace = createWorkspace(998);
+  const importPath = path.join(workspace, 'region-import.ndjson');
+
+  try {
+    await writeRowsToNdjsonFile(importPath, [
+      {
+        osm_type: 'way',
+        osm_id: 3,
+        tags_json: JSON.stringify({
+          building: 'yes',
+          notes: 'x'.repeat(1_200_000)
+        }),
+        geometry_wkb_hex: '0A0B',
+        min_lon: 37.5,
+        min_lat: 55.5,
+        max_lon: 37.6,
+        max_lat: 55.6
+      }
+    ]);
+
+    const summary = await summarizeImportRows(importPath, { requireGeometryWkbHex: true });
+
+    assert.equal(summary.importedFeatureCount, 1);
+    assert.deepEqual(summary.bounds, {
+      west: 37.5,
+      south: 55.5,
+      east: 37.6,
+      north: 55.6
+    });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('formatGeojsonFeatureLine preserves geometry json and encoded OSM feature id', () => {
   const line = formatGeojsonFeatureLine('relation', 123, '{"type":"Point","coordinates":[37.6,55.7]}');
 

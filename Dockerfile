@@ -97,9 +97,10 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
   && /opt/pyosm/bin/pip install "pip==${PIP_VERSION}" \
   && /opt/pyosm/bin/pip install "quackosm==${QUACKOSM_VERSION}" "duckdb==${DUCKDB_VERSION}"
 
-RUN mkdir -p /app/data/quackosm
+RUN mkdir -p /app/data/cache /app/data/quackosm
 
 ENV PYTHON_BIN=/opt/pyosm/bin/python
+ENV XDG_CACHE_HOME=/app/data/cache
 
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
 

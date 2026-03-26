@@ -39,6 +39,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
   - production `node_modules`
   - python venv with `quackosm`/`duckdb`
   - `tippecanoe` binaries
+  - QuackOSM's cache root is mapped to `/app/data/cache`, so precalculated extract indexes survive container restarts when the default `./data:/app/data` volume is present.
 
 ## Cache Stability Rules
 

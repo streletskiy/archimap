@@ -1,7 +1,6 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const readline = require('readline');
 const { once } = require('events');
 const { moveFileSync } = require('../../src/lib/server/utils/fs');
 
@@ -131,11 +130,29 @@ async function* readImportRows(ndjsonPath, options: LooseRecord = {}) {
     encoding: 'utf8',
     highWaterMark: NDJSON_STREAM_HIGH_WATER_MARK
   });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  for await (const line of rl) {
-    const trimmed = String(line || '').trim();
-    if (!trimmed) continue;
-    yield parseRowPayload(trimmed, options);
+  let bufferedLine = '';
+
+  try {
+    for await (const chunk of stream) {
+      bufferedLine += String(chunk || '');
+
+      let newlineIndex = bufferedLine.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = bufferedLine.slice(0, newlineIndex).trim();
+        bufferedLine = bufferedLine.slice(newlineIndex + 1);
+        if (line) {
+          yield parseRowPayload(line, options);
+        }
+        newlineIndex = bufferedLine.indexOf('\n');
+      }
+    }
+
+    const trailingLine = bufferedLine.trim();
+    if (trailingLine) {
+      yield parseRowPayload(trailingLine, options);
+    }
+  } finally {
+    stream.destroy();
   }
 }
 

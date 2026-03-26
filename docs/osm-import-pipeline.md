@@ -153,6 +153,7 @@ flowchart TD
 
 - Resolves the configured extract query.
 - Downloads or reuses the matching extract.
+- If the precalculated index download is rate-limited, the importer retries with local index recalculation and caches the result for future runs.
 - Filters source data by `tags_filter={'building': True, 'building:part': True}` before the project-specific SQL stage.
 - Writes the raw import result into DuckDB as `quackosm_raw`.
 
@@ -239,6 +240,7 @@ flowchart TD
   - `region.pmtiles`
 - Persistent intermediate extraction cache:
   - `data/quackosm/*.duckdb`
+  - QuackOSM source indexes under `data/cache/QuackOSM/*.geojson` when the container uses the persisted cache root
 - Persistent runtime outputs:
   - `osm.building_contours`
   - `data_region_memberships`
@@ -258,6 +260,7 @@ flowchart TD
 
 - Syncs are serialized through one in-process queue; parallel region imports are not allowed.
 - A `0`-feature import is treated as failure; DB state and PMTiles stay untouched.
+- QuackOSM index rate limits are treated as recoverable: the importer falls back to local index recalculation instead of failing the sync immediately.
 - PMTiles swap is protected by a backup file and explicit rollback path.
 - Cleanup deletes only contours that have no remaining membership in any region.
 - Interrupted runs are recoverable because region sync status and run history are stored separately from the import workspace.
