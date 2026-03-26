@@ -7,6 +7,11 @@ const CONCRETE_BUILDING_MATERIAL_VARIANTS = new Map([
 const ARCHI_EDITED_FIELD_ALIASES = new Map([
   ['name', 'name'],
   ['style', 'style'],
+  ['design', 'design'],
+  ['designref', 'design_ref'],
+  ['design_ref', 'design_ref'],
+  ['designyear', 'design_year'],
+  ['design_year', 'design_year'],
   ['material', 'material'],
   ['levels', 'levels'],
   ['yearbuilt', 'year_built'],
@@ -31,6 +36,13 @@ function sanitizeFieldText(value, maxLen = 500) {
   const text = String(value).trim();
   if (!text) return null;
   return text.slice(0, maxLen);
+}
+
+function sanitizeYearInRange(value, min = 1000, max = 2100) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
 }
 
 function normalizeBuildingMaterialSelectionKey(value) {
@@ -71,10 +83,11 @@ function splitBuildingMaterialSelection(value) {
 }
 
 function sanitizeYearBuilt(value) {
-  if (value === null || value === undefined || String(value).trim() === '') return null;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1000 || parsed > 2100) return null;
-  return parsed;
+  return sanitizeYearInRange(value, 1000, 2100);
+}
+
+function sanitizeProjectYear(value) {
+  return sanitizeYearInRange(value, 1000, 2100);
 }
 
 function sanitizeLevels(value) {
@@ -86,8 +99,10 @@ function sanitizeLevels(value) {
 
 function sanitizeArchiPayload(body) {
   const yearRaw = body?.yearBuilt ?? body?.year_built;
+  const designYearRaw = body?.designYear ?? body?.design_year;
   const levelsRaw = body?.levels;
   const yearBuilt = sanitizeYearBuilt(yearRaw);
+  const designYear = sanitizeProjectYear(designYearRaw);
   const levels = sanitizeLevels(levelsRaw);
   const materialSelection = String(body?.material ?? '').trim();
   const explicitMaterialConcrete = normalizeConcreteBuildingMaterialVariant(body?.materialConcrete ?? body?.material_concrete);
@@ -97,6 +112,9 @@ function sanitizeArchiPayload(body) {
   const materialConcrete = explicitMaterialConcrete || splitMaterial.material_concrete;
   if ((yearRaw !== null && yearRaw !== undefined && String(yearRaw).trim() !== '') && yearBuilt == null) {
     return { code: 'ERR_INVALID_YEAR_BUILT', error: 'Year built must be an integer between 1000 and 2100' };
+  }
+  if ((designYearRaw !== null && designYearRaw !== undefined && String(designYearRaw).trim() !== '') && designYear == null) {
+    return { code: 'ERR_INVALID_DESIGN_YEAR', error: 'Project year must be an integer between 1000 and 2100' };
   }
   if ((levelsRaw !== null && levelsRaw !== undefined && String(levelsRaw).trim() !== '') && levels == null) {
     return { code: 'ERR_INVALID_LEVELS', error: 'Levels must be an integer between 0 and 300' };
@@ -117,6 +135,9 @@ function sanitizeArchiPayload(body) {
     value: {
       name: sanitizeFieldText(body?.name, 250),
       style: sanitizeFieldText(body?.style, 200),
+      design: sanitizeFieldText(body?.design, 120),
+      design_ref: sanitizeFieldText(body?.designRef ?? body?.design_ref, 500),
+      design_year: designYear,
       material,
       material_concrete: materialConcrete,
       colour: sanitizeFieldText(body?.colour ?? body?.color, 120),
@@ -162,7 +183,9 @@ function sanitizeEditedFields(value) {
 module.exports = {
   normalizeUserEditStatus,
   sanitizeFieldText,
+  sanitizeYearInRange,
   sanitizeYearBuilt,
+  sanitizeProjectYear,
   sanitizeLevels,
   splitBuildingMaterialSelection,
   sanitizeArchiPayload,

@@ -3,12 +3,24 @@
 User-side:
 
 - User submits building changes via `POST /api/building-info`.
-- Supported editable fields: `name`, `style`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
+- Supported editable fields: `name`, `style`, `design`, `designRef`, `designYear`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
 - `material` accepts the concrete variants `concrete_panels`, `concrete_blocks`, and `concrete_monolith` in addition to the regular material list.
+- When `design` is enabled as a typical project, `designRef` and `designYear` become editable; `designRef` suggestions come from a cached list of values already present in the database.
+- Bulk edit is started with Shift+Click on the map to build a temporary multi-selection.
+- On the main map, Shift is reserved for bulk selection, so the default MapLibre Shift-drag box zoom is disabled there.
+- The building modal stays open during map editing and does not block clicks on the map, so you can keep adding or removing buildings while the panel is open.
+- The selected-building count is shown inside the building modal header; there is no separate top-of-map bulk-selection chip.
+- In bulk edit mode, `name` and address tags are read-only and are not sent to the save endpoint.
+- In bulk edit mode, the modal hides single-building metadata that no longer has a clear meaning for a group, such as the primary OSM id badge and the raw OSM tag dump.
+- If selected buildings disagree on an editable field, the modal shows that field as mixed, lists current sample values, and leaves it unchanged until the user explicitly enters, selects, or clears a value for the whole group.
+- The bulk-only `Clear for all` control writes an explicit empty value for that field to every selected building when the edit is saved.
+- If any selected building is a `building_part`, bulk edit narrows the editable fields to `levels`, `colour`, `style`, `material`, and `yearBuilt`.
+- When a bulk edit is submitted, the same allowed field changes are applied to every selected building one by one, but any building whose effective values do not change is skipped so that no empty edit row is created.
 - When `material` is one of the concrete variants, the server persists `building:material=concrete` plus `building:material:concrete=<panels|blocks|monolith>` in the local merged state and user edit rows.
 - For one `user + building` only one active `pending` edit is kept:
   - latest `pending` is updated in place;
   - stale extra `pending` rows are marked as `superseded`.
+- In the account history, a user can withdraw their own `pending` edit before moderation; the action deletes that pending row.
 - In account history user can see moderation statuses and admin comment.
 
 Admin-side moderation:
@@ -22,19 +34,25 @@ Admin-side moderation:
   - accepted subset + rejected subset -> `partially_accepted`;
   - all rejected -> `rejected`.
 - Accepted fields are persisted to `local.architectural_info`; merged field list is saved to `merged_fields_json`.
+- Search index refresh is only queued when accepted, deleted, or reassigned local data touches search fields (`name`, `address`, `style`, `architect`, `design_ref`). Material/levels-only moderation does not touch the search index, and the refresh itself is handled by a dedicated background worker without waiting for a worker response on the admin request thread.
 
 OSM publish flow:
 
 - Master admins can open `Admin -> Send to OSM` and connect an OSM OAuth2 client.
 - Sync works on a building group (`osm_type` + `osm_id`), not on an individual history row.
 - The sync queue supports selecting multiple building groups and publishing them in one OSM changeset.
+- Candidates whose local state already matches the live OSM element are marked `noChange`, skipped from the write list, and counted as synced without sending a new OSM element update.
 - Style edits are published as `building:architecture`.
+- Levels, colour, and architect edits are published as `building:levels`, `building:colour`, and `architect` only; the legacy `levels`, `colour`, and `architect_name` tags are still read for older OSM data, but new edits do not write them.
+- `design` is published as `design=typical` when the checkbox is enabled, and the tag is omitted when it is disabled.
+- `design:ref` and `design:year` are published together with the typical-project flag when those fields are filled in.
 - Before publishing, the runtime fetches the live OSM element and compares it with the stored source snapshot; if the upstream OSM state drifted, sync is blocked with `409 OSM_SYNC_SOURCE_DRIFT`.
 - On success, the runtime opens an OSM changeset with a compact `comment`, `source`, and `created_by` metadata payload, pushes one or more merged element updates as standard OSM XML documents wrapped in `<osm version="0.6">`, closes the changeset, and marks all accepted / partially accepted rows for the synced building groups as `synced`.
+- OSM publish only updates remote OSM and sync metadata; it does not enqueue a local search index refresh. Any later cleanup refresh is also dispatched through the background search-refresh worker only when the overwritten local row contained search-relevant fields.
 - Changeset comments begin with `Update architectural info:` in all OSM sync cases.
 - The original local history rows remain in place and carry sync metadata such as the changeset id, sync timestamps, and a compact JSON summary.
 - Synced / cleaned rows are treated as read-only in admin views: they move to compact archive sections, stay collapsed by default in the UI, and cannot be re-synced or re-moderated.
-- After the next successful OSM import, if the tags that were actually synchronized are already present in the imported contour data, the runtime can remove the redundant `local.architectural_info` overwrite while leaving the edit history row in compact form.
+- After the next successful OSM import, if the tags that were actually synchronized are already present in the imported contour data, the runtime can remove the redundant `local.architectural_info` overwrite while leaving the edit history row in compact form. Cleanup only refreshes the search index when the overwritten local row contained search-relevant fields.
 
 Corner cases handled:
 

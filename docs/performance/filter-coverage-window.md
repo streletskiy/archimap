@@ -6,7 +6,7 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
 
 ## Pipeline
 
-1. Filter input is prepared in worker (`prepare-rules`) and diff plans are built in worker (`build-apply-plan`).
+1. Filter input is prepared in worker (`build-request-plan`) and resolved highlight payloads are composed in worker (`build-resolved-payload`).
 2. For each viewport, client builds a coverage window (expanded bbox).
 3. Authoritative request is made for coverage window, not exact viewport bbox.
 4. While viewport remains fully inside active coverage window:

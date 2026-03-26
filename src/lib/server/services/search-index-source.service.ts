@@ -8,6 +8,7 @@ const SEARCH_SOURCE_RAW_SELECT_FIELDS = `
   ai.address AS local_address,
   ai.style AS local_style,
   ai.architect AS local_architect,
+  ai.design_ref AS local_design_ref,
   CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
   (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
   (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
@@ -29,6 +30,7 @@ const BUILDING_SEARCH_SOURCE_INSERT_SQL = `
     address,
     style,
     architect,
+    design_ref,
     local_priority,
     center_lon,
     center_lat,
@@ -46,6 +48,7 @@ const BUILDING_SEARCH_SOURCE_UPSERT_SQL = `
     address,
     style,
     architect,
+    design_ref,
     local_priority,
     center_lon,
     center_lat,
@@ -59,6 +62,7 @@ const BUILDING_SEARCH_SOURCE_UPSERT_SQL = `
     @address,
     @style,
     @architect,
+    @design_ref,
     @local_priority,
     @center_lon,
     @center_lat,
@@ -69,6 +73,7 @@ const BUILDING_SEARCH_SOURCE_UPSERT_SQL = `
     address = excluded.address,
     style = excluded.style,
     architect = excluded.architect,
+    design_ref = excluded.design_ref,
     local_priority = excluded.local_priority,
     center_lon = excluded.center_lon,
     center_lat = excluded.center_lat,
@@ -81,8 +86,8 @@ const BUILDING_SEARCH_SOURCE_DELETE_SQL = `
 `;
 
 const BUILDING_SEARCH_FTS_INSERT_SQL = `
-  INSERT INTO building_search_fts (osm_key, name, address, style, architect)
-  VALUES (?, ?, ?, ?, ?)
+  INSERT INTO building_search_fts (osm_key, name, address, style, architect, design_ref)
+  VALUES (?, ?, ?, ?, ?, ?)
 `;
 
 const BUILDING_SEARCH_FTS_DELETE_SQL = `
@@ -167,6 +172,7 @@ function hasSearchSourceValues(sourceRow) {
     || normalizeNullableSearchText(sourceRow?.address)
     || normalizeNullableSearchText(sourceRow?.style)
     || normalizeNullableSearchText(sourceRow?.architect)
+    || normalizeNullableSearchText(sourceRow?.design_ref)
   );
 }
 
@@ -203,6 +209,11 @@ function normalizeSearchSourceRow(rawRow) {
     tags.architect,
     tags.architect_name
   );
+  const designRef = pickFirstText(
+    rawRow.local_design_ref,
+    tags['design:ref'],
+    tags.design_ref
+  );
   const centerLon = Number(rawRow.center_lon);
   const centerLat = Number(rawRow.center_lat);
 
@@ -214,6 +225,7 @@ function normalizeSearchSourceRow(rawRow) {
     address,
     style,
     architect,
+    design_ref: designRef,
     local_priority: Number(rawRow.local_priority || 0) > 0 ? 1 : 0,
     center_lon: Number.isFinite(centerLon) ? centerLon : 0,
     center_lat: Number.isFinite(centerLat) ? centerLat : 0

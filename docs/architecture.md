@@ -13,7 +13,7 @@
 - `frontend/src/lib/components/ui/**`: generated `shadcn-svelte` primitives kept close to upstream.
 - `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
-- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`.
+- `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`, plus tab-local subcomponents for list/filter/detail panes (`EditListFilters`, `EditDetailPane`, `SyncCandidateCard`, `SyncCandidateDetailPane`, `AdminDataForm`, `AdminDataRegionList`, `AdminDataHistorySection`, `AdminFilterTagsSection`, `AdminFilterPresetsSection`, `StyleOverridesDialog`, `StyleDefaultsSection`).
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
@@ -47,6 +47,8 @@
   - `src/lib/server/services/building-edits/history.ts`: edit list/details queries and response shaping
   - `src/lib/server/services/building-edits/moderation.ts`: reassignment/delete flows and merged-local-state safety checks
   - `src/lib/server/services/building-edits/personal-overlays.ts`: pending/rejected personal overlay lookup for feature info and filter payloads
+- Building data access:
+  - `src/lib/server/services/buildings.repository.ts`: SQL access for building contour lookups, region slug resolution, local architectural info attachment, and pending building-info draft persistence shared by `buildings.route.ts` and `feature-info.http.ts`
 - Auth backend decomposition:
   - `src/lib/server/auth/index.ts`: auth bootstrap and route registration entrypoint
   - `src/lib/server/auth/schema.ts`: auth schema bootstrap for SQLite
@@ -59,6 +61,7 @@
   - `src/lib/server/services/admin/admin-settings.service.ts`: email-preview, app-settings, data-settings, and region-sync orchestration
   - `src/lib/server/services/admin/admin-edits.service.ts`: admin edit moderation, merge flows, and admin user detail queries
   - `src/lib/server/services/style-region-overrides.service.ts`: public/admin style-region override rule persistence and validation
+  - `src/lib/server/services/osm-sync.service.ts`: thin façade over `osm-oauth.ts`, `osm-api-client.ts`, `osm-changeset-builder.ts`, and `osm-candidate-resolver.ts` for OSM admin sync and OAuth flows
 - Frontend map filter decomposition:
   - `frontend/src/lib/services/map/map-filter-pipeline.ts`: filter lifecycle orchestration entrypoint for viewport events and status transitions
   - `frontend/src/lib/services/map/filter-request-planner.ts`: rule/layer normalization, request-spec planning, and resolved highlight payload shaping
@@ -67,11 +70,11 @@
   - `frontend/src/lib/services/map/filter-diff-apply-strategy.ts`: highlight diff/apply strategy over MapLibre paint properties
 - Frontend map canvas decomposition:
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
-  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, and search-result click routing
+  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, buffered hover/click hit-testing for pmtiles buildings, and search-result click routing
   - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
-- Shared search source normalization: `src/lib/server/services/search-index-source.service.ts`.
-- Shared utilities: `src/lib/shared/**`.
+- Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.
+- Shared utilities: `src/lib/shared/**`, including `src/lib/shared/types/**` for cross-cutting domain contracts shared by backend and frontend (`Region`, `FilterPreset`, `BuildingEdit`, `SyncCandidate`, and related admin payloads).
 - Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.ts`, `frontend/src/lib/client/filterUrlState.ts`, `frontend/src/lib/client/section-routes.ts`.
 - Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and the `Filters` tab contains both filter-tag allowlist management and DB-backed filter-preset CRUD.
 
@@ -90,6 +93,8 @@
 - PMTiles range/streaming + validators: `src/lib/server/infra/pmtiles-stream.infra.ts`.
 - In-process LRU: `src/lib/server/infra/lru-cache.infra.ts` (search hot-paths plus building filter bbox/match caches via `building-filters.service.ts`).
 - Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.ts`.
+- Design-ref suggestions cache: `src/lib/server/boot/design-ref-suggestions.boot.ts` is startup-warmed and refreshed when `design_ref`-affecting writes or import/rebuild paths need it; OSM publish itself no longer waits on a full suggestions rebuild.
+- Search index maintenance: `src/lib/server/boot/search-index.boot.ts` keeps incremental building refreshes in a keyed in-process queue, coalesces repeated refreshes for the same `osm_key`, and defers queued work while a full rebuild is running. Incremental refreshes are dispatched to a dedicated worker process (`workers/refresh-search-index.worker.ts`) so request handlers do not wait on the DB update or the worker response, and call sites only enqueue refreshes for search-affecting fields (`name`, `address`, `style`, `architect`, `design_ref`); OSM publish/sync metadata updates do not enqueue search refreshes.
 
 ## i18n
 
@@ -110,6 +115,10 @@
 - Custom building filter renders through dedicated region-scoped highlight layers:
   - `<region>-filter-highlight-fill`
   - `<region>-filter-highlight-line`
+- Building hover renders through dedicated region-scoped hover layers:
+  - `<region>-hover-fill`
+  - `<region>-hover-line`
+  - Hover hit-testing uses a small pixel buffer around the cursor so thin building contours still respond to pointer hover and click.
 - Filter evaluation for architectural fields uses merged local values first and then falls back to raw OSM tags, so accepted/synced edits participate in map highlighting the same way they do in building details.
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
@@ -126,7 +135,7 @@
   - `map-filter-pipeline.js`: top-level orchestration and runtime status
   - `filter-request-planner.js`: layer normalization, request planning, and resolved highlight payload shaping
   - `filter-match-cache-strategy.js`: authoritative request caching, optimistic reuse, and prefetch coordination
-  - `filter-worker-dispatcher.js`: lazy worker lifecycle for `prepare-rules` and `build-apply-plan`
+  - `filter-worker-dispatcher.js`: lazy worker lifecycle for `prepare-rules`, `build-request-plan`, and `build-resolved-payload`
   - `filter-diff-apply-strategy.js`: chunked highlight diff/apply over MapLibre paint properties
   - supporting utilities remain split into `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js`
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
@@ -163,5 +172,5 @@ SvelteKit Node runtime (server.sveltekit.ts)
   |
   +--> SQLite (main + osm + local/user edits + auth)
   +--> Redis session store (optional, prod)
-  +--> workers/scripts (region-sync pipeline, search index rebuild, tag cache rebuild)
+  +--> workers/scripts (region-sync pipeline, search index rebuild, search index refresh, tag cache rebuild)
 ```

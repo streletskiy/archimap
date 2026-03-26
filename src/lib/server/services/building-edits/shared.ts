@@ -1,4 +1,27 @@
+import type {
+  BuildingEdit,
+  BuildingEditFieldChange,
+  BuildingEditMergedInfo
+} from '$shared/types';
+
 const { sanitizeEditedFields } = require('../edits.service');
+const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
+
+function assertMutableSyncStatus(syncStatusRaw) {
+  const syncStatus = String(syncStatusRaw || 'unsynced').trim().toLowerCase();
+  if (syncStatus === 'syncing') {
+    const error = new Error('This edit is currently being synchronized and cannot be changed right now.');
+    error.status = 409;
+    error.code = 'EDIT_SYNC_IN_PROGRESS';
+    throw error;
+  }
+  if (READ_ONLY_SYNC_STATUSES.has(syncStatus)) {
+    const error = new Error('This edit has already been synchronized and can only be viewed.');
+    error.status = 409;
+    error.code = 'EDIT_SYNC_LOCKED';
+    throw error;
+  }
+}
 
 function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   if (!db) {
@@ -11,7 +34,6 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   const isPostgres = db.provider === 'postgres';
   const REASSIGNABLE_EDIT_STATUSES = new Set(['pending', 'accepted', 'partially_accepted']);
   const MERGED_EDIT_STATUSES = new Set(['accepted', 'partially_accepted']);
-  const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
   const MERGED_EDITS_FOR_TARGET_SQL = `
         (
           SELECT COUNT(*)
@@ -46,6 +68,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         ${MERGED_EDITS_FOR_TARGET_SQL},
         ai.name AS merged_name,
         ai.style AS merged_style,
+        ai.design AS merged_design,
+        ai.design_ref AS merged_design_ref,
+        ai.design_year AS merged_design_year,
         ai.material AS merged_material,
         ai.material_concrete AS merged_material_concrete,
         ai.colour AS merged_colour,
@@ -83,9 +108,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     const normalizedMaterial = normalizeInfoForDiff(material);
     const normalizedConcrete = normalizeInfoForDiff(materialConcrete);
     if (normalizedMaterial === 'concrete' && normalizedConcrete) {
-      return `concrete_${normalizedConcrete}`;
+      return `concrete_${String(normalizedConcrete)}`;
     }
-    if (normalizedMaterial) return normalizedMaterial;
+    if (normalizedMaterial != null) return String(normalizedMaterial);
     return null;
   }
 
@@ -94,7 +119,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     if (normalized == null) return null;
 
     const key = String(fieldKey || '').trim();
-    if (key === 'levels' || key === 'year_built') {
+    if (key === 'levels' || key === 'year_built' || key === 'design_year') {
       const text = String(normalized).trim();
       if (/^-?\d+(?:\.\d+)?$/.test(text)) {
         const num = Number(text);
@@ -140,12 +165,15 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   const ARCHI_EDIT_FIELDS = Object.freeze([
     { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
     { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
-    { key: 'levels', label: 'Этажей', osmTag: 'building:levels | levels' },
+    { key: 'levels', label: 'Этажей', osmTag: 'building:levels' },
     { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
-    { key: 'architect', label: 'Архитектор', osmTag: 'architect | architect_name' },
+    { key: 'architect', label: 'Архитектор', osmTag: 'architect' },
     { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture' },
+    { key: 'design', label: 'Типовой проект', osmTag: 'design' },
+    { key: 'design_ref', label: 'Номер проекта', osmTag: 'design:ref' },
+    { key: 'design_year', label: 'Год проекта', osmTag: 'design:year' },
     { key: 'material', label: 'Материал', osmTag: 'building:material | material' },
-    { key: 'colour', label: 'Цвет', osmTag: 'building:colour | colour' },
+    { key: 'colour', label: 'Цвет', osmTag: 'building:colour' },
     { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
   ]);
 
@@ -190,7 +218,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   async function getMergedInfoRow(osmType, osmId) {
     return await db.prepare(`
-      SELECT osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+      SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
@@ -273,10 +301,13 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     `).run(osmType, osmId, author);
   }
 
-  function buildChangesFromRows(editRow, tags) {
+  function buildChangesFromRows(editRow, tags): BuildingEditFieldChange[] {
     const osmBaseline = {
       name: pickTagValue(tags, ['name', 'name:ru', 'official_name']),
       style: pickTagValue(tags, ['building:architecture', 'architecture', 'style']),
+      design: pickTagValue(tags, ['design']),
+      design_ref: pickTagValue(tags, ['design:ref', 'design_ref']),
+      design_year: pickTagValue(tags, ['design:year', 'design_year']),
       material: normalizeMaterialSelection(
         pickTagValue(tags, ['building:material', 'material']),
         pickTagValue(tags, ['building:material:concrete', 'material_concrete'])
@@ -350,10 +381,13 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return username || null;
   }
 
-  function normalizeMergedInfoRow(row) {
+  function normalizeMergedInfoRow(row): BuildingEditMergedInfo | null {
     if (!row) return null;
     const hasMergedValue = row.name != null
       || row.style != null
+      || row.design != null
+      || row.design_ref != null
+      || row.design_year != null
       || row.material != null
       || row.material_concrete != null
       || row.colour != null
@@ -368,6 +402,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return {
       name: row.name ?? null,
       style: row.style ?? null,
+      design: row.design ?? null,
+      design_ref: row.design_ref ?? null,
+      design_year: row.design_year ?? null,
       material: row.material ?? null,
       material_concrete: row.material_concrete ?? null,
       colour: row.colour ?? null,
@@ -382,10 +419,13 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function getMergedInfoRowFromUserEditRow(row) {
+  function getMergedInfoRowFromUserEditRow(row): BuildingEditMergedInfo | null {
     return normalizeMergedInfoRow({
       name: row?.merged_name,
       style: row?.merged_style,
+      design: row?.merged_design,
+      design_ref: row?.merged_design_ref,
+      design_year: row?.merged_design_year,
       material: row?.merged_material,
       material_concrete: row?.merged_material_concrete,
       colour: row?.merged_colour,
@@ -433,7 +473,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function mapUserEditRow(row, tags, mergedInfoRow) {
+  function mapUserEditRow(row, tags, mergedInfoRow): BuildingEdit {
     const runtimeState = buildEditRuntimeState(row, mergedInfoRow);
     const changes = buildChangesFromRows(row, tags);
     const editedFields = getEditedFieldsFromRow(row);
@@ -492,6 +532,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       values: {
         name: row.name ?? null,
         style: row.style ?? null,
+        design: row.design ?? null,
+        design_ref: row.design_ref ?? null,
+        design_year: row.design_year ?? null,
         material: normalizeMaterialSelection(row.material, row.material_concrete),
         material_raw: row.material ?? null,
         material_concrete: row.material_concrete ?? null,
@@ -506,7 +549,11 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function mapDetailedUserEditRow(row) {
+  function mapDetailedUserEditRow(row): {
+    tags: Record<string, string>;
+    mergedInfoRow: BuildingEditMergedInfo | null;
+    mapped: BuildingEdit;
+  } {
     const tags = parseTagsJsonSafe(row?.source_tags_json || row?.tags_json);
     const mergedInfoRow = getMergedInfoRowFromUserEditRow(row);
     return {
@@ -527,6 +574,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     REASSIGNABLE_EDIT_STATUSES,
     READ_ONLY_SYNC_STATUSES,
     USER_EDITS_ORDER_BY_SQL,
+    assertMutableSyncStatus,
     applyUserEditRowToInfo,
     buildChangesFromRows,
     countMergedEditsForTarget,
@@ -549,5 +597,6 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 }
 
 module.exports = {
+  assertMutableSyncStatus,
   createBuildingEditsContext
 };

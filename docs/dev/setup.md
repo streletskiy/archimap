@@ -3,6 +3,7 @@
 ## Local
 
 1. Install deps:
+   - use Node.js 24 LTS
    - `npm ci`
    - `npm --prefix frontend ci`
 2. Prepare env:

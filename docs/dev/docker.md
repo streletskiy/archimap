@@ -32,7 +32,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 5. `runtime`
 
-- Uses pinned `node:20-bookworm-slim`.
+- Uses pinned `node:24-bookworm-slim`.
 - Contains only runtime assets:
   - backend runtime code (`server.sveltekit.ts`, `server.ts`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`

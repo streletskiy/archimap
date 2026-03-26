@@ -1,5 +1,4 @@
 import { writable } from 'svelte/store';
-import { computeRulesHash } from '$lib/components/map/filter-pipeline-utils';
 import { createFilterCache } from './filter-cache';
 import {
   buildBboxHash,
@@ -11,13 +10,12 @@ import {
 import { createFilterFetcher } from './filter-fetcher';
 import { createFilterMatchCacheStrategy } from './filter-match-cache-strategy';
 import {
-  buildFilterRequestSpecs,
   buildResolvedLayerPayload,
   EMPTY_LAYER_FILTER,
   hashFilterExpression,
   isLayerInput,
-  normalizeFilterInputLayers,
-  buildFilterRequestCacheKey
+  buildFilterRequestCacheKey,
+  prepareFilterRequestPlan
 } from './filter-request-planner';
 import { createFilterDiffApplyStrategy } from './filter-diff-apply-strategy';
 import { normalizeLayerIdsSnapshot } from './filter-utils';
@@ -30,6 +28,7 @@ import type {
   FilterMapDebug,
   FilterMapLike,
   FilterPipelineState,
+  FilterResolvedLayerPayload,
   FilterRequestResolution,
   FilterRequestSpec,
   FilterRuntimeStatus,
@@ -299,41 +298,38 @@ export function createFilterPipeline({
       const requestPayload = isLayerInput(input)
         ? { layers: input }
         : { rules: input };
-      const workerResult = await filterWorkerDispatcher.request('prepare-rules', requestPayload);
+      const workerResult = await filterWorkerDispatcher.request('build-request-plan', requestPayload);
       if (workerResult?.ok) {
-        const normalizedLayers = Array.isArray(workerResult.layers) && workerResult.layers.length > 0
-          ? workerResult.layers
-          : normalizeFilterInputLayers(input).layers;
-        const preparedRequests = buildFilterRequestSpecs(normalizedLayers);
         return {
           ok: true,
-          layers: preparedRequests.layers,
-          requestSpecs: preparedRequests.requestSpecs,
-          combinedGroup: preparedRequests.combinedGroup,
-          rulesHash: String(workerResult.rulesHash || computeRulesHash(preparedRequests.layers)),
+          layers: Array.isArray(workerResult.layers) ? workerResult.layers : [],
+          requestSpecs: Array.isArray(workerResult.requestSpecs) ? workerResult.requestSpecs : [],
+          combinedGroup: workerResult.combinedGroup || null,
+          hasStandaloneLayers: Boolean(workerResult.hasStandaloneLayers),
+          rulesHash: String(workerResult.rulesHash || 'fnv1a-0'),
           heavy: Boolean(workerResult.heavy)
         };
       }
       return {
         ok: false,
-        error: String(workerResult?.invalidReason || 'Invalid filter rules')
+        error: String(workerResult?.invalidReason || workerResult?.error || 'Invalid filter rules')
       };
     } catch {
-      const normalizedLayers = normalizeFilterInputLayers(input);
-      if (normalizedLayers.invalidReason) {
+      const prepared = prepareFilterRequestPlan(input);
+      if (prepared.ok === false) {
         return {
           ok: false,
-          error: normalizedLayers.invalidReason
+          error: prepared.invalidReason
         };
       }
-      const preparedRequests = buildFilterRequestSpecs(normalizedLayers.layers);
       return {
         ok: true,
-        layers: preparedRequests.layers,
-        requestSpecs: preparedRequests.requestSpecs,
-        combinedGroup: preparedRequests.combinedGroup,
-        rulesHash: computeRulesHash(preparedRequests.layers),
-        heavy: preparedRequests.requestSpecs.some((spec) => spec.rules.some((rule) => rule.op === 'contains'))
+        layers: prepared.layers,
+        requestSpecs: prepared.requestSpecs,
+        combinedGroup: prepared.combinedGroup,
+        hasStandaloneLayers: prepared.hasStandaloneLayers,
+        rulesHash: prepared.rulesHash,
+        heavy: prepared.heavy
       };
     }
   }
@@ -421,26 +417,65 @@ export function createFilterPipeline({
       }
       if (token !== latestFilterToken) return;
 
-      const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
-        requestResults.map((result) => [result.spec.id, result.payload])
-      );
       const usedFallback = requestResults.some((result) => result.usedFallback);
-      const resolvedPayload = buildResolvedLayerPayload({
-        prepared: context,
-        payloadsByRequestId,
-        cacheHit: requestResults.length > 0 && requestResults.every((result) => result.cacheHit)
-      });
-      resolvedPayload.meta = {
-        ...(resolvedPayload.meta || {}),
-        bboxHash: context.bboxHash,
-        coverageHash: context.coverageHash,
-        coverageWindow: context.coverageWindow,
-        rulesHash: context.rulesHash,
-        zoomBucket: context.zoomBucket,
-        truncated: Boolean(resolvedPayload.meta?.truncated),
-        elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
-        cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
-      };
+      const cacheHit = requestResults.length > 0 && requestResults.every((result) => result.cacheHit);
+      const requestPayloads = requestResults.map((result) => ({
+        requestId: result.spec.id,
+        payload: result.payload
+      }));
+      let resolvedPayload: FilterResolvedLayerPayload | null = null;
+      try {
+        const workerResult = await filterWorkerDispatcher.request('build-resolved-payload', {
+          prepared: context,
+          payloads: requestPayloads,
+          cacheHit
+        });
+        if (workerResult?.ok) {
+          resolvedPayload = {
+            highlightColorGroups: Array.isArray(workerResult.highlightColorGroups)
+              ? workerResult.highlightColorGroups
+              : [],
+            matchedFeatureIds: Array.isArray(workerResult.matchedFeatureIds)
+              ? workerResult.matchedFeatureIds
+              : [],
+            matchedCount: Number(workerResult.matchedCount || 0),
+            meta: {
+              ...(workerResult.meta || {}),
+              bboxHash: context.bboxHash,
+              coverageHash: context.coverageHash,
+              coverageWindow: context.coverageWindow,
+              rulesHash: context.rulesHash,
+              zoomBucket: context.zoomBucket,
+              truncated: Boolean(workerResult.meta?.truncated),
+              elapsedMs: Number(workerResult.meta?.elapsedMs || 0),
+              cacheHit: Boolean(workerResult.meta?.cacheHit)
+            }
+          };
+        }
+      } catch {
+        resolvedPayload = null;
+      }
+      if (!resolvedPayload) {
+        const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
+          requestResults.map((result) => [result.spec.id, result.payload])
+        );
+        resolvedPayload = buildResolvedLayerPayload({
+          prepared: context,
+          payloadsByRequestId,
+          cacheHit
+        });
+        resolvedPayload.meta = {
+          ...(resolvedPayload.meta || {}),
+          bboxHash: context.bboxHash,
+          coverageHash: context.coverageHash,
+          coverageWindow: context.coverageWindow,
+          rulesHash: context.rulesHash,
+          zoomBucket: context.zoomBucket,
+          truncated: Boolean(resolvedPayload.meta?.truncated),
+          elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
+          cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
+        };
+      }
       const matchedSize = Number(resolvedPayload?.matchedCount || 0);
       if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
         updateFilterRuntimeStatus({

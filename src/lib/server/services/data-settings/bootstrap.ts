@@ -42,12 +42,13 @@ function createBootstrapDomain(context: LooseRecord = {}) {
     if (state.bootstrapPromise) return state.bootstrapPromise;
 
     state.bootstrapPromise = (async () => {
+      const getRegions = async () => (await listRegionRows()).map(rowToRegion).filter((region) => region !== null);
       const existingRegions = await countRegions();
       if (existingRegions > 0) {
         return {
           source: 'db',
           imported: false,
-          regions: (await listRegionRows()).map(rowToRegion)
+          regions: await getRegions()
         };
       }
 
@@ -56,7 +57,7 @@ function createBootstrapDomain(context: LooseRecord = {}) {
         return {
           source: 'db',
           imported: false,
-          regions: (await listRegionRows()).map(rowToRegion)
+          regions: await getRegions()
         };
       }
 
@@ -64,7 +65,7 @@ function createBootstrapDomain(context: LooseRecord = {}) {
       return {
         source: 'db',
         imported: false,
-        regions: (await listRegionRows()).map(rowToRegion)
+        regions: await getRegions()
       };
     })();
 

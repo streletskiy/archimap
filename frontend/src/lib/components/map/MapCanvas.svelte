@@ -21,7 +21,9 @@
     getCurrentBuildingPartFillLayerIds,
     getCurrentBuildingPartLineLayerIds,
     getCurrentBuildingPartFilterHighlightFillLayerIds,
-    getCurrentBuildingPartFilterHighlightLineLayerIds
+    getCurrentBuildingPartFilterHighlightLineLayerIds,
+    getCurrentBuildingHoverFillLayerIds,
+    getCurrentBuildingHoverLineLayerIds
   } from '$lib/services/map/map-layer-utils';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
@@ -40,9 +42,11 @@
     mapFocusRequest,
     mapLabelsVisible,
     mapBuildingPartsVisible,
+    setMapSelectionShiftKey,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
     selectedBuilding,
+    selectedBuildings,
     setMapCenter,
     setMapReady,
     setMapViewport,
@@ -87,6 +91,32 @@
     }
   });
 
+  onMount(() => {
+    const setShiftKeyState = (value) => {
+      setMapSelectionShiftKey(value);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Shift') setShiftKeyState(true);
+    };
+    const handleKeyUp = (event) => {
+      if (event.key === 'Shift') setShiftKeyState(false);
+    };
+    const resetShiftKey = () => setShiftKeyState(false);
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', resetShiftKey);
+    document.addEventListener('visibilitychange', resetShiftKey);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', resetShiftKey);
+      document.removeEventListener('visibilitychange', resetShiftKey);
+      setShiftKeyState(false);
+    };
+  });
+
   function getFilterStatusOverlayText(statusCode) {
     const code = String(statusCode || 'idle');
     if (code === 'refining') return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
@@ -119,12 +149,23 @@
     mapDebug.recordSetFilter(layerId);
   }
 
+  function getSelectionSignature(selection = []) {
+    return (Array.isArray(selection) ? selection : [])
+      .map((item) => `${String(item?.osmType || '').trim()}/${Number(item?.osmId) || ''}`)
+      .filter((item) => item !== '/')
+      .join('|');
+  }
+
   const regionLayersController = createMapRegionLayersController({
     getMap: () => map,
     getRuntimeConfig: () => runtimeConfig,
     getCurrentTheme,
     getSearchItems: () => $searchMapState.items,
-    getSelectedBuilding: () => $selectedBuilding,
+    getSelectedBuilding: () => (
+      Array.isArray($selectedBuildings) && $selectedBuildings.length > 0
+        ? $selectedBuildings
+        : ($selectedBuilding?.osmType && $selectedBuilding?.osmId ? [$selectedBuilding] : [])
+    ),
     getMapLabelsVisible: () => $mapLabelsVisible,
     getBuildingPartsVisible: () => $mapBuildingPartsVisible,
     getBuildingFilterLayers: () => currentBuildingFilterLayers,
@@ -137,6 +178,7 @@
     onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
       forceHighlightVisible: currentBuildingFilterLayers.length > 0
     }),
+    onRefreshHoverFromPointer: () => selectionController.refreshHoverFromLastPointer(),
     onRefreshFilterDebugState: (active) => filterPipeline.refreshDebugState(active),
     onReapplyFilteredHighlight: () => filterPipeline.reapplyFilteredHighlight()
   });
@@ -172,6 +214,12 @@
     dispatchBuildingClick: (payload) => dispatch('buildingClick', payload)
   });
 
+  const handleBuildingClick = (event) => selectionController.handleMapBuildingClick(event);
+  const handleSearchClusterClick = (event) => selectionController.onSearchClusterClick(event);
+  const handleSearchResultClick = (event) => selectionController.onSearchResultClick(event);
+  const handleMapPointerMove = (event) => selectionController.handleMapPointerMove(event);
+  const handleMapPointerLeave = () => selectionController.handleMapPointerLeave();
+
   const filterState = filterPipeline.state;
 
   function updateSearchMarkers(items) {
@@ -202,7 +250,9 @@
       fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegions),
       lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions),
       partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
-      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions)
+      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions)
     });
   }
 
@@ -244,29 +294,12 @@
     }
   }
 
-  function onPointerEnter() {
-    if (!map) return;
-    map.getCanvas().style.cursor = 'pointer';
-  }
-
-  function onPointerLeave() {
-    if (!map) return;
-    map.getCanvas().style.cursor = '';
-  }
-
   function bindStyleInteractionHandlers() {
-    const layerIds = regionLayersController.getCurrentMapLayerIds();
     bindMapInteractionHandlers({
       map,
-      buildingFillLayerIds: layerIds.buildingFillLayerIds,
-      buildingLineLayerIds: layerIds.buildingLineLayerIds,
-      buildingPartFillLayerIds: layerIds.buildingPartFillLayerIds,
-      buildingPartLineLayerIds: layerIds.buildingPartLineLayerIds,
-      onBuildingClick: (event) => selectionController.handleMapBuildingClick(event),
-      onSearchClusterClick: (event) => selectionController.onSearchClusterClick(event),
-      onSearchResultClick: (event) => selectionController.onSearchResultClick(event),
-      onPointerEnter,
-      onPointerLeave
+      onBuildingClick: handleBuildingClick,
+      onSearchClusterClick: handleSearchClusterClick,
+      onSearchResultClick: handleSearchResultClick
     });
   }
 
@@ -297,19 +330,24 @@
     restoreCustomLayersAfterStyleChange();
   }
 
-  $: if (map && !$selectedBuilding) {
-    lastSelectedKey = null;
-    selectionController.clearSelectedFeature();
-    void lastSelectedKey;
-  }
-
-  $: if (map && $selectedBuilding?.osmType && $selectedBuilding?.osmId) {
-    const key = `${$selectedBuilding.osmType}/${$selectedBuilding.osmId}`;
-    if (key !== lastSelectedKey) {
-      lastSelectedKey = key;
-      selectionController.applySelectionFromStore($selectedBuilding);
+  $: {
+    const currentSelection = Array.isArray($selectedBuildings) && $selectedBuildings.length > 0
+      ? $selectedBuildings
+      : ($selectedBuilding?.osmType && $selectedBuilding?.osmId ? [$selectedBuilding] : []);
+    if (!map) {
+      void lastSelectedKey;
+    } else if (currentSelection.length === 0) {
+      lastSelectedKey = null;
+      selectionController.clearSelectedFeature();
+      void lastSelectedKey;
+    } else {
+      const key = getSelectionSignature(currentSelection);
+      if (key !== lastSelectedKey) {
+        lastSelectedKey = key;
+        selectionController.applySelectionFromStore(currentSelection);
+      }
+      void lastSelectedKey;
     }
-    void lastSelectedKey;
   }
 
   $: if (map) {
@@ -393,6 +431,8 @@
         zoom: Number(initialCamera.z),
         attributionControl: false
       });
+      // Reserve Shift+Click for bulk building selection on the main map surface.
+      map.boxZoom?.disable?.();
       map.addControl(new maplibregl.AttributionControl({
         compact: true,
         customAttribution: CUSTOM_MAP_ATTRIBUTION
@@ -412,6 +452,9 @@
       map.on('zoomend', () => regionLayersController.scheduleCoverageCheck());
       map.on('resize', () => regionLayersController.syncMapRegionSources());
       map.on('resize', () => regionLayersController.scheduleCoverageCheck());
+      map.on('mousemove', handleMapPointerMove);
+      map.on('mouseleave', handleMapPointerLeave);
+      map.on('mouseout', handleMapPointerLeave);
 
       map.on('style.load', () => {
         regionLayersController.ensureMapSourcesAndLayers(config, { force: true });
@@ -423,6 +466,7 @@
         cameraStoreSyncEnabled = true;
         filterPipeline.registerFilterMoveEnd();
         syncMapCameraStores();
+        regionLayersController.syncMapRegionSources();
         setMapReady(true);
         filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();

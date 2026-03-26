@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: archimap API
   version: 1.0.0
-  description: Core API contract for auth, buildings, search, and system endpoints.
+  description: Canonical HTTP contract for ArchiMap. `docs/api.md` is the human-readable companion and should stay aligned with this file.
 servers:
   - url: http://localhost:3252
 paths:
@@ -78,7 +78,7 @@ paths:
           description: Building not found
   /api/building-info/{osmType}/{osmId}:
     get:
-      summary: Get merged building information by OSM id
+      summary: Get merged building information by OSM id, including design project fields and cached design-ref suggestions
       parameters:
         - in: path
           name: osmType
@@ -124,6 +124,12 @@ paths:
                   type: string
                 style:
                   type: string
+                design:
+                  type: string
+                designRef:
+                  type: string
+                designYear:
+                  type: integer
                 levels:
                   type: integer
                 yearBuilt:
@@ -460,6 +466,7 @@ paths:
       description: |
         The endpoint accepts a flat `rules[]` array per request.
         Client-side filter layers, priorities, colors, and AND/OR/layer composition are resolved before calling this endpoint.
+        Use `POST /api/buildings/filter-matches-batch` when you need multiple rule sets against the same bbox.
       requestBody:
         required: true
         content:
@@ -544,9 +551,25 @@ paths:
           name: cursor
           schema:
             type: integer
+        - in: query
+          name: west
+          schema:
+            type: number
+        - in: query
+          name: south
+          schema:
+            type: number
+        - in: query
+          name: east
+          schema:
+            type: number
+        - in: query
+          name: north
+          schema:
+            type: number
       responses:
         '200':
-          description: Search result page
+          description: Search result page. Result items may include optional designRef values.
         '400':
           description: Invalid query
   /api/account/profile:
@@ -721,3 +744,865 @@ paths:
           description: Unauthorized
         '403':
           description: Forbidden or CSRF failed
+  /app-config.js:
+    get:
+      summary: Get runtime JS config payload
+      responses:
+        '200':
+          description: window.__ARCHIMAP_CONFIG bootstrap payload
+  /api/filter-presets:
+    get:
+      summary: Get public runtime filter presets
+      responses:
+        '200':
+          description: Filter preset list
+        '500':
+          description: Failed to load filter presets
+  /api/style-overrides:
+    get:
+      summary: Get public style-region overrides
+      responses:
+        '200':
+          description: Public style override list
+        '500':
+          description: Failed to load public style overrides
+  /api/buildings/filter-data:
+    post:
+      summary: Get merged building filter data for explicit keys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keys]
+              properties:
+                keys:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Filter data payload
+        '400':
+          description: Invalid keys payload
+  /api/search-buildings-map:
+    get:
+      summary: Search buildings for map view
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: west
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: south
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: east
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: north
+          required: true
+          schema:
+            type: number
+        - in: query
+          name: lon
+          schema:
+            type: number
+        - in: query
+          name: lat
+          schema:
+            type: number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Map search result payload
+        '400':
+          description: Invalid query or bbox
+  /api/buildings/filter-matches-batch:
+    post:
+      summary: Match multiple filter rule sets against one bbox
+      description: Batched variant of `POST /api/buildings/filter-matches`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bbox, requests]
+              properties:
+                bbox:
+                  type: object
+                  required: [west, south, east, north]
+                  properties:
+                    west:
+                      type: number
+                    south:
+                      type: number
+                    east:
+                      type: number
+                    north:
+                      type: number
+                zoom:
+                  type: number
+                zoomBucket:
+                  type: number
+                requests:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      rulesHash:
+                        type: string
+                      maxResults:
+                        type: integer
+                      rules:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            key:
+                              type: string
+                            op:
+                              type: string
+                              enum:
+                                [
+                                  contains,
+                                  equals,
+                                  not_equals,
+                                  starts_with,
+                                  exists,
+                                  not_exists,
+                                  greater_than,
+                                  greater_or_equals,
+                                  less_than,
+                                  less_or_equals
+                                ]
+                            value:
+                              type: string
+      responses:
+        '200':
+          description: Batch match result payload
+        '400':
+          description: Invalid batch request
+        '429':
+          description: Rate limited
+  /api/admin/app-settings/data/filter-tag-allowlist:
+    post:
+      summary: Save filter tag allowlist
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowlist]
+              properties:
+                allowlist:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Saved allowlist
+        '400':
+          description: Invalid allowlist payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/data/filter-presets:
+    get:
+      summary: List persisted filter presets
+      responses:
+        '200':
+          description: Persisted filter presets
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+    post:
+      summary: Save one filter preset
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [preset]
+              properties:
+                preset:
+                  type: object
+      responses:
+        '200':
+          description: Saved preset
+        '400':
+          description: Validation failed
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/data/filter-presets/{id}:
+    delete:
+      summary: Delete one filter preset
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted preset
+        '400':
+          description: Invalid preset id
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+        '404':
+          description: Filter preset not found
+  /api/admin/app-settings/data/regions/resolve-extract:
+    post:
+      summary: Resolve extract candidates for a managed region
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                source:
+                  type: string
+      responses:
+        '200':
+          description: Extract resolution result
+        '400':
+          description: Validation failed
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/osm:
+    get:
+      summary: Get OSM sync settings
+      responses:
+        '200':
+          description: OSM settings payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+    post:
+      summary: Save OSM sync settings
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                osm:
+                  type: object
+      responses:
+        '200':
+          description: Saved settings
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/osm/oauth/start:
+    post:
+      summary: Start OSM OAuth2 flow
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OAuth authorization payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/osm/oauth/callback:
+    get:
+      summary: Finish OSM OAuth2 flow
+      parameters:
+        - in: query
+          name: code
+          schema:
+            type: string
+        - in: query
+          name: state
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect back to the admin OSM page on success
+        '400':
+          description: Invalid OAuth callback
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/osm-sync/candidates:
+    get:
+      summary: List OSM sync candidates
+      responses:
+        '200':
+          description: Sync candidate list
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/osm-sync/candidates/sync:
+    post:
+      summary: Sync selected candidates to OSM
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      osmType:
+                        type: string
+                        enum: [way, relation]
+                      osmId:
+                        type: integer
+      responses:
+        '200':
+          description: Bulk sync result
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/osm-sync/candidates/{osmType}/{osmId}:
+    get:
+      summary: Get one OSM sync candidate
+      parameters:
+        - in: path
+          name: osmType
+          required: true
+          schema:
+            type: string
+            enum: [way, relation]
+        - in: path
+          name: osmId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Sync candidate details
+        '404':
+          description: Sync candidate not found
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/osm-sync/candidates/{osmType}/{osmId}/sync:
+    post:
+      summary: Sync one OSM candidate
+      parameters:
+        - in: path
+          name: osmType
+          required: true
+          schema:
+            type: string
+            enum: [way, relation]
+        - in: path
+          name: osmId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Sync result
+        '401':
+          description: Unauthorized
+        '403':
+          description: Master admin required
+  /api/admin/building-edits:
+    get:
+      summary: List admin building edits
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Building edit list
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/building-edits/{editId}:
+    get:
+      summary: Get one admin building edit
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Building edit details
+        '400':
+          description: Invalid edit id
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+        '404':
+          description: Edit not found
+    delete:
+      summary: Delete one admin building edit
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted edit
+        '400':
+          description: Invalid edit id
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+        '404':
+          description: Edit not found
+  /api/admin/building-edits/{editId}/reject:
+    post:
+      summary: Reject one admin building edit
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Rejection result
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/building-edits/{editId}/reassign:
+    post:
+      summary: Reassign one admin building edit
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target:
+                  type: string
+                force:
+                  type: boolean
+      responses:
+        '200':
+          description: Reassign result
+        '400':
+          description: Invalid reassignment payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/building-edits/{editId}/merge:
+    post:
+      summary: Merge one admin building edit
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                comment:
+                  type: string
+                fields:
+                  type: array
+                  items:
+                    type: string
+                values:
+                  type: object
+      responses:
+        '200':
+          description: Merge result
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/style-overrides:
+    get:
+      summary: List admin style overrides
+      responses:
+        '200':
+          description: Style override list
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+    post:
+      summary: Save one style override
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                override:
+                  type: object
+      responses:
+        '200':
+          description: Saved override
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/style-overrides/{id}:
+    delete:
+      summary: Delete one style override
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted override
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+        '404':
+          description: Style override not found
+  /api/admin/users:
+    get:
+      summary: List admin users
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: role
+          schema:
+            type: string
+        - in: query
+          name: canEdit
+          schema:
+            type: string
+        - in: query
+          name: hasEdits
+          schema:
+            type: string
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+        - in: query
+          name: sortDir
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User list
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/users/{email}:
+    get:
+      summary: Get one admin user
+      parameters:
+        - in: path
+          name: email
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User details
+        '400':
+          description: Invalid email
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+        '404':
+          description: User not found
+  /api/admin/users/{email}/edits:
+    get:
+      summary: List edits for one admin user
+      parameters:
+        - in: path
+          name: email
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User edit list
+        '400':
+          description: Invalid email
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+        '404':
+          description: User not found
+  /api/admin/users/edit-permission:
+    post:
+      summary: Change a user's edit permission
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                canEdit:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated permission
+        '400':
+          description: Invalid payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/admin/users/role:
+    post:
+      summary: Change a user's role
+      parameters:
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                isAdmin:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated role
+        '400':
+          description: Invalid payload
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin required
+  /api/account/edits:
+    get:
+      summary: List current user's edits
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Current user edit list
+        '400':
+          description: Current user not resolved
+        '401':
+          description: Unauthorized
+  /api/account/edits/{editId}:
+    get:
+      summary: Get one current user's edit
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Current user edit details
+        '400':
+          description: Invalid edit id or current user not resolved
+        '401':
+          description: Unauthorized
+        '403':
+          description: Access denied
+        '404':
+          description: Edit not found
+    delete:
+      summary: Withdraw one of the current user's pending edits before moderation
+      parameters:
+        - in: path
+          name: editId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Pending edit withdrawn
+        '400':
+          description: Invalid edit id or current user not resolved
+        '401':
+          description: Unauthorized
+        '403':
+          description: Access denied
+        '409':
+          description: Edit is no longer pending review

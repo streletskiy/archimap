@@ -10,6 +10,10 @@ import {
   toFeatureIdSetFromMatches
 } from '../../components/map/filter-pipeline-utils.js';
 import { FILTER_LAYER_BASE_COLOR } from '../../constants/filter-presets.js';
+import type {
+  FilterPreparedRequestPlan,
+  FilterResolvedLayerPayload
+} from './filter-types.js';
 
 export { EMPTY_LAYER_FILTER, hashFilterExpression };
 
@@ -41,6 +45,29 @@ export function normalizeFilterInputLayers(input) {
     mode: 'and',
     rules: normalizedRules.rules
   }]);
+}
+
+export function prepareFilterRequestPlan(input): { ok: false; invalidReason: string } | ({ ok: true } & FilterPreparedRequestPlan) {
+  const normalizedLayers = normalizeFilterInputLayers(input);
+  if (normalizedLayers.invalidReason) {
+    return {
+      ok: false,
+      invalidReason: normalizedLayers.invalidReason
+    };
+  }
+
+  const preparedRequests = buildFilterRequestSpecs(normalizedLayers.layers);
+  return {
+    ok: true,
+    layers: preparedRequests.layers,
+    combinedGroup: preparedRequests.combinedGroup,
+    requestSpecs: preparedRequests.requestSpecs,
+    hasStandaloneLayers: preparedRequests.hasStandaloneLayers,
+    rulesHash: computeRulesHash(preparedRequests.layers),
+    heavy: preparedRequests.requestSpecs.some((spec) => (
+      Array.isArray(spec?.rules) && spec.rules.some((rule) => String(rule?.op || '') === 'contains')
+    ))
+  };
 }
 
 export function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket) {
@@ -111,7 +138,7 @@ export function buildFilterRequestSpecs(layers) {
   };
 }
 
-export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cacheHit = false }) {
+export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cacheHit = false }): FilterResolvedLayerPayload {
   const resolvedEntriesById = new Map();
   const requestSpecs = Array.isArray(prepared?.requestSpecs) ? prepared.requestSpecs : [];
   const combinedGroup = prepared?.combinedGroup || null;

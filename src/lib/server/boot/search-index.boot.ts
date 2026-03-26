@@ -1,11 +1,5 @@
-const {
-  BUILDING_SEARCH_FTS_DELETE_SQL,
-  BUILDING_SEARCH_FTS_INSERT_SQL,
-  BUILDING_SEARCH_SOURCE_DELETE_SQL,
-  BUILDING_SEARCH_SOURCE_UPSERT_SQL,
-  buildRawSearchSourceQuery,
-  normalizeSearchSourceRow
-} = require('../services/search-index-source.service');
+const { createSearchIndexRefreshDispatcher } = require('./search-index-refresh.dispatcher');
+const { createSearchIndexRefreshService } = require('../services/search-index-refresh.service');
 
 function createSearchIndexBoot(options: LooseRecord = {}) {
   const {
@@ -16,6 +10,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
     processExecPath,
     rootDir,
     searchRebuildScriptPath,
+    searchRefreshWorkerScriptPath,
     batchSize,
     env = process.env,
     sqlite = {},
@@ -26,7 +21,26 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
   let searchIndexRebuildInProgress = false;
   let queuedSearchIndexRebuildReason = null;
   const pendingSearchIndexRefreshes = new Set();
+  const queuedSearchIndexRefreshes = new Map();
+  let searchIndexRefreshQueueScheduled = false;
+  let searchIndexRefreshQueueRunning = false;
   const isPostgres = String(dbProvider || db?.provider || '').trim().toLowerCase() === 'postgres';
+  const searchIndexRefreshService = createSearchIndexRefreshService({
+    db,
+    logger
+  });
+  const searchIndexRefreshDispatcher = createSearchIndexRefreshDispatcher({
+    db,
+    logger,
+    spawn,
+    processExecPath,
+    rootDir,
+    searchRefreshWorkerScriptPath,
+    env,
+    sqlite,
+    isShuttingDown,
+    refreshSearchIndexForBuildingFallback: searchIndexRefreshService.refreshSearchIndexForBuilding
+  });
 
   const selectSearchCounts = db.prepare(isPostgres
     ? `
@@ -52,6 +66,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(btrim(ai.address), '') IS NOT NULL
               OR NULLIF(btrim(ai.style), '') IS NOT NULL
               OR NULLIF(btrim(ai.architect), '') IS NOT NULL
+              OR NULLIF(btrim(ai.design_ref), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'name'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'name:ru'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'official_name'), '') IS NOT NULL
@@ -66,6 +81,8 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(btrim(tags.tags_jsonb ->> 'style'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'architect'), '') IS NOT NULL
               OR NULLIF(btrim(tags.tags_jsonb ->> 'architect_name'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'design:ref'), '') IS NOT NULL
+              OR NULLIF(btrim(tags.tags_jsonb ->> 'design_ref'), '') IS NOT NULL
             )
           LIMIT 1
         ) AS searchable_rows_expected,
@@ -96,6 +113,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(trim(ai.address), '') IS NOT NULL
               OR NULLIF(trim(ai.style), '') IS NOT NULL
               OR NULLIF(trim(ai.architect), '') IS NOT NULL
+              OR NULLIF(trim(ai.design_ref), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.name') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."name:ru"') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.official_name') END), '') IS NOT NULL
@@ -110,18 +128,12 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.style') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect') END), '') IS NOT NULL
               OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.architect_name') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."design:ref"') END), '') IS NOT NULL
+              OR NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.design_ref') END), '') IS NOT NULL
             )
           LIMIT 1
         ) AS searchable_rows_expected
     `);
-  const selectRawSearchSourceByBuilding = db.prepare(buildRawSearchSourceQuery({
-    where: 'WHERE bc.osm_type = ? AND bc.osm_id = ?'
-  }));
-  const upsertSearchSource = db.prepare(BUILDING_SEARCH_SOURCE_UPSERT_SQL);
-  const deleteSearchSource = db.prepare(BUILDING_SEARCH_SOURCE_DELETE_SQL);
-  const deleteSearchFts = !isPostgres ? db.prepare(BUILDING_SEARCH_FTS_DELETE_SQL) : null;
-  const insertSearchFts = !isPostgres ? db.prepare(BUILDING_SEARCH_FTS_INSERT_SQL) : null;
-
   async function getSearchIndexCountsSnapshot() {
     return selectSearchCounts.get();
   }
@@ -170,40 +182,62 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
     };
   }
 
-  async function applySearchSourceRow(sourceRow) {
-    await upsertSearchSource.run(sourceRow);
-    if (!isPostgres) {
-      await deleteSearchFts.run(sourceRow.osm_key);
-      await insertSearchFts.run(
-        sourceRow.osm_key,
-        sourceRow.name || '',
-        sourceRow.address || '',
-        sourceRow.style || '',
-        sourceRow.architect || ''
-      );
+  function normalizeSearchRefreshTarget(osmType, osmId) {
+    const normalizedType = String(osmType || '').trim();
+    const normalizedId = Number(osmId);
+    if (!['way', 'relation'].includes(normalizedType) || !Number.isInteger(normalizedId) || normalizedId <= 0) {
+      return null;
     }
+    return {
+      osmType: normalizedType,
+      osmId: normalizedId
+    };
   }
 
-  async function refreshSearchIndexForBuilding(osmType, osmId, options: LooseRecord = {}) {
-    const force = Boolean(options.force);
-    if (!force && searchIndexRebuildInProgress) {
-      pendingSearchIndexRefreshes.add(`${osmType}/${osmId}`);
+  async function refreshSearchIndexForBuilding(osmType, osmId) {
+    const target = normalizeSearchRefreshTarget(osmType, osmId);
+    if (!target) return;
+    if (searchIndexRebuildInProgress) {
+      pendingSearchIndexRefreshes.add(`${target.osmType}/${target.osmId}`);
       return;
     }
+    return searchIndexRefreshDispatcher.dispatchRefreshTask(target.osmType, target.osmId);
+  }
 
-    const rawRow = await selectRawSearchSourceByBuilding.get(osmType, osmId);
-    const sourceRow = normalizeSearchSourceRow(rawRow);
-    const osmKey = `${osmType}/${osmId}`;
+  function scheduleQueuedSearchIndexRefreshes() {
+    if (searchIndexRefreshQueueScheduled || searchIndexRefreshQueueRunning) return;
+    searchIndexRefreshQueueScheduled = true;
+    setImmediate(() => {
+      searchIndexRefreshQueueScheduled = false;
+      void flushQueuedSearchIndexRefreshes();
+    });
+  }
 
-    if (!sourceRow) {
-      await deleteSearchSource.run(osmKey);
-      if (!isPostgres) {
-        await deleteSearchFts.run(osmKey);
+  async function flushQueuedSearchIndexRefreshes() {
+    if (searchIndexRefreshQueueRunning) return;
+    searchIndexRefreshQueueRunning = true;
+    try {
+      while (queuedSearchIndexRefreshes.size > 0) {
+        const batch = Array.from(queuedSearchIndexRefreshes.values());
+        queuedSearchIndexRefreshes.clear();
+        for (const item of batch) {
+          try {
+            await refreshSearchIndexForBuilding(item.osmType, item.osmId);
+          } catch (error) {
+            logger.error('search_incremental_refresh_failed', {
+              osmType: item.osmType,
+              osmId: item.osmId,
+              error: String(error?.message || error)
+            });
+          }
+        }
       }
-      return;
+    } finally {
+      searchIndexRefreshQueueRunning = false;
+      if (queuedSearchIndexRefreshes.size > 0) {
+        scheduleQueuedSearchIndexRefreshes();
+      }
     }
-
-    await applySearchSourceRow(sourceRow);
   }
 
   async function flushDeferredSearchRefreshes() {
@@ -215,7 +249,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
       const [osmType, osmIdRaw] = String(key).split('/');
       const osmId = Number(osmIdRaw);
       if (['way', 'relation'].includes(osmType) && Number.isInteger(osmId)) {
-        await refreshSearchIndexForBuilding(osmType, osmId, { force: true });
+        await refreshSearchIndexForBuilding(osmType, osmId);
       }
     }
   }
@@ -230,13 +264,12 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
   }
 
   function enqueueSearchIndexRefresh(osmType, osmId) {
-    setImmediate(async () => {
-      try {
-        await refreshSearchIndexForBuilding(osmType, osmId);
-      } catch (error) {
-        logger.error('search_incremental_refresh_failed', { osmType, osmId, error: String(error.message || error) });
-      }
-    });
+    const target = normalizeSearchRefreshTarget(osmType, osmId);
+    if (!target) return;
+
+    const key = `${target.osmType}/${target.osmId}`;
+    queuedSearchIndexRefreshes.set(key, target);
+    scheduleQueuedSearchIndexRefreshes();
   }
 
   async function rebuildSearchIndex(reason = 'manual', options: LooseRecord = {}) {
@@ -314,6 +347,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
         // ignore shutdown cleanup errors
       }
     }
+    searchIndexRefreshDispatcher.stop();
   }
 
   return {

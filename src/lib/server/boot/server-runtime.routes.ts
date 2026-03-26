@@ -74,6 +74,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     reassignUserEdit: runtime.reassignUserEdit,
     deleteUserEdit: runtime.deleteUserEdit,
     enqueueSearchIndexRefresh: runtime.enqueueSearchIndexRefresh,
+    refreshDesignRefSuggestionsCache: runtime.refreshDesignRefSuggestionsCache,
     ARCHI_FIELD_SET: runtime.ARCHI_FIELD_SET,
     registrationCodeHtmlTemplate,
     registrationCodeTextTemplate,
@@ -135,7 +136,9 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
     sanitizeArchiPayload: runtime.sanitizeArchiPayload,
     sanitizeEditedFields: runtime.sanitizeEditedFields,
-    supersedePendingUserEdits: runtime.supersedePendingUserEdits
+    supersedePendingUserEdits: runtime.supersedePendingUserEdits,
+    getDesignRefSuggestionsCached: runtime.getDesignRefSuggestionsCached,
+    refreshDesignRefSuggestionsCache: runtime.refreshDesignRefSuggestionsCache
   });
 
   registerSearchRoutes({
@@ -151,7 +154,8 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     getSessionEditActorKey: runtime.getSessionEditActorKey,
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
     getUserEditsList: runtime.getUserEditsList,
-    getUserEditDetailsById: runtime.getUserEditDetailsById
+    getUserEditDetailsById: runtime.getUserEditDetailsById,
+    withdrawPendingUserEdit: runtime.withdrawPendingUserEdit
   });
 
   registerContoursStatusRoute(runtime.app, runtime.db, runtime.rateLimiters.contoursStatusRateLimiter);

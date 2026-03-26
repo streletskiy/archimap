@@ -294,6 +294,16 @@
                       {entry.item.architect}
                     </UiBadge>
                   {/if}
+
+                  {#if entry.item.designRef}
+                    <UiBadge
+                      variant="default"
+                      className="inline-flex flex-wrap gap-[0.3rem] rounded-full border px-[0.62rem] py-[0.42rem] text-[0.76rem] leading-[1.25] [border-color:var(--panel-border)] [background:var(--panel-solid)] [color:var(--muted-strong)]"
+                    >
+                      <strong class="[color:var(--fg-strong)]">{$t('buildingModal.designRef')}</strong>
+                      {entry.item.designRef}
+                    </UiBadge>
+                  {/if}
                 </div>
               </div>
             </button>

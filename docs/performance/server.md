@@ -31,7 +31,8 @@
   - `getUserPersonalEditsByKeys` (`building-edits.service`)
 - `/api/contours-status` fast path reads from `osm.building_contours_summary` (1 row), with aggregate fallback if summary is empty/unavailable.
 - OSM sync for PostgreSQL updates `osm.building_contours_summary` in the same import transaction.
-- Search source normalization uses raw DB rows plus Node-side JSON parsing in `src/lib/server/services/search-index-source.service.ts`, shared by incremental refresh and full rebuild worker.
+- Search source normalization uses raw DB rows plus Node-side JSON parsing in `src/lib/server/services/search-index-source.service.ts`, shared by the incremental refresh worker and the full rebuild worker.
+  - Incremental search refresh is dispatched to `workers/refresh-search-index.worker.ts`, so save/moderation/cleanup requests only enqueue work and return immediately while the worker performs the DB write in the background.
   - PostgreSQL stores searchable rows in `building_search_source` with generated `search_tsv`.
   - SQLite keeps `building_search_source` plus `building_search_fts`.
 - `rebuild-filter-tag-keys-cache.worker` (PostgreSQL) switched from row-by-row insert to set-based `INSERT ... SELECT DISTINCT`.

@@ -54,6 +54,9 @@
   "author": "Archimap Contributors",
   "license": "Apache-2.0",
   "description": "Archimap map editing service",
+  "engines": {
+    "node": ">=24"
+  },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "connect-redis": "^9.0.0",
@@ -67,8 +70,6 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.5.0",
-    "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.54.2",
     "@types/node": "^25.5.0",
@@ -78,10 +79,9 @@
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-svelte": "^3.16.0",
     "globals": "^17.4.0",
-    "husky": "^9.1.7",
     "prettier": "^3.5.3",
     "svelte": "^5.54.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.1"
+    "typescript-eslint": "^8.57.2"
   }
 }

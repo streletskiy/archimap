@@ -43,6 +43,34 @@ test('buildFilterRequestSpecs splits combined and standalone layers into stable 
   );
 });
 
+test('prepareFilterRequestPlan builds a worker-ready request plan', async () => {
+  const { prepareFilterRequestPlan } = await loadFilterRequestPlanner();
+  const prepared = prepareFilterRequestPlan([
+    {
+      id: 'and-layer',
+      mode: 'and',
+      priority: 0,
+      color: '#111111',
+      rules: [{ key: 'name', op: 'contains', value: 'alpha' }]
+    },
+    {
+      id: 'standalone-layer',
+      mode: 'layer',
+      priority: 1,
+      color: '#333333',
+      rules: [{ key: 'levels', op: 'greater_or_equals', value: '5' }]
+    }
+  ]);
+
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.rulesHash.startsWith('fnv1a-'), true);
+  assert.equal(prepared.heavy, true);
+  assert.deepEqual(
+    prepared.requestSpecs.map((spec) => spec.id),
+    ['combined-and', 'layer:standalone-layer']
+  );
+});
+
 test('buildResolvedLayerPayload combines AND/OR group intersections with standalone highlights', async () => {
   const {
     buildFilterRequestSpecs,

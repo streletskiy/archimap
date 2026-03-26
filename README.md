@@ -8,6 +8,7 @@ ArchiMap is a self-hosted platform for architectural mapping and building analys
 - Explore buildings visually by floors, style, materials, function, density, and surrounding context.
 - Configure visual filters to expose missing architectural tags, compare building attributes, and focus on gaps in the map data.
 - Edit architectural tags and building metadata directly on the map with a review-and-moderation workflow.
+- Bulk edit multiple selected buildings on the map with Shift+Click and apply the same non-address changes to all of them.
 - Merge approved local changes and publish them back to OpenStreetMap when needed.
 - Work in a multilingual UI with runtime language switching.
 - Deploy privately with full control over data, tiles, and sessions.
@@ -23,6 +24,8 @@ ArchiMap is a self-hosted platform for architectural mapping and building analys
 ## Quick Start
 
 ### Local development
+
+Use Node.js 24 LTS.
 
 ```bash
 npm ci
@@ -54,12 +57,12 @@ docker compose up --build
 - Setup -> [docs/dev/setup.md](docs/dev/setup.md)
 - Environment -> [docs/dev/env.md](docs/dev/env.md)
 - Docker -> [docs/dev/docker.md](docs/dev/docker.md)
-- API -> [docs/api.md](docs/api.md)
+- OpenAPI contract -> [docs/openapi.yaml](docs/openapi.yaml)
+- API guide -> [docs/api.md](docs/api.md)
 - OSM import pipeline -> [docs/osm-import-pipeline.md](docs/osm-import-pipeline.md)
 - Edits workflow -> [docs/edits-workflow.md](docs/edits-workflow.md)
 - Runbook -> [docs/runbook.md](docs/runbook.md)
 - Security -> [docs/security.md](docs/security.md)
-- OpenAPI -> [docs/openapi.yaml](docs/openapi.yaml)
 
 ## License
 

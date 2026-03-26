@@ -25,6 +25,7 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     getUserEditDetailsById: historyService.getUserEditDetailsById,
     reassignUserEdit: moderationService.reassignUserEdit,
     deleteUserEdit: moderationService.deleteUserEdit,
+    withdrawPendingUserEdit: moderationService.withdrawPendingUserEdit,
     getUserPersonalEditsByKeys: personalOverlaysService.getUserPersonalEditsByKeys,
     mergePersonalEditsIntoFeatureInfo: personalOverlaysService.mergePersonalEditsIntoFeatureInfo,
     applyPersonalEditsToFilterItems: personalOverlaysService.applyPersonalEditsToFilterItems

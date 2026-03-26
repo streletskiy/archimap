@@ -24,7 +24,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ['commitlint.config.ts', 'drizzle.config.ts', 'playwright.config.ts', 'frontend/*.ts'],
+    files: ['drizzle.config.ts', 'playwright.config.ts', 'frontend/*.ts'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

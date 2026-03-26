@@ -1,3 +1,9 @@
+import type {
+  RegionExtractCandidate,
+  RegionExtractSearchResult,
+  RegionExtractValidationResult
+} from '$shared/types';
+
 function createExtractsDomain(context: LooseRecord = {}) {
   const {
     ensureBootstrapped,
@@ -16,7 +22,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
     return extractResolver;
   }
 
-  function normalizeExtractCandidate(candidate: LooseRecord = {}) {
+  function normalizeExtractCandidate(candidate: LooseRecord = {}): RegionExtractCandidate | null {
     const extractSource = normalizeNullableText(
       candidate.extractSource ?? candidate.source,
       64
@@ -42,7 +48,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
     };
   }
 
-  function buildResolutionRequiredMessage(result: LooseRecord = {}, query = '') {
+  function buildResolutionRequiredMessage(result: { message?: string | null; errorCode?: string | null } = {}, query = '') {
     const base = normalizeNullableText(result.message, 1000);
     if (base) return base;
     const searchQuery = normalizeNullableText(query, 240);
@@ -59,7 +65,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
     return 'Region requires manual canonical extract selection.';
   }
 
-  async function searchExtractCandidates(query, options: LooseRecord = {}) {
+  async function searchExtractCandidates(query, options: LooseRecord = {}): Promise<RegionExtractSearchResult> {
     await ensureBootstrapped();
     const normalizedQuery = normalizeNullableText(query, 240);
     if (!normalizedQuery) {
@@ -72,7 +78,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
     const resolver = requireExtractResolver();
     const result = await resolver.searchExtractCandidates(normalizedQuery, options);
     const items = Array.isArray(result?.items)
-      ? result.items.map(normalizeExtractCandidate).filter(Boolean)
+      ? result.items.map(normalizeExtractCandidate).filter((item): item is RegionExtractCandidate => Boolean(item))
       : [];
 
     return {
@@ -81,7 +87,10 @@ function createExtractsDomain(context: LooseRecord = {}) {
     };
   }
 
-  async function validateSelectedExtract(input: LooseRecord = {}, previous = null) {
+  async function validateSelectedExtract(
+    input: LooseRecord = {},
+    previous: { extractSource?: string | null; extractId?: string | null; extractLabel?: string | null } | null = null
+  ): Promise<RegionExtractValidationResult> {
     await ensureBootstrapped();
     const extractSource = normalizeNullableText(
       input.extractSource ?? input.extract_source ?? previous?.extractSource,

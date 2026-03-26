@@ -23,6 +23,15 @@ export function encodeOsmFeatureId(osmType, osmId) {
   return (Number(osmId) * 2) + typeBit;
 }
 
+function normalizeSelectionIdentity(selection) {
+  const osmType = String(selection?.osmType ?? selection?.osm_type ?? '').trim();
+  const osmId = Number(selection?.osmId ?? selection?.osm_id);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
+    return null;
+  }
+  return { osmType, osmId };
+}
+
 export function getFeatureIdentity(feature) {
   const fromOsmKey = parseOsmKey(feature?.properties?.osm_key);
   if (fromOsmKey) return fromOsmKey;
@@ -43,7 +52,52 @@ export function getFeatureIdentity(feature) {
   return null;
 }
 
+function buildSelectionFilterFromIdentities(feature, identities) {
+  const normalizedIdentities = [];
+  const seen = new Set();
+  for (const item of Array.isArray(identities) ? identities : []) {
+    const identity = normalizeSelectionIdentity(item);
+    if (!identity) continue;
+    const key = `${identity.osmType}/${identity.osmId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalizedIdentities.push(identity);
+  }
+
+  if (normalizedIdentities.length === 0) {
+    return ['==', ['id'], -1];
+  }
+
+  if (normalizedIdentities.length === 1) {
+    return getSelectionFilter(feature, normalizedIdentities[0]);
+  }
+
+  const fallbackFilters = normalizedIdentities
+    .map((identity) => getSelectionFilter(null, identity))
+    .filter(Boolean);
+
+  if (fallbackFilters.length === 0) {
+    return ['==', ['id'], -1];
+  }
+  if (fallbackFilters.length === 1) {
+    return fallbackFilters[0];
+  }
+  return ['any', ...fallbackFilters];
+}
+
 export function getSelectionFilter(feature, identity) {
+  if (Array.isArray(identity)) {
+    return buildSelectionFilterFromIdentities(feature, identity);
+  }
+
+  const normalizedIdentity = normalizeSelectionIdentity(identity);
+  if (normalizedIdentity?.osmType && Number.isInteger(normalizedIdentity?.osmId)) {
+    const encodedId = encodeOsmFeatureId(normalizedIdentity.osmType, normalizedIdentity.osmId);
+    if (Number.isInteger(encodedId) && encodedId > 0) {
+      return ['==', ['id'], encodedId];
+    }
+  }
+
   if (identity?.osmType && Number.isInteger(identity?.osmId)) {
     const encodedId = encodeOsmFeatureId(identity.osmType, identity.osmId);
     if (Number.isInteger(encodedId) && encodedId > 0) {

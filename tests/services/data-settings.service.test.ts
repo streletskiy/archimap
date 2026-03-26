@@ -213,6 +213,9 @@ test('filter tag allowlist uses important defaults when DB config is absent', as
   assert.equal(settings.source, 'default');
   assert.deepEqual(settings.allowlist, DEFAULT_FILTER_TAG_ALLOWLIST);
   assert.deepEqual(settings.defaultAllowlist, DEFAULT_FILTER_TAG_ALLOWLIST);
+  for (const key of ['design', 'design:ref', 'design:year', 'building:material:concrete']) {
+    assert.ok(settings.allowlist.includes(key), `default allowlist should include ${key}`);
+  }
 });
 
 test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () => {
@@ -742,6 +745,56 @@ test('overlapping enabled region bounds are allowed to complete syncs', async ()
   const runtimeRegions = await service.listRuntimePmtilesRegions();
   assert.equal(runtimeRegions.length, 2);
   assert.deepEqual(runtimeRegions.map((item) => item.id).sort((left, right) => left - right), [first.id, second.id]);
+});
+
+test('listRuntimePmtilesRegions does not require lastSuccessfulSyncAt', async () => {
+  const db = createTestDb();
+  ensureContoursTable(db);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-runtime-pmtiles-'));
+  const service = createService({
+    db,
+    dataDir: tempDir,
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  try {
+    const region = await service.saveRegion(buildRegionInput({
+      name: 'Runtime Region',
+      slug: 'runtime-region',
+      extractId: 'runtime-region',
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }), 'tester');
+
+    db.prepare(`
+      UPDATE data_sync_regions
+      SET
+        bounds_west = ?,
+        bounds_south = ?,
+        bounds_east = ?,
+        bounds_north = ?,
+        last_successful_sync_at = NULL
+      WHERE id = ?
+    `).run(10, 10, 20, 20, region.id);
+
+    const pmtilesPath = resolveRegionPmtilesPath(tempDir, region);
+    fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
+    fs.writeFileSync(pmtilesPath, Buffer.alloc(32, 7));
+
+    const runtimeRegions = await service.listRuntimePmtilesRegions();
+    assert.equal(runtimeRegions.length, 1);
+    assert.equal(runtimeRegions[0].id, region.id);
+    assert.equal(runtimeRegions[0].lastSuccessfulSyncAt, null);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('run lifecycle updates region status, history and nextSyncAt', async () => {

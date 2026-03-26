@@ -19,6 +19,9 @@ function createTestDb() {
       created_by TEXT NOT NULL,
       name TEXT,
       style TEXT,
+      design TEXT,
+      design_ref TEXT,
+      design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
       colour TEXT,
@@ -59,6 +62,9 @@ function createTestDb() {
       osm_id INTEGER NOT NULL,
       name TEXT,
       style TEXT,
+      design TEXT,
+      design_ref TEXT,
+      design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
       colour TEXT,
@@ -212,6 +218,92 @@ test('buildChangesFromRows does not report levels diff for numeric-equivalent va
   assert.equal(fields.has('levels'), false);
 });
 
+test('buildChangesFromRows labels levels changes with building:levels', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2302,
+    JSON.stringify({
+      name: 'Дом с этажностью',
+      'building:levels': '2'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    23,
+    'way',
+    2302,
+    'user@example.com',
+    'Дом с этажностью',
+    null,
+    5,
+    null,
+    null,
+    null,
+    null,
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(23);
+  const changes = Array.isArray(item?.changes)
+    ? item.changes
+    : [];
+  const levelsChange = changes.find((change) => String(change.field || '') === 'levels');
+  assert.ok(levelsChange);
+  assert.equal(levelsChange?.osmTag, 'building:levels');
+});
+
+test('buildChangesFromRows labels colour and architect changes with modern tags', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2402,
+    JSON.stringify({
+      name: 'Дом с цветом и архитектором',
+      'building:colour': '#aabbcc',
+      architect: 'Old Architect'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, colour, architect, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    24,
+    'way',
+    2402,
+    'user@example.com',
+    'Дом с цветом и архитектором',
+    '#112233',
+    'New Architect',
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(24);
+  const byField = new Map<string, { osmTag?: string }>(
+    (item?.changes || []).map((change) => [String(change.field || ''), change])
+  );
+  assert.equal(byField.get('colour')?.osmTag, 'building:colour');
+  assert.equal(byField.get('architect')?.osmTag, 'architect');
+});
+
 test('buildChangesFromRows treats concrete material variants as one selection', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
@@ -248,6 +340,50 @@ test('buildChangesFromRows treats concrete material variants as one selection', 
 
   const fields = new Set((items[0].changes || []).map((change) => String(change.field || '')));
   assert.equal(fields.has('material'), false);
+});
+
+test('getUserEditDetailsById exposes design project changes and values', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2202,
+    JSON.stringify({
+      name: 'Дом с типовым тегом',
+      'design:ref': '1-447С-42'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, design, design_ref, design_year, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    22,
+    'way',
+    2202,
+    'user@example.com',
+    'Дом с типовым тегом',
+    'typical',
+    '1-447С-43',
+    1972,
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(22);
+  assert.ok(item);
+  assert.equal(item?.values.design, 'typical');
+  assert.equal(item?.values.design_ref, '1-447С-43');
+  assert.equal(item?.values.design_year, 1972);
+  const fields = new Set((item?.changes || []).map((change) => String(change.field || '')));
+  assert.equal(fields.has('design'), true);
+  assert.equal(fields.has('design_ref'), true);
+  assert.equal(fields.has('design_year'), true);
 });
 
 test('getUserEditsList marks accepted edit as orphaned when contour is missing', async () => {
@@ -409,6 +545,67 @@ test('deleteUserEdit removes pending edit history row', async () => {
   assert.equal(row, undefined);
 });
 
+test('withdrawPendingUserEdit removes the current user pending edit', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(60, 'way', 6060, 'user@example.com', 'Черновик', 'pending');
+
+  const withdrawn = await service.withdrawPendingUserEdit(60, 'user@example.com');
+  assert.equal(withdrawn?.editId, 60);
+  assert.equal(withdrawn?.status, 'pending');
+  assert.equal(withdrawn?.deletedMergedLocal, false);
+
+  const row = db.prepare(`
+    SELECT 1
+    FROM user_edits.building_user_edits
+    WHERE id = ?
+  `).get(60);
+  assert.equal(row, undefined);
+});
+
+test('withdrawPendingUserEdit blocks edits from other users and non-pending rows', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, created_at, updated_at
+    )
+    VALUES
+      (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
+      (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    61,
+    'way',
+    6061,
+    'other@example.com',
+    'Чужая правка',
+    'pending',
+    62,
+    'way',
+    6062,
+    'user@example.com',
+    'Уже рассмотрено',
+    'rejected'
+  );
+
+  await assert.rejects(
+    () => service.withdrawPendingUserEdit(61, 'user@example.com'),
+    (error) => error?.code === 'EDIT_ACCESS_DENIED'
+  );
+
+  await assert.rejects(
+    () => service.withdrawPendingUserEdit(62, 'user@example.com'),
+    (error) => error?.code === 'EDIT_NOT_PENDING'
+  );
+});
+
 test('deleteUserEdit removes lone accepted edit together with merged local data', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
@@ -499,7 +696,7 @@ test('deleteUserEdit blocks deleting accepted edit when merged state is shared',
   assert.ok(localRow);
 });
 
-test('synced edits are read only in admin moderation actions', async () => {
+test('synced, cleaned, and syncing edits are read only in admin moderation actions', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
@@ -507,23 +704,38 @@ test('synced edits are read only in admin moderation actions', async () => {
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, sync_status, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(10, 'way', 3010, 'user@example.com', 'Synced building', 'accepted', 'synced');
-
-  await assert.rejects(
-    () => service.reassignUserEdit(10, { osmType: 'way', osmId: 3011 }, { actor: 'admin@example.com' }),
-    (error) => {
-      assert.match(error.message, /synchronized/i);
-      return true;
-    }
+    VALUES
+      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
+      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
+      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    10, 'way', 3010, 'user@example.com', 'Synced building', 'accepted', 'synced',
+    11, 'way', 3011, 'user@example.com', 'Cleaned building', 'accepted', 'cleaned',
+    12, 'way', 3012, 'user@example.com', 'Syncing building', 'accepted', 'syncing'
   );
 
-  await assert.rejects(
-    () => service.deleteUserEdit(10),
-    (error) => {
-      assert.match(error.message, /synchronized/i);
-      return true;
-    }
-  );
+  const cases = [
+    { editId: 10, message: /already been synchronized/i },
+    { editId: 11, message: /already been synchronized/i },
+    { editId: 12, message: /currently being synchronized/i }
+  ];
+
+  for (const { editId, message } of cases) {
+    await assert.rejects(
+      () => service.reassignUserEdit(editId, { osmType: 'way', osmId: editId + 1 }, { actor: 'admin@example.com' }),
+      (error) => {
+        assert.match(error.message, message);
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      () => service.deleteUserEdit(editId),
+      (error) => {
+        assert.match(error.message, message);
+        return true;
+      }
+    );
+  }
 });
 

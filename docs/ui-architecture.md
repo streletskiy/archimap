@@ -122,6 +122,18 @@ When a new control is needed:
 - Layer/rule editing UI is shared between map and admin preset management through one reusable component (`FilterLayersEditor.svelte`), and map/admin surfaces should compose it instead of duplicating layer editor markup/logic.
 - Map preset buttons are runtime data-driven (`/api/filter-presets`), while admin preset labels are editable persisted data with per-locale `nameI18n` values (not locale keys).
 
+### Bulk Map Selection
+
+- Shift+Click on the map toggles buildings into a temporary multi-selection used for bulk edit.
+- On the main map route, Shift is reserved for bulk selection and the default MapLibre box-zoom handler is disabled.
+- The building details modal does not block map clicks, so the user can keep the panel open while selecting another building or extending a bulk selection with Shift+Click.
+- When multi-selection is active, the building modal header shows the selected-building count; there is no separate selection chip under the navigation bar.
+- Bulk edit hides `name` and address fields entirely, and skips any selected building that ends up unchanged so empty pending edits are not created.
+- In bulk edit mode, the modal hides single-object metadata that is misleading for a group, including the OSM id badge and the full OSM tag dump.
+- Mixed editable values are shown as mixed-state inputs with sample current values; leaving such a field untouched preserves per-building differences.
+- The bulk-only `Clear for all` control writes an explicit empty value for that field to the whole selection when the edit is saved.
+- If any selected building is a building part, bulk edit narrows the form to the shared part-safe fields only.
+
 ### Date Range
 
 - `UiDateRangePicker` is the standard date-range filter for edit history and moderation history views.
@@ -173,6 +185,7 @@ When a new control is needed:
 - Shell components define application composition and shared UX language.
 - Routes should stay thin when possible and delegate behavior to shell components, services, and stores.
 - Base controls define the contract; shells define composition; routes wire data and lifecycle.
+- When a shell grows into a large admin tab, split repeated filter rows, list cards, and detail panes into tab-local subcomponents instead of keeping one monolithic file.
 
 ## Workflow For New UI Work
 
@@ -181,7 +194,8 @@ When a new control is needed:
 3. Wrap it in `base/**`.
 4. Map shared styling into semantic classes and tokens in `frontend/src/app.css`.
 5. Migrate feature code to the base wrapper.
-6. Update this document if a new shared pattern or rule was introduced.
+6. Split large admin or settings tabs into local subcomponents when a tab starts mixing filters, list rows, and detail panes; keep tag-management, preset-management, and detail panes separate instead of embedding them in one monolith.
+7. Update this document if a new shared pattern or rule was introduced.
 
 ## Build And Verification
 

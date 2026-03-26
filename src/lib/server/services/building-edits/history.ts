@@ -1,3 +1,5 @@
+import type { BuildingEdit, BuildingEditSummary } from '$shared/types';
+
 function createBuildingEditHistoryService(context) {
   const {
     BASE_USER_EDITS_JOINS,
@@ -11,7 +13,14 @@ function createBuildingEditHistoryService(context) {
     parseTagsJsonSafe
   } = context;
 
-  async function getUserEditsList({ createdBy = null, status = null, limit = 2000, summary = false }) {
+  async function getUserEditsList(
+    { createdBy = null, status = null, limit = 2000, summary = false }: {
+      createdBy?: string | null;
+      status?: string | null;
+      limit?: number;
+      summary?: boolean;
+    } = {}
+  ): Promise<Array<BuildingEditSummary | BuildingEdit>> {
     const cap = Math.max(1, Math.min(5000, Number(limit) || 2000));
     const clauses = [];
     const params = [];
@@ -67,7 +76,7 @@ function createBuildingEditHistoryService(context) {
     return rows.map((row) => mapDetailedUserEditRow(row).mapped);
   }
 
-  async function getUserEditDetailsById(editId) {
+  async function getUserEditDetailsById(editId): Promise<BuildingEdit | null> {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) return null;
 
@@ -84,10 +93,13 @@ function createBuildingEditHistoryService(context) {
     mapped.tags = tags;
     mapped.currentTags = parseTagsJsonSafe(row.tags_json);
     mapped.sourceTags = parseTagsJsonSafe(row.source_tags_json);
-      mapped.latestMerged = mergedInfoRow
+    mapped.latestMerged = mergedInfoRow
       ? {
         name: mergedInfoRow.name ?? null,
         style: mergedInfoRow.style ?? null,
+        design: mergedInfoRow.design ?? null,
+        design_ref: mergedInfoRow.design_ref ?? null,
+        design_year: mergedInfoRow.design_year ?? null,
         material: mergedInfoRow.material === 'concrete' && mergedInfoRow.material_concrete
           ? `concrete_${mergedInfoRow.material_concrete}`
           : (mergedInfoRow.material ?? null),

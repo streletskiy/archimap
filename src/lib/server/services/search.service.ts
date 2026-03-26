@@ -1,5 +1,6 @@
 function createSearchService(options: LooseRecord = {}) {
   const db = options.db;
+  const isPostgres = db?.provider === 'postgres';
   const isRebuildInProgress = typeof options.isRebuildInProgress === 'function'
     ? options.isRebuildInProgress
     : () => false;
@@ -42,6 +43,17 @@ function createSearchService(options: LooseRecord = {}) {
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
     const lat = Number.isFinite(centerLat) ? centerLat : defaultLat;
     const bbox = normalizeSearchBbox(searchBbox);
+    const designRefSql = isPostgres
+      ? `COALESCE(
+        NULLIF(btrim(ai.design_ref), ''),
+        NULLIF(btrim(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb ->> 'design:ref' ELSE NULL END), ''),
+        NULLIF(btrim(CASE WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb ->> 'design_ref' ELSE NULL END), '')
+      )`
+      : `COALESCE(
+        NULLIF(trim(ai.design_ref), ''),
+        NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$."design:ref"') END), ''),
+        NULLIF(trim(CASE WHEN json_valid(bc.tags_json) THEN json_extract(bc.tags_json, '$.design_ref') END), '')
+      )`;
 
     const whereTokenClauses = [];
     const whereParams = [];
@@ -51,9 +63,10 @@ function createSearchService(options: LooseRecord = {}) {
         coalesce(ai.name, '') LIKE ? OR
         coalesce(ai.address, '') LIKE ? OR
         coalesce(ai.style, '') LIKE ? OR
-        coalesce(ai.architect, '') LIKE ?
+        coalesce(ai.architect, '') LIKE ? OR
+        coalesce(${designRefSql}, '') LIKE ?
       )`);
-      whereParams.push(pattern, pattern, pattern, pattern);
+      whereParams.push(pattern, pattern, pattern, pattern, pattern);
     }
 
     const whereSql = whereTokenClauses.length > 0 ? whereTokenClauses.join(' AND ') : '1=1';
@@ -74,6 +87,7 @@ function createSearchService(options: LooseRecord = {}) {
           ai.address,
           ai.style,
           ai.architect,
+          ${designRefSql} AS design_ref,
           ai.updated_at,
           ((bc.min_lon + bc.max_lon) / 2.0) AS center_lon,
           ((bc.min_lat + bc.max_lat) / 2.0) AS center_lat
@@ -89,6 +103,7 @@ function createSearchService(options: LooseRecord = {}) {
         address,
         style,
         architect,
+        design_ref,
         center_lon,
         center_lat,
         COUNT(*) OVER() AS total_count,
@@ -113,6 +128,7 @@ function createSearchService(options: LooseRecord = {}) {
         address: row.address || null,
         style: row.style || null,
         architect: row.architect || null,
+        designRef: row.design_ref || null,
         lon: Number.isFinite(Number(row.center_lon)) ? Number(row.center_lon) : null,
         lat: Number.isFinite(Number(row.center_lat)) ? Number(row.center_lat) : null,
         score: 0
@@ -156,6 +172,7 @@ function createSearchService(options: LooseRecord = {}) {
           s.address,
           s.style,
           s.architect,
+          s.design_ref,
           s.center_lon,
           s.center_lat,
           s.local_priority,
@@ -181,6 +198,7 @@ function createSearchService(options: LooseRecord = {}) {
           s.address,
           s.style,
           s.architect,
+          s.design_ref,
           s.center_lon,
           s.center_lat,
           s.local_priority,
@@ -213,6 +231,7 @@ function createSearchService(options: LooseRecord = {}) {
         address: row.address || null,
         style: row.style || null,
         architect: row.architect || null,
+        designRef: row.design_ref || null,
         lon: Number.isFinite(Number(row.center_lon)) ? Number(row.center_lon) : null,
         lat: Number.isFinite(Number(row.center_lat)) ? Number(row.center_lat) : null,
         score: Number(row.rank || 0)

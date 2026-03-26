@@ -17,12 +17,14 @@ test('normalizeSearchSourceRow safely parses tags JSON and builds fallback field
       'addr:street': 'Кривоарбатский переулок',
       'addr:housenumber': '10',
       architecture: 'авангард',
-      architect_name: 'Константин Мельников'
+      architect_name: 'Константин Мельников',
+      'design:ref': '1-447С-43'
     }),
     local_name: null,
     local_address: null,
     local_style: null,
     local_architect: null,
+    local_design_ref: null,
     local_priority: 0,
     center_lon: 37.588,
     center_lat: 55.748
@@ -36,6 +38,7 @@ test('normalizeSearchSourceRow safely parses tags JSON and builds fallback field
     address: '119002, Москва, Кривоарбатский переулок, 10',
     style: 'авангард',
     architect: 'Константин Мельников',
+    design_ref: '1-447С-43',
     local_priority: 0,
     center_lon: 37.588,
     center_lat: 55.748
@@ -66,6 +69,27 @@ test('normalizeSearchSourceRow prefers local architectural info over OSM tags', 
   assert.equal(row.style, 'Local style');
   assert.equal(row.architect, 'Local architect');
   assert.equal(row.local_priority, 1);
+});
+
+test('normalizeSearchSourceRow keeps design ref only buildings searchable', () => {
+  const row = normalizeSearchSourceRow({
+    osm_type: 'relation',
+    osm_id: 8,
+    tags_json: JSON.stringify({
+      'design:ref': 'II-18-01'
+    }),
+    local_name: null,
+    local_address: null,
+    local_style: null,
+    local_architect: null,
+    local_design_ref: null,
+    local_priority: 0,
+    center_lon: 10,
+    center_lat: 20
+  });
+
+  assert.ok(row);
+  assert.equal(row.design_ref, 'II-18-01');
 });
 
 test('normalizeSearchSourceRows filters malformed rows without throwing', () => {

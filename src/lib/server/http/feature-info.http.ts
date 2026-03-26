@@ -1,14 +1,18 @@
 const { getFeatureKindFromTagsJson } = require('../utils/building-feature-kind');
+const { createBuildingsRepository } = require('../services/buildings.repository');
 
 function createFeatureInfoSupport(options: LooseRecord = {}) {
   const {
     db,
-    mergePersonalEditsIntoFeatureInfo
+    mergePersonalEditsIntoFeatureInfo,
+    buildingsRepository: providedBuildingsRepository
   } = options;
 
-  if (!db) {
+  if (!db && !providedBuildingsRepository) {
     throw new Error('createFeatureInfoSupport: db is required');
   }
+
+  const buildingsRepository = providedBuildingsRepository || createBuildingsRepository({ db });
 
   function rowToFeature(row) {
     let ring = [];
@@ -56,23 +60,9 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
     if (keys.length === 0) return features;
 
     const infoByKey = new Map();
-    const chunkSize = 300;
-    for (let index = 0; index < keys.length; index += chunkSize) {
-      const chunk = keys.slice(index, index + chunkSize);
-      const clauses = chunk.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
-      const params = [];
-      for (const key of chunk) {
-        const [type, id] = key.split('/');
-        params.push(type, Number(id));
-      }
-      const rows = await db.prepare(`
-        SELECT osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
-        FROM local.architectural_info
-        WHERE ${clauses}
-      `).all(...params);
-      for (const row of rows) {
-        infoByKey.set(`${row.osm_type}/${row.osm_id}`, row);
-      }
+    const rows = await buildingsRepository.getLocalArchitecturalInfoRowsByKeys(keys);
+    for (const row of rows) {
+      infoByKey.set(`${row.osm_type}/${row.osm_id}`, row);
     }
 
     for (const feature of features) {

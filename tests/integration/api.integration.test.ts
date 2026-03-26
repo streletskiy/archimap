@@ -570,6 +570,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(buildingInfoBody?.name, 'Integration test building');
       assert.equal(buildingInfoBody?.feature_kind, 'building');
       assert.deepEqual(buildingInfoBody?.region_slugs, ['ru-moscow']);
+      assert.deepEqual(buildingInfoBody?.design_ref_suggestions, []);
 
       const partBuildingInfo = await callApi('/api/building-info/way/102');
       assert.equal(partBuildingInfo.status, 200);
@@ -602,7 +603,10 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           osmType: 'way',
           osmId: 104,
           material: 'concrete_blocks',
-          editedFields: ['material']
+          design: 'typical',
+          designRef: '1-447С-43',
+          designYear: 1972,
+          editedFields: ['material', 'design', 'design_ref', 'design_year']
         })
       });
       assert.equal(concreteEdit.status, 200);
@@ -612,12 +616,15 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const concreteUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
       try {
         const pendingConcreteEdit = concreteUserEditsDb.prepare(`
-          SELECT material, material_concrete
+          SELECT material, material_concrete, design, design_ref, design_year
           FROM building_user_edits
           WHERE id = ?
         `).get(concreteEditBody.editId);
         assert.equal(pendingConcreteEdit?.material, 'concrete');
         assert.equal(pendingConcreteEdit?.material_concrete, 'blocks');
+        assert.equal(pendingConcreteEdit?.design, 'typical');
+        assert.equal(pendingConcreteEdit?.design_ref, '1-447С-43');
+        assert.equal(pendingConcreteEdit?.design_year, 1972);
       } finally {
         concreteUserEditsDb.close();
       }

@@ -92,6 +92,45 @@ test('getBuildingSearchResults applies viewport bbox constraints to SQL queries'
   assert.equal(capturedParams[10], 0);
 });
 
+test('getBuildingSearchResults local fallback searches design ref values', async () => {
+  let capturedSql = '';
+  const returnedRows = [
+    {
+      osm_type: 'way',
+      osm_id: 7,
+      name: 'Дом',
+      address: null,
+      style: null,
+      architect: null,
+      design_ref: 'II-18-01',
+      center_lon: 44,
+      center_lat: 56,
+      total_count: 1
+    }
+  ];
+  const db = {
+    provider: 'sqlite',
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        all() {
+          return returnedRows;
+        }
+      };
+    }
+  };
+  const service = createSearchService({
+    db,
+    isRebuildInProgress: () => true
+  });
+
+  const result = await service.getBuildingSearchResults('1-447С-43', 44, 56, 30, 0);
+
+  assert.match(capturedSql, /design_ref/);
+  assert.match(capturedSql, /json_extract\(bc\.tags_json, '\$\."design:ref"'\)/);
+  assert.equal(result.items[0].designRef, 'II-18-01');
+});
+
 test('getBuildingSearchResults returns total from window count', async () => {
   const db = {
     provider: 'sqlite',
@@ -106,6 +145,7 @@ test('getBuildingSearchResults returns total from window count', async () => {
               address: null,
               style: null,
               architect: null,
+              design_ref: '1-447С-43',
               center_lon: 44,
               center_lat: 56,
               rank: 1,
@@ -120,4 +160,5 @@ test('getBuildingSearchResults returns total from window count', async () => {
   const result = await service.getBuildingSearchResults('дом', 44, 56, 120, 0);
   assert.equal(result.total, 345);
   assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].designRef, '1-447С-43');
 });

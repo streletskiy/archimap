@@ -1,3 +1,5 @@
+import type { Region, RegionInput } from '$shared/types';
+
 const DELETE_REGION_SQL = {
   countMemberships: `
     SELECT COUNT(*) AS total
@@ -62,18 +64,19 @@ function createRegionsDomain(context: LooseRecord = {}) {
     validateSelectedExtract
   } = context;
 
-  async function getRegionById(regionId) {
+  async function getRegionById(regionId): Promise<Region | null> {
     await ensureBootstrapped();
     return rowToRegion(await getRegionRowById(regionId));
   }
 
-  async function listRegions(options: LooseRecord = {}) {
+  async function listRegions(options: { includeDisabled?: boolean; includeStorageStats?: boolean } = {}): Promise<Region[]> {
     await ensureBootstrapped();
     const includeDisabled = options.includeDisabled !== false;
     const includeStorageStats = options.includeStorageStats === true;
     const rows = await listRegionRows();
     const items = rows
       .map(rowToRegion)
+      .filter((item): item is Region => Boolean(item))
       .filter((item) => includeDisabled || item.enabled);
     return includeStorageStats
       ? await context.enrichRegionsWithStorageStats(items)
@@ -100,7 +103,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     }
   }
 
-  async function validateOverlap(nextRegion) {
+  async function validateOverlap(nextRegion: Region) {
     if (!nextRegion?.enabled || !nextRegion?.bounds) return [];
     const allRegions = await listRegions();
     return allRegions.filter((candidate) => {
@@ -110,7 +113,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     });
   }
 
-  async function normalizeRegionInput(input: LooseRecord = {}, previous = null) {
+  async function normalizeRegionInput(input: RegionInput = {}, previous: Region | null = null) {
     const previousRegion = previous || null;
     const hasLegacySourceValueField = Object.prototype.hasOwnProperty.call(input, 'sourceValue')
       || Object.prototype.hasOwnProperty.call(input, 'source_value');
@@ -231,7 +234,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     };
   }
 
-  async function saveRegion(input: LooseRecord = {}, actor = null) {
+  async function saveRegion(input: RegionInput = {}, actor = null): Promise<Region> {
     await ensureBootstrapped();
     const regionId = Number(input?.id || 0);
     const existing = regionId > 0 ? await getRegionById(regionId) : null;
@@ -331,7 +334,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
         updatedBy,
         existing.id
       );
-      return getRegionById(existing.id);
+      const updatedRegion = await getRegionById(existing.id);
+      if (!updatedRegion) {
+        throw new Error('Failed to load saved region');
+      }
+      return updatedRegion;
     }
 
     await db.prepare(`
@@ -386,7 +393,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
       ORDER BY id DESC
       LIMIT 1
     `).get(next.slug);
-    return getRegionById(row?.id);
+    const createdRegion = await getRegionById(row?.id);
+    if (!createdRegion) {
+      throw new Error('Failed to load saved region');
+    }
+    return createdRegion;
   }
 
   function buildDeleteResult(existing, deletedBy, membershipCount, runCount, orphanDeletedCount) {
@@ -442,10 +453,10 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return tx();
   }
 
-  async function listRuntimePmtilesRegions() {
+  async function listRuntimePmtilesRegions(): Promise<Array<Pick<Region, 'id' | 'slug' | 'name' | 'sourceLayer' | 'bounds' | 'pmtilesMinZoom' | 'pmtilesMaxZoom' | 'lastSuccessfulSyncAt'>>> {
     await ensureBootstrapped();
     return (await listRegions({ includeDisabled: false }))
-      .filter((region) => region.enabled && region.bounds && region.lastSuccessfulSyncAt)
+      .filter((region) => region.enabled && region.bounds)
       .map((region) => ({
         id: region.id,
         slug: region.slug,

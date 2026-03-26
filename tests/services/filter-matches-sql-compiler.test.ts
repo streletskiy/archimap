@@ -23,8 +23,8 @@ test('compilePostgresFilterRulePredicate: compiles supported operators with stab
     op: 'equals',
     valueNormalized: 'neo'
   });
-  assert.match(equals.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(src\.style\)\), 0\) > 0 THEN src\.style ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\) = \?/);
-  assert.deepEqual(equals.params, ['style', 'neo']);
+  assert.match(equals.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(src\.style\)\), 0\) > 0 THEN src\.style ELSE COALESCE\(jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\)\) END\) = \?/);
+  assert.deepEqual(equals.params, ['building:architecture', 'architecture', 'style', 'neo']);
 
   const colour = compilePostgresFilterRulePredicate({
     key: 'colour',
@@ -55,8 +55,8 @@ test('compilePostgresFilterRulePredicate: compiles supported operators with stab
     op: 'exists',
     valueNormalized: ''
   });
-  assert.match(exists.sql, /COALESCE\(length\(btrim\(CASE WHEN COALESCE\(length\(btrim\(src\.style\)\), 0\) > 0 THEN src\.style ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\)\), 0\) > 0/);
-  assert.deepEqual(exists.params, ['style']);
+  assert.match(exists.sql, /COALESCE\(length\(btrim\(CASE WHEN COALESCE\(length\(btrim\(src\.style\)\), 0\) > 0 THEN src\.style ELSE COALESCE\(jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\), jsonb_extract_path_text\(src\.tags_jsonb, \?\)\) END\)\), 0\) > 0/);
+  assert.deepEqual(exists.params, ['building:architecture', 'architecture', 'style']);
 
   const notExists = compilePostgresFilterRulePredicate({
     key: 'name',
@@ -74,6 +74,14 @@ test('compilePostgresFilterRulePredicate: compiles supported operators with stab
   });
   assert.match(greaterOrEquals.sql, /double precision ELSE NULL END >= \?/);
   assert.deepEqual(greaterOrEquals.params, ['levels', 'levels', 5]);
+
+  const designRef = compilePostgresFilterRulePredicate({
+    key: 'design:ref',
+    op: 'equals',
+    valueNormalized: '1-447с-43'
+  });
+  assert.match(designRef.sql, /lower\(CASE WHEN COALESCE\(length\(btrim\(src\.design_ref\)\), 0\) > 0 THEN src\.design_ref ELSE jsonb_extract_path_text\(src\.tags_jsonb, \?\) END\) = \?/);
+  assert.deepEqual(designRef.params, ['design:ref', '1-447с-43']);
 });
 
 test('compilePostgresFilterRulesPredicate: combines predicates and preserves params order', () => {
@@ -87,7 +95,7 @@ test('compilePostgresFilterRulesPredicate: combines predicates and preserves par
   assert.deepEqual(compiled.params, [
     'name', 'alpha',
     'foo', 'foo', 'bar',
-    'style'
+    'building:architecture', 'architecture', 'style'
   ]);
 });
 

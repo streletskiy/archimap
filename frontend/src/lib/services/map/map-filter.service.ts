@@ -1,7 +1,7 @@
 import type {
-  FilterWorkerPrepareRequest,
-  FilterWorkerPrepareResponse,
-  FilterWorkerFactory
+  FilterWorkerFactory,
+  FilterWorkerRequest,
+  FilterWorkerResponse
 } from './filter-types.js';
 
 const DEFAULT_WORKER_ERROR = 'Filter worker crashed';
@@ -11,7 +11,7 @@ export class MapFilterService {
   worker: Worker | null;
   requestSeq: number;
   pending: Map<string, {
-    resolve: (value: FilterWorkerPrepareResponse) => void;
+    resolve: (value: FilterWorkerResponse) => void;
     reject: (error: unknown) => void;
   }>;
 
@@ -34,7 +34,7 @@ export class MapFilterService {
 
     this.worker = this.workerFactory();
     this.worker.onmessage = (event) => {
-      const data = (event?.data || {}) as FilterWorkerPrepareResponse;
+      const data = (event?.data || {}) as FilterWorkerResponse;
       const requestId = String(data?.requestId || '');
       const handlers = this.pending.get(requestId);
       if (!handlers) return;
@@ -49,8 +49,8 @@ export class MapFilterService {
   }
 
   request(
-    type: FilterWorkerPrepareRequest['type'],
-    payload: Omit<FilterWorkerPrepareRequest, 'type' | 'requestId'> = {}
+    type: FilterWorkerRequest['type'],
+    payload: Omit<FilterWorkerRequest, 'type' | 'requestId'> = {}
   ) {
     this.ensureWorker();
     if (!this.worker) {
@@ -58,7 +58,7 @@ export class MapFilterService {
     }
 
     const requestId = `w-${Date.now()}-${++this.requestSeq}`;
-    return new Promise<FilterWorkerPrepareResponse>((resolve, reject) => {
+    return new Promise<FilterWorkerResponse>((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
       this.worker.postMessage({
         type,

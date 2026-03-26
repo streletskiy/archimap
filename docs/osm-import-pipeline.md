@@ -197,7 +197,7 @@ flowchart TD
 
 - PostgreSQL keeps only searchable rows in `building_search_source` and derives `search_tsv` there through a generated column.
 - SQLite keeps `building_search_source` plus `building_search_fts`.
-- Parsing and fallback composition for `name`, `address`, `style`, and `architect` happens in Node.js via `src/lib/server/services/search-index-source.service.ts`.
+- Parsing and fallback composition for `name`, `address`, `style`, `architect`, and `design_ref` happens in Node.js via `src/lib/server/services/search-index-source.service.ts`.
 - pure `building:part` rows are excluded from the search read model so part geometries do not create duplicate search hits for the same visible building; rows that also have a `building` tag stay searchable as normal buildings.
 - The same normalization code is shared by incremental runtime refreshes and the full rebuild worker for both PostgreSQL and SQLite.
 
@@ -250,6 +250,7 @@ flowchart TD
 - In-app sync flow (scheduler/admin queue) runs follow-up jobs from `ServerRuntime` boot modules.
 - These jobs rebuild the search read-model through `search-index.boot.js` (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite), then reset and warm `filter_tag_keys_cache` through `filter-tag-keys.boot.js`.
 - Direct standalone full sync execution of `scripts/sync-osm-region.ts` invokes the same rebuild workers itself, so search/filter read-models stay aligned after new region imports and normal region updates even without the in-app runtime wrapper.
+- Ordinary app/container restarts reuse the persisted `filter_tag_keys_cache`; there is no unconditional startup rebuild. The first `GET /api/filter-tag-keys` read cold-starts the cache only when the table is empty.
 - `--pmtiles-only` rebuilds only the archive from DB rows and intentionally skips search/filter follow-up because imported OSM rows are unchanged.
 - The archive remains a single regional source of truth; `building_part` is just another feature kind inside the same PMTiles file, not a separate archive.
 

@@ -33,7 +33,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - a refreshed PMTiles archive for the target region
    - updated region sync metadata and bounds for runtime clients
 7. For managed in-app syncs, the runtime runs post-sync maintenance through `ServerRuntime` boot modules:
-   - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite)
+   - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite) and dispatches incremental refreshes to `workers/refresh-search-index.worker.ts`
    - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
 
 ## Safety invariants
@@ -57,12 +57,12 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 ## Search/filter/building APIs
 
 - Existing building/search/filter APIs continue to read the union dataset from `osm.building_contours`.
-- Search source rows are normalized in Node.js from raw `tags_json` plus `local.architectural_info` via `src/lib/server/services/search-index-source.service.ts`, shared by incremental updates and full rebuild worker.
+- Search source rows are normalized in Node.js from raw `tags_json` plus `local.architectural_info` via `src/lib/server/services/search-index-source.service.ts`, shared by incremental updates and full rebuild worker. The normalized search text now also includes `design:ref` / `design_ref`.
 - This keeps `/api/building/*`, `/api/building-info/*`, `/api/search-buildings`, and filter endpoints aligned in single-region and multi-region setups.
 
 ## Operational notes
 
 - Region PMTiles are named by region slug on disk; runtime/API addressing uses numeric `regionId`.
 - `server.ts` is only a thin entrypoint; runtime orchestration is built by `ServerRuntime` and split across `src/lib/server/boot/server-runtime.boot.ts` plus `server-runtime.{config,middleware,routes}.ts`.
-- Search index rebuild runs after successful syncs so search/filter APIs stay aligned with the union dataset.
+- Search index rebuild runs after successful syncs so search/filter APIs stay aligned with the union dataset. Incremental refreshes for accepted edits, deletions, and OSM cleanup are queued to a dedicated worker instead of running inline in the request handler.
 - Bounds-driven PMTiles activation is rectangle-based, not polygon-precise by extract shape.

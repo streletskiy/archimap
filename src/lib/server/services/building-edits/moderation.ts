@@ -1,8 +1,9 @@
+const { assertMutableSyncStatus } = require('./shared');
+
 function createBuildingEditModerationService(context: LooseRecord, { getUserEditDetailsById }: LooseRecord) {
   const {
     MERGED_EDIT_STATUSES,
     REASSIGNABLE_EDIT_STATUSES,
-    READ_ONLY_SYNC_STATUSES,
     countMergedEditsForTarget,
     db,
     getMergedInfoRow,
@@ -17,7 +18,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
   }
 
   function mergeLocalInfoForReassign(sourceRow: LooseRecord, targetRow: LooseRecord, { force = false }: LooseRecord = {}) {
-    const fields = ['name', 'style', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+    const fields = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
     const conflicts: string[] = [];
     const merged: LooseRecord = {};
 
@@ -41,21 +42,6 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     return { merged, conflicts };
   }
 
-  function throwSyncLockedError(syncStatus) {
-    if (syncStatus === 'syncing') {
-      const error = new Error('This edit is currently being synchronized and cannot be changed right now.');
-      error.status = 409;
-      error.code = 'EDIT_SYNC_IN_PROGRESS';
-      throw error;
-    }
-    if (READ_ONLY_SYNC_STATUSES.has(syncStatus)) {
-      const error = new Error('This edit has already been synchronized and can only be viewed.');
-      error.status = 409;
-      error.code = 'EDIT_SYNC_LOCKED';
-      throw error;
-    }
-  }
-
   async function reassignUserEdit(editId, target, options: LooseRecord = {}) {
     const id = Number(editId);
     if (!Number.isInteger(id) || id <= 0) {
@@ -77,7 +63,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     if (!REASSIGNABLE_EDIT_STATUSES.has(item.status)) {
       throw new Error('This edit cannot be reassigned');
     }
-    throwSyncLockedError(String(item.syncStatus || 'unsynced').trim().toLowerCase());
+    assertMutableSyncStatus(item.syncStatus);
 
     const targetContour = await getOsmContourRow(targetOsmType, targetOsmId);
     if (!targetContour) {
@@ -121,12 +107,15 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
+          design = excluded.design,
+          design_ref = excluded.design_ref,
+          design_year = excluded.design_year,
           material = excluded.material,
           material_concrete = excluded.material_concrete,
           colour = excluded.colour,
@@ -142,6 +131,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
         targetOsmId,
         merged.name ?? null,
         merged.style ?? null,
+        merged.design ?? null,
+        merged.design_ref ?? null,
+        merged.design_year ?? null,
         merged.material ?? null,
         merged.material_concrete ?? null,
         merged.colour ?? null,
@@ -195,7 +187,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
       }
 
       const status = normalizeUserEditStatus(row.status);
-      throwSyncLockedError(String((await getUserEditDetailsById(id))?.syncStatus || 'unsynced').trim().toLowerCase());
+      assertMutableSyncStatus((await getUserEditDetailsById(id))?.syncStatus);
       const deletesMergedLocal = MERGED_EDIT_STATUSES.has(status);
       if (deletesMergedLocal) {
         const otherMergedCount = await countMergedEditsForTarget(row.osm_type, row.osm_id, id);
@@ -234,9 +226,85 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     return tx();
   }
 
+  async function withdrawPendingUserEdit(editId, actor) {
+    const id = Number(editId);
+    if (!Number.isInteger(id) || id <= 0) {
+      const error = new Error('Invalid edit id');
+      error.status = 400;
+      error.code = 'ERR_INVALID_EDIT_ID';
+      throw error;
+    }
+
+    const owner = String(actor || '').trim().toLowerCase();
+    if (!owner) {
+      const error = new Error('Failed to resolve current user');
+      error.status = 400;
+      error.code = 'ERR_CURRENT_USER_UNRESOLVED';
+      throw error;
+    }
+
+    const tx = db.transaction(async () => {
+      const row = await db.prepare(`
+        SELECT id, osm_type, osm_id, created_by, status, sync_status
+        FROM user_edits.building_user_edits
+        WHERE id = ?
+        LIMIT 1
+      `).get(id);
+
+      if (!row) {
+        const error = new Error('Edit not found');
+        error.status = 404;
+        error.code = 'EDIT_NOT_FOUND';
+        throw error;
+      }
+
+      if (String(row.created_by || '').trim().toLowerCase() !== owner) {
+        const error = new Error('You can only cancel your own pending edits');
+        error.status = 403;
+        error.code = 'EDIT_ACCESS_DENIED';
+        throw error;
+      }
+
+      const status = normalizeUserEditStatus(row.status);
+      if (status !== 'pending') {
+        const error = new Error('This edit is no longer pending review.');
+        error.status = 409;
+        error.code = 'EDIT_NOT_PENDING';
+        throw error;
+      }
+
+      assertMutableSyncStatus(row.sync_status);
+
+      const result = await db.prepare(`
+        DELETE FROM user_edits.building_user_edits
+        WHERE id = ?
+          AND lower(trim(created_by)) = ?
+          AND status = 'pending'
+      `).run(id, owner);
+
+      if (Number(result?.changes || 0) === 0) {
+        const error = new Error('Edit not found');
+        error.status = 404;
+        error.code = 'EDIT_NOT_FOUND';
+        throw error;
+      }
+
+      return {
+        editId: id,
+        osmType: row.osm_type,
+        osmId: Number(row.osm_id),
+        status: 'pending',
+        deletedMergedLocal: false
+      };
+    });
+
+    return tx();
+  }
+
   return {
     deleteUserEdit,
-    reassignUserEdit
+    reassignUserEdit,
+    withdrawPendingUserEdit
   };
 }
 

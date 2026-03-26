@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS building_search_source (
   address TEXT,
   style TEXT,
   architect TEXT,
+  design_ref TEXT,
   local_priority INTEGER NOT NULL DEFAULT 0,
   center_lon REAL NOT NULL,
   center_lat REAL NOT NULL,
@@ -337,6 +338,9 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
   osm_id INTEGER NOT NULL,
   name TEXT,
   style TEXT,
+  design TEXT,
+  design_ref TEXT,
+  design_year INTEGER,
   material TEXT,
   material_concrete TEXT,
   colour TEXT,
@@ -365,6 +369,9 @@ CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
   source_osm_updated_at TEXT,
   name TEXT,
   style TEXT,
+  design TEXT,
+  design_ref TEXT,
+  design_year INTEGER,
   material TEXT,
   material_concrete TEXT,
   colour TEXT,
@@ -414,6 +421,7 @@ USING fts5(
   address,
   style,
   architect,
+  design_ref,
   tokenize = 'unicode61 remove_diacritics 2'
 );
 `);
