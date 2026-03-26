@@ -33,3 +33,11 @@ test('buildDesiredTagMap writes building:levels and removes legacy levels', asyn
   assert.equal(Object.prototype.hasOwnProperty.call(desired, 'levels'), false);
   assert.ok(removedKeys.includes('levels'));
 });
+
+test('createPkceChallenge matches the RFC 7636 S256 example', async () => {
+  const { createPkceChallenge } = await loadModule();
+
+  const challenge = await createPkceChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk');
+
+  assert.equal(challenge, 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
+});
