@@ -116,15 +116,14 @@ function decryptSecret(secret, encoded) {
 async function createPkceChallenge(verifier) {
   const verifierBytes = Buffer.from(String(verifier || ''), 'utf8');
   const subtle = crypto.webcrypto?.subtle;
-  if (subtle) {
-    // RFC 7636 requires the PKCE S256 challenge to be SHA-256 of the verifier.
-    // codeql[js/insufficient-password-hash]
-    const digest = await subtle.digest('SHA-256', verifierBytes);
-    return Buffer.from(digest).toString('base64url');
+  if (!subtle) {
+    throw new Error('WebCrypto subtle.digest is required for PKCE challenge generation');
   }
+
   // RFC 7636 requires the PKCE S256 challenge to be SHA-256 of the verifier.
-  // codeql[js/insufficient-password-hash]
-  return crypto.createHash('sha256').update(verifierBytes).digest('base64url');
+  // lgtm[js/insufficient-password-hash]
+  const digest = await subtle.digest('SHA-256', verifierBytes);
+  return Buffer.from(digest).toString('base64url');
 }
 
 function stableJson(value) {
