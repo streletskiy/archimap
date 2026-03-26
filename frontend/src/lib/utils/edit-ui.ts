@@ -69,13 +69,57 @@ export function parseEditKey(key) {
     : null;
 }
 
+function getAddressFromTags(tags) {
+  if (!tags || typeof tags !== 'object') return '';
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const value = String(tags?.[key] || '').trim();
+      if (value) return value;
+    }
+    return '';
+  };
+
+  const full = pick('addr:full', 'addr:full:en');
+  if (full) return full;
+
+  const parts = [
+    pick('addr:postcode', 'addr_postcode'),
+    pick('addr:city', 'addr_city'),
+    pick('addr:place', 'addr_place'),
+    pick('addr:street', 'addr_street', 'addr_stree')
+  ].filter(Boolean);
+  const house = pick('addr:housenumber', 'addr_housenumber', 'addr_hous');
+  if (house) {
+    if (parts.length > 0) {
+      parts[parts.length - 1] = `${parts[parts.length - 1]}, ${house}`;
+    } else {
+      parts.push(house);
+    }
+  }
+  return parts.join(', ');
+}
+
 export function getEditAddress(item) {
-  if (item?.values?.address) return String(item.values.address);
-  if (item?.local?.address) return String(item.local.address);
+  const displayAddress = String(item?.displayAddress || '').trim();
+  if (displayAddress) return displayAddress;
+  const mergedAddress = String(item?.latestMerged?.address || '').trim();
+  if (mergedAddress) return mergedAddress;
+  const valueAddress = String(item?.values?.address || '').trim();
+  if (valueAddress) return valueAddress;
+  const localAddress = String(item?.local?.address || '').trim();
+  if (localAddress) return localAddress;
+  const currentTagAddress = getAddressFromTags(item?.currentTags);
+  if (currentTagAddress) return currentTagAddress;
+  const sourceTagAddress = getAddressFromTags(item?.sourceTags);
+  if (sourceTagAddress) return sourceTagAddress;
+  const genericTagAddress = getAddressFromTags(item?.tags);
+  if (genericTagAddress) return genericTagAddress;
   const changes = Array.isArray(item?.changes) ? item.changes : [];
   const addressChange = changes.find((change) => change?.field === 'address');
-  if (addressChange?.localValue) return String(addressChange.localValue);
-  if (addressChange?.osmValue) return String(addressChange.osmValue);
+  const localValue = String(addressChange?.localValue || '').trim();
+  if (localValue) return localValue;
+  const osmValue = String(addressChange?.osmValue || '').trim();
+  if (osmValue) return osmValue;
   return `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
 }
 

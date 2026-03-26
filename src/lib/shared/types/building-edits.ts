@@ -110,6 +110,7 @@ export interface BuildingEdit {
   syncChangesetId: string | number | null;
   syncSummary: UnknownRecord | null;
   syncError: string | null;
+  displayAddress?: string | null;
   editedFields: string[] | null;
   mergedFields: string[] | null;
   values: BuildingEditValueMap;

@@ -419,6 +419,22 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
+  function resolveDisplayAddressForRow(row, mergedInfoRow = null) {
+    const mergedAddress = normalizeInfoForDiff(mergedInfoRow?.address);
+    if (mergedAddress) return mergedAddress;
+
+    const rowAddress = normalizeInfoForDiff(row?.address);
+    if (rowAddress) return rowAddress;
+
+    const currentContourAddress = osmAddressFromTags(parseTagsJsonSafe(row?.tags_json));
+    if (currentContourAddress) return currentContourAddress;
+
+    const sourceContourAddress = osmAddressFromTags(parseTagsJsonSafe(row?.source_tags_json));
+    if (sourceContourAddress) return sourceContourAddress;
+
+    return null;
+  }
+
   function getMergedInfoRowFromUserEditRow(row): BuildingEditMergedInfo | null {
     return normalizeMergedInfoRow({
       name: row?.merged_name,
@@ -527,8 +543,10 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         }
       })() : null,
       syncError: row.sync_error_text ?? null,
+      displayAddress: resolveDisplayAddressForRow(row, mergedInfoRow),
       editedFields,
       mergedFields,
+      latestMerged: mergedInfoRow,
       values: {
         name: row.name ?? null,
         style: row.style ?? null,

@@ -63,6 +63,7 @@
 
   let edits = [];
   let visibleEdits = [];
+  let visibleEditGroups = [];
   let editsLoading = false;
   let editsStatus;
   let editsFilter = 'all';
@@ -77,6 +78,7 @@
   ];
 
   let selectedEdit = null;
+  let selectedEditGroupItems = [];
   let detailLoading = false;
   let detailStatus = '';
   let detailPaneVisible = false;
@@ -110,6 +112,75 @@
   function getSelectedEditId(item = selectedEdit) {
     const id = Number(item?.editId || item?.id || 0);
     return Number.isInteger(id) && id > 0 ? id : null;
+  }
+
+  function normalizeSyncStatus(value) {
+    return String(value || 'unsynced').trim().toLowerCase();
+  }
+
+  function getMeaningfulEditAddress(item) {
+    const address = String(getEditAddress(item) || '').trim();
+    const fallback = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+    return address && address !== fallback ? address : '';
+  }
+
+  function getGroupDisplayAddress(group) {
+    for (const item of Array.isArray(group?.edits) ? group.edits : []) {
+      const address = getMeaningfulEditAddress(item);
+      if (address) return address;
+    }
+    return getEditAddress(group?.edits?.[0] || group);
+  }
+
+  function getDisplayEditStatusMeta(item) {
+    const syncStatus = normalizeSyncStatus(item?.syncStatus);
+    if (syncStatus === 'synced') {
+      return { cls: 'ui-surface-success-soft ui-text-success-soft', text: $t('account.edits.syncSynced') };
+    }
+    if (syncStatus === 'cleaned') {
+      return { cls: 'ui-surface-info ui-text-info', text: $t('account.edits.syncCleaned') };
+    }
+    if (syncStatus === 'syncing') {
+      return { cls: 'ui-surface-warning ui-text-warning', text: $t('account.edits.syncing') };
+    }
+    if (syncStatus === 'failed') {
+      return { cls: 'ui-surface-danger ui-text-danger', text: $t('account.edits.syncFailed') };
+    }
+    return getStatusBadgeMeta(item?.status, translateNow);
+  }
+
+  function groupEditRows(items) {
+    const groups = [];
+    const groupsByKey = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      const key = getEditKey(item) || `edit/${Number(item?.id || item?.editId || groups.length + 1)}`;
+      let group = groupsByKey.get(key);
+      if (!group) {
+        group = {
+          key,
+          osmType: item?.osmType || null,
+          osmId: Number(item?.osmId || 0),
+          edits: []
+        };
+        groupsByKey.set(key, group);
+        groups.push(group);
+      }
+      group.edits.push(item);
+    }
+
+    return groups.map((group) => {
+      const latest = group.edits[0] || null;
+      return {
+        ...group,
+        latest,
+        latestEditId: Number(latest?.id || latest?.editId || 0),
+        latestAddress: getGroupDisplayAddress(group),
+        latestCreatedBy: latest?.updatedBy || null,
+        latestStatusMeta: getDisplayEditStatusMeta(latest),
+        latestCounters: getChangeCounters(latest?.changes),
+        totalEdits: group.edits.length
+      };
+    });
   }
 
   async function ensureMapRuntime() {
@@ -256,11 +327,17 @@
     if (!map || !map.getSource(SRC)) return;
     const features = [];
     const ids = [];
-    for (const item of visibleEdits) {
-      const key = getEditKey(item);
+    for (const item of visibleEditGroups) {
+      const key = item?.key || getEditKey(item);
       if (!key) continue;
       const c = centerByKey.get(key);
-      if (c) features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { osmKey: key, editId: Number(item.id || item.editId || 0) } });
+      if (c) {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: c },
+          properties: { osmKey: key, editId: Number(item.latestEditId || 0) }
+        });
+      }
       const p = parseEditKey(key);
       if (p) ids.push((p.osmId * 2) + (p.osmType === 'relation' ? 1 : 0));
     }
@@ -331,18 +408,10 @@
       const data = await apiJson(`/api/account/edits?${p.toString()}`);
       edits = Array.isArray(data?.items) ? data.items : [];
       visibleEdits = [...edits];
-      editIdByKey.clear();
-      for (const item of visibleEdits) {
-        const key = getEditKey(item);
-        if (key) editIdByKey.set(key, Number(item.id || item.editId || 0));
-      }
       await loadCenters(visibleEdits);
       await ensureMap();
       applyMapData();
       fitAllEdited();
-      editsStatus = visibleEdits.length
-        ? translateNow('account.edits.statusShown', { visible: visibleEdits.length, total: edits.length })
-        : translateNow('account.edits.statusEmpty');
     } catch (e) {
       edits = [];
       editsStatus = msg(e, translateNow('account.edits.loadFailed'));
@@ -526,10 +595,15 @@
       if (!matchesUiDateRange(item?.updatedAt, editsDateRange)) return false;
       return true;
     });
+    visibleEditGroups = groupEditRows(visibleEdits);
+    const groupedEdits = groupEditRows(edits);
+    const selectedKey = getEditKey(selectedEdit);
+    selectedEditGroupItems = selectedKey
+      ? (groupedEdits.find((group) => group.key === selectedKey)?.edits || (selectedEdit ? [selectedEdit] : []))
+      : (selectedEdit ? [selectedEdit] : []);
     editIdByKey.clear();
-    for (const item of visibleEdits) {
-      const key = getEditKey(item);
-      if (key) editIdByKey.set(key, Number(item.id || item.editId || 0));
+    for (const group of visibleEditGroups) {
+      if (group.latestEditId) editIdByKey.set(group.key, group.latestEditId);
     }
     if (map) {
       applyMapData();
@@ -537,7 +611,9 @@
     }
     editsStatus = editsLoading
       ? translateNow('account.edits.loading')
-      : translateNow('account.edits.statusShown', { visible: visibleEdits.length, total: edits.length });
+      : visibleEditGroups.length
+        ? translateNow('account.edits.statusShownGrouped', { visible: visibleEditGroups.length, total: edits.length })
+        : translateNow('account.edits.statusEmpty');
   }
 
   $: accountPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
@@ -748,44 +824,38 @@
                 <UiTableRow>
                   <UiTableCell colspan="4" className="ui-text-subtle">{$t('account.edits.loading')}</UiTableCell>
                 </UiTableRow>
-              {:else if visibleEdits.length===0}
+              {:else if visibleEditGroups.length===0}
                 <UiTableRow>
                   <UiTableCell colspan="4" className="ui-text-subtle">{$t('account.edits.empty')}</UiTableCell>
                 </UiTableRow>
               {:else}
-                {#each visibleEdits as it (`${it.id || it.editId}`)}
-                  {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
-                  {@const counters = getChangeCounters(it.changes)}
+                {#each visibleEditGroups as group (group.key)}
+                  {@const statusMeta = group.latestStatusMeta}
+                  {@const counters = group.latestCounters}
                   <UiTableRow
                     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
-                    onclick={() => openEdit(it.id || it.editId)}
+                    onclick={() => openEdit(group.latestEditId || group.edits?.[0]?.id || group.edits?.[0]?.editId)}
                   >
                     <UiTableCell className="min-w-0">
-                      <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(it)}</p>
-                      <p class="text-xs ui-text-subtle truncate">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>
-                      <div class="mt-1 flex flex-wrap gap-1">
-                        {#if it.orphaned}
-                          <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>
-                        {/if}
-                        {#if !it.osmPresent && !it.orphaned}
-                          <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
-                        {/if}
-                      {#if it.sourceOsmChanged}
-                          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>
-                        {/if}
-                        {#if it.syncStatus && it.syncStatus !== 'unsynced'}
-                          {@const syncMeta = getSyncBadgeMeta(it.syncStatus)}
-                          <span class={`rounded-md px-2 py-1 text-[11px] font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
+                      <p class="text-xs ui-text-subtle truncate">{$t('account.edits.id')}: {group.osmType}/{group.osmId}</p>
+                      <div class="mt-1 flex min-w-0 items-center gap-1">
+                        <p class="min-w-0 flex-1 font-semibold ui-text-strong break-words line-clamp-1">{group.latestAddress}</p>
+                        {#if group.totalEdits > 1}
+                          <span class="shrink-0 rounded-md ui-surface-soft px-2 py-1 text-[11px] font-semibold ui-text-muted" title={$t('account.edits.groupTitle')}>
+                            ×{group.totalEdits}
+                          </span>
                         {/if}
                       </div>
-                      {#if String(it?.adminComment || '').trim()}
-                        <p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>
-                      {/if}
-                      {#if it.syncChangesetId}
-                        <p class="mt-1 text-xs ui-text-subtle">{$t('account.edits.syncChangeset')}: #{it.syncChangesetId}</p>
-                      {/if}
+                      <div class="mt-1 flex flex-wrap gap-1">
+                        {#if group.latest?.orphaned}
+                          <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>
+                        {/if}
+                        {#if group.latest && !group.latest.osmPresent && !group.latest.orphaned}
+                          <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
+                        {/if}
+                      </div>
                     </UiTableCell>
-                    <UiTableCell>{it.updatedBy || '-'}</UiTableCell>
+                    <UiTableCell>{group.latestCreatedBy || '-'}</UiTableCell>
                     <UiTableCell>
                       <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span>
                     </UiTableCell>
@@ -820,8 +890,14 @@
           {:else if !selectedEdit}
             <p class="text-sm ui-text-subtle">{$t('account.edits.selectHint')}</p>
           {:else}
-                {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
-            <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
+                {@const selectedStatusMeta = getDisplayEditStatusMeta(selectedEdit)}
+            <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted">
+              <span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span>
+              {#if selectedEdit.syncChangesetId && selectedEditGroupItems.length <= 1}
+                <span>{$t('account.edits.syncChangeset')}: #{selectedEdit.syncChangesetId}</span>
+              {/if}
+              <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span>
+            </p>
             {#if selectedEdit.status === 'pending'}
               <div class="rounded-xl border ui-border ui-surface-warning p-3 text-sm ui-text-body">
                 <p class="text-sm font-semibold ui-text-strong">{$t('account.edits.pendingEditTitle')}</p>
@@ -845,7 +921,6 @@
                 <p><strong>{$t('account.edits.syncAttemptedAt')}:</strong> {formatUiDate(selectedEdit.syncAttemptedAt) || '---'}</p>
                 <p><strong>{$t('account.edits.syncSucceededAt')}:</strong> {formatUiDate(selectedEdit.syncSucceededAt) || '---'}</p>
                 <p><strong>{$t('account.edits.syncCleanedAt')}:</strong> {formatUiDate(selectedEdit.syncCleanedAt) || '---'}</p>
-                <p><strong>{$t('account.edits.syncChangeset')}:</strong> {selectedEdit.syncChangesetId || '---'}</p>
                 {#if selectedEdit.syncSummary}
                   <p class="mt-1 text-xs ui-text-subtle break-words">{JSON.stringify(selectedEdit.syncSummary)}</p>
                 {/if}
@@ -854,7 +929,57 @@
                 {/if}
               </div>
             {/if}
-            {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
+            {#if selectedEditGroupItems.length > 1}
+              <div class="rounded-xl border ui-border ui-surface-soft p-3 text-sm ui-text-body">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-sm font-semibold ui-text-strong">{$t('account.edits.groupTitle')}</p>
+                  <span class="rounded-md ui-surface-soft px-2 py-1 text-[11px] font-semibold ui-text-muted">×{selectedEditGroupItems.length}</span>
+                </div>
+                <UiScrollArea
+                  className="mt-2 max-h-[42vh] rounded-xl"
+                  contentClassName="space-y-2 p-2"
+                >
+                  {#each selectedEditGroupItems as groupEdit (`group-edit-${groupEdit.id || groupEdit.editId}`)}
+                    {@const groupStatusMeta = getDisplayEditStatusMeta(groupEdit)}
+                    {@const groupCounters = getChangeCounters(groupEdit.changes)}
+                    <div class="rounded-lg border ui-border ui-surface-base p-2">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p class="text-sm font-semibold ui-text-strong">#{groupEdit.editId || groupEdit.id}</p>
+                          <p class="text-xs ui-text-subtle">{formatUiDate(groupEdit.updatedAt) || '---'}</p>
+                        </div>
+                        <span class={`badge-pill rounded-full px-2.5 py-1 text-xs font-semibold ${groupStatusMeta.cls}`}>{groupStatusMeta.text}</span>
+                      </div>
+                      <div class="mt-1 space-y-1 text-xs ui-text-muted">
+                        {#if groupEdit.syncChangesetId}
+                          <p><strong>{$t('account.edits.syncChangeset')}:</strong> #{groupEdit.syncChangesetId}</p>
+                        {/if}
+                        {#if String(groupEdit.adminComment || '').trim()}
+                          <p class="ui-text-danger"><strong>{$t('account.edits.comment')}:</strong> {String(groupEdit.adminComment).trim()}</p>
+                        {/if}
+                        <p><strong>{$t('account.edits.tableChanges')}:</strong> {groupCounters.total} {$t('account.edits.total')}</p>
+                      </div>
+                      <div class="mt-2 space-y-1">
+                        {#if !Array.isArray(groupEdit.changes) || groupEdit.changes.length === 0}
+                          <p class="text-xs ui-text-subtle">{$t('account.edits.noChanges')}</p>
+                        {:else}
+                          {#each groupEdit.changes as ch (`${groupEdit.id || groupEdit.editId}-${ch.field}`)}
+                            <div class="rounded-md border ui-border ui-surface-muted p-2">
+                              <p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p>
+                              <p class="text-xs ui-text-muted">
+                                <span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span>
+                                -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong>
+                              </p>
+                            </div>
+                          {/each}
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                </UiScrollArea>
+              </div>
+            {/if}
+            {#if selectedEdit.orphaned || !selectedEdit.osmPresent}
               <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
                 {#if selectedEdit.orphaned}
                   <p>{$t('account.edits.orphanedHelp')}</p>
@@ -862,23 +987,22 @@
                 {#if !selectedEdit.osmPresent && !selectedEdit.orphaned}
                   <p>{$t('account.edits.missingTargetHelp')}</p>
                 {/if}
-                {#if selectedEdit.sourceOsmChanged}
-                  <p>{$t('account.edits.osmChangedHelp')}</p>
-                {/if}
               </div>
             {/if}
-            <UiScrollArea
-              className="ui-scroll-surface max-h-[42vh] rounded-xl"
-              contentClassName="space-y-2 p-2"
-            >
-              {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
-                <p class="text-sm ui-text-subtle">{$t('account.edits.noChanges')}</p>
-              {:else}
-                {#each selectedEdit.changes as ch (`${ch.field}`)}
-                  <div class="rounded-lg border ui-border ui-surface-muted p-2"><p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p><p class="text-xs ui-text-muted"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
-                {/each}
-              {/if}
-            </UiScrollArea>
+            {#if selectedEditGroupItems.length <= 1}
+              <UiScrollArea
+                className="ui-scroll-surface max-h-[42vh] rounded-xl"
+                contentClassName="space-y-2 p-2"
+              >
+                {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
+                  <p class="text-sm ui-text-subtle">{$t('account.edits.noChanges')}</p>
+                {:else}
+                  {#each selectedEdit.changes as ch (`${ch.field}`)}
+                    <div class="rounded-lg border ui-border ui-surface-muted p-2"><p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p><p class="text-xs ui-text-muted"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
+                  {/each}
+                {/if}
+              </UiScrollArea>
+            {/if}
             {#if detailStatus}<p class="text-sm ui-text-muted">{detailStatus}</p>{/if}
           {/if}
         </section>
