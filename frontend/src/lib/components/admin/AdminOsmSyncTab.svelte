@@ -6,7 +6,6 @@
     UiButton,
     UiCheckbox,
     UiInput,
-    UiScrollArea,
     UiTable,
     UiTableBody,
     UiTableHead,
@@ -15,15 +14,20 @@
   } from '$lib/components/base';
   import { apiJson } from '$lib/services/http';
   import { t, translateNow } from '$lib/i18n/index';
+  import { EditsPagination } from '$lib/components/edits';
   import SyncCandidateCard from './SyncCandidateCard.svelte';
   import SyncCandidateDetailPane from './SyncCandidateDetailPane.svelte';
+  import SyncCandidateSkeletonRows from './SyncCandidateSkeletonRows.svelte';
 
   export let isMasterAdmin = false;
 
+  const OSM_SYNC_PAGE_SIZE = 20;
   const dispatch = createEventDispatcher();
 
+  let settingsLoading = false;
+  let activeLoading = false;
+  let archivedLoading = false;
   let loading = false;
-  let candidates = [];
   let selectedCandidate = null;
   let selectedCandidateDetail = null;
   let selectedCandidateKeys = [];
@@ -38,6 +42,18 @@
   let archivedCandidates = [];
   let syncableCandidates = [];
   let selectedSyncCandidates = [];
+  let activePage = 1;
+  let activeTotal = 0;
+  let activePageCount = 0;
+  let activePageInfo = '';
+  let activeError = '';
+  let activeRequestToken = 0;
+  let archivedPage = 1;
+  let archivedTotal = 0;
+  let archivedPageCount = 0;
+  let archivedPageInfo = '';
+  let archivedError = '';
+  let archivedRequestToken = 0;
 
   let draft = {
     providerName: 'OpenStreetMap',
@@ -76,10 +92,6 @@
     return Boolean(clientId && clientSecret && redirectUri);
   }
 
-  function selectedCount() {
-    return selectedCandidateKeys.length;
-  }
-
   function setSelectedCandidates(items) {
     selectedCandidateKeys = [...new Set((Array.isArray(items) ? items : []).map(candidateKey).filter(Boolean))];
   }
@@ -113,7 +125,7 @@
     selectedCandidateKeys = [];
   }
 
-  function resolveSelectedSyncCandidates(sourceCandidates = candidates, selectedKeys = selectedCandidateKeys) {
+  function resolveSelectedSyncCandidates(sourceCandidates = activeCandidates, selectedKeys = selectedCandidateKeys) {
     if (!Array.isArray(sourceCandidates) || !Array.isArray(selectedKeys) || selectedKeys.length === 0) {
       return [];
     }
@@ -134,33 +146,129 @@
     };
   }
 
-  async function loadState() {
-    loading = true;
-    statusText = translateNow('admin.osm.loading');
+  function normalizeCandidatePageResult(data, fallbackPage) {
+    const total = Math.max(0, Number(data?.total || 0));
+    const pageSize = Math.max(1, Number(data?.pageSize || OSM_SYNC_PAGE_SIZE));
+    const pageCount = Math.max(0, Number(data?.pageCount || 0) || (total > 0 ? Math.ceil(total / pageSize) : 0));
+    const page = Number.isInteger(Number(data?.page)) && Number(data.page) > 0 ? Number(data.page) : fallbackPage;
+    return {
+      total,
+      pageSize,
+      pageCount,
+      page,
+      items: Array.isArray(data?.items) ? data.items : []
+    };
+  }
+
+  async function loadSettings() {
+    settingsLoading = true;
     try {
-      const [settingsResponse, candidatesResponse] = await Promise.all([
-        apiJson('/api/admin/app-settings/osm'),
-        apiJson('/api/admin/osm-sync/candidates?limit=200')
-      ]);
-      snapshotSettings(settingsResponse?.item || null);
-      candidates = Array.isArray(candidatesResponse?.items) ? candidatesResponse.items : [];
-      activeCandidates = candidates.filter((item) => !isArchivedCandidate(item));
-      archivedCandidates = candidates.filter((item) => isArchivedCandidate(item));
-      syncableCandidates = activeCandidates.filter((item) => canSyncCandidate(item));
-      pruneSelectedCandidates();
-      statusText = activeCandidates.length
-        ? translateNow('admin.osm.status.loaded', { count: activeCandidates.length })
-        : translateNow('admin.osm.status.empty');
+      const response = await apiJson('/api/admin/app-settings/osm');
+      snapshotSettings(response?.item || null);
+      if (settingsStatus === translateNow('admin.osm.status.loadFailed')) {
+        settingsStatus = '';
+      }
     } catch (error) {
-      candidates = [];
-      activeCandidates = [];
-      archivedCandidates = [];
-      syncableCandidates = [];
-      statusText = message(error, translateNow('admin.osm.status.loadFailed'));
+      settings = null;
+      settingsStatus = message(error, translateNow('admin.osm.status.loadFailed'));
     } finally {
-      loading = false;
-      dispatch('summary', { total: activeCandidates.length, archived: archivedCandidates.length });
+      settingsLoading = false;
     }
+  }
+
+  async function loadCandidatePage(syncMode, page = 1) {
+    const normalizedSyncMode = syncMode === 'archived' ? 'archived' : 'active';
+    const nextPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const isActive = normalizedSyncMode === 'active';
+    const requestToken = isActive ? ++activeRequestToken : ++archivedRequestToken;
+
+    if (isActive) {
+      activeLoading = true;
+      activeError = '';
+    } else {
+      archivedLoading = true;
+      archivedError = '';
+    }
+
+    try {
+      const params = new URLSearchParams({
+        sync: normalizedSyncMode,
+        page: String(nextPage),
+        limit: String(OSM_SYNC_PAGE_SIZE)
+      });
+      const data = await apiJson(`/api/admin/osm-sync/candidates?${params.toString()}`);
+      if (requestToken !== (isActive ? activeRequestToken : archivedRequestToken)) return;
+      const result = normalizeCandidatePageResult(data, nextPage);
+      if (result.pageCount > 0 && nextPage > result.pageCount) {
+        if (isActive) {
+          activePage = result.pageCount;
+        } else {
+          archivedPage = result.pageCount;
+        }
+        if (requestToken === (isActive ? activeRequestToken : archivedRequestToken)) {
+          await loadCandidatePage(normalizedSyncMode, result.pageCount);
+        }
+        return;
+      }
+
+      if (isActive) {
+        activePage = result.page;
+        activeCandidates = result.items;
+        activeTotal = result.total;
+        activePageCount = result.pageCount;
+        activePageInfo = result.pageCount > 0 ? translateNow('admin.osm.list.pageInfo', { page: result.page, pages: result.pageCount }) : '';
+        statusText = result.total
+          ? translateNow('admin.osm.status.loaded', { count: result.total })
+          : translateNow('admin.osm.status.empty');
+      } else {
+        archivedPage = result.page;
+        archivedCandidates = result.items;
+        archivedTotal = result.total;
+        archivedPageCount = result.pageCount;
+        archivedPageInfo = result.pageCount > 0 ? translateNow('admin.osm.list.pageInfo', { page: result.page, pages: result.pageCount }) : '';
+      }
+    } catch (error) {
+      const errorText = message(error, translateNow('admin.osm.status.loadFailed'));
+      if (isActive) {
+        activeCandidates = [];
+        activeTotal = 0;
+        activePageCount = 0;
+        activePageInfo = '';
+        activeError = errorText;
+        statusText = errorText;
+      } else {
+        archivedCandidates = [];
+        archivedTotal = 0;
+        archivedPageCount = 0;
+        archivedPageInfo = '';
+        archivedError = errorText;
+      }
+    } finally {
+      if (requestToken === (isActive ? activeRequestToken : archivedRequestToken)) {
+        if (isActive) {
+          activeLoading = false;
+        } else {
+          archivedLoading = false;
+        }
+      }
+    }
+  }
+
+  async function loadActiveCandidates(page = activePage) {
+    await loadCandidatePage('active', page);
+  }
+
+  async function loadArchivedCandidates(page = archivedPage) {
+    await loadCandidatePage('archived', page);
+  }
+
+  async function loadState() {
+    statusText = translateNow('admin.osm.loading');
+    await Promise.all([loadSettings(), loadActiveCandidates(activePage), loadArchivedCandidates(archivedPage)]);
+  }
+
+  async function refreshCandidatePages() {
+    await Promise.all([loadActiveCandidates(activePage), loadArchivedCandidates(archivedPage)]);
   }
 
   async function saveSettings() {
@@ -244,13 +352,13 @@
       settingsStatus = response?.item?.noChange
         ? translateNow('admin.osm.status.syncedNoChange')
         : translateNow('admin.osm.status.synced');
-      await loadState();
+      await refreshCandidatePages();
       if (selectedCandidate?.osmType === candidate.osmType && selectedCandidate?.osmId === candidate.osmId) {
         await loadCandidate(candidate);
       }
     } catch (error) {
       settingsStatus = message(error, translateNow('admin.osm.status.syncFailed'));
-      await loadState();
+      await refreshCandidatePages();
       if (selectedCandidate?.osmType === candidate.osmType && selectedCandidate?.osmId === candidate.osmId) {
         await loadCandidate(candidate);
       }
@@ -286,13 +394,13 @@
         ? translateNow('admin.osm.status.synced')
         : translateNow('admin.osm.status.syncedNoChange');
       clearSelection();
-      await loadState();
+      await refreshCandidatePages();
       if (selectedCandidate) {
         await loadCandidate(selectedCandidate);
       }
     } catch (error) {
       settingsStatus = message(error, translateNow('admin.osm.status.syncFailed'));
-      await loadState();
+      await refreshCandidatePages();
       if (selectedCandidate) {
         await loadCandidate(selectedCandidate);
       }
@@ -301,12 +409,11 @@
     }
   }
 
-  $: activeCandidates = candidates.filter((item) => !isArchivedCandidate(item));
-  $: archivedCandidates = candidates.filter((item) => isArchivedCandidate(item));
+  $: loading = settingsLoading || activeLoading || archivedLoading || saveBusy || connectBusy || syncBusy;
   $: syncableCandidates = activeCandidates.filter((item) => canSyncCandidate(item));
-  $: selectedSyncCandidates = resolveSelectedSyncCandidates(candidates, selectedCandidateKeys);
+  $: selectedSyncCandidates = resolveSelectedSyncCandidates(activeCandidates, selectedCandidateKeys);
   $: pruneSelectedCandidates();
-  $: dispatch('summary', { total: activeCandidates.length, archived: archivedCandidates.length });
+  $: dispatch('summary', { total: activeTotal + archivedTotal, active: activeTotal, archived: archivedTotal });
 
   onMount(() => {
     void loadState();
@@ -338,7 +445,7 @@
           {settings?.osm?.hasAccessToken ? $t('admin.osm.connected') : $t('admin.osm.disconnected')}
         </UiBadge>
         <UiBadge variant="default">
-          <strong>{$t('admin.osm.count')}</strong>{activeCandidates.length}
+          <strong>{$t('admin.osm.count')}</strong>{activeTotal}
         </UiBadge>
       </div>
       {#if settings?.osm?.connectedUser}
@@ -408,10 +515,13 @@
     <p class="text-sm ui-text-muted">{$t('admin.osm.masterOnly')}</p>
   {/if}
 
-  <section class="space-y-3 min-w-0">
+  <section class="space-y-4 min-w-0">
     <div class="flex items-center justify-between gap-2">
-      <h4 class="text-sm font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.osm.list.title')}</h4>
-      <span class="text-xs ui-text-subtle">{selectedCount() ? `${selectedCount()} / ` : ''}{activeCandidates.length}</span>
+      <div class="space-y-1">
+        <h4 class="text-sm font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.osm.list.title')}</h4>
+        <p class="text-sm ui-text-muted">{statusText}</p>
+      </div>
+      <span class="text-xs ui-text-subtle">{activeTotal}</span>
     </div>
 
     {#if isMasterAdmin && activeCandidates.length > 0}
@@ -419,48 +529,72 @@
         <UiButton type="button" variant="secondary" size="xs" onclick={selectAllCandidates} disabled={syncBusy || loading}>
           {$t('admin.osm.list.selectAll')}
         </UiButton>
-      <UiButton type="button" variant="secondary" size="xs" onclick={clearSelection} disabled={syncBusy || loading || selectedCandidateKeys.length === 0}>
-        {$t('admin.osm.list.clearSelection')}
-      </UiButton>
-      <UiButton type="button" size="xs" onclick={syncSelectedCandidates} disabled={syncBusy || loading || !isOsmConnected() || selectedSyncCandidates.length === 0}>
-        {syncBusy ? $t('admin.osm.status.syncingState') : $t('admin.osm.list.syncSelected')}
-      </UiButton>
-      <span class="text-xs ui-text-subtle">{$t('admin.osm.list.selected', { count: selectedCandidateKeys.length })}</span>
-      {#if !isOsmConnected() && activeCandidates.length > 0}
-        <span class="text-xs ui-text-warning">{$t('admin.osm.list.syncRequiresConnection')}</span>
-      {/if}
-      {#if selectedCandidateKeys.length > 0 && selectedSyncCandidates.length !== selectedCandidateKeys.length}
-        <span class="text-xs ui-text-warning">{$t('admin.osm.list.selectedNotSyncable')}</span>
-      {/if}
-      {#if syncBusy || settingsStatus}
-        <span class="text-xs ui-text-subtle">{syncBusy ? $t('admin.osm.status.syncing') : settingsStatus}</span>
-      {/if}
-    </div>
-  {/if}
+        <UiButton type="button" variant="secondary" size="xs" onclick={clearSelection} disabled={syncBusy || loading || selectedCandidateKeys.length === 0}>
+          {$t('admin.osm.list.clearSelection')}
+        </UiButton>
+        <UiButton type="button" size="xs" onclick={syncSelectedCandidates} disabled={syncBusy || loading || !isOsmConnected() || selectedSyncCandidates.length === 0}>
+          {syncBusy ? $t('admin.osm.status.syncingState') : $t('admin.osm.list.syncSelected')}
+        </UiButton>
+        <span class="text-xs ui-text-subtle">{$t('admin.osm.list.selected', { count: selectedCandidateKeys.length })}</span>
+        {#if !isOsmConnected() && activeCandidates.length > 0}
+          <span class="text-xs ui-text-warning">{$t('admin.osm.list.syncRequiresConnection')}</span>
+        {/if}
+        {#if selectedCandidateKeys.length > 0 && selectedSyncCandidates.length !== selectedCandidateKeys.length}
+          <span class="text-xs ui-text-warning">{$t('admin.osm.list.selectedNotSyncable')}</span>
+        {/if}
+        {#if syncBusy || settingsStatus}
+          <span class="text-xs ui-text-subtle">{syncBusy ? $t('admin.osm.status.syncing') : settingsStatus}</span>
+        {/if}
+      </div>
+    {/if}
 
-    {#if loading}
-      <p class="osm-summary-card rounded-xl px-3 py-2 text-sm ui-text-subtle">{$t('admin.osm.loading')}</p>
-    {:else if activeCandidates.length === 0}
-      <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">{$t('admin.osm.list.empty')}</p>
-    {:else}
-      <UiScrollArea className="ui-scroll-surface max-h-[32rem] rounded-xl" contentClassName="space-y-2 p-2">
-        <UiTable framed={false}>
+    {#if activeLoading}
+      <div class="overflow-hidden rounded-xl border ui-border ui-surface-base">
+        <UiTable framed={false} className="ui-table--mobile-wide [--ui-table-mobile-min-width:64rem] [--ui-table-mobile-identity-width:20rem]">
           <UiTableHeader>
             <UiTableRow className="hover:[&>th]:bg-transparent">
-                {#if isMasterAdmin}
-                  <UiTableHead className="w-10">
-                    <UiCheckbox
-                      checked={syncableCandidates.length > 0 && selectedCandidateKeys.length === syncableCandidates.length}
-                      indeterminate={selectedCandidateKeys.length > 0 && selectedCandidateKeys.length < syncableCandidates.length}
-                      disabled={syncableCandidates.length === 0}
-                      onchange={({ detail }) => (detail?.checked ? selectAllCandidates() : clearSelection())}
-                    />
-                  </UiTableHead>
-                {/if}
-              <UiTableHead>{$t('admin.osm.list.building')}</UiTableHead>
+              {#if isMasterAdmin}
+                <UiTableHead className="w-10">
+                  <span class="sr-only">{$t('admin.osm.list.selectAll')}</span>
+                </UiTableHead>
+              {/if}
+              <UiTableHead>{$t('admin.edits.tableObject')}</UiTableHead>
               <UiTableHead>{$t('admin.osm.list.author')}</UiTableHead>
               <UiTableHead>{$t('admin.osm.list.syncState')}</UiTableHead>
               <UiTableHead>{$t('admin.osm.list.updated')}</UiTableHead>
+              <UiTableHead>{$t('admin.osm.list.changes')}</UiTableHead>
+              <UiTableHead>{$t('admin.osm.list.actions')}</UiTableHead>
+            </UiTableRow>
+          </UiTableHeader>
+          <UiTableBody>
+            <SyncCandidateSkeletonRows rows={OSM_SYNC_PAGE_SIZE} showSelection={isMasterAdmin} />
+          </UiTableBody>
+        </UiTable>
+      </div>
+    {:else if activeError}
+      <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-danger">{activeError}</p>
+    {:else if activeCandidates.length === 0}
+      <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">{$t('admin.osm.list.empty')}</p>
+    {:else}
+      <div class="overflow-hidden rounded-xl border ui-border ui-surface-base">
+        <UiTable framed={false} className="ui-table--mobile-wide [--ui-table-mobile-min-width:64rem] [--ui-table-mobile-identity-width:20rem]">
+          <UiTableHeader>
+            <UiTableRow className="hover:[&>th]:bg-transparent">
+              {#if isMasterAdmin}
+                <UiTableHead className="w-10">
+                  <UiCheckbox
+                    checked={syncableCandidates.length > 0 && selectedCandidateKeys.length === syncableCandidates.length}
+                    indeterminate={selectedCandidateKeys.length > 0 && selectedCandidateKeys.length < syncableCandidates.length}
+                    disabled={syncableCandidates.length === 0}
+                    onchange={({ detail }) => (detail?.checked ? selectAllCandidates() : clearSelection())}
+                  />
+                </UiTableHead>
+              {/if}
+              <UiTableHead>{$t('admin.edits.tableObject')}</UiTableHead>
+              <UiTableHead>{$t('admin.osm.list.author')}</UiTableHead>
+              <UiTableHead>{$t('admin.osm.list.syncState')}</UiTableHead>
+              <UiTableHead>{$t('admin.osm.list.updated')}</UiTableHead>
+              <UiTableHead>{$t('admin.osm.list.changes')}</UiTableHead>
               <UiTableHead>{$t('admin.osm.list.actions')}</UiTableHead>
             </UiTableRow>
           </UiTableHeader>
@@ -479,62 +613,107 @@
             {/each}
           </UiTableBody>
         </UiTable>
-      </UiScrollArea>
+      </div>
     {/if}
 
-    {#if !loading && archivedCandidates.length > 0}
-      <details class="overflow-hidden rounded-xl border ui-border ui-surface-muted" open={false}>
+    <EditsPagination
+      page={activePage}
+      pageCount={activePageCount}
+      pageInfo={activePageInfo}
+      loading={activeLoading}
+      previousLabel={$t('common.previous')}
+      nextLabel={$t('common.next')}
+      onPageChange={loadActiveCandidates}
+    />
+
+    {#if archivedLoading || archivedError || archivedTotal > 0}
+      <details class="overflow-hidden rounded-xl border ui-border ui-surface-muted">
         <summary class="flex cursor-pointer list-none items-center justify-between gap-2 p-3">
           <div>
             <p class="text-sm font-semibold ui-text-strong">{$t('admin.osm.archive.title')}</p>
             <p class="text-xs ui-text-muted">{$t('admin.osm.archive.hint')}</p>
           </div>
-          <span class="text-xs ui-text-subtle">{archivedCandidates.length}</span>
+          <span class="text-xs ui-text-subtle">{archivedTotal}</span>
         </summary>
-        <div class="space-y-2 border-t ui-border px-3 py-3">
-          <UiScrollArea className="ui-scroll-surface max-h-60 rounded-lg" contentClassName="space-y-2 p-2">
-            <UiTable framed={false}>
-              <UiTableHeader>
-                <UiTableRow className="hover:[&>th]:bg-transparent">
-                  <UiTableHead>{$t('admin.osm.list.building')}</UiTableHead>
-                  <UiTableHead>{$t('admin.osm.list.syncState')}</UiTableHead>
-                  <UiTableHead>{$t('admin.osm.list.updated')}</UiTableHead>
-                  <UiTableHead>{$t('admin.osm.list.actions')}</UiTableHead>
-                </UiTableRow>
-              </UiTableHeader>
-              <UiTableBody>
-                {#each archivedCandidates as item (`osm-sync-archive-${item.osmType}-${item.osmId}`)}
-                  <SyncCandidateCard
-                    candidate={item}
-                    archived
-                    isMasterAdmin={isMasterAdmin}
-                    selected={false}
-                    syncable={false}
-                    syncBusy={syncBusy}
-                    onOpen={loadCandidate}
-                    onSync={syncCandidate}
-                    onToggleSelection={toggleCandidateSelection}
-                  />
-                {/each}
-              </UiTableBody>
-            </UiTable>
-          </UiScrollArea>
+        <div class="space-y-3 border-t ui-border px-3 py-3">
+          {#if archivedLoading}
+            <div class="overflow-hidden rounded-xl border ui-border ui-surface-base">
+              <UiTable framed={false} className="ui-table--mobile-wide [--ui-table-mobile-min-width:60rem] [--ui-table-mobile-identity-width:20rem]">
+                <UiTableHeader>
+                  <UiTableRow className="hover:[&>th]:bg-transparent">
+                    <UiTableHead>{$t('admin.edits.tableObject')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.author')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.syncState')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.updated')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.changes')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.actions')}</UiTableHead>
+                  </UiTableRow>
+                </UiTableHeader>
+                <UiTableBody>
+                  <SyncCandidateSkeletonRows rows={OSM_SYNC_PAGE_SIZE} archived />
+                </UiTableBody>
+              </UiTable>
+            </div>
+          {:else if archivedError}
+            <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-danger">{archivedError}</p>
+          {:else if archivedCandidates.length === 0}
+            <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">{$t('admin.osm.archive.empty')}</p>
+          {:else}
+            <div class="overflow-hidden rounded-xl border ui-border ui-surface-base">
+              <UiTable framed={false} className="ui-table--mobile-wide [--ui-table-mobile-min-width:60rem] [--ui-table-mobile-identity-width:20rem]">
+                <UiTableHeader>
+                  <UiTableRow className="hover:[&>th]:bg-transparent">
+                    <UiTableHead>{$t('admin.edits.tableObject')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.author')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.syncState')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.updated')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.changes')}</UiTableHead>
+                    <UiTableHead>{$t('admin.osm.list.actions')}</UiTableHead>
+                  </UiTableRow>
+                </UiTableHeader>
+                <UiTableBody>
+                  {#each archivedCandidates as item (`osm-sync-archive-${item.osmType}-${item.osmId}`)}
+                    <SyncCandidateCard
+                      candidate={item}
+                      archived
+                      isMasterAdmin={isMasterAdmin}
+                      selected={false}
+                      syncable={false}
+                      syncBusy={syncBusy}
+                      onOpen={loadCandidate}
+                      onSync={syncCandidate}
+                      onToggleSelection={toggleCandidateSelection}
+                    />
+                  {/each}
+                </UiTableBody>
+              </UiTable>
+            </div>
+          {/if}
+
+          <EditsPagination
+            page={archivedPage}
+            pageCount={archivedPageCount}
+            pageInfo={archivedPageInfo}
+            loading={archivedLoading}
+            previousLabel={$t('common.previous')}
+            nextLabel={$t('common.next')}
+            onPageChange={loadArchivedCandidates}
+          />
         </div>
       </details>
     {/if}
   </section>
 
-  {#if selectedCandidate}
-    <SyncCandidateDetailPane
-      {selectedCandidate}
-      {selectedCandidateDetail}
-      {detailBusy}
-      {isMasterAdmin}
-      onClose={() => (selectedCandidate = null)}
-      onRefresh={loadState}
-      onSync={syncCandidate}
-    />
-  {/if}
+  <SyncCandidateDetailPane
+    open={Boolean(selectedCandidate)}
+    {selectedCandidate}
+    {selectedCandidateDetail}
+    {detailBusy}
+    {isMasterAdmin}
+    onClose={() => (selectedCandidate = null)}
+    onRefresh={loadState}
+    onSync={syncCandidate}
+  />
 </section>
 
 <style>

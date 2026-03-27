@@ -137,7 +137,9 @@ System notes:
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
   - Regions in `queued` or `running` state cannot be deleted.
 - `GET /api/admin/app-settings/data/regions/:regionId/runs`
-  - Returns recent sync runs for the region.
+  - Returns paginated sync runs for the region.
+  - Supports `page` and `limit` query parameters. `limit` defaults to 20 and is capped at 200.
+  - Response includes `total`, `page`, `pageSize`, `pageCount`, and `items`.
   - Run items include storage metadata captured during sync (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`) plus feature counters (`importedFeatureCount`, `activeFeatureCount`, `orphanDeletedCount`).
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
@@ -159,8 +161,10 @@ System notes:
   - On success, the route redirects back to `/admin/osm`.
 - `GET /api/admin/osm-sync/candidates`
   - Returns building-level sync candidates grouped by `osm_type` + `osm_id`.
-  - Includes local merge state, sync status, last sync timestamps, and current contour snapshot data.
-  - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the collapsed archive section of the admin UI, and are excluded from bulk sync selection.
+  - Includes local merge state, sync status, last sync timestamps, current contour snapshot data, and a precomputed `displayAddress` for the list identity cell.
+  - Supports `sync=active|archived|all`, `page`, and `limit` query parameters. `limit` defaults to 20 in the UI.
+  - Response includes `total`, `page`, `pageSize`, `pageCount`, and `items`.
+  - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the archive section of the admin UI, and are excluded from bulk sync selection.
   - If a building receives a newer accepted / partially accepted edit after an earlier sync, the queue reactivates that building and shows the newest non-read-only edit state instead of keeping the old synced history in the archive.
 - `GET /api/admin/osm-sync/candidates/:osmType/:osmId`
   - Returns a detailed preflight snapshot for one building, including current live OSM state, local desired state, and drift/conflict diagnostics.

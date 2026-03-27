@@ -28,24 +28,54 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     return 'Region is not ready for sync: canonical extract is not selected';
   }
 
-  async function getRecentRuns(regionId = null, limit = 25) {
+  async function getRecentRuns(regionId = null, pageOrLimit = 1, limitMaybe = undefined) {
     await ensureBootstrapped();
-    const safeLimit = Math.max(1, Math.min(200, Number(limit) || 25));
-    const rows = regionId == null
+
+    const hasPageArgument = limitMaybe !== undefined;
+    const rawPage = hasPageArgument ? pageOrLimit : 1;
+    const rawLimit = hasPageArgument ? limitMaybe : pageOrLimit;
+    const safeLimit = Math.max(1, Math.min(200, Math.trunc(Number(rawLimit) || 25)));
+    const numericRegionId = Number(regionId);
+    const hasRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0;
+    const whereSql = hasRegionId ? 'WHERE region_id = ?' : '';
+    const queryArgs = hasRegionId ? [numericRegionId] : [];
+
+    const countRow = await db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM data_region_sync_runs
+      ${whereSql}
+    `).get(...queryArgs);
+    const total = Math.max(0, Number(countRow?.total || 0));
+    const pageCount = total > 0 ? Math.ceil(total / safeLimit) : 0;
+    const safePage = pageCount > 0
+      ? Math.min(Math.max(1, Math.trunc(Number(rawPage) || 1)), pageCount)
+      : 1;
+    const offset = (safePage - 1) * safeLimit;
+
+    const rows = hasRegionId
       ? await db.prepare(`
         SELECT ${RUN_SELECT_FIELDS}
         FROM data_region_sync_runs
+        ${whereSql}
         ORDER BY id DESC
         LIMIT ?
-      `).all(safeLimit)
+        OFFSET ?
+      `).all(...queryArgs, safeLimit, offset)
       : await db.prepare(`
         SELECT ${RUN_SELECT_FIELDS}
         FROM data_region_sync_runs
-        WHERE region_id = ?
         ORDER BY id DESC
         LIMIT ?
-      `).all(Number(regionId), safeLimit);
-    return rows.map(rowToRun);
+        OFFSET ?
+      `).all(safeLimit, offset);
+
+    const items = rows.map(rowToRun).filter(Boolean);
+    return Object.assign(items, {
+      total,
+      page: safePage,
+      pageSize: safeLimit,
+      pageCount
+    });
   }
 
   async function getRunById(runId) {

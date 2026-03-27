@@ -1,146 +1,124 @@
 <script>
-  import { onDestroy } from 'svelte';
-
   import { t } from '$lib/i18n/index';
   import { formatUiDate } from '$lib/utils/edit-ui';
-  import { UiPressableCard, UiScrollArea } from '$lib/components/base';
+  import { UiPressableCard } from '$lib/components/base';
+  import { EditsPagination } from '$lib/components/edits';
 
   export let controller = null;
   export let regions = [];
   export let selectedDataRegionId = null;
   export let dataLoading = false;
 
-  const REGION_LIST_BATCH_SIZE = 24;
+  const REGION_LIST_PAGE_SIZE = 20;
+  const REGION_CARD_SKELETON_DELAY_MS = 40;
 
-  let visibleRegionCount = REGION_LIST_BATCH_SIZE;
-  let visibleRegions;
-  let viewportRef;
-  let sentinelRef;
-  let regionListObserver = null;
-  let lastRegionListKey;
+  let regionPage = 1;
+  let regionPageCount = 0;
+  let lastRegionListKey = '';
+  let lastSelectedDataRegionId = null;
 
   function buildRegionListKey(items) {
     return (Array.isArray(items) ? items : []).map((region) => Number(region?.id || 0)).join(':');
   }
 
-  function resetVisibleRegionCount(total) {
-    const numericTotal = Math.max(0, Number(total || 0));
-    visibleRegionCount = numericTotal > 0 ? Math.min(REGION_LIST_BATCH_SIZE, numericTotal) : REGION_LIST_BATCH_SIZE;
-  }
-
-  function clampVisibleRegionCount(total) {
-    const numericTotal = Math.max(0, Number(total || 0));
-    if (numericTotal === 0) {
-      if (visibleRegionCount !== REGION_LIST_BATCH_SIZE) {
-        visibleRegionCount = REGION_LIST_BATCH_SIZE;
-      }
-      return;
+  function normalizeRegionPage(value, totalPages) {
+    const numericPage = Math.trunc(Number(value) || 1);
+    const clampedPage = Math.max(1, numericPage);
+    const pageTotal = Math.max(0, Math.trunc(Number(totalPages) || 0));
+    if (pageTotal > 0) {
+      return Math.min(clampedPage, pageTotal);
     }
-
-    if (visibleRegionCount < REGION_LIST_BATCH_SIZE) {
-      visibleRegionCount = Math.min(REGION_LIST_BATCH_SIZE, numericTotal);
-      return;
-    }
-
-    if (visibleRegionCount > numericTotal) {
-      visibleRegionCount = numericTotal;
-    }
+    return 1;
   }
 
-  function ensureSelectedRegionVisible(selectedId, items) {
-    const numericSelectedRegionId = Number(selectedId || 0);
-    if (!Number.isInteger(numericSelectedRegionId) || numericSelectedRegionId <= 0) return;
-
-    const selectedIndex = (Array.isArray(items) ? items : []).findIndex((item) => Number(item?.id || 0) === numericSelectedRegionId);
-    if (selectedIndex < 0 || selectedIndex < visibleRegionCount) return;
-
-    visibleRegionCount = Math.min(
-      items.length,
-      Math.ceil((selectedIndex + 1) / REGION_LIST_BATCH_SIZE) * REGION_LIST_BATCH_SIZE
-    );
+  function getRegionPageForIndex(index) {
+    return Math.floor(Math.max(0, Math.trunc(Number(index) || 0)) / REGION_LIST_PAGE_SIZE) + 1;
   }
 
-  function loadMoreRegions() {
-    if (visibleRegionCount >= regions.length) return;
-    visibleRegionCount = Math.min(regions.length, visibleRegionCount + REGION_LIST_BATCH_SIZE);
+  function setRegionPage(nextPage) {
+    const normalizedPage = normalizeRegionPage(nextPage, regionPageCount);
+    if (normalizedPage === regionPage) return;
+    regionPage = normalizedPage;
   }
 
-  function destroyRegionListObserver() {
-    if (!regionListObserver) return;
-    regionListObserver.disconnect();
-    regionListObserver = null;
-  }
-
-  function setupRegionListObserver() {
-    destroyRegionListObserver();
-
-    if (!viewportRef || !sentinelRef || typeof IntersectionObserver === 'undefined') return;
-
-    regionListObserver = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          loadMoreRegions();
-        }
-      },
-      {
-        root: viewportRef,
-        rootMargin: '0px 0px 180px 0px',
-        threshold: 0.1
-      }
-    );
-
-    regionListObserver.observe(sentinelRef);
-  }
+  $: regionPageCount = Math.ceil(Math.max(0, Number(regions?.length || 0)) / REGION_LIST_PAGE_SIZE);
+  $: regionPage = normalizeRegionPage(regionPage, regionPageCount);
 
   $: {
     const nextRegionListKey = buildRegionListKey(regions);
-    if (nextRegionListKey !== lastRegionListKey) {
+    const regionsChanged = nextRegionListKey !== lastRegionListKey;
+    if (regionsChanged) {
       lastRegionListKey = nextRegionListKey;
-      resetVisibleRegionCount(regions.length);
     }
+
+    const nextSelectedDataRegionId = Math.trunc(Number(selectedDataRegionId || 0));
+    const selectionChanged = nextSelectedDataRegionId !== lastSelectedDataRegionId;
+    if (selectionChanged) {
+      lastSelectedDataRegionId = nextSelectedDataRegionId;
+    }
+
+    if (nextSelectedDataRegionId > 0 && (selectionChanged || regionsChanged)) {
+      const selectedIndex = (Array.isArray(regions) ? regions : []).findIndex(
+        (item) => Number(item?.id || 0) === nextSelectedDataRegionId
+      );
+      if (selectedIndex >= 0) {
+        const nextPage = getRegionPageForIndex(selectedIndex);
+        if (nextPage !== regionPage) {
+          regionPage = normalizeRegionPage(nextPage, regionPageCount);
+        }
+      }
+    }
+
     void lastRegionListKey;
+    void lastSelectedDataRegionId;
   }
 
-  $: clampVisibleRegionCount(regions.length);
-  $: ensureSelectedRegionVisible(selectedDataRegionId, regions);
-  $: visibleRegions = regions.slice(0, visibleRegionCount);
-
-  $: if (!viewportRef || !sentinelRef) {
-    destroyRegionListObserver();
-  }
-
-  $: if (viewportRef && sentinelRef && visibleRegions.length > 0 && visibleRegionCount < regions.length) {
-    setupRegionListObserver();
-  }
-
-  $: if (visibleRegionCount >= regions.length || regions.length === 0) {
-    destroyRegionListObserver();
-  }
-
-  onDestroy(() => {
-    destroyRegionListObserver();
-  });
 </script>
 
 <section class="space-y-3 min-w-0">
   <div class="flex items-center justify-between gap-2">
     <h4 class="text-sm font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.list.title')}</h4>
-    <span class="text-xs ui-text-subtle">{Math.min(visibleRegions.length, regions.length)} / {regions.length}</span>
+    <span class="text-xs ui-text-subtle">{regions.length}</span>
   </div>
 
   {#if dataLoading}
-    <p class="data-summary-card rounded-xl px-3 py-2 text-sm ui-text-subtle">{$t('admin.data.list.loading')}</p>
+    <div class="space-y-2">
+      {#each Array.from({ length: REGION_LIST_PAGE_SIZE }, (_, index) => index) as row (row)}
+        <div
+          aria-hidden="true"
+          class="data-region-card pointer-events-none select-none animate-pulse"
+          style={`animation-delay: ${row * REGION_CARD_SKELETON_DELAY_MS}ms;`}
+        >
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span class="h-4 w-[18ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+                <span class="h-3 w-[9ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+              </div>
+              <span class="mt-1 block h-3 w-[min(24rem,70%)] max-w-full rounded-full bg-black/10 dark:bg-white/10"></span>
+            </div>
+            <span class="shrink-0 h-6 w-[8ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+          </div>
+
+          <div class="data-region-meta mt-1.5 flex flex-wrap gap-2 text-xs ui-text-subtle">
+            <span class="h-6 w-[12ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+            <span class="h-6 w-[12ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+            <span class="h-6 w-[13ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+            <span class="h-6 w-[11ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+            <span class="h-6 w-[8ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+          </div>
+
+          <div class="mt-2 h-4 w-[32ch] max-w-full rounded-full bg-black/10 dark:bg-white/10"></div>
+        </div>
+      {/each}
+    </div>
   {:else if regions.length === 0}
     <p class="rounded-xl border border-dashed ui-border-strong px-3 py-4 text-sm ui-text-subtle">
       {$t('admin.data.list.empty')}
     </p>
   {:else}
-    <UiScrollArea
-      className="ui-scroll-surface max-h-[34rem] rounded-xl"
-      contentClassName="space-y-2 p-2"
-      bind:viewportRef={viewportRef}
-    >
-      {#each visibleRegions as region (`data-region-${region.id}`)}
+    <div class="space-y-2">
+      {#each (Array.isArray(regions) ? regions : []).slice((regionPage - 1) * REGION_LIST_PAGE_SIZE, regionPage * REGION_LIST_PAGE_SIZE) as region (`data-region-${region.id}`)}
         {@const statusMeta = controller.getRegionStatusMeta(region.lastSyncStatus, region)}
         {@const extractSummary = controller.getRegionExtractSummaryText(region)}
         <UiPressableCard
@@ -177,25 +155,21 @@
           {/if}
         </UiPressableCard>
       {/each}
-
-      {#if visibleRegionCount < regions.length}
-        <div class="data-region-list-sentinel" bind:this={sentinelRef} aria-hidden="true"></div>
-      {/if}
-    </UiScrollArea>
+    </div>
   {/if}
+
+  <EditsPagination
+    page={regionPage}
+    pageCount={regionPageCount}
+    pageInfo={regionPageCount > 0 ? $t('admin.data.list.pageInfo', { page: regionPage, pages: regionPageCount }) : ''}
+    loading={dataLoading}
+    previousLabel={$t('common.previous')}
+    nextLabel={$t('common.next')}
+    onPageChange={setRegionPage}
+  />
 </section>
 
 <style>
-  .data-summary-card {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-solid);
-    box-shadow: var(--shadow-soft);
-  }
-
-  .data-region-list-sentinel {
-    min-height: 1px;
-  }
-
   .data-status-pill {
     border: 1px solid transparent;
   }

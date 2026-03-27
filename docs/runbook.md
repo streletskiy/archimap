@@ -58,8 +58,8 @@
 
 ## Data refresh
 
-1. Update region settings in `Admin -> Data`.
-2. Run `Sync now` for the target region or `npm run tiles:build -- --region-id=<id>`.
+1. Open `Admin -> Data`, select or create the target region in the modal editor, and update its settings there.
+2. Run `Sync now` for the target region from the same modal or `npm run tiles:build -- --region-id=<id>`.
 3. Optional maintenance rebuild without re-import:
    - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`
 4. Verify PMTiles:

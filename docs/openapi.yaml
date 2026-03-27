@@ -399,6 +399,19 @@ paths:
           required: true
           schema:
             type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based page number for the run history list.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+          description: Maximum number of runs per page. Defaults to 20.
       responses:
         '200':
           description: Region run history
@@ -1098,9 +1111,26 @@ paths:
   /api/admin/osm-sync/candidates:
     get:
       summary: List OSM sync candidates
+      parameters:
+        - in: query
+          name: sync
+          schema:
+            type: string
+            enum: [all, active, archived]
+          description: Candidate subset to return. Defaults to all candidates.
+        - in: query
+          name: page
+          schema:
+            type: integer
+          description: 1-based page number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Page size
       responses:
         '200':
-          description: Sync candidate list
+          description: Paginated sync candidate list with page metadata
         '401':
           description: Unauthorized
         '403':

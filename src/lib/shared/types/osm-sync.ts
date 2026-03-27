@@ -29,6 +29,7 @@ export interface SyncCandidateSummary {
   latestCreatedBy: string | null;
   latestStatus: string | null;
   latestLocalName: string | null;
+  displayAddress?: string | null;
   latestLocalUpdatedAt: string | null;
   sourceOsmUpdatedAt: string | null;
   sourceOsmVersion: string | number | null;
@@ -47,6 +48,14 @@ export interface SyncCandidateSummary {
   canSync: boolean;
   hasLocalState: boolean;
   explicitFields: string[];
+}
+
+export interface SyncCandidatePageResult<TItem = SyncCandidateSummary> {
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  items: TItem[];
 }
 
 export interface SyncCandidate extends SyncCandidateSummary {

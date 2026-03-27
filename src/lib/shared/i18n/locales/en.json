@@ -582,10 +582,12 @@
       "list": {
         "title": "Sync queue",
         "empty": "No sync candidates found.",
+        "pageInfo": "Page {page} of {pages}",
         "building": "Building",
         "author": "Author",
         "syncState": "Sync state",
         "updated": "Updated",
+        "changes": "Changes",
         "actions": "Actions",
         "edits": "edits",
         "details": "Details",
@@ -629,6 +631,7 @@
       "archive": {
         "title": "Synced archive",
         "hint": "Read-only building groups already published to OSM.",
+        "empty": "No archived sync candidates found.",
         "readOnly": "Read only",
         "readOnlyHelp": "This building group was already synchronized. It stays here for inspection only."
       }
@@ -773,7 +776,8 @@
         "enabled": "enabled",
         "disabled": "disabled",
         "manualOnly": "manual only",
-        "everyHours": "every {hours}h"
+        "everyHours": "every {hours}h",
+        "pageInfo": "Page {page} of {pages}"
       },
       "form": {
         "editTitle": "Edit region",
@@ -826,7 +830,8 @@
         "status": "Status",
         "requested": "Requested",
         "finished": "Finished",
-        "features": "Features"
+        "features": "Features",
+        "pageInfo": "Page {page} of {pages}"
       },
       "runStatus": {
         "running": "running",

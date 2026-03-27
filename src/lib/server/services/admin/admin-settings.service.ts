@@ -321,21 +321,26 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     }
   }
 
-  async function getRegionRuns(regionIdRaw, limitRaw) {
+  async function getRegionRuns(regionIdRaw, pageRaw, limitRaw) {
     const service = ensureDataSettingsService();
     const regionId = parseRegionId(regionIdRaw);
     if (!regionId) {
       throw createAdminError(400, 'Invalid region id');
     }
+    const page = Math.max(1, Math.trunc(Number(pageRaw) || 1));
     const limit = parseLimit(limitRaw, 20, 1, 200);
     const region = await service.getRegionById(regionId);
     if (!region) {
       throw createAdminError(404, 'Region not found');
     }
-    const items = await service.getRecentRuns(regionId, limit);
+    const runsPage = await service.getRecentRuns(regionId, page, limit);
     return {
       region,
-      items
+      total: Number(runsPage?.total || 0),
+      page: Number(runsPage?.page || page),
+      pageSize: Number(runsPage?.pageSize || limit),
+      pageCount: Number(runsPage?.pageCount || 0),
+      items: Array.isArray(runsPage) ? runsPage : Array.isArray(runsPage?.items) ? runsPage.items : []
     };
   }
 

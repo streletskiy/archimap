@@ -1,8 +1,7 @@
 <script>
-  import AdminDataHistorySection from './AdminDataHistorySection.svelte';
   import AdminDataRegionList from './AdminDataRegionList.svelte';
   import AdminDataRegionMap from './AdminDataRegionMap.svelte';
-  import AdminDataForm from './AdminDataForm.svelte';
+  import AdminDataRegionModal from './AdminDataRegionModal.svelte';
   import { t } from '$lib/i18n/index';
   import { UiButton } from '$lib/components/base';
 
@@ -23,6 +22,10 @@
   const regionRuns = controller.regionRuns;
   const regionRunsLoading = controller.regionRunsLoading;
   const regionRunsStatus = controller.regionRunsStatus;
+  const regionRunsPage = controller.regionRunsPage;
+  const regionRunsPageCount = controller.regionRunsPageCount;
+  const regionRunsTotal = controller.regionRunsTotal;
+  const regionEditorOpen = controller.regionEditorOpen;
   const initialized = controller.initialized;
 
   let regions;
@@ -95,17 +98,6 @@
       <p class="text-sm ui-text-muted">{$dataStatus}</p>
     {/if}
 
-    <AdminDataForm
-      {controller}
-      regionDraft={regionDraft}
-      regionExtractCandidates={regionExtractCandidates}
-      {selectedRegion}
-      regionSaving={$regionSaving}
-      regionDeleting={$regionDeleting}
-      regionSyncBusy={$regionSyncBusy}
-      regionResolveBusy={$regionResolveBusy}
-    />
-
     <AdminDataRegionList
       {controller}
       {regions}
@@ -113,12 +105,26 @@
       dataLoading={$dataLoading}
     />
 
-    <AdminDataHistorySection
+    <AdminDataRegionModal
+      open={$regionEditorOpen}
       {controller}
+      {regionDraft}
+      {selectedRegion}
+      {regionExtractCandidates}
+      regionSaving={$regionSaving}
+      regionDeleting={$regionDeleting}
+      regionSyncBusy={$regionSyncBusy}
+      regionResolveBusy={$regionResolveBusy}
       selectedDataRegionId={$selectedDataRegionId}
       regionRuns={$regionRuns}
       regionRunsLoading={$regionRunsLoading}
       regionRunsStatus={$regionRunsStatus}
+      regionRunsPage={$regionRunsPage}
+      regionRunsPageCount={$regionRunsPageCount}
+      regionRunsTotal={$regionRunsTotal}
+      dataStatus={$dataStatus}
+      closeDisabled={$regionSaving || $regionDeleting || $regionSyncBusy}
+      onClose={controller.closeRegionEditor}
     />
   </section>
 {/if}

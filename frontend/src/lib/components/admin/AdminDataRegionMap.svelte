@@ -49,8 +49,46 @@
     return mapRuntimePromise;
   }
 
+  function isDarkTheme() {
+    return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark';
+  }
+
   function styleByTheme() {
-    return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark' ? DARK : LIGHT;
+    return isDarkTheme() ? DARK : LIGHT;
+  }
+
+  function getRegionLineColors() {
+    if (isDarkTheme()) {
+      return {
+        selected: {
+          failed: '#FECACA',
+          ready: '#BBF7D0',
+          syncing: '#FDE68A',
+          default: '#C7D2FE'
+        },
+        normal: {
+          failed: '#FFE4E6',
+          ready: '#DCFCE7',
+          syncing: '#FEF3C7',
+          default: '#E2E8F0'
+        }
+      };
+    }
+
+    return {
+      selected: {
+        failed: '#7F1D1D',
+        ready: '#14532D',
+        syncing: '#92400E',
+        default: '#1D4ED8'
+      },
+      normal: {
+        failed: '#B91C1C',
+        ready: '#2F6B3C',
+        syncing: '#9A6700',
+        default: '#768195'
+      }
+    };
   }
 
   function walkGeometryCoordinates(coordinates, visit) {
@@ -429,6 +467,7 @@
 
   function ensureRegionLayers() {
     if (!map) return;
+    const lineColors = getRegionLineColors();
 
     if (!map.getSource(REGIONS_SOURCE_ID)) {
       map.addSource(REGIONS_SOURCE_ID, {
@@ -499,20 +538,20 @@
               'match',
               ['feature-state', 'tone'],
               'failed',
-              '#7F1D1D',
+              lineColors.selected.failed,
               'ready',
-              '#14532D',
+              lineColors.selected.ready,
               'syncing',
-              '#92400E',
-              '#1D4ED8'
+              lineColors.selected.syncing,
+              lineColors.selected.default
             ],
             ['==', ['feature-state', 'tone'], 'failed'],
-            '#B91C1C',
+            lineColors.normal.failed,
             ['==', ['feature-state', 'tone'], 'ready'],
-            '#2F6B3C',
+            lineColors.normal.ready,
             ['==', ['feature-state', 'tone'], 'syncing'],
-            '#9A6700',
-            '#768195'
+            lineColors.normal.syncing,
+            lineColors.normal.default
           ],
           'line-opacity': 0.98,
           'line-width': [

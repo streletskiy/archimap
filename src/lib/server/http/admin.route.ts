@@ -324,10 +324,14 @@ function registerAdminRoutes(deps: LooseRecord) {
     requireMasterAdmin,
     withAdminError(
       async (req, res) => {
-        const result = await adminSettingsService.getRegionRuns(req.params.regionId, req.query?.limit);
+        const result = await adminSettingsService.getRegionRuns(req.params.regionId, req.query?.page, req.query?.limit);
         return sendPrivateJson(req, res, {
           ok: true,
           region: result.region,
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+          pageCount: result.pageCount,
           items: result.items
         });
       },
@@ -486,10 +490,17 @@ function registerAdminRoutes(deps: LooseRecord) {
     requireAdmin,
     withAdminError(
       async (req, res) => {
-        const items = await osmSyncService.listSyncCandidates(req.query?.limit);
+        const result = await osmSyncService.listSyncCandidates({
+          sync: req.query?.sync,
+          page: req.query?.page,
+          limit: req.query?.limit
+        });
         return sendPrivateJson(req, res, {
-          total: items.length,
-          items
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+          pageCount: result.pageCount,
+          items: result.items
         });
       },
       {
