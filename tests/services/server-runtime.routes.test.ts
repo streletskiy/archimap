@@ -40,13 +40,13 @@ function createNoopMiddleware() {
   return (_req, _res, next) => next();
 }
 
-function createModuleMock(exports) {
+function createModuleMock(exports): NodeJS.Module {
   return {
     id: 'mocked-module',
     filename: 'mocked-module',
     loaded: true,
     exports
-  };
+  } as unknown as NodeJS.Module;
 }
 
 test('region delete triggers search rebuild without waiting for completion', async (t) => {

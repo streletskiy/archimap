@@ -123,7 +123,23 @@ export interface BuildingEdit {
 
 export interface BuildingEditListQuery {
   status?: string;
+  sync?: string;
   limit?: number;
+  page?: number;
+  q?: string;
+  from?: string;
+  to?: string;
+  user?: string;
+  createdBy?: string;
+}
+
+export interface BuildingEditPageResult<TItem = BuildingEditSummary | BuildingEdit> {
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  items: TItem[];
+  authors?: string[];
 }
 
 export interface BuildingEditMergeValues extends Partial<BuildingEditValueMap> {

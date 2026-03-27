@@ -63,6 +63,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     requireAdmin: runtime.requireAdmin,
     requireCsrfSession,
     getUserEditsList: runtime.getUserEditsList,
+    getUserEditsPageRaw: runtime.getUserEditsPageRaw,
     getUserEditDetailsById: runtime.getUserEditDetailsById,
     getSessionEditActorKey: runtime.getSessionEditActorKey,
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
@@ -165,6 +166,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     getSessionEditActorKey: runtime.getSessionEditActorKey,
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
     getUserEditsList: runtime.getUserEditsList,
+    getUserEditsPage: runtime.getUserEditsPage,
     getUserEditDetailsById: runtime.getUserEditDetailsById,
     withdrawPendingUserEdit: runtime.withdrawPendingUserEdit
   });

@@ -53,6 +53,28 @@ export function getStatusBadgeMeta(status, translate) {
   return { text: translate('admin.status.pending'), cls: 'ui-surface-warning ui-text-warning' };
 }
 
+export function normalizeSyncStatus(status) {
+  return String(status || 'unsynced').trim().toLowerCase();
+}
+
+export function getSyncBadgeMeta(status, translate, keyPrefix = 'admin.edits') {
+  const normalized = normalizeSyncStatus(status);
+  const prefix = String(keyPrefix || 'admin.edits').trim() || 'admin.edits';
+  if (normalized === 'synced') return { cls: 'ui-surface-success-soft ui-text-success-soft', text: translate(`${prefix}.syncSynced`) };
+  if (normalized === 'cleaned') return { cls: 'ui-surface-info ui-text-info', text: translate(`${prefix}.syncCleaned`) };
+  if (normalized === 'syncing') return { cls: 'ui-surface-warning ui-text-warning', text: translate(`${prefix}.syncing`) };
+  if (normalized === 'failed') return { cls: 'ui-surface-danger ui-text-danger', text: translate(`${prefix}.syncFailed`) };
+  return { cls: 'ui-surface-soft ui-text-muted', text: translate(`${prefix}.syncUnsynced`) };
+}
+
+export function getDisplayEditStatusMeta(item, translate, syncKeyPrefix = 'admin.edits') {
+  const syncStatus = normalizeSyncStatus(item?.syncStatus);
+  if (syncStatus && syncStatus !== 'unsynced') {
+    return getSyncBadgeMeta(syncStatus, translate, syncKeyPrefix);
+  }
+  return getStatusBadgeMeta(item?.status, translate);
+}
+
 export function getEditKey(item) {
   const osmType = String(item?.osmType || '').trim();
   const osmId = Number(item?.osmId || 0);

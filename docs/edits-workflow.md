@@ -22,10 +22,12 @@ User-side:
   - stale extra `pending` rows are marked as `superseded`.
 - In the account history, a user can withdraw their own `pending` edit before moderation; the action deletes that pending row.
 - In account history user can see moderation statuses and admin comment.
+- Opening an edit from account history shows a full-screen modal with the edit details and a top map focused on the target building.
 
 Admin-side moderation:
 
 - Admin opens edit details in `/admin/` and reviews changed fields.
+- Admin edit details also open in a full-screen modal with a top map focused on the target building.
 - The moderation list also exposes row checkboxes for currently pending edits so several selected rows can be accepted in one action.
 - Decision is field-level:
   - accept field (optionally with corrected value);

@@ -15,12 +15,12 @@
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
   import { getGeometryCenter } from '$lib/utils/map-geometry';
+  import { getEditsDateRangeParams } from '$lib/utils/edit-date-range';
   import {
-    getEditAddress,
     getEditKey,
-    matchesUiDateRange,
     parseEditKey
   } from '$lib/utils/edit-ui';
+  import { EditsPagination, EditsSkeletonRows } from '$lib/components/edits';
 
   import AdminMap from './AdminMap.svelte';
   import EditDetailPane from './EditDetailPane.svelte';
@@ -31,6 +31,7 @@
   export let isMasterAdmin = false;
 
   const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
+  const EDITS_PAGE_SIZE = 20;
   const dispatch = createEventDispatcher();
   const msg = (error, fallback) => String(error?.message || fallback);
 
@@ -42,22 +43,31 @@
   let editsStatus;
   let editsError = '';
   let editsFilter = 'all';
-  let editsLimit = 200;
   let editsQuery = '';
   let editsDateRange = undefined;
   let editsUser = '';
   let editsUsers = [];
   let editsUserItems;
   let editsFilterItems;
-  const editsLimitItems = [
-    { value: 100, label: '100' },
-    { value: 200, label: '200' },
-    { value: 500, label: '500' }
-  ];
   const reassignTargetTypeItems = [
     { value: 'way', label: 'way' },
     { value: 'relation', label: 'relation' }
   ];
+  let editsPage = 1;
+  let editsTotal = 0;
+  let editsPageCount = 0;
+  let editsPageInfo;
+  let editsReloadTimer = null;
+  let editsRequestToken = 0;
+  let archivedEdits = [];
+  let archivedLoading = false;
+  let archivedError = '';
+  let archivedPage = 1;
+  let archivedTotal = 0;
+  let archivedPageCount = 0;
+  let archivedPageInfo;
+  let archivedReloadTimer = null;
+  let archivedRequestToken = 0;
 
   let selectedEdit = null;
   let selectedFeature = EMPTY_FEATURE_COLLECTION;
@@ -73,7 +83,7 @@
   let selectedEditIds = [];
   let bulkSelectableEdits = [];
   let selectedBulkEdits = [];
-  let showBulkSelection = false;
+  let showBulkSelection;
   let reassignTargetType = 'way';
   let reassignTargetId = '';
   let reassignForce = false;
@@ -208,28 +218,108 @@
     }
   }
 
-  async function loadEdits() {
+  function clearEditsReloadTimer() {
+    if (editsReloadTimer) {
+      clearTimeout(editsReloadTimer);
+      editsReloadTimer = null;
+    }
+  }
+
+  function clearArchivedReloadTimer() {
+    if (archivedReloadTimer) {
+      clearTimeout(archivedReloadTimer);
+      archivedReloadTimer = null;
+    }
+  }
+
+  function scheduleEditsReload(page = 1, delay = 250) {
+    editsPage = page;
+    clearEditsReloadTimer();
+    editsReloadTimer = setTimeout(() => {
+      editsReloadTimer = null;
+      void loadEdits(page);
+    }, delay);
+  }
+
+  function scheduleArchivedReload(page = 1, delay = 250) {
+    archivedPage = page;
+    clearArchivedReloadTimer();
+    archivedReloadTimer = setTimeout(() => {
+      archivedReloadTimer = null;
+      void loadArchivedEdits(page);
+    }, delay);
+  }
+
+  function scheduleAllEditsReload(page = 1, delay = 250) {
+    scheduleEditsReload(page, delay);
+    scheduleArchivedReload(1, delay);
+  }
+
+  function buildAdminEditsPageRequest(page, syncMode) {
+    const nextPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const params = new URLSearchParams();
+    if (editsFilter !== 'all') {
+      params.set('status', editsFilter);
+    }
+    if (editsQuery.trim()) {
+      params.set('q', editsQuery.trim());
+    }
+    const { from, to } = getEditsDateRangeParams(editsDateRange);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    if (String(editsUser || '').trim()) {
+      params.set('user', String(editsUser).trim());
+    }
+    params.set('sync', syncMode);
+    params.set('page', String(nextPage));
+    params.set('limit', String(EDITS_PAGE_SIZE));
+    return { nextPage, params };
+  }
+
+  function parseAdminEditsPageResponse(data, fallbackPage) {
+    const total = Math.max(0, Number(data?.total || 0));
+    const pageCount = Math.max(0, Number(data?.pageCount || 0) || (total > 0 ? Math.ceil(total / EDITS_PAGE_SIZE) : 0));
+    return {
+      items: Array.isArray(data?.items) ? data.items : [],
+      authors: Array.isArray(data?.authors)
+        ? data.authors.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      total,
+      pageCount,
+      page: Number.isInteger(Number(data?.page)) && Number(data.page) > 0 ? Number(data.page) : fallbackPage
+    };
+  }
+
+  async function refreshAllEdits() {
+    clearEditsReloadTimer();
+    clearArchivedReloadTimer();
+    await Promise.all([loadEdits(editsPage), loadArchivedEdits(archivedPage)]);
+  }
+
+  async function loadEdits(page = editsPage) {
+    const { nextPage, params } = buildAdminEditsPageRequest(page, 'active');
+    const requestToken = ++editsRequestToken;
+    clearEditsReloadTimer();
     editsLoading = true;
     editsError = '';
     editsStatus = translateNow('admin.loading');
 
     try {
-      const params = new URLSearchParams();
-      params.set('status', 'all');
-      params.set('limit', String(editsLimit));
       const data = await apiJson(`/api/admin/building-edits?${params.toString()}`);
-      edits = Array.isArray(data?.items) ? data.items : [];
-      editsUsers = [
-        ...new Set(
-          edits
-            .map((item) =>
-              String(item?.updatedBy || '')
-                .trim()
-                .toLowerCase()
-            )
-            .filter(Boolean)
-        )
-      ].sort();
+      if (requestToken !== editsRequestToken) return;
+      const result = parseAdminEditsPageResponse(data, nextPage);
+      if (result.pageCount > 0 && nextPage > result.pageCount) {
+        editsPage = result.pageCount;
+        if (requestToken === editsRequestToken) {
+          await loadEdits(result.pageCount);
+        }
+        return;
+      }
+      edits = result.items;
+      editsUsers = result.authors;
+      editsTotal = result.total;
+      editsPageCount = result.pageCount;
+      editsPage = result.page;
       await loadCenters(edits);
       await maybeOpenRequestedEdit(normalizeEditId(requestedEditId));
     } catch (error) {
@@ -237,11 +327,49 @@
       visibleEdits = [];
       activeEdits = [];
       syncedEdits = [];
-      editsUsers = [];
+      editsTotal = 0;
+      editsPageCount = 0;
       editsError = msg(error, translateNow('admin.edits.loadFailed'));
       editsStatus = editsError;
     } finally {
-      editsLoading = false;
+      if (requestToken === editsRequestToken) {
+        editsLoading = false;
+      }
+    }
+  }
+
+  async function loadArchivedEdits(page = archivedPage) {
+    const { nextPage, params } = buildAdminEditsPageRequest(page, 'archived');
+    const requestToken = ++archivedRequestToken;
+    clearArchivedReloadTimer();
+    archivedLoading = true;
+    archivedError = '';
+
+    try {
+      const data = await apiJson(`/api/admin/building-edits?${params.toString()}`);
+      if (requestToken !== archivedRequestToken) return;
+      const result = parseAdminEditsPageResponse(data, nextPage);
+      if (result.pageCount > 0 && nextPage > result.pageCount) {
+        archivedPage = result.pageCount;
+        if (requestToken === archivedRequestToken) {
+          await loadArchivedEdits(result.pageCount);
+        }
+        return;
+      }
+      archivedEdits = result.items;
+      archivedTotal = result.total;
+      archivedPageCount = result.pageCount;
+      archivedPage = result.page;
+      editsUsers = result.authors.length > 0 ? result.authors : editsUsers;
+    } catch (error) {
+      archivedEdits = [];
+      archivedTotal = 0;
+      archivedPageCount = 0;
+      archivedError = msg(error, translateNow('admin.edits.loadFailed'));
+    } finally {
+      if (requestToken === archivedRequestToken) {
+        archivedLoading = false;
+      }
     }
   }
 
@@ -314,18 +442,6 @@
     const { syncUrl = true } = options;
     detailRequestToken += 1;
     detailPaneVisible = false;
-    detailLoading = false;
-    detailStatus = '';
-    moderationComment = '';
-    resetReassignDraft();
-    setSelectedFeature(EMPTY_FEATURE_COLLECTION);
-    if (syncUrl) {
-      notifyEditIdChange(null);
-    }
-  }
-
-  function onDetailPaneOutroEnd() {
-    if (detailPaneVisible) return;
     selectedEdit = null;
     detailLoading = false;
     detailStatus = '';
@@ -334,6 +450,9 @@
     moderationComment = '';
     resetReassignDraft();
     setSelectedFeature(EMPTY_FEATURE_COLLECTION);
+    if (syncUrl) {
+      notifyEditIdChange(null);
+    }
   }
 
   async function bulkAcceptSelectedEdits() {
@@ -354,7 +473,7 @@
       const totalCount = Number(summary?.totalCount || editIds.length);
 
       selectedEditIds = [];
-      await loadEdits();
+      await refreshAllEdits();
       await refreshCurrentEditDetails();
 
       if (successCount > 0 && failureCount > 0) {
@@ -432,6 +551,7 @@
         }
       }
       await loadEdits();
+      await loadArchivedEdits();
       await openEdit(editId, { syncUrl: false, forceReload: true });
     } catch (error) {
       detailStatus = msg(error, translateNow('admin.edits.decisionFailed'));
@@ -463,7 +583,7 @@
           force: reassignForce
         })
       });
-      await loadEdits();
+      await refreshAllEdits();
       await openEdit(editId, { syncUrl: false, forceReload: true });
       detailStatus = translateNow('admin.edits.reassignDone');
     } catch (error) {
@@ -491,7 +611,7 @@
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
-      await loadEdits();
+      await refreshAllEdits();
       closeEditPanel();
       editsStatus = translateNow('admin.edits.deleteDone');
     } catch (error) {
@@ -509,30 +629,9 @@
   }
 
   $: {
-    const query = String(editsQuery || '')
-      .trim()
-      .toLowerCase();
-    const user = String(editsUser || '')
-      .trim()
-      .toLowerCase();
-    const status = String(editsFilter || 'all')
-      .trim()
-      .toLowerCase();
-
-    visibleEdits = edits.filter((item) => {
-      const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`.toLowerCase();
-      const address = getEditAddress(item).toLowerCase();
-      const author = String(item?.updatedBy || '')
-        .trim()
-        .toLowerCase();
-      if (query && !address.includes(query) && !osmKey.includes(query)) return false;
-      if (!matchesUiDateRange(item?.updatedAt, editsDateRange)) return false;
-      if (user && author !== user) return false;
-      if (status !== 'all' && String(item?.status || '').trim().toLowerCase() !== status) return false;
-      return true;
-    });
-    activeEdits = visibleEdits.filter((item) => !isSyncedArchiveEdit(item));
-    syncedEdits = visibleEdits.filter((item) => isSyncedArchiveEdit(item));
+    visibleEdits = Array.isArray(edits) ? edits : [];
+    activeEdits = visibleEdits;
+    syncedEdits = Array.isArray(archivedEdits) ? archivedEdits : [];
 
     const nextEditIdByKey = new Map();
     for (const item of visibleEdits) {
@@ -547,11 +646,15 @@
       editsStatus = editsError;
     } else if (editsLoading) {
       editsStatus = translateNow('admin.loading');
+    } else if (visibleEdits.length || editsTotal > 0) {
+      editsStatus = translateNow('admin.edits.statusShown', { visible: visibleEdits.length, total: editsTotal });
     } else {
-      editsStatus = activeEdits.length || syncedEdits.length
-        ? translateNow('admin.edits.statusShown', { visible: activeEdits.length, total: visibleEdits.length })
-        : translateNow('admin.empty');
+      editsStatus = translateNow('admin.empty');
     }
+    editsPageInfo = editsPageCount > 0 ? translateNow('admin.edits.pageInfo', { page: editsPage, pages: editsPageCount }) : '';
+    archivedPageInfo = archivedPageCount > 0
+      ? translateNow('admin.edits.pageInfo', { page: archivedPage, pages: archivedPageCount })
+      : '';
   }
 
   $: bulkSelectableEdits = Array.isArray(activeEdits) ? activeEdits.filter(isPendingEdit) : [];
@@ -559,7 +662,7 @@
   $: showBulkSelection = bulkSelectableEdits.length > 0 || selectedBulkEdits.length > 0 || bulkModerationBusy;
   $: pruneSelectedEdits();
 
-  $: dispatch('summary', { total: edits.length, visible: activeEdits.length, archived: syncedEdits.length });
+  $: dispatch('summary', { total: editsTotal + archivedTotal, visible: activeEdits.length, archived: archivedTotal });
 
   $: {
     const nextRequestedEditId = normalizeEditId(requestedEditId);
@@ -576,30 +679,25 @@
   }
 
   $: selectedEditIsReadOnly = isSyncedArchiveEdit(selectedEdit);
-  $: adminPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
 
   onMount(() => {
-    void loadEdits();
+    void refreshAllEdits();
   });
 </script>
 
-<div
-  class="mt-3 grid gap-4 overflow-hidden min-h-0"
-  class:lg:grid-cols-[1.1fr_1fr]={adminPaneOpen}
-  class:lg:grid-cols-1={!adminPaneOpen}
->
+<div class="mt-3 grid gap-4 overflow-hidden min-h-0">
   <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden">
     <EditListFilters
       bind:editsQuery
       bind:editsDateRange
       bind:editsUser
       bind:editsFilter
-      bind:editsLimit
+      page={editsPage}
       {editsUserItems}
       {editsFilterItems}
-      {editsLimitItems}
-      loading={editsLoading}
-      onRefresh={loadEdits}
+      loading={editsLoading || archivedLoading}
+      onFilterChange={scheduleAllEditsReload}
+      onRefresh={refreshAllEdits}
     />
 
     <p class="text-sm ui-text-muted">{editsStatus}</p>
@@ -640,11 +738,13 @@
       {visibleEdits}
       {centerByKey}
       {editIdByKey}
-      {selectedFeature}
       on:openedit={(event) => openEdit(event.detail?.editId)}
     />
 
-    <UiTable framed={false}>
+    <UiTable
+      framed={false}
+      className="ui-table--mobile-wide [--ui-table-mobile-min-width:56rem] [--ui-table-mobile-identity-width:20rem]"
+    >
       <UiTableHeader>
         <UiTableRow className="hover:[&>th]:bg-transparent">
           {#if showBulkSelection}
@@ -657,20 +757,19 @@
               />
             </UiTableHead>
           {/if}
-          <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
+          <UiTableHead>{$t('admin.edits.tableObject')}</UiTableHead>
           <UiTableHead>{$t('admin.edits.tableAuthor')}</UiTableHead>
+          <UiTableHead>{$t('admin.edits.tableCreatedAt')}</UiTableHead>
           <UiTableHead>{$t('admin.edits.tableStatus')}</UiTableHead>
           <UiTableHead>{$t('admin.edits.tableChanges')}</UiTableHead>
         </UiTableRow>
       </UiTableHeader>
       <UiTableBody>
         {#if editsLoading}
-          <UiTableRow>
-            <UiTableCell colspan={showBulkSelection ? 5 : 4} className="ui-text-subtle">{$t('admin.loading')}</UiTableCell>
-          </UiTableRow>
+          <EditsSkeletonRows rows={EDITS_PAGE_SIZE} showSelection={showBulkSelection} showMarker={false} idLabel={$t('admin.edits.id')} />
         {:else if activeEdits.length === 0}
           <UiTableRow>
-            <UiTableCell colspan={showBulkSelection ? 5 : 4} className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
+            <UiTableCell colspan={showBulkSelection ? 6 : 5} className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
           </UiTableRow>
         {:else}
           {#each activeEdits as edit (`${edit.id || edit.editId}`)}
@@ -688,33 +787,69 @@
       </UiTableBody>
     </UiTable>
 
-    {#if syncedEdits.length > 0}
-      <details class="overflow-hidden rounded-xl border ui-border ui-surface-muted" open={false}>
+    <EditsPagination
+      page={editsPage}
+      pageCount={editsPageCount}
+      pageInfo={editsPageInfo}
+      loading={editsLoading}
+      previousLabel={$t('common.previous')}
+      nextLabel={$t('common.next')}
+      onPageChange={loadEdits}
+    />
+
+    {#if archivedLoading || archivedError || archivedTotal > 0}
+      <details class="overflow-hidden rounded-xl border ui-border ui-surface-muted">
         <summary class="flex cursor-pointer list-none items-center justify-between gap-2 p-3">
           <div>
             <h4 class="text-sm font-semibold ui-text-strong">{$t('admin.edits.syncedArchiveTitle')}</h4>
             <p class="text-xs ui-text-muted">{$t('admin.edits.syncedArchiveHint')}</p>
           </div>
-          <span class="text-xs ui-text-subtle">{syncedEdits.length}</span>
+          <span class="text-xs ui-text-subtle">{archivedTotal}</span>
         </summary>
         <div class="border-t ui-border p-3">
-          <UiScrollArea className="ui-scroll-surface max-h-72 rounded-xl" contentClassName="space-y-2 p-2">
-            <UiTable framed={false}>
+          <UiScrollArea className="ui-scroll-surface rounded-xl" contentClassName="space-y-2 p-2">
+            <UiTable
+              framed={false}
+              className="ui-table--mobile-wide [--ui-table-mobile-min-width:52rem] [--ui-table-mobile-identity-width:20rem]"
+            >
               <UiTableHeader>
                 <UiTableRow className="hover:[&>th]:bg-transparent">
-                  <UiTableHead>{$t('admin.edits.tableBuilding')}</UiTableHead>
+                  <UiTableHead>{$t('admin.edits.tableObject')}</UiTableHead>
+                  <UiTableHead>{$t('admin.edits.tableAuthor')}</UiTableHead>
+                  <UiTableHead>{$t('admin.edits.tableCreatedAt')}</UiTableHead>
                   <UiTableHead>{$t('admin.edits.tableStatus')}</UiTableHead>
                   <UiTableHead>{$t('admin.edits.tableChanges')}</UiTableHead>
-                  <UiTableHead>{$t('admin.edits.syncStatus')}</UiTableHead>
                 </UiTableRow>
               </UiTableHeader>
               <UiTableBody>
-                {#each syncedEdits as edit (`synced-${edit.id || edit.editId}`)}
-                  <EditListItem edit={edit} archived onOpen={openEdit} />
-                {/each}
+                {#if archivedLoading}
+                  <EditsSkeletonRows rows={EDITS_PAGE_SIZE} showMarker={false} idLabel={$t('admin.edits.id')} />
+                {:else if archivedError}
+                  <UiTableRow>
+                    <UiTableCell colspan={5} className="ui-text-danger">{archivedError}</UiTableCell>
+                  </UiTableRow>
+                {:else if syncedEdits.length === 0}
+                  <UiTableRow>
+                    <UiTableCell colspan={5} className="ui-text-subtle">{$t('admin.empty')}</UiTableCell>
+                  </UiTableRow>
+                {:else}
+                  {#each syncedEdits as edit (`synced-${edit.id || edit.editId}`)}
+                    <EditListItem edit={edit} archived onOpen={openEdit} />
+                  {/each}
+                {/if}
               </UiTableBody>
             </UiTable>
           </UiScrollArea>
+          <EditsPagination
+            page={archivedPage}
+            pageCount={archivedPageCount}
+            pageInfo={archivedPageInfo}
+            loading={archivedLoading}
+            previousLabel={$t('common.previous')}
+            nextLabel={$t('common.next')}
+            onPageChange={loadArchivedEdits}
+            className="mt-3"
+          />
         </div>
       </details>
     {/if}
@@ -729,6 +864,7 @@
       bind:reassignTargetId
       bind:reassignForce
       {selectedEdit}
+      {selectedFeature}
       {detailLoading}
       {detailStatus}
       {selectedEditIsReadOnly}
@@ -736,7 +872,6 @@
       {reassignTargetTypeItems}
       {moderationBusy}
       onClose={closeEditPanel}
-      onOutroEnd={onDetailPaneOutroEnd}
       setAll={setAll}
       applyDecision={applyDecision}
       reassignSelectedEdit={reassignSelectedEdit}

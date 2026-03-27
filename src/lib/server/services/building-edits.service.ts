@@ -22,6 +22,8 @@ function createBuildingEditsService({ db, normalizeUserEditStatus }) {
     getSessionEditActorKey: context.getSessionEditActorKey,
     applyUserEditRowToInfo: context.applyUserEditRowToInfo,
     getUserEditsList: historyService.getUserEditsList,
+    getUserEditsPage: historyService.getUserEditsPage,
+    getUserEditsPageRaw: historyService.getUserEditsPageRaw,
     getUserEditDetailsById: historyService.getUserEditDetailsById,
     reassignUserEdit: moderationService.reassignUserEdit,
     deleteUserEdit: moderationService.deleteUserEdit,

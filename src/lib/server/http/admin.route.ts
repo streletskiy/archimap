@@ -572,13 +572,23 @@ function registerAdminRoutes(deps: LooseRecord) {
     requireAuth,
     requireAdmin,
     withAdminError(async (req, res) => {
-      const items = await adminEditsService.listBuildingEdits({
+      const result = await adminEditsService.listBuildingEdits({
         status: req.query?.status,
-        limit: req.query?.limit
+        sync: req.query?.sync,
+        limit: req.query?.limit,
+        page: req.query?.page,
+        q: req.query?.q,
+        from: req.query?.from,
+        to: req.query?.to,
+        user: req.query?.user
       });
       return sendPrivateJson(req, res, {
-        total: items.length,
-        items
+        total: result.total,
+        page: result.page,
+        pageSize: result.pageSize,
+        pageCount: result.pageCount,
+        items: result.items,
+        authors: result.authors
       });
     })
   );

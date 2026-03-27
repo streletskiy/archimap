@@ -144,7 +144,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   function osmAddressFromTags(tags) {
     const full = pickTagValue(tags, ['addr:full']);
-    if (full != null) return full;
+    if (full != null) return String(full);
     const parts = [
       pickTagValue(tags, ['addr:postcode', 'addr_postcode']),
       pickTagValue(tags, ['addr:city', 'addr_city']),
@@ -419,18 +419,18 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     };
   }
 
-  function resolveDisplayAddressForRow(row, mergedInfoRow = null) {
+  function resolveDisplayAddressForRow(row, mergedInfoRow = null): string | null {
     const mergedAddress = normalizeInfoForDiff(mergedInfoRow?.address);
-    if (mergedAddress) return mergedAddress;
+    if (mergedAddress != null) return String(mergedAddress);
 
     const rowAddress = normalizeInfoForDiff(row?.address);
-    if (rowAddress) return rowAddress;
+    if (rowAddress != null) return String(rowAddress);
 
     const currentContourAddress = osmAddressFromTags(parseTagsJsonSafe(row?.tags_json));
-    if (currentContourAddress) return currentContourAddress;
+    if (currentContourAddress != null) return String(currentContourAddress);
 
     const sourceContourAddress = osmAddressFromTags(parseTagsJsonSafe(row?.source_tags_json));
-    if (sourceContourAddress) return sourceContourAddress;
+    if (sourceContourAddress != null) return String(sourceContourAddress);
 
     return null;
   }

@@ -175,6 +175,9 @@ System notes:
   - Marks the linked accepted/partially accepted edit rows as synced and stores the returned changeset id / compact summary in edit history.
   - Returns `409 OSM_SYNC_ALREADY_PUBLISHED` for building groups that were already synchronized and are read-only.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
+  - `GET /api/admin/building-edits` accepts `status`, `sync`, `user`, `q`, `from`, `to`, `page`, and `limit` query parameters and returns paginated raw edit rows ordered newest-first.
+  - `sync=active` returns editable rows, `sync=archived` returns read-only rows with `syncStatus` of `synced` or `cleaned`.
+  - The list response includes `total`, `page`, `pageSize`, `pageCount`, `items`, and `authors[]` for the user filter dropdown.
   - Edit history items include sync metadata when available: `syncStatus`, `syncAttemptedAt`, `syncSucceededAt`, `syncCleanedAt`, `syncChangesetId`, `syncSummary`, `syncError`.
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
 - `POST /api/admin/building-edits/bulk-merge`
@@ -197,6 +200,8 @@ System notes:
   - Admin-only delete for a style-region override rule.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
   - Account history uses the same sync metadata fields as admin edit details and keeps them visible after local overwrite cleanup.
+  - `GET /api/account/edits` accepts `status`, `q`, `from`, `to`, `page`, and `limit` query parameters and returns paginated building groups ordered from newest to oldest.
+  - The list response includes `total`, `page`, `pageSize`, `pageCount`, and `items`.
 - `DELETE /api/account/edits/:editId`
   - Current-user only.
   - Withdraws one of the user's own `pending` edits before moderation and removes that history row.

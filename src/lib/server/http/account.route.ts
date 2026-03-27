@@ -7,11 +7,18 @@ function registerAccountRoutes({
   requireAuth,
   getSessionEditActorKey,
   normalizeUserEditStatus,
-  getUserEditsList,
+  getUserEditsPage,
   getUserEditDetailsById,
   withdrawPendingUserEdit
 }) {
   function parseLimit(raw, fallback = 200, min = 1, max = 500) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    const v = Math.trunc(n);
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function parsePage(raw, fallback = 1, min = 1, max = 1000) {
     const n = Number(raw);
     if (!Number.isFinite(n)) return fallback;
     const v = Math.trunc(n);
@@ -25,9 +32,31 @@ function registerAccountRoutes({
     }
     const statusRaw = String(req.query?.status || '').trim().toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
-    const limit = parseLimit(req.query?.limit, 200, 1, 500);
-    const items = await getUserEditsList({ createdBy: actorKey, status, limit, summary: false });
-    return sendCachedJson(req, res, { total: items.length, items }, {
+    const query = String(req.query?.q || '').trim();
+    const createdFrom = String(req.query?.from || '').trim();
+    const createdTo = String(req.query?.to || '').trim();
+    const page = parsePage(req.query?.page, 1, 1, 1000);
+    const limit = parseLimit(req.query?.limit, 20, 1, 100);
+    const offset = (page - 1) * limit;
+    const pageData = typeof getUserEditsPage === 'function'
+      ? await getUserEditsPage({
+        createdBy: actorKey,
+        status,
+        q: query,
+        createdFrom,
+        createdTo,
+        limit,
+        offset
+      })
+      : { total: 0, items: [] };
+    const pageCount = pageData.total > 0 ? Math.ceil(pageData.total / limit) : 0;
+    return sendCachedJson(req, res, {
+      total: pageData.total,
+      page,
+      pageSize: limit,
+      pageCount,
+      items: pageData.items
+    }, {
       cacheControl: 'private, no-cache'
     });
   });

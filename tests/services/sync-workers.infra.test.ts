@@ -4,6 +4,10 @@ const { EventEmitter } = require('events');
 
 const { initSyncWorkersInfra } = require('../../src/lib/server/infra/sync-workers.infra');
 
+type ManagedDataSettingsOverrides = {
+  refreshAllNextSyncAt?: () => Promise<Array<Record<string, unknown>>>;
+} & Record<string, unknown>;
+
 function waitForMicrotasks() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -34,7 +38,7 @@ function createChildProcessStub() {
   return child;
 }
 
-function createManagedDataSettingsService(regions = [], overrides = {}) {
+function createManagedDataSettingsService(regions = [], overrides: ManagedDataSettingsOverrides = {}) {
   let nextRunId = 1;
   let managedEnabled = true;
   const regionMap = new Map(regions.map((region) => [region.id, { ...region }]));

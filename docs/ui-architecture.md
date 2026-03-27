@@ -148,6 +148,12 @@ When a new control is needed:
 - Bulk table selection should target only actionable rows and keep non-actionable rows visually separate from the selected set.
 - When a table sits inside a bordered card or scroll container, use `UiTable framed={false}` so the outer shell owns the contour and the table keeps only row and cell structure.
 
+### Edit Detail Modals
+
+- Account edit history and admin moderation details open in a shared full-screen modal instead of a side pane.
+- The modal reserves its top section for a focused building map and keeps the edit content scrollable underneath it.
+- Account/admin edit detail implementations should reuse the shared edits modal shell instead of rebuilding overlay structure separately.
+
 ### Scrollable Areas
 
 - `UiScrollArea` is the default wrapper for long panes and lists such as search results, diff panes, OSM tag dumps, and admin region lists.

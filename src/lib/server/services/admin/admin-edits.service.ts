@@ -13,6 +13,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
   const {
     db,
     getUserEditsList,
+    getUserEditsPageRaw,
     getUserEditDetailsById,
     normalizeUserEditStatus,
     sanitizeFieldText,
@@ -27,13 +28,37 @@ function createAdminEditsService(options: LooseRecord = {}) {
     ARCHI_FIELD_SET
   } = options;
 
-  async function listBuildingEdits({ status, limit }: BuildingEditListQuery = {}): Promise<BuildingEdit[]> {
+  async function listBuildingEdits({
+    status,
+    sync,
+    limit,
+    page,
+    q,
+    from,
+    to,
+    user,
+    createdBy
+  }: BuildingEditListQuery = {}): Promise<{ total: number; page: number; pageSize: number; pageCount: number; items: BuildingEdit[]; authors: string[] }> {
     const statusRaw = String(status || '')
       .trim()
       .toLowerCase();
     const normalizedStatus = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
-    const normalizedLimit = parseLimit(limit, 200, 1, 1000);
-    return getUserEditsList({ status: normalizedStatus, limit: normalizedLimit, summary: false });
+    const normalizedLimit = parseLimit(limit, 20, 1, 100);
+    const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const normalizedUser = String(createdBy ?? user ?? '')
+      .trim()
+      .toLowerCase() || null;
+
+    return getUserEditsPageRaw({
+      createdBy: normalizedUser,
+      status: normalizedStatus,
+      sync,
+      q,
+      createdFrom: from,
+      createdTo: to,
+      limit: normalizedLimit,
+      page: normalizedPage
+    });
   }
 
   async function getBuildingEditDetails(editIdRaw): Promise<BuildingEdit> {
