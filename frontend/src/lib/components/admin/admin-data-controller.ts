@@ -957,9 +957,11 @@ export function createAdminDataController() {
   async function saveDataRegion(event) {
     event?.preventDefault?.();
     if (!ensureFilterTagChangesDiscarded()) return;
+    if (get(regionSaving) || get(regionDeleting)) return;
 
     const currentDraft = get(regionDraft);
     const isNewRegion = !currentDraft.id;
+    const draftSnapshot = { ...currentDraft };
     const payload = {
       ...(currentDraft.id ? { id: currentDraft.id } : {}),
       name: String(currentDraft.name || '').trim(),
@@ -1000,73 +1002,6 @@ export function createAdminDataController() {
         }
 
         selectRegionLocally(null);
-        dataStatus.set(dataT('status.regionSavedQueued'));
-        regionSaving.set(false);
-
-        void (async () => {
-          try {
-            const data = await apiJson('/api/admin/app-settings/data/regions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ region: payload })
-            });
-            const savedRegion = data?.item || null;
-            const numericRegionId = Number(savedRegion?.id || 0);
-
-            if (optimisticRegionId != null) {
-              forgetOptimisticRegion(optimisticRegionId);
-              removeRegionSnapshot(optimisticRegionId);
-            }
-
-            const queuedRegion = upsertRegionSnapshot(
-              buildRegionSnapshot(savedRegion, currentDraft, {
-                lastSyncStatus: 'queued',
-                lastSyncError: null,
-                __optimistic: false
-              })
-            );
-
-            try {
-              if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
-                throw new Error(dataT('status.regionSavedQueueFailed'));
-              }
-
-              await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-              });
-            } catch (error) {
-              const errorText = msg(error, dataT('status.regionSavedQueueFailed'));
-              const failedRegion = upsertRegionSnapshot(
-                buildRegionSnapshot(queuedRegion || getRegionById(numericRegionId), currentDraft, {
-                  lastSyncStatus: 'failed',
-                  lastSyncError: errorText,
-                  __optimistic: false
-                })
-              );
-              if (failedRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
-                selectRegionLocally(failedRegion, { resetRuns: false });
-              }
-              dataStatus.set(errorText);
-            } finally {
-              if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
-                void refreshDataSettingsInBackground({
-                  selectedRegionId: numericRegionId,
-                  preserveStatus: true
-                });
-              }
-            }
-          } catch (error) {
-            if (optimisticRegionId != null) {
-              forgetOptimisticRegion(optimisticRegionId);
-              removeRegionSnapshot(optimisticRegionId);
-            }
-            dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
-          }
-        })();
-
-        return;
       }
 
       const data = await apiJson('/api/admin/app-settings/data/regions', {
@@ -1076,21 +1011,70 @@ export function createAdminDataController() {
       });
       const savedRegion = data?.item || null;
       const numericRegionId = Number(savedRegion?.id || currentDraft.id || 0);
-      const optimisticRegion = upsertRegionSnapshot(buildRegionSnapshot(savedRegion, currentDraft));
+      const nextRegion = upsertRegionSnapshot(
+        buildRegionSnapshot(savedRegion, currentDraft, isNewRegion
+          ? {
+            lastSyncStatus: 'queued',
+            lastSyncError: null,
+            __optimistic: false
+          }
+          : {})
+      );
 
-      if (optimisticRegion) {
-        selectRegionLocally(optimisticRegion, { resetRuns: false });
+      if (optimisticRegionId != null) {
+        forgetOptimisticRegion(optimisticRegionId);
+        removeRegionSnapshot(optimisticRegionId);
       }
 
-      dataStatus.set(dataT('status.regionSaved'));
+      if (isNewRegion) {
+        try {
+          if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+            throw new Error(dataT('status.regionSavedQueueFailed'));
+          }
+
+          await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          dataStatus.set(dataT('status.regionSavedQueued'));
+        } catch (error) {
+          const errorText = msg(error, dataT('status.regionSavedQueueFailed'));
+          const failedRegion = upsertRegionSnapshot(
+            buildRegionSnapshot(nextRegion || getRegionById(numericRegionId), draftSnapshot, {
+              lastSyncStatus: 'failed',
+              lastSyncError: errorText,
+              __optimistic: false
+            })
+          );
+          if (failedRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
+            selectRegionLocally(failedRegion, { resetRuns: false });
+          }
+          dataStatus.set(errorText);
+        }
+      } else {
+        if (nextRegion) {
+          selectRegionLocally(nextRegion, { resetRuns: false });
+        }
+        dataStatus.set(dataT('status.regionSaved'));
+      }
 
       if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
-        void refreshDataSettingsInBackground({
-          selectedRegionId: numericRegionId,
-          preserveStatus: true
-        });
+        if (!isNewRegion) {
+          void refreshDataSettingsInBackground({
+            selectedRegionId: numericRegionId,
+            preserveStatus: true
+          });
+        }
       }
     } catch (error) {
+      if (isNewRegion) {
+        regionDraft.set(createRegionDraft(draftSnapshot));
+      }
+      if (optimisticRegionId != null) {
+        forgetOptimisticRegion(optimisticRegionId);
+        removeRegionSnapshot(optimisticRegionId);
+      }
       dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
     } finally {
       regionSaving.set(false);
