@@ -89,6 +89,8 @@ function registerBuildingsRoutes(deps) {
     return res.json(result.payload || {
       matchedKeys: [],
       matchedFeatureIds: [],
+      matchedLocations: [],
+      matchedCount: 0,
       meta: {
         rulesHash: 'fnv1a-0',
         bboxHash: '',

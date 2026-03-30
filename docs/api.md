@@ -43,20 +43,24 @@ System notes:
 - `POST /api/buildings/filter-data`
   - Body: `{ keys: ["way/123", "relation/456", ...] }`.
   - Returns merged filter payload for explicit building keys.
+  - Each item includes `centerLon` and `centerLat` when the backend can derive a centroid from bbox metadata; the client uses those coordinates for low-zoom marker fallback.
 - `GET /api/buildings/filter-data-bbox?minLon=&minLat=&maxLon=&maxLat=&limit=`
   - Returns tag/info set for current bbox.
+  - Each item may include `centerLon` and `centerLat`; the client uses those coordinates when `filter-matches` is not available for low-zoom marker fallback.
   - Cache: `Cache-Control: public, max-age=10`, `ETag`.
 - `POST /api/buildings/filter-matches`
-  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, rules[], rulesHash?, maxResults? }`.
+  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, renderMode?, rules[], rulesHash?, maxResults? }`.
   - `rules[]` remains a flat per-request contract. Layer modes, priorities, presets, and color resolution are handled client-side by issuing one or more requests against this endpoint.
   - Supported operators: `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, `less_or_equals`.
   - Numeric operators expect a numeric `value`; `exists` / `not_exists` ignore `value`.
-  - Returns `{ matchedKeys[], matchedFeatureIds[], meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
-  - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket`), per-request `meta.cacheHit`.
+  - Returns `{ matchedKeys[], matchedFeatureIds[], matchedLocations[], matchedCount?, meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
+  - `matchedLocations[]` carries `{ id, lon, lat, count?, osmKey? }` points for low-zoom marker fallback; below `z<5` the backend can aggregate marker-mode matches into viewport-relative cells so the client does not need the full building list, while `z5-12` keeps stable point-level locations.
+  - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket+renderMode`), per-request `meta.cacheHit`.
 - `POST /api/buildings/filter-matches-batch`
-  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, requests[] }`.
+  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, renderMode?, requests[] }`.
   - Each batch item uses the same flat `rules[]` contract as `POST /api/buildings/filter-matches`, with its own optional `id`, `rulesHash?`, and `maxResults?`.
-  - Returns `items[]`, each item containing `matchedKeys`, `matchedFeatureIds`, and per-item `meta`.
+  - Returns `items[]`, each item containing `matchedKeys`, `matchedFeatureIds`, `matchedLocations`, `matchedCount?`, and per-item `meta`.
+  - `matchedLocations[]` follows the same low-zoom marker fallback contract as the single request endpoint, including optional `count` on aggregated points.
   - Batch meta includes overall `elapsedMs` and `cacheHit`.
 - `GET /api/building/:osmType/:osmId`
   - Returns GeoJSON feature.

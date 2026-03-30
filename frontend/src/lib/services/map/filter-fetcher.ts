@@ -36,6 +36,8 @@ type FilterFetcherOptions = {
 
 type FilterDataItem = Record<string, unknown> & {
   osmKey?: string;
+  centerLon?: number;
+  centerLat?: number;
 };
 
 export function createFilterFetcher({
@@ -96,44 +98,56 @@ export function createFilterFetcher({
     return getLoadedSourceBuildingOsmKeys();
   }
 
-  async function fetchFilterMatchesPrimary({ bbox, zoomBucket, rules, rulesHash, signal }: {
+  async function fetchFilterMatchesPrimary({ bbox, zoomBucket, rules, rulesHash, maxResults, renderMode, signal }: {
     bbox: unknown;
     zoomBucket: number;
     rules: FilterRule[];
     rulesHash: string;
+    maxResults?: number;
+    renderMode?: 'contours' | 'markers';
     signal?: AbortSignal | null;
   }): Promise<FilterMatchPayload> {
+    const requestedMaxResults = Number.isFinite(Number(maxResults))
+      ? Number(maxResults)
+      : matchDefaultLimit;
     return apiJson('/api/buildings/filter-matches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         bbox,
         zoomBucket,
+        renderMode: String(renderMode || 'contours') === 'markers' ? 'markers' : 'contours',
         rules,
         rulesHash,
-        maxResults: matchDefaultLimit
+        maxResults: Math.max(1, Math.trunc(requestedMaxResults))
       }),
       signal
     }) as Promise<FilterMatchPayload>;
   }
 
-  async function fetchFilterMatchesBatchPrimary({ bbox, zoomBucket, requestSpecs, signal }: {
+  async function fetchFilterMatchesBatchPrimary({ bbox, zoomBucket, requestSpecs, maxResults, renderMode, signal }: {
     bbox: unknown;
     zoomBucket: number;
     requestSpecs: FilterRequestSpec[];
+    maxResults?: number;
+    renderMode?: 'contours' | 'markers';
     signal?: AbortSignal | null;
   }): Promise<FilterMatchBatchResponse> {
+    const requestedMaxResults = Number.isFinite(Number(maxResults))
+      ? Number(maxResults)
+      : matchDefaultLimit;
     return apiJson('/api/buildings/filter-matches-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         bbox,
         zoomBucket,
+        renderMode: String(renderMode || 'contours') === 'markers' ? 'markers' : 'contours',
         requests: (Array.isArray(requestSpecs) ? requestSpecs : []).map((spec) => ({
           id: String(spec?.id || ''),
           rules: Array.isArray(spec?.rules) ? spec.rules : [],
           rulesHash: String(spec?.rulesHash || ''),
-          maxResults: matchDefaultLimit
+          maxResults: Math.max(1, Math.trunc(requestedMaxResults))
         }))
       }),
       signal
@@ -210,6 +224,7 @@ export function createFilterFetcher({
     const byKey = await fetchFilterDataByOsmKeys(visibleKeys, signal);
     const matchedKeys = [];
     const matchedFeatureIds = [];
+    const matchedLocations = [];
     for (const key of visibleKeys) {
       const item = byKey.get(key);
       if (!item) continue;
@@ -218,7 +233,19 @@ export function createFilterFetcher({
       matchedKeys.push(key);
       const parsed = parseOsmKey(key);
       if (parsed) {
-        matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+        const featureId = encodeOsmFeatureId(parsed.osmType, parsed.osmId);
+        matchedFeatureIds.push(featureId);
+        const lon = Number(item.centerLon);
+        const lat = Number(item.centerLat);
+        if (Number.isFinite(lon) && Number.isFinite(lat)) {
+          matchedLocations.push({
+            id: featureId,
+            lon,
+            lat,
+            count: 1,
+            osmKey: key
+          });
+        }
       }
       if (matchedKeys.length >= matchDefaultLimit) break;
     }
@@ -226,6 +253,7 @@ export function createFilterFetcher({
     return {
       matchedKeys,
       matchedFeatureIds,
+      matchedLocations,
       meta: {
         rulesHash: getCurrentRulesHash?.() || 'fnv1a-0',
         bboxHash: getLastViewportHash?.() || '',

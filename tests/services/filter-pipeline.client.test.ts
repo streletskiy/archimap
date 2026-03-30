@@ -8,6 +8,11 @@ async function loadFilterPipelineUtils() {
   return import(pathToFileURL(modulePath).href);
 }
 
+async function loadMapFilterPipeline() {
+  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'map-filter-pipeline.ts');
+  return import(pathToFileURL(modulePath).href);
+}
+
 test('computeRulesHash is stable for normalized rules', async () => {
   const { normalizeFilterRules, computeRulesHash } = await loadFilterPipelineUtils();
   const normalizedA = normalizeFilterRules([
@@ -123,5 +128,16 @@ test('coverage window hash changes when viewport exits active window', async () 
   assert.equal(isViewportInsideBbox(viewportOutside, windowA), false);
   const windowB = expandBboxWithMargin(viewportOutside, 0.3);
   assert.notEqual(buildBboxHash(windowA, 4), buildBboxHash(windowB, 4));
+});
+
+test('marker fallback gets a larger match budget on lower zooms and suppresses truncated warnings', async () => {
+  const { getMarkerMatchLimit, getFilterStatusCodeForRenderMode } = await loadMapFilterPipeline();
+  assert.equal(getMarkerMatchLimit(12.5), 8000);
+  assert.equal(getMarkerMatchLimit(11.5), 12000);
+  assert.equal(getMarkerMatchLimit(10.5), 16000);
+  assert.equal(getMarkerMatchLimit(8), 20000);
+  assert.equal(getFilterStatusCodeForRenderMode('markers', true), 'applied');
+  assert.equal(getFilterStatusCodeForRenderMode('contours', true), 'truncated');
+  assert.equal(getFilterStatusCodeForRenderMode('contours', false), 'applied');
 });
 

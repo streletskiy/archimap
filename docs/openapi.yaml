@@ -470,7 +470,7 @@ paths:
             type: integer
       responses:
         '200':
-          description: Filter payload
+          description: Filter payload; items may include `centerLon` and `centerLat` for low-zoom marker fallback
         '400':
           description: Invalid bbox
   /api/buildings/filter-matches:
@@ -479,6 +479,8 @@ paths:
       description: |
         The endpoint accepts a flat `rules[]` array per request.
         Client-side filter layers, priorities, colors, and AND/OR/layer composition are resolved before calling this endpoint.
+        The response includes `matchedLocations[]` points for low-zoom marker fallback, in addition to `matchedFeatureIds[]` for contour highlight.
+        When `renderMode=markers` and the zoom is below `5`, the backend can aggregate matches into viewport-relative cells and include `count` on each returned location; zooms `5-12` keep stable point-level locations.
         Use `POST /api/buildings/filter-matches-batch` when you need multiple rule sets against the same bbox.
       requestBody:
         required: true
@@ -503,6 +505,9 @@ paths:
                   type: number
                 zoomBucket:
                   type: number
+                renderMode:
+                  type: string
+                  enum: [contours, markers]
                 maxResults:
                   type: integer
                 rules:
@@ -796,7 +801,7 @@ paths:
                     type: string
       responses:
         '200':
-          description: Filter data payload
+          description: Filter data payload; items may include `centerLon` and `centerLat` for low-zoom marker fallback
         '400':
           description: Invalid keys payload
   /api/search-buildings-map:
@@ -848,7 +853,10 @@ paths:
   /api/buildings/filter-matches-batch:
     post:
       summary: Match multiple filter rule sets against one bbox
-      description: Batched variant of `POST /api/buildings/filter-matches`.
+      description: |
+        Batched variant of `POST /api/buildings/filter-matches`.
+        Each item includes `matchedLocations[]` for low-zoom marker fallback, alongside `matchedFeatureIds[]` for contour highlight.
+        When `renderMode=markers` and the zoom is below `5`, the backend can return aggregated marker cells with `count` instead of a full building list; zooms `5-12` keep stable point-level locations.
       requestBody:
         required: true
         content:
@@ -873,6 +881,9 @@ paths:
                   type: number
                 zoomBucket:
                   type: number
+                renderMode:
+                  type: string
+                  enum: [contours, markers]
                 requests:
                   type: array
                   items:

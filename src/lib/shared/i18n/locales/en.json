@@ -56,7 +56,7 @@
     "searchFailed": "Search failed",
     "mapLoading": "Loading map...",
     "filterStatus": {
-      "refining": "Refining",
+      "refining": "Applying filter",
       "tooMany": "Too many matches. Zoom in or refine.",
       "truncated": "Results truncated. Zoom in or refine.",
       "invalid": "Invalid filter"
@@ -259,7 +259,7 @@
       "label": "Status",
       "idle": "Idle",
       "applied": "Applied",
-      "refining": "Refining",
+      "refining": "Applying filter",
       "tooMany": "Too many matches. Zoom in or refine.",
       "truncated": "Results truncated. Zoom in or refine.",
       "invalid": "Invalid filter",

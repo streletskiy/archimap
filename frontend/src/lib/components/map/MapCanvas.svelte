@@ -12,6 +12,11 @@
     FILTER_TELEMETRY_ENABLED
   } from '$lib/services/map/map-filter-pipeline';
   import {
+    getFilterApplyOverlayState,
+    shouldShowFilterApplyOverlay,
+    shouldShowFilterRefiningMessage
+  } from '$lib/services/map/filter-overlay-utils';
+  import {
     applyBuildingThemePaint as applyBuildingThemePaintToLayers,
     applyBuildingPartsLayerVisibility as applyBuildingPartsLayerVisibilityToLayers,
     applyLabelLayerVisibility as applyMapLabelLayerVisibility,
@@ -42,6 +47,7 @@
     mapFocusRequest,
     mapLabelsVisible,
     mapBuildingPartsVisible,
+    mapZoom,
     setMapSelectionShiftKey,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
@@ -52,11 +58,13 @@
     setMapViewport,
     setMapZoom
   } from '$lib/stores/map';
-  import { buildingFilterLayers, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
+  import { buildingFilterLayers, buildingFilterRuntime, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchMapState, searchState } from '$lib/stores/search';
   import { createMapRegionLayersController } from './map-region-layers-controller';
   import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
+
+  const FILTER_APPLY_PROGRESS_TICK_MS = 120;
 
   const dispatch = createEventDispatcher();
 
@@ -77,6 +85,14 @@
   let stopBuildingFilterLayers = null;
   let currentBuildingFilterLayers = [];
   let filterStatusOverlayText;
+  let filterApplyClock = Date.now();
+  let filterApplyClockTimer = null;
+  let filterApplyVisible = false;
+  let currentMapZoom = Number.NaN;
+  let filterApplyOverlayState = {
+    visible: false,
+    progress: 0
+  };
   let cameraStoreSyncEnabled = false;
 
   beforeNavigate((navigation) => {
@@ -117,16 +133,31 @@
     };
   });
 
-  function getFilterStatusOverlayText(statusCode) {
+  function getFilterStatusOverlayText(statusCode, zoom = currentMapZoom) {
     const code = String(statusCode || 'idle');
-    if (code === 'refining') return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
+    if (code === 'refining' && shouldShowFilterRefiningMessage(code, zoom)) {
+      return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
+    }
     if (code === 'too_many_matches') return $t('mapPage.filterStatus.tooMany') || $t('header.filterStatus.tooMany');
     if (code === 'truncated') return $t('mapPage.filterStatus.truncated') || $t('header.filterStatus.truncated');
     if (code === 'invalid') return $t('mapPage.filterStatus.invalid') || $t('header.filterStatus.invalid');
     return '';
   }
 
-  $: filterStatusOverlayText = getFilterStatusOverlayText($filterState.statusCode);
+  $: currentMapZoom = Number($mapZoom ?? map?.getZoom?.() ?? Number.NaN);
+  $: filterStatusOverlayText = getFilterStatusOverlayText($filterState.statusCode, currentMapZoom);
+  $: filterApplyOverlayState = getFilterApplyOverlayState($filterState, $buildingFilterRuntime, filterApplyClock, currentMapZoom);
+  $: filterApplyVisible = shouldShowFilterApplyOverlay($filterState, currentMapZoom);
+  $: if (typeof window !== 'undefined') {
+    if (filterApplyVisible && !filterApplyClockTimer) {
+      filterApplyClockTimer = window.setInterval(() => {
+        filterApplyClock = Date.now();
+      }, FILTER_APPLY_PROGRESS_TICK_MS);
+    } else if (!filterApplyVisible && filterApplyClockTimer) {
+      clearInterval(filterApplyClockTimer);
+      filterApplyClockTimer = null;
+    }
+  }
 
   function isSelectionDebugEnabled() {
     const fromRuntimeConfig = Boolean(runtimeConfig?.mapSelection?.debug);
@@ -506,6 +537,10 @@
       clearTimeout(styleTransitionTimer);
       styleTransitionTimer = null;
     }
+    if (filterApplyClockTimer) {
+      clearInterval(filterApplyClockTimer);
+      filterApplyClockTimer = null;
+    }
     selectionController.destroy();
     regionLayersController.destroy();
     filterPipeline.destroy();
@@ -538,6 +573,9 @@
   filterStatusCode={$filterState.statusCode}
   {filterStatusOverlayText}
   filterErrorMessage={$filterState.errorMessage}
+  filterApplyVisible={filterApplyOverlayState.visible}
+  filterApplyLabel={$t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining')}
+  filterApplyProgress={filterApplyOverlayState.progress}
   {styleTransitionOverlaySrc}
   {styleTransitionOverlayVisible}
 />

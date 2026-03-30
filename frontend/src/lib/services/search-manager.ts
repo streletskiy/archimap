@@ -45,9 +45,44 @@ export function createSearchManager() {
   let lastViewportRefreshKey = '';
   let lastSearchMapRefreshKey = '';
   let lastSearchCommandId = null;
+  let lastSearchMapActive = false;
   let stopViewportSearchSync = null;
   let stopCommandSync = null;
   let stopSearchStateSync = null;
+
+  function clearSearchTimers() {
+    if (searchViewportRefreshTimer) {
+      clearTimeout(searchViewportRefreshTimer);
+      searchViewportRefreshTimer = null;
+    }
+    if (searchMapRefreshTimer) {
+      clearTimeout(searchMapRefreshTimer);
+      searchMapRefreshTimer = null;
+    }
+  }
+
+  function invalidateSearchRequests() {
+    activeSearchRequestToken += 1;
+    activeSearchMapRequestToken += 1;
+  }
+
+  function abortSearchRequests({ resetMapState = false }: { resetMapState?: boolean } = {}) {
+    if (activeSearchAbortController) {
+      activeSearchAbortController.abort();
+      activeSearchAbortController = null;
+    }
+    if (activeSearchMapAbortController) {
+      activeSearchMapAbortController.abort();
+      activeSearchMapAbortController = null;
+    }
+    clearSearchTimers();
+    invalidateSearchRequests();
+    lastViewportRefreshKey = '';
+    lastSearchMapRefreshKey = '';
+    if (resetMapState) {
+      resetSearchMapState();
+    }
+  }
 
   function scheduleViewportSearchRefresh(queryText) {
     if (searchViewportRefreshTimer) {
@@ -83,12 +118,13 @@ export function createSearchManager() {
     const currentSearch = get(searchState);
     const currentMapSearch = get(searchMapState);
     const activeQuery = String(currentSearch.query || '').trim();
+    const searchEnabled = Boolean(currentSearch?.mapActive) && activeQuery.length >= 2;
     const viewport = normalizeSearchViewport(viewportValue);
     const viewportHash = buildSearchViewportHash(viewport);
     const shouldRefreshViewportSearch = Boolean(
       viewport
       && viewportHash
-      && activeQuery.length >= 2
+      && searchEnabled
       && String(currentSearch.bboxHash || '')
       && viewportHash !== String(currentSearch.bboxHash || '')
       && !currentSearch.loading
@@ -103,7 +139,7 @@ export function createSearchManager() {
       }
     }
 
-    if (activeQuery.length < 2) {
+    if (!searchEnabled) {
       lastViewportRefreshKey = '';
       if (searchViewportRefreshTimer) {
         clearTimeout(searchViewportRefreshTimer);
@@ -114,7 +150,7 @@ export function createSearchManager() {
     const shouldRefreshMapSearch = Boolean(
       viewport
       && viewportHash
-      && activeQuery.length >= 2
+      && searchEnabled
       && String(currentMapSearch.bboxHash || '')
       && viewportHash !== String(currentMapSearch.bboxHash || '')
       && !currentMapSearch.loading
@@ -129,7 +165,7 @@ export function createSearchManager() {
       return;
     }
 
-    if (activeQuery.length < 2) {
+    if (!searchEnabled) {
       lastSearchMapRefreshKey = '';
       if (searchMapRefreshTimer) {
         clearTimeout(searchMapRefreshTimer);
@@ -264,6 +300,11 @@ export function createSearchManager() {
       lastSearchMapRefreshKey = '';
       return;
     }
+    if (!Boolean(get(searchState)?.mapActive)) {
+      resetSearchMapState();
+      lastSearchMapRefreshKey = '';
+      return;
+    }
 
     const viewport = normalizeSearchViewport(get(mapViewport));
     const viewportHash = buildSearchViewportHash(viewport);
@@ -374,32 +415,25 @@ export function createSearchManager() {
       stopCommandSync = searchCommand.subscribe(handleSearchCommand);
     }
     if (!stopSearchStateSync) {
+      lastSearchMapActive = Boolean(get(searchState)?.mapActive);
       stopSearchStateSync = searchState.subscribe((value) => {
-        if (String(value?.query || '').trim().length < 2) {
-          resetSearchMapState();
-          lastSearchMapRefreshKey = '';
+        const nextActive = Boolean(value?.mapActive);
+        if (nextActive === lastSearchMapActive) {
+          return;
+        }
+        lastSearchMapActive = nextActive;
+        if (!nextActive) {
+          abortSearchRequests({ resetMapState: true });
         }
       });
+      if (!lastSearchMapActive) {
+        abortSearchRequests({ resetMapState: true });
+      }
     }
   }
 
   function destroy() {
-    if (activeSearchAbortController) {
-      activeSearchAbortController.abort();
-      activeSearchAbortController = null;
-    }
-    if (activeSearchMapAbortController) {
-      activeSearchMapAbortController.abort();
-      activeSearchMapAbortController = null;
-    }
-    if (searchViewportRefreshTimer) {
-      clearTimeout(searchViewportRefreshTimer);
-      searchViewportRefreshTimer = null;
-    }
-    if (searchMapRefreshTimer) {
-      clearTimeout(searchMapRefreshTimer);
-      searchMapRefreshTimer = null;
-    }
+    abortSearchRequests({ resetMapState: false });
     if (stopViewportSearchSync) {
       stopViewportSearchSync();
       stopViewportSearchSync = null;

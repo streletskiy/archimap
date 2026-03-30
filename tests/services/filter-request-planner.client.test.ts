@@ -43,6 +43,23 @@ test('buildFilterRequestSpecs splits combined and standalone layers into stable 
   );
 });
 
+test('buildFilterRequestCacheKey separates contour and marker render modes', async () => {
+  const { buildFilterRequestCacheKey } = await loadFilterRequestPlanner();
+
+  const contourKey = buildFilterRequestCacheKey({
+    id: 'layer:example',
+    rulesHash: 'fnv1a-test'
+  }, 'coverage-test', 12.5, 'contours');
+  const markerKey = buildFilterRequestCacheKey({
+    id: 'layer:example',
+    rulesHash: 'fnv1a-test'
+  }, 'coverage-test', 12.5, 'markers');
+
+  assert.notEqual(contourKey, markerKey);
+  assert.equal(contourKey.endsWith(':contours'), true);
+  assert.equal(markerKey.endsWith(':markers'), true);
+});
+
 test('prepareFilterRequestPlan builds a worker-ready request plan', async () => {
   const { prepareFilterRequestPlan } = await loadFilterRequestPlanner();
   const prepared = prepareFilterRequestPlan([
@@ -102,9 +119,31 @@ test('buildResolvedLayerPayload combines AND/OR group intersections with standal
   ]);
 
   const payloadsByRequestId = new Map([
-    ['combined-and', { matchedFeatureIds: [2, 4], matchedKeys: [], meta: { elapsedMs: 7 } }],
-    ['combined-or:or-layer', { matchedFeatureIds: [2], matchedKeys: [], meta: { elapsedMs: 5 } }],
-    ['layer:standalone-layer', { matchedFeatureIds: [6], matchedKeys: [], meta: { elapsedMs: 3 } }]
+    ['combined-and', {
+      matchedFeatureIds: [2, 4],
+      matchedKeys: [],
+      matchedLocations: [
+        { id: 2, lon: 37.61, lat: 55.75, osmKey: 'way/1' },
+        { id: 4, lon: 37.62, lat: 55.76, osmKey: 'way/2' }
+      ],
+      meta: { elapsedMs: 7 }
+    }],
+    ['combined-or:or-layer', {
+      matchedFeatureIds: [2],
+      matchedKeys: [],
+      matchedLocations: [
+        { id: 2, lon: 37.61, lat: 55.75, osmKey: 'way/1' }
+      ],
+      meta: { elapsedMs: 5 }
+    }],
+    ['layer:standalone-layer', {
+      matchedFeatureIds: [6],
+      matchedKeys: [],
+      matchedLocations: [
+        { id: 6, lon: 37.63, lat: 55.77, osmKey: 'way/3' }
+      ],
+      meta: { elapsedMs: 3 }
+    }]
   ]);
 
   const resolved = buildResolvedLayerPayload({
@@ -120,8 +159,69 @@ test('buildResolvedLayerPayload combines AND/OR group intersections with standal
   assert.equal(resolved.meta.cacheHit, true);
   assert.equal(resolved.meta.elapsedMs, 15);
   assert.deepEqual(resolved.highlightColorGroups, [
-    { color: '#111111', ids: [2] },
-    { color: '#333333', ids: [6] }
+    {
+      color: '#111111',
+      ids: [2],
+      points: [
+        { id: 2, lon: 37.61, lat: 55.75, osmKey: 'way/1' }
+      ]
+    },
+    {
+      color: '#333333',
+      ids: [6],
+      points: [
+        { id: 6, lon: 37.63, lat: 55.77, osmKey: 'way/3' }
+      ]
+    }
+  ]);
+});
+
+test('buildResolvedLayerPayload preserves marker aggregation counts', async () => {
+  const {
+    buildFilterRequestSpecs,
+    buildResolvedLayerPayload
+  } = await loadFilterRequestPlanner();
+
+  const prepared = buildFilterRequestSpecs([
+    {
+      id: 'marker-layer',
+      mode: 'layer',
+      priority: 0,
+      color: '#111111',
+      rules: [{ key: 'name', op: 'contains', value: 'alpha' }]
+    }
+  ]);
+
+  const payloadsByRequestId = new Map([
+    ['layer:marker-layer', {
+      matchedFeatureIds: [9001],
+      matchedKeys: ['cell:18:1:1'],
+      matchedLocations: [
+        { id: 9001, lon: 37.61, lat: 55.75, count: 4, osmKey: 'cell:18:1:1' }
+      ],
+      meta: { elapsedMs: 9 }
+    }]
+  ]);
+
+  const resolved = buildResolvedLayerPayload({
+    prepared: {
+      ...prepared,
+      renderMode: 'markers',
+      rulesHash: 'fnv1a-marker'
+    },
+    payloadsByRequestId,
+    cacheHit: false
+  });
+
+  assert.equal(resolved.matchedCount, 4);
+  assert.deepEqual(resolved.highlightColorGroups, [
+    {
+      color: '#111111',
+      ids: [9001],
+      points: [
+        { id: 9001, lon: 37.61, lat: 55.75, count: 4, osmKey: 'cell:18:1:1' }
+      ]
+    }
   ]);
 });
 

@@ -1,6 +1,14 @@
 const { createLruCache } = require('../infra/lru-cache.infra');
 const { createBuildingFilterQueryService } = require('./building-filter-query.service');
 const {
+  normalizeRenderMode,
+  shouldAggregateMarkerMatches,
+  getMarkerAggregationLegacyCellSize,
+  getMarkerAggregationGridShape,
+  buildMarkerAggregationCellKey,
+  buildMarkerAggregationCellId
+} = require('./building-filter-marker-aggregation');
+const {
   ARCHI_RULE_KEYS,
   FILTER_RULE_OPS,
   NUMERIC_FILTER_RULE_OPS,
@@ -174,6 +182,8 @@ function buildFilterMatchPayload({
   id = '',
   matchedKeys = [],
   matchedFeatureIds = [],
+  matchedLocations = [],
+  matchedCount = null,
   rulesHash = 'fnv1a-0',
   bboxHash = '',
   truncated = false,
@@ -183,6 +193,8 @@ function buildFilterMatchPayload({
   const payload = {
     matchedKeys,
     matchedFeatureIds,
+    matchedLocations,
+    ...(matchedCount != null ? { matchedCount: Number(matchedCount) || 0 } : {}),
     meta: {
       rulesHash,
       bboxHash,
@@ -252,21 +264,126 @@ function getBatchFilterMatchCandidateLimit(requests) {
   );
 }
 
-function buildFilterMatchResultForRules(items, rules, maxResults) {
+function buildFilterMatchResultForRules(items, rules, maxResults, {
+  bbox = null,
+  renderMode = 'contours',
+  zoomBucket = 0
+} = {}) {
   const matchedKeys = [];
   const matchedFeatureIds = [];
+  const matchedLocations = [];
+  const aggregateMarkers = shouldAggregateMarkerMatches(renderMode, zoomBucket);
+  const safeMaxResults = aggregateMarkers
+    ? FILTER_MATCH_CANDIDATE_CAP
+    : Math.max(1, Math.trunc(Number(maxResults) || FILTER_MATCH_DEFAULT_RESULTS));
   let truncated = false;
+  let matchedCount = 0;
+
+  if (aggregateMarkers) {
+    const markerGrid = getMarkerAggregationGridShape(zoomBucket, bbox);
+    const markerBBox = markerGrid.bbox;
+    const gridKey = markerBBox
+      ? `${markerGrid.columns}x${markerGrid.rows}`
+      : `${getMarkerAggregationLegacyCellSize(zoomBucket)}`;
+    const cells = new Map();
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const ok = rules.every((rule) => matchesFilterRule(item, rule));
+      if (!ok) continue;
+      matchedCount += 1;
+      const lon = Number(item.centerLon);
+      const lat = Number(item.centerLat);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+        continue;
+      }
+      let cellX = 0;
+      let cellY = 0;
+      let centerLon = lon;
+      let centerLat = lat;
+      if (markerBBox) {
+        const cellWidth = markerBBox.width / markerGrid.columns;
+        const cellHeight = markerBBox.height / markerGrid.rows;
+        if (cellWidth > 0 && cellHeight > 0) {
+          cellX = Math.max(0, Math.min(markerGrid.columns - 1, Math.floor((lon - markerBBox.west) / cellWidth)));
+          cellY = Math.max(0, Math.min(markerGrid.rows - 1, Math.floor((lat - markerBBox.south) / cellHeight)));
+          centerLon = markerBBox.west + ((cellX + 0.5) * cellWidth);
+          centerLat = markerBBox.south + ((cellY + 0.5) * cellHeight);
+        }
+      } else {
+        const cellSize = getMarkerAggregationLegacyCellSize(zoomBucket);
+        cellX = Math.floor((lon + 180) / cellSize);
+        cellY = Math.floor((lat + 90) / cellSize);
+        centerLon = ((cellX + 0.5) * cellSize) - 180;
+        centerLat = ((cellY + 0.5) * cellSize) - 90;
+      }
+      const key = buildMarkerAggregationCellKey(zoomBucket, gridKey, cellX, cellY);
+      let cell = cells.get(key);
+      if (!cell) {
+        cell = {
+          id: buildMarkerAggregationCellId(key),
+          key,
+          cellX,
+          cellY,
+          lonSum: 0,
+          latSum: 0,
+          count: 0
+        };
+        cells.set(key, cell);
+      }
+      cell.lonSum += centerLon;
+      cell.latSum += centerLat;
+      cell.count += 1;
+    }
+
+    const limitedCells = [...cells.values()]
+      .sort((left, right) => left.id - right.id)
+      .slice(0, safeMaxResults);
+    truncated = cells.size > limitedCells.length;
+    for (const cell of limitedCells) {
+      matchedKeys.push(cell.key);
+      matchedFeatureIds.push(cell.id);
+      matchedLocations.push({
+        id: cell.id,
+        lon: cell.lonSum / cell.count,
+        lat: cell.latSum / cell.count,
+        count: cell.count,
+        osmKey: cell.key
+      });
+    }
+
+    return {
+      matchedKeys,
+      matchedFeatureIds,
+      matchedLocations,
+      matchedCount,
+      truncated
+    };
+  }
 
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     const ok = rules.every((rule) => matchesFilterRule(item, rule));
     if (!ok) continue;
+    matchedCount += 1;
     matchedKeys.push(item.osmKey);
     const parsed = parseOsmKey(item.osmKey);
     if (parsed) {
-      matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
+      const featureId = encodeOsmFeatureId(parsed.osmType, parsed.osmId);
+      matchedFeatureIds.push(featureId);
+      const lon = Number(item.centerLon);
+      const lat = Number(item.centerLat);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) {
+        matchedLocations.push({
+          id: featureId,
+          lon,
+          lat,
+          count: 1,
+          osmKey: item.osmKey
+        });
+      }
     }
-    if (matchedKeys.length >= maxResults) {
+    if (matchedCount >= safeMaxResults) {
       truncated = true;
       break;
     }
@@ -275,26 +392,38 @@ function buildFilterMatchResultForRules(items, rules, maxResults) {
   return {
     matchedKeys,
     matchedFeatureIds,
+    matchedLocations,
+    matchedCount,
     truncated
   };
 }
 
 function buildFilterMatchBatchResults(items, requests, {
+  bbox = null,
   bboxHash = '',
   elapsedMs = 0,
   cacheHit = false,
-  forceTruncated = false
+  forceTruncated = false,
+  renderMode = 'contours',
+  zoomBucket = 0
 } = {}) {
   return (Array.isArray(requests) ? requests : []).map((request) => {
     const result = buildFilterMatchResultForRules(
       Array.isArray(items) ? items : [],
       Array.isArray(request?.rules) ? request.rules : [],
-      Number(request?.maxResults || FILTER_MATCH_DEFAULT_RESULTS)
+      Number(request?.maxResults || FILTER_MATCH_DEFAULT_RESULTS),
+      {
+        bbox,
+        renderMode,
+        zoomBucket
+      }
     );
     return buildFilterMatchPayload({
       id: request?.id,
       matchedKeys: result.matchedKeys,
       matchedFeatureIds: result.matchedFeatureIds,
+      matchedLocations: result.matchedLocations,
+      matchedCount: result.matchedCount,
       rulesHash: request?.rulesHash,
       bboxHash,
       truncated: forceTruncated || result.truncated,
@@ -427,10 +556,11 @@ function createBuildingFiltersService({
 
     const { minLon, minLat, maxLon, maxLat } = bbox;
     const zoomBucket = resolveZoomBucket(body);
+    const renderMode = normalizeRenderMode(body?.renderMode);
     const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
     const actorKey = normalizeActorKey(actorKeyRaw) || 'anon';
     const queryMode = queryService.getBboxQueryMode();
-    const cacheKey = `${actorKey}:batch:${bboxHash}:${zoomBucket}:${queryMode}:${normalizedRequests.map((request) => `${request.id}:${request.rulesHash}:${request.maxResults}`).join('|')}`;
+    const cacheKey = `${actorKey}:batch:${bboxHash}:${zoomBucket}:${renderMode}:${queryMode}:${normalizedRequests.map((request) => `${request.id}:${request.rulesHash}:${request.maxResults}`).join('|')}`;
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
       return {
@@ -478,10 +608,13 @@ function createBuildingFiltersService({
       : await applyPersonalEditsToRows(candidateRows, actorKeyRaw, applyPersonalEditsToFilterItems, queryService.mapFilterDataRow);
     const elapsedMs = Date.now() - startedAt;
     const items = buildFilterMatchBatchResults(candidateItems, normalizedRequests, {
+      bbox,
       bboxHash,
       elapsedMs,
       cacheHit: false,
-      forceTruncated: candidateRows.length >= candidateLimit
+      forceTruncated: candidateRows.length >= candidateLimit,
+      renderMode,
+      zoomBucket
     });
     const payload = {
       items,
@@ -528,11 +661,12 @@ function createBuildingFiltersService({
     );
     const { minLon, minLat, maxLon, maxLat } = bbox;
     const rulesHash = String(body?.rulesHash || '').trim() || stableRulesHash(normalizedRules);
+    const renderMode = normalizeRenderMode(body?.renderMode);
     const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
     const zoomBucket = resolveZoomBucket(body);
     const actorKey = normalizeActorKey(actorKeyRaw) || 'anon';
     const queryMode = queryService.getBboxQueryMode();
-    const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${maxResults}:${queryMode}`;
+    const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${renderMode}:${maxResults}:${queryMode}`;
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
       return {
@@ -551,6 +685,8 @@ function createBuildingFiltersService({
       const payload = {
         matchedKeys: [],
         matchedFeatureIds: [],
+        matchedLocations: [],
+        matchedCount: 0,
         meta: {
           rulesHash,
           bboxHash,
@@ -563,12 +699,17 @@ function createBuildingFiltersService({
       return { payload };
     }
 
-    const matchedKeys = [];
-    const matchedFeatureIds = [];
-    let truncated = false;
-
+    let matchedResult = {
+      matchedKeys: [],
+      matchedFeatureIds: [],
+      matchedLocations: [],
+      matchedCount: 0,
+      truncated: false
+    };
     if (queryService.isPostgres && actorKey === 'anon') {
       const splitRules = splitPostgresPushdownRules(normalizedRules);
+      const aggregateMarkers = shouldAggregateMarkerMatches(renderMode, zoomBucket);
+      const tagOnlyMaxResults = aggregateMarkers ? FILTER_MATCH_CANDIDATE_CAP : maxResults;
       const rows = splitRules.fallbackRules.length === 0
         ? await queryService.selectTagOnlyPostgresMatchRowsByBbox({
           minLon,
@@ -576,20 +717,18 @@ function createBuildingFiltersService({
           maxLon,
           maxLat,
           rules: splitRules.tagOnlyRules,
-          maxResults
+          maxResults: tagOnlyMaxResults
         })
         : null;
 
       if (rows) {
-        const limitedRows = rows.length > maxResults ? rows.slice(0, maxResults) : rows;
-        truncated = rows.length > maxResults;
-        for (const row of limitedRows) {
-          const osmType = String(row.osm_type || '');
-          const osmId = Number(row.osm_id);
-          if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId)) continue;
-          matchedKeys.push(`${osmType}/${osmId}`);
-          matchedFeatureIds.push(encodeOsmFeatureId(osmType, osmId));
-        }
+        const candidateItems = rows.map(queryService.mapFilterDataRow);
+        matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
+          bbox,
+          renderMode,
+          zoomBucket
+        });
+        matchedResult.truncated = rows.length > tagOnlyMaxResults || matchedResult.truncated;
       } else {
         const candidateLimit = getFilterMatchCandidateLimit(normalizedRules, maxResults);
         const candidateRows = await queryService.selectGuardedPostgresCandidateRowsByBbox({
@@ -602,23 +741,12 @@ function createBuildingFiltersService({
           candidateLimit
         });
         const candidateItems = candidateRows.map(queryService.mapFilterDataRow);
-        for (let index = 0; index < candidateItems.length; index += 1) {
-          const item = candidateItems[index];
-          const ok = normalizedRules.every((rule) => matchesFilterRule(item, rule));
-          if (!ok) continue;
-          matchedKeys.push(item.osmKey);
-          const parsed = parseOsmKey(item.osmKey);
-          if (parsed) {
-            matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
-          }
-          if (matchedKeys.length >= maxResults) {
-            truncated = true;
-            break;
-          }
-        }
-        if (!truncated && candidateRows.length >= candidateLimit) {
-          truncated = true;
-        }
+        matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
+          bbox,
+          renderMode,
+          zoomBucket
+        });
+        matchedResult.truncated = candidateRows.length >= candidateLimit || matchedResult.truncated;
       }
     } else {
       const candidateLimit = getFilterMatchCandidateLimit(normalizedRules, maxResults);
@@ -629,32 +757,23 @@ function createBuildingFiltersService({
         applyPersonalEditsToFilterItems,
         queryService.mapFilterDataRow
       );
-      for (let index = 0; index < candidateItems.length; index += 1) {
-        const item = candidateItems[index];
-        const ok = normalizedRules.every((rule) => matchesFilterRule(item, rule));
-        if (!ok) continue;
-        matchedKeys.push(item.osmKey);
-        const parsed = parseOsmKey(item.osmKey);
-        if (parsed) {
-          matchedFeatureIds.push(encodeOsmFeatureId(parsed.osmType, parsed.osmId));
-        }
-        if (matchedKeys.length >= maxResults) {
-          truncated = true;
-          break;
-        }
-      }
-      if (!truncated && candidateRows.length >= candidateLimit) {
-        truncated = true;
-      }
+      matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
+        bbox,
+        renderMode,
+        zoomBucket
+      });
+      matchedResult.truncated = candidateRows.length >= candidateLimit || matchedResult.truncated;
     }
 
     const payload = {
-      matchedKeys,
-      matchedFeatureIds,
+      matchedKeys: matchedResult.matchedKeys,
+      matchedFeatureIds: matchedResult.matchedFeatureIds,
+      matchedLocations: matchedResult.matchedLocations,
+      matchedCount: matchedResult.matchedCount,
       meta: {
         rulesHash,
         bboxHash,
-        truncated,
+        truncated: matchedResult.truncated,
         elapsedMs: Date.now() - startedAt,
         cacheHit: false
       }

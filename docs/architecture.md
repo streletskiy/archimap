@@ -39,6 +39,7 @@
 - Building filter backend decomposition:
   - `src/lib/server/http/buildings.route.ts`: thin HTTP wiring for building/filter endpoints
   - `src/lib/server/services/building-filters.service.ts`: filter-data/filter-matches orchestration, cache policy, request normalization
+  - `src/lib/server/services/building-filter-marker-aggregation.ts`: low-zoom marker aggregation helpers and stable cell-id generation
   - `src/lib/server/services/building-filter-query.service.ts`: bbox/key query selection for SQLite RTREE/plain paths and PostGIS paths
   - `src/lib/server/utils/filter-sql-builder.ts`: isolated Postgres predicate/guard SQL builder for filter rules
 - Building edit backend decomposition:
@@ -124,6 +125,14 @@
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
   - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
+- Zoom-aware highlight rendering switches below zoom `13` from contour highlight to clustered marker fallback:
+  - the client reuses `matchedLocations[]` from `filter-matches`, or centroid coordinates from `filter-data`, to place marker points;
+  - each filter color gets its own clustered marker source/layers, and unclustered points use a tiny deterministic coordinate jitter so overlapping matches do not sit exactly on top of each other;
+  - below zoom `5` the backend aggregates marker-mode matches into viewport-relative cells and includes `count` on each returned point, so the client does not need the full building list for only the most zoomed-out views;
+  - the marker path uses a larger low-zoom match budget and does not surface the contour-style truncation warning, because the rendered output is already an intentionally clustered approximation;
+  - the centered "filter applying" overlay is suppressed on contour zooms (`z13+`) so camera moves do not keep popping a blocking loader while PMTiles building contours stay visible;
+  - the marker layer stack stays above the building base layers but below search result overlays.
+- Search and filter overlays are mutually exclusive on the map: the last applied mode wins, and a new search request clears active filter layers while activating the search overlay; a new filter application deactivates the map search overlay before the filter result markers are applied.
 - Multi-layer execution stays client-side:
   - all `and` and `or` layers are resolved as one combined logical group;
   - each `layer` mode layer is fetched independently;

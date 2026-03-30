@@ -124,6 +124,8 @@ Docker downloads only changed layers during pull.
 docker compose up -d
 ```
 
+The Compose service sets `shm_size: 512m` for `db-postgres` because Docker's default 64MB `/dev/shm` is often too small for PostGIS parallel workers and bbox filter queries.
+
 Pending PostgreSQL migrations are applied automatically on app startup. Manual migrations/smoke remain available in the compose network for recovery or verification:
 
 ```bash
@@ -134,6 +136,8 @@ docker compose exec archimap npm run db:pg:smoke
 When an updated image contains storage-compaction PostgreSQL migrations, the first container start applies them automatically to the existing database. Expect a longer first boot and keep extra free disk space available temporarily while large tables are rebuilt.
 
 Avoid bind-mounting local `./db` into `/app/db` on deployment hosts. The runtime image already contains `db/postgres/migrations`, and masking that path can make the app start against an empty schema.
+
+If PostgreSQL logs `could not resize shared memory segment` or `could not attach to dynamic shared area` during `POST /api/buildings/filter-matches`, raise the `shm_size` value further or reduce parallelism for the affected query.
 
 ## Validate Layer Sizes
 
