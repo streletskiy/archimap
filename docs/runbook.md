@@ -58,8 +58,8 @@
 
 ## Data refresh
 
-1. Update region settings in `Admin -> Data`.
-2. Run `Sync now` for the target region or `npm run tiles:build -- --region-id=<id>`.
+1. Open `Admin -> Data`, select or create the target region in the modal editor, and update its settings there.
+2. Run `Sync now` for the target region from the same modal or `npm run tiles:build -- --region-id=<id>`.
 3. Optional maintenance rebuild without re-import:
    - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`
 4. Verify PMTiles:
@@ -87,6 +87,16 @@
 - Validate FTS source/index integrity.
 - Re-run sync/rebuild flow.
 - Check `/metrics` when enabled and request logs for high latency spikes.
+
+### PostgreSQL shared memory exhausted
+
+- Symptoms:
+  - `could not resize shared memory segment ... No space left on device`
+  - `could not attach to dynamic shared area`
+  - `parallel worker` exit messages in the Postgres log
+- Usually triggered by a heavy spatial filter query, especially `POST /api/buildings/filter-matches`.
+- In Docker Compose, raise the `db-postgres` `shm_size` value above the default `512m` if the workload still exhausts shared memory.
+- For non-Compose deployments, increase the container or host `/dev/shm` allocation, or disable parallel workers for the affected query path.
 
 ### Auth appears broken in local docker
 

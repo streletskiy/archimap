@@ -48,7 +48,7 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 - `SESSION_COOKIE_SECURE`
 - `SESSION_ALLOW_MEMORY_FALLBACK`
 - `APP_SETTINGS_SECRET`
-- `CSP_CONNECT_SRC_EXTRA`
+- `CSP_CONNECT_SRC_EXTRA` - defaults to CARTO tile hosts plus the public Overpass origins used by the browser fallback
 
 ## Observability and app identity
 

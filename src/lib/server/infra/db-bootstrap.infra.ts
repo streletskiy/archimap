@@ -366,6 +366,7 @@ CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
   created_by TEXT NOT NULL,
   source_osm_version INTEGER,
   source_tags_json TEXT,
+  source_geometry_json TEXT,
   source_osm_updated_at TEXT,
   name TEXT,
   style TEXT,

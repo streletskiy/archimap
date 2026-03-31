@@ -25,7 +25,7 @@
     "test:smoke": "node --import tsx scripts/smoke-test.ts",
     "perf:smoke": "node --import tsx scripts/perf-smoke.ts",
     "analyze": "npm --prefix frontend run analyze",
-    "depcheck": "depcheck --ignores=\"@eslint/js,globals,eslint-config-prettier,eslint-plugin-svelte,svelte\"",
+    "depcheck": "depcheck --ignores=\"@eslint/js,globals,eslint-config-prettier,eslint-plugin-svelte,svelte,$shared\"",
     "dev": "npm run dev:full",
     "dev:server": "node --import tsx server.sveltekit.ts",
     "dev:full": "npm run frontend:build && node --import tsx server.sveltekit.ts",
@@ -61,9 +61,9 @@
     "better-sqlite3": "^12.8.0",
     "connect-redis": "^9.0.0",
     "dotenv": "^17.3.1",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-orm": "^0.45.2",
     "express-session": "^1.19.0",
-    "nodemailer": "^8.0.3",
+    "nodemailer": "^8.0.4",
     "pg": "^8.20.0",
     "redis": "^5.8.2",
     "tsx": "^4.21.0",
@@ -74,14 +74,13 @@
     "@playwright/test": "^1.54.2",
     "@types/node": "^25.5.0",
     "depcheck": "^1.4.7",
-    "drizzle-kit": "1.0.0-beta.19-2a36fd0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-svelte": "^3.16.0",
     "globals": "^17.4.0",
     "prettier": "^3.5.3",
-    "svelte": "^5.54.1",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2"
+    "svelte": "^5.55.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.0"
   }
 }

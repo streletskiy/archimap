@@ -315,17 +315,134 @@ test('listSyncCandidates groups accepted edits by building and exposes sync stat
 
   const candidates = await service.listSyncCandidates();
 
-  assert.equal(candidates.length, 2);
-  const first = candidates.find((item) => item.osmId === 101);
+  assert.equal(candidates.total, 2);
+  assert.equal(candidates.page, 1);
+  assert.equal(candidates.pageSize, 200);
+  assert.equal(candidates.pageCount, 1);
+  assert.equal(candidates.items.length, 2);
+  const first = candidates.items.find((item) => item.osmId === 101);
   assert.equal(first.totalEdits, 2);
   assert.equal(first.syncStatus, 'synced');
   assert.equal(first.syncReadOnly, true);
   assert.equal(first.canSync, false);
 
-  const second = candidates.find((item) => item.osmId === 202);
+  const second = candidates.items.find((item) => item.osmId === 202);
   assert.equal(second.syncStatus, 'failed');
   assert.equal(second.syncReadOnly, false);
   assert.equal(second.canSync, true);
+
+  const activeCandidates = await service.listSyncCandidates({ sync: 'active', limit: 1, page: 1 });
+  assert.equal(activeCandidates.total, 1);
+  assert.equal(activeCandidates.pageCount, 1);
+  assert.equal(activeCandidates.items[0].osmId, 202);
+
+  const archivedCandidates = await service.listSyncCandidates({ sync: 'archived', limit: 1, page: 1 });
+  assert.equal(archivedCandidates.total, 1);
+  assert.equal(archivedCandidates.pageCount, 1);
+  assert.equal(archivedCandidates.items[0].osmId, 101);
+});
+
+test('listSyncCandidates derives displayAddress from contour address tags', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run(
+    'way',
+    150,
+    JSON.stringify({
+      'addr:street': 'улица Нестерова',
+      'addr:housenumber': '4А'
+    }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(`
+    INSERT INTO local.architectural_info (
+      osm_type, osm_id, updated_at
+    ) VALUES (?, ?, ?)
+  `).run('way', 150, '2026-01-02T00:00:00Z');
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(150, 'way', 150, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z', 'New Name', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+
+  const candidates = await service.listSyncCandidates();
+  const candidate = candidates.items.find((item) => item.osmId === 150);
+
+  assert.ok(candidate);
+  assert.equal(candidate.displayAddress, 'улица Нестерова, 4А');
+});
+
+test('listSyncCandidates reactivates a building when a newer accepted edit is still unsynced', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run('way', 303, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
+  db.prepare(`
+    INSERT INTO local.architectural_info (
+      osm_type, osm_id, name, updated_at
+    ) VALUES (?, ?, ?, ?)
+  `).run('way', 303, 'New Name', '2026-01-04T00:00:00Z');
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    4,
+    'way',
+    303,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'synced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    5,
+    'way',
+    303,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-04T00:00:00Z',
+    '2026-01-04T00:00:00Z'
+  );
+
+  const candidates = await service.listSyncCandidates();
+  const candidate = candidates.items.find((item) => item.osmId === 303);
+
+  assert.ok(candidate);
+  assert.equal(candidate.totalEdits, 2);
+  assert.equal(candidate.latestEditId, 5);
+  assert.equal(candidate.syncStatus, 'unsynced');
+  assert.equal(candidate.syncReadOnly, false);
+  assert.equal(candidate.canSync, true);
 });
 
 test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can list candidates', async () => {
@@ -380,7 +497,7 @@ test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can li
           }
           return [];
         },
-        get: () => null,
+        get: () => (text.includes('COUNT(*) AS total') ? { total: rows.length } : null),
         run: () => ({ changes: 0, lastInsertRowid: 0 })
       };
     }
@@ -389,9 +506,10 @@ test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can li
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
   const candidates = await service.listSyncCandidates();
 
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].osmId, 80061889);
-  assert.ok(preparedSql.some((sql) => sql.includes('ORDER BY ue.updated_at DESC, ue.id DESC')));
+  assert.equal(candidates.total, 1);
+  assert.equal(candidates.items.length, 1);
+  assert.equal(candidates.items[0].osmId, 80061889);
+  assert.ok(preparedSql.some((sql) => sql.includes('ORDER BY page_groups.latest_updated_at DESC, ranked.updated_at DESC, ranked.id DESC')));
   assert.ok(!preparedSql.some((sql) => sql.includes('ORDER BY datetime(ue.updated_at)')));
 });
 

@@ -30,10 +30,30 @@ import {
 } from '$lib/utils/architecture-style';
 import { isAbortError } from '$lib/utils/error';
 import { clampText } from '$lib/utils/text';
+import { searchOverpassBuildings } from '$lib/services/map/overpass-buildings';
 
 const SEARCH_PAGE_SIZE = 120;
 const SEARCH_MAP_RESULTS_LIMIT = 5000;
 const SEARCH_VIEWPORT_REFRESH_DEBOUNCE_MS = 260;
+
+function getSearchItemKey(item) {
+  const osmType = String(item?.osmType || '').trim();
+  const osmId = Number(item?.osmId);
+  if (!osmType || !Number.isInteger(osmId) || osmId <= 0) return '';
+  return `${osmType}/${osmId}`;
+}
+
+function mergeSearchItems(primaryItems, secondaryItems) {
+  const merged = [];
+  const seen = new Set();
+  for (const item of [...(Array.isArray(primaryItems) ? primaryItems : []), ...(Array.isArray(secondaryItems) ? secondaryItems : [])]) {
+    const key = getSearchItemKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged;
+}
 
 export function createSearchManager() {
   let activeSearchRequestToken = 0;
@@ -45,9 +65,44 @@ export function createSearchManager() {
   let lastViewportRefreshKey = '';
   let lastSearchMapRefreshKey = '';
   let lastSearchCommandId = null;
+  let lastSearchMapActive = false;
   let stopViewportSearchSync = null;
   let stopCommandSync = null;
   let stopSearchStateSync = null;
+
+  function clearSearchTimers() {
+    if (searchViewportRefreshTimer) {
+      clearTimeout(searchViewportRefreshTimer);
+      searchViewportRefreshTimer = null;
+    }
+    if (searchMapRefreshTimer) {
+      clearTimeout(searchMapRefreshTimer);
+      searchMapRefreshTimer = null;
+    }
+  }
+
+  function invalidateSearchRequests() {
+    activeSearchRequestToken += 1;
+    activeSearchMapRequestToken += 1;
+  }
+
+  function abortSearchRequests({ resetMapState = false }: { resetMapState?: boolean } = {}) {
+    if (activeSearchAbortController) {
+      activeSearchAbortController.abort();
+      activeSearchAbortController = null;
+    }
+    if (activeSearchMapAbortController) {
+      activeSearchMapAbortController.abort();
+      activeSearchMapAbortController = null;
+    }
+    clearSearchTimers();
+    invalidateSearchRequests();
+    lastViewportRefreshKey = '';
+    lastSearchMapRefreshKey = '';
+    if (resetMapState) {
+      resetSearchMapState();
+    }
+  }
 
   function scheduleViewportSearchRefresh(queryText) {
     if (searchViewportRefreshTimer) {
@@ -83,12 +138,13 @@ export function createSearchManager() {
     const currentSearch = get(searchState);
     const currentMapSearch = get(searchMapState);
     const activeQuery = String(currentSearch.query || '').trim();
+    const searchEnabled = Boolean(currentSearch?.mapActive) && activeQuery.length >= 2;
     const viewport = normalizeSearchViewport(viewportValue);
     const viewportHash = buildSearchViewportHash(viewport);
     const shouldRefreshViewportSearch = Boolean(
       viewport
       && viewportHash
-      && activeQuery.length >= 2
+      && searchEnabled
       && String(currentSearch.bboxHash || '')
       && viewportHash !== String(currentSearch.bboxHash || '')
       && !currentSearch.loading
@@ -103,7 +159,7 @@ export function createSearchManager() {
       }
     }
 
-    if (activeQuery.length < 2) {
+    if (!searchEnabled) {
       lastViewportRefreshKey = '';
       if (searchViewportRefreshTimer) {
         clearTimeout(searchViewportRefreshTimer);
@@ -114,7 +170,7 @@ export function createSearchManager() {
     const shouldRefreshMapSearch = Boolean(
       viewport
       && viewportHash
-      && activeQuery.length >= 2
+      && searchEnabled
       && String(currentMapSearch.bboxHash || '')
       && viewportHash !== String(currentMapSearch.bboxHash || '')
       && !currentMapSearch.loading
@@ -129,7 +185,7 @@ export function createSearchManager() {
       return;
     }
 
-    if (activeQuery.length < 2) {
+    if (!searchEnabled) {
       lastSearchMapRefreshKey = '';
       if (searchMapRefreshTimer) {
         clearTimeout(searchMapRefreshTimer);
@@ -192,8 +248,11 @@ export function createSearchManager() {
         }));
         if (token !== activeSearchRequestToken) return;
         const merged = mergeChunkedSearchResults(chunks);
-
-        const filtered = filterSearchItemsByStyleKeys(merged, styleSearchKeys);
+        const localOverpassItems = searchOverpassBuildings(text).filter(Boolean);
+        const filtered = filterSearchItemsByStyleKeys(
+          mergeSearchItems(merged, localOverpassItems),
+          styleSearchKeys
+        );
         applySearchResults({
           query: text,
           items: filtered.slice(0, SEARCH_PAGE_SIZE),
@@ -232,7 +291,11 @@ export function createSearchManager() {
       });
       if (token !== activeSearchRequestToken) return;
       const itemsRaw = Array.isArray(data?.items) ? data.items : [];
-      const items = filterSearchItemsByStyleKey(itemsRaw, styleSearchKey);
+      const localOverpassItems = append ? [] : searchOverpassBuildings(text);
+      const items = filterSearchItemsByStyleKey(
+        mergeSearchItems(itemsRaw, localOverpassItems),
+        styleSearchKey
+      );
       applySearchResults({
         query: text,
         items,
@@ -260,6 +323,11 @@ export function createSearchManager() {
   async function runSearchMapRequest(queryText, { background = false }: LooseRecord = {}) {
     const text = clampText(queryText);
     if (text.length < 2) {
+      resetSearchMapState();
+      lastSearchMapRefreshKey = '';
+      return;
+    }
+    if (!get(searchState)?.mapActive) {
       resetSearchMapState();
       lastSearchMapRefreshKey = '';
       return;
@@ -334,7 +402,14 @@ export function createSearchManager() {
       if (token !== activeSearchMapRequestToken) return;
 
       const itemsRaw = Array.isArray(data?.items) ? data.items : [];
-      const items = filterSearchItemsByStyleKey(itemsRaw, styleSearchKey);
+      const localOverpassItems = searchOverpassBuildings(text, {
+        viewport,
+        limit: SEARCH_MAP_RESULTS_LIMIT
+      });
+      const items = filterSearchItemsByStyleKey(
+        mergeSearchItems(itemsRaw, localOverpassItems),
+        styleSearchKey
+      );
       applySearchMapResults({
         query: text,
         bboxHash: viewportHash,
@@ -374,32 +449,25 @@ export function createSearchManager() {
       stopCommandSync = searchCommand.subscribe(handleSearchCommand);
     }
     if (!stopSearchStateSync) {
+      lastSearchMapActive = Boolean(get(searchState)?.mapActive);
       stopSearchStateSync = searchState.subscribe((value) => {
-        if (String(value?.query || '').trim().length < 2) {
-          resetSearchMapState();
-          lastSearchMapRefreshKey = '';
+        const nextActive = Boolean(value?.mapActive);
+        if (nextActive === lastSearchMapActive) {
+          return;
+        }
+        lastSearchMapActive = nextActive;
+        if (!nextActive) {
+          abortSearchRequests({ resetMapState: true });
         }
       });
+      if (!lastSearchMapActive) {
+        abortSearchRequests({ resetMapState: true });
+      }
     }
   }
 
   function destroy() {
-    if (activeSearchAbortController) {
-      activeSearchAbortController.abort();
-      activeSearchAbortController = null;
-    }
-    if (activeSearchMapAbortController) {
-      activeSearchMapAbortController.abort();
-      activeSearchMapAbortController = null;
-    }
-    if (searchViewportRefreshTimer) {
-      clearTimeout(searchViewportRefreshTimer);
-      searchViewportRefreshTimer = null;
-    }
-    if (searchMapRefreshTimer) {
-      clearTimeout(searchMapRefreshTimer);
-      searchMapRefreshTimer = null;
-    }
+    abortSearchRequests({ resetMapState: false });
     if (stopViewportSearchSync) {
       stopViewportSearchSync();
       stopViewportSearchSync = null;

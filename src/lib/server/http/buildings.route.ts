@@ -12,6 +12,56 @@ const {
 } = require('../utils/filter-sql-builder');
 const { getFeatureKindFromTagsJson } = require('../utils/building-feature-kind');
 
+function normalizeJsonText(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed == null) return null;
+      return JSON.stringify(parsed);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeText(value) {
+  const text = String(value == null ? '' : value).trim();
+  return text ? text : null;
+}
+
+function buildSourceSnapshot(options: any = {}) {
+  const snapshotOptions = options || {};
+  const contourRow = snapshotOptions.contourRow ?? null;
+  const body = snapshotOptions.body ?? {};
+  const fallbackRow = snapshotOptions.fallbackRow ?? null;
+  if (contourRow) {
+    return {
+      sourceGeometryJson: normalizeJsonText(contourRow.geometry_json),
+      sourceTagsJson: normalizeJsonText(contourRow.tags_json),
+      sourceOsmUpdatedAt: normalizeText(contourRow.updated_at)
+    };
+  }
+
+  const bodyGeometryJson = normalizeJsonText(body?.sourceGeometryJson);
+  const bodyTagsJson = normalizeJsonText(body?.sourceTagsJson);
+  const fallbackGeometryJson = normalizeJsonText(fallbackRow?.source_geometry_json);
+  const fallbackTagsJson = normalizeJsonText(fallbackRow?.source_tags_json);
+
+  return {
+    sourceGeometryJson: bodyGeometryJson || fallbackGeometryJson,
+    sourceTagsJson: bodyTagsJson || fallbackTagsJson,
+    sourceOsmUpdatedAt: normalizeText(body?.sourceOsmUpdatedAt) || normalizeText(fallbackRow?.source_osm_updated_at)
+  };
+}
+
 function registerBuildingsRoutes(deps) {
   const {
     app,
@@ -89,6 +139,8 @@ function registerBuildingsRoutes(deps) {
     return res.json(result.payload || {
       matchedKeys: [],
       matchedFeatureIds: [],
+      matchedLocations: [],
+      matchedCount: 0,
       meta: {
         rulesHash: 'fnv1a-0',
         bboxHash: '',
@@ -171,10 +223,18 @@ function registerBuildingsRoutes(deps) {
       return res.status(400).json({ code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve current user' });
     }
     const currentContour = await getOsmContourRow(osmType, osmId);
-    if (!currentContour) {
-      return res.status(404).json({ code: 'ERR_BUILDING_NOT_FOUND', error: 'Building was not found in the local contours database' });
+    const latestSnapshot = !currentContour && buildingsRepository && typeof buildingsRepository.getLatestUserEditSnapshotById === 'function'
+      ? await buildingsRepository.getLatestUserEditSnapshotById(osmType, osmId)
+      : null;
+    const sourceSnapshot = buildSourceSnapshot({
+      contourRow: currentContour,
+      body,
+      fallbackRow: latestSnapshot
+    });
+    if (!sourceSnapshot.sourceGeometryJson || !sourceSnapshot.sourceTagsJson) {
+      return res.status(404).json({ code: 'ERR_BUILDING_NOT_FOUND', error: 'Building source snapshot was not found' });
     }
-    const featureKind = getFeatureKindFromTagsJson(currentContour.tags_json);
+    const featureKind = getFeatureKindFromTagsJson(sourceSnapshot.sourceTagsJson);
     const requestedEditedFields = sanitizeEditedFields(body.editedFields);
     if (requestedEditedFields.length === 0) {
       return res.status(409).json({ code: 'ERR_EDIT_NO_CHANGES', error: 'Edit payload does not contain changes' });
@@ -201,8 +261,9 @@ function registerBuildingsRoutes(deps) {
         ...validated.value,
         edited_fields_json: nextEditedFields.length > 0 ? JSON.stringify(nextEditedFields) : null,
         source_osm_version: null,
-        source_tags_json: currentContour.tags_json ?? null,
-        source_osm_updated_at: currentContour.updated_at ?? null
+        source_geometry_json: sourceSnapshot.sourceGeometryJson,
+        source_tags_json: sourceSnapshot.sourceTagsJson,
+        source_osm_updated_at: sourceSnapshot.sourceOsmUpdatedAt
       };
       if (latest && Number.isInteger(Number(latest.id)) && Number(latest.id) > 0) {
         await buildingsRepository.updatePendingUserEditById(latest.id, {
@@ -237,7 +298,13 @@ function registerBuildingsRoutes(deps) {
       return res.status(400).json({ code: 'ERR_INVALID_BUILDING_ID', error: 'Invalid building id' });
     }
 
-    const row = await buildingsRepository.getBuildingById(osmType, osmId);
+    const contourRow = await buildingsRepository.getBuildingById(osmType, osmId);
+    const snapshotRow = contourRow
+      ? null
+      : (typeof buildingsRepository.getLatestUserEditSnapshotById === 'function'
+        ? await buildingsRepository.getLatestUserEditSnapshotById(osmType, osmId)
+        : null);
+    const row = contourRow || snapshotRow;
 
     if (!row) {
       return res.status(404).json({ code: 'ERR_BUILDING_NOT_FOUND', error: 'Building was not found in the local contours database' });
@@ -246,7 +313,8 @@ function registerBuildingsRoutes(deps) {
     const feature = rowToFeature(row);
     await attachInfoToFeatures([feature], { actorKey: getSessionEditActorKey(req) });
     return sendCachedJson(req, res, feature, {
-      cacheControl: 'public, max-age=30'
+      cacheControl: 'public, max-age=30',
+      lastModified: row?.updated_at || contourRow?.updated_at || undefined
     });
   });
 }

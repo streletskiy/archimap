@@ -27,6 +27,14 @@ export type LayerIdsSnapshot = {
   selectedLineLayerIds: string[];
 };
 
+export type FilterMatchedPoint = {
+  id: number;
+  lon: number;
+  lat: number;
+  count?: number;
+  osmKey?: string;
+};
+
 export type FeatureIdentitySource = {
   id?: number | string | null;
   properties?: {
@@ -86,6 +94,7 @@ export type FilterFeatureStateEntry = {
 export type FilterColorGroup = {
   color: string;
   ids: number[];
+  points?: FilterMatchedPoint[];
 };
 
 export type FilterWorkerPrepareRequest = {
@@ -146,7 +155,7 @@ export type FilterWorkerBuildRequestPlanResponse =
 
 export type FilterWorkerResolvedPayloadInputItem = {
   requestId: string;
-  payload: Pick<FilterMatchPayload, 'matchedKeys' | 'matchedFeatureIds' | 'meta'> | null;
+  payload: Pick<FilterMatchPayload, 'matchedKeys' | 'matchedFeatureIds' | 'matchedLocations' | 'matchedCount' | 'meta'> | null;
 };
 
 export type FilterWorkerBuildResolvedPayloadRequest = {
@@ -205,6 +214,11 @@ export type FilterMapLike = {
   setFilter?: (layerId: string, filter: unknown) => void;
   setLayoutProperty?: (layerId: string, property: string, value: unknown) => void;
   setPaintProperty?: (layerId: string, property: string, value: unknown) => void;
+  addSource?: (sourceId: string, source: Record<string, unknown>) => void;
+  removeSource?: (sourceId: string) => void;
+  addLayer?: (layer: Record<string, unknown>, beforeId?: string) => void;
+  removeLayer?: (layerId: string) => void;
+  moveLayer?: (layerId: string, beforeId?: string) => void;
   getBounds?: () => unknown;
   getZoom?: () => number;
   getCenter?: () => { lng?: number; lat?: number } | null;
@@ -272,6 +286,9 @@ export type FilterRuntimeStatus = {
 export type FilterDiffApplyMeta = {
   token?: number;
   phase?: string;
+  renderMode?: 'contours' | 'markers';
+  forceReapply?: boolean;
+  matchedCount?: number;
   matchedFeatureIds?: number[];
   featureIds?: number[];
   layerIds?: LayerIdsSnapshot;
@@ -318,14 +335,17 @@ export type FilterMatchMeta = {
   elapsedMs: number;
   cacheHit: boolean;
   fallback?: boolean;
+  renderMode?: 'contours' | 'markers';
   coverageHash?: string;
   coverageWindow?: CoverageWindowSnapshot | null;
   zoomBucket?: number;
+  dataVersion?: number;
 };
 
 export type FilterMatchPayload = {
   matchedKeys: string[];
   matchedFeatureIds: number[];
+  matchedLocations?: FilterMatchedPoint[];
   meta: FilterMatchMeta;
   highlightColorGroups?: FilterColorGroup[];
   matchedCount?: number;
@@ -355,6 +375,8 @@ export type FilterCoverageContext = {
   coverageWindow: CoverageWindowSnapshot;
   rulesHash: string;
   zoomBucket: number;
+  renderMode?: 'contours' | 'markers';
+  matchLimit?: number;
   bboxHash: string;
   requestSpecs: FilterRequestSpec[];
   heavy?: boolean;
@@ -362,4 +384,5 @@ export type FilterCoverageContext = {
   reason?: string;
   combinedGroup?: FilterPreparedGroup | null;
   layers?: FilterLayer[];
+  dataVersion?: number;
 };

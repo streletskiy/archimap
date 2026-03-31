@@ -26,6 +26,7 @@ import {
   pickNullableText
 } from '$lib/utils/text';
 import { getEditedBuildingFields, hydrateBuildingForm } from '$lib/utils/building-mapper';
+import { getOverpassBuildingDetails } from '$lib/services/map/overpass-buildings';
 
 const initialState = {
   buildingDetails: null,
@@ -118,9 +119,77 @@ function normalizeArchiInfo(payload: LooseRecord) {
   };
 }
 
+function normalizeJsonString(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed == null) return null;
+      return JSON.stringify(parsed);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function buildSourceSnapshotFromFeature(feature) {
+  if (!feature || typeof feature !== 'object') {
+    return {
+      sourceGeometryJson: null,
+      sourceTagsJson: null,
+      sourceOsmUpdatedAt: null,
+      featureKind: null
+    };
+  }
+  const properties = feature?.properties && typeof feature.properties === 'object'
+    ? feature.properties
+    : {};
+  const sourceTags = properties?.source_tags && typeof properties.source_tags === 'object'
+    ? properties.source_tags
+    : {};
+  return {
+    sourceGeometryJson: feature?.geometry == null ? null : normalizeJsonString(feature.geometry),
+    sourceTagsJson: normalizeJsonString(sourceTags),
+    sourceOsmUpdatedAt: pickNullableText(properties?.source_osm_updated_at),
+    featureKind: pickNullableText(properties?.feature_kind)
+  };
+}
+
+function buildSourceSnapshotFromDetail(detail) {
+  const explicit = {
+    sourceGeometryJson: normalizeJsonString(detail?.sourceGeometryJson ?? detail?.source_geometry_json ?? null),
+    sourceTagsJson: normalizeJsonString(detail?.sourceTagsJson ?? detail?.source_tags_json ?? null),
+    sourceOsmUpdatedAt: pickNullableText(detail?.sourceOsmUpdatedAt ?? detail?.source_osm_updated_at ?? null),
+    featureKind: pickNullableText(detail?.featureKind ?? detail?.feature_kind ?? detail?.feature?.properties?.feature_kind ?? null)
+  };
+  const fallback = detail?.feature ? buildSourceSnapshotFromFeature(detail.feature) : {
+    sourceGeometryJson: null,
+    sourceTagsJson: null,
+    sourceOsmUpdatedAt: null,
+    featureKind: null
+  };
+  return {
+    sourceGeometryJson: explicit.sourceGeometryJson || fallback.sourceGeometryJson,
+    sourceTagsJson: explicit.sourceTagsJson || fallback.sourceTagsJson,
+    sourceOsmUpdatedAt: explicit.sourceOsmUpdatedAt || fallback.sourceOsmUpdatedAt,
+    featureKind: explicit.featureKind || fallback.featureKind
+  };
+}
+
 function createFallbackBuildingDetails(detail = null) {
+  const sourceSnapshot = buildSourceSnapshotFromDetail(detail);
   return {
     feature_kind: detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+    sourceGeometryJson: sourceSnapshot.sourceGeometryJson,
+    sourceTagsJson: sourceSnapshot.sourceTagsJson,
+    sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt,
     review_status: null,
     admin_comment: null,
     user_edit_id: null,
@@ -266,7 +335,11 @@ function getBulkSaveTargets(options: {
     const itemChangedFields = itemComparable ? getEditedBuildingFields(snapshot, itemComparable) : outgoingEditedFields;
     const itemEditedFields = itemChangedFields.filter((field) => outgoingEditedFields.includes(field));
     return itemEditedFields.length > 0
-      ? { item, editedFields: itemEditedFields }
+      ? {
+          item,
+          editedFields: itemEditedFields,
+          sourceSnapshot: buildSourceSnapshotFromDetail(itemDetail)
+        }
       : null;
   }).filter(Boolean);
 }
@@ -288,23 +361,35 @@ export function createBuildingDetailsManager() {
 
   async function fetchBuildingDetails(detail, signal) {
     let feature = null;
+    const localOverpassDetail = detail?.feature?.properties?.source === 'overpass'
+      ? getOverpassBuildingDetails(detail.feature)
+      : getOverpassBuildingDetails(`${detail?.osmType || ''}/${detail?.osmId || ''}`);
+    if (localOverpassDetail) {
+      return localOverpassDetail;
+    }
     try {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
       const reviewStatus = String(data?.review_status || '').trim().toLowerCase() || null;
       const userEditId = Number(data?.user_edit_id || 0);
       let sourceTags = {};
+      let sourceSnapshot;
       try {
         feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         sourceTags = feature?.properties?.source_tags || {};
+        sourceSnapshot = buildSourceSnapshotFromFeature(feature);
       } catch (featureError) {
         if (!isAbortError(featureError)) {
           sourceTags = detail?.feature?.properties?.source_tags || {};
+          sourceSnapshot = buildSourceSnapshotFromDetail(detail);
         } else {
           throw featureError;
         }
       }
       return {
         feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+        sourceGeometryJson: sourceSnapshot.sourceGeometryJson,
+        sourceTagsJson: sourceSnapshot.sourceTagsJson,
+        sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt,
         review_status: reviewStatus,
         admin_comment: coerceNullableText(data?.admin_comment),
         user_edit_id: Number.isInteger(userEditId) && userEditId > 0 ? userEditId : null,
@@ -324,8 +409,12 @@ export function createBuildingDetailsManager() {
       try {
         feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         const archiInfo = feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
+        const sourceSnapshot = buildSourceSnapshotFromFeature(feature);
         return {
           feature_kind: feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+          sourceGeometryJson: sourceSnapshot.sourceGeometryJson,
+          sourceTagsJson: sourceSnapshot.sourceTagsJson,
+          sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt,
           review_status: null,
           admin_comment: null,
           user_edit_id: null,
@@ -554,6 +643,7 @@ export function createBuildingDetailsManager() {
     try {
       let lastSaveResult = null;
       for (const target of saveTargets) {
+        const sourceSnapshot = (target?.sourceSnapshot || {}) as any;
         lastSaveResult = await apiJson('/api/building-info', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -561,7 +651,11 @@ export function createBuildingDetailsManager() {
             ...payload,
             osmType: target.item.osmType,
             osmId: target.item.osmId,
-            editedFields: target.editedFields
+            editedFields: target.editedFields,
+            sourceGeometryJson: sourceSnapshot.sourceGeometryJson ?? currentState.buildingDetails?.sourceGeometryJson ?? null,
+            sourceTagsJson: sourceSnapshot.sourceTagsJson ?? currentState.buildingDetails?.sourceTagsJson ?? null,
+            sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt ?? currentState.buildingDetails?.sourceOsmUpdatedAt ?? null,
+            featureKind: sourceSnapshot.featureKind ?? currentState.buildingDetails?.feature_kind ?? normalized.featureKind ?? null
           })
         });
       }

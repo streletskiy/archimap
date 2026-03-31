@@ -291,6 +291,8 @@ class ServerRuntime {
     this.getSessionEditActorKey = buildingEditsService.getSessionEditActorKey;
     this.applyUserEditRowToInfo = buildingEditsService.applyUserEditRowToInfo;
     this.getUserEditsList = buildingEditsService.getUserEditsList;
+    this.getUserEditsPage = buildingEditsService.getUserEditsPage;
+    this.getUserEditsPageRaw = buildingEditsService.getUserEditsPageRaw;
     this.getUserEditDetailsById = buildingEditsService.getUserEditDetailsById;
     this.reassignUserEdit = buildingEditsService.reassignUserEdit;
     this.deleteUserEdit = buildingEditsService.deleteUserEdit;

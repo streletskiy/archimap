@@ -143,7 +143,7 @@ test('formatGeojsonFeatureLine derives building_part feature kind from tags json
     'way',
     124,
     '{"type":"Point","coordinates":[37.6,55.7]}',
-    '{"building:part":"yes"}'
+    '{"building:part":"apartments"}'
   );
 
   assert.equal(
@@ -157,7 +157,7 @@ test('formatGeojsonFeatureLine treats mixed building tags as building', () => {
     'way',
     125,
     '{"type":"Point","coordinates":[37.6,55.7]}',
-    '{"building":"yes","building:part":"yes"}'
+    '{"building":"yes","building:part":"apartments"}'
   );
 
   assert.equal(
@@ -170,7 +170,7 @@ test('parseRowPayload derives building_part feature kind from tags json', () => 
   const row = parseRowPayload(JSON.stringify({
     osm_type: 'relation',
     osm_id: 456,
-    tags_json: '{"building:part":"yes"}',
+    tags_json: '{"building:part":"apartments"}',
     geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
     min_lon: 37.5,
     min_lat: 55.5,
@@ -185,7 +185,7 @@ test('parseRowPayload treats mixed building tags as building', () => {
   const row = parseRowPayload(JSON.stringify({
     osm_type: 'way',
     osm_id: 457,
-    tags_json: '{"building":"yes","building:part":"yes"}',
+    tags_json: '{"building":"yes","building:part":"apartments"}',
     geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
     min_lon: 37.5,
     min_lat: 55.5,

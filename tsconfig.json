@@ -18,6 +18,7 @@
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "strict": false,
+    "ignoreDeprecations": "6.0",
     "noEmit": true,
     "forceConsistentCasingInFileNames": true
   },

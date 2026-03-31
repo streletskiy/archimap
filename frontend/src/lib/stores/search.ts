@@ -1,5 +1,6 @@
 import { get, writable } from 'svelte/store';
 import { translateNow } from '$lib/i18n/index';
+import { buildingFilterLayers, resetBuildingFilterLayers } from './filters';
 
 const initialState = {
   modalOpen: false,
@@ -12,6 +13,7 @@ const initialState = {
   nextCursor: null,
   loading: false,
   loadingMore: false,
+  mapActive: false,
   status: translateNow('search.minChars'),
   error: '',
   fitSeq: 0
@@ -73,6 +75,7 @@ export function resetSearchState(message = translateNow('search.minChars')) {
     nextCursor: null,
     loading: false,
     loadingMore: false,
+    mapActive: false,
     status: String(message || translateNow('search.minChars')),
     error: ''
   }));
@@ -83,6 +86,7 @@ export function setSearchLoading({ append = false, background = false }: LooseRe
     ...state,
     loading: background ? false : !append,
     loadingMore: Boolean(append),
+    mapActive: true,
     error: '',
     status: append
       ? buildFoundStatus(state.items.length, state.total)
@@ -119,6 +123,7 @@ export function applySearchResults({
       nextCursor: Number.isFinite(Number(nextCursor)) ? Number(nextCursor) : null,
       loading: false,
       loadingMore: false,
+      mapActive: true,
       error: '',
       status: nextItems.length > 0 ? buildFoundStatus(nextItems.length, nextTotal) : translateNow('search.notFound'),
       fitSeq: append || fit === false ? state.fitSeq : state.fitSeq + 1
@@ -193,9 +198,20 @@ export function requestSearch({
 }: LooseRecord) {
   const current = get(searchState);
   const resolvedScope = String(scope || (append ? current.scope : 'global') || 'global');
+  const nextQuery = String(query || '').slice(0, 120);
+  if (nextQuery.trim().length >= 2) {
+    const currentFilters = get(buildingFilterLayers);
+    if (Array.isArray(currentFilters) && currentFilters.length > 0) {
+      resetBuildingFilterLayers();
+    }
+  }
+  searchState.update((state) => ({
+    ...state,
+    mapActive: nextQuery.trim().length >= 2
+  }));
   searchCommand.set({
     id: Date.now() + Math.random(),
-    query: String(query || ''),
+    query: nextQuery,
     append: Boolean(append),
     scope: resolvedScope,
     fit: append ? false : fit !== false,

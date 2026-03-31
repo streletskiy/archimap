@@ -63,6 +63,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     requireAdmin: runtime.requireAdmin,
     requireCsrfSession,
     getUserEditsList: runtime.getUserEditsList,
+    getUserEditsPageRaw: runtime.getUserEditsPageRaw,
     getUserEditDetailsById: runtime.getUserEditDetailsById,
     getSessionEditActorKey: runtime.getSessionEditActorKey,
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
@@ -95,11 +96,22 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
       }
       if (action === 'delete') {
         runtime.removeRegionPmtilesFiles(deleted?.region);
-        await runtime.rebuildSearchIndex(`region-delete:${deleted?.region?.id || 'unknown'}`);
+        void runtime.rebuildSearchIndex(`region-delete:${deleted?.region?.id || 'unknown'}`).catch((error) => {
+          runtime.logger.error('region_delete_search_rebuild_failed', {
+            error: String(error?.message || error)
+          });
+        });
         runtime.resetFilterTagKeysCache();
         runtime.scheduleFilterTagKeysCacheRebuild(`region-delete:${deleted?.region?.id || 'unknown'}`);
       }
-      return runtime.syncWorkers?.reloadSchedules?.();
+      const reloadSchedulesPromise = runtime.syncWorkers?.reloadSchedules?.();
+      if (reloadSchedulesPromise && typeof reloadSchedulesPromise.catch === 'function') {
+        void reloadSchedulesPromise.catch((error) => {
+          runtime.logger.error('region_sync_schedules_reload_failed', {
+            error: String(error?.message || error)
+          });
+        });
+      }
     },
     onRegionSyncRequested: (regionId, options) => runtime.syncWorkers?.requestRegionSync?.(regionId, options),
     appDisplayName: runtime.config.appDisplayName,
@@ -154,6 +166,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     getSessionEditActorKey: runtime.getSessionEditActorKey,
     normalizeUserEditStatus: runtime.normalizeUserEditStatus,
     getUserEditsList: runtime.getUserEditsList,
+    getUserEditsPage: runtime.getUserEditsPage,
     getUserEditDetailsById: runtime.getUserEditDetailsById,
     withdrawPendingUserEdit: runtime.withdrawPendingUserEdit
   });

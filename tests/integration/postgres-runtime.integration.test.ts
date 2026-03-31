@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Client } = require('pg');
+const { pickIntegrationPort } = require('./test-ports');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -398,7 +399,7 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
     edits: path.join(tmpRoot, 'user-edits.db'),
     auth: path.join(tmpRoot, 'users.db')
   };
-  const port = 3900 + Math.floor(Math.random() * 300);
+  const port = pickIntegrationPort('postgresRuntime');
   const baseUrl = `http://127.0.0.1:${port}`;
 
   const server = spawn(process.execPath, ['--import', 'tsx', 'server.sveltekit.ts'], {

@@ -16,26 +16,57 @@ function normalizeColor(rawColor, fallbackColor = FILTER_TRANSPARENT_COLOR) {
   return color || fallbackColor;
 }
 
+function normalizePoints(values) {
+  const points = [];
+  const seen = new Set();
+  for (const point of Array.isArray(values) ? values : []) {
+    const id = Number(point?.id);
+    const lon = Number(point?.lon);
+    const lat = Number(point?.lat);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    if (!Number.isFinite(lon) || lon < -180 || lon > 180) continue;
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const count = Number(point?.count);
+    const normalizedCount = Number.isFinite(count) && count > 0 ? Math.max(1, Math.trunc(count)) : null;
+    const osmKey = String(point?.osmKey || '').trim();
+    points.push(osmKey
+      ? { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}), osmKey }
+      : { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}) });
+  }
+  return points.sort((left, right) => left.id - right.id);
+}
+
 export function normalizeFilterPaintColorGroups(colorGroups) {
   const groupedIds = new Map();
+  const groupedPoints = new Map();
   const seenIds = new Set();
 
   for (const group of Array.isArray(colorGroups) ? colorGroups : []) {
     const color = normalizeColor(group?.color);
     if (color === FILTER_TRANSPARENT_COLOR) continue;
     const ids = normalizeIds(group?.ids).filter((id) => id > 0 && !seenIds.has(id));
+    const idSet = new Set(ids);
+    const points = normalizePoints(group?.points).filter((point) => idSet.has(point.id) && !seenIds.has(point.id));
     if (ids.length === 0) continue;
     const bucket = groupedIds.get(color) || [];
+    const pointBucket = groupedPoints.get(color) || [];
     for (const id of ids) {
       seenIds.add(id);
       bucket.push(id);
     }
+    for (const point of points) {
+      pointBucket.push(point);
+    }
     groupedIds.set(color, bucket);
+    groupedPoints.set(color, pointBucket);
   }
 
   return [...groupedIds.entries()].map(([color, ids]) => ({
     color,
-    ids: [...ids].sort((left, right) => left - right)
+    ids: [...ids].sort((left, right) => left - right),
+    points: [...(groupedPoints.get(color) || [])].sort((left, right) => left.id - right.id)
   }));
 }
 

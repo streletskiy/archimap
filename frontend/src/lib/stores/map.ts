@@ -1,6 +1,7 @@
 import { get, writable } from 'svelte/store';
 import { parseUrlState } from '../client/urlState.js';
 
+const MAP_LABELS_VISIBLE_STORAGE_KEY = 'archimap-map-labels-visible';
 const LAST_MAP_CAMERA_STORAGE_KEY = 'archimap-last-map-camera';
 const MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY = 'archimap-map-building-parts-visible';
 
@@ -8,6 +9,33 @@ function getStorageHost(storageHost = null) {
   if (storageHost) return storageHost;
   if (typeof window === 'undefined') return null;
   return window;
+}
+
+function getLocalStorage(storageHost = null) {
+  const host = getStorageHost(storageHost);
+  if (!host) return null;
+  return host.localStorage || (typeof localStorage !== 'undefined' ? localStorage : null);
+}
+
+function readStoredBoolean(storage, key, defaultValue) {
+  if (!storage?.getItem) return defaultValue;
+  try {
+    const stored = storage.getItem(key);
+    if (stored === '1' || stored === 'true') return true;
+    if (stored === '0' || stored === 'false') return false;
+  } catch {
+    // ignore
+  }
+  return defaultValue;
+}
+
+function persistStoredBoolean(storage, key, value) {
+  if (!storage?.setItem) return;
+  try {
+    storage.setItem(key, value ? '1' : '0');
+  } catch {
+    // ignore
+  }
 }
 
 export function normalizeOptionalMapZoom(value) {
@@ -104,27 +132,11 @@ function patchLastMapCamera(patch: LooseRecord = {}) {
 }
 
 function getInitialLabelsVisibility() {
-  if (typeof window === 'undefined') return true;
-  try {
-    const stored = localStorage.getItem('archimap-map-labels-visible');
-    if (stored === '0') return false;
-    if (stored === '1') return true;
-  } catch {
-    // ignore
-  }
-  return true;
+  return readStoredBoolean(getLocalStorage(), MAP_LABELS_VISIBLE_STORAGE_KEY, true);
 }
 
 function getInitialBuildingPartsVisibility() {
-  if (typeof window === 'undefined') return false;
-  try {
-    const stored = localStorage.getItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY);
-    if (stored === '0') return false;
-    if (stored === '1') return true;
-  } catch {
-    // ignore
-  }
-  return false;
+  return readStoredBoolean(getLocalStorage(), MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY, false);
 }
 
 export const selectedBuilding = writable(null);
@@ -138,6 +150,21 @@ export const mapFocusRequest = writable(null);
 export const mapLabelsVisible = writable(getInitialLabelsVisibility());
 export const mapBuildingPartsVisible = writable(getInitialBuildingPartsVisibility());
 export const lastMapCamera = writable(getInitialLastMapCamera());
+
+export function syncMapVisibilityFromStorage(storageHost = null) {
+  const nextLabelsVisible = readStoredBoolean(getLocalStorage(storageHost), MAP_LABELS_VISIBLE_STORAGE_KEY, true);
+  const nextBuildingPartsVisible = readStoredBoolean(
+    getLocalStorage(storageHost),
+    MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY,
+    false
+  );
+  if (get(mapLabelsVisible) !== nextLabelsVisible) {
+    mapLabelsVisible.set(nextLabelsVisible);
+  }
+  if (get(mapBuildingPartsVisible) !== nextBuildingPartsVisible) {
+    mapBuildingPartsVisible.set(nextBuildingPartsVisible);
+  }
+}
 
 function getSelectedBuildingKey(selection) {
   const osmType = String(selection?.osmType || '').trim();
@@ -284,15 +311,13 @@ export function requestMapFocus(payload: LooseRecord = {}) {
 }
 
 export function setMapLabelsVisible(value) {
-  mapLabelsVisible.set(Boolean(value));
+  const next = Boolean(value);
+  mapLabelsVisible.set(next);
+  persistStoredBoolean(getLocalStorage(), MAP_LABELS_VISIBLE_STORAGE_KEY, next);
 }
 
 export function setMapBuildingPartsVisible(value) {
   const next = Boolean(value);
   mapBuildingPartsVisible.set(next);
-  try {
-    localStorage.setItem(MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY, next ? '1' : '0');
-  } catch {
-    // ignore
-  }
+  persistStoredBoolean(getLocalStorage(), MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY, next);
 }

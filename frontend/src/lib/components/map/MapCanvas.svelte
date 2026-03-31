@@ -12,10 +12,17 @@
     FILTER_TELEMETRY_ENABLED
   } from '$lib/services/map/map-filter-pipeline';
   import {
+    getFilterApplyOverlayState,
+    shouldShowFilterRefiningMessage
+  } from '$lib/services/map/filter-overlay-utils';
+  import {
+    bringBaseLabelLayersAboveCustomLayers,
+    bringSearchResultsLayersToFront,
     applyBuildingThemePaint as applyBuildingThemePaintToLayers,
     applyBuildingPartsLayerVisibility as applyBuildingPartsLayerVisibilityToLayers,
     applyLabelLayerVisibility as applyMapLabelLayerVisibility,
     bindMapInteractionHandlers,
+    ensureOverpassBuildingSourceAndLayers,
     getCurrentBuildingsFillLayerIds,
     getCurrentBuildingsLineLayerIds,
     getCurrentBuildingPartFillLayerIds,
@@ -30,11 +37,24 @@
     updateSearchMarkers as updateSearchMarkerSource
   } from '$lib/services/map/map-search-utils';
   import {
+    getBuildingHoverThemePaint,
+    getBuildingThemePaint,
     getCurrentTheme,
     getMapStyleForTheme,
     LIGHT_MAP_STYLE_URL,
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
+  import {
+    shouldCheckOverpassViewportCoverage,
+    cancelOverpassViewportLoad,
+    clearOverpassCache,
+    getOverpassFeatureCollection,
+    getOverpassStateSnapshot,
+    overpassBuildingsState,
+    requestOverpassViewportLoad,
+    refreshOverpassViewportData,
+    scheduleOverpassViewportRefresh
+  } from '$lib/services/map/overpass-buildings';
   import { loadMapRuntime } from '$lib/services/map-runtime';
   import { t, translateNow } from '$lib/i18n/index';
   import {
@@ -42,6 +62,7 @@
     mapFocusRequest,
     mapLabelsVisible,
     mapBuildingPartsVisible,
+    mapZoom,
     setMapSelectionShiftKey,
     normalizeOptionalMapZoom,
     resolveInitialMapCamera,
@@ -52,11 +73,15 @@
     setMapViewport,
     setMapZoom
   } from '$lib/stores/map';
-  import { buildingFilterLayers, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
+  import { buildingFilterLayers, buildingFilterRuntime, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchMapState, searchState } from '$lib/stores/search';
+  import { pointInBounds } from '$lib/services/region-pmtiles';
   import { createMapRegionLayersController } from './map-region-layers-controller';
   import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
+  import OverpassFallbackOverlay from './OverpassFallbackOverlay.svelte';
+
+  const FILTER_APPLY_PROGRESS_TICK_MS = 120;
 
   const dispatch = createEventDispatcher();
 
@@ -77,6 +102,16 @@
   let stopBuildingFilterLayers = null;
   let currentBuildingFilterLayers = [];
   let filterStatusOverlayText;
+  let filterApplyClock = Date.now();
+  let filterApplyClockTimer = null;
+  let currentMapZoom = Number.NaN;
+  let overpassLayerVisible = false;
+  let overpassViewportCovered = true;
+  let overpassViewportPrimeTimer = null;
+  let overpassFallbackVisible;
+  let overpassHasCachedData = false;
+  let lastOverpassDataVersion;
+  let lastOverpassLoading;
   let cameraStoreSyncEnabled = false;
 
   beforeNavigate((navigation) => {
@@ -117,16 +152,70 @@
     };
   });
 
-  function getFilterStatusOverlayText(statusCode) {
+  function getFilterStatusOverlayText(statusCode, zoom = currentMapZoom) {
     const code = String(statusCode || 'idle');
-    if (code === 'refining') return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
+    if (code === 'refining' && shouldShowFilterRefiningMessage(code, zoom)) {
+      return $t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining');
+    }
     if (code === 'too_many_matches') return $t('mapPage.filterStatus.tooMany') || $t('header.filterStatus.tooMany');
     if (code === 'truncated') return $t('mapPage.filterStatus.truncated') || $t('header.filterStatus.truncated');
     if (code === 'invalid') return $t('mapPage.filterStatus.invalid') || $t('header.filterStatus.invalid');
     return '';
   }
 
-  $: filterStatusOverlayText = getFilterStatusOverlayText($filterState.statusCode);
+  $: currentMapZoom = Number($mapZoom ?? map?.getZoom?.() ?? Number.NaN);
+  $: filterStatusOverlayText = getFilterStatusOverlayText($filterState.statusCode, currentMapZoom);
+  $: {
+    const nextFilterApplyOverlayState = getFilterApplyOverlayState($filterState, $buildingFilterRuntime, filterApplyClock, currentMapZoom);
+    const nextFilterApplyVisible = Boolean(nextFilterApplyOverlayState.visible);
+    if (typeof window !== 'undefined') {
+      if (nextFilterApplyVisible && !filterApplyClockTimer) {
+        filterApplyClockTimer = window.setInterval(() => {
+          filterApplyClock = Date.now();
+        }, FILTER_APPLY_PROGRESS_TICK_MS);
+      } else if (!nextFilterApplyVisible && filterApplyClockTimer) {
+        clearInterval(filterApplyClockTimer);
+        filterApplyClockTimer = null;
+      }
+    }
+  }
+  $: if (map) {
+    const nextOverpassDataVersion = Number($overpassBuildingsState.dataVersion || 0);
+    const nextOverpassLoading = Boolean($overpassBuildingsState.loading);
+    overpassHasCachedData = Boolean(
+      Number($overpassBuildingsState.lastSyncedAt || 0) > 0
+        || Number($overpassBuildingsState.featureCount || 0) > 0
+        || Number($overpassBuildingsState.tileCount || 0) > 0
+    );
+    $mapBuildingPartsVisible;
+    currentBuildingFilterLayers;
+    overpassLayerVisible;
+    syncOverpassMapLayers();
+    recordOverpassDebugState();
+    if (
+      currentBuildingFilterLayers.length > 0
+      && (
+        (Number.isFinite(lastOverpassDataVersion) && nextOverpassDataVersion !== lastOverpassDataVersion && !nextOverpassLoading)
+        || (lastOverpassLoading && !nextOverpassLoading)
+      )
+    ) {
+      filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers, { reason: 'data' });
+    }
+    lastOverpassDataVersion = nextOverpassDataVersion;
+    lastOverpassLoading = nextOverpassLoading;
+    void lastOverpassDataVersion;
+    void lastOverpassLoading;
+  }
+
+  $: overpassFallbackVisible = Boolean(
+    !overpassViewportCovered
+      && (
+        $overpassBuildingsState.promptVisible
+        || $overpassBuildingsState.loading
+        || Boolean($overpassBuildingsState.error)
+        || overpassHasCachedData
+      )
+  );
 
   function isSelectionDebugEnabled() {
     const fromRuntimeConfig = Boolean(runtimeConfig?.mapSelection?.debug);
@@ -143,6 +232,18 @@
 
   function isFilterDebugEnabled() {
     return Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
+  }
+
+  function recordOverpassDebugState(extra = {}) {
+    if (typeof window === 'undefined') return;
+    window.__MAP_DEBUG__ = window.__MAP_DEBUG__ || {};
+    window.__MAP_DEBUG__.overpass = {
+      ...getOverpassStateSnapshot(),
+      covered: overpassViewportCovered,
+      layerVisible: overpassLayerVisible,
+      zoom: currentMapZoom,
+      ...extra
+    };
   }
 
   function recordDebugSetFilter(layerId) {
@@ -195,6 +296,7 @@
     mapDebug,
     getLayerIds: () => regionLayersController.getCurrentMapLayerIds(),
     getBuildingSourceConfigs: () => regionLayersController.getCurrentBuildingSourceConfigs(),
+    getSourceDataVersion: () => $overpassBuildingsState.dataVersion,
     onStatusChange: setBuildingFilterRuntimeStatus,
     translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
   });
@@ -219,6 +321,129 @@
   const handleSearchResultClick = (event) => selectionController.onSearchResultClick(event);
   const handleMapPointerMove = (event) => selectionController.handleMapPointerMove(event);
   const handleMapPointerLeave = () => selectionController.handleMapPointerLeave();
+
+  function getViewportSamplePoints(bounds = map?.getBounds?.(), mapRef = map) {
+    if (!bounds || !mapRef) return [];
+    const west = Number(bounds.getWest?.());
+    const east = Number(bounds.getEast?.());
+    const south = Number(bounds.getSouth?.());
+    const north = Number(bounds.getNorth?.());
+    if (![west, east, south, north].every(Number.isFinite)) return [];
+    const center = mapRef.getCenter?.();
+    if (!center) return [];
+    const midLon = (west + east) / 2;
+    const midLat = (north + south) / 2;
+    return [
+      [center.lng, center.lat],
+      [west, north],
+      [east, north],
+      [east, south],
+      [west, south],
+      [midLon, north],
+      [midLon, south],
+      [west, midLat],
+      [east, midLat]
+    ];
+  }
+
+  function getCoverageRegions() {
+    const activeRegions = regionLayersController.getActiveRegionPmtiles();
+    if (Array.isArray(activeRegions) && activeRegions.length > 0) {
+      return activeRegions;
+    }
+    return Array.isArray(runtimeConfig?.buildingRegionsPmtiles)
+      ? runtimeConfig.buildingRegionsPmtiles
+      : [];
+  }
+
+  function isViewportCoveredByProcessedRegions() {
+    if (!shouldCheckOverpassViewportCoverage(currentMapZoom)) {
+      return true;
+    }
+    const regions = getCoverageRegions();
+    const points = getViewportSamplePoints();
+    if (regions.length === 0 || points.length === 0) return false;
+    return points.every(([lon, lat]) => regions.some((region) => pointInBounds(lon, lat, region.bounds)));
+  }
+
+  function syncOverpassMapLayers() {
+    if (!map || !runtimeConfig || !map.isStyleLoaded?.()) return;
+    const theme = getCurrentTheme();
+    const buildingPaint = getBuildingThemePaint(theme);
+    const hoverPaint = getBuildingHoverThemePaint(theme);
+    ensureOverpassBuildingSourceAndLayers({
+      map,
+      data: getOverpassFeatureCollection(),
+      buildingPaint,
+      hoverPaint,
+      buildingPartsVisible: $mapBuildingPartsVisible,
+      buildingPartHighlightVisible: currentBuildingFilterLayers.length > 0,
+      visible: overpassLayerVisible
+    });
+    bringSearchResultsLayersToFront(map);
+    bringBaseLabelLayersAboveCustomLayers(map);
+  }
+
+  function getOverpassViewportPayload() {
+    if (!map || !runtimeConfig) return null;
+    overpassViewportCovered = isViewportCoveredByProcessedRegions();
+    overpassLayerVisible = Boolean(!overpassViewportCovered && Number.isFinite(currentMapZoom) && currentMapZoom >= 13);
+    const viewport = buildBboxSnapshot(map.getBounds?.());
+    if (!viewport || !Number.isFinite(currentMapZoom)) {
+      return null;
+    }
+    const payload = {
+      viewport,
+      zoom: currentMapZoom,
+      covered: overpassViewportCovered
+    };
+    recordOverpassDebugState({
+      viewportPresent: Boolean(viewport),
+      viewportHash: viewport ? `${viewport.west}:${viewport.south}:${viewport.east}:${viewport.north}` : ''
+    });
+    return payload;
+  }
+
+  function scheduleOverpassViewportPrime({ load = false } = {}) {
+    if (typeof window === 'undefined') return;
+    if (overpassViewportPrimeTimer) {
+      clearTimeout(overpassViewportPrimeTimer);
+    }
+    overpassViewportPrimeTimer = window.setTimeout(() => {
+      overpassViewportPrimeTimer = null;
+      syncOverpassViewportState({ load });
+    }, 120);
+  }
+
+  function syncOverpassViewportState({ load = false } = {}) {
+    const payload = getOverpassViewportPayload();
+    if (!payload) {
+      scheduleOverpassViewportPrime({ load });
+      return;
+    }
+    if (load) {
+      void requestOverpassViewportLoad(payload);
+    } else {
+      void scheduleOverpassViewportRefresh(payload);
+    }
+    syncOverpassMapLayers();
+  }
+
+  function handleOverpassFallbackLoad() {
+    const payload = getOverpassViewportPayload();
+    if (!payload) return;
+    void requestOverpassViewportLoad(payload);
+  }
+
+  function handleOverpassFallbackRefresh() {
+    const payload = getOverpassViewportPayload();
+    if (!payload) return;
+    void refreshOverpassViewportData(payload);
+  }
+
+  function handleOverpassFallbackClear() {
+    void clearOverpassCache();
+  }
 
   const filterState = filterPipeline.state;
 
@@ -442,6 +667,7 @@
         filterPipeline.registerFilterMoveEnd();
         syncMapCameraStores();
         regionLayersController.syncMapRegionSources();
+        syncOverpassViewportState();
       });
       map.on('moveend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('moveend', () => regionLayersController.scheduleCoverageCheck());
@@ -450,16 +676,23 @@
       map.on('zoomend', syncMapZoomStore);
       map.on('zoomend', () => regionLayersController.syncMapRegionSources());
       map.on('zoomend', () => regionLayersController.scheduleCoverageCheck());
+      map.on('zoomend', () => syncOverpassViewportState());
       map.on('resize', () => regionLayersController.syncMapRegionSources());
       map.on('resize', () => regionLayersController.scheduleCoverageCheck());
+      map.on('resize', () => syncOverpassViewportState());
       map.on('mousemove', handleMapPointerMove);
       map.on('mouseleave', handleMapPointerLeave);
       map.on('mouseout', handleMapPointerLeave);
+
+      // Prime the viewport-dependent state immediately so fallback UI does not
+      // wait for the first camera event to appear.
+      syncOverpassViewportState();
 
       map.on('style.load', () => {
         regionLayersController.ensureMapSourcesAndLayers(config, { force: true });
         filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();
+        syncOverpassViewportState();
       });
 
       map.on('load', () => {
@@ -470,6 +703,7 @@
         setMapReady(true);
         filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();
+        syncOverpassViewportState();
       });
 
       themeObserver = new MutationObserver(() => {
@@ -502,9 +736,19 @@
       themeObserver.disconnect();
       themeObserver = null;
     }
+    cancelOverpassViewportLoad();
     if (styleTransitionTimer) {
       clearTimeout(styleTransitionTimer);
       styleTransitionTimer = null;
+    }
+    if (overpassViewportPrimeTimer) {
+      clearTimeout(overpassViewportPrimeTimer);
+      overpassViewportPrimeTimer = null;
+    }
+    recordOverpassDebugState();
+    if (filterApplyClockTimer) {
+      clearInterval(filterApplyClockTimer);
+      filterApplyClockTimer = null;
     }
     selectionController.destroy();
     regionLayersController.destroy();
@@ -538,8 +782,26 @@
   filterStatusCode={$filterState.statusCode}
   {filterStatusOverlayText}
   filterErrorMessage={$filterState.errorMessage}
+  filterApplyVisible={getFilterApplyOverlayState($filterState, $buildingFilterRuntime, filterApplyClock, currentMapZoom).visible}
+  filterApplyLabel={$t('mapPage.filterStatus.refining') || $t('header.filterStatus.refining')}
+  filterApplyProgress={getFilterApplyOverlayState($filterState, $buildingFilterRuntime, filterApplyClock, currentMapZoom).progress}
   {styleTransitionOverlaySrc}
   {styleTransitionOverlayVisible}
+/>
+<OverpassFallbackOverlay
+  visible={overpassFallbackVisible}
+  loading={$overpassBuildingsState.loading}
+  canLoad={$overpassBuildingsState.canLoad}
+  hasCachedData={overpassHasCachedData}
+  messageKey={$overpassBuildingsState.messageKey}
+  message={$overpassBuildingsState.message}
+  error={$overpassBuildingsState.error}
+  progressDone={$overpassBuildingsState.progressDone}
+  progressTotal={$overpassBuildingsState.progressTotal}
+  lastSyncedAt={$overpassBuildingsState.lastSyncedAt}
+  onLoad={handleOverpassFallbackLoad}
+  onRefresh={handleOverpassFallbackRefresh}
+  onClearCache={handleOverpassFallbackClear}
 />
 
 <style>

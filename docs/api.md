@@ -43,20 +43,24 @@ System notes:
 - `POST /api/buildings/filter-data`
   - Body: `{ keys: ["way/123", "relation/456", ...] }`.
   - Returns merged filter payload for explicit building keys.
+  - Each item includes `centerLon` and `centerLat` when the backend can derive a centroid from bbox metadata; the client uses those coordinates for low-zoom marker fallback.
 - `GET /api/buildings/filter-data-bbox?minLon=&minLat=&maxLon=&maxLat=&limit=`
   - Returns tag/info set for current bbox.
+  - Each item may include `centerLon` and `centerLat`; the client uses those coordinates when `filter-matches` is not available for low-zoom marker fallback.
   - Cache: `Cache-Control: public, max-age=10`, `ETag`.
 - `POST /api/buildings/filter-matches`
-  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, rules[], rulesHash?, maxResults? }`.
+  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, renderMode?, rules[], rulesHash?, maxResults? }`.
   - `rules[]` remains a flat per-request contract. Layer modes, priorities, presets, and color resolution are handled client-side by issuing one or more requests against this endpoint.
   - Supported operators: `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, `less_or_equals`.
   - Numeric operators expect a numeric `value`; `exists` / `not_exists` ignore `value`.
-  - Returns `{ matchedKeys[], matchedFeatureIds[], meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
-  - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket`), per-request `meta.cacheHit`.
+  - Returns `{ matchedKeys[], matchedFeatureIds[], matchedLocations[], matchedCount?, meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
+  - `matchedLocations[]` carries `{ id, lon, lat, count?, osmKey? }` points for low-zoom marker fallback; below `z<5` the backend can aggregate marker-mode matches into viewport-relative cells so the client does not need the full building list, while `z5-12` keeps stable point-level locations.
+  - Cache: short-lived in-memory server cache (`rulesHash+bboxHash+zoomBucket+renderMode`), per-request `meta.cacheHit`.
 - `POST /api/buildings/filter-matches-batch`
-  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, requests[] }`.
+  - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, renderMode?, requests[] }`.
   - Each batch item uses the same flat `rules[]` contract as `POST /api/buildings/filter-matches`, with its own optional `id`, `rulesHash?`, and `maxResults?`.
-  - Returns `items[]`, each item containing `matchedKeys`, `matchedFeatureIds`, and per-item `meta`.
+  - Returns `items[]`, each item containing `matchedKeys`, `matchedFeatureIds`, `matchedLocations`, `matchedCount?`, and per-item `meta`.
+  - `matchedLocations[]` follows the same low-zoom marker fallback contract as the single request endpoint, including optional `count` on aggregated points.
   - Batch meta includes overall `elapsedMs` and `cacheHit`.
 - `GET /api/building/:osmType/:osmId`
   - Returns GeoJSON feature.
@@ -137,7 +141,9 @@ System notes:
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
   - Regions in `queued` or `running` state cannot be deleted.
 - `GET /api/admin/app-settings/data/regions/:regionId/runs`
-  - Returns recent sync runs for the region.
+  - Returns paginated sync runs for the region.
+  - Supports `page` and `limit` query parameters. `limit` defaults to 20 and is capped at 200.
+  - Response includes `total`, `page`, `pageSize`, `pageCount`, and `items`.
   - Run items include storage metadata captured during sync (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`) plus feature counters (`importedFeatureCount`, `activeFeatureCount`, `orphanDeletedCount`).
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
@@ -159,8 +165,11 @@ System notes:
   - On success, the route redirects back to `/admin/osm`.
 - `GET /api/admin/osm-sync/candidates`
   - Returns building-level sync candidates grouped by `osm_type` + `osm_id`.
-  - Includes local merge state, sync status, last sync timestamps, and current contour snapshot data.
-  - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the collapsed archive section of the admin UI, and are excluded from bulk sync selection.
+  - Includes local merge state, sync status, last sync timestamps, current contour snapshot data, and a precomputed `displayAddress` for the list identity cell.
+  - Supports `sync=active|archived|all`, `page`, and `limit` query parameters. `limit` defaults to 20 in the UI.
+  - Response includes `total`, `page`, `pageSize`, `pageCount`, and `items`.
+  - Candidates with `syncStatus` set to `synced` or `cleaned` are read-only archive rows, are shown only in the archive section of the admin UI, and are excluded from bulk sync selection.
+  - If a building receives a newer accepted / partially accepted edit after an earlier sync, the queue reactivates that building and shows the newest non-read-only edit state instead of keeping the old synced history in the archive.
 - `GET /api/admin/osm-sync/candidates/:osmType/:osmId`
   - Returns a detailed preflight snapshot for one building, including current live OSM state, local desired state, and drift/conflict diagnostics.
   - OAuth connection metadata is not included here; use `GET /api/admin/app-settings/osm` for OSM settings and connection state.
@@ -174,8 +183,15 @@ System notes:
   - Marks the linked accepted/partially accepted edit rows as synced and stores the returned changeset id / compact summary in edit history.
   - Returns `409 OSM_SYNC_ALREADY_PUBLISHED` for building groups that were already synchronized and are read-only.
 - `GET /api/admin/building-edits`, `GET /api/admin/building-edits/:editId`
+  - `GET /api/admin/building-edits` accepts `status`, `sync`, `user`, `q`, `from`, `to`, `page`, and `limit` query parameters and returns paginated raw edit rows ordered newest-first.
+  - `sync=active` returns editable rows, `sync=archived` returns read-only rows with `syncStatus` of `synced` or `cleaned`.
+  - The list response includes `total`, `page`, `pageSize`, `pageCount`, `items`, and `authors[]` for the user filter dropdown.
   - Edit history items include sync metadata when available: `syncStatus`, `syncAttemptedAt`, `syncSucceededAt`, `syncCleanedAt`, `syncChangesetId`, `syncSummary`, `syncError`.
 - `POST /api/admin/building-edits/:editId/reject`, `POST /api/admin/building-edits/:editId/merge`
+- `POST /api/admin/building-edits/bulk-merge`
+  - Admin-only bulk accept for multiple pending edit rows selected in the moderation table.
+  - Body: `{ editIds: [1, 2, ...], force?: boolean, comment?: string }`.
+  - Each selected edit is processed independently through the same merge path as the single-edit action, so already-processed rows can fail without aborting the rest of the batch.
 - `POST /api/admin/building-edits/:editId/reassign`
 - `DELETE /api/admin/building-edits/:editId`
   - Master-admin only.
@@ -192,6 +208,8 @@ System notes:
   - Admin-only delete for a style-region override rule.
 - `GET /api/account/edits`, `GET /api/account/edits/:editId`
   - Account history uses the same sync metadata fields as admin edit details and keeps them visible after local overwrite cleanup.
+  - `GET /api/account/edits` accepts `status`, `q`, `from`, `to`, `page`, and `limit` query parameters and returns paginated building groups ordered from newest to oldest.
+  - The list response includes `total`, `page`, `pageSize`, `pageCount`, and `items`.
 - `DELETE /api/account/edits/:editId`
   - Current-user only.
   - Withdraws one of the user's own `pending` edits before moderation and removes that history row.

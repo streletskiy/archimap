@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { createFilterCache } from './filter-cache';
 import {
   buildBboxHash,
@@ -8,6 +8,7 @@ import {
   isViewportInsideBbox
 } from './filter-bbox';
 import { createFilterFetcher } from './filter-fetcher';
+import { FILTER_FALLBACK_MARKER_MAX_ZOOM } from './filter-fallback-marker-utils';
 import { createFilterMatchCacheStrategy } from './filter-match-cache-strategy';
 import {
   buildResolvedLayerPayload,
@@ -20,6 +21,7 @@ import {
 import { createFilterDiffApplyStrategy } from './filter-diff-apply-strategy';
 import { normalizeLayerIdsSnapshot } from './filter-utils';
 import { createFilterWorkerDispatcher } from './filter-worker-dispatcher';
+import { resetSearchState, searchState } from '$lib/stores/search';
 import type {
   BboxSnapshot,
   FilterBuildingSourceConfig,
@@ -36,7 +38,11 @@ import type {
 } from './filter-types.js';
 
 export const FILTER_HIGHLIGHT_MODE = 'paint-property';
-export const FILTER_TELEMETRY_ENABLED = Boolean(import.meta.env.DEV || import.meta.env.MODE === 'test');
+const IMPORT_META_ENV: {
+  DEV?: boolean;
+  MODE?: string;
+} = import.meta.env ?? {};
+export const FILTER_TELEMETRY_ENABLED = Boolean(IMPORT_META_ENV.DEV || IMPORT_META_ENV.MODE === 'test');
 
 const FILTER_REQUEST_DEBOUNCE_MS = 180;
 const FILTER_HEAVY_RULE_DEBOUNCE_MS = 500;
@@ -45,6 +51,10 @@ const FILTER_MATCH_CACHE_TTL_MS = 8_000;
 const FILTER_MATCH_CACHE_MAX_ITEMS = 90;
 const FILTER_MATCH_DEGRADE_LIMIT = FILTER_HIGHLIGHT_MODE === 'paint-property' ? 30_000 : 20_000;
 const FILTER_MATCH_DEFAULT_LIMIT = 12_000;
+const FILTER_MARKER_MATCH_LIMIT_HIGH = 8_000;
+const FILTER_MARKER_MATCH_LIMIT_MID = 12_000;
+const FILTER_MARKER_MATCH_LIMIT_LOW = 16_000;
+const FILTER_MARKER_MATCH_LIMIT_MIN = 20_000;
 const FILTER_DATA_CACHE_TTL_MS = 45_000;
 const FILTER_DATA_CACHE_MAX_ITEMS = 25_000;
 const FILTER_DATA_REQUEST_CHUNK_SIZE = 5_000;
@@ -73,11 +83,26 @@ function createInitialState(mapDebug: FilterMapDebug | null | undefined) {
   };
 }
 
+export function getMarkerMatchLimit(zoomBucket: number) {
+  const zoom = Number(zoomBucket);
+  if (!Number.isFinite(zoom)) return FILTER_MARKER_MATCH_LIMIT_MID;
+  if (zoom >= 12.5) return FILTER_MARKER_MATCH_LIMIT_HIGH;
+  if (zoom >= 11.5) return FILTER_MARKER_MATCH_LIMIT_MID;
+  if (zoom >= 10.5) return FILTER_MARKER_MATCH_LIMIT_LOW;
+  return FILTER_MARKER_MATCH_LIMIT_MIN;
+}
+
+export function getFilterStatusCodeForRenderMode(renderMode: 'contours' | 'markers', truncated: boolean) {
+  if (String(renderMode || 'contours') === 'markers') return 'applied';
+  return truncated ? 'truncated' : 'applied';
+}
+
 export function createFilterPipeline({
   map,
   mapDebug,
   getLayerIds,
   getBuildingSourceConfigs,
+  getSourceDataVersion,
   onStatusChange,
   translateInvalidMessage
 }: {
@@ -85,6 +110,7 @@ export function createFilterPipeline({
   mapDebug?: FilterMapDebug | null | undefined;
   getLayerIds?: () => Partial<LayerIdsSnapshot> | LayerIdsSnapshot | null | undefined;
   getBuildingSourceConfigs?: () => FilterBuildingSourceConfig[] | null | undefined;
+  getSourceDataVersion?: () => number | null | undefined;
   onStatusChange?: (status: FilterRuntimeStatus & { updatedAt: number }) => void;
   translateInvalidMessage?: (message?: string) => string;
 } = {}) {
@@ -98,6 +124,9 @@ export function createFilterPipeline({
       return Array.isArray(configs) ? configs : [];
     }
     : () => [];
+  const resolveSourceDataVersion = typeof getSourceDataVersion === 'function'
+    ? () => Number(getSourceDataVersion() || 0) || 0
+    : () => 0;
   const handleStatusChange = typeof onStatusChange === 'function' ? onStatusChange : () => {};
   const resolveInvalidMessage = typeof translateInvalidMessage === 'function'
     ? translateInvalidMessage
@@ -119,8 +148,10 @@ export function createFilterPipeline({
   let activeFilterCoverageWindow: (FilterCoverageContext['coverageWindow'] & {
     rulesHash?: string;
     zoomBucket?: number;
+    dataVersion?: number;
   }) | null = null;
   let activeFilterCoverageKey = '';
+  let activeFilterRenderMode: 'contours' | 'markers' = 'contours';
   let filterLastMoveEndAt = 0;
   let filterLastMapCenter = null;
   let filterLastMoveVector = { dx: 0, dy: 0 };
@@ -279,17 +310,23 @@ export function createFilterPipeline({
     viewportBbox,
     rulesHash,
     zoomBucket,
+    renderMode,
+    dataVersion,
     reason
   }: {
     viewportBbox: BboxSnapshot | null | undefined;
     rulesHash: string;
     zoomBucket: number;
+    renderMode: 'contours' | 'markers';
+    dataVersion?: number;
     reason?: string | null | undefined;
   }) {
     if (reason !== 'viewport') return false;
     if (!activeFilterCoverageWindow) return false;
     if (String(activeFilterCoverageWindow.rulesHash || '') !== String(rulesHash || '')) return false;
     if (Number(activeFilterCoverageWindow.zoomBucket || 0) !== Number(zoomBucket || 0)) return false;
+    if (String(activeFilterRenderMode || '') !== String(renderMode || '')) return false;
+    if (Number(activeFilterCoverageWindow.dataVersion || 0) !== Number(dataVersion || 0)) return false;
     return isViewportInsideBbox(viewportBbox, activeFilterCoverageWindow);
   }
 
@@ -343,7 +380,11 @@ export function createFilterPipeline({
     filterAuthoritativeTimer = setTimeout(async () => {
       filterAuthoritativeTimer = null;
       if (token !== latestFilterToken || !resolveMap()) return;
-      const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}`;
+      const renderMode = String(context?.renderMode || 'contours') === 'markers' ? 'markers' : 'contours';
+      const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}:${renderMode}:${Number(context?.dataVersion || 0)}`;
+      const matchLimit = Number.isFinite(Number(context?.matchLimit))
+        ? Number(context.matchLimit)
+        : (renderMode === 'markers' ? getMarkerMatchLimit(context.zoomBucket) : FILTER_MATCH_DEFAULT_LIMIT);
       if (requestKey === lastAuthoritativeRequestKey && context.reason === 'viewport') {
         return;
       }
@@ -387,11 +428,17 @@ export function createFilterPipeline({
         requestResults = [...cachedResults];
         if (missingSpecs.length > 0) {
           const fetchedResults = missingSpecs.length > 1
-            ? await (() => filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(missingSpecs, context, signal))()
+            ? await (() => filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(missingSpecs, {
+              ...context,
+              matchLimit
+            }, signal))()
                 .catch(async (error) => {
                   if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
                   return Promise.all(missingSpecs.map(async (spec) => {
-                    const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, context, signal);
+                    const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, {
+                      ...context,
+                      matchLimit
+                    }, signal);
                     return {
                       spec,
                       ...result
@@ -399,7 +446,10 @@ export function createFilterPipeline({
                   }));
                 })
             : await Promise.all(missingSpecs.map(async (spec) => {
-                const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, context, signal);
+                const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, {
+                  ...context,
+                  matchLimit
+                }, signal);
                 return {
                   spec,
                   ...result
@@ -446,6 +496,8 @@ export function createFilterPipeline({
               coverageWindow: context.coverageWindow,
               rulesHash: context.rulesHash,
               zoomBucket: context.zoomBucket,
+              dataVersion: context.dataVersion,
+              renderMode,
               truncated: Boolean(workerResult.meta?.truncated),
               elapsedMs: Number(workerResult.meta?.elapsedMs || 0),
               cacheHit: Boolean(workerResult.meta?.cacheHit)
@@ -471,13 +523,15 @@ export function createFilterPipeline({
           coverageWindow: context.coverageWindow,
           rulesHash: context.rulesHash,
           zoomBucket: context.zoomBucket,
+          dataVersion: context.dataVersion,
+          renderMode,
           truncated: Boolean(resolvedPayload.meta?.truncated),
           elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
           cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
         };
       }
       const matchedSize = Number(resolvedPayload?.matchedCount || 0);
-      if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT) {
+      if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT && renderMode !== 'markers') {
         updateFilterRuntimeStatus({
           statusCode: 'too_many_matches',
           count: matchedSize
@@ -490,23 +544,27 @@ export function createFilterPipeline({
         return;
       }
 
-      await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
-        resolvedPayload.highlightColorGroups || [],
-        token,
-        {
-          phase: 'authoritative',
-          matchedFeatureIds: Array.isArray(resolvedPayload?.matchedFeatureIds)
-            ? resolvedPayload.matchedFeatureIds
-            : []
-        }
-      );
+        await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
+          resolvedPayload.highlightColorGroups || [],
+          token,
+          {
+            phase: 'authoritative',
+            renderMode,
+            matchedCount: Number(resolvedPayload?.matchedCount || 0),
+            matchedFeatureIds: Array.isArray(resolvedPayload?.matchedFeatureIds)
+              ? resolvedPayload.matchedFeatureIds
+              : []
+          }
+        );
       if (token !== latestFilterToken) return;
       filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
       activeFilterCoverageWindow = {
         ...context.coverageWindow,
         rulesHash: context.rulesHash,
-        zoomBucket: context.zoomBucket
+        zoomBucket: context.zoomBucket,
+        dataVersion: context.dataVersion
       };
+      activeFilterRenderMode = renderMode;
       activeFilterCoverageKey = context.coverageHash;
 
       patchState({
@@ -534,7 +592,7 @@ export function createFilterPipeline({
         highlightedCount: filterDiffApplyStrategy.getFilteredFeatureCount()
       });
       updateFilterRuntimeStatus({
-        statusCode: resolvedPayload?.meta?.truncated ? 'truncated' : 'applied',
+        statusCode: getFilterStatusCodeForRenderMode(renderMode, Boolean(resolvedPayload?.meta?.truncated)),
         count: currentState.lastCount,
         elapsedMs: currentState.lastElapsedMs,
         cacheHit: currentState.lastCacheHit,
@@ -572,6 +630,7 @@ export function createFilterPipeline({
     currentFilterRulesHash = 'fnv1a-0';
     activeFilterCoverageWindow = null;
     activeFilterCoverageKey = '';
+    activeFilterRenderMode = 'contours';
     setFilterPhase('idle');
     updateFilterRuntimeStatus({
       statusCode: 'idle',
@@ -585,6 +644,13 @@ export function createFilterPipeline({
 
   async function applyBuildingFilters(input, { reason = 'rules' } = {}) {
     if (!resolveMap()) {
+      return;
+    }
+    if (Array.isArray(input) && input.length === 0) {
+      patchState({
+        errorMessage: ''
+      });
+      clearFilterHighlight();
       return;
     }
     const token = ++latestFilterToken;
@@ -627,12 +693,27 @@ export function createFilterPipeline({
       });
       return;
     }
+    const currentSearch = get(searchState);
+    if (
+      Boolean(currentSearch?.mapActive)
+      || Boolean(currentSearch?.loading)
+      || Boolean(currentSearch?.loadingMore)
+      || (Array.isArray(currentSearch?.items) && currentSearch.items.length > 0)
+    ) {
+      resetSearchState();
+    }
     const currentMap = resolveMap();
+    const currentZoom = Number(currentMap?.getZoom?.());
+    const renderMode = Number.isFinite(currentZoom) && currentZoom < FILTER_FALLBACK_MARKER_MAX_ZOOM
+      ? 'markers'
+      : 'contours';
     const bboxHash = buildBboxHash(bbox, 4);
-    const zoomBucket = Math.round(currentMap.getZoom() * 2) / 2;
+    const zoomBucket = Math.round(Number(currentMap?.getZoom?.() || 0) * 2) / 2;
     const coverageWindow = getCoverageWindowForViewport(bbox) || bbox;
     const coverageHash = buildBboxHash(coverageWindow, 4);
-    const cacheKey = `${prepared.rulesHash}:${coverageHash}:${zoomBucket}`;
+    const dataVersion = resolveSourceDataVersion();
+    const matchLimit = renderMode === 'markers' ? getMarkerMatchLimit(zoomBucket) : FILTER_MATCH_DEFAULT_LIMIT;
+    const cacheKey = `${prepared.rulesHash}:${coverageHash}:${zoomBucket}:${renderMode}:${dataVersion}`;
     lastViewportHash = bboxHash;
 
     patchState({
@@ -645,6 +726,8 @@ export function createFilterPipeline({
       viewportBbox: bbox,
       rulesHash: prepared.rulesHash,
       zoomBucket,
+      renderMode,
+      dataVersion,
       reason
     })) {
       setFilterPhase('authoritative');
@@ -673,6 +756,8 @@ export function createFilterPipeline({
         token,
         {
           phase: 'optimistic',
+          renderMode,
+          matchedCount: Number(cachedPayload?.matchedCount || 0),
           matchedFeatureIds: Array.isArray(cachedPayload?.matchedFeatureIds)
             ? cachedPayload.matchedFeatureIds
             : []
@@ -687,8 +772,10 @@ export function createFilterPipeline({
       activeFilterCoverageWindow = {
         ...coverageWindow,
         rulesHash: prepared.rulesHash,
-        zoomBucket
+        zoomBucket,
+        dataVersion
       };
+      activeFilterRenderMode = renderMode;
       activeFilterCoverageKey = coverageHash;
       updateFilterRuntimeStatus({
         statusCode: 'applied',
@@ -717,7 +804,9 @@ export function createFilterPipeline({
     const reusableResolvedPayload = filterMatchCacheStrategy.findReusableResolvedPayload({
       viewportBbox: bbox,
       rulesHash: prepared.rulesHash,
-      zoomBucket
+      zoomBucket,
+      renderMode,
+      dataVersion
     });
     if (reusableResolvedPayload) {
       const reusedPayload = {
@@ -732,6 +821,8 @@ export function createFilterPipeline({
         token,
         {
           phase: 'optimistic',
+          renderMode,
+          matchedCount: Number(reusedPayload?.matchedCount || 0),
           matchedFeatureIds: Array.isArray(reusedPayload?.matchedFeatureIds)
             ? reusedPayload.matchedFeatureIds
             : []
@@ -746,8 +837,10 @@ export function createFilterPipeline({
       activeFilterCoverageWindow = {
         ...(reusedPayload?.meta?.coverageWindow || coverageWindow),
         rulesHash: prepared.rulesHash,
-        zoomBucket
+        zoomBucket,
+        dataVersion
       };
+      activeFilterRenderMode = renderMode;
       activeFilterCoverageKey = String(reusedPayload?.meta?.coverageHash || coverageHash);
       setFilterPhase('authoritative');
       updateFilterRuntimeStatus({
@@ -791,18 +884,21 @@ export function createFilterPipeline({
       coverageHash,
       bboxHash,
       zoomBucket,
+      renderMode,
+      dataVersion,
+      matchLimit,
       cacheKey
     }, token, debounceMs);
   }
 
-  function scheduleFilterRefresh(input: unknown) {
+  function scheduleFilterRefresh(input: unknown, { reason = 'viewport' } = {}) {
     if (mapMoveDebounceTimer) {
       clearTimeout(mapMoveDebounceTimer);
       mapMoveDebounceTimer = null;
     }
     mapMoveDebounceTimer = setTimeout(() => {
       mapMoveDebounceTimer = null;
-      applyBuildingFilters(input, { reason: 'viewport' });
+      applyBuildingFilters(input, { reason });
     }, FILTER_REQUEST_DEBOUNCE_MS);
   }
 
@@ -859,6 +955,7 @@ export function createFilterPipeline({
     filterFetcher.clear();
     activeFilterCoverageWindow = null;
     activeFilterCoverageKey = '';
+    activeFilterRenderMode = 'contours';
     lastAuthoritativeRequestKey = '';
     currentFilterRulesHash = 'fnv1a-0';
     lastViewportHash = '';

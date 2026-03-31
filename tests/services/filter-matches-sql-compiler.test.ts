@@ -261,3 +261,112 @@ test('buildFilterMatchBatchResults prefers local archi info over raw OSM tags', 
   ]);
   assert.deepEqual(colourResult[0].matchedKeys, ['way/201']);
 });
+
+test('buildFilterMatchBatchResults returns actual marker points at and above the low-zoom aggregation cutoff', () => {
+  const items = [
+    {
+      osmKey: 'way/301',
+      centerLon: 37.595,
+      centerLat: 55.695,
+      sourceTags: {},
+      archiInfo: null
+    },
+    {
+      osmKey: 'way/302',
+      centerLon: 37.615,
+      centerLat: 55.715,
+      sourceTags: {},
+      archiInfo: null
+    },
+    {
+      osmKey: 'way/303',
+      centerLon: 37.645,
+      centerLat: 55.745,
+      sourceTags: {},
+      archiInfo: null
+    },
+    {
+      osmKey: 'way/304',
+      centerLon: 37.675,
+      centerLat: 55.775,
+      sourceTags: {},
+      archiInfo: null
+    }
+  ];
+
+  const results = buildFilterMatchBatchResults(items, [
+    {
+      id: 'markers-all',
+      rulesHash: 'hash-markers',
+      maxResults: 100,
+      rules: []
+    }
+  ], {
+    bbox: {
+      west: 37.59,
+      south: 55.69,
+      east: 37.68,
+      north: 55.78
+    },
+    bboxHash: 'bbox:markers',
+    elapsedMs: 7,
+    renderMode: 'markers',
+    zoomBucket: 5
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].matchedCount, 4);
+  assert.equal(results[0].matchedFeatureIds.length, 4);
+  assert.equal(results[0].matchedLocations.length, 4);
+  assert.deepEqual(results[0].matchedLocations.map((point) => point?.count ?? null), [1, 1, 1, 1]);
+  assert.equal(results[0].matchedLocations.every((point) => String(point?.osmKey || '').startsWith('way/')), true);
+  assert.equal(results[0].matchedLocations.every((point) => String(point?.osmKey || '').startsWith('cell:') === false), true);
+  assert.equal(results[0].meta.truncated, false);
+});
+
+test('buildFilterMatchBatchResults aggregates marker fallback only below the low-zoom cutoff', () => {
+  const items = [
+    {
+      osmKey: 'way/401',
+      centerLon: 37.6001,
+      centerLat: 55.7001,
+      sourceTags: {},
+      archiInfo: null
+    },
+    {
+      osmKey: 'way/402',
+      centerLon: 37.6002,
+      centerLat: 55.7002,
+      sourceTags: {},
+      archiInfo: null
+    }
+  ];
+
+  const results = buildFilterMatchBatchResults(items, [
+    {
+      id: 'markers-aggregated',
+      rulesHash: 'hash-markers-aggregated',
+      maxResults: 100,
+      rules: []
+    }
+  ], {
+    bbox: {
+      west: 37.59,
+      south: 55.69,
+      east: 37.68,
+      north: 55.78
+    },
+    bboxHash: 'bbox:markers-aggregated',
+    elapsedMs: 7,
+    renderMode: 'markers',
+    zoomBucket: 4
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].matchedCount, 2);
+  assert.equal(results[0].matchedFeatureIds.length, 1);
+  assert.equal(results[0].matchedLocations.length, 1);
+  assert.equal(results[0].matchedLocations[0]?.count, 2);
+  assert.equal(String(results[0].matchedLocations[0]?.osmKey || '').startsWith('cell:'), true);
+  assert.equal(results[0].meta.truncated, false);
+});

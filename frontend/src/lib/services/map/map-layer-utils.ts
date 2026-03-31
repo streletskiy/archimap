@@ -18,6 +18,81 @@ import {
 export const CARTO_BUILDING_LAYER_IDS = Object.freeze(['building', 'building-top']);
 export const BUILDING_FEATURE_KIND = 'building';
 export const BUILDING_PART_FEATURE_KIND = 'building_part';
+export const OVERPASS_BUILDING_SOURCE_ID = 'overpass-buildings-source';
+const BUILDING_SELECTED_THEME = Object.freeze({
+  fillColor: '#6d655b',
+  fillOpacity: 0.72,
+  lineColor: '#3d3832',
+  lineWidth: 2.2,
+  lineOpacity: 1
+});
+const OVERPASS_BUILDING_LAYER_SUFFIXES = Object.freeze({
+  fill: 'fill',
+  line: 'line',
+  partFill: 'part-fill',
+  partLine: 'part-line',
+  partFilterHighlightFill: 'part-filter-highlight-fill',
+  partFilterHighlightLine: 'part-filter-highlight-line',
+  filterHighlightFill: 'filter-highlight-fill',
+  filterHighlightLine: 'filter-highlight-line',
+  hoverFill: 'hover-fill',
+  hoverLine: 'hover-line',
+  selectedFill: 'selected-fill',
+  selectedLine: 'selected-line'
+});
+
+function buildOverpassBuildingLayerId(suffix = '') {
+  const normalizedSuffix = String(suffix || '').trim();
+  return normalizedSuffix ? `${OVERPASS_BUILDING_SOURCE_ID}-${normalizedSuffix}` : OVERPASS_BUILDING_SOURCE_ID;
+}
+
+export function getCurrentOverpassBuildingsFillLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.fill)];
+}
+
+export function getCurrentOverpassBuildingsLineLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.line)];
+}
+
+export function getCurrentOverpassBuildingPartFillLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFill)];
+}
+
+export function getCurrentOverpassBuildingPartLineLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partLine)];
+}
+
+export function getCurrentOverpassBuildingPartFilterHighlightFillLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightFill)];
+}
+
+export function getCurrentOverpassBuildingPartFilterHighlightLineLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightLine)];
+}
+
+export function getCurrentOverpassBuildingHoverFillLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverFill)];
+}
+
+export function getCurrentOverpassBuildingHoverLineLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverLine)];
+}
+
+export function getCurrentOverpassFilterHighlightFillLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightFill)];
+}
+
+export function getCurrentOverpassFilterHighlightLineLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightLine)];
+}
+
+export function getCurrentOverpassSelectedFillLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedFill)];
+}
+
+export function getCurrentOverpassSelectedLineLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedLine)];
+}
 
 function buildFeatureKindFilter(featureKind = BUILDING_FEATURE_KIND) {
   if (featureKind === BUILDING_PART_FEATURE_KIND) {
@@ -60,11 +135,16 @@ export function buildRegionBuildingHighlightFilterExpression({
 }
 
 export function getCurrentBuildingSourceConfigs(activeRegionPmtiles = []) {
-  return activeRegionPmtiles.map((region) => ({
-    regionId: region.id,
-    sourceId: buildRegionSourceId(region.id),
-    sourceLayer: region.sourceLayer
-  }));
+  return [
+    ...activeRegionPmtiles.map((region) => ({
+      regionId: region.id,
+      sourceId: buildRegionSourceId(region.id),
+      sourceLayer: region.sourceLayer
+    })),
+    {
+      sourceId: OVERPASS_BUILDING_SOURCE_ID
+    }
+  ];
 }
 
 export function getRegionLayerIds(activeRegionPmtiles = [], suffix) {
@@ -72,51 +152,87 @@ export function getRegionLayerIds(activeRegionPmtiles = [], suffix) {
 }
 
 export function getCurrentBuildingsFillLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'fill');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'fill'),
+    ...getCurrentOverpassBuildingsFillLayerIds()
+  ];
 }
 
 export function getCurrentBuildingsLineLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'line');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'line'),
+    ...getCurrentOverpassBuildingsLineLayerIds()
+  ];
 }
 
 export function getCurrentBuildingPartFillLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'part-fill');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'part-fill'),
+    ...getCurrentOverpassBuildingPartFillLayerIds()
+  ];
 }
 
 export function getCurrentBuildingPartLineLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'part-line');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'part-line'),
+    ...getCurrentOverpassBuildingPartLineLayerIds()
+  ];
 }
 
 export function getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-fill');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-fill'),
+    ...getCurrentOverpassBuildingPartFilterHighlightFillLayerIds()
+  ];
 }
 
 export function getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-line');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-line'),
+    ...getCurrentOverpassBuildingPartFilterHighlightLineLayerIds()
+  ];
 }
 
 export function getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'hover-fill');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'hover-fill'),
+    ...getCurrentOverpassBuildingHoverFillLayerIds()
+  ];
 }
 
 export function getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'hover-line');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'hover-line'),
+    ...getCurrentOverpassBuildingHoverLineLayerIds()
+  ];
 }
 
 export function getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-fill');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-fill'),
+    ...getCurrentOverpassFilterHighlightFillLayerIds()
+  ];
 }
 
 export function getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-line');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-line'),
+    ...getCurrentOverpassFilterHighlightLineLayerIds()
+  ];
 }
 
 export function getCurrentSelectedFillLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'selected-fill');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'selected-fill'),
+    ...getCurrentOverpassSelectedFillLayerIds()
+  ];
 }
 
 export function getCurrentSelectedLineLayerIds(activeRegionPmtiles = []) {
-  return getRegionLayerIds(activeRegionPmtiles, 'selected-line');
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'selected-line'),
+    ...getCurrentOverpassSelectedLineLayerIds()
+  ];
 }
 
 export function applyBuildingThemePaint({
@@ -185,7 +301,7 @@ export function isBaseLabelLayer(layer) {
 }
 
 export function applyLabelLayerVisibility(map, visible) {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!map) return;
   const layers = map.getStyle()?.layers || [];
   const nextVisibility = visible ? 'visible' : 'none';
   for (const layer of layers) {
@@ -268,6 +384,300 @@ export function bringSearchResultsLayersToFront(map) {
     if (!map.getLayer(layerId)) continue;
     map.moveLayer(layerId);
   }
+}
+
+export function bringBaseLabelLayersAboveCustomLayers(map) {
+  if (!map) return;
+  const layers = map.getStyle()?.layers || [];
+  const searchAnchorLayerId = [
+    SEARCH_RESULTS_CLUSTER_LAYER_ID,
+    SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
+    SEARCH_RESULTS_LAYER_ID
+  ].find((layerId) => Boolean(map.getLayer(layerId)));
+
+  for (const layer of layers) {
+    if (!isBaseLabelLayer(layer)) continue;
+    const layerId = String(layer?.id || '').trim();
+    if (!layerId) continue;
+    if (!map.getLayer(layerId)) continue;
+    if (searchAnchorLayerId) {
+      map.moveLayer(layerId, searchAnchorLayerId);
+    } else {
+      map.moveLayer(layerId);
+    }
+  }
+}
+
+function ensureLayerVisibility(map, layerId, visibility) {
+  if (!map?.getLayer?.(layerId)) return;
+  map.setLayoutProperty(layerId, 'visibility', visibility);
+}
+
+export function ensureOverpassBuildingSourceAndLayers({
+  map,
+  data,
+  buildingPaint,
+  hoverPaint = getBuildingHoverThemePaint('light'),
+  buildingPartsVisible = true,
+  buildingPartHighlightVisible = false,
+  visible = true
+}) {
+  if (!map) return;
+  const sourceId = OVERPASS_BUILDING_SOURCE_ID;
+  const fillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.fill);
+  const lineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.line);
+  const partFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFill);
+  const partLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partLine);
+  const filterFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightFill);
+  const filterLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightLine);
+  const partFilterFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightFill);
+  const partFilterLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightLine);
+  const hoverFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverFill);
+  const hoverLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverLine);
+  const selectedFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedFill);
+  const selectedLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedLine);
+
+  const sourceData = data || {
+    type: 'FeatureCollection',
+    features: []
+  };
+
+  if (!map.getSource(sourceId)) {
+    map.addSource(sourceId, {
+      type: 'geojson',
+      data: sourceData
+    });
+  } else {
+    const source = map.getSource(sourceId);
+    source?.setData?.(sourceData);
+  }
+
+  if (!map.getLayer(fillLayerId)) {
+    map.addLayer({
+      id: fillLayerId,
+      type: 'fill',
+      source: sourceId,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression(),
+      paint: {
+        'fill-color': buildingPaint.fillColor,
+        'fill-opacity': buildingPaint.fillOpacity
+      },
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      }
+    });
+  }
+
+  if (!map.getLayer(lineLayerId)) {
+    map.addLayer({
+      id: lineLayerId,
+      type: 'line',
+      source: sourceId,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression(),
+      paint: {
+        'line-color': buildingPaint.lineColor,
+        'line-width': buildingPaint.lineWidth,
+        'line-opacity': buildingPaint.lineOpacity ?? 1
+      },
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      }
+    });
+  }
+
+  if (!map.getLayer(partFillLayerId)) {
+    map.addLayer({
+      id: partFillLayerId,
+      type: 'fill',
+      source: sourceId,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression({
+        featureKind: BUILDING_PART_FEATURE_KIND
+      }),
+      layout: {
+        visibility: visible && buildingPartsVisible ? 'visible' : 'none'
+      },
+      paint: {
+        'fill-color': buildingPaint.fillColor,
+        'fill-opacity': buildingPaint.fillOpacity
+      }
+    });
+  }
+
+  if (!map.getLayer(partLineLayerId)) {
+    map.addLayer({
+      id: partLineLayerId,
+      type: 'line',
+      source: sourceId,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression({
+        featureKind: BUILDING_PART_FEATURE_KIND
+      }),
+      layout: {
+        visibility: visible && buildingPartsVisible ? 'visible' : 'none'
+      },
+      paint: {
+        'line-color': buildingPaint.lineColor,
+        'line-width': buildingPaint.lineWidth,
+        'line-opacity': buildingPaint.lineOpacity ?? 1
+      }
+    });
+  }
+
+  if (!map.getLayer(filterFillLayerId)) {
+    map.addLayer({
+      id: filterFillLayerId,
+      type: 'fill',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      },
+      paint: {
+        'fill-color': 'transparent',
+        'fill-opacity': 0
+      }
+    });
+  }
+
+  if (!map.getLayer(filterLineLayerId)) {
+    map.addLayer({
+      id: filterLineLayerId,
+      type: 'line',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      },
+      paint: {
+        'line-color': 'transparent',
+        'line-width': 0,
+        'line-opacity': 0
+      }
+    });
+  }
+
+  if (!map.getLayer(partFilterFillLayerId)) {
+    map.addLayer({
+      id: partFilterFillLayerId,
+      type: 'fill',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible && buildingPartHighlightVisible ? 'visible' : 'none'
+      },
+      paint: {
+        'fill-color': 'transparent',
+        'fill-opacity': 0
+      }
+    });
+  }
+
+  if (!map.getLayer(partFilterLineLayerId)) {
+    map.addLayer({
+      id: partFilterLineLayerId,
+      type: 'line',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible && buildingPartHighlightVisible ? 'visible' : 'none'
+      },
+      paint: {
+        'line-color': 'transparent',
+        'line-width': 0,
+        'line-opacity': 0
+      }
+    });
+  }
+
+  if (!map.getLayer(hoverFillLayerId)) {
+    map.addLayer({
+      id: hoverFillLayerId,
+      type: 'fill',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      },
+      paint: {
+        'fill-color': hoverPaint.fillColor,
+        'fill-opacity': hoverPaint.fillOpacity
+      }
+    });
+  }
+
+  if (!map.getLayer(hoverLineLayerId)) {
+    map.addLayer({
+      id: hoverLineLayerId,
+      type: 'line',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      },
+      paint: {
+        'line-color': hoverPaint.lineColor,
+        'line-width': hoverPaint.lineWidth,
+        'line-opacity': hoverPaint.lineOpacity ?? 1
+      }
+    });
+  }
+
+  if (!map.getLayer(selectedFillLayerId)) {
+    map.addLayer({
+      id: selectedFillLayerId,
+      type: 'fill',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      },
+      paint: {
+        'fill-color': BUILDING_SELECTED_THEME.fillColor,
+        'fill-opacity': BUILDING_SELECTED_THEME.fillOpacity
+      }
+    });
+  }
+
+  if (!map.getLayer(selectedLineLayerId)) {
+    map.addLayer({
+      id: selectedLineLayerId,
+      type: 'line',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible ? 'visible' : 'none'
+      },
+      paint: {
+        'line-color': BUILDING_SELECTED_THEME.lineColor,
+        'line-width': BUILDING_SELECTED_THEME.lineWidth,
+        'line-opacity': BUILDING_SELECTED_THEME.lineOpacity
+      }
+    });
+  }
+
+  ensureLayerVisibility(map, fillLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, lineLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFillLayerId, visible && buildingPartsVisible ? 'visible' : 'none');
+  ensureLayerVisibility(map, partLineLayerId, visible && buildingPartsVisible ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterFillLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterLineLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterFillLayerId, visible && buildingPartHighlightVisible ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterLineLayerId, visible && buildingPartHighlightVisible ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverFillLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverLineLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedFillLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedLineLayerId, visible ? 'visible' : 'none');
 }
 
 export function ensureRegionBuildingSourceAndLayers({
@@ -482,8 +892,8 @@ export function ensureRegionBuildingSourceAndLayers({
       minzoom: 13,
       filter: ['==', ['id'], -1],
       paint: {
-        'fill-color': '#6d655b',
-        'fill-opacity': 0.72
+        'fill-color': BUILDING_SELECTED_THEME.fillColor,
+        'fill-opacity': BUILDING_SELECTED_THEME.fillOpacity
       }
     });
   }
@@ -497,8 +907,9 @@ export function ensureRegionBuildingSourceAndLayers({
       minzoom: 13,
       filter: ['==', ['id'], -1],
       paint: {
-        'line-color': '#3d3832',
-        'line-width': 2.2
+        'line-color': BUILDING_SELECTED_THEME.lineColor,
+        'line-width': BUILDING_SELECTED_THEME.lineWidth,
+        'line-opacity': BUILDING_SELECTED_THEME.lineOpacity
       }
     });
   }
@@ -540,7 +951,7 @@ export function applyBuildingPartsLayerVisibility({
   partFilterHighlightFillLayerIds = [],
   partFilterHighlightLineLayerIds = []
 }) {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!map) return;
   const partLayerVisibility = visible ? 'visible' : 'none';
   const partHighlightVisibility = (visible || forceHighlightVisible) ? 'visible' : 'none';
   for (const layerId of [...new Set([

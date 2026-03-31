@@ -44,6 +44,7 @@ function createTestDb() {
       sync_changeset_id INTEGER,
       sync_summary_json TEXT,
       sync_error_text TEXT,
+      source_geometry_json TEXT,
       source_tags_json TEXT,
       source_osm_updated_at TEXT,
       created_at TEXT,
@@ -54,6 +55,7 @@ function createTestDb() {
       osm_type TEXT NOT NULL,
       osm_id INTEGER NOT NULL,
       tags_json TEXT,
+      geometry_json TEXT,
       updated_at TEXT
     );
 
@@ -409,6 +411,35 @@ test('getUserEditsList marks accepted edit as orphaned when contour is missing',
   assert.equal(items[0].osmPresent, false);
   assert.equal(items[0].orphaned, true);
   assert.equal(items[0].hasMergedLocal, true);
+  assert.equal(items[0].hasSourceSnapshot, false);
+});
+
+test('getUserEditDetailsById marks overpass-backed edit snapshots separately from deleted contours', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, source_geometry_json, source_tags_json, source_osm_updated_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    31,
+    'way',
+    3101,
+    'user@example.com',
+    'Overpass building',
+    'pending',
+    JSON.stringify({ type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] }),
+    JSON.stringify({ name: 'Overpass building' }),
+    null
+  );
+
+  const item = await service.getUserEditDetailsById(31);
+  assert.ok(item);
+  assert.equal(item?.osmPresent, false);
+  assert.equal(item?.hasSourceSnapshot, true);
+  assert.equal(item?.sourceOsmUpdatedAt, null);
 });
 
 test('accepted edit keeps original change counters visible after merge', async () => {

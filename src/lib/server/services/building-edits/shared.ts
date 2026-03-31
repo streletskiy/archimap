@@ -5,6 +5,7 @@ import type {
 } from '$shared/types';
 
 const { sanitizeEditedFields } = require('../edits.service');
+const { osmAddressFromTags: sharedOsmAddressFromTags, resolveDisplayAddressForRow: sharedResolveDisplayAddressForRow } = require('../address-format');
 const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
 
 function assertMutableSyncStatus(syncStatusRaw) {
@@ -104,6 +105,14 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     return text ? text : null;
   }
 
+  function pickTagValue(tags, keys) {
+    for (const key of keys) {
+      const value = normalizeInfoForDiff(tags?.[key]);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
   function normalizeMaterialSelection(material, materialConcrete = null) {
     const normalizedMaterial = normalizeInfoForDiff(material);
     const normalizedConcrete = normalizeInfoForDiff(materialConcrete);
@@ -132,34 +141,6 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     }
 
     return normalized;
-  }
-
-  function pickTagValue(tags, keys) {
-    for (const key of keys) {
-      const value = normalizeInfoForDiff(tags?.[key]);
-      if (value != null) return value;
-    }
-    return null;
-  }
-
-  function osmAddressFromTags(tags) {
-    const full = pickTagValue(tags, ['addr:full']);
-    if (full != null) return full;
-    const parts = [
-      pickTagValue(tags, ['addr:postcode', 'addr_postcode']),
-      pickTagValue(tags, ['addr:city', 'addr_city']),
-      pickTagValue(tags, ['addr:place', 'addr_place']),
-      pickTagValue(tags, ['addr:street', 'addr_street', 'addr_stree'])
-    ].filter((value) => value != null);
-    const house = pickTagValue(tags, ['addr:housenumber', 'addr_housenumber', 'addr_hous']);
-    if (house != null) {
-      if (parts.length > 0) {
-        parts[parts.length - 1] = `${parts[parts.length - 1]}, ${house}`;
-      } else {
-        parts.push(house);
-      }
-    }
-    return parts.length > 0 ? parts.join(', ') : null;
   }
 
   const ARCHI_EDIT_FIELDS = Object.freeze([
@@ -226,7 +207,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   async function getOsmContourRow(osmType, osmId) {
     return await db.prepare(`
-      SELECT osm_type, osm_id, tags_json, updated_at
+      SELECT osm_type, osm_id, tags_json, geometry_json, updated_at
       FROM osm.building_contours
       WHERE osm_type = ? AND osm_id = ?
       LIMIT 1
@@ -316,7 +297,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       levels: pickTagValue(tags, ['building:levels', 'levels']),
       year_built: pickTagValue(tags, ['building:year', 'start_date', 'construction_date', 'year_built']),
       architect: pickTagValue(tags, ['architect', 'architect_name']),
-      address: osmAddressFromTags(tags),
+      address: sharedOsmAddressFromTags(tags),
       archimap_description: null
     };
 
@@ -462,6 +443,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       status,
       syncStatus,
       syncReadOnly,
+      hasSourceSnapshot: Boolean(row?.source_geometry_json != null),
       osmPresent,
       orphaned,
       hasMergedLocal,
@@ -503,6 +485,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       mergedBy: row.merged_by ?? null,
       mergedAt: row.merged_at ?? null,
       sourceOsmVersion: row.source_osm_version ?? null,
+      hasSourceSnapshot: runtimeState.hasSourceSnapshot,
       osmPresent: runtimeState.osmPresent,
       orphaned: runtimeState.orphaned,
       hasMergedLocal: runtimeState.hasMergedLocal,
@@ -527,8 +510,10 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         }
       })() : null,
       syncError: row.sync_error_text ?? null,
+      displayAddress: sharedResolveDisplayAddressForRow(row, mergedInfoRow),
       editedFields,
       mergedFields,
+      latestMerged: mergedInfoRow,
       values: {
         name: row.name ?? null,
         style: row.style ?? null,

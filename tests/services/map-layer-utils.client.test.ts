@@ -10,15 +10,24 @@ async function loadMapLayerUtils() {
   return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
 }
 
-function createMapStub() {
+function createMapStub({ styleLoaded = true } = {}) {
   const sources = new Map();
   const layers = new Map();
   const addedLayers = [];
   const layoutCalls = [];
+  const moveCalls = [];
+
+  function setLayerOrder(entries) {
+    layers.clear();
+    for (const [layerId, layer] of entries) {
+      layers.set(layerId, layer);
+    }
+  }
 
   return {
     addedLayers,
     layoutCalls,
+    moveCalls,
     layers,
     sources,
     getSource(sourceId) {
@@ -31,8 +40,15 @@ function createMapStub() {
       return layers.get(layerId) || null;
     },
     addLayer(layer) {
-      layers.set(layer.id, layer);
+      const nextLayers = Array.from(layers.entries()).filter(([existingLayerId]) => existingLayerId !== layer.id);
+      nextLayers.push([layer.id, layer]);
+      setLayerOrder(nextLayers);
       addedLayers.push(layer);
+    },
+    getStyle() {
+      return {
+        layers: Array.from(layers.values())
+      };
     },
     removeLayer(layerId) {
       layers.delete(layerId);
@@ -56,11 +72,25 @@ function createMapStub() {
       }
     },
     isStyleLoaded() {
-      return true;
+      return styleLoaded;
     },
     off() {},
     on() {},
-    moveLayer() {}
+    moveLayer(layerId, beforeId) {
+      const layer = layers.get(layerId);
+      if (!layer) return;
+      const nextLayers = Array.from(layers.entries()).filter(([existingLayerId]) => existingLayerId !== layerId);
+      const beforeIndex = beforeId
+        ? nextLayers.findIndex(([existingLayerId]) => existingLayerId === beforeId)
+        : -1;
+      if (beforeIndex >= 0) {
+        nextLayers.splice(beforeIndex, 0, [layerId, layer]);
+      } else {
+        nextLayers.push([layerId, layer]);
+      }
+      setLayerOrder(nextLayers);
+      moveCalls.push({ layerId, beforeId });
+    }
   };
 }
 
@@ -123,6 +153,36 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'visible');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').layout.visibility, 'none');
+});
+
+test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as pmtiles layers', async () => {
+  const { ensureOverpassBuildingSourceAndLayers } = await loadMapLayerUtils();
+  const map = createMapStub();
+
+  ensureOverpassBuildingSourceAndLayers({
+    map,
+    data: {
+      type: 'FeatureCollection',
+      features: []
+    },
+    buildingPaint: {
+      fillColor: '#a3a3a3',
+      fillOpacity: 1,
+      lineColor: '#bcbcbc',
+      lineWidth: 0.9,
+      lineOpacity: 1
+    }
+  });
+
+  assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-color'], '#a3a3a3');
+  assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-opacity'], 1);
+  assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-color'], '#bcbcbc');
+  assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-width'], 0.9);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-color'], '#6d655b');
+  assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-opacity'], 0.72);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-color'], '#3d3832');
+  assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-width'], 2.2);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-opacity'], 1);
 });
 
 test('applyBuildingThemePaint updates hover layers with hover theme paint', async () => {
@@ -236,5 +296,74 @@ test('applyBuildingPartsLayerVisibility keeps part highlight layers visible for 
     { layerId: 'region-buildings-7-part-filter-highlight-fill', name: 'visibility', value: 'visible' },
     { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'visible' }
   ]);
+});
+
+test('applyLabelLayerVisibility hides symbol layers even when style is not reported as loaded', async () => {
+  const { applyLabelLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub({ styleLoaded: false });
+  map.addLayer({ id: 'waterway_label', type: 'symbol', layout: { visibility: 'visible' } });
+  map.addLayer({ id: 'landcover', type: 'fill', layout: { visibility: 'visible' } });
+  map.addLayer({ id: 'search-results-points-layer', type: 'symbol', layout: { visibility: 'visible' } });
+
+  applyLabelLayerVisibility(map, false);
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'waterway_label', name: 'visibility', value: 'none' }
+  ]);
+  assert.equal(map.layers.get('waterway_label').layout.visibility, 'none');
+  assert.equal(map.layers.get('landcover').layout.visibility, 'visible');
+  assert.equal(map.layers.get('search-results-points-layer').layout.visibility, 'visible');
+});
+
+test('bringBaseLabelLayersAboveCustomLayers keeps labels above building layers but below search results', async () => {
+  const { bringBaseLabelLayersAboveCustomLayers } = await loadMapLayerUtils();
+  const map = createMapStub();
+
+  map.addLayer({ id: 'building', type: 'fill', paint: {} });
+  map.addLayer({ id: 'waterway_label', type: 'symbol', paint: {} });
+  map.addLayer({ id: 'city_label', type: 'symbol', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'overpass-buildings-source-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'search-results-clusters-layer', type: 'circle', paint: {} });
+  map.addLayer({ id: 'search-results-clusters-count-layer', type: 'symbol', paint: {} });
+  map.addLayer({ id: 'search-results-points-layer', type: 'circle', paint: {} });
+
+  bringBaseLabelLayersAboveCustomLayers(map);
+
+  assert.deepEqual(Array.from(map.layers.keys()), [
+    'building',
+    'region-buildings-7-fill',
+    'overpass-buildings-source-fill',
+    'waterway_label',
+    'city_label',
+    'search-results-clusters-layer',
+    'search-results-clusters-count-layer',
+    'search-results-points-layer'
+  ]);
+  assert.deepEqual(map.moveCalls, [
+    { layerId: 'waterway_label', beforeId: 'search-results-clusters-layer' },
+    { layerId: 'city_label', beforeId: 'search-results-clusters-layer' }
+  ]);
+});
+
+test('applyBuildingPartsLayerVisibility still applies part visibility before style loaded flag flips true', async () => {
+  const { applyBuildingPartsLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub({ styleLoaded: false });
+  map.addLayer({ id: 'region-buildings-7-part-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-line', type: 'line', paint: {} });
+
+  applyBuildingPartsLayerVisibility({
+    map,
+    visible: false,
+    partFillLayerIds: ['region-buildings-7-part-fill'],
+    partLineLayerIds: ['region-buildings-7-part-line']
+  });
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'region-buildings-7-part-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-part-line', name: 'visibility', value: 'none' }
+  ]);
+  assert.equal(map.layers.get('region-buildings-7-part-fill').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'none');
 });
 

@@ -3,7 +3,6 @@
   import { get } from 'svelte/store';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { fade } from 'svelte/transition';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import {
     buildAccountEditUrl,
@@ -29,7 +28,7 @@
     UiTableRow,
     UiTabsNav
   } from '$lib/components/base';
-  import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
+  import { EditDetailModal, EditsIdentityCell, EditsPagination, EditsSkeletonRows } from '$lib/components/edits';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
   import { session, setSession } from '$lib/stores/auth';
   import { apiJson } from '$lib/services/http';
@@ -37,8 +36,9 @@
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { locale, t, translateNow } from '$lib/i18n/index';
-  import { formatUiDate, getChangeCounters, getEditAddress, getEditKey, getStatusBadgeMeta, matchesUiDateRange, parseEditKey } from '$lib/utils/edit-ui';
-  import { focusMapOnGeometry, getGeometryCenter } from '$lib/utils/map-geometry';
+  import { getEditsDateRangeParams } from '$lib/utils/edit-date-range';
+  import { formatUiDate, getChangeCounters, getDisplayEditStatusMeta, getEditAddress, getEditKey, getSyncBadgeMeta, isOverpassBackedEdit, parseEditKey } from '$lib/utils/edit-ui';
+  import { getGeometryCenter } from '$lib/utils/map-geometry';
 
   const LIGHT = '/styles/positron-custom.json';
   const DARK = '/styles/dark-matter-custom.json';
@@ -48,6 +48,8 @@
   const L_POINT = 'account-edited-points-unclustered';
   const MAP_PIN_COLOR = '#FDC82F';
   const MAP_PIN_INK = '#342700';
+  const EDITS_PAGE_SIZE = 20;
+  const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
 
   let activeTab = resolveAccountTabFromUrl(get(page).url);
   let tabNavValue = activeTab;
@@ -63,20 +65,24 @@
 
   let edits = [];
   let visibleEdits = [];
+  let visibleEditGroups = [];
   let editsLoading = false;
   let editsStatus;
   let editsFilter = 'all';
-  let editsLimit = 200;
+  let editsPage = 1;
+  let editsTotal = 0;
+  let editsPageCount = 0;
   let editsQuery = '';
   let editsDateRange = undefined;
   let editsFilterItems;
-  const editsLimitItems = [
-    { value: 100, label: '100' },
-    { value: 200, label: '200' },
-    { value: 500, label: '500' }
-  ];
+  let accountEditsPageInfo;
+  let editsReloadTimer = null;
+  let editsRequestToken = 0;
+  let editsInitialLoadRequested = false;
 
   let selectedEdit = null;
+  let selectedEditGroupItems;
+  let selectedFeature = EMPTY_FEATURE_COLLECTION;
   let detailLoading = false;
   let detailStatus = '';
   let detailPaneVisible = false;
@@ -100,7 +106,8 @@
     
     // Ensure edits are loaded if we reload directly on the edits tab 
     // and session hydrates after mount.
-    if (activeTab === 'edits' && !editsLoading && edits.length === 0) {
+    if (activeTab === 'edits' && !editsLoading && edits.length === 0 && !editsInitialLoadRequested) {
+      editsInitialLoadRequested = true;
       loadEdits();
     }
   }
@@ -110,6 +117,55 @@
   function getSelectedEditId(item = selectedEdit) {
     const id = Number(item?.editId || item?.id || 0);
     return Number.isInteger(id) && id > 0 ? id : null;
+  }
+
+  function getMeaningfulEditAddress(item) {
+    const address = String(getEditAddress(item) || '').trim();
+    const fallback = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`;
+    return address && address !== fallback ? address : '';
+  }
+
+  function getGroupDisplayAddress(group) {
+    for (const item of Array.isArray(group?.edits) ? group.edits : []) {
+      const address = getMeaningfulEditAddress(item);
+      if (address) return address;
+    }
+    return getEditAddress(group?.edits?.[0] || group);
+  }
+
+  function groupEditRows(items) {
+    const groups = [];
+    const groupsByKey = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      const key = getEditKey(item) || `edit/${Number(item?.id || item?.editId || groups.length + 1)}`;
+      let group = groupsByKey.get(key);
+      if (!group) {
+        group = {
+          key,
+          osmType: item?.osmType || null,
+          osmId: Number(item?.osmId || 0),
+          edits: []
+        };
+        groupsByKey.set(key, group);
+        groups.push(group);
+      }
+      group.edits.push(item);
+    }
+
+    return groups.map((group) => {
+      const latest = group.edits[0] || null;
+      return {
+        ...group,
+        latest,
+        latestEditId: Number(latest?.id || latest?.editId || 0),
+        latestCreatedAt: latest?.createdAt || null,
+        latestAddress: getGroupDisplayAddress(group),
+        latestCreatedBy: latest?.updatedBy || null,
+        latestStatusMeta: getDisplayEditStatusMeta(latest, translateNow, 'account.edits'),
+        latestCounters: getChangeCounters(latest?.changes),
+        totalEdits: group.edits.length
+      };
+    });
   }
 
   async function ensureMapRuntime() {
@@ -140,9 +196,6 @@
     const regions = Array.isArray(cfg?.buildingRegionsPmtiles) ? cfg.buildingRegionsPmtiles : [];
     activeRegionPmtiles = regions;
 
-    if (!map.getSource('selected-building')) {
-      map.addSource('selected-building', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    }
     if (!map.getSource(SRC)) {
       map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterRadius: 44, clusterMaxZoom: 12 });
     }
@@ -167,15 +220,9 @@
       }
     }
 
-    if (!map.getLayer('selected-fill')) map.addLayer({ id: 'selected-fill', type: 'fill', source: 'selected-building', paint: { 'fill-color': '#4F4A43', 'fill-opacity': 0.2 } });
-    if (!map.getLayer('selected-line')) map.addLayer({ id: 'selected-line', type: 'line', source: 'selected-building', paint: { 'line-color': '#2B2824', 'line-width': 3 } });
     if (!map.getLayer(L_CLUSTER)) map.addLayer({ id: L_CLUSTER, type: 'circle', source: SRC, filter: ['has', 'point_count'], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 23], 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
     if (!map.getLayer(L_COUNT)) map.addLayer({ id: L_COUNT, type: 'symbol', source: SRC, filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': MAP_PIN_INK } });
     if (!map.getLayer(L_POINT)) map.addLayer({ id: L_POINT, type: 'circle', source: SRC, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': MAP_PIN_COLOR, 'circle-radius': 7, 'circle-stroke-width': 2, 'circle-stroke-color': MAP_PIN_INK } });
-  }
-
-  function focusMapOnFeature(feature) {
-    focusMapOnGeometry(map, maplibregl, feature?.geometry);
   }
 
   function fitAllEdited() {
@@ -256,11 +303,17 @@
     if (!map || !map.getSource(SRC)) return;
     const features = [];
     const ids = [];
-    for (const item of visibleEdits) {
-      const key = getEditKey(item);
+    for (const item of visibleEditGroups) {
+      const key = item?.key || getEditKey(item);
       if (!key) continue;
       const c = centerByKey.get(key);
-      if (c) features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { osmKey: key, editId: Number(item.id || item.editId || 0) } });
+      if (c) {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: c },
+          properties: { osmKey: key, editId: Number(item.latestEditId || 0) }
+        });
+      }
       const p = parseEditKey(key);
       if (p) ids.push((p.osmId * 2) + (p.osmType === 'relation' ? 1 : 0));
     }
@@ -321,33 +374,70 @@
     }
   }
 
-  async function loadEdits() {
+  function clearEditsReloadTimer() {
+    if (editsReloadTimer) {
+      clearTimeout(editsReloadTimer);
+      editsReloadTimer = null;
+    }
+  }
+
+  function scheduleEditsReload(page = 1, delay = 250) {
+    editsPage = page;
+    clearEditsReloadTimer();
+    editsReloadTimer = setTimeout(() => {
+      editsReloadTimer = null;
+      void loadEdits(page);
+    }, delay);
+  }
+
+  async function loadEdits(page = editsPage) {
+    const nextPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const requestToken = ++editsRequestToken;
     editsLoading = true;
     editsStatus = translateNow('account.edits.loading');
     try {
       const p = new URLSearchParams();
       if (editsFilter !== 'all') p.set('status', editsFilter);
-      p.set('limit', String(editsLimit));
+      if (editsQuery.trim()) p.set('q', editsQuery.trim());
+      const { from, to } = getEditsDateRangeParams(editsDateRange);
+      if (from) p.set('from', from);
+      if (to) p.set('to', to);
+      p.set('page', String(nextPage));
+      p.set('limit', String(EDITS_PAGE_SIZE));
       const data = await apiJson(`/api/account/edits?${p.toString()}`);
+      if (requestToken !== editsRequestToken) return;
+      const pageCount = Math.max(0, Number(data?.pageCount || 0));
+      if (pageCount > 0 && nextPage > pageCount) {
+        editsPage = pageCount;
+        if (requestToken === editsRequestToken) {
+          await loadEdits(pageCount);
+        }
+        return;
+      }
       edits = Array.isArray(data?.items) ? data.items : [];
       visibleEdits = [...edits];
-      editIdByKey.clear();
-      for (const item of visibleEdits) {
-        const key = getEditKey(item);
-        if (key) editIdByKey.set(key, Number(item.id || item.editId || 0));
-      }
+      editsTotal = Math.max(0, Number(data?.total || 0));
+      editsPageCount = Math.max(0, pageCount || (editsTotal > 0 ? Math.ceil(editsTotal / EDITS_PAGE_SIZE) : 0));
+      editsPage = Number.isInteger(Number(data?.page)) && Number(data.page) > 0 ? Number(data.page) : nextPage;
+      visibleEditGroups = groupEditRows(visibleEdits);
       await loadCenters(visibleEdits);
       await ensureMap();
       applyMapData();
       fitAllEdited();
-      editsStatus = visibleEdits.length
-        ? translateNow('account.edits.statusShown', { visible: visibleEdits.length, total: edits.length })
+      editsStatus = visibleEditGroups.length
+        ? translateNow('account.edits.statusShownGrouped', { visible: visibleEditGroups.length, total: editsTotal })
         : translateNow('account.edits.statusEmpty');
     } catch (e) {
       edits = [];
+      visibleEdits = [];
+      visibleEditGroups = [];
+      editsTotal = 0;
+      editsPageCount = 0;
       editsStatus = msg(e, translateNow('account.edits.loadFailed'));
     } finally {
-      editsLoading = false;
+      if (requestToken === editsRequestToken) {
+        editsLoading = false;
+      }
     }
   }
 
@@ -360,6 +450,7 @@
     editActionBusy = false;
     detailStatus = translateNow('account.edits.loading');
     selectedEdit = null;
+    selectedFeature = EMPTY_FEATURE_COLLECTION;
     try {
       const data = await apiJson(`/api/account/edits/${id}`);
       if (requestToken !== detailRequestToken) return;
@@ -375,13 +466,15 @@
       try {
         const feature = await apiJson(`/api/building/${encodeURIComponent(selectedEdit.osmType)}/${encodeURIComponent(selectedEdit.osmId)}`);
         if (requestToken !== detailRequestToken) return;
-        if (map?.getSource('selected-building')) map.getSource('selected-building').setData(feature);
-        focusMapOnFeature(feature);
-      } catch {}
+        selectedFeature = feature && typeof feature === 'object' ? feature : EMPTY_FEATURE_COLLECTION;
+      } catch {
+        selectedFeature = EMPTY_FEATURE_COLLECTION;
+      }
     } catch (e) {
       if (requestToken !== detailRequestToken) return;
       detailStatus = msg(e, translateNow('account.edits.detailsLoadFailed'));
       selectedEdit = null;
+      selectedFeature = EMPTY_FEATURE_COLLECTION;
     } finally {
       if (requestToken === detailRequestToken) detailLoading = false;
     }
@@ -405,11 +498,9 @@
         method: 'DELETE'
       });
       selectedEdit = null;
+      selectedFeature = EMPTY_FEATURE_COLLECTION;
       detailLoading = false;
       detailStatus = translateNow('account.edits.cancelPendingSuccess');
-      if (map?.getSource('selected-building')) {
-        map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
-      }
       if (activeTab === 'edits') {
         await replaceAccountUrl(activeTab, null);
         await loadEdits();
@@ -421,42 +512,24 @@
     }
   }
 
-  function closeEditPanel() {
+  function closeEditPanel(options = {}) {
+    const { syncUrl = true } = options;
     detailRequestToken += 1;
     detailPaneVisible = false;
+    selectedEdit = null;
+    selectedFeature = EMPTY_FEATURE_COLLECTION;
+    detailLoading = false;
+    detailStatus = '';
+    editActionBusy = false;
+    if (syncUrl && activeTab === 'edits') {
+      void replaceAccountUrl(activeTab, null);
+    }
   }
 
   function resetEditPanelState() {
-    detailRequestToken += 1;
-    detailPaneVisible = false;
-    selectedEdit = null;
-    detailLoading = false;
-    detailStatus = '';
-    editActionBusy = false;
-    if (map?.getSource('selected-building')) {
-      map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
-    }
+    closeEditPanel({ syncUrl: false });
   }
 
-  function onDetailPaneOutroEnd() {
-    if (detailPaneVisible) return;
-    selectedEdit = null;
-    detailLoading = false;
-    detailStatus = '';
-    editActionBusy = false;
-    if (map?.getSource('selected-building')) {
-      map.getSource('selected-building').setData({ type: 'FeatureCollection', features: [] });
-    }
-  }
-
-  function getSyncBadgeMeta(status) {
-    const normalized = String(status || 'unsynced').trim().toLowerCase();
-    if (normalized === 'synced') return { cls: 'ui-surface-success-soft ui-text-success-soft', text: $t('account.edits.syncSynced') };
-    if (normalized === 'cleaned') return { cls: 'ui-surface-info ui-text-info', text: $t('account.edits.syncCleaned') };
-    if (normalized === 'syncing') return { cls: 'ui-surface-warning ui-text-warning', text: $t('account.edits.syncing') };
-    if (normalized === 'failed') return { cls: 'ui-surface-danger ui-text-danger', text: $t('account.edits.syncFailed') };
-    return { cls: 'ui-surface-soft ui-text-muted', text: $t('account.edits.syncUnsynced') };
-  }
 
   async function replaceAccountUrl(tab, editId = null) {
     if (typeof window === 'undefined') return;
@@ -492,7 +565,10 @@
       map?.resize();
       applyMapData();
       fitAllEdited();
-      if (!edits.length && !editsLoading) await loadEdits();
+      if (!edits.length && !editsLoading && !editsInitialLoadRequested) {
+        editsInitialLoadRequested = true;
+        await loadEdits();
+      }
       return;
     }
     resetEditPanelState();
@@ -518,29 +594,24 @@
   }
 
   $: {
-    const q = String(editsQuery || '').trim().toLowerCase();
-    visibleEdits = edits.filter((item) => {
-      const osmKey = `${String(item?.osmType || '')}/${Number(item?.osmId || 0)}`.toLowerCase();
-      const address = getEditAddress(item).toLowerCase();
-      if (q && !address.includes(q) && !osmKey.includes(q)) return false;
-      if (!matchesUiDateRange(item?.updatedAt, editsDateRange)) return false;
-      return true;
-    });
+    visibleEdits = Array.isArray(edits) ? edits : [];
+    visibleEditGroups = groupEditRows(visibleEdits);
+    const groupedEdits = visibleEditGroups;
+    const selectedKey = getEditKey(selectedEdit);
+    selectedEditGroupItems = selectedKey
+      ? (groupedEdits.find((group) => group.key === selectedKey)?.edits || (selectedEdit ? [selectedEdit] : []))
+      : (selectedEdit ? [selectedEdit] : []);
     editIdByKey.clear();
-    for (const item of visibleEdits) {
-      const key = getEditKey(item);
-      if (key) editIdByKey.set(key, Number(item.id || item.editId || 0));
+    for (const group of visibleEditGroups) {
+      if (group.latestEditId) editIdByKey.set(group.key, group.latestEditId);
     }
     if (map) {
       applyMapData();
       fitAllEdited();
     }
-    editsStatus = editsLoading
-      ? translateNow('account.edits.loading')
-      : translateNow('account.edits.statusShown', { visible: visibleEdits.length, total: edits.length });
   }
 
-  $: accountPaneOpen = detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus);
+  $: accountEditsPageInfo = editsPageCount > 0 ? $t('account.edits.pageInfo', { page: editsPage, pages: editsPageCount }) : '';
   $: editsFilterItems = [
     { value: 'all', label: $t('account.edits.filterAll') },
     { value: 'pending', label: $t('account.edits.filterPending') },
@@ -564,7 +635,7 @@
               await openEdit(nextEditId, { syncUrl: false });
             }
           } else if (detailPaneVisible || detailLoading || Boolean(selectedEdit) || Boolean(detailStatus)) {
-            closeEditPanel();
+            closeEditPanel({ syncUrl: false });
           }
         }
         await replaceAccountUrl(nextTab, nextTab === 'edits' ? nextEditId : null);
@@ -572,7 +643,8 @@
     });
     if (activeTab === 'edits') {
       ensureMap();
-      if ($session.authenticated && !editsLoading && edits.length === 0) {
+      if ($session.authenticated && !editsLoading && edits.length === 0 && !editsInitialLoadRequested) {
+        editsInitialLoadRequested = true;
         loadEdits();
       }
     }
@@ -597,7 +669,7 @@
   <PortalFrame title={$t('account.title')} description={$t('account.subtitle')}>
     <svelte:fragment slot="meta">
       <UiBadge variant="default"><strong>{$t('account.profile.email')}</strong>{email || '-'}</UiBadge>
-      <UiBadge variant="accent"><strong>{$t('account.tabs.edits')}</strong>{edits.length}</UiBadge>
+      <UiBadge variant="accent"><strong>{$t('account.tabs.edits')}</strong>{editsTotal}</UiBadge>
     </svelte:fragment>
 
     <UiTabsNav
@@ -705,92 +777,104 @@
             </div>
           </section>
       </div>
-    {:else}
-      <div class="mt-4 grid gap-4 overflow-hidden min-h-0" class:lg:grid-cols-[1.1fr_1fr]={accountPaneOpen} class:lg:grid-cols-1={!accountPaneOpen}>
+  {:else}
+      <div class="mt-4 grid gap-4 overflow-hidden min-h-0">
         <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden">
           <div class="ui-filter-toolbar ui-filter-toolbar--account-edits">
-            <UiInput type="search" placeholder={$t('account.edits.searchPlaceholder')} bind:value={editsQuery} />
+            <UiInput
+              type="search"
+              placeholder={$t('account.edits.searchPlaceholder')}
+              bind:value={editsQuery}
+              oninput={() => scheduleEditsReload(1)}
+            />
             <UiDateRangePicker
               value={editsDateRange}
               locale={$locale}
               placeholder={$t('account.edits.dateRangePlaceholder')}
               calendarLabel={$t('account.edits.dateRangeLabel')}
               clearLabel={$t('common.clear')}
-              onchange={(event) => (editsDateRange = event.detail.value)}
+              onchange={(event) => {
+                editsDateRange = event.detail.value;
+                if (!event.detail.value?.start || event.detail.value?.end) {
+                  scheduleEditsReload(1, 0);
+                }
+              }}
             />
-            <UiSelect items={editsFilterItems} bind:value={editsFilter} onchange={loadEdits} />
-            <div class="ui-filter-toolbar__group ui-filter-toolbar__group--limit">
-              <UiSelect items={editsLimitItems} bind:value={editsLimit} onchange={loadEdits} />
-              <UiButton
-                type="button"
-                variant="secondary"
-                className="w-full min-h-11 rounded-[1rem] px-4 py-3 text-sm sm:w-auto"
-                onclick={loadEdits}
-              >
-                {$t('common.refresh')}
-              </UiButton>
-            </div>
+            <UiSelect items={editsFilterItems} bind:value={editsFilter} onchange={() => loadEdits(1)} />
+            <UiButton
+              type="button"
+              variant="secondary"
+              className="w-full min-h-11 rounded-[1rem] px-4 py-3 text-sm sm:w-auto"
+              onclick={() => loadEdits(editsPage)}
+            >
+              {$t('common.refresh')}
+            </UiButton>
           </div>
           <p class="text-sm ui-text-muted">{editsStatus}</p>
           <div class="h-[36vh] min-h-[260px] flex-shrink-0 overflow-hidden rounded-xl border ui-border" bind:this={mapEl}></div>
           <UiScrollArea className="ui-scroll-surface flex-1 min-h-0 rounded-xl">
-            <UiTable framed={false}>
+            <UiTable
+              framed={false}
+              className="ui-table--mobile-wide [--ui-table-mobile-min-width:52rem] [--ui-table-mobile-identity-width:20rem]"
+            >
             <UiTableHeader>
               <UiTableRow className="hover:[&>th]:bg-transparent">
                 <UiTableHead>{$t('account.edits.tableObject')}</UiTableHead>
                 <UiTableHead>{$t('account.edits.tableAuthor')}</UiTableHead>
+                <UiTableHead>{$t('account.edits.tableCreatedAt')}</UiTableHead>
                 <UiTableHead>{$t('account.edits.tableStatus')}</UiTableHead>
                 <UiTableHead>{$t('account.edits.tableChanges')}</UiTableHead>
               </UiTableRow>
             </UiTableHeader>
             <UiTableBody>
               {#if editsLoading}
+                <EditsSkeletonRows rows={EDITS_PAGE_SIZE} idLabel={$t('account.edits.id')} />
+              {:else if visibleEditGroups.length===0}
                 <UiTableRow>
-                  <UiTableCell colspan="4" className="ui-text-subtle">{$t('account.edits.loading')}</UiTableCell>
-                </UiTableRow>
-              {:else if visibleEdits.length===0}
-                <UiTableRow>
-                  <UiTableCell colspan="4" className="ui-text-subtle">{$t('account.edits.empty')}</UiTableCell>
+                  <UiTableCell colspan="5" className="ui-text-subtle">{$t('account.edits.empty')}</UiTableCell>
                 </UiTableRow>
               {:else}
-                {#each visibleEdits as it (`${it.id || it.editId}`)}
-                  {@const statusMeta = getStatusBadgeMeta(it.status, translateNow)}
-                  {@const counters = getChangeCounters(it.changes)}
+                {#each visibleEditGroups as group (group.key)}
+                  {@const statusMeta = group.latestStatusMeta}
+                  {@const counters = group.latestCounters}
                   <UiTableRow
                     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_44%,var(--panel-solid))]"
-                    onclick={() => openEdit(it.id || it.editId)}
+                    onclick={() => openEdit(group.latestEditId || group.edits?.[0]?.id || group.edits?.[0]?.editId)}
                   >
-                    <UiTableCell className="min-w-0">
-                      <p class="font-semibold ui-text-strong break-words line-clamp-1">{getEditAddress(it)}</p>
-                      <p class="text-xs ui-text-subtle truncate">{$t('account.edits.id')}: {it.osmType}/{it.osmId}</p>
-                      <div class="mt-1 flex flex-wrap gap-1">
-                        {#if it.orphaned}
+                    <UiTableCell className="edits-list-identity-cell min-w-0">
+                      <EditsIdentityCell
+                        idLabel={$t('account.edits.id')}
+                        osmType={group.osmType}
+                        osmId={group.osmId}
+                        address={group.latestAddress}
+                        markerText={group.totalEdits > 1 ? `×${group.totalEdits}` : ''}
+                        markerTitle={group.totalEdits > 1 ? $t('account.edits.groupTitle') : ''}
+                        showBadgesRow={Boolean(group.latest?.orphaned || (group.latest && !group.latest.osmPresent && !group.latest.orphaned) || group.latest?.sourceOsmChanged)}
+                      >
+                        <svelte:fragment slot="badges">
+                        {@const overpassBacked = isOverpassBackedEdit(group.latest)}
+                        {#if group.latest?.orphaned}
                           <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>
-                        {/if}
-                        {#if !it.osmPresent && !it.orphaned}
+                        {:else if overpassBacked}
+                          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.overpassSource')}</span>
+                        {:else if group.latest && !group.latest.osmPresent && !group.latest.orphaned}
                           <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
                         {/if}
-                      {#if it.sourceOsmChanged}
+                        {#if group.latest?.sourceOsmChanged}
                           <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>
                         {/if}
-                        {#if it.syncStatus && it.syncStatus !== 'unsynced'}
-                          {@const syncMeta = getSyncBadgeMeta(it.syncStatus)}
-                          <span class={`rounded-md px-2 py-1 text-[11px] font-semibold ${syncMeta.cls}`}>{syncMeta.text}</span>
-                        {/if}
-                      </div>
-                      {#if String(it?.adminComment || '').trim()}
-                        <p class="mt-1 text-xs ui-text-danger">{$t('account.edits.comment')}: {String(it.adminComment).trim()}</p>
-                      {/if}
-                      {#if it.syncChangesetId}
-                        <p class="mt-1 text-xs ui-text-subtle">{$t('account.edits.syncChangeset')}: #{it.syncChangesetId}</p>
-                      {/if}
+                        </svelte:fragment>
+                      </EditsIdentityCell>
                     </UiTableCell>
-                    <UiTableCell>{it.updatedBy || '-'}</UiTableCell>
+                    <UiTableCell>{group.latestCreatedBy || '-'}</UiTableCell>
+                    <UiTableCell>
+                      <span class="whitespace-nowrap text-xs ui-text-subtle">{formatUiDate(group.latestCreatedAt) || '-'}</span>
+                    </UiTableCell>
                     <UiTableCell>
                       <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {statusMeta.cls}">{statusMeta.text}</span>
                     </UiTableCell>
                     <UiTableCell>
-                      <div class="flex flex-wrap items-center gap-2">
+                      <div class="edits-list-changes flex flex-wrap items-center gap-2">
                         <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">{counters.total} {$t('account.edits.total')}</span>
                         {#if counters.created > 0}
                           <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">+{counters.created} {$t('account.edits.created')}</span>
@@ -806,82 +890,164 @@
             </UiTableBody>
           </UiTable>
           </UiScrollArea>
+          <EditsPagination
+            page={editsPage}
+            pageCount={editsPageCount}
+            pageInfo={accountEditsPageInfo}
+            loading={editsLoading}
+            previousLabel={$t('common.previous')}
+            nextLabel={$t('common.next')}
+            onPageChange={loadEdits}
+          />
         </section>
         {#if detailPaneVisible}
-        <section class="flex flex-col space-y-3 rounded-2xl border ui-border ui-surface-base p-3 min-h-0 overflow-hidden" in:fade={{ duration: 180 }} out:fade={{ duration: 180 }} on:outroend={onDetailPaneOutroEnd}>
-          <div class="flex items-center justify-between gap-2">
-            <h3 class="text-base font-bold ui-text-strong">{$t('account.edits.detailTitle')}</h3>
-            <UiButton type="button" variant="secondary" size="close" aria-label={$t('account.edits.closeDetail')} disabled={editActionBusy} onclick={closeEditPanel}><CloseIcon class="ui-close-icon" /></UiButton>
-          </div>
-          {#if detailLoading}
-            <p class="text-sm ui-text-subtle">{$t('account.edits.loading')}</p>
-          {:else if !selectedEdit && detailStatus}
-            <p class="text-sm ui-text-muted">{detailStatus}</p>
-          {:else if !selectedEdit}
-            <p class="text-sm ui-text-subtle">{$t('account.edits.selectHint')}</p>
-          {:else}
-                {@const selectedStatusMeta = getStatusBadgeMeta(selectedEdit.status, translateNow)}
-            <p class="flex flex-wrap items-center gap-2 text-sm ui-text-muted"><span>ID: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span><span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span></p>
-            {#if selectedEdit.status === 'pending'}
-              <div class="rounded-xl border ui-border ui-surface-warning p-3 text-sm ui-text-body">
-                <p class="text-sm font-semibold ui-text-strong">{$t('account.edits.pendingEditTitle')}</p>
-                <p class="mt-1 text-sm ui-text-subtle">{$t('account.edits.pendingEditHelp')}</p>
-                <div class="mt-3 flex flex-wrap gap-2">
-                  <UiButton
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    disabled={editActionBusy}
-                    onclick={cancelSelectedEdit}
-                  >
-                    {editActionBusy ? $t('account.edits.cancelPendingWorking') : $t('account.edits.cancelPending')}
-                  </UiButton>
-                </div>
-              </div>
-            {/if}
-            {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
-              <div class="rounded-xl border ui-border ui-surface-muted p-3 text-sm ui-text-body">
-                <p><strong>{$t('account.edits.syncStatus')}:</strong> {getSyncBadgeMeta(selectedEdit.syncStatus).text}</p>
-                <p><strong>{$t('account.edits.syncAttemptedAt')}:</strong> {formatUiDate(selectedEdit.syncAttemptedAt) || '---'}</p>
-                <p><strong>{$t('account.edits.syncSucceededAt')}:</strong> {formatUiDate(selectedEdit.syncSucceededAt) || '---'}</p>
-                <p><strong>{$t('account.edits.syncCleanedAt')}:</strong> {formatUiDate(selectedEdit.syncCleanedAt) || '---'}</p>
-                <p><strong>{$t('account.edits.syncChangeset')}:</strong> {selectedEdit.syncChangesetId || '---'}</p>
-                {#if selectedEdit.syncSummary}
-                  <p class="mt-1 text-xs ui-text-subtle break-words">{JSON.stringify(selectedEdit.syncSummary)}</p>
-                {/if}
-                {#if selectedEdit.syncError}
-                  <p class="mt-1 text-xs ui-text-danger break-words">{selectedEdit.syncError}</p>
-                {/if}
-              </div>
-            {/if}
-            {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
-              <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
-                {#if selectedEdit.orphaned}
-                  <p>{$t('account.edits.orphanedHelp')}</p>
-                {/if}
-                {#if !selectedEdit.osmPresent && !selectedEdit.orphaned}
-                  <p>{$t('account.edits.missingTargetHelp')}</p>
-                {/if}
-                {#if selectedEdit.sourceOsmChanged}
-                  <p>{$t('account.edits.osmChangedHelp')}</p>
-                {/if}
-              </div>
-            {/if}
-            <UiScrollArea
-              className="ui-scroll-surface max-h-[42vh] rounded-xl"
-              contentClassName="space-y-2 p-2"
-            >
-              {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
-                <p class="text-sm ui-text-subtle">{$t('account.edits.noChanges')}</p>
+          <EditDetailModal
+            open={detailPaneVisible}
+            title={$t('account.edits.detailTitle')}
+            closeLabel={$t('account.edits.closeDetail')}
+            closeDisabled={editActionBusy}
+            selectedFeature={selectedFeature}
+            mapLoading={detailLoading}
+            mapLoadingText={$t('account.edits.loading')}
+            onClose={closeEditPanel}
+          >
+            <div class="edit-detail-flow">
+              {#if detailLoading}
+                <p class="text-sm ui-text-subtle">{$t('account.edits.loading')}</p>
+              {:else if !selectedEdit && detailStatus}
+                <p class="text-sm ui-text-muted">{detailStatus}</p>
+              {:else if !selectedEdit}
+                <p class="text-sm ui-text-subtle">{$t('account.edits.selectHint')}</p>
               {:else}
-                {#each selectedEdit.changes as ch (`${ch.field}`)}
-                  <div class="rounded-lg border ui-border ui-surface-muted p-2"><p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p><p class="text-xs ui-text-muted"><span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span> -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong></p></div>
-                {/each}
+                {@const selectedStatusMeta = getDisplayEditStatusMeta(selectedEdit, translateNow, 'account.edits')}
+                <p class="edit-detail-meta flex flex-wrap items-center gap-2 text-sm ui-text-muted">
+                  <span class="edit-detail-meta-primary">{$t('account.edits.id')}: {selectedEdit.editId || selectedEdit.id} | {selectedEdit.osmType}/{selectedEdit.osmId}</span>
+                  {#if selectedEdit.syncChangesetId && selectedEditGroupItems.length <= 1}
+                    <span>{$t('account.edits.syncChangeset')}: #{selectedEdit.syncChangesetId}</span>
+                  {/if}
+                  <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold {selectedStatusMeta.cls}">{selectedStatusMeta.text}</span>
+                </p>
+                {#if selectedEdit.status === 'pending'}
+                  <div class="rounded-xl border ui-border ui-surface-warning p-3 text-sm ui-text-body">
+                    <p class="text-sm font-semibold ui-text-strong">{$t('account.edits.pendingEditTitle')}</p>
+                    <p class="mt-1 text-sm ui-text-subtle">{$t('account.edits.pendingEditHelp')}</p>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <UiButton
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        disabled={editActionBusy}
+                        onclick={cancelSelectedEdit}
+                      >
+                        {editActionBusy ? $t('account.edits.cancelPendingWorking') : $t('account.edits.cancelPending')}
+                      </UiButton>
+                    </div>
+                  </div>
+                {/if}
+                {#if selectedEdit.syncStatus && selectedEdit.syncStatus !== 'unsynced'}
+                  <div class="rounded-xl border ui-border ui-surface-muted p-3 text-sm ui-text-body">
+                    <p><strong>{$t('account.edits.syncStatus')}:</strong> {getSyncBadgeMeta(selectedEdit.syncStatus, translateNow, 'account.edits').text}</p>
+                    <p><strong>{$t('account.edits.syncAttemptedAt')}:</strong> {formatUiDate(selectedEdit.syncAttemptedAt) || '---'}</p>
+                    <p><strong>{$t('account.edits.syncSucceededAt')}:</strong> {formatUiDate(selectedEdit.syncSucceededAt) || '---'}</p>
+                    <p><strong>{$t('account.edits.syncCleanedAt')}:</strong> {formatUiDate(selectedEdit.syncCleanedAt) || '---'}</p>
+                    {#if selectedEdit.syncSummary}
+                      <p class="edit-detail-break mt-1 text-xs ui-text-subtle">{JSON.stringify(selectedEdit.syncSummary)}</p>
+                    {/if}
+                    {#if selectedEdit.syncError}
+                      <p class="edit-detail-break mt-1 text-xs ui-text-danger">{selectedEdit.syncError}</p>
+                    {/if}
+                  </div>
+                {/if}
+                {#if selectedEditGroupItems.length > 1}
+                  <div class="rounded-xl border ui-border ui-surface-soft p-3 text-sm ui-text-body">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-sm font-semibold ui-text-strong">{$t('account.edits.groupTitle')}</p>
+                      <span class="rounded-md ui-surface-soft px-2 py-1 text-[11px] font-semibold ui-text-muted">×{selectedEditGroupItems.length}</span>
+                    </div>
+                    <div class="mt-2 space-y-2">
+                      {#each selectedEditGroupItems as groupEdit (`group-edit-${groupEdit.id || groupEdit.editId}`)}
+                        {@const groupStatusMeta = getDisplayEditStatusMeta(groupEdit, translateNow, 'account.edits')}
+                        {@const groupCounters = getChangeCounters(groupEdit.changes)}
+                        <div class="rounded-lg border ui-border ui-surface-base p-2">
+                          <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p class="text-sm font-semibold ui-text-strong">#{groupEdit.editId || groupEdit.id}</p>
+                              <p class="text-xs ui-text-subtle">{formatUiDate(groupEdit.createdAt || groupEdit.updatedAt) || '---'}</p>
+                            </div>
+                            <span class={`badge-pill rounded-full px-2.5 py-1 text-xs font-semibold ${groupStatusMeta.cls}`}>{groupStatusMeta.text}</span>
+                          </div>
+                          <div class="mt-1 space-y-1 text-xs ui-text-muted">
+                            {#if groupEdit.syncChangesetId}
+                              <p><strong>{$t('account.edits.syncChangeset')}:</strong> #{groupEdit.syncChangesetId}</p>
+                            {/if}
+                            {#if String(groupEdit.adminComment || '').trim()}
+                              <p class="edit-detail-break ui-text-danger"><strong>{$t('account.edits.comment')}:</strong> {String(groupEdit.adminComment).trim()}</p>
+                            {/if}
+                            <p><strong>{$t('account.edits.tableChanges')}:</strong> {groupCounters.total} {$t('account.edits.total')}</p>
+                          </div>
+                          <div class="mt-2 space-y-1">
+                            {#if !Array.isArray(groupEdit.changes) || groupEdit.changes.length === 0}
+                              <p class="text-xs ui-text-subtle">{$t('account.edits.noChanges')}</p>
+                            {:else}
+                              {#each groupEdit.changes as ch (`${groupEdit.id || groupEdit.editId}-${ch.field}`)}
+                                <div class="rounded-md border ui-border ui-surface-muted p-2">
+                                  <p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p>
+                                  <p class="edit-detail-break text-xs ui-text-muted">
+                                    <span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span>
+                                    -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong>
+                                  </p>
+                                </div>
+                              {/each}
+                            {/if}
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+                {@const overpassBacked = isOverpassBackedEdit(selectedEdit)}
+                {#if overpassBacked}
+                  <div class="rounded-xl border ui-border ui-surface-info p-3 text-sm ui-text-body">
+                    <p class="font-semibold ui-text-info">{$t('account.edits.overpassSource')}</p>
+                    <p class="mt-1 text-xs ui-text-muted">{$t('account.edits.overpassSourceHelp')}</p>
+                  </div>
+                {/if}
+                {#if selectedEdit.orphaned || (!selectedEdit.osmPresent && !selectedEdit.orphaned && !overpassBacked) || selectedEdit.sourceOsmChanged}
+                  <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
+                    {#if selectedEdit.orphaned}
+                      <p>{$t('account.edits.orphanedHelp')}</p>
+                    {/if}
+                    {#if !selectedEdit.osmPresent && !selectedEdit.orphaned && !overpassBacked}
+                      <p>{$t('account.edits.missingTargetHelp')}</p>
+                    {/if}
+                    {#if selectedEdit.sourceOsmChanged}
+                      <p>{$t('account.edits.osmChangedHelp')}</p>
+                    {/if}
+                  </div>
+                {/if}
+                {#if selectedEditGroupItems.length <= 1}
+                  <div class="space-y-2">
+                    {#if !Array.isArray(selectedEdit.changes) || selectedEdit.changes.length === 0}
+                      <p class="text-sm ui-text-subtle">{$t('account.edits.noChanges')}</p>
+                    {:else}
+                      {#each selectedEdit.changes as ch (`${ch.field}`)}
+                        <div class="rounded-lg border ui-border ui-surface-muted p-2">
+                          <p class="text-sm font-semibold ui-text-strong">{ch.label || ch.field}</p>
+                          <p class="edit-detail-break text-xs ui-text-muted">
+                            <span class="line-through">{String(ch.osmValue ?? $t('account.edits.emptyValue'))}</span>
+                            -> <strong>{String(ch.localValue ?? $t('account.edits.emptyValue'))}</strong>
+                          </p>
+                        </div>
+                      {/each}
+                    {/if}
+                  </div>
+                {/if}
+                {#if detailStatus}
+                  <p class="text-sm ui-text-muted">{detailStatus}</p>
+                {/if}
               {/if}
-            </UiScrollArea>
-            {#if detailStatus}<p class="text-sm ui-text-muted">{detailStatus}</p>{/if}
-          {/if}
-        </section>
+            </div>
+          </EditDetailModal>
         {/if}
       </div>
     {/if}

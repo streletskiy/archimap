@@ -12,13 +12,19 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
 4. While viewport remains fully inside active coverage window:
    - no new authoritative request is sent;
    - existing highlight is reused (superset of viewport is allowed).
+   - render mode must also stay the same; zoom changes across the low-zoom marker fallback threshold force a fresh apply even if the coverage window itself is still reusable.
 5. If viewport exits active window, a new window is requested.
 
 ## Cache keys
 
 - Match cache key:
-  - `rulesHash:coverageHash:zoomBucket`
+  - `rulesHash:coverageHash:zoomBucket:renderMode`
   - `coverageHash` is built from expanded bbox (`buildBboxHash`).
+- Render mode is part of the client-side reuse boundary:
+  - contour and marker fallback payloads are cached separately, so the low-zoom marker path does not reuse a contour payload;
+  - marker fallback uses a larger `maxResults` budget on lower zooms so clustered circles do not hit the truncation cap too early;
+  - marker fallback uses search-like clustering plus a tiny deterministic point jitter so low-zoom circles do not stack on top of each other or disappear during zoom transitions.
+  - below zoom `5`, marker-mode requests also let the backend aggregate matches into viewport-relative cells so the client never needs the full building list for the densest views.
 - TTL and limits are unchanged:
   - match cache: `8s`, max `90`
   - fallback data cache: `45s`, max `25k`, request chunk `5k`
@@ -54,6 +60,7 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
   - status (`Applied`, `Refining`, `Too many matches`, etc.)
   - count
   - elapsed ms
+- The centered map apply loader is quiet on contour zooms (`z13+`) and only becomes prominent for low-zoom marker fallback, where the loader is actually useful.
 - Degrade mode (`>20k matches`) keeps the existing highlight and shows a clear action hint, without forced hard reset.
 
 ## Dev/Test telemetry

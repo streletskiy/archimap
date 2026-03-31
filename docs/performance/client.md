@@ -16,6 +16,10 @@
   - `apiJsonCached` in `frontend/src/lib/services/http.ts`.
   - Search and bbox responses reuse short-lived in-memory cache.
   - Map filter keeps a short-lived in-memory match cache for `/api/buildings/filter-matches` (`rulesHash+bboxHash+zoomBucket`), and per-building cache for fallback `/api/buildings/filter-data`.
+  - Client-side Overpass fallback stores loaded building tiles in browser IndexedDB, keeps the last successful sync timestamp, and supports explicit load/refresh/clear actions.
+  - Overpass tile loads use a small concurrent worker pool, prefer the last working public endpoint for each tile, and temporarily cool down endpoints that return `403/504/5xx` so several tiles can download in parallel without hammering bad hosts.
+  - Camera movement only re-evaluates the current cached viewport state; network fetches happen only through explicit user actions.
+  - Processed-region coverage checks for the Overpass fallback are skipped until map zoom `12+`, avoiding repeated region-boundary sampling while browsing the whole map.
 - Reduced unnecessary redraws:
   - Filter updates guarded by request token, abort semantics, and worker-built request plans plus resolved highlight payload composition.
   - Filter highlight updates dedicated highlight layers via feature-state; base building layers are not re-filtered/hid.

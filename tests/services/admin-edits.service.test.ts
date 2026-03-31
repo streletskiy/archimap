@@ -70,10 +70,7 @@ function assertBlockedSyncError(error, expectedCode, expectedMessagePattern) {
   return true;
 }
 
-function createDbStub({
-  editSourceRow = {},
-  statusRow = { status: 'accepted' }
-} = {}) {
+function createDbStub({ editSourceRow = {}, statusRow = { status: 'accepted' } } = {}) {
   return {
     provider: 'sqlite',
     transaction(fn) {
@@ -82,7 +79,11 @@ function createDbStub({
     prepare(sql) {
       const text = String(sql || '');
 
-      if (text.includes('SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description')) {
+      if (
+        text.includes(
+          'SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description'
+        )
+      ) {
         return {
           get() {
             return editSourceRow;
@@ -211,6 +212,135 @@ function createRefreshTrackingService({
   return { service, refreshCalls, searchRefreshCalls };
 }
 
+function createBulkMergeTrackingService({
+  editsById = {},
+  sourceRowsById = {},
+  mergedRowsByKey = {},
+  contourRowsByKey = {},
+  initialStatusById = {},
+  refreshPromise = Promise.resolve()
+} = {}) {
+  const refreshCalls = [];
+  const searchRefreshCalls = [];
+  const statusById = { ...initialStatusById };
+  const db = {
+    provider: 'sqlite',
+    transaction(fn) {
+      return async (...args) => fn(...args);
+    },
+    prepare(sql) {
+      const text = String(sql || '');
+
+      if (
+        text.includes(
+          'SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description'
+        )
+      ) {
+        return {
+          get(editId) {
+            return sourceRowsById[Number(editId)] || null;
+          },
+          run() {
+            return { changes: 0 };
+          },
+          all() {
+            return [];
+          }
+        };
+      }
+
+      if (text.includes('SELECT status FROM user_edits.building_user_edits WHERE id = ?')) {
+        return {
+          get(editId) {
+            const id = Number(editId);
+            return { status: statusById[id] || 'accepted' };
+          },
+          run() {
+            return { changes: 0 };
+          },
+          all() {
+            return [];
+          }
+        };
+      }
+
+      if (text.includes('UPDATE user_edits.building_user_edits') && text.includes('status = ?')) {
+        return {
+          get() {
+            return null;
+          },
+          run(nextStatus, _comment, _reviewedBy, _mergedBy, _mergedFieldsJson, editId) {
+            statusById[Number(editId)] = String(nextStatus || 'accepted');
+            return { changes: 1 };
+          },
+          all() {
+            return [];
+          }
+        };
+      }
+
+      return {
+        get() {
+          return null;
+        },
+        run() {
+          return { changes: 1 };
+        },
+        all() {
+          return [];
+        }
+      };
+    }
+  };
+
+  const service = createAdminEditsService({
+    db,
+    getUserEditsList: async () => [],
+    getUserEditDetailsById: async (editId) => editsById[Number(editId)] || null,
+    normalizeUserEditStatus,
+    sanitizeFieldText: (value) => (value == null ? null : String(value).trim()),
+    sanitizeYearBuilt: (value) => {
+      const text = String(value ?? '').trim();
+      return text ? Number(text) : null;
+    },
+    sanitizeLevels: (value) => {
+      const text = String(value ?? '').trim();
+      return text ? Number(text) : null;
+    },
+    getMergedInfoRow: async (osmType, osmId) => mergedRowsByKey[`${osmType}/${osmId}`] || null,
+    getOsmContourRow: async (osmType, osmId) => contourRowsByKey[`${osmType}/${osmId}`] || null,
+    reassignUserEdit: async () => {
+      throw new Error('Reassign mutation should not be used in bulk merge tests');
+    },
+    deleteUserEdit: async () => {
+      throw new Error('Delete mutation should not be used in bulk merge tests');
+    },
+    enqueueSearchIndexRefresh: (osmType, osmId) => {
+      searchRefreshCalls.push(`${osmType}/${osmId}`);
+    },
+    refreshDesignRefSuggestionsCache: (reason) => {
+      refreshCalls.push(reason);
+      return refreshPromise;
+    },
+    ARCHI_FIELD_SET: new Set([
+      'name',
+      'style',
+      'design',
+      'design_ref',
+      'design_year',
+      'material',
+      'colour',
+      'levels',
+      'year_built',
+      'architect',
+      'address',
+      'archimap_description'
+    ])
+  });
+
+  return { service, refreshCalls, searchRefreshCalls, statusById };
+}
+
 async function withTimeout(promise, timeoutMs = 1000) {
   let timeoutId = null;
   try {
@@ -263,11 +393,12 @@ test('admin edit operations reject synced, cleaned, and syncing rows before muta
     );
 
     await assert.rejects(
-      () => service.mergeBuildingEdit(1, {
-        fields: ['name'],
-        values: { name: 'New name' },
-        reviewer: 'admin@example.com'
-      }),
+      () =>
+        service.mergeBuildingEdit(1, {
+          fields: ['name'],
+          values: { name: 'New name' },
+          reviewer: 'admin@example.com'
+        }),
       (error) => assertBlockedSyncError(error, expectedCode, expectedMessage)
     );
   }
@@ -287,11 +418,13 @@ test('admin merge refreshes search index for style changes without waiting for d
     }
   });
 
-  const result = await withTimeout(service.mergeBuildingEdit(1, {
-    fields: ['style'],
-    values: { style: 'omani' },
-    reviewer: 'admin@example.com'
-  }));
+  const result = await withTimeout(
+    service.mergeBuildingEdit(1, {
+      fields: ['style'],
+      values: { style: 'omani' },
+      reviewer: 'admin@example.com'
+    })
+  );
 
   assert.equal(result.ok, true);
   assert.equal(result.status, 'accepted');
@@ -313,11 +446,13 @@ test('admin merge skips search index refresh for material-only edits', async () 
     }
   });
 
-  const result = await withTimeout(service.mergeBuildingEdit(1, {
-    fields: ['material'],
-    values: { material: 'brick' },
-    reviewer: 'admin@example.com'
-  }));
+  const result = await withTimeout(
+    service.mergeBuildingEdit(1, {
+      fields: ['material'],
+      values: { material: 'brick' },
+      reviewer: 'admin@example.com'
+    })
+  );
 
   assert.equal(result.ok, true);
   assert.equal(result.status, 'accepted');
@@ -341,11 +476,13 @@ test('admin merge refreshes design-ref suggestions without blocking when design-
     refreshPromise
   });
 
-  const result = await withTimeout(service.mergeBuildingEdit(1, {
-    fields: ['design_ref'],
-    values: { design_ref: '1-464' },
-    reviewer: 'admin@example.com'
-  }));
+  const result = await withTimeout(
+    service.mergeBuildingEdit(1, {
+      fields: ['design_ref'],
+      values: { design_ref: '1-464' },
+      reviewer: 'admin@example.com'
+    })
+  );
 
   assert.equal(result.ok, true);
   assert.equal(result.status, 'accepted');
@@ -407,10 +544,12 @@ test('admin reassign skips search index refresh for pending material-only edits'
     }
   });
 
-  const result = await withTimeout(service.reassignBuildingEdit(1, {
-    target: { osmType: 'way', osmId: 2002 },
-    actor: 'admin@example.com'
-  }));
+  const result = await withTimeout(
+    service.reassignBuildingEdit(1, {
+      target: { osmType: 'way', osmId: 2002 },
+      actor: 'admin@example.com'
+    })
+  );
 
   assert.equal(result.osmId, 2002);
   assert.equal(result.status, 'pending');
@@ -429,12 +568,145 @@ test('admin reassign refreshes search index for accepted style edits on both bui
     }
   });
 
-  const result = await withTimeout(service.reassignBuildingEdit(1, {
-    target: { osmType: 'way', osmId: 2002 },
-    actor: 'admin@example.com'
-  }));
+  const result = await withTimeout(
+    service.reassignBuildingEdit(1, {
+      target: { osmType: 'way', osmId: 2002 },
+      actor: 'admin@example.com'
+    })
+  );
 
   assert.equal(result.osmId, 2002);
   assert.equal(result.status, 'accepted');
   assert.deepEqual(searchRefreshCalls, ['way/2001', 'way/2002']);
+});
+
+test('admin bulk merge accepts multiple pending edits and refreshes search for each', async () => {
+  const { service, searchRefreshCalls, statusById } = createBulkMergeTrackingService({
+    editsById: {
+      1: {
+        editId: 1,
+        osmType: 'way',
+        osmId: 1001,
+        updatedBy: 'user-1@example.com',
+        updatedAt: '2026-03-25T12:00:00Z',
+        createdAt: '2026-03-25T11:00:00Z',
+        status: 'pending',
+        syncStatus: 'unsynced',
+        changes: [{ field: 'name' }]
+      },
+      2: {
+        editId: 2,
+        osmType: 'way',
+        osmId: 1002,
+        updatedBy: 'user-2@example.com',
+        updatedAt: '2026-03-25T12:30:00Z',
+        createdAt: '2026-03-25T11:30:00Z',
+        status: 'pending',
+        syncStatus: 'unsynced',
+        changes: [{ field: 'name' }]
+      }
+    },
+    sourceRowsById: {
+      1: { name: 'New Name One' },
+      2: { name: 'New Name Two' }
+    },
+    mergedRowsByKey: {
+      'way/1001': {
+        osm_type: 'way',
+        osm_id: 1001,
+        name: 'Old Name One',
+        updated_at: '2026-03-24T00:00:00Z'
+      },
+      'way/1002': {
+        osm_type: 'way',
+        osm_id: 1002,
+        name: 'Old Name Two',
+        updated_at: '2026-03-24T00:00:00Z'
+      }
+    },
+    contourRowsByKey: {
+      'way/1001': { tags_json: JSON.stringify({ name: 'Old Name One' }) },
+      'way/1002': { tags_json: JSON.stringify({ name: 'Old Name Two' }) }
+    }
+  });
+
+  const result = await service.bulkMergeBuildingEdits([1, 2], { reviewer: 'admin@example.com' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.totalCount, 2);
+  assert.equal(result.successCount, 2);
+  assert.equal(result.failureCount, 0);
+  assert.deepEqual(
+    result.results.map((item) => item.ok),
+    [true, true]
+  );
+  assert.deepEqual(
+    result.results.map((item) => item.status),
+    ['accepted', 'accepted']
+  );
+  assert.deepEqual(searchRefreshCalls, ['way/1001', 'way/1002']);
+  assert.equal(statusById[1], 'accepted');
+  assert.equal(statusById[2], 'accepted');
+});
+
+test('admin bulk merge reports per-row failures and still accepts remaining edits', async () => {
+  const { service, searchRefreshCalls } = createBulkMergeTrackingService({
+    editsById: {
+      1: {
+        editId: 1,
+        osmType: 'way',
+        osmId: 2001,
+        updatedBy: 'user-1@example.com',
+        updatedAt: '2026-03-25T12:00:00Z',
+        createdAt: '2026-03-25T11:00:00Z',
+        status: 'pending',
+        syncStatus: 'unsynced',
+        changes: [{ field: 'name' }]
+      },
+      2: {
+        editId: 2,
+        osmType: 'way',
+        osmId: 2002,
+        updatedBy: 'user-2@example.com',
+        updatedAt: '2026-03-25T12:30:00Z',
+        createdAt: '2026-03-25T11:30:00Z',
+        status: 'rejected',
+        syncStatus: 'unsynced',
+        changes: [{ field: 'name' }]
+      }
+    },
+    sourceRowsById: {
+      1: { name: 'Accepted Name' },
+      2: { name: 'Rejected Name' }
+    },
+    mergedRowsByKey: {
+      'way/2001': {
+        osm_type: 'way',
+        osm_id: 2001,
+        name: 'Old Accepted Name',
+        updated_at: '2026-03-24T00:00:00Z'
+      },
+      'way/2002': {
+        osm_type: 'way',
+        osm_id: 2002,
+        name: 'Old Rejected Name',
+        updated_at: '2026-03-24T00:00:00Z'
+      }
+    },
+    contourRowsByKey: {
+      'way/2001': { tags_json: JSON.stringify({ name: 'Old Accepted Name' }) },
+      'way/2002': { tags_json: JSON.stringify({ name: 'Old Rejected Name' }) }
+    }
+  });
+
+  const result = await service.bulkMergeBuildingEdits([1, 2], { reviewer: 'admin@example.com' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.totalCount, 2);
+  assert.equal(result.successCount, 1);
+  assert.equal(result.failureCount, 1);
+  assert.equal(result.results[0].ok, true);
+  assert.equal(result.results[1].ok, false);
+  assert.match(result.results[1].error, /already been processed/i);
+  assert.deepEqual(searchRefreshCalls, ['way/2001']);
 });

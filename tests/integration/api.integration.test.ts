@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
+const { pickIntegrationPort } = require('./test-ports');
 
 let pythonExtractorDepsSkipReason = null;
 try {
@@ -45,7 +46,7 @@ function setCookiesFromHeaders(cookieJar, headers) {
 
 test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-it-'));
-  const port = 3600 + Math.floor(Math.random() * 400);
+  const port = pickIntegrationPort('api');
   const baseUrl = `http://127.0.0.1:${port}`;
   const repoDataDir = path.join(__dirname, '..', '..', 'data');
   const generatedPmtilesPaths = [];
@@ -443,7 +444,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           'way',
           102,
           JSON.stringify({
-            'building:part': 'yes',
+            'building:part': 'apartments',
             name: 'Integration test part'
           }),
           JSON.stringify({
@@ -472,7 +473,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           103,
           JSON.stringify({
             building: 'yes',
-            'building:part': 'yes',
+            'building:part': 'apartments',
             name: 'Integration test mixed building'
           }),
           JSON.stringify({
@@ -663,7 +664,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         assert.equal(pendingPartEdit?.levels, 4);
         assert.equal(pendingPartEdit?.year_built, 1989);
         assert.equal(pendingPartEdit?.name, null);
-        assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"yes"/);
+        assert.match(String(pendingPartEdit?.source_tags_json || ''), /"building:part":"apartments"/);
       } finally {
         partUserEditsDb.close();
       }
@@ -1037,6 +1038,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(emptyRules.status, 200);
       const emptyBody = await emptyRules.json();
       assert.deepEqual(emptyBody.matchedKeys, []);
+      assert.deepEqual(emptyBody.matchedLocations, []);
       assert.equal(Boolean(emptyBody?.meta?.cacheHit), false);
       assert.equal(typeof emptyBody?.meta?.elapsedMs, 'number');
       assert.equal(typeof emptyBody?.meta?.rulesHash, 'string');
@@ -1058,8 +1060,36 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const firstBody = await first.json();
       assert.ok(Array.isArray(firstBody?.matchedKeys));
       assert.ok(Array.isArray(firstBody?.matchedFeatureIds));
+      assert.ok(Array.isArray(firstBody?.matchedLocations));
+      assert.equal(firstBody.matchedLocations.length, firstBody.matchedFeatureIds.length);
+      assert.equal(firstBody.matchedCount, firstBody.matchedFeatureIds.length);
+      if (firstBody.matchedLocations.length > 0) {
+        assert.equal(typeof firstBody.matchedLocations[0]?.id, 'number');
+        assert.equal(typeof firstBody.matchedLocations[0]?.lon, 'number');
+        assert.equal(typeof firstBody.matchedLocations[0]?.lat, 'number');
+      }
       assert.equal(typeof firstBody?.meta?.truncated, 'boolean');
       assert.equal(Boolean(firstBody?.meta?.cacheHit), false);
+
+      const markerPointLevel = await callApi('/api/buildings/filter-matches', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          bbox: { west: 37.59, south: 55.69, east: 37.68, north: 55.78 },
+          zoomBucket: 5,
+          renderMode: 'markers',
+          rules: [{ key: 'name', op: 'contains', value: 'Integration test' }],
+          maxResults: 15
+        })
+      });
+      assert.equal(markerPointLevel.status, 200);
+      const markerPointLevelBody = await markerPointLevel.json();
+      assert.ok(Array.isArray(markerPointLevelBody?.matchedLocations));
+      assert.equal(markerPointLevelBody.matchedLocations.length, 4);
+      assert.equal(markerPointLevelBody.matchedFeatureIds.length, 4);
+      assert.equal(markerPointLevelBody.matchedLocations.every((point) => point?.count === 1), true);
+      assert.equal(markerPointLevelBody.matchedCount, 4);
+      assert.equal(Boolean(markerPointLevelBody?.meta?.truncated), false);
 
       const second = await callApi('/api/buildings/filter-matches', {
         method: 'POST',
@@ -1085,12 +1115,13 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(invalid.status, 400);
 
       const payload = {
-        bbox: { west: 44, south: 56, east: 44.02, north: 56.02 },
-        zoomBucket: 14,
+        bbox: { west: 37.59, south: 55.69, east: 37.68, north: 55.78 },
+        zoomBucket: 5,
+        renderMode: 'markers',
         requests: [
           {
             id: 'contains-test',
-            rules: [{ key: 'name', op: 'contains', value: 'test' }],
+            rules: [{ key: 'name', op: 'contains', value: 'Integration test' }],
             maxResults: 15
           },
           {
@@ -1112,6 +1143,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(firstBody.items.length, 2);
       assert.equal(firstBody.items[0]?.id, 'contains-test');
       assert.ok(Array.isArray(firstBody.items[0]?.matchedKeys));
+      assert.ok(Array.isArray(firstBody.items[0]?.matchedLocations));
+      assert.equal(firstBody.items[0]?.matchedLocations.length, 4);
+      assert.equal(firstBody.items[0]?.matchedLocations.every((point) => point?.count === 1), true);
+      assert.equal(firstBody.items[0]?.matchedCount, 4);
+      assert.equal(firstBody.items[1]?.matchedLocations.length, 4);
+      assert.equal(firstBody.items[1]?.matchedCount, 4);
       assert.equal(typeof firstBody.items[0]?.meta?.truncated, 'boolean');
       assert.equal(Boolean(firstBody.items[0]?.meta?.cacheHit), false);
 

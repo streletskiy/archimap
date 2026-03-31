@@ -91,6 +91,7 @@
   let bulkRegionSlugs = [];
   let modalEl = null;
   let hadOpenState;
+  let canEditForm = false;
   let selectionState = {
     selectedBuildingItems: [],
     selectedBuildingCount: 0,
@@ -259,6 +260,10 @@
       && (bulkFieldState?.[field]?.isMixed || Boolean(pickFirstText(currentValue)));
   }
 
+  function isOverpassBuilding(details = buildingDetails) {
+    return String(details?.source || details?.properties?.source || '').trim().toLowerCase() === 'overpass';
+  }
+
   $: currentComparable = buildComparableSnapshot(form);
   $: selectedBuildingItems = Array.isArray($selectedBuildings) && $selectedBuildings.length > 0
     ? $selectedBuildings
@@ -306,7 +311,7 @@
   function submitEdit(event) {
     event.preventDefault();
     const selection = $selectedBuilding;
-    if (!selection?.osmType || !selection?.osmId || !canEditBuildings || savePending) return;
+    if (!selection?.osmType || !selection?.osmId || !canEditForm || savePending) return;
     if (!selectionState.hasEditableFields) return;
     const snapshot = currentComparable;
     dispatch('save', {
@@ -357,6 +362,7 @@
     hadOpenState = false;
   }
   $: void hadOpenState;
+  $: canEditForm = Boolean(canEditBuildings);
 
   $: archiInfo = buildingDetails?.properties?.archiInfo || {};
   $: buildingKey = !isBulkSelection && $selectedBuilding?.osmType && $selectedBuilding?.osmId
@@ -455,6 +461,7 @@
     { label: $t('buildingModal.yearBuilt'), value: getSummaryValue('yearBuilt', isBulkSelection ? form.yearBuilt : pickFirstText(form.yearBuilt, archiInfo.year_built)) },
     { label: $t('buildingModal.architect'), value: getSummaryValue('architect', isBulkSelection ? form.architect : pickFirstText(form.architect, archiInfo.architect)) }
   ].filter((item) => pickFirstText(item.value));
+  $: hasOverviewContent = Boolean(displayDescription || summaryItems.length > 0);
 </script>
 
 {#if $buildingModalOpen}
@@ -494,6 +501,14 @@
               >
                 {buildingKey}
               </UiBadge>
+              {#if isOverpassBuilding()}
+                <UiBadge
+                  variant="default"
+                  className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold"
+                >
+                  {$t('buildingModal.cachedOverpass')}
+                </UiBadge>
+              {/if}
               {#if hasPendingEdit}
                 <UiBadge
                   href={pendingEditHref}
@@ -523,27 +538,29 @@
       </header>
 
       {#if hasReadyDetails}
-        <section class="overview-card">
-          <div class="overview-head">
-            <div>
-              <h4>{$t('buildingModal.title')}</h4>
-              {#if displayDescription}
-                <p>{displayDescription}</p>
-              {/if}
+        {#if hasOverviewContent}
+          <section class="overview-card">
+            <div class="overview-head">
+              <div>
+                <h4>{$t('buildingModal.title')}</h4>
+                {#if displayDescription}
+                  <p>{displayDescription}</p>
+                {/if}
+              </div>
             </div>
-          </div>
 
-          {#if summaryItems.length > 0}
-            <div class="overview-grid">
-              {#each summaryItems as item}
-                <article class="overview-stat">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </article>
-              {/each}
-            </div>
-          {/if}
-        </section>
+            {#if summaryItems.length > 0}
+              <div class="overview-grid">
+                {#each summaryItems as item}
+                  <article class="overview-stat">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </article>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
 
         {#if selectionState.isBulkSelection}
           <section class="bulk-selection-note" aria-live="polite">
@@ -551,8 +568,8 @@
           </section>
         {/if}
 
-        {#if canEditBuildings}
-          <form class="edit-form" on:submit={submitEdit}>
+            {#if canEditForm}
+              <form class="edit-form" on:submit={submitEdit}>
             <section class="form-section">
               <div class="section-head">
                 <h4>{$t('buildingModal.primarySection')}</h4>

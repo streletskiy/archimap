@@ -3,6 +3,7 @@
 User-side:
 
 - User submits building changes via `POST /api/building-info`.
+- Buildings loaded from browser-local Overpass cache are editable too; when there is no processed contour row, the save path persists a source snapshot (`source_geometry_json` + `source_tags_json`) in `user_edits.building_user_edits` so the edit can be reopened later in account/admin views.
 - Supported editable fields: `name`, `style`, `design`, `designRef`, `designYear`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
 - `material` accepts the concrete variants `concrete_panels`, `concrete_blocks`, and `concrete_monolith` in addition to the regular material list.
 - When `design` is enabled as a typical project, `designRef` and `designYear` become editable; `designRef` suggestions come from a cached list of values already present in the database.
@@ -22,10 +23,13 @@ User-side:
   - stale extra `pending` rows are marked as `superseded`.
 - In the account history, a user can withdraw their own `pending` edit before moderation; the action deletes that pending row.
 - In account history user can see moderation statuses and admin comment.
+- Opening an edit from account history shows a full-screen modal with the edit details and a top map focused on the target building.
 
 Admin-side moderation:
 
 - Admin opens edit details in `/admin/` and reviews changed fields.
+- Admin edit details also open in a full-screen modal with a top map focused on the target building.
+- The moderation list also exposes row checkboxes for currently pending edits so several selected rows can be accepted in one action.
 - Decision is field-level:
   - accept field (optionally with corrected value);
   - reject field.
@@ -33,6 +37,7 @@ Admin-side moderation:
   - all accepted -> `accepted`;
   - accepted subset + rejected subset -> `partially_accepted`;
   - all rejected -> `rejected`.
+- Bulk accept still runs each edit through the same merge checks, so rows that were already processed or became stale can fail independently without aborting the rest of the batch.
 - Accepted fields are persisted to `local.architectural_info`; merged field list is saved to `merged_fields_json`.
 - Search index refresh is only queued when accepted, deleted, or reassigned local data touches search fields (`name`, `address`, `style`, `architect`, `design_ref`). Material/levels-only moderation does not touch the search index, and the refresh itself is handled by a dedicated background worker without waiting for a worker response on the admin request thread.
 
@@ -52,6 +57,7 @@ OSM publish flow:
 - Changeset comments begin with `Update architectural info:` in all OSM sync cases.
 - The original local history rows remain in place and carry sync metadata such as the changeset id, sync timestamps, and a compact JSON summary.
 - Synced / cleaned rows are treated as read-only in admin views: they move to compact archive sections, stay collapsed by default in the UI, and cannot be re-synced or re-moderated.
+- If the same building later gets a newer accepted / partially accepted edit, the sync queue shows it again as active; older synced rows stay in history, but they should not keep the whole building locked in the archive.
 - After the next successful OSM import, if the tags that were actually synchronized are already present in the imported contour data, the runtime can remove the redundant `local.architectural_info` overwrite while leaving the edit history row in compact form. Cleanup only refreshes the search index when the overwritten local row contained search-relevant fields.
 
 Corner cases handled:
@@ -69,6 +75,9 @@ Corner cases handled:
 - Orphan accepted edit:
   - accepted / partially accepted history rows remain visible in account/admin lists even if the original OSM contour disappears;
   - admin can reassign merged local data to another existing OSM object.
+- Overpass-only building:
+  - if the local contour row is missing, the save path uses the browser-provided snapshot or the latest stored snapshot row for that OSM id;
+  - account/admin building previews read geometry from the stored snapshot instead of re-querying Overpass.
 - Full delete by master admin:
   - `pending`, `rejected`, `superseded` edits can be removed completely from history;
   - `accepted` / `partially_accepted` can be fully deleted only when they are the only accepted edit for that OSM object;

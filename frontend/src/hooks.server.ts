@@ -54,7 +54,16 @@ function buildCspHeader(nodeEnv: string, rawConnectOrigins: string, scriptHashes
 }
 
 const NODE_ENV = String(process.env.NODE_ENV || 'development');
-const DEFAULT_CSP_CONNECT_SRC_EXTRA = 'https://tiles.basemaps.cartocdn.com,https://*.basemaps.cartocdn.com';
+const DEFAULT_CSP_CONNECT_SRC_EXTRA = [
+  'https://tiles.basemaps.cartocdn.com',
+  'https://*.basemaps.cartocdn.com',
+  'https://overpass-api.de',
+  'https://lz4.overpass-api.de',
+  'https://z.overpass-api.de',
+  'https://maps.mail.ru',
+  'https://overpass.openstreetmap.fr',
+  'https://overpass.kumi.systems'
+].join(',');
 const CSP_CONNECT_SRC_EXTRA = String(process.env.CSP_CONNECT_SRC_EXTRA || DEFAULT_CSP_CONNECT_SRC_EXTRA);
 
 export const handle: Handle = async ({ event, resolve }) => {

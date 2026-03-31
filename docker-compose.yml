@@ -42,6 +42,8 @@ services:
     image: imresamu/postgis:16-3.4-bookworm
     container_name: archimap-postgres
     restart: unless-stopped
+    # PostGIS parallel workers and spatial scans can exhaust Docker's 64MB /dev/shm default.
+    shm_size: 512m
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}

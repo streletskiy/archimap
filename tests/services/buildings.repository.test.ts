@@ -63,6 +63,7 @@ function createTestDb() {
       osm_id INTEGER NOT NULL,
       created_by TEXT NOT NULL,
       source_osm_version TEXT,
+      source_geometry_json TEXT,
       name TEXT,
       style TEXT,
       design TEXT,
@@ -205,6 +206,7 @@ test('buildings repository inserts and updates pending edits', async () => {
       osm_id: 101,
       created_by: 'editor@example.test',
       source_osm_version: null,
+      source_geometry_json: '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
       name: 'Draft House',
       style: 'constructivism',
       design: 'typical',
@@ -246,6 +248,7 @@ test('buildings repository inserts and updates pending edits', async () => {
 
     await repository.updatePendingUserEditById(editId, {
       source_osm_version: 'v2',
+      source_geometry_json: '{"type":"Polygon","coordinates":[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}',
       name: 'Updated House',
       style: 'neo-classical',
       design: null,
@@ -288,6 +291,11 @@ test('buildings repository inserts and updates pending edits', async () => {
     assert.equal(row?.sync_summary_json, null);
     assert.equal(row?.sync_error_text, null);
     assert.equal(row?.source_osm_version, 'v2');
+    assert.equal(row?.source_geometry_json, '{"type":"Polygon","coordinates":[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}');
+
+    const snapshot = await repository.getLatestUserEditSnapshotById('way', 101);
+    assert.equal(snapshot?.id, editId);
+    assert.equal(snapshot?.source_geometry_json, '{"type":"Polygon","coordinates":[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}');
   } finally {
     db.close();
   }

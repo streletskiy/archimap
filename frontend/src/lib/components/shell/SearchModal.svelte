@@ -28,6 +28,7 @@
   let displayedResults;
   let visibleResultsTotal;
   let queryIsActive;
+  let searchStatusVisible;
   let showVisibleMapStatus;
   let visibleListLimited;
 
@@ -152,7 +153,13 @@
 
   $: displayedResults = buildDisplayedResults($searchMapState.items, $searchState.items);
   $: visibleResultsTotal = Math.max(0, Number($searchMapState.total || 0));
-  $: queryIsActive = String($searchState.query || '').trim().length >= 2;
+  $: queryIsActive = Boolean($searchState.mapActive) && String($searchState.query || '').trim().length >= 2;
+  $: searchStatusVisible = String($searchState.query || '').trim().length < 2
+    || Boolean($searchState.mapActive)
+    || Boolean($searchState.loading)
+    || Boolean($searchState.loadingMore)
+    || Boolean($searchState.error)
+    || ($searchState.items?.length || 0) > 0;
   $: visibleListLimited = Boolean($searchMapState.truncated || visibleResultsTotal > SEARCH_VISIBLE_PRIORITY_LIMIT);
   $: showVisibleMapStatus = queryIsActive && ($searchMapState.loading || visibleResultsTotal > 0 || $searchMapState.truncated);
 </script>
@@ -213,7 +220,9 @@
 
       <div class="search-meta">
         <div class="search-meta-copy">
-          <p id="search-results-status" class="search-status">{$searchState.status}</p>
+          {#if searchStatusVisible}
+            <p id="search-results-status" class="search-status">{$searchState.status}</p>
+          {/if}
           {#if showVisibleMapStatus}
             <p class="search-viewport-status" data-loading={$searchMapState.loading ? 'true' : 'false'}>
               {#if $searchMapState.loading}

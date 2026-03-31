@@ -1,10 +1,4 @@
-const {
-  createAdminError,
-  isLikelyEmail,
-  parseLimit,
-  parseOsmTarget,
-  parsePositiveId
-} = require('./shared');
+const { createAdminError, isLikelyEmail, parseLimit, parseOsmTarget, parsePositiveId } = require('./shared');
 const { splitBuildingMaterialSelection, sanitizeProjectYear } = require('../edits.service');
 const { hasSearchIndexRelevantFieldChange } = require('../search-index-fields');
 const { assertMutableSyncStatus } = require('../building-edits/shared');
@@ -19,6 +13,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
   const {
     db,
     getUserEditsList,
+    getUserEditsPageRaw,
     getUserEditDetailsById,
     normalizeUserEditStatus,
     sanitizeFieldText,
@@ -33,11 +28,37 @@ function createAdminEditsService(options: LooseRecord = {}) {
     ARCHI_FIELD_SET
   } = options;
 
-  async function listBuildingEdits({ status, limit }: BuildingEditListQuery = {}): Promise<BuildingEdit[]> {
-    const statusRaw = String(status || '').trim().toLowerCase();
+  async function listBuildingEdits({
+    status,
+    sync,
+    limit,
+    page,
+    q,
+    from,
+    to,
+    user,
+    createdBy
+  }: BuildingEditListQuery = {}): Promise<{ total: number; page: number; pageSize: number; pageCount: number; items: BuildingEdit[]; authors: string[] }> {
+    const statusRaw = String(status || '')
+      .trim()
+      .toLowerCase();
     const normalizedStatus = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
-    const normalizedLimit = parseLimit(limit, 200, 1, 1000);
-    return getUserEditsList({ status: normalizedStatus, limit: normalizedLimit, summary: false });
+    const normalizedLimit = parseLimit(limit, 20, 1, 100);
+    const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const normalizedUser = String(createdBy ?? user ?? '')
+      .trim()
+      .toLowerCase() || null;
+
+    return getUserEditsPageRaw({
+      createdBy: normalizedUser,
+      status: normalizedStatus,
+      sync,
+      q,
+      createdFrom: from,
+      createdTo: to,
+      limit: normalizedLimit,
+      page: normalizedPage
+    });
   }
 
   async function getBuildingEditDetails(editIdRaw): Promise<BuildingEdit> {
@@ -53,12 +74,16 @@ function createAdminEditsService(options: LooseRecord = {}) {
   }
 
   async function getUserByEmail(emailRaw) {
-    const email = String(emailRaw || '').trim().toLowerCase();
+    const email = String(emailRaw || '')
+      .trim()
+      .toLowerCase();
     if (!isLikelyEmail(email)) {
       throw createAdminError(400, 'Invalid email');
     }
 
-    const row = await db.prepare(`
+    const row = await db
+      .prepare(
+        `
       SELECT
         u.email,
         u.first_name,
@@ -81,7 +106,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
         ON e.created_by_key = lower(u.email)
       WHERE lower(u.email) = ?
       LIMIT 1
-    `).get(email);
+    `
+      )
+      .get(email);
     if (!row) {
       throw createAdminError(404, 'User not found');
     }
@@ -103,7 +130,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
   }
 
   async function getUserEditsByEmail(emailRaw, limitRaw) {
-    const email = String(emailRaw || '').trim().toLowerCase();
+    const email = String(emailRaw || '')
+      .trim()
+      .toLowerCase();
     if (!isLikelyEmail(email)) {
       throw createAdminError(400, 'Invalid email');
     }
@@ -120,7 +149,10 @@ function createAdminEditsService(options: LooseRecord = {}) {
     return hasSearchIndexRelevantFieldChange(changes);
   }
 
-  async function rejectBuildingEdit(editIdRaw, { comment, reviewer }: { comment?: string; reviewer?: string | null } = {}) {
+  async function rejectBuildingEdit(
+    editIdRaw,
+    { comment, reviewer }: { comment?: string; reviewer?: string | null } = {}
+  ) {
     const row = await getBuildingEditDetails(editIdRaw);
     assertMutableSyncStatus(row.syncStatus);
     if (normalizeUserEditStatus(row.status) !== 'pending') {
@@ -129,7 +161,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
 
     const editId = parsePositiveId(editIdRaw);
     const adminComment = sanitizeFieldText(comment, 1200);
-    const result = await db.prepare(`
+    const result = await db
+      .prepare(
+        `
       UPDATE user_edits.building_user_edits
       SET
         status = 'rejected',
@@ -141,7 +175,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
         merged_fields_json = NULL,
         updated_at = datetime('now')
       WHERE id = ? AND status = 'pending'
-    `).run(adminComment, reviewer || 'admin', editId);
+    `
+      )
+      .run(adminComment, reviewer || 'admin', editId);
     if (Number(result?.changes || 0) === 0) {
       throw createAdminError(409, 'Edit has already been processed by another administrator');
     }
@@ -182,14 +218,19 @@ function createAdminEditsService(options: LooseRecord = {}) {
       const beforeOsmId = Number(before.osmId);
       const afterOsmType = String(updated?.osmType || '').trim();
       const afterOsmId = Number(updated?.osmId);
-      const shouldRefreshSearchIndex = shouldRefreshSearchIndexForChanges(before.changes)
-        && normalizeUserEditStatus(before.status) !== 'pending'
-        && Number.isInteger(beforeOsmId)
-        && beforeOsmType
-        && (beforeOsmType !== afterOsmType || beforeOsmId !== afterOsmId);
+      const shouldRefreshSearchIndex =
+        shouldRefreshSearchIndexForChanges(before.changes) &&
+        normalizeUserEditStatus(before.status) !== 'pending' &&
+        Number.isInteger(beforeOsmId) &&
+        beforeOsmType &&
+        (beforeOsmType !== afterOsmType || beforeOsmId !== afterOsmId);
       if (shouldRefreshSearchIndex) {
         enqueueSearchIndexRefresh(beforeOsmType, beforeOsmId);
-        if (afterOsmType && Number.isInteger(afterOsmId) && (beforeOsmType !== afterOsmType || beforeOsmId !== afterOsmId)) {
+        if (
+          afterOsmType &&
+          Number.isInteger(afterOsmId) &&
+          (beforeOsmType !== afterOsmType || beforeOsmId !== afterOsmId)
+        ) {
           enqueueSearchIndexRefresh(afterOsmType, afterOsmId);
         }
       }
@@ -229,13 +270,17 @@ function createAdminEditsService(options: LooseRecord = {}) {
 
     try {
       const deleted = await deleteUserEdit(editId);
-      if (deleted?.deletedMergedLocal && shouldRefreshSearchIndexForChanges(before.changes) && deleted?.osmType && Number.isInteger(Number(deleted.osmId))) {
+      if (
+        deleted?.deletedMergedLocal &&
+        shouldRefreshSearchIndexForChanges(before.changes) &&
+        deleted?.osmType &&
+        Number.isInteger(Number(deleted.osmId))
+      ) {
         enqueueSearchIndexRefresh(deleted.osmType, deleted.osmId);
       }
       queueDesignRefSuggestionsRefresh(
         'admin-delete',
-        Array.isArray(before?.changes)
-          && before.changes.some((change) => String(change?.field || '') === 'design_ref')
+        Array.isArray(before?.changes) && before.changes.some((change) => String(change?.field || '') === 'design_ref')
       );
       return deleted;
     } catch (error) {
@@ -295,9 +340,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
         sanitizedValues.material_concrete = selection.material_concrete;
         continue;
       }
-      const maxLen = key === 'archimap_description'
-        ? 1000
-        : (key === 'design_ref' ? 500 : 300);
+      const maxLen = key === 'archimap_description' ? 1000 : key === 'design_ref' ? 500 : 300;
       sanitizedValues[key] = sanitizeFieldText(source[key], maxLen);
     }
 
@@ -328,12 +371,17 @@ function createAdminEditsService(options: LooseRecord = {}) {
       updated_by: currentMergedRow?.updated_by ?? null,
       updated_at: currentMergedRow?.updated_at ?? null
     };
-    const editSourceRow = (await db.prepare(`
+    const editSourceRow =
+      (await db
+        .prepare(
+          `
         SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
-      `).get(editId)) || {};
+      `
+        )
+        .get(editId)) || {};
     const editSource: BuildingEditMergeCandidate['editSource'] = {
       name: editSourceRow.name ?? null,
       style: editSourceRow.style ?? null,
@@ -378,7 +426,13 @@ function createAdminEditsService(options: LooseRecord = {}) {
 
   async function mergeBuildingEdit(
     editIdRaw,
-    { force, fields, values, comment, reviewer }: {
+    {
+      force,
+      fields,
+      values,
+      comment,
+      reviewer
+    }: {
       force?: boolean;
       fields?: string[];
       values?: BuildingEditMergeValues | Record<string, unknown>;
@@ -395,18 +449,26 @@ function createAdminEditsService(options: LooseRecord = {}) {
     const forceMerge = Boolean(force === true);
     const currentContour = await getOsmContourRow(item.osmType, item.osmId);
     if (!currentContour) {
-      throw createAdminError(409, 'Source OSM building no longer exists in the local contours database. Reassign the edit to a current building first.', {
-        code: 'EDIT_TARGET_MISSING'
-      });
+      throw createAdminError(
+        409,
+        'Source OSM building no longer exists in the local contours database. Reassign the edit to a current building first.',
+        {
+          code: 'EDIT_TARGET_MISSING'
+        }
+      );
     }
     if (!forceMerge && item.sourceOsmChanged) {
-      throw createAdminError(409, 'Edit is outdated because the building OSM data changed after the edit was created. Refresh the edit, reassign it, or run merge with force.', {
-        code: 'EDIT_OUTDATED_OSM',
-        details: {
-          currentUpdatedAt: item.currentOsmUpdatedAt || null,
-          sourceUpdatedAt: item.sourceOsmUpdatedAt || null
+      throw createAdminError(
+        409,
+        'Edit is outdated because the building OSM data changed after the edit was created. Refresh the edit, reassign it, or run merge with force.',
+        {
+          code: 'EDIT_OUTDATED_OSM',
+          details: {
+            currentUpdatedAt: item.currentOsmUpdatedAt || null,
+            sourceUpdatedAt: item.sourceOsmUpdatedAt || null
+          }
         }
-      });
+      );
     }
 
     const allowedFields = new Set<string>((item.changes || []).map((change) => String(change.field || '')));
@@ -416,28 +478,34 @@ function createAdminEditsService(options: LooseRecord = {}) {
 
     const requestedFields = Array.isArray(fields)
       ? fields
-        .map((value) => String(value || '').trim())
-        .filter((key) => ARCHI_FIELD_SET.has(key) && allowedFields.has(key))
+          .map((value) => String(value || '').trim())
+          .filter((key) => ARCHI_FIELD_SET.has(key) && allowedFields.has(key))
       : [];
     const fieldsToMerge = requestedFields.length > 0 ? [...new Set(requestedFields)] : [...allowedFields];
     const sanitizedValues = sanitizeMergeValues(fieldsToMerge, values);
     const editId = parsePositiveId(editIdRaw);
-    const {
-      currentMerged,
-      editCreatedTs,
-      currentMergedTs,
-      editSource,
-      mergedCandidate
-    } = await buildMergedCandidate(item, editId);
+    const { currentMerged, editCreatedTs, currentMergedTs, editSource, mergedCandidate } = await buildMergedCandidate(
+      item,
+      editId
+    );
 
-    if (!forceMerge && Number.isFinite(editCreatedTs) && Number.isFinite(currentMergedTs) && currentMergedTs > editCreatedTs) {
-      throw createAdminError(409, 'Edit is outdated because the building data changed after the edit was created. Refresh the edit or run merge with force.', {
-        code: 'EDIT_OUTDATED',
-        details: {
-          currentUpdatedAt: currentMerged?.updated_at || null,
-          editCreatedAt: item.createdAt || null
+    if (
+      !forceMerge &&
+      Number.isFinite(editCreatedTs) &&
+      Number.isFinite(currentMergedTs) &&
+      currentMergedTs > editCreatedTs
+    ) {
+      throw createAdminError(
+        409,
+        'Edit is outdated because the building data changed after the edit was created. Refresh the edit or run merge with force.',
+        {
+          code: 'EDIT_OUTDATED',
+          details: {
+            currentUpdatedAt: currentMerged?.updated_at || null,
+            editCreatedAt: item.createdAt || null
+          }
         }
-      });
+      );
     }
 
     for (const field of fieldsToMerge) {
@@ -464,7 +532,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
     const nextStatus = fieldsToMerge.length < allowedFields.size ? 'partially_accepted' : 'accepted';
     // Keep merge/update writes in one transaction to preserve legacy concurrency behaviour.
     const tx = db.transaction(async () => {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         INSERT INTO local.architectural_info (
           osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
@@ -485,26 +555,30 @@ function createAdminEditsService(options: LooseRecord = {}) {
           archimap_description = excluded.archimap_description,
           updated_by = excluded.updated_by,
           updated_at = datetime('now')
-      `).run(
-        item.osmType,
-        item.osmId,
-        mergedCandidate.name,
-        mergedCandidate.style,
-        mergedCandidate.design,
-        mergedCandidate.design_ref,
-        mergedCandidate.design_year,
-        mergedCandidate.material,
-        mergedCandidate.material_concrete,
-        mergedCandidate.colour,
-        mergedCandidate.levels,
-        mergedCandidate.year_built,
-        mergedCandidate.architect,
-        mergedCandidate.address,
-        mergedCandidate.archimap_description,
-        normalizedReviewer
-      );
+      `
+        )
+        .run(
+          item.osmType,
+          item.osmId,
+          mergedCandidate.name,
+          mergedCandidate.style,
+          mergedCandidate.design,
+          mergedCandidate.design_ref,
+          mergedCandidate.design_year,
+          mergedCandidate.material,
+          mergedCandidate.material_concrete,
+          mergedCandidate.colour,
+          mergedCandidate.levels,
+          mergedCandidate.year_built,
+          mergedCandidate.architect,
+          mergedCandidate.address,
+          mergedCandidate.archimap_description,
+          normalizedReviewer
+        );
 
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE user_edits.building_user_edits
         SET
           status = ?,
@@ -516,14 +590,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
           merged_fields_json = ?,
           updated_at = datetime('now')
         WHERE id = ? AND status = 'pending'
-      `).run(
-        nextStatus,
-        adminComment,
-        normalizedReviewer,
-        normalizedReviewer,
-        JSON.stringify(fieldsToMerge),
-        editId
-      );
+      `
+        )
+        .run(nextStatus, adminComment, normalizedReviewer, normalizedReviewer, JSON.stringify(fieldsToMerge), editId);
     });
 
     try {
@@ -550,6 +619,72 @@ function createAdminEditsService(options: LooseRecord = {}) {
     };
   }
 
+  async function bulkMergeBuildingEdits(
+    editIdsRaw,
+    {
+      force,
+      comment,
+      reviewer
+    }: {
+      force?: boolean;
+      comment?: string;
+      reviewer?: string;
+    } = {}
+  ) {
+    const requestedIds = Array.isArray(editIdsRaw) ? editIdsRaw : [];
+    const normalizedIds: number[] = [];
+    const seenIds = new Set<number>();
+
+    for (const rawId of requestedIds) {
+      const editId = parsePositiveId(rawId);
+      if (!editId || seenIds.has(editId)) continue;
+      seenIds.add(editId);
+      normalizedIds.push(editId);
+    }
+
+    if (normalizedIds.length === 0) {
+      throw createAdminError(400, 'Select at least one edit to merge', { code: 'ERR_INVALID_INPUT' });
+    }
+
+    const results: Array<LooseRecord> = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const editId of normalizedIds) {
+      try {
+        const result = await mergeBuildingEdit(editId, {
+          force,
+          comment,
+          reviewer
+        });
+        successCount += 1;
+        results.push({
+          editId,
+          ok: true,
+          status: result.status,
+          mergedFields: Array.isArray(result.mergedFields) ? result.mergedFields : []
+        });
+      } catch (error) {
+        failureCount += 1;
+        results.push({
+          editId,
+          ok: false,
+          httpStatus: Number(error?.status) || 409,
+          code: String(error?.code || ''),
+          error: String(error?.message || 'Failed to merge edit')
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      totalCount: normalizedIds.length,
+      successCount,
+      failureCount,
+      results
+    };
+  }
+
   return {
     listBuildingEdits,
     getBuildingEditDetails,
@@ -558,7 +693,8 @@ function createAdminEditsService(options: LooseRecord = {}) {
     rejectBuildingEdit,
     reassignBuildingEdit,
     deleteBuildingEdit,
-    mergeBuildingEdit
+    mergeBuildingEdit,
+    bulkMergeBuildingEdits
   };
 }
 

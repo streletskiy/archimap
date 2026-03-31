@@ -13,8 +13,9 @@ import {
 } from './osm-sync.shared';
 import { fetchOsmElement } from './osm-api-client';
 import { buildChangesetTags, closeChangeset, createChangeset, updateOsmElement } from './osm-changeset-builder';
+import { resolveDisplayAddressForRow } from './address-format';
 import { hasSearchIndexRelevantValues } from './search-index-fields';
-import type { SyncCandidate, SyncCandidateSummary } from '$shared/types';
+import type { SyncCandidate, SyncCandidatePageResult, SyncCandidateSummary } from '$shared/types';
 
 type CandidateResolverDeps = {
   db: any;
@@ -29,105 +30,7 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
   if (!db) throw new Error('createOsmCandidateResolver: db is required');
   if (typeof getCredentials !== 'function') throw new Error('createOsmCandidateResolver: getCredentials is required');
 
-  async function readCandidateRows(osmType, osmId) {
-    return await db.prepare(`
-      SELECT
-        ue.id,
-        ue.osm_type,
-        ue.osm_id,
-        ue.created_by,
-        ue.status,
-        ue.edited_fields_json,
-        ue.source_osm_version,
-        ue.sync_status,
-        ue.sync_attempted_at,
-        ue.sync_succeeded_at,
-        ue.sync_cleaned_at,
-        ue.sync_changeset_id,
-        ue.sync_summary_json,
-        ue.sync_error_text,
-        ue.source_tags_json,
-        ue.source_osm_updated_at,
-        ue.updated_at,
-        ue.created_at,
-        ai.name AS local_name,
-        ai.style AS local_style,
-        ai.design AS local_design,
-        ai.design_ref AS local_design_ref,
-        ai.design_year AS local_design_year,
-        ai.material AS local_material,
-        ai.material_concrete AS local_material_concrete,
-        ai.colour AS local_colour,
-        ai.levels AS local_levels,
-        ai.year_built AS local_year_built,
-        ai.architect AS local_architect,
-        ai.address AS local_address,
-        ai.description AS local_description,
-        ai.archimap_description AS local_archimap_description,
-        ai.updated_at AS local_updated_at,
-        bc.tags_json AS contour_tags_json,
-        bc.updated_at AS contour_updated_at
-      FROM user_edits.building_user_edits ue
-      LEFT JOIN local.architectural_info ai
-        ON ai.osm_type = ue.osm_type AND ai.osm_id = ue.osm_id
-      LEFT JOIN osm.building_contours bc
-        ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
-      WHERE ue.osm_type = ? AND ue.osm_id = ?
-      ORDER BY ue.updated_at DESC, ue.id DESC
-    `).all(osmType, osmId);
-  }
-
-  function buildCandidateRecord(rows: LooseRecord[]): SyncCandidateSummary {
-    const latestRow: LooseRecord = rows[0] || {};
-    const latestLocalState = stateFromLocalRow(latestRow);
-    const contourState = stateFromContourTags(parseTags(latestRow?.contour_tags_json));
-    const explicitFields = [...new Set(rows.flatMap((row) => parseEditedFields(row.edited_fields_json)))];
-    const latestSyncStatus = rows.reduce((acc, row) => {
-      const status = String(row.sync_status || 'unsynced');
-      if (status === 'failed') return 'failed';
-      if (status === 'syncing' && acc !== 'failed') return 'syncing';
-      if (status === 'synced' && !['failed', 'syncing'].includes(acc)) return 'synced';
-      if (status === 'cleaned' && !['failed', 'syncing', 'synced'].includes(acc)) return 'cleaned';
-      return acc;
-    }, 'unsynced');
-    const syncReadOnly = latestSyncStatus === 'synced' || latestSyncStatus === 'cleaned';
-    const summary = parseSyncSummary(latestRow?.sync_summary_json);
-    const changes = diffStates(contourState, latestLocalState);
-    const hasSyncableEdits = rows.some((row) => ['accepted', 'partially_accepted'].includes(String(row.status || '')));
-    return {
-      osmType: latestRow.osm_type,
-      osmId: Number(latestRow.osm_id || 0),
-      totalEdits: rows.length,
-      syncableEdits: rows.filter((row) => ['accepted', 'partially_accepted'].includes(String(row.status || ''))).length,
-      latestEditId: Number(latestRow.id || 0),
-      latestUpdatedAt: latestRow.updated_at || null,
-      latestCreatedBy: latestRow.created_by || null,
-      latestStatus: latestRow.status || null,
-      latestLocalName: latestRow.local_name || null,
-      latestLocalUpdatedAt: latestRow.local_updated_at || null,
-      sourceOsmUpdatedAt: latestRow.source_osm_updated_at || null,
-      sourceOsmVersion: latestRow.source_osm_version || null,
-      syncStatus: latestSyncStatus,
-      syncAttemptedAt: latestRow.sync_attempted_at || null,
-      syncSucceededAt: latestRow.sync_succeeded_at || null,
-      syncCleanedAt: latestRow.sync_cleaned_at || null,
-      syncChangesetId: latestRow.sync_changeset_id || null,
-      syncSummary: summary,
-      syncErrorText: latestRow.sync_error_text || null,
-      currentContourUpdatedAt: latestRow.contour_updated_at || null,
-      localState: latestLocalState,
-      contourState,
-      changes,
-      syncReadOnly,
-      canSync: hasSyncableEdits && !syncReadOnly && latestSyncStatus !== 'syncing',
-      hasLocalState: Object.values(latestLocalState).some((value) => value != null),
-      explicitFields
-    };
-  }
-
-  async function listSyncCandidates(limit = 200): Promise<SyncCandidateSummary[]> {
-    const cap = Math.max(1, Math.min(500, Number(limit) || 200));
-    const rows = await db.prepare(`
+  const CANDIDATE_ROWS_SELECT = `
       SELECT
         ue.id,
         ue.osm_type,
@@ -170,18 +73,173 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
       LEFT JOIN osm.building_contours bc
         ON bc.osm_type = ue.osm_type AND bc.osm_id = ue.osm_id
       WHERE ue.status IN ('accepted', 'partially_accepted')
-      ORDER BY ue.updated_at DESC, ue.id DESC
-      LIMIT ?
-    `).all(cap);
+    `;
 
-    const grouped = new Map();
+  function normalizeSyncMode(sync) {
+    const normalized = String(sync || 'all').trim().toLowerCase();
+    if (normalized === 'active' || normalized === 'archived' || normalized === 'all') {
+      return normalized;
+    }
+    return 'all';
+  }
+
+  function buildSyncModeWhereClause(syncMode) {
+    if (syncMode === 'active') {
+      return `(has_syncing_row = 1 OR latest_sync_status NOT IN ('synced', 'cleaned'))`;
+    }
+    if (syncMode === 'archived') {
+      return `(has_syncing_row = 0 AND latest_sync_status IN ('synced', 'cleaned'))`;
+    }
+    return '1 = 1';
+  }
+
+  function buildCandidateGroupCtes() {
+    return `
+      WITH filtered AS (
+        ${CANDIDATE_ROWS_SELECT}
+      ),
+      ranked AS (
+        SELECT
+          filtered.*,
+          ROW_NUMBER() OVER (PARTITION BY osm_type, osm_id ORDER BY updated_at DESC, id DESC) AS row_rank,
+          MAX(CASE WHEN COALESCE(lower(trim(sync_status)), 'unsynced') = 'syncing' THEN 1 ELSE 0 END)
+            OVER (PARTITION BY osm_type, osm_id) AS has_syncing_row
+        FROM filtered
+      ),
+      group_summary AS (
+        SELECT
+          osm_type,
+          osm_id,
+          id AS latest_edit_id,
+          updated_at AS latest_updated_at,
+          COALESCE(lower(trim(sync_status)), 'unsynced') AS latest_sync_status,
+          has_syncing_row
+        FROM ranked
+        WHERE row_rank = 1
+      )
+    `;
+  }
+
+  async function readCandidateRows(osmType, osmId) {
+    return await db.prepare(`
+      ${CANDIDATE_ROWS_SELECT}
+        AND ue.osm_type = ? AND ue.osm_id = ?
+      ORDER BY ue.updated_at DESC, ue.id DESC
+    `).all(osmType, osmId);
+  }
+
+  function buildCandidateRecord(rows: LooseRecord[]): SyncCandidateSummary {
+    const latestRow: LooseRecord = rows[0] || {};
+    const latestLocalState = stateFromLocalRow(latestRow);
+    const contourState = stateFromContourTags(parseTags(latestRow?.contour_tags_json));
+    const displayAddress = resolveDisplayAddressForRow({
+      address: latestRow?.local_address || null,
+      tags_json: latestRow?.contour_tags_json || null,
+      source_tags_json: latestRow?.source_tags_json || null
+    });
+    const explicitFields = [...new Set(rows.flatMap((row) => parseEditedFields(row.edited_fields_json)))];
+    const hasSyncingRow = rows.some((row) => String(row.sync_status || 'unsynced').trim().toLowerCase() === 'syncing');
+    // Keep a newer accepted/partially accepted edit from being hidden by older synced history rows.
+    const latestSyncStatus = hasSyncingRow
+      ? 'syncing'
+      : String(latestRow.sync_status || 'unsynced').trim().toLowerCase();
+    const syncReadOnly = latestSyncStatus === 'synced' || latestSyncStatus === 'cleaned';
+    const summary = parseSyncSummary(latestRow?.sync_summary_json);
+    const changes = diffStates(contourState, latestLocalState);
+    const hasSyncableEdits = rows.some((row) => ['accepted', 'partially_accepted'].includes(String(row.status || '')));
+    return {
+      osmType: latestRow.osm_type,
+      osmId: Number(latestRow.osm_id || 0),
+      totalEdits: rows.length,
+      syncableEdits: rows.filter((row) => ['accepted', 'partially_accepted'].includes(String(row.status || ''))).length,
+      latestEditId: Number(latestRow.id || 0),
+      latestUpdatedAt: latestRow.updated_at || null,
+      latestCreatedBy: latestRow.created_by || null,
+      latestStatus: latestRow.status || null,
+      latestLocalName: latestRow.local_name || null,
+      displayAddress,
+      latestLocalUpdatedAt: latestRow.local_updated_at || null,
+      sourceOsmUpdatedAt: latestRow.source_osm_updated_at || null,
+      sourceOsmVersion: latestRow.source_osm_version || null,
+      syncStatus: latestSyncStatus,
+      syncAttemptedAt: latestRow.sync_attempted_at || null,
+      syncSucceededAt: latestRow.sync_succeeded_at || null,
+      syncCleanedAt: latestRow.sync_cleaned_at || null,
+      syncChangesetId: latestRow.sync_changeset_id || null,
+      syncSummary: summary,
+      syncErrorText: latestRow.sync_error_text || null,
+      currentContourUpdatedAt: latestRow.contour_updated_at || null,
+      localState: latestLocalState,
+      contourState,
+      changes,
+      syncReadOnly,
+      canSync: hasSyncableEdits && !syncReadOnly && latestSyncStatus !== 'syncing',
+      hasLocalState: Object.values(latestLocalState).some((value) => value != null),
+      explicitFields
+    };
+  }
+
+  async function listSyncCandidates({
+    sync = 'all',
+    limit = 200,
+    page = 1
+  }: {
+    sync?: string;
+    limit?: number;
+    page?: number;
+  } = {}): Promise<SyncCandidatePageResult<SyncCandidateSummary>> {
+    const cap = Math.max(1, Math.min(500, Number(limit) || 200));
+    const currentPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const offset = (currentPage - 1) * cap;
+    const normalizedSync = normalizeSyncMode(sync);
+    const syncWhere = buildSyncModeWhereClause(normalizedSync);
+    const ctes = buildCandidateGroupCtes();
+
+    const countRow = await db.prepare(`
+      ${ctes}
+      SELECT COUNT(*) AS total
+      FROM group_summary
+      WHERE ${syncWhere}
+    `).get();
+
+    const rows = await db.prepare(`
+      ${ctes},
+      page_groups AS (
+        SELECT
+          osm_type,
+          osm_id,
+          latest_updated_at,
+          latest_edit_id
+        FROM group_summary
+        WHERE ${syncWhere}
+        ORDER BY latest_updated_at DESC, latest_edit_id DESC, osm_type ASC, osm_id ASC
+        LIMIT ? OFFSET ?
+      )
+      SELECT ranked.*
+      FROM ranked
+      INNER JOIN page_groups
+        ON page_groups.osm_type = ranked.osm_type
+       AND page_groups.osm_id = ranked.osm_id
+      ORDER BY page_groups.latest_updated_at DESC, ranked.updated_at DESC, ranked.id DESC
+    `).all(cap, offset);
+
+    const grouped = new Map<string, LooseRecord[]>();
     for (const row of rows) {
       const key = `${row.osm_type}/${row.osm_id}`;
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key).push(row);
     }
 
-    return [...grouped.values()].map((group) => buildCandidateRecord(group));
+    const total = Math.max(0, Number(countRow?.total || 0));
+    const pageCount = total > 0 ? Math.ceil(total / cap) : 0;
+
+    return {
+      total,
+      page: currentPage,
+      pageSize: cap,
+      pageCount,
+      items: [...grouped.values()].map((group) => buildCandidateRecord(group))
+    };
   }
 
   async function getSyncCandidate(osmType, osmId): Promise<SyncCandidate | null> {
@@ -559,10 +617,10 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
   }
 
   async function cleanupSyncedLocalOverwritesAfterImport() {
-    const candidates = await listSyncCandidates(500);
+    const candidates = await listSyncCandidates({ sync: 'all', limit: 500, page: 1 });
     const cleaned = [];
 
-    for (const candidate of candidates) {
+    for (const candidate of candidates.items) {
       if (!candidate || !['synced', 'cleaned'].includes(String(candidate.syncStatus || ''))) {
         continue;
       }

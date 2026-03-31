@@ -24,21 +24,25 @@
   - `data/archimap.db` (main app DB)
   - `data/osm.db` (OSM contours/search source)
   - `data/local-edits.db` (accepted local edits)
-  - `data/user-edits.db` (moderation queue)
+  - `data/user-edits.db` (moderation queue + stored source geometry/tags snapshots for contour-less Overpass edits)
   - `data/users.db` (auth/users)
 - Redis (optional): session store backend.
 - PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`.
+- Browser-local map fallback cache: Overpass-loaded building tiles are stored in IndexedDB from `frontend/src/lib/services/map/overpass-buildings.ts` so uncovered viewports can be revisited without re-downloading the same area in one session. When the user saves an edit for one of those buildings, the app also persists a server-side snapshot of the source geometry/tags in `user_edits.building_user_edits`, so later account/admin views do not depend on the browser cache. The same client-side module also tracks the last sync timestamp, exposes explicit load/refresh/clear controls, and uses a small concurrent worker pool that prefers the last working public endpoint for each tile while cooling down `403/504/5xx` hosts.
 
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
 - Shared UI composition follows `ui/** -> base/** -> shell/routes`; product code should not consume generated primitives directly.
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.ts`.
+  - `frontend/src/lib/services/map/overpass-buildings.ts`: client-side Overpass fallback loader/cache with viewport tiling, browser-local persistence, explicit load/refresh/clear controls, and a small concurrent worker pool that prefers the last working public endpoint while cooling down failing hosts.
+  - `frontend/src/lib/services/map/overpass-data-utils.ts`: normalization helpers for locally loaded Overpass building features and their search/filter/detail payloads, including source snapshots used when saving Overpass-backed edits.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
 - Building filter backend decomposition:
   - `src/lib/server/http/buildings.route.ts`: thin HTTP wiring for building/filter endpoints
   - `src/lib/server/services/building-filters.service.ts`: filter-data/filter-matches orchestration, cache policy, request normalization
+  - `src/lib/server/services/building-filter-marker-aggregation.ts`: low-zoom marker aggregation helpers and stable cell-id generation
   - `src/lib/server/services/building-filter-query.service.ts`: bbox/key query selection for SQLite RTREE/plain paths and PostGIS paths
   - `src/lib/server/utils/filter-sql-builder.ts`: isolated Postgres predicate/guard SQL builder for filter rules
 - Building edit backend decomposition:
@@ -48,7 +52,7 @@
   - `src/lib/server/services/building-edits/moderation.ts`: reassignment/delete flows and merged-local-state safety checks
   - `src/lib/server/services/building-edits/personal-overlays.ts`: pending/rejected personal overlay lookup for feature info and filter payloads
 - Building data access:
-  - `src/lib/server/services/buildings.repository.ts`: SQL access for building contour lookups, region slug resolution, local architectural info attachment, and pending building-info draft persistence shared by `buildings.route.ts` and `feature-info.http.ts`
+  - `src/lib/server/services/buildings.repository.ts`: SQL access for building contour lookups, region slug resolution, local architectural info attachment, and pending building-info draft persistence plus stored source snapshot lookup shared by `buildings.route.ts` and `feature-info.http.ts`
 - Auth backend decomposition:
   - `src/lib/server/auth/index.ts`: auth bootstrap and route registration entrypoint
   - `src/lib/server/auth/schema.ts`: auth schema bootstrap for SQLite
@@ -71,7 +75,7 @@
 - Frontend map canvas decomposition:
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
   - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, buffered hover/click hit-testing for pmtiles buildings, and search-result click routing
-  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, and carto fallback visibility
+  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, carto fallback visibility, and base-label stacking
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.
 - Shared utilities: `src/lib/shared/**`, including `src/lib/shared/types/**` for cross-cutting domain contracts shared by backend and frontend (`Region`, `FilterPreset`, `BuildingEdit`, `SyncCandidate`, and related admin payloads).
@@ -95,6 +99,7 @@
 - Runtime settings caches (`general`, `smtp`, `filter-tag allowlist`): `src/lib/server/boot/runtime-settings.boot.ts`.
 - Design-ref suggestions cache: `src/lib/server/boot/design-ref-suggestions.boot.ts` is startup-warmed and refreshed when `design_ref`-affecting writes or import/rebuild paths need it; OSM publish itself no longer waits on a full suggestions rebuild.
 - Search index maintenance: `src/lib/server/boot/search-index.boot.ts` keeps incremental building refreshes in a keyed in-process queue, coalesces repeated refreshes for the same `osm_key`, and defers queued work while a full rebuild is running. Incremental refreshes are dispatched to a dedicated worker process (`workers/refresh-search-index.worker.ts`) so request handlers do not wait on the DB update or the worker response, and call sites only enqueue refreshes for search-affecting fields (`name`, `address`, `style`, `architect`, `design_ref`); OSM publish/sync metadata updates do not enqueue search refreshes.
+- Region deletes also trigger a full search rebuild through the existing worker, but the admin delete request does not wait for that rebuild to finish.
 
 ## i18n
 
@@ -123,6 +128,14 @@
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
   - Authoritative phase: client calls `POST /api/buildings/filter-matches` with coverage-window bbox + rules and applies server result by diff.
+- Zoom-aware highlight rendering switches below zoom `13` from contour highlight to clustered marker fallback:
+  - the client reuses `matchedLocations[]` from `filter-matches`, or centroid coordinates from `filter-data`, to place marker points;
+  - each filter color gets its own clustered marker source/layers, and unclustered points use a tiny deterministic coordinate jitter so overlapping matches do not sit exactly on top of each other;
+  - below zoom `5` the backend aggregates marker-mode matches into viewport-relative cells and includes `count` on each returned point, so the client does not need the full building list for only the most zoomed-out views;
+  - the marker path uses a larger low-zoom match budget and does not surface the contour-style truncation warning, because the rendered output is already an intentionally clustered approximation;
+  - the centered "filter applying" overlay is suppressed on contour zooms (`z13+`) so camera moves do not keep popping a blocking loader while PMTiles building contours stay visible;
+  - the marker layer stack stays above the building base layers but below search result overlays.
+- Search and filter overlays are mutually exclusive on the map: the last applied mode wins, and a new search request clears active filter layers while activating the search overlay; a new filter application deactivates the map search overlay before the filter result markers are applied.
 - Multi-layer execution stays client-side:
   - all `and` and `or` layers are resolved as one combined logical group;
   - each `layer` mode layer is fetched independently;

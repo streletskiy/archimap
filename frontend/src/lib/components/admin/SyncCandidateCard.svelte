@@ -1,8 +1,9 @@
 <script>
   import { t } from '$lib/i18n/index';
+  import { EditsIdentityCell } from '$lib/components/edits';
   import { formatUiDate } from '$lib/utils/edit-ui';
 
-  import { UiButton, UiCheckbox, UiTableCell, UiTableRow } from '$lib/components/base';
+  import { UiBadge, UiButton, UiCheckbox, UiTableCell, UiTableRow } from '$lib/components/base';
 
   export let candidate = null;
   export let archived = false;
@@ -14,13 +15,17 @@
   export let onSync = () => {};
   export let onToggleSelection = () => {};
 
-  function statusTone(status) {
+  let candidateAddress;
+  let changeCounters;
+
+  function statusVariant(status) {
     const normalized = String(status || 'unsynced').trim().toLowerCase();
-    if (normalized === 'synced' || normalized === 'cleaned') return 'success';
-    if (normalized === 'syncing') return 'running';
-    if (normalized === 'failed') return 'failed';
-    if (normalized === 'unsynced') return 'idle';
-    return 'queued';
+    if (normalized === 'synced') return 'success';
+    if (normalized === 'cleaned') return 'info';
+    if (normalized === 'syncing') return 'warning';
+    if (normalized === 'failed') return 'danger';
+    if (normalized === 'unsynced') return 'secondary';
+    return 'accent';
   }
 
   function statusTextFor(status) {
@@ -32,6 +37,41 @@
     if (normalized === 'unsynced') return $t('admin.osm.status.unsynced');
     return normalized || $t('admin.osm.status.unsynced');
   }
+
+  function getCandidateAddress(item) {
+    const displayAddress = String(item?.displayAddress || '').trim();
+    if (displayAddress) return displayAddress;
+
+    const localAddress = String(item?.localState?.address || '').trim();
+    if (localAddress) return localAddress;
+
+    const contourAddress = String(item?.contourState?.address || '').trim();
+    if (contourAddress) return contourAddress;
+    return '';
+  }
+
+  function getChangeCounters(changes) {
+    const list = Array.isArray(changes) ? changes : [];
+    let created = 0;
+    let modified = 0;
+
+    for (const change of list) {
+      if (change?.before == null && change?.after != null) {
+        created += 1;
+      } else {
+        modified += 1;
+      }
+    }
+
+    return {
+      total: list.length,
+      created,
+      modified
+    };
+  }
+
+  $: candidateAddress = getCandidateAddress(candidate);
+  $: changeCounters = getChangeCounters(candidate?.changes);
 </script>
 
 {#if archived}
@@ -39,22 +79,38 @@
     className="cursor-pointer hover:[&>td]:[background:color-mix(in_srgb,var(--accent-soft)_28%,var(--panel-solid))]"
     onclick={() => onOpen(candidate)}
   >
-    <UiTableCell className="min-w-0">
-      <p class="font-semibold ui-text-strong break-words line-clamp-1">{candidate.latestLocalName || `${candidate.osmType}/${candidate.osmId}`}</p>
-      <p class="text-xs ui-text-subtle truncate">{candidate.osmType}/{candidate.osmId}</p>
-      <div class="mt-1 flex flex-wrap gap-1">
-        {#if candidate.syncChangesetId}
-          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">#{candidate.syncChangesetId}</span>
+    <UiTableCell className="edits-list-identity-cell min-w-0">
+      <EditsIdentityCell
+        idLabel={$t('admin.edits.id')}
+        osmType={candidate?.osmType}
+        osmId={candidate?.osmId}
+        address={candidateAddress}
+      />
+    </UiTableCell>
+    <UiTableCell>{candidate?.latestCreatedBy || '-'}</UiTableCell>
+    <UiTableCell>
+      <UiBadge variant={statusVariant(candidate?.syncStatus)} className="rounded-full px-2.5 py-1 text-xs font-semibold">
+        {statusTextFor(candidate?.syncStatus)}
+      </UiBadge>
+    </UiTableCell>
+    <UiTableCell className="ui-text-muted">{formatUiDate(candidate?.latestUpdatedAt) || '---'}</UiTableCell>
+    <UiTableCell>
+      <div class="edits-list-changes flex flex-wrap items-center gap-2">
+        <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">
+          {changeCounters.total} {$t('admin.edits.changesTotal')}
+        </span>
+        {#if changeCounters.created > 0}
+          <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">
+            +{changeCounters.created} {$t('admin.edits.changesCreated')}
+          </span>
         {/if}
-        <span class="rounded-md ui-surface-soft px-2 py-1 text-[11px] font-semibold ui-text-muted">{$t('admin.osm.archive.readOnly')}</span>
+        {#if changeCounters.modified > 0}
+          <span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body">
+            ~{changeCounters.modified} {$t('admin.edits.changesModified')}
+          </span>
+        {/if}
       </div>
     </UiTableCell>
-    <UiTableCell>
-      <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold" data-tone={statusTone(candidate.syncStatus)}>
-        {statusTextFor(candidate.syncStatus)}
-      </span>
-    </UiTableCell>
-    <UiTableCell className="ui-text-muted">{formatUiDate(candidate.latestUpdatedAt) || '---'}</UiTableCell>
     <UiTableCell>
       <UiButton type="button" size="xs" variant="secondary" onclick={(event) => { event.stopPropagation(); onOpen(candidate); }}>
         {$t('admin.osm.list.details')}
@@ -75,38 +131,38 @@
         />
       </UiTableCell>
     {/if}
-    <UiTableCell className="min-w-0">
-      {@const addedTags = (candidate.changes || []).filter(c => c.before == null && c.after != null).length}
-      {@const removedTags = (candidate.changes || []).filter(c => c.before != null && c.after == null).length}
-      {@const modifiedTags = (candidate.changes || []).filter(c => c.before != null && c.after != null).length}
-      <p class="font-semibold ui-text-strong break-words line-clamp-1">{candidate.latestLocalName || `${candidate.osmType}/${candidate.osmId}`}</p>
-      <p class="text-xs ui-text-subtle truncate">{candidate.osmType}/{candidate.osmId}</p>
-      <div class="mt-1 flex flex-wrap items-center gap-1">
-        {#if addedTags > 0}
-          <span class="rounded-md bg-emerald-100/60 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 px-1.5 py-0.5 text-[11px] font-bold" title="Заполнено новых полей">+{addedTags}</span>
+    <UiTableCell className="edits-list-identity-cell min-w-0">
+      <EditsIdentityCell
+        idLabel={$t('admin.edits.id')}
+        osmType={candidate?.osmType}
+        osmId={candidate?.osmId}
+        address={candidateAddress}
+      />
+    </UiTableCell>
+    <UiTableCell>{candidate?.latestCreatedBy || '-'}</UiTableCell>
+    <UiTableCell>
+      <UiBadge variant={statusVariant(candidate?.syncStatus)} className="rounded-full px-2.5 py-1 text-xs font-semibold">
+        {statusTextFor(candidate?.syncStatus)}
+      </UiBadge>
+    </UiTableCell>
+    <UiTableCell className="ui-text-muted">{formatUiDate(candidate?.latestUpdatedAt) || '---'}</UiTableCell>
+    <UiTableCell>
+      <div class="edits-list-changes flex flex-wrap items-center gap-2">
+        <span class="rounded-md ui-surface-soft px-2 py-1 text-xs ui-text-muted">
+          {changeCounters.total} {$t('admin.edits.changesTotal')}
+        </span>
+        {#if changeCounters.created > 0}
+          <span class="rounded-md ui-surface-success-soft px-2 py-1 text-xs ui-text-success-soft">
+            +{changeCounters.created} {$t('admin.edits.changesCreated')}
+          </span>
         {/if}
-        {#if modifiedTags > 0}
-          <span class="rounded-md bg-amber-100/60 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 text-[11px] font-bold" title="Изменено существующих полей">~{modifiedTags}</span>
-        {/if}
-        {#if removedTags > 0}
-          <span class="rounded-md bg-rose-100/60 dark:bg-rose-900/40 text-rose-800 dark:text-rose-300 px-1.5 py-0.5 text-[11px] font-bold" title="Очищено полей">-{removedTags}</span>
-        {/if}
-        {#if addedTags === 0 && modifiedTags === 0 && removedTags === 0}
-          <span class="rounded-md ui-surface-soft px-1.5 py-0.5 text-[11px] font-bold ui-text-muted">{$t('admin.osm.detail.noChanges') || 'Без изменений'}</span>
-        {/if}
-        <span class="ml-1 rounded-md ui-surface-soft px-2 py-0.5 text-[11px] font-medium ui-text-muted" title="Количество одобренных заявок от пользователей, образующих это состояние">Заявок: {candidate.totalEdits}</span>
-        {#if candidate.syncChangesetId}
-          <span class="rounded-md ui-surface-info px-2 py-0.5 text-[11px] font-bold ui-text-info">#{candidate.syncChangesetId}</span>
+        {#if changeCounters.modified > 0}
+          <span class="rounded-md ui-surface-emphasis px-2 py-1 text-xs ui-text-body">
+            ~{changeCounters.modified} {$t('admin.edits.changesModified')}
+          </span>
         {/if}
       </div>
     </UiTableCell>
-    <UiTableCell>{candidate.latestCreatedBy || '-'}</UiTableCell>
-    <UiTableCell>
-      <span class="badge-pill rounded-full px-2.5 py-1 text-xs font-semibold" data-tone={statusTone(candidate.syncStatus)}>
-        {statusTextFor(candidate.syncStatus)}
-      </span>
-    </UiTableCell>
-    <UiTableCell className="ui-text-muted">{formatUiDate(candidate.latestUpdatedAt) || '---'}</UiTableCell>
     <UiTableCell>
       <div class="flex flex-wrap gap-2">
         <UiButton type="button" size="xs" variant="secondary" onclick={(event) => { event.stopPropagation(); onOpen(candidate); }}>
@@ -126,4 +182,3 @@
     </UiTableCell>
   </UiTableRow>
 {/if}
-

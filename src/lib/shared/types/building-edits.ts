@@ -92,6 +92,7 @@ export interface BuildingEdit {
   mergedBy: string | null;
   mergedAt: string | null;
   sourceOsmVersion: string | number | null;
+  hasSourceSnapshot: boolean;
   osmPresent: boolean;
   orphaned: boolean;
   hasMergedLocal: boolean;
@@ -110,6 +111,7 @@ export interface BuildingEdit {
   syncChangesetId: string | number | null;
   syncSummary: UnknownRecord | null;
   syncError: string | null;
+  displayAddress?: string | null;
   editedFields: string[] | null;
   mergedFields: string[] | null;
   values: BuildingEditValueMap;
@@ -122,7 +124,23 @@ export interface BuildingEdit {
 
 export interface BuildingEditListQuery {
   status?: string;
+  sync?: string;
   limit?: number;
+  page?: number;
+  q?: string;
+  from?: string;
+  to?: string;
+  user?: string;
+  createdBy?: string;
+}
+
+export interface BuildingEditPageResult<TItem = BuildingEditSummary | BuildingEdit> {
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  items: TItem[];
+  authors?: string[];
 }
 
 export interface BuildingEditMergeValues extends Partial<BuildingEditValueMap> {

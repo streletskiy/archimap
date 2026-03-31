@@ -207,7 +207,15 @@ test('createMapSelectionController applies hover filters and cursor for buffered
       filter: ['==', ['id'], 84]
     },
     {
+      layerId: 'overpass-buildings-source-hover-fill',
+      filter: ['==', ['id'], 84]
+    },
+    {
       layerId: 'region-buildings-7-hover-line',
+      filter: ['==', ['id'], 84]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-line',
       filter: ['==', ['id'], 84]
     }
   ]);
@@ -222,10 +230,72 @@ test('createMapSelectionController applies hover filters and cursor for buffered
       filter: ['==', ['id'], 84]
     },
     {
+      layerId: 'overpass-buildings-source-hover-fill',
+      filter: ['==', ['id'], 84]
+    },
+    {
       layerId: 'region-buildings-7-hover-line',
+      filter: ['==', ['id'], 84]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-line',
       filter: ['==', ['id'], 84]
     }
   ]);
+});
+
+test('createMapSelectionController ignores missing overpass layers during hover hit-testing', async () => {
+  const { createMapSelectionController } = await loadMapSelectionController();
+  const queriedCalls = [];
+  const canvas = { style: { cursor: '' } };
+  const map = {
+    getLayer(layerId) {
+      if (String(layerId || '').startsWith('overpass-buildings-source-')) return null;
+      if (String(layerId || '').startsWith('search-results-')) return null;
+      return { id: layerId };
+    },
+    getCanvas() {
+      return canvas;
+    },
+    queryRenderedFeatures(geometry, options: { layers?: string[] } = {}) {
+      queriedCalls.push({
+        geometry,
+        layers: [...(options.layers || [])]
+      });
+      return [];
+    },
+    setFilter() {},
+    setLayoutProperty() {},
+    on() {},
+    off() {},
+    once() {},
+    easeTo() {},
+    isStyleLoaded() {
+      return true;
+    }
+  };
+
+  const controller = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => [{ id: 7 }],
+    recordDebugSetFilter: () => {},
+    debugSelectionLog: () => {}
+  });
+
+  assert.doesNotThrow(() => {
+    controller.handleMapPointerMove({
+      point: { x: 30, y: 40 }
+    });
+  });
+
+  assert.equal(queriedCalls.length, 1);
+  assert.deepEqual(queriedCalls[0].layers, [
+    'region-buildings-7-line',
+    'region-buildings-7-fill',
+    'region-buildings-7-part-line',
+    'region-buildings-7-part-fill'
+  ]);
+  assert.equal(canvas.style.cursor, '');
 });
 
 test('createMapSelectionController skips zoom on shift-click and forwards feature kind', async () => {

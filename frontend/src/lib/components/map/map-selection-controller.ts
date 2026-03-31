@@ -125,6 +125,16 @@ export function createMapSelectionController({
     };
   }
 
+  function getRenderableLayerIds(layerIds: string[] = []) {
+    const map = getMap?.();
+    if (!map) return [];
+    return [...new Set(
+      (Array.isArray(layerIds) ? layerIds : [])
+        .map((layerId) => String(layerId || '').trim())
+        .filter((layerId) => layerId && Boolean(map.getLayer(layerId)))
+    )];
+  }
+
   function clearHoveredBuilding({ force = false }: { force?: boolean } = {}) {
     const map = getMap?.();
     if (!map) {
@@ -178,19 +188,22 @@ export function createMapSelectionController({
     if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) return null;
     const normalizedPoint = getNormalizedPoint(event?.point);
     if (!normalizedPoint) return null;
-    const searchFeatures = map.queryRenderedFeatures(normalizedPoint, {
-      layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
-    });
+    const searchLayerIds = getRenderableLayerIds([SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]);
+    const searchFeatures = searchLayerIds.length > 0
+      ? map.queryRenderedFeatures(normalizedPoint, {
+          layers: searchLayerIds
+        })
+      : [];
     if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
       return null;
     }
     const activeRegions = getActiveRegions?.() || [];
-    const buildingLayerIds = [
+    const buildingLayerIds = getRenderableLayerIds([
       ...getCurrentBuildingsLineLayerIds(activeRegions),
       ...getCurrentBuildingsFillLayerIds(activeRegions),
       ...getCurrentBuildingPartLineLayerIds(activeRegions),
       ...getCurrentBuildingPartFillLayerIds(activeRegions)
-    ];
+    ]);
     if (buildingLayerIds.length === 0) return null;
     const queryBounds = [
       [normalizedPoint.x - BUILDING_HIT_BUFFER_PX, normalizedPoint.y - BUILDING_HIT_BUFFER_PX],
@@ -221,9 +234,12 @@ export function createMapSelectionController({
     }
     lastPointerPoint = { x: normalizedPoint.x, y: normalizedPoint.y };
 
-    const searchFeatures = map.queryRenderedFeatures(normalizedPoint, {
-      layers: [SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]
-    });
+    const searchLayerIds = getRenderableLayerIds([SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]);
+    const searchFeatures = searchLayerIds.length > 0
+      ? map.queryRenderedFeatures(normalizedPoint, {
+          layers: searchLayerIds
+        })
+      : [];
     if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
       clearHoveredBuilding();
       setMapCursor('pointer');
@@ -231,12 +247,12 @@ export function createMapSelectionController({
     }
 
     const activeRegions = getActiveRegions?.() || [];
-    const buildingLayerIds = [
+    const buildingLayerIds = getRenderableLayerIds([
       ...getCurrentBuildingsLineLayerIds(activeRegions),
       ...getCurrentBuildingsFillLayerIds(activeRegions),
       ...getCurrentBuildingPartLineLayerIds(activeRegions),
       ...getCurrentBuildingPartFillLayerIds(activeRegions)
-    ];
+    ]);
     if (buildingLayerIds.length === 0) {
       clearHoveredBuilding();
       setMapCursor('');

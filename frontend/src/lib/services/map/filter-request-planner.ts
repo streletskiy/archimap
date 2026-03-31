@@ -70,8 +70,8 @@ export function prepareFilterRequestPlan(input): { ok: false; invalidReason: str
   };
 }
 
-export function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket) {
-  return `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}`;
+export function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket, renderMode = 'contours', dataVersion = 0) {
+  return `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}:${String(renderMode || 'contours')}:${Math.max(0, Math.trunc(Number(dataVersion) || 0))}`;
 }
 
 export function buildFilterRequestSpecs(layers) {
@@ -142,11 +142,37 @@ export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cache
   const resolvedEntriesById = new Map();
   const requestSpecs = Array.isArray(prepared?.requestSpecs) ? prepared.requestSpecs : [];
   const combinedGroup = prepared?.combinedGroup || null;
+  const renderMode = String(prepared?.renderMode || 'contours') === 'markers' ? 'markers' : 'contours';
   const combinedAndPayload = payloadsByRequestId.get('combined-and');
   const combinedOrPayloads = requestSpecs
     .filter((spec) => spec.kind === 'combined-or')
     .map((spec) => payloadsByRequestId.get(spec.id))
     .filter(Boolean);
+  const locationById = new Map();
+
+  function normalizeMatchedPoint(point) {
+    const id = Number(point?.id);
+    const lon = Number(point?.lon);
+    const lat = Number(point?.lat);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    if (!Number.isFinite(lon) || lon < -180 || lon > 180) return null;
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+    const count = Number(point?.count);
+    const normalizedCount = Number.isFinite(count) && count > 0 ? Math.max(1, Math.trunc(count)) : null;
+    const osmKey = String(point?.osmKey || '').trim();
+    return osmKey
+      ? { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}), osmKey }
+      : { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}) };
+  }
+
+  for (const payload of payloadsByRequestId.values()) {
+    const matchedLocations = Array.isArray(payload?.matchedLocations) ? payload.matchedLocations : [];
+    for (const point of matchedLocations) {
+      const normalizedPoint = normalizeMatchedPoint(point);
+      if (!normalizedPoint || locationById.has(normalizedPoint.id)) continue;
+      locationById.set(normalizedPoint.id, normalizedPoint);
+    }
+  }
 
   function assignResolvedFeature(id, color, priority) {
     if (!Number.isInteger(id) || id <= 0) return;
@@ -193,21 +219,42 @@ export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cache
   const highlightGroupsByColor = new Map();
   for (const [id, entry] of resolvedEntriesById.entries()) {
     const color = String(entry?.color || FILTER_LAYER_BASE_COLOR).trim() || FILTER_LAYER_BASE_COLOR;
-    const bucket = highlightGroupsByColor.get(color) || [];
-    bucket.push(id);
+    const bucket = highlightGroupsByColor.get(color) || {
+      ids: [],
+      points: []
+    };
+    bucket.ids.push(id);
+    const point = locationById.get(id);
+    if (point) {
+      bucket.points.push(point);
+    }
     highlightGroupsByColor.set(color, bucket);
   }
 
-  const highlightColorGroups = [...highlightGroupsByColor.entries()].map(([color, ids]) => ({
-    color,
-    ids
-  }));
+  const highlightColorGroups = [...highlightGroupsByColor.entries()].map(([color, bucket]) => {
+    const ids = Array.isArray(bucket?.ids) ? [...bucket.ids].sort((left, right) => left - right) : [];
+    const points = Array.isArray(bucket?.points) && bucket.points.length > 0
+      ? [...bucket.points].sort((left, right) => left.id - right.id)
+      : [];
+    return {
+      color,
+      ids,
+      ...(points.length > 0 ? { points } : {})
+    };
+  });
 
   const payloads = [...payloadsByRequestId.values()];
+  const matchedCount = renderMode === 'markers'
+    ? highlightColorGroups.reduce((sum, group) => (
+      sum + (Array.isArray(group?.points)
+        ? group.points.reduce((pointSum, point) => pointSum + Math.max(1, Number(point?.count || 1)), 0)
+        : 0)
+    ), 0)
+    : [...resolvedEntriesById.keys()].length;
   return {
     highlightColorGroups,
     matchedFeatureIds: [...resolvedEntriesById.keys()].sort((left, right) => left - right),
-    matchedCount: resolvedEntriesById.size,
+    matchedCount,
     meta: {
       rulesHash: String(prepared?.rulesHash || 'fnv1a-0'),
       bboxHash: '',

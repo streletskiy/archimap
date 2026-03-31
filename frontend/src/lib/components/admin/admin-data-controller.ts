@@ -328,8 +328,14 @@ export function createAdminDataController() {
   const regionRuns: Writable<LooseRecord[]> = writable([]);
   const regionRunsLoading: Writable<boolean> = writable(false);
   const regionRunsStatus: Writable<string> = writable('');
+  const regionRunsPage: Writable<number> = writable(1);
+  const regionRunsPageCount: Writable<number> = writable(0);
+  const regionRunsTotal: Writable<number> = writable(0);
+  const regionEditorOpen: Writable<boolean> = writable(false);
   const initialized: Writable<boolean> = writable(false);
+  const REGION_RUNS_PAGE_SIZE = 20;
   let nextOptimisticRegionId = -1;
+  let regionRunsRequestToken = 0;
   const pendingOptimisticRegions = new Map();
 
   const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
@@ -664,9 +670,13 @@ export function createAdminDataController() {
 
     if (!resetRuns) return;
 
+    regionRunsRequestToken += 1;
     regionRunsLoading.set(false);
     regionRuns.set([]);
-    regionRunsStatus.set(nextSelectedRegionId ? dataT('history.empty') : '');
+    regionRunsTotal.set(0);
+    regionRunsPageCount.set(0);
+    regionRunsPage.set(1);
+    regionRunsStatus.set('');
   }
 
   async function refreshDataSettingsInBackground(options: LooseRecord = {}) {
@@ -732,32 +742,61 @@ export function createAdminDataController() {
     return filterSettingsController.resetFilterTagAllowlistToDefault();
   }
 
-  async function loadRegionRuns(regionId: number | string) {
+  async function loadRegionRuns(regionId: number | string = get(selectedDataRegionId), page: number | string = get(regionRunsPage)) {
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+      regionRunsRequestToken += 1;
+      regionRunsLoading.set(false);
       regionRuns.set([]);
+      regionRunsTotal.set(0);
+      regionRunsPageCount.set(0);
+      regionRunsPage.set(1);
       regionRunsStatus.set('');
       return;
     }
 
+    const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const requestToken = ++regionRunsRequestToken;
     regionRunsLoading.set(true);
-    regionRunsStatus.set(dataT('status.loadingHistory'));
+    regionRunsStatus.set('');
     try {
-      const data = await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/runs?limit=10`);
+      const query = new URLSearchParams({
+        page: String(normalizedPage),
+        limit: String(REGION_RUNS_PAGE_SIZE)
+      });
+      const data = await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/runs?${query.toString()}`);
+      if (requestToken !== regionRunsRequestToken) return;
+
+      const total = Math.max(0, Number(data?.total || 0));
+      const pageSize = Math.max(1, Math.trunc(Number(data?.pageSize || REGION_RUNS_PAGE_SIZE) || REGION_RUNS_PAGE_SIZE));
+      const pageCount = Math.max(0, Number(data?.pageCount || 0) || (total > 0 ? Math.ceil(total / pageSize) : 0));
+      const responsePage = Number.isInteger(Number(data?.page)) && Number(data.page) > 0
+        ? Number(data.page)
+        : normalizedPage;
       const items = Array.isArray(data?.items) ? data.items : [];
+
       regionRuns.set(items);
-      regionRunsStatus.set(items.length > 0 ? '' : dataT('history.empty'));
+      regionRunsTotal.set(total);
+      regionRunsPageCount.set(pageCount);
+      regionRunsPage.set(pageCount > 0 ? Math.min(responsePage, pageCount) : 1);
     } catch (error) {
+      if (requestToken !== regionRunsRequestToken) return;
       regionRuns.set([]);
+      regionRunsTotal.set(0);
+      regionRunsPageCount.set(0);
       regionRunsStatus.set(msg(error, dataT('status.loadHistoryFailed')));
     } finally {
-      regionRunsLoading.set(false);
+      if (requestToken === regionRunsRequestToken) {
+        regionRunsLoading.set(false);
+      }
     }
   }
 
-  async function selectDataRegion(region: DataRegion | null) {
+  async function selectDataRegion(region: DataRegion | null, options: { openEditor?: boolean; resetRuns?: boolean } = {}) {
     if (isOptimisticRegion(region)) return;
 
+    const shouldOpenEditor = options.openEditor !== false && Boolean(region);
+    const resetRuns = options.resetRuns !== false;
     const numericRegionId = Number(region?.id || 0);
     const nextSelectedRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0 ? numericRegionId : null;
 
@@ -765,19 +804,40 @@ export function createAdminDataController() {
     regionDraft.set(createRegionDraft(region || null));
     regionResolveBusy.set(false);
     regionExtractCandidates.set([]);
+    if (shouldOpenEditor) {
+      regionEditorOpen.set(true);
+    }
 
     if (nextSelectedRegionId) {
-      await loadRegionRuns(nextSelectedRegionId);
+      if (resetRuns) {
+        regionRunsRequestToken += 1;
+        regionRunsLoading.set(false);
+        regionRuns.set([]);
+        regionRunsTotal.set(0);
+        regionRunsPageCount.set(0);
+        regionRunsPage.set(1);
+        regionRunsStatus.set('');
+      }
+      await loadRegionRuns(nextSelectedRegionId, resetRuns ? 1 : get(regionRunsPage));
       return;
     }
 
+    regionRunsRequestToken += 1;
     regionRunsLoading.set(false);
     regionRuns.set([]);
+    regionRunsTotal.set(0);
+    regionRunsPageCount.set(0);
+    regionRunsPage.set(1);
     regionRunsStatus.set('');
   }
 
   async function loadDataSettings(options: LooseRecord = {}) {
-    const { selectedRegionId = null, preserveSelection = true, ignoreUnsavedFilterTags = false } = options;
+    const {
+      selectedRegionId = null,
+      preserveSelection = true,
+      ignoreUnsavedFilterTags = false,
+      openEditor = get(regionEditorOpen)
+    } = options;
     if (!ignoreUnsavedFilterTags && !ensureFilterTagChangesDiscarded()) {
       return false;
     }
@@ -803,13 +863,18 @@ export function createAdminDataController() {
           : preserveSelection
             ? Number(get(selectedDataRegionId) || 0)
             : 0;
-      const selectedRegion =
-        getRegionById(nextSelectedRegionId)
-        || nextSettings.regions.find((item) => !isOptimisticRegion(item))
-        || nextSettings.regions[0]
-        || null;
+      const hasSelectedRegion = Number.isInteger(nextSelectedRegionId) && nextSelectedRegionId > 0;
+      const selectedRegion = hasSelectedRegion
+        ? getRegionById(nextSelectedRegionId)
+          || nextSettings.regions.find((item) => Number(item?.id || 0) === nextSelectedRegionId && !isOptimisticRegion(item))
+          || null
+        : null;
 
-      await selectDataRegion(selectedRegion);
+      const shouldResetRuns = selectedRegionId != null ? true : !preserveSelection;
+      await selectDataRegion(selectedRegion, {
+        openEditor: hasSelectedRegion ? openEditor : false,
+        resetRuns: shouldResetRuns
+      });
       dataStatus.set('');
       initialized.set(true);
       return true;
@@ -869,10 +934,15 @@ export function createAdminDataController() {
     regionDraft.set(createRegionDraft());
     regionResolveBusy.set(false);
     regionExtractCandidates.set([]);
+    regionRunsRequestToken += 1;
     regionRunsLoading.set(false);
     regionRuns.set([]);
+    regionRunsTotal.set(0);
+    regionRunsPageCount.set(0);
+    regionRunsPage.set(1);
     regionRunsStatus.set('');
     dataStatus.set('');
+    regionEditorOpen.set(true);
     return true;
   }
 
@@ -887,9 +957,11 @@ export function createAdminDataController() {
   async function saveDataRegion(event) {
     event?.preventDefault?.();
     if (!ensureFilterTagChangesDiscarded()) return;
+    if (get(regionSaving) || get(regionDeleting)) return;
 
     const currentDraft = get(regionDraft);
     const isNewRegion = !currentDraft.id;
+    const draftSnapshot = { ...currentDraft };
     const payload = {
       ...(currentDraft.id ? { id: currentDraft.id } : {}),
       name: String(currentDraft.name || '').trim(),
@@ -930,73 +1002,6 @@ export function createAdminDataController() {
         }
 
         selectRegionLocally(null);
-        dataStatus.set(dataT('status.regionSavedQueued'));
-        regionSaving.set(false);
-
-        void (async () => {
-          try {
-            const data = await apiJson('/api/admin/app-settings/data/regions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ region: payload })
-            });
-            const savedRegion = data?.item || null;
-            const numericRegionId = Number(savedRegion?.id || 0);
-
-            if (optimisticRegionId != null) {
-              forgetOptimisticRegion(optimisticRegionId);
-              removeRegionSnapshot(optimisticRegionId);
-            }
-
-            const queuedRegion = upsertRegionSnapshot(
-              buildRegionSnapshot(savedRegion, currentDraft, {
-                lastSyncStatus: 'queued',
-                lastSyncError: null,
-                __optimistic: false
-              })
-            );
-
-            try {
-              if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
-                throw new Error(dataT('status.regionSavedQueueFailed'));
-              }
-
-              await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-              });
-            } catch (error) {
-              const errorText = msg(error, dataT('status.regionSavedQueueFailed'));
-              const failedRegion = upsertRegionSnapshot(
-                buildRegionSnapshot(queuedRegion || getRegionById(numericRegionId), currentDraft, {
-                  lastSyncStatus: 'failed',
-                  lastSyncError: errorText,
-                  __optimistic: false
-                })
-              );
-              if (failedRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
-                selectRegionLocally(failedRegion, { resetRuns: false });
-              }
-              dataStatus.set(errorText);
-            } finally {
-              if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
-                void refreshDataSettingsInBackground({
-                  selectedRegionId: numericRegionId,
-                  preserveStatus: true
-                });
-              }
-            }
-          } catch (error) {
-            if (optimisticRegionId != null) {
-              forgetOptimisticRegion(optimisticRegionId);
-              removeRegionSnapshot(optimisticRegionId);
-            }
-            dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
-          }
-        })();
-
-        return;
       }
 
       const data = await apiJson('/api/admin/app-settings/data/regions', {
@@ -1006,21 +1011,70 @@ export function createAdminDataController() {
       });
       const savedRegion = data?.item || null;
       const numericRegionId = Number(savedRegion?.id || currentDraft.id || 0);
-      const optimisticRegion = upsertRegionSnapshot(buildRegionSnapshot(savedRegion, currentDraft));
+      const nextRegion = upsertRegionSnapshot(
+        buildRegionSnapshot(savedRegion, currentDraft, isNewRegion
+          ? {
+            lastSyncStatus: 'queued',
+            lastSyncError: null,
+            __optimistic: false
+          }
+          : {})
+      );
 
-      if (optimisticRegion) {
-        selectRegionLocally(optimisticRegion, { resetRuns: false });
+      if (optimisticRegionId != null) {
+        forgetOptimisticRegion(optimisticRegionId);
+        removeRegionSnapshot(optimisticRegionId);
       }
 
-      dataStatus.set(dataT('status.regionSaved'));
+      if (isNewRegion) {
+        try {
+          if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+            throw new Error(dataT('status.regionSavedQueueFailed'));
+          }
+
+          await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          dataStatus.set(dataT('status.regionSavedQueued'));
+        } catch (error) {
+          const errorText = msg(error, dataT('status.regionSavedQueueFailed'));
+          const failedRegion = upsertRegionSnapshot(
+            buildRegionSnapshot(nextRegion || getRegionById(numericRegionId), draftSnapshot, {
+              lastSyncStatus: 'failed',
+              lastSyncError: errorText,
+              __optimistic: false
+            })
+          );
+          if (failedRegion && Number(get(selectedDataRegionId) || 0) === numericRegionId) {
+            selectRegionLocally(failedRegion, { resetRuns: false });
+          }
+          dataStatus.set(errorText);
+        }
+      } else {
+        if (nextRegion) {
+          selectRegionLocally(nextRegion, { resetRuns: false });
+        }
+        dataStatus.set(dataT('status.regionSaved'));
+      }
 
       if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
-        void refreshDataSettingsInBackground({
-          selectedRegionId: numericRegionId,
-          preserveStatus: true
-        });
+        if (!isNewRegion) {
+          void refreshDataSettingsInBackground({
+            selectedRegionId: numericRegionId,
+            preserveStatus: true
+          });
+        }
       }
     } catch (error) {
+      if (isNewRegion) {
+        regionDraft.set(createRegionDraft(draftSnapshot));
+      }
+      if (optimisticRegionId != null) {
+        forgetOptimisticRegion(optimisticRegionId);
+        removeRegionSnapshot(optimisticRegionId);
+      }
       dataStatus.set(msg(error, dataT('status.saveRegionFailed')));
     } finally {
       regionSaving.set(false);
@@ -1047,9 +1101,11 @@ export function createAdminDataController() {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
+      closeRegionEditor();
       await loadDataSettings({
         selectedRegionId: null,
-        preserveSelection: false
+        preserveSelection: false,
+        openEditor: false
       });
       dataStatus.set(dataT('status.regionDeleted'));
     } catch (error) {
@@ -1186,6 +1242,10 @@ export function createAdminDataController() {
     return filterSettingsController.getFilterTagDraftClass(state);
   }
 
+  function closeRegionEditor() {
+    regionEditorOpen.set(false);
+  }
+
   function isFilterTagSelected(key) {
     return filterSettingsController.isFilterTagSelected(key);
   }
@@ -1221,6 +1281,10 @@ export function createAdminDataController() {
     regionRuns,
     regionRunsLoading,
     regionRunsStatus,
+    regionRunsPage,
+    regionRunsPageCount,
+    regionRunsTotal,
+    regionEditorOpen,
     initialized,
     applyRegionExtractCandidate,
     confirmDiscardFilterTagChanges,
@@ -1244,6 +1308,7 @@ export function createAdminDataController() {
     isFilterTagSelected,
     loadFilterPresets,
     loadDataSettings,
+    loadRegionRuns,
     patchFilterPresetDraft,
     patchRegionDraft,
     findRegionByMapFeature,
@@ -1258,6 +1323,7 @@ export function createAdminDataController() {
     setFilterPresetDraftLayers,
     startNewFilterPresetDraft,
     startNewRegionDraft,
+    closeRegionEditor,
     syncRegionNow,
     toggleFilterTagSelection,
     deleteDataRegion,

@@ -10,6 +10,10 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     bc.osm_type,
     bc.osm_id,
     bc.tags_json,
+    bc.min_lon,
+    bc.min_lat,
+    bc.max_lon,
+    bc.max_lat,
     ai.osm_id AS info_osm_id,
     ai.name,
     ai.style,
@@ -49,7 +53,11 @@ const FILTER_MATCH_TAGS_ONLY_POSTGIS_BBOX_SQL = `
   SELECT
     bc.osm_type,
     bc.osm_id,
-    bc.tags_json
+    bc.tags_json,
+    bc.min_lon,
+    bc.min_lat,
+    bc.max_lon,
+    bc.max_lat
   FROM osm.building_contours bc
   JOIN env ON bc.geom && env.geom
   WHERE ST_Intersects(bc.geom, env.geom)
@@ -93,6 +101,12 @@ function mapFilterDataRow(row) {
   }
   const hasExtraInfo = row.info_osm_id != null;
   const split = hasExtraInfo ? splitBuildingMaterialSelection(row.material) : null;
+  const minLon = Number(row.min_lon);
+  const minLat = Number(row.min_lat);
+  const maxLon = Number(row.max_lon);
+  const maxLat = Number(row.max_lat);
+  const centerLon = [minLon, maxLon].every(Number.isFinite) ? (minLon + maxLon) / 2 : null;
+  const centerLat = [minLat, maxLat].every(Number.isFinite) ? (minLat + maxLat) / 2 : null;
   return {
     osmKey,
     sourceTags,
@@ -118,7 +132,9 @@ function mapFilterDataRow(row) {
         updated_at: row.updated_at
       }
       : null,
-    hasExtraInfo
+    hasExtraInfo,
+    centerLon,
+    centerLat
   };
 }
 
@@ -134,6 +150,10 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       bc.osm_type,
       bc.osm_id,
       bc.tags_json,
+      bc.min_lon,
+      bc.min_lat,
+      bc.max_lon,
+      bc.max_lat,
       ai.osm_id AS info_osm_id,
       ai.name,
       ai.style,
@@ -167,7 +187,11 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
     SELECT
       bc.osm_type,
       bc.osm_id,
-      bc.tags_json
+      bc.tags_json,
+      bc.min_lon,
+      bc.min_lat,
+      bc.max_lon,
+      bc.max_lat
     FROM osm.building_contours_rtree br
     JOIN osm.building_contours bc
       ON bc.rowid = br.contour_rowid
@@ -191,7 +215,11 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
     SELECT
       bc.osm_type,
       bc.osm_id,
-      bc.tags_json
+      bc.tags_json,
+      bc.min_lon,
+      bc.min_lat,
+      bc.max_lon,
+      bc.max_lat
     FROM osm.building_contours bc
     WHERE bc.max_lon >= ?
       AND bc.min_lon <= ?
@@ -282,6 +310,11 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
         SELECT
           bc.osm_type,
           bc.osm_id,
+          bc.tags_json,
+          bc.min_lon,
+          bc.min_lat,
+          bc.max_lon,
+          bc.max_lat,
           CASE
             WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
             ELSE '{}'::jsonb
@@ -291,7 +324,14 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
           ON bc.geom && env.geom
         WHERE ST_Intersects(bc.geom, env.geom)
       )
-      SELECT base.osm_type, base.osm_id
+      SELECT
+        base.osm_type,
+        base.osm_id,
+        base.tags_json,
+        base.min_lon,
+        base.min_lat,
+        base.max_lon,
+        base.max_lat
       FROM base
       WHERE ${compiledTagRules.sql}
       LIMIT ?
@@ -340,6 +380,10 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
           bc.osm_type,
           bc.osm_id,
           bc.tags_json,
+          bc.min_lon,
+          bc.min_lat,
+          bc.max_lon,
+          bc.max_lat,
           CASE
             WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
             ELSE '{}'::jsonb
@@ -353,7 +397,11 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
         SELECT
           base.osm_type,
           base.osm_id,
-          base.tags_json
+          base.tags_json,
+          base.min_lon,
+          base.min_lat,
+          base.max_lon,
+          base.max_lat
         FROM base
         WHERE ${compiledGuardRules.sql}
         LIMIT ?
@@ -362,6 +410,10 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
         guarded.osm_type,
         guarded.osm_id,
         guarded.tags_json,
+        guarded.min_lon,
+        guarded.min_lat,
+        guarded.max_lon,
+        guarded.max_lat,
         ${aiSelectSql}
       FROM guarded
       ${aiJoinSql}

@@ -144,11 +144,34 @@ When a new control is needed:
 - `UiTable*` is the default table stack for product code.
 - Native `<table>` markup should remain only inside generated upstream primitives or content-rendering cases that are not part of product UI composition.
 - Interactive table rows must use `UiTableRow` with the `onclick` callback prop, not `on:click`, so row selection works consistently through the base wrapper.
+- When a moderation table adds a checkbox selection column for bulk actions, the checkbox cell must stop event propagation so the row click still opens the detail pane.
+- Bulk table selection should target only actionable rows and keep non-actionable rows visually separate from the selected set.
 - When a table sits inside a bordered card or scroll container, use `UiTable framed={false}` so the outer shell owns the contour and the table keeps only row and cell structure.
+
+### Edit Detail Modals
+
+- Account edit history and admin moderation details open in a shared full-screen modal instead of a side pane.
+- The modal reserves its top section for a focused building map and keeps the edit content scrollable underneath it.
+- Account/admin edit detail implementations should reuse the shared edits modal shell instead of rebuilding overlay structure separately.
+
+### Region Editor Modals
+
+- Admin data region create/edit flows open in a shared full-screen modal instead of an inline page form.
+- The modal keeps a full-width current-status summary at the top, then the region form card, and reserves the scrollable area only for sync history.
+- Save, sync, and delete actions live inside the current-status card instead of floating outside the form.
+- Sync history uses paginated table rows and loading skeletons so the history pane behaves like edits and region lists elsewhere.
+- Map/list selection for admin regions should open the modal rather than embedding a second editor pane on the page.
+- Region lists use edits-style page controls and loading skeletons so long result sets stay predictable without infinite scroll.
+
+### OSM Sync Lists
+
+- `Admin -> Send to OSM` uses paginated active and archive tables with a fixed 20-row page size so candidate lists stay predictable.
+- Both candidate and archive tables use loading skeleton rows and edits-style page navigation instead of infinite or self-contained vertical scroll surfaces.
+- The synced archive should rely on page scroll for vertical movement; keep the table container only for horizontal overflow.
 
 ### Scrollable Areas
 
-- `UiScrollArea` is the default wrapper for long panes and lists such as search results, diff panes, OSM tag dumps, and admin region lists.
+- `UiScrollArea` is the default wrapper for long panes and lists such as search results, diff panes, and OSM tag dumps.
 - Bordered scroll list surfaces should use the semantic `ui-scroll-surface` class on the root so the border and background stay consistent across admin and account panes.
 
 ### Pressable Cards
