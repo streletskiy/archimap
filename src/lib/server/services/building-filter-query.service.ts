@@ -310,6 +310,7 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
         SELECT
           bc.osm_type,
           bc.osm_id,
+          bc.tags_json,
           bc.min_lon,
           bc.min_lat,
           bc.max_lon,
@@ -326,6 +327,7 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       SELECT
         base.osm_type,
         base.osm_id,
+        base.tags_json,
         base.min_lon,
         base.min_lat,
         base.max_lon,

@@ -11,6 +11,23 @@ const {
 
 let hooksServerImportCounter = 0;
 
+function parseDelimitedValues(raw, delimiter = ',') {
+  return String(raw || '')
+    .split(delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function parseCspDirectiveSources(csp, directiveName) {
+  for (const directive of parseDelimitedValues(csp, ';')) {
+    const [name, ...sources] = directive.split(/\s+/).filter(Boolean);
+    if (name === directiveName) {
+      return new Set(sources);
+    }
+  }
+  return new Set();
+}
+
 async function loadHooksServerModule() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'hooks.server.ts');
   return import(`${pathToFileURL(modulePath).href}?v=${hooksServerImportCounter += 1}`);
@@ -50,10 +67,11 @@ test('parseRuntimeEnv defaults CSP connect origins for carto and overpass fallba
       NODE_ENV: 'development',
       SESSION_SECRET: '1234567890abcdef'
     });
+    const connectOrigins = new Set(parseDelimitedValues(runtimeEnv.cspConnectSrcExtra));
 
-    assert.ok(runtimeEnv.cspConnectSrcExtra.includes('https://tiles.basemaps.cartocdn.com'));
-    assert.ok(runtimeEnv.cspConnectSrcExtra.includes('https://overpass-api.de'));
-    assert.ok(runtimeEnv.cspConnectSrcExtra.includes('https://overpass.kumi.systems'));
+    assert.ok(connectOrigins.has('https://tiles.basemaps.cartocdn.com'));
+    assert.ok(connectOrigins.has('https://overpass-api.de'));
+    assert.ok(connectOrigins.has('https://overpass.kumi.systems'));
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousNodeEnv;
@@ -84,10 +102,11 @@ test('frontend hook CSP allows browser Overpass requests by default', async () =
     });
 
     const csp = String(response.headers.get('content-security-policy') || '');
-    assert.ok(csp.includes('connect-src'));
-    assert.ok(csp.includes('https://tiles.basemaps.cartocdn.com'));
-    assert.ok(csp.includes('https://overpass-api.de'));
-    assert.ok(csp.includes('https://maps.mail.ru'));
+    const connectSrc = parseCspDirectiveSources(csp, 'connect-src');
+    assert.ok(connectSrc.size > 0);
+    assert.ok(connectSrc.has('https://tiles.basemaps.cartocdn.com'));
+    assert.ok(connectSrc.has('https://overpass-api.de'));
+    assert.ok(connectSrc.has('https://maps.mail.ru'));
     assert.equal(/\bscript-src\s[^;]*unsafe-inline/.test(csp), false);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
