@@ -10,6 +10,23 @@ async function loadOverpassBuildings() {
   return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
 }
 
+function toRequestUrl(input: RequestInfo | URL) {
+  if (input instanceof URL) {
+    return input;
+  }
+  if (typeof Request !== 'undefined' && input instanceof Request) {
+    return new URL(input.url);
+  }
+  return new URL(String(input));
+}
+
+function isExactEndpointMatch(actual: URL, expected: string) {
+  const target = new URL(expected);
+  return actual.origin === target.origin
+    && actual.pathname === target.pathname
+    && actual.search === target.search;
+}
+
 function readStoreValue(store) {
   let value;
   const unsubscribe = store.subscribe((next) => {
@@ -131,7 +148,7 @@ test('camera movement does not abort or restart an active Overpass load', async 
 
 test('overpass load keeps multiple tile requests in flight when only one endpoint is healthy', async () => {
   const previousFetch = global.fetch;
-  const tileEndpoints: string[] = [];
+  const tileEndpoints: URL[] = [];
   const pendingTileResponses: Array<() => void> = [];
   let releaseTileResponses = false;
   let phase: 'warmup' | 'parallel' = 'warmup';
@@ -140,7 +157,7 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
   const healthyEndpoint = 'https://overpass.kumi.systems/api/interpreter';
 
   const mockFetch: typeof fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const endpoint = String(input);
+    const endpoint = toRequestUrl(input);
     const body = String(init.body || '');
     if (body.includes('node(1);out ids;')) {
       return new Response(JSON.stringify({ elements: [] }), {
@@ -151,7 +168,7 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
 
     tileEndpoints.push(endpoint);
     if (phase === 'warmup') {
-      if (endpoint === healthyEndpoint) {
+      if (isExactEndpointMatch(endpoint, healthyEndpoint)) {
         return new Response(JSON.stringify({ elements: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json' }
@@ -163,7 +180,7 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
       });
     }
 
-    if (endpoint === healthyEndpoint) {
+    if (isExactEndpointMatch(endpoint, healthyEndpoint)) {
       activeTileRequests += 1;
       maxConcurrentTileRequests = Math.max(maxConcurrentTileRequests, activeTileRequests);
       const createTileResponse = () => new Response(JSON.stringify({ elements: [] }), {
@@ -213,7 +230,7 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
     });
 
     await waitFor(() => maxConcurrentTileRequests >= 2);
-    assert.ok(tileEndpoints.includes(healthyEndpoint));
+    assert.ok(tileEndpoints.some((endpoint) => isExactEndpointMatch(endpoint, healthyEndpoint)));
     assert.ok(maxConcurrentTileRequests >= 2);
 
     releaseTileResponses = true;
@@ -223,7 +240,7 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
     }
     await refreshPromise;
 
-    assert.ok(tileEndpoints.filter((endpoint) => endpoint === healthyEndpoint).length >= 2);
+    assert.ok(tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, healthyEndpoint)).length >= 2);
   } finally {
     global.fetch = previousFetch;
   }
@@ -231,13 +248,15 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
 
 test('overpass endpoint cooldown skips repeated 504 failures and ignores mail.ru', async () => {
   const previousFetch = global.fetch;
-  const tileEndpoints: string[] = [];
+  const tileEndpoints: URL[] = [];
+  const primaryEndpoint = 'https://overpass-api.de/api/interpreter';
+  const mailRuEndpoint = 'https://maps.mail.ru/osm/tools/overpass/api/interpreter';
 
   const mockFetch: typeof fetch = async (input: RequestInfo | URL) => {
-    const endpoint = String(input);
+    const endpoint = toRequestUrl(input);
     tileEndpoints.push(endpoint);
 
-    if (endpoint.includes('overpass-api.de/api/interpreter')) {
+    if (isExactEndpointMatch(endpoint, primaryEndpoint)) {
       return new Response('Gateway Timeout', {
         status: 504,
         headers: { 'content-type': 'text/plain' }
@@ -266,8 +285,8 @@ test('overpass endpoint cooldown skips repeated 504 failures and ignores mail.ru
       covered: false
     });
 
-    const primaryEndpointCallsBeforeRefresh = tileEndpoints.filter((endpoint) => endpoint === 'https://overpass-api.de/api/interpreter').length;
-    const mailRuCallsBeforeRefresh = tileEndpoints.filter((endpoint) => endpoint === 'https://maps.mail.ru/osm/tools/overpass/api/interpreter').length;
+    const primaryEndpointCallsBeforeRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, primaryEndpoint)).length;
+    const mailRuCallsBeforeRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, mailRuEndpoint)).length;
 
     assert.ok(primaryEndpointCallsBeforeRefresh > 0);
     assert.equal(mailRuCallsBeforeRefresh, 0);
@@ -278,8 +297,8 @@ test('overpass endpoint cooldown skips repeated 504 failures and ignores mail.ru
       covered: false
     });
 
-    const primaryEndpointCallsAfterRefresh = tileEndpoints.filter((endpoint) => endpoint === 'https://overpass-api.de/api/interpreter').length;
-    const mailRuCallsAfterRefresh = tileEndpoints.filter((endpoint) => endpoint === 'https://maps.mail.ru/osm/tools/overpass/api/interpreter').length;
+    const primaryEndpointCallsAfterRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, primaryEndpoint)).length;
+    const mailRuCallsAfterRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, mailRuEndpoint)).length;
 
     assert.equal(primaryEndpointCallsAfterRefresh, primaryEndpointCallsBeforeRefresh);
     assert.equal(mailRuCallsAfterRefresh, 0);
