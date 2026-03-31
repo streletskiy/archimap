@@ -11,6 +11,7 @@
   import BulkClearAction from '$lib/components/shell/BulkClearAction.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
   import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
+  import { resolveAddressText } from '$lib/utils/building-address';
   import { getBuildingMaterialOptions, toHumanBuildingMaterial } from '$lib/utils/building-material';
   import { filterBuildingEditedFields } from '$lib/utils/building-edit-fields';
   import { styleRegionOverrides } from '$lib/stores/style-overrides';
@@ -143,6 +144,17 @@
 
   function buildAddressFromForm(formValue = form) {
     return buildAddressFromBuildingForm(formValue);
+  }
+
+  function buildAddressDisplaySource(formValue = form) {
+    return {
+      'addr:full': formValue.addressFull,
+      'addr:postcode': formValue.addressPostcode,
+      'addr:city': formValue.addressCity,
+      'addr:place': formValue.addressPlace,
+      'addr:street': formValue.addressStreet,
+      'addr:housenumber': formValue.addressHouseNumber
+    };
   }
 
   function buildComparableSnapshot(formValue = form) {
@@ -375,12 +387,19 @@
   $: pendingEditHref = pendingEditUrl
     ? `${pendingEditUrl.pathname}${pendingEditUrl.search}${pendingEditUrl.hash}`
     : '';
-  $: displayName = isBulkSelection
+  $: displayAddress = isBulkSelection
+    ? ''
+    : resolveAddressText(
+      buildAddressDisplaySource(form),
+      pickFirstText,
+      pickFirstText(buildAddressFromForm(), archiInfo.address)
+    );
+  $: headerTitle = isBulkSelection
     ? (!bulkDetailsReady || bulkFieldState?.name?.isMixed
       ? $t('buildingModal.bulkSelectionTitle')
       : (pickFirstText(form.name) || $t('buildingModal.bulkSelectionTitle')))
-    : (pickFirstText(form.name, archiInfo.name) || buildingKey || $t('buildingModal.title'));
-  $: displayAddress = isBulkSelection ? '' : pickFirstText(buildAddressFromForm(), archiInfo.address);
+    : (displayAddress || buildingKey || $t('buildingModal.title'));
+  $: showBuildingKeyBadge = !isBulkSelection && Boolean(displayAddress) && Boolean(buildingKey);
   $: displayStyleRaw = isBulkSelection
     ? pickFirstText(form.style)
     : pickFirstText(form.style, archiInfo.styleRaw, archiInfo.style);
@@ -484,8 +503,7 @@
     >
       <header class="modal-header">
         <div class="modal-header-copy">
-          <p class="ui-kicker">{$t('buildingModal.overview')}</p>
-          <h3 id="building-modal-title">{displayName}</h3>
+          <h3 id="building-modal-title">{headerTitle}</h3>
           <div class="modal-header-meta">
             {#if selectionState.isBulkSelection}
               <UiBadge
@@ -495,12 +513,14 @@
                 {$t('buildingModal.bulkSelectionLabel', { count: selectionState.selectedBuildingCount })}
               </UiBadge>
             {:else}
-              <UiBadge
-                variant="accent"
-                className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
-              >
-                {buildingKey}
-              </UiBadge>
+              {#if showBuildingKeyBadge}
+                <UiBadge
+                  variant="accent"
+                  className="inline-flex items-center rounded-full px-[0.72rem] py-[0.42rem] text-[0.78rem] font-bold [background:var(--accent-soft)] [color:var(--accent-ink)]"
+                >
+                  {buildingKey}
+                </UiBadge>
+              {/if}
               {#if isOverpassBuilding()}
                 <UiBadge
                   variant="default"
@@ -519,9 +539,6 @@
                   {$t('buildingModal.pendingEdit')}
                 </UiBadge>
               {/if}
-            {/if}
-            {#if !selectionState.isBulkSelection && displayAddress}
-              <span class="modal-address">{displayAddress}</span>
             {/if}
           </div>
         </div>
@@ -1119,11 +1136,6 @@
     flex-wrap: wrap;
     gap: 0.55rem;
     align-items: center;
-  }
-
-  .modal-address {
-    color: var(--muted);
-    font-size: 0.88rem;
   }
 
   .overview-card,
