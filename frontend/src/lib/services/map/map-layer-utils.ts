@@ -386,6 +386,28 @@ export function bringSearchResultsLayersToFront(map) {
   }
 }
 
+export function bringBaseLabelLayersAboveCustomLayers(map) {
+  if (!map) return;
+  const layers = map.getStyle()?.layers || [];
+  const searchAnchorLayerId = [
+    SEARCH_RESULTS_CLUSTER_LAYER_ID,
+    SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
+    SEARCH_RESULTS_LAYER_ID
+  ].find((layerId) => Boolean(map.getLayer(layerId)));
+
+  for (const layer of layers) {
+    if (!isBaseLabelLayer(layer)) continue;
+    const layerId = String(layer?.id || '').trim();
+    if (!layerId) continue;
+    if (!map.getLayer(layerId)) continue;
+    if (searchAnchorLayerId) {
+      map.moveLayer(layerId, searchAnchorLayerId);
+    } else {
+      map.moveLayer(layerId);
+    }
+  }
+}
+
 function ensureLayerVisibility(map, layerId, visibility) {
   if (!map?.getLayer?.(layerId)) return;
   map.setLayoutProperty(layerId, 'visibility', visibility);

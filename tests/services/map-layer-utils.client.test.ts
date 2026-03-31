@@ -15,10 +15,19 @@ function createMapStub({ styleLoaded = true } = {}) {
   const layers = new Map();
   const addedLayers = [];
   const layoutCalls = [];
+  const moveCalls = [];
+
+  function setLayerOrder(entries) {
+    layers.clear();
+    for (const [layerId, layer] of entries) {
+      layers.set(layerId, layer);
+    }
+  }
 
   return {
     addedLayers,
     layoutCalls,
+    moveCalls,
     layers,
     sources,
     getSource(sourceId) {
@@ -31,7 +40,9 @@ function createMapStub({ styleLoaded = true } = {}) {
       return layers.get(layerId) || null;
     },
     addLayer(layer) {
-      layers.set(layer.id, layer);
+      const nextLayers = Array.from(layers.entries()).filter(([existingLayerId]) => existingLayerId !== layer.id);
+      nextLayers.push([layer.id, layer]);
+      setLayerOrder(nextLayers);
       addedLayers.push(layer);
     },
     getStyle() {
@@ -65,7 +76,21 @@ function createMapStub({ styleLoaded = true } = {}) {
     },
     off() {},
     on() {},
-    moveLayer() {}
+    moveLayer(layerId, beforeId) {
+      const layer = layers.get(layerId);
+      if (!layer) return;
+      const nextLayers = Array.from(layers.entries()).filter(([existingLayerId]) => existingLayerId !== layerId);
+      const beforeIndex = beforeId
+        ? nextLayers.findIndex(([existingLayerId]) => existingLayerId === beforeId)
+        : -1;
+      if (beforeIndex >= 0) {
+        nextLayers.splice(beforeIndex, 0, [layerId, layer]);
+      } else {
+        nextLayers.push([layerId, layer]);
+      }
+      setLayerOrder(nextLayers);
+      moveCalls.push({ layerId, beforeId });
+    }
   };
 }
 
@@ -288,6 +313,37 @@ test('applyLabelLayerVisibility hides symbol layers even when style is not repor
   assert.equal(map.layers.get('waterway_label').layout.visibility, 'none');
   assert.equal(map.layers.get('landcover').layout.visibility, 'visible');
   assert.equal(map.layers.get('search-results-points-layer').layout.visibility, 'visible');
+});
+
+test('bringBaseLabelLayersAboveCustomLayers keeps labels above building layers but below search results', async () => {
+  const { bringBaseLabelLayersAboveCustomLayers } = await loadMapLayerUtils();
+  const map = createMapStub();
+
+  map.addLayer({ id: 'building', type: 'fill', paint: {} });
+  map.addLayer({ id: 'waterway_label', type: 'symbol', paint: {} });
+  map.addLayer({ id: 'city_label', type: 'symbol', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'overpass-buildings-source-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'search-results-clusters-layer', type: 'circle', paint: {} });
+  map.addLayer({ id: 'search-results-clusters-count-layer', type: 'symbol', paint: {} });
+  map.addLayer({ id: 'search-results-points-layer', type: 'circle', paint: {} });
+
+  bringBaseLabelLayersAboveCustomLayers(map);
+
+  assert.deepEqual(Array.from(map.layers.keys()), [
+    'building',
+    'region-buildings-7-fill',
+    'overpass-buildings-source-fill',
+    'waterway_label',
+    'city_label',
+    'search-results-clusters-layer',
+    'search-results-clusters-count-layer',
+    'search-results-points-layer'
+  ]);
+  assert.deepEqual(map.moveCalls, [
+    { layerId: 'waterway_label', beforeId: 'search-results-clusters-layer' },
+    { layerId: 'city_label', beforeId: 'search-results-clusters-layer' }
+  ]);
 });
 
 test('applyBuildingPartsLayerVisibility still applies part visibility before style loaded flag flips true', async () => {

@@ -1,4 +1,5 @@
 import {
+  bringBaseLabelLayersAboveCustomLayers,
   bringSearchResultsLayersToFront,
   CARTO_BUILDING_LAYER_IDS,
   ensureRegionBuildingSourceAndLayers,
@@ -345,6 +346,7 @@ export function createMapRegionLayersController({
       }
     }
     bringSearchResultsLayersToFront(map);
+    bringBaseLabelLayersAboveCustomLayers(map);
 
     onBindStyleInteractionHandlers?.();
     onApplySelectionFromStore?.(getSelectedBuilding?.());

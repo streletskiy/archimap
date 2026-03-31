@@ -16,6 +16,7 @@
     shouldShowFilterRefiningMessage
   } from '$lib/services/map/filter-overlay-utils';
   import {
+    bringBaseLabelLayersAboveCustomLayers,
     bringSearchResultsLayersToFront,
     applyBuildingThemePaint as applyBuildingThemePaintToLayers,
     applyBuildingPartsLayerVisibility as applyBuildingPartsLayerVisibilityToLayers,
@@ -376,6 +377,7 @@
       visible: overpassLayerVisible
     });
     bringSearchResultsLayersToFront(map);
+    bringBaseLabelLayersAboveCustomLayers(map);
   }
 
   function getOverpassViewportPayload() {
