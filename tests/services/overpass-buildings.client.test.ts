@@ -29,6 +29,19 @@ async function waitFor(predicate, timeoutMs = 2000, intervalMs = 10) {
   }
 }
 
+test('overpass coverage checks stay disabled until zoom 12', async () => {
+  const {
+    OVERPASS_MIN_COVERAGE_CHECK_ZOOM,
+    shouldCheckOverpassViewportCoverage
+  } = await loadOverpassBuildings();
+
+  assert.equal(OVERPASS_MIN_COVERAGE_CHECK_ZOOM, 12);
+  assert.equal(shouldCheckOverpassViewportCoverage(null), false);
+  assert.equal(shouldCheckOverpassViewportCoverage(11.99), false);
+  assert.equal(shouldCheckOverpassViewportCoverage(12), true);
+  assert.equal(shouldCheckOverpassViewportCoverage(14), true);
+});
+
 test('camera movement does not abort or restart an active Overpass load', async () => {
   const previousFetch = global.fetch;
   const fetchCalls = [];

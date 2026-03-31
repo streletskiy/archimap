@@ -84,6 +84,7 @@ const OVERPASS_DB_NAME = `${OVERPASS_STORAGE_PREFIX}-cache-v1`;
 const OVERPASS_DB_STORE = 'tiles';
 const OVERPASS_LAST_ENDPOINT_KEY = `${OVERPASS_STORAGE_PREFIX}-last-endpoint`;
 const OVERPASS_LAST_SYNC_KEY = `${OVERPASS_STORAGE_PREFIX}-last-sync`;
+export const OVERPASS_MIN_COVERAGE_CHECK_ZOOM = 12;
 const OVERPASS_MIN_RENDER_ZOOM = 13;
 const OVERPASS_MIN_LOAD_ZOOM = 13;
 const OVERPASS_TILE_PADDING = 1;
@@ -144,6 +145,11 @@ let tileKeyAccessOrder: Array<{ key: string; touchedAt: number }> = [];
 let idbPromise: Promise<IDBDatabase | null> | null = null;
 let indexedDbAvailable = typeof indexedDB !== 'undefined';
 let memoryDbFallback = new Map<string, OverpassTileRecord>();
+
+export function shouldCheckOverpassViewportCoverage(zoom: number | string | null | undefined) {
+  const normalizedZoom = Number(zoom);
+  return Number.isFinite(normalizedZoom) && normalizedZoom >= OVERPASS_MIN_COVERAGE_CHECK_ZOOM;
+}
 
 function patchOverpassState(patch: Partial<OverpassRequestState> = {}) {
   overpassBuildingsState.update((state) => ({

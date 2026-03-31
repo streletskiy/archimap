@@ -45,6 +45,7 @@
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
   import {
+    shouldCheckOverpassViewportCoverage,
     cancelOverpassViewportLoad,
     clearOverpassCache,
     getOverpassFeatureCollection,
@@ -356,6 +357,9 @@
   }
 
   function isViewportCoveredByProcessedRegions() {
+    if (!shouldCheckOverpassViewportCoverage(currentMapZoom)) {
+      return true;
+    }
     const regions = getCoverageRegions();
     const points = getViewportSamplePoints();
     if (regions.length === 0 || points.length === 0) return false;
