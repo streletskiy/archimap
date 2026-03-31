@@ -30,12 +30,10 @@ Use Node.js 24 LTS.
 
 ```bash
 npm ci
-npm --prefix frontend ci --legacy-peer-deps
+npm --prefix frontend ci
 cp .env.example .env
 npm run dev
 ```
-
-The frontend workspace currently needs `--legacy-peer-deps` because npm peer checks still reject the TypeScript 6 and SvelteKit combination during install.
 
 Optional production-like run:
 

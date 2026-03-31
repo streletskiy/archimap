@@ -371,24 +371,23 @@ export function createBuildingDetailsManager() {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
       const reviewStatus = String(data?.review_status || '').trim().toLowerCase() || null;
       const userEditId = Number(data?.user_edit_id || 0);
-      let sourceTags = {};
-      let sourceSnapshot = {
-        sourceGeometryJson: null,
-        sourceTagsJson: null,
-        sourceOsmUpdatedAt: null
-      };
-      try {
-        feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
-        sourceTags = feature?.properties?.source_tags || {};
-        sourceSnapshot = buildSourceSnapshotFromFeature(feature);
-      } catch (featureError) {
-        if (!isAbortError(featureError)) {
-          sourceTags = detail?.feature?.properties?.source_tags || {};
-          sourceSnapshot = buildSourceSnapshotFromDetail(detail);
-        } else {
-          throw featureError;
+      const { sourceTags, sourceSnapshot } = await (async () => {
+        try {
+          feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
+          return {
+            sourceTags: feature?.properties?.source_tags || {},
+            sourceSnapshot: buildSourceSnapshotFromFeature(feature)
+          };
+        } catch (featureError) {
+          if (isAbortError(featureError)) {
+            throw featureError;
+          }
+          return {
+            sourceTags: detail?.feature?.properties?.source_tags || {},
+            sourceSnapshot: buildSourceSnapshotFromDetail(detail)
+          };
         }
-      }
+      })();
       return {
         feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
         sourceGeometryJson: sourceSnapshot.sourceGeometryJson,

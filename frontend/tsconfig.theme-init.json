@@ -5,7 +5,6 @@
     "module": "none",
     "strict": false,
     "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
     "noEmitOnError": true,
     "declaration": false,
     "emitDeclarationOnly": false,
