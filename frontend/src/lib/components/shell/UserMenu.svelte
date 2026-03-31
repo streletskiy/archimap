@@ -13,7 +13,8 @@
     mapBuildingPartsVisible,
     mapLabelsVisible,
     setMapBuildingPartsVisible,
-    setMapLabelsVisible
+    setMapLabelsVisible,
+    syncMapVisibilityFromStorage
   } from '$lib/stores/map';
   import { getUserInitials, getUserLabel } from '$lib/utils/user-display';
 
@@ -58,23 +59,11 @@
   }
 
   function applyLabelsVisibility(visible) {
-    const next = Boolean(visible);
-    setMapLabelsVisible(next);
-    try {
-      localStorage.setItem('archimap-map-labels-visible', next ? '1' : '0');
-    } catch {
-      // ignore
-    }
+    setMapLabelsVisible(Boolean(visible));
   }
 
   function applyBuildingPartsVisibility(visible) {
-    const next = Boolean(visible);
-    setMapBuildingPartsVisible(next);
-    try {
-      localStorage.setItem('archimap-map-building-parts-visible', next ? '1' : '0');
-    } catch {
-      // ignore
-    }
+    setMapBuildingPartsVisible(Boolean(visible));
   }
 
   async function logout() {
@@ -89,18 +78,7 @@
 
   onMount(() => {
     darkTheme = getCurrentTheme() === 'dark';
-    try {
-      const storedLabels = localStorage.getItem('archimap-map-labels-visible');
-      if (storedLabels === '0' || storedLabels === '1') {
-        setMapLabelsVisible(storedLabels === '1');
-      }
-      const storedParts = localStorage.getItem('archimap-map-building-parts-visible');
-      if (storedParts === '0' || storedParts === '1') {
-        setMapBuildingPartsVisible(storedParts === '1');
-      }
-    } catch {
-      // ignore
-    }
+    syncMapVisibilityFromStorage();
     themeObserver = new MutationObserver(() => {
       darkTheme = getCurrentTheme() === 'dark';
     });

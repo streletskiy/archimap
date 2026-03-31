@@ -47,13 +47,13 @@ function createFeatureFromRow(row) {
   if (!row) return null;
   const geometryJson = row?.geometry_json ?? row?.source_geometry_json ?? null;
   const tagsJson = row?.tags_json ?? row?.source_tags_json ?? null;
-  let geometry = null;
-  let tags = {};
+  let geometry;
   try {
     geometry = geometryJson ? JSON.parse(geometryJson) : null;
   } catch {
     geometry = null;
   }
+  let tags;
   try {
     tags = tagsJson ? JSON.parse(tagsJson) : {};
   } catch {

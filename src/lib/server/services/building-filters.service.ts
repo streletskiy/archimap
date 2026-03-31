@@ -699,13 +699,7 @@ function createBuildingFiltersService({
       return { payload };
     }
 
-    let matchedResult = {
-      matchedKeys: [],
-      matchedFeatureIds: [],
-      matchedLocations: [],
-      matchedCount: 0,
-      truncated: false
-    };
+    let matchedResult;
     if (queryService.isPostgres && actorKey === 'anon') {
       const splitRules = splitPostgresPushdownRules(normalizedRules);
       const aggregateMarkers = shouldAggregateMarkerMatches(renderMode, zoomBucket);

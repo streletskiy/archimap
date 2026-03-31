@@ -301,7 +301,7 @@ export function isBaseLabelLayer(layer) {
 }
 
 export function applyLabelLayerVisibility(map, visible) {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!map) return;
   const layers = map.getStyle()?.layers || [];
   const nextVisibility = visible ? 'visible' : 'none';
   for (const layer of layers) {
@@ -929,7 +929,7 @@ export function applyBuildingPartsLayerVisibility({
   partFilterHighlightFillLayerIds = [],
   partFilterHighlightLineLayerIds = []
 }) {
-  if (!map || !map.isStyleLoaded()) return;
+  if (!map) return;
   const partLayerVisibility = visible ? 'visible' : 'none';
   const partHighlightVisibility = (visible || forceHighlightVisible) ? 'visible' : 'none';
   for (const layerId of [...new Set([

@@ -10,7 +10,7 @@ async function loadMapLayerUtils() {
   return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
 }
 
-function createMapStub() {
+function createMapStub({ styleLoaded = true } = {}) {
   const sources = new Map();
   const layers = new Map();
   const addedLayers = [];
@@ -34,6 +34,11 @@ function createMapStub() {
       layers.set(layer.id, layer);
       addedLayers.push(layer);
     },
+    getStyle() {
+      return {
+        layers: Array.from(layers.values())
+      };
+    },
     removeLayer(layerId) {
       layers.delete(layerId);
     },
@@ -56,7 +61,7 @@ function createMapStub() {
       }
     },
     isStyleLoaded() {
-      return true;
+      return styleLoaded;
     },
     off() {},
     on() {},
@@ -266,5 +271,43 @@ test('applyBuildingPartsLayerVisibility keeps part highlight layers visible for 
     { layerId: 'region-buildings-7-part-filter-highlight-fill', name: 'visibility', value: 'visible' },
     { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'visible' }
   ]);
+});
+
+test('applyLabelLayerVisibility hides symbol layers even when style is not reported as loaded', async () => {
+  const { applyLabelLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub({ styleLoaded: false });
+  map.addLayer({ id: 'waterway_label', type: 'symbol', layout: { visibility: 'visible' } });
+  map.addLayer({ id: 'landcover', type: 'fill', layout: { visibility: 'visible' } });
+  map.addLayer({ id: 'search-results-points-layer', type: 'symbol', layout: { visibility: 'visible' } });
+
+  applyLabelLayerVisibility(map, false);
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'waterway_label', name: 'visibility', value: 'none' }
+  ]);
+  assert.equal(map.layers.get('waterway_label').layout.visibility, 'none');
+  assert.equal(map.layers.get('landcover').layout.visibility, 'visible');
+  assert.equal(map.layers.get('search-results-points-layer').layout.visibility, 'visible');
+});
+
+test('applyBuildingPartsLayerVisibility still applies part visibility before style loaded flag flips true', async () => {
+  const { applyBuildingPartsLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub({ styleLoaded: false });
+  map.addLayer({ id: 'region-buildings-7-part-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-line', type: 'line', paint: {} });
+
+  applyBuildingPartsLayerVisibility({
+    map,
+    visible: false,
+    partFillLayerIds: ['region-buildings-7-part-fill'],
+    partLineLayerIds: ['region-buildings-7-part-line']
+  });
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'region-buildings-7-part-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-part-line', name: 'visibility', value: 'none' }
+  ]);
+  assert.equal(map.layers.get('region-buildings-7-part-fill').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'none');
 });
 
