@@ -41,6 +41,7 @@ function registerAppRoutes(deps) {
     normalizeMapConfig,
     getBuildInfo,
     getAppVersion,
+    loadEffectiveGeneralConfig,
     registrationEnabled,
     getRegistrationEnabled,
     dataSettingsService,
@@ -52,6 +53,23 @@ function registerAppRoutes(deps) {
   const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
   const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
   const invokeSvelteNodeHandler = createSvelteNodeHandlerInvoker(rootDir);
+
+  function normalizeBasemapConfig(raw: LooseRecord = {}) {
+    const provider = String(raw?.basemapProvider || '').trim().toLowerCase() === 'maptiler'
+      ? 'maptiler'
+      : 'carto';
+    const maptilerApiKey = String(raw?.maptilerApiKey || '').trim();
+    if (provider === 'maptiler' && !maptilerApiKey) {
+      return {
+        provider: 'carto',
+        maptilerApiKey: ''
+      };
+    }
+    return {
+      provider,
+      maptilerApiKey
+    };
+  }
 
   async function getAvailableRegionPmtiles() {
     if (!dataSettingsService) return [];
@@ -68,21 +86,33 @@ function registerAppRoutes(deps) {
     const mapDefault = normalizeMapConfig();
     const regionalPmtiles = await getAvailableRegionPmtiles();
     const buildInfo = getBuildInfo();
+    const effectiveGeneralSettings = typeof loadEffectiveGeneralConfig === 'function'
+      ? await Promise.resolve(loadEffectiveGeneralConfig()).catch(() => null)
+      : null;
+    const generalConfig = effectiveGeneralSettings?.config && typeof effectiveGeneralSettings.config === 'object'
+      ? effectiveGeneralSettings.config
+      : {};
     const mapSelection = {
       debug: String(process.env.MAP_SELECTION_ATOMIC_DEBUG || '').trim() === 'true'
     };
-    const effectiveRegistrationEnabled = typeof getRegistrationEnabled === 'function'
-      ? Boolean(getRegistrationEnabled())
-      : Boolean(registrationEnabled);
+    const effectiveRegistrationEnabled = typeof generalConfig?.registrationEnabled === 'boolean'
+      ? generalConfig.registrationEnabled
+      : (
+        typeof getRegistrationEnabled === 'function'
+          ? Boolean(getRegistrationEnabled())
+          : Boolean(registrationEnabled)
+      );
     const auth = {
       registrationEnabled: effectiveRegistrationEnabled
     };
+    const basemap = normalizeBasemapConfig(generalConfig);
     res.type('application/javascript').send(
       `window.__ARCHIMAP_CONFIG = ${JSON.stringify({
         mapDefault,
         buildingRegionsPmtiles: regionalPmtiles,
         buildInfo,
         auth,
+        basemap,
         mapSelection
       })};`
     );

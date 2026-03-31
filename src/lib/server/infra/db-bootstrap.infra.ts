@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS app_general_settings (
   registration_enabled INTEGER NOT NULL DEFAULT 1,
   user_edit_requires_permission INTEGER NOT NULL DEFAULT 1,
   metrics_token TEXT,
+  basemap_provider TEXT NOT NULL DEFAULT 'carto',
+  maptiler_api_key TEXT,
   updated_by TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

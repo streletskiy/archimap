@@ -1,8 +1,12 @@
 <script>
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { getRuntimeConfig } from '$lib/services/config';
+  import { locale } from '$lib/i18n/index';
+  import { getCurrentTheme } from '$lib/services/map/map-theme-utils';
+  import { createMapStyleSyncController } from '$lib/services/map/map-style-sync';
   import { loadMapRuntime } from '$lib/services/map-runtime';
   import { focusMapOnGeometry } from '$lib/utils/map-geometry';
 
@@ -10,8 +14,6 @@
   export let loading = false;
   export let loadingText = '';
 
-  const LIGHT = '/styles/positron-custom.json';
-  const DARK = '/styles/dark-matter-custom.json';
   const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
 
   let mapEl;
@@ -19,18 +21,18 @@
   let maplibregl = null;
   let mapRuntimePromise = null;
   let mapInitNonce = 0;
+  const mapStyleSync = createMapStyleSyncController({
+    getMap: () => map,
+    getTheme: getCurrentTheme,
+    getLocaleCode: () => get(locale),
+    getRuntimeConfig
+  });
 
   function ensureMapRuntime() {
     if (!mapRuntimePromise) {
       mapRuntimePromise = loadMapRuntime();
     }
     return mapRuntimePromise;
-  }
-
-  function styleByTheme() {
-    return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark'
-      ? DARK
-      : LIGHT;
   }
 
   function normalizeFeatureData(feature) {
@@ -132,10 +134,12 @@
 
     maplibregl = runtime.maplibregl;
     const config = getRuntimeConfig();
+    const initialStyle = await mapStyleSync.resolveInitialStyle(config);
+    if (map || !mapEl || initNonce !== mapInitNonce) return;
 
     map = new maplibregl.Map({
       container: mapEl,
-      style: styleByTheme(),
+      style: initialStyle,
       center: [config.mapDefault.lon, config.mapDefault.lat],
       zoom: Math.max(12, Number(config.mapDefault.zoom || 14)),
       attributionControl: false
@@ -174,14 +178,17 @@
     void ensureMap();
 
     const observer = new MutationObserver(() => {
-      if (map) {
-        map.setStyle(styleByTheme());
-      }
+      void mapStyleSync.syncMapStyle();
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const unsubscribeLocale = locale.subscribe(() => {
+      void mapStyleSync.syncMapStyle();
+    });
 
     return () => {
+      unsubscribeLocale();
       observer.disconnect();
+      mapStyleSync.reset();
       destroyMap();
     };
   });

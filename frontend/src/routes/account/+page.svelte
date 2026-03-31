@@ -34,14 +34,14 @@
   import { apiJson } from '$lib/services/http';
   import { getRuntimeConfig } from '$lib/services/config';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
+  import { getCurrentTheme } from '$lib/services/map/map-theme-utils';
+  import { createMapStyleSyncController } from '$lib/services/map/map-style-sync';
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { locale, t, translateNow } from '$lib/i18n/index';
   import { getEditsDateRangeParams } from '$lib/utils/edit-date-range';
   import { formatUiDate, getChangeCounters, getDisplayEditStatusMeta, getEditAddress, getEditKey, getSyncBadgeMeta, isOverpassBackedEdit, parseEditKey } from '$lib/utils/edit-ui';
   import { getGeometryCenter } from '$lib/utils/map-geometry';
 
-  const LIGHT = '/styles/positron-custom.json';
-  const DARK = '/styles/dark-matter-custom.json';
   const SRC = 'account-edited-points';
   const L_CLUSTER = 'account-edited-points-clusters';
   const L_COUNT = 'account-edited-points-cluster-count';
@@ -96,6 +96,12 @@
   let protocol = null;
   let mapInitNonce = 0;
   let activeRegionPmtiles = [];
+  const mapStyleSync = createMapStyleSyncController({
+    getMap: () => map,
+    getTheme: getCurrentTheme,
+    getLocaleCode: () => get(locale),
+    getRuntimeConfig
+  });
   const centerByKey = new Map();
   const editIdByKey = new Map();
 
@@ -175,10 +181,6 @@
     return mapRuntimePromise;
   }
 
-  function styleByTheme() {
-    return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark' ? DARK : LIGHT;
-  }
-
   function getEditedFillLayerIds() {
     return activeRegionPmtiles.length > 0
       ? activeRegionPmtiles.map((region) => buildRegionLayerId(region.id, 'edited-fill'))
@@ -252,9 +254,11 @@
       maplibregl.addProtocol('pmtiles', protocol.tile);
     }
     const cfg = getRuntimeConfig();
+    const initialStyle = await mapStyleSync.resolveInitialStyle(cfg);
+    if (!mapEl || map || initNonce !== mapInitNonce) return;
     map = new maplibregl.Map({
       container: mapEl,
-      style: styleByTheme(),
+      style: initialStyle,
       center: [cfg.mapDefault.lon, cfg.mapDefault.lat],
       zoom: Math.max(12, Number(cfg.mapDefault.zoom || 14)),
       attributionControl: false
@@ -648,11 +652,16 @@
         loadEdits();
       }
     }
-    const obs = new MutationObserver(() => { if (map) map.setStyle(styleByTheme()); });
+    const obs = new MutationObserver(() => { void mapStyleSync.syncMapStyle(); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const unsubscribeLocale = locale.subscribe(() => {
+      void mapStyleSync.syncMapStyle();
+    });
     return () => {
       unsubscribePage();
+      unsubscribeLocale();
       obs.disconnect();
+      mapStyleSync.reset();
       destroyMap();
     };
   });

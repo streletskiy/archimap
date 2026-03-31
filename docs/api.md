@@ -97,7 +97,12 @@ System notes:
 - `GET /api/admin/users`, `GET /api/admin/users/:email`, `GET /api/admin/users/:email/edits`
 - `POST /api/admin/users/edit-permission`, `POST /api/admin/users/role`
 - `GET /api/admin/app-settings/general`
+  - Returns DB-backed general runtime settings.
+  - `general` includes `appDisplayName`, `appBaseUrl`, `registrationEnabled`, `userEditRequiresPermission`, `metricsToken`, `basemapProvider`, and `maptilerApiKey`.
 - `POST /api/admin/app-settings/general`
+  - Saves the same `general` payload as above.
+  - `basemapProvider` supports `carto` and `maptiler`.
+  - When `basemapProvider=maptiler`, `maptilerApiKey` is required.
 - `GET /api/admin/app-settings/smtp`
 - `POST /api/admin/app-settings/smtp`
 - `POST /api/admin/app-settings/smtp/test`
@@ -220,6 +225,8 @@ System notes:
 
 - `GET /app-config.js`
   - Returns `window.__ARCHIMAP_CONFIG`.
+  - Includes `basemap: { provider, maptilerApiKey }`.
+  - Invalid `maptiler` runtime config without a key is normalized back to `carto` so the client map still boots.
   - Multi-region payload adds `buildingRegionsPmtiles[]`, each item containing:
     - `id`
     - `slug`

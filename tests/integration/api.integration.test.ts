@@ -197,6 +197,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(appConfig.status, 200);
       const appConfigText = await appConfig.text();
       assert.match(appConfigText, /window\.__ARCHIMAP_CONFIG/);
+      assert.match(appConfigText, /"basemap":\{"provider":"carto","maptilerApiKey":""\}/);
       assert.match(appConfigText, /"mapSelection":\{"debug":false\}/);
     });
 
@@ -320,6 +321,59 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(typeof mapSearchBody.total, 'number');
       assert.equal(typeof mapSearchBody.truncated, 'boolean');
       assert.ok(Array.isArray(mapSearchBody.items));
+    });
+
+    await t.test('general settings expose basemap provider in admin api and runtime config', async () => {
+      const generalSettings = await callApi('/api/admin/app-settings/general');
+      assert.equal(generalSettings.status, 200);
+      const generalSettingsBody = await generalSettings.json();
+      assert.equal(generalSettingsBody?.ok, true);
+      assert.equal(generalSettingsBody?.item?.general?.basemapProvider, 'carto');
+
+      const saveGeneral = await callApi('/api/admin/app-settings/general', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          general: {
+            ...(generalSettingsBody?.item?.general || {}),
+            appDisplayName: 'archimap',
+            appBaseUrl: baseUrl,
+            basemapProvider: 'maptiler',
+            maptilerApiKey: 'integration-maptiler-key'
+          }
+        })
+      });
+      assert.equal(saveGeneral.status, 200);
+      const saveGeneralBody = await saveGeneral.json();
+      assert.equal(saveGeneralBody?.ok, true);
+      assert.equal(saveGeneralBody?.item?.general?.basemapProvider, 'maptiler');
+      assert.equal(saveGeneralBody?.item?.general?.maptilerApiKey, 'integration-maptiler-key');
+
+      const appConfig = await callApi('/app-config.js');
+      assert.equal(appConfig.status, 200);
+      const appConfigText = await appConfig.text();
+      assert.match(appConfigText, /"basemap":\{"provider":"maptiler","maptilerApiKey":"integration-maptiler-key"\}/);
+
+      const invalidGeneral = await callApi('/api/admin/app-settings/general', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          general: {
+            ...(saveGeneralBody?.item?.general || {}),
+            basemapProvider: 'maptiler',
+            maptilerApiKey: ''
+          }
+        })
+      });
+      assert.equal(invalidGeneral.status, 400);
+      const invalidGeneralBody = await invalidGeneral.json();
+      assert.match(String(invalidGeneralBody?.error || ''), /MapTiler API key/i);
     });
 
     await t.test('style override admin endpoints work and building-info returns region_slugs', async () => {

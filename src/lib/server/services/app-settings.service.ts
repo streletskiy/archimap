@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 
+const DEFAULT_BASEMAP_PROVIDER = 'carto';
+
 function createAppSettingsService(options: LooseRecord = {}) {
   const {
     db,
@@ -29,6 +31,13 @@ function createAppSettingsService(options: LooseRecord = {}) {
     return Boolean(fallback);
   }
 
+  function normalizeBasemapProvider(value, fallback = DEFAULT_BASEMAP_PROVIDER) {
+    const text = String(value ?? '').trim().toLowerCase();
+    if (text === 'maptiler') return 'maptiler';
+    if (text === 'carto') return 'carto';
+    return fallback;
+  }
+
   function normalizeSmtpShape(raw: LooseRecord = {}) {
     const url = String(raw.url || '').trim();
     const host = String(raw.host || '').trim();
@@ -47,12 +56,16 @@ function createAppSettingsService(options: LooseRecord = {}) {
     const registrationEnabled = normalizeBoolean(raw.registrationEnabled ?? raw.registration_enabled, true);
     const userEditRequiresPermission = normalizeBoolean(raw.userEditRequiresPermission ?? raw.user_edit_requires_permission, true);
     const metricsToken = String(raw.metricsToken || raw.metrics_token || '').trim();
+    const basemapProvider = normalizeBasemapProvider(raw.basemapProvider ?? raw.basemap_provider);
+    const maptilerApiKey = String(raw.maptilerApiKey || raw.maptiler_api_key || '').trim();
     return {
       appDisplayName,
       appBaseUrl,
       registrationEnabled,
       userEditRequiresPermission,
-      metricsToken
+      metricsToken,
+      basemapProvider,
+      maptilerApiKey
     };
   }
 
@@ -87,27 +100,35 @@ function createAppSettingsService(options: LooseRecord = {}) {
     if (generalSettingsSchema) return generalSettingsSchema;
 
     let hasMetricsToken: boolean;
+    let hasBasemapProvider: boolean;
+    let hasMaptilerApiKey: boolean;
     try {
       if (dbProvider === 'postgres') {
-        const row = await db.prepare(`
-          SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'app_general_settings'
-              AND column_name = 'metrics_token'
-          ) AS has_metrics_token
-        `).get();
-        hasMetricsToken = Boolean(row?.has_metrics_token || row?.hasMetricsToken);
+        const rows = await db.prepare(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'app_general_settings'
+            AND column_name IN ('metrics_token', 'basemap_provider', 'maptiler_api_key')
+        `).all();
+        const columnNames = new Set(rows.map((row) => String(row?.column_name || '').trim().toLowerCase()));
+        hasMetricsToken = columnNames.has('metrics_token');
+        hasBasemapProvider = columnNames.has('basemap_provider');
+        hasMaptilerApiKey = columnNames.has('maptiler_api_key');
       } else {
         const rows = await db.prepare('PRAGMA table_info(app_general_settings)').all();
-        hasMetricsToken = rows.some((row) => String(row?.name || '').trim().toLowerCase() === 'metrics_token');
+        const columnNames = new Set(rows.map((row) => String(row?.name || '').trim().toLowerCase()));
+        hasMetricsToken = columnNames.has('metrics_token');
+        hasBasemapProvider = columnNames.has('basemap_provider');
+        hasMaptilerApiKey = columnNames.has('maptiler_api_key');
       }
     } catch {
       hasMetricsToken = false;
+      hasBasemapProvider = false;
+      hasMaptilerApiKey = false;
     }
 
-    generalSettingsSchema = { hasMetricsToken };
+    generalSettingsSchema = { hasMetricsToken, hasBasemapProvider, hasMaptilerApiKey };
     return generalSettingsSchema;
   }
 
@@ -137,6 +158,8 @@ function createAppSettingsService(options: LooseRecord = {}) {
     try {
       const schema = await getGeneralSettingsSchema();
       const metricsTokenSelect = schema.hasMetricsToken ? 'metrics_token,' : 'NULL AS metrics_token,';
+      const basemapProviderSelect = schema.hasBasemapProvider ? 'basemap_provider,' : 'NULL AS basemap_provider,';
+      const maptilerApiKeySelect = schema.hasMaptilerApiKey ? 'maptiler_api_key,' : 'NULL AS maptiler_api_key,';
       return await db.prepare(`
         SELECT
           app_display_name,
@@ -144,6 +167,8 @@ function createAppSettingsService(options: LooseRecord = {}) {
           registration_enabled,
           user_edit_requires_permission,
           ${metricsTokenSelect}
+          ${basemapProviderSelect}
+          ${maptilerApiKeySelect}
           updated_by,
           updated_at
         FROM app_general_settings
@@ -200,7 +225,9 @@ function createAppSettingsService(options: LooseRecord = {}) {
         app_base_url: row.app_base_url,
         registration_enabled: Number(row.registration_enabled || 0) > 0,
         user_edit_requires_permission: Number(row.user_edit_requires_permission || 0) > 0,
-        metrics_token: row.metrics_token
+        metrics_token: row.metrics_token,
+        basemap_provider: row.basemap_provider,
+        maptiler_api_key: row.maptiler_api_key
       })
       : null;
 
@@ -264,7 +291,9 @@ function createAppSettingsService(options: LooseRecord = {}) {
         appBaseUrl: effective.config.appBaseUrl,
         registrationEnabled: effective.config.registrationEnabled,
         userEditRequiresPermission: effective.config.userEditRequiresPermission,
-        metricsToken: effective.config.metricsToken
+        metricsToken: effective.config.metricsToken,
+        basemapProvider: effective.config.basemapProvider,
+        maptilerApiKey: effective.config.maptilerApiKey
       },
       updatedBy: effective.updatedBy,
       updatedAt: effective.updatedAt
@@ -344,68 +373,72 @@ function createAppSettingsService(options: LooseRecord = {}) {
   async function saveGeneralSettings(input: LooseRecord = {}, actor = null) {
     const next = normalizeGeneralShape(input);
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
+    if (next.basemapProvider === 'maptiler' && !next.maptilerApiKey) {
+      const error = new Error('MapTiler API key is required when MapTiler basemap is enabled');
+      error.status = 400;
+      throw error;
+    }
     let metricsTokenToSave = next.metricsToken;
     if (!metricsTokenToSave) {
       metricsTokenToSave = crypto.randomBytes(32).toString('hex');
     }
     const schema = await getGeneralSettingsSchema();
 
+    const insertColumns = [
+      'id',
+      'app_display_name',
+      'app_base_url',
+      'registration_enabled',
+      'user_edit_requires_permission'
+    ];
+    const insertValues = ['1', '?', '?', '?', '?'];
+    const updateClauses = [
+      'app_display_name = excluded.app_display_name',
+      'app_base_url = excluded.app_base_url',
+      'registration_enabled = excluded.registration_enabled',
+      'user_edit_requires_permission = excluded.user_edit_requires_permission'
+    ];
+    const params = [
+      next.appDisplayName,
+      next.appBaseUrl || null,
+      next.registrationEnabled ? 1 : 0,
+      next.userEditRequiresPermission ? 1 : 0
+    ];
+
     if (schema.hasMetricsToken) {
-      await db.prepare(`
-        INSERT INTO app_general_settings (
-          id,
-          app_display_name,
-          app_base_url,
-          registration_enabled,
-          user_edit_requires_permission,
-          metrics_token,
-          updated_by,
-          updated_at
-        )
-        VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          app_display_name = excluded.app_display_name,
-          app_base_url = excluded.app_base_url,
-          registration_enabled = excluded.registration_enabled,
-          user_edit_requires_permission = excluded.user_edit_requires_permission,
-          metrics_token = excluded.metrics_token,
-          updated_by = excluded.updated_by,
-          updated_at = datetime('now')
-      `).run(
-        next.appDisplayName,
-        next.appBaseUrl || null,
-        next.registrationEnabled ? 1 : 0,
-        next.userEditRequiresPermission ? 1 : 0,
-        metricsTokenToSave || null,
-        updatedBy
-      );
-    } else {
-      await db.prepare(`
-        INSERT INTO app_general_settings (
-          id,
-          app_display_name,
-          app_base_url,
-          registration_enabled,
-          user_edit_requires_permission,
-          updated_by,
-          updated_at
-        )
-        VALUES (1, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          app_display_name = excluded.app_display_name,
-          app_base_url = excluded.app_base_url,
-          registration_enabled = excluded.registration_enabled,
-          user_edit_requires_permission = excluded.user_edit_requires_permission,
-          updated_by = excluded.updated_by,
-          updated_at = datetime('now')
-      `).run(
-        next.appDisplayName,
-        next.appBaseUrl || null,
-        next.registrationEnabled ? 1 : 0,
-        next.userEditRequiresPermission ? 1 : 0,
-        updatedBy
-      );
+      insertColumns.push('metrics_token');
+      insertValues.push('?');
+      updateClauses.push('metrics_token = excluded.metrics_token');
+      params.push(metricsTokenToSave || null);
     }
+
+    if (schema.hasBasemapProvider) {
+      insertColumns.push('basemap_provider');
+      insertValues.push('?');
+      updateClauses.push('basemap_provider = excluded.basemap_provider');
+      params.push(next.basemapProvider);
+    }
+
+    if (schema.hasMaptilerApiKey) {
+      insertColumns.push('maptiler_api_key');
+      insertValues.push('?');
+      updateClauses.push('maptiler_api_key = excluded.maptiler_api_key');
+      params.push(next.maptilerApiKey || null);
+    }
+
+    insertColumns.push('updated_by', 'updated_at');
+    insertValues.push('?', "datetime('now')");
+    updateClauses.push('updated_by = excluded.updated_by', "updated_at = datetime('now')");
+    params.push(updatedBy);
+
+    await db.prepare(`
+      INSERT INTO app_general_settings (
+        ${insertColumns.join(',\n          ')}
+      )
+      VALUES (${insertValues.join(', ')})
+      ON CONFLICT(id) DO UPDATE SET
+        ${updateClauses.join(',\n        ')}
+    `).run(...params);
 
     return getGeneralSettingsForAdmin();
   }

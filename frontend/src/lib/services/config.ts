@@ -1,6 +1,7 @@
 const FALLBACK_CONFIG = Object.freeze({
   mapDefault: { lon: 44.0059, lat: 56.3269, zoom: 15 },
   buildingRegionsPmtiles: [],
+  basemap: { provider: 'carto', maptilerApiKey: '' },
   mapSelection: { debug: false }
 });
 
@@ -38,6 +39,20 @@ function normalizeRegionPmtiles(item) {
   };
 }
 
+function normalizeBasemapConfig(value) {
+  const provider = String(value?.provider || '').trim().toLowerCase() === 'maptiler'
+    ? 'maptiler'
+    : 'carto';
+  const maptilerApiKey = String(value?.maptilerApiKey || '').trim();
+  if (provider === 'maptiler' && !maptilerApiKey) {
+    return { ...FALLBACK_CONFIG.basemap };
+  }
+  return {
+    provider,
+    maptilerApiKey
+  };
+}
+
 export function getRuntimeConfig() {
   const fromWindow = globalThis?.window?.__ARCHIMAP_CONFIG;
   if (!fromWindow || typeof fromWindow !== 'object') {
@@ -52,6 +67,7 @@ export function getRuntimeConfig() {
     buildingRegionsPmtiles: Array.isArray(fromWindow?.buildingRegionsPmtiles)
       ? fromWindow.buildingRegionsPmtiles.map(normalizeRegionPmtiles).filter(Boolean)
       : FALLBACK_CONFIG.buildingRegionsPmtiles,
+    basemap: normalizeBasemapConfig(fromWindow?.basemap),
     mapSelection: {
       debug: Boolean(fromWindow?.mapSelection?.debug ?? FALLBACK_CONFIG.mapSelection.debug)
     }

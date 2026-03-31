@@ -46,6 +46,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     normalizeMapConfig: () => runtime.normalizeMapConfig(),
     getBuildInfo: runtime.getBuildInfo,
     getAppVersion: runtime.getAppVersion,
+    loadEffectiveGeneralConfig: () => runtime.appSettingsService.getEffectiveGeneralConfig(),
     registrationEnabled: runtime.config.registrationEnabled,
     getRegistrationEnabled: runtime.getRegistrationEnabled,
     dataSettingsService: runtime.dataSettingsService,

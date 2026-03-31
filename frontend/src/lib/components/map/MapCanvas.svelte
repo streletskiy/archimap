@@ -40,8 +40,8 @@
     getBuildingHoverThemePaint,
     getBuildingThemePaint,
     getCurrentTheme,
-    getMapStyleForTheme,
-    LIGHT_MAP_STYLE_URL,
+    getMapStyleSignature,
+    resolveMapStyleForTheme,
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
   import {
@@ -56,7 +56,7 @@
     scheduleOverpassViewportRefresh
   } from '$lib/services/map/overpass-buildings';
   import { loadMapRuntime } from '$lib/services/map-runtime';
-  import { t, translateNow } from '$lib/i18n/index';
+  import { locale, t, translateNow } from '$lib/i18n/index';
   import {
     lastMapCamera,
     mapFocusRequest,
@@ -94,11 +94,12 @@
   let lastSearchFitSeq;
   let searchFitSeqInitialized = false;
   let lastMapFocusRequestId;
-  let currentMapStyleUrl = LIGHT_MAP_STYLE_URL;
+  let currentMapStyleSignature = '';
   let runtimeConfig = null;
   let styleTransitionOverlaySrc = null;
   let styleTransitionOverlayVisible = false;
   let styleTransitionTimer = null;
+  let mapStyleRequestSeq = 0;
   let stopBuildingFilterLayers = null;
   let currentBuildingFilterLayers = [];
   let filterStatusOverlayText;
@@ -545,14 +546,28 @@
     map.once('idle', tryRestore);
   }
 
-  function applyThemeToMap(theme) {
-    if (!map) return;
-    const nextStyle = getMapStyleForTheme(theme);
-    if (nextStyle === currentMapStyleUrl) return;
+  async function applyThemeToMap(theme) {
+    if (!map || !runtimeConfig) return;
+    const nextStyleSignature = getMapStyleSignature(theme, runtimeConfig, get(locale));
+    if (nextStyleSignature === currentMapStyleSignature) return;
+
+    const requestSeq = ++mapStyleRequestSeq;
     captureStyleTransitionOverlay();
-    currentMapStyleUrl = nextStyle;
-    map.setStyle(nextStyle);
-    restoreCustomLayersAfterStyleChange();
+
+    try {
+      const nextStyle = await resolveMapStyleForTheme(theme, {
+        runtimeConfig,
+        localeCode: get(locale)
+      });
+      if (!map || requestSeq !== mapStyleRequestSeq) return;
+      currentMapStyleSignature = nextStyleSignature;
+      map.setStyle(nextStyle);
+      restoreCustomLayersAfterStyleChange();
+    } catch {
+      if (requestSeq === mapStyleRequestSeq) {
+        clearStyleTransitionOverlaySoon();
+      }
+    }
   }
 
   $: {
@@ -629,7 +644,13 @@
       runtimeConfig = config;
       protocol = new ProtocolCtor();
       maplibregl.addProtocol('pmtiles', protocol.tile);
-      currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
+      const currentTheme = getCurrentTheme();
+      currentMapStyleSignature = getMapStyleSignature(currentTheme, config, get(locale));
+      const initialStyle = await resolveMapStyleForTheme(currentTheme, {
+        runtimeConfig: config,
+        localeCode: get(locale)
+      });
+      if (!mountAlive) return;
       const initialCamera = resolveInitialMapCamera({
         url: window.location.href,
         persistedCamera: get(lastMapCamera),
@@ -651,7 +672,7 @@
 
       map = new maplibregl.Map({
         container,
-        style: currentMapStyleUrl,
+        style: initialStyle,
         center: [initialCamera.lng, initialCamera.lat],
         zoom: Number(initialCamera.z),
         attributionControl: false
@@ -707,19 +728,36 @@
       });
 
       themeObserver = new MutationObserver(() => {
-        applyThemeToMap(getCurrentTheme());
+        void applyThemeToMap(getCurrentTheme());
       });
       themeObserver.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['data-theme']
       });
+      const unsubscribeLocale = locale.subscribe(() => {
+        void applyThemeToMap(getCurrentTheme());
+      });
+
+      return () => {
+        unsubscribeLocale();
+      };
     }
 
-    initMap().catch(() => {
-      // Keep empty fallback state if map runtime cannot initialize.
-    });
+    let cleanupLocaleSubscription = null;
+
+    initMap()
+      .then((cleanup) => {
+        cleanupLocaleSubscription = typeof cleanup === 'function' ? cleanup : null;
+      })
+      .catch(() => {
+        cleanupLocaleSubscription = null;
+      });
 
     return () => {
+      if (cleanupLocaleSubscription) {
+        cleanupLocaleSubscription();
+        cleanupLocaleSubscription = null;
+      }
       mountAlive = false;
     };
   });

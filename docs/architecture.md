@@ -75,7 +75,9 @@
 - Frontend map canvas decomposition:
   - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
   - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, buffered hover/click hit-testing for pmtiles buildings, and search-result click routing
-  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, carto fallback visibility, and base-label stacking
+  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, provider-aware basemap building visibility, and base-label stacking
+  - `frontend/src/lib/services/map/map-theme-utils.ts`: basemap style resolution for CARTO/MapTiler, MapTiler POI/ferry/3D-building suppression, and locale-aware label transformation before styles reach MapLibre
+  - `frontend/src/lib/services/map/map-style-sync.ts`: shared theme/locale-driven basemap style synchronization used by secondary map widgets outside the main canvas
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.
 - Shared utilities: `src/lib/shared/**`, including `src/lib/shared/types/**` for cross-cutting domain contracts shared by backend and frontend (`Region`, `FilterPreset`, `BuildingEdit`, `SyncCandidate`, and related admin payloads).

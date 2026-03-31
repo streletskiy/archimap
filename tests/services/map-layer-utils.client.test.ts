@@ -155,6 +155,19 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').layout.visibility, 'none');
 });
 
+test('getBasemapBuildingLayerIds resolves provider-specific base building layers', async () => {
+  const {
+    getBasemapBuildingLayerIds,
+    getBasemapSuppressedLayerIds
+  } = await loadMapLayerUtils();
+
+  assert.deepEqual(getBasemapBuildingLayerIds('carto'), ['building', 'building-top']);
+  assert.deepEqual(getBasemapBuildingLayerIds('maptiler'), ['Building']);
+  assert.deepEqual(getBasemapBuildingLayerIds('unknown'), ['building', 'building-top']);
+  assert.deepEqual(getBasemapSuppressedLayerIds('carto'), []);
+  assert.deepEqual(getBasemapSuppressedLayerIds('maptiler'), ['Building 3D']);
+});
+
 test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as pmtiles layers', async () => {
   const { ensureOverpassBuildingSourceAndLayers } = await loadMapLayerUtils();
   const map = createMapStub();
@@ -302,6 +315,7 @@ test('applyLabelLayerVisibility hides symbol layers even when style is not repor
   const { applyLabelLayerVisibility } = await loadMapLayerUtils();
   const map = createMapStub({ styleLoaded: false });
   map.addLayer({ id: 'waterway_label', type: 'symbol', layout: { visibility: 'visible' } });
+  map.addLayer({ id: 'Food', type: 'symbol', 'source-layer': 'poi', layout: { visibility: 'none' } });
   map.addLayer({ id: 'landcover', type: 'fill', layout: { visibility: 'visible' } });
   map.addLayer({ id: 'search-results-points-layer', type: 'symbol', layout: { visibility: 'visible' } });
 
@@ -311,8 +325,51 @@ test('applyLabelLayerVisibility hides symbol layers even when style is not repor
     { layerId: 'waterway_label', name: 'visibility', value: 'none' }
   ]);
   assert.equal(map.layers.get('waterway_label').layout.visibility, 'none');
+  assert.equal(map.layers.get('Food').layout.visibility, 'none');
   assert.equal(map.layers.get('landcover').layout.visibility, 'visible');
   assert.equal(map.layers.get('search-results-points-layer').layout.visibility, 'visible');
+});
+
+test('applyLabelLayerVisibility does not force hidden MapTiler POI layers visible again', async () => {
+  const { applyLabelLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub();
+  map.addLayer({ id: 'Food', type: 'symbol', 'source-layer': 'poi', layout: { visibility: 'none' } });
+  map.addLayer({ id: 'Road labels', type: 'symbol', 'source-layer': 'transportation_name', layout: { visibility: 'none' } });
+
+  applyLabelLayerVisibility(map, true);
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'Road labels', name: 'visibility', value: 'visible' }
+  ]);
+  assert.equal(map.layers.get('Food').layout.visibility, 'none');
+  assert.equal(map.layers.get('Road labels').layout.visibility, 'visible');
+});
+
+test('applyLabelLayerVisibility does not force hidden ferry labels visible again', async () => {
+  const { applyLabelLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub();
+  map.addLayer({
+    id: 'Ferry',
+    type: 'symbol',
+    'source-layer': 'transportation_name',
+    filter: ['==', 'class', 'ferry'],
+    layout: { visibility: 'none' }
+  });
+  map.addLayer({
+    id: 'Road labels',
+    type: 'symbol',
+    'source-layer': 'transportation_name',
+    filter: ['all', ['!in', 'class', 'ferry', 'service']],
+    layout: { visibility: 'none' }
+  });
+
+  applyLabelLayerVisibility(map, true);
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'Road labels', name: 'visibility', value: 'visible' }
+  ]);
+  assert.equal(map.layers.get('Ferry').layout.visibility, 'none');
+  assert.equal(map.layers.get('Road labels').layout.visibility, 'visible');
 });
 
 test('bringBaseLabelLayersAboveCustomLayers keeps labels above building layers but below search results', async () => {

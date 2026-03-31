@@ -10,6 +10,7 @@ const envSchema = z.object({
     [
       'https://tiles.basemaps.cartocdn.com',
       'https://*.basemaps.cartocdn.com',
+      'https://api.maptiler.com',
       'https://overpass-api.de',
       'https://lz4.overpass-api.de',
       'https://z.overpass-api.de',

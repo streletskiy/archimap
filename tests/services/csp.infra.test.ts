@@ -70,6 +70,7 @@ test('parseRuntimeEnv defaults CSP connect origins for carto and overpass fallba
     const connectOrigins = new Set(parseDelimitedValues(runtimeEnv.cspConnectSrcExtra));
 
     assert.ok(connectOrigins.has('https://tiles.basemaps.cartocdn.com'));
+    assert.ok(connectOrigins.has('https://api.maptiler.com'));
     assert.ok(connectOrigins.has('https://overpass-api.de'));
     assert.ok(connectOrigins.has('https://overpass.kumi.systems'));
   } finally {
@@ -105,6 +106,7 @@ test('frontend hook CSP allows browser Overpass requests by default', async () =
     const connectSrc = parseCspDirectiveSources(csp, 'connect-src');
     assert.ok(connectSrc.size > 0);
     assert.ok(connectSrc.has('https://tiles.basemaps.cartocdn.com'));
+    assert.ok(connectSrc.has('https://api.maptiler.com'));
     assert.ok(connectSrc.has('https://overpass-api.de'));
     assert.ok(connectSrc.has('https://maps.mail.ru'));
     assert.equal(/\bscript-src\s[^;]*unsafe-inline/.test(csp), false);

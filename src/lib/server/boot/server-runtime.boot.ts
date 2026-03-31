@@ -157,7 +157,9 @@ class ServerRuntime {
         appDisplayName: this.config.appDisplayName,
         appBaseUrl: this.config.appBaseUrl,
         registrationEnabled: this.config.registrationEnabled,
-        userEditRequiresPermission: this.config.userEditRequiresPermission
+        userEditRequiresPermission: this.config.userEditRequiresPermission,
+        basemapProvider: 'carto',
+        maptilerApiKey: ''
       },
       fallbackSmtp: {
         url: this.config.smtpUrl,
@@ -194,6 +196,8 @@ class ServerRuntime {
         appBaseUrl: this.config.appBaseUrl,
         registrationEnabled: this.config.registrationEnabled,
         userEditRequiresPermission: this.config.userEditRequiresPermission,
+        basemapProvider: 'carto',
+        maptilerApiKey: '',
         smtpUrl: this.config.smtpUrl,
         smtpHost: this.config.smtpHost,
         smtpPort: this.config.smtpPort,

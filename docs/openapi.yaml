@@ -658,9 +658,16 @@ paths:
                       type: boolean
                     userEditRequiresPermission:
                       type: boolean
+                    basemapProvider:
+                      type: string
+                      enum: [carto, maptiler]
+                    maptilerApiKey:
+                      type: string
       responses:
         '200':
           description: Saved
+        '400':
+          description: Invalid general settings payload
         '401':
           description: Unauthorized
         '403':
@@ -767,7 +774,7 @@ paths:
       summary: Get runtime JS config payload
       responses:
         '200':
-          description: window.__ARCHIMAP_CONFIG bootstrap payload
+          description: window.__ARCHIMAP_CONFIG bootstrap payload, including `basemap` runtime settings and available region PMTiles metadata
   /api/filter-presets:
     get:
       summary: Get public runtime filter presets

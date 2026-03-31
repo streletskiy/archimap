@@ -33,6 +33,13 @@ function createTestDb() {
   return db;
 }
 
+function enableBasemapColumns(db) {
+  db.exec(`
+    ALTER TABLE app_general_settings ADD COLUMN basemap_provider TEXT NOT NULL DEFAULT 'carto';
+    ALTER TABLE app_general_settings ADD COLUMN maptiler_api_key TEXT;
+  `);
+}
+
 test('buildSmtpConfigFromInput keeps existing password when pass is empty and keepPassword=true', async () => {
   const db = createTestDb();
   const service = createAppSettingsService({
@@ -155,4 +162,60 @@ test('saveGeneralSettings updates legacy schema without metrics_token', async ()
   assert.equal(row.user_edit_requires_permission, 1);
   assert.equal(row.updated_by, 'admin@example.com');
   assert.equal(settings.general.metricsToken, '');
+});
+
+test('saveGeneralSettings persists basemap provider and maptiler api key when schema supports it', async () => {
+  const db = createTestDb();
+  enableBasemapColumns(db);
+  db.exec('ALTER TABLE app_general_settings ADD COLUMN metrics_token TEXT;');
+  const service = createAppSettingsService({
+    db,
+    settingsSecret: 'test-secret',
+    fallbackGeneral: {}
+  });
+
+  const settings = await service.saveGeneralSettings({
+    appDisplayName: 'basemap-test',
+    appBaseUrl: 'https://example.com',
+    registrationEnabled: true,
+    userEditRequiresPermission: false,
+    basemapProvider: 'maptiler',
+    maptilerApiKey: 'test-maptiler-key'
+  }, 'admin@example.com');
+
+  const row = db.prepare(`
+    SELECT
+      basemap_provider,
+      maptiler_api_key
+    FROM app_general_settings
+    WHERE id = 1
+  `).get();
+
+  assert.equal(row.basemap_provider, 'maptiler');
+  assert.equal(row.maptiler_api_key, 'test-maptiler-key');
+  assert.equal(settings.general.basemapProvider, 'maptiler');
+  assert.equal(settings.general.maptilerApiKey, 'test-maptiler-key');
+});
+
+test('saveGeneralSettings rejects maptiler provider without api key', async () => {
+  const db = createTestDb();
+  enableBasemapColumns(db);
+  const service = createAppSettingsService({
+    db,
+    settingsSecret: 'test-secret',
+    fallbackGeneral: {}
+  });
+
+  await assert.rejects(
+    () => service.saveGeneralSettings({
+      appDisplayName: 'invalid-maptiler',
+      basemapProvider: 'maptiler',
+      maptilerApiKey: ''
+    }, 'admin@example.com'),
+    (error) => {
+      assert.equal(error?.status, 400);
+      assert.match(String(error?.message || ''), /MapTiler API key/i);
+      return true;
+    }
+  );
 });

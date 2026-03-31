@@ -48,7 +48,7 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 - `SESSION_COOKIE_SECURE`
 - `SESSION_ALLOW_MEMORY_FALLBACK`
 - `APP_SETTINGS_SECRET`
-- `CSP_CONNECT_SRC_EXTRA` - defaults to CARTO tile hosts plus the public Overpass origins used by the browser fallback
+- `CSP_CONNECT_SRC_EXTRA` - defaults to CARTO tile hosts, `api.maptiler.com`, and the public Overpass origins used by the browser fallback
 
 ## Observability and app identity
 
@@ -61,6 +61,11 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 - Runtime OSM region settings live in `Admin -> Data`.
 - Each enabled region stores its extract query, schedule, PMTiles zooms/layer, bounds, sync status, and run history in the application DB.
 - The map runtime receives regional PMTiles metadata only through `/app-config.js`.
+
+## DB-backed general settings
+
+- `Admin -> Settings` stores runtime general settings in DB.
+- Basemap selection (`carto|maptiler`) and the public `MapTiler` browser key are delivered to clients only through `/app-config.js`.
 
 ## Region defaults
 

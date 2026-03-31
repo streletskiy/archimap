@@ -57,6 +57,7 @@ const NODE_ENV = String(process.env.NODE_ENV || 'development');
 const DEFAULT_CSP_CONNECT_SRC_EXTRA = [
   'https://tiles.basemaps.cartocdn.com',
   'https://*.basemaps.cartocdn.com',
+  'https://api.maptiler.com',
   'https://overpass-api.de',
   'https://lz4.overpass-api.de',
   'https://z.overpass-api.de',

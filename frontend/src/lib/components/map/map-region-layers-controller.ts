@@ -1,9 +1,10 @@
 import {
   bringBaseLabelLayersAboveCustomLayers,
   bringSearchResultsLayersToFront,
-  CARTO_BUILDING_LAYER_IDS,
   ensureRegionBuildingSourceAndLayers,
   ensureSearchResultsSourceAndLayers,
+  getBasemapBuildingLayerIds,
+  getBasemapSuppressedLayerIds,
   getCurrentBuildingSourceConfigs,
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
@@ -45,6 +46,9 @@ type RegionLike = {
 
 type RuntimeConfigLike = {
   buildingRegionsPmtiles?: RegionLike[];
+  basemap?: {
+    provider?: string;
+  };
 };
 
 type MapRegionLayersControllerOptions = {
@@ -90,7 +94,7 @@ export function createMapRegionLayersController({
 }: MapRegionLayersControllerOptions = {}) {
   let activeRegionPmtiles: RegionLike[] = [];
   let coverageDebounceTimer = null;
-  let cartoShowTimer = null;
+  let basemapShowTimer = null;
   let coverageEvalToken = 0;
   let coverageVisibleState = 'visible';
 
@@ -203,32 +207,43 @@ export function createMapRegionLayersController({
     return getActiveRegionPmtiles(getConfiguredRegionPmtiles(config), map.getBounds());
   }
 
-  function setCartoBuildingsVisibility(nextVisibility) {
+  function getBasemapProvider() {
+    return String(getRuntimeConfig?.()?.basemap?.provider || '').trim().toLowerCase() === 'maptiler'
+      ? 'maptiler'
+      : 'carto';
+  }
+
+  function setBasemapBuildingsVisibility(nextVisibility) {
     const map = getMap?.();
     if (!map || !map.isStyleLoaded()) return;
+    const basemapProvider = getBasemapProvider();
+    for (const layerId of getBasemapSuppressedLayerIds(basemapProvider)) {
+      if (!map.getLayer(layerId)) continue;
+      map.setLayoutProperty(layerId, 'visibility', 'none');
+    }
     if (coverageVisibleState === nextVisibility) return;
-    for (const layerId of CARTO_BUILDING_LAYER_IDS) {
+    for (const layerId of getBasemapBuildingLayerIds(basemapProvider)) {
       if (!map.getLayer(layerId)) continue;
       map.setLayoutProperty(layerId, 'visibility', nextVisibility);
     }
     coverageVisibleState = nextVisibility;
   }
 
-  function queueCartoBuildingsVisibility(nextVisibility) {
+  function queueBasemapBuildingsVisibility(nextVisibility) {
     if (nextVisibility === 'none') {
-      if (cartoShowTimer) {
-        clearTimeout(cartoShowTimer);
-        cartoShowTimer = null;
+      if (basemapShowTimer) {
+        clearTimeout(basemapShowTimer);
+        basemapShowTimer = null;
       }
-      setCartoBuildingsVisibility('none');
+      setBasemapBuildingsVisibility('none');
       return;
     }
-    if (cartoShowTimer) {
-      clearTimeout(cartoShowTimer);
+    if (basemapShowTimer) {
+      clearTimeout(basemapShowTimer);
     }
-    cartoShowTimer = setTimeout(() => {
-      cartoShowTimer = null;
-      setCartoBuildingsVisibility('visible');
+    basemapShowTimer = setTimeout(() => {
+      basemapShowTimer = null;
+      setBasemapBuildingsVisibility('visible');
     }, CARTO_SHOW_DELAY_MS);
   }
 
@@ -271,7 +286,7 @@ export function createMapRegionLayersController({
       ? activeRegionPmtiles
       : getViewportActiveRegionPmtiles(runtimeConfig);
     if (regions.length === 0) {
-      queueCartoBuildingsVisibility('visible');
+      queueBasemapBuildingsVisibility('visible');
       return;
     }
     const points = getViewportSamplePoints();
@@ -280,11 +295,11 @@ export function createMapRegionLayersController({
       if (token !== coverageEvalToken) return;
       const covered = regions.some((region) => pointInBounds(lon, lat, region.bounds));
       if (!covered) {
-        queueCartoBuildingsVisibility('visible');
+        queueBasemapBuildingsVisibility('visible');
         return;
       }
     }
-    queueCartoBuildingsVisibility('none');
+    queueBasemapBuildingsVisibility('none');
   }
 
   function scheduleCoverageCheck() {
@@ -374,9 +389,9 @@ export function createMapRegionLayersController({
       clearTimeout(coverageDebounceTimer);
       coverageDebounceTimer = null;
     }
-    if (cartoShowTimer) {
-      clearTimeout(cartoShowTimer);
-      cartoShowTimer = null;
+    if (basemapShowTimer) {
+      clearTimeout(basemapShowTimer);
+      basemapShowTimer = null;
     }
     activeRegionPmtiles = [];
     coverageEvalToken = 0;

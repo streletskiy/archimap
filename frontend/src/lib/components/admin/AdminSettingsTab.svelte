@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  import { UiButton, UiCheckbox, UiInput } from '$lib/components/base';
+  import { UiButton, UiCheckbox, UiInput, UiSelect } from '$lib/components/base';
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
 
@@ -14,10 +14,13 @@
     appBaseUrl: '',
     registrationEnabled: true,
     userEditRequiresPermission: true,
-    metricsToken: ''
+    metricsToken: '',
+    basemapProvider: 'carto',
+    maptilerApiKey: ''
   };
   let generalLoading = false;
   let generalStatus = '';
+  let basemapProviderItems = [];
 
   let smtp = {
     url: '',
@@ -50,6 +53,10 @@
 
   async function saveGeneral(event) {
     event.preventDefault();
+    if (general.basemapProvider === 'maptiler' && String(general.maptilerApiKey || '').trim() === '') {
+      generalStatus = translateNow('admin.settings.maptilerApiKeyRequired');
+      return;
+    }
     generalLoading = true;
     generalStatus = translateNow('admin.settings.saving');
 
@@ -60,6 +67,13 @@
         body: JSON.stringify({ general })
       });
       general = data?.item?.general || general;
+      if (typeof window !== 'undefined') {
+        window.__ARCHIMAP_CONFIG = window.__ARCHIMAP_CONFIG || {};
+        window.__ARCHIMAP_CONFIG.basemap = {
+          provider: general.basemapProvider,
+          maptilerApiKey: general.maptilerApiKey
+        };
+      }
       generalStatus = translateNow('admin.settings.saved');
     } catch (error) {
       generalStatus = msg(error, translateNow('admin.settings.saveGeneralFailed'));
@@ -67,6 +81,17 @@
       generalLoading = false;
     }
   }
+
+  $: basemapProviderItems = [
+    {
+      value: 'carto',
+      label: $t('admin.settings.basemapProviderCarto')
+    },
+    {
+      value: 'maptiler',
+      label: $t('admin.settings.basemapProviderMaptiler')
+    }
+  ];
 
   async function loadSmtp() {
     smtpLoading = true;
@@ -157,6 +182,24 @@
         ><UiCheckbox bind:checked={general.userEditRequiresPermission} />
         {$t('admin.settings.editRequiresPermission')}</label
       >
+      <div class="space-y-1">
+        <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.basemapTitle')}</div>
+        <UiSelect
+          items={basemapProviderItems}
+          bind:value={general.basemapProvider}
+          placeholder={$t('admin.settings.basemapTitle')}
+        />
+      </div>
+      <div class="space-y-1">
+        <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.maptilerApiKey')}</div>
+        <UiInput
+          type="password"
+          bind:value={general.maptilerApiKey}
+          placeholder={$t('admin.settings.maptilerApiKeyPlaceholder')}
+          disabled={general.basemapProvider !== 'maptiler'}
+        />
+        <p class="text-xs ui-text-muted">{$t('admin.settings.basemapHelp')}</p>
+      </div>
       <div class="mt-2 text-sm text-gray-500">
         <div class="font-semibold text-gray-700">{$t('admin.settings.metricsToken')}:</div>
         <div class="flex items-center gap-2 mt-1">

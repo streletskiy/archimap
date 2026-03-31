@@ -14,8 +14,16 @@ import {
   SEARCH_RESULTS_LAYER_ID,
   SEARCH_RESULTS_SOURCE_ID
 } from './map-search-utils.js';
+import { hasPositiveStyleFilterMatch } from './map-style-filter-utils.js';
 
-export const CARTO_BUILDING_LAYER_IDS = Object.freeze(['building', 'building-top']);
+export const BASEMAP_BUILDING_LAYER_IDS = Object.freeze({
+  carto: Object.freeze(['building', 'building-top']),
+  maptiler: Object.freeze(['Building'])
+});
+export const BASEMAP_SUPPRESSED_LAYER_IDS = Object.freeze({
+  carto: Object.freeze([]),
+  maptiler: Object.freeze(['Building 3D'])
+});
 export const BUILDING_FEATURE_KIND = 'building';
 export const BUILDING_PART_FEATURE_KIND = 'building_part';
 export const OVERPASS_BUILDING_SOURCE_ID = 'overpass-buildings-source';
@@ -40,6 +48,20 @@ const OVERPASS_BUILDING_LAYER_SUFFIXES = Object.freeze({
   selectedFill: 'selected-fill',
   selectedLine: 'selected-line'
 });
+
+export function getBasemapBuildingLayerIds(provider = 'carto') {
+  const normalizedProvider = String(provider || '').trim().toLowerCase() === 'maptiler'
+    ? 'maptiler'
+    : 'carto';
+  return BASEMAP_BUILDING_LAYER_IDS[normalizedProvider];
+}
+
+export function getBasemapSuppressedLayerIds(provider = 'carto') {
+  const normalizedProvider = String(provider || '').trim().toLowerCase() === 'maptiler'
+    ? 'maptiler'
+    : 'carto';
+  return BASEMAP_SUPPRESSED_LAYER_IDS[normalizedProvider];
+}
 
 function buildOverpassBuildingLayerId(suffix = '') {
   const normalizedSuffix = String(suffix || '').trim();
@@ -294,6 +316,8 @@ export function bindMapInteractionHandlers({
 
 export function isBaseLabelLayer(layer) {
   if (!layer || layer.type !== 'symbol') return false;
+  if (String(layer?.['source-layer'] || '').trim().toLowerCase() === 'poi') return false;
+  if (hasPositiveStyleFilterMatch(layer?.filter, 'class', 'ferry')) return false;
   const id = String(layer.id || '').toLowerCase();
   if (id === SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID) return false;
   if (id.startsWith('search-results-')) return false;

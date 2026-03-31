@@ -17,6 +17,8 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     appBaseUrl = '',
     registrationEnabled = true,
     userEditRequiresPermission = true,
+    basemapProvider = 'carto',
+    maptilerApiKey = '',
     smtpUrl = '',
     smtpHost = '',
     smtpPort = 587,
@@ -34,7 +36,9 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     appDisplayName,
     appBaseUrl,
     registrationEnabled,
-    userEditRequiresPermission
+    userEditRequiresPermission,
+    basemapProvider,
+    maptilerApiKey
   };
   const smtpConfigFallback = {
     url: smtpUrl,
@@ -53,7 +57,11 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
       appDisplayName: String(config.appDisplayName || appDisplayName).trim() || appDisplayName,
       appBaseUrl: String(config.appBaseUrl || '').trim(),
       registrationEnabled: Boolean(config.registrationEnabled),
-      userEditRequiresPermission: Boolean(config.userEditRequiresPermission)
+      userEditRequiresPermission: Boolean(config.userEditRequiresPermission),
+      basemapProvider: String(config.basemapProvider || basemapProvider).trim().toLowerCase() === 'maptiler'
+        ? 'maptiler'
+        : 'carto',
+      maptilerApiKey: String(config.maptilerApiKey || '').trim()
     })
   });
 
