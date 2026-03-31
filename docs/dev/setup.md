@@ -5,7 +5,8 @@
 1. Install deps:
    - use Node.js 24 LTS
    - `npm ci`
-   - `npm --prefix frontend ci`
+   - `npm --prefix frontend ci --legacy-peer-deps`
+   - the frontend workspace currently needs `--legacy-peer-deps` because npm peer checks still reject the TypeScript 6 and SvelteKit combination
 2. Prepare env:
    - copy [`.env.example`](../../.env.example) -> `.env`
 3. Start dev runtime:

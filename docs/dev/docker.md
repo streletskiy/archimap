@@ -21,16 +21,21 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 3. `frontend-deps`
 
-- Installs frontend dependencies from `frontend/package-lock.json`.
+- Installs frontend dependencies from `frontend/package-lock.json` with `--legacy-peer-deps`.
 - Isolated from backend source changes.
 
-4. `frontend-build`
+4. `frontend-runtime-deps`
+
+- Starts from `frontend-deps` and prunes dev dependencies with `npm prune --omit=dev --legacy-peer-deps`.
+- Keeps the runtime image free of frontend dev dependencies while bypassing the current TypeScript 6 / SvelteKit peer mismatch.
+
+5. `frontend-build`
 
 - Generates version metadata and builds frontend bundle from committed frontend assets.
 - Installs the backend production dependency tree in the build-platform stage so `scripts/generate-version.ts` uses a matching native `esbuild` binary.
 - Does not reuse the runtime `deps` layer.
 
-5. `runtime`
+6. `runtime`
 
 - Uses pinned `node:24-bookworm-slim`.
 - Contains only runtime assets:

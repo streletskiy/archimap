@@ -25,7 +25,7 @@
     "test:smoke": "node --import tsx scripts/smoke-test.ts",
     "perf:smoke": "node --import tsx scripts/perf-smoke.ts",
     "analyze": "npm --prefix frontend run analyze",
-    "depcheck": "depcheck --ignores=\"@eslint/js,globals,eslint-config-prettier,eslint-plugin-svelte,svelte\"",
+    "depcheck": "depcheck --ignores=\"@eslint/js,globals,eslint-config-prettier,eslint-plugin-svelte,svelte,$shared\"",
     "dev": "npm run dev:full",
     "dev:server": "node --import tsx server.sveltekit.ts",
     "dev:full": "npm run frontend:build && node --import tsx server.sveltekit.ts",
@@ -74,14 +74,13 @@
     "@playwright/test": "^1.54.2",
     "@types/node": "^25.5.0",
     "depcheck": "^1.4.7",
-    "drizzle-kit": "1.0.0-beta.20",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-svelte": "^3.16.0",
     "globals": "^17.4.0",
     "prettier": "^3.5.3",
     "svelte": "^5.55.0",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2"
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.0"
   }
 }

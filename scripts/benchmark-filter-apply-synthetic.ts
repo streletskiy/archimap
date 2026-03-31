@@ -1,7 +1,7 @@
 /* global requestAnimationFrame, window */
 
 const path = require('path');
-const { chromium } = require('playwright');
+const { chromium } = require('@playwright/test');
 
 const VIEWPORT = { width: 1440, height: 900 };
 const CAMERA = {

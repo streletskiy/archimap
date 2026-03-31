@@ -1,6 +1,6 @@
 /* global document, location, window */
 
-const { chromium } = require('playwright');
+const { chromium } = require('@playwright/test');
 
 const TARGET_URL = process.env.BENCHMARK_URL
   || 'http://127.0.0.1:3252/?lat=55.753115&lng=37.629365&z=13.41&f=AgEPYnVpbGRpbmc6bGV2ZWxzBgKG76wBAAEBMQL94EcBAAEBMgL9unQCAAcBMwAIATUC-5I8AgAHATUACAE5AvhxcQIABwE5AAgCMTYCwIT8AQAHAjE2';

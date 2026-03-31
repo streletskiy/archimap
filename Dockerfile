@@ -42,12 +42,12 @@ WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-  npm ci
+  npm ci --legacy-peer-deps
 
 FROM --platform=$BUILDPLATFORM frontend-deps AS frontend-runtime-deps
 
 WORKDIR /app/frontend
-RUN npm prune --omit=dev
+RUN npm prune --omit=dev --legacy-peer-deps
 
 FROM --platform=$BUILDPLATFORM frontend-deps AS frontend-build
 
