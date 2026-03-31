@@ -6,7 +6,18 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3252),
   SESSION_SECRET: z.string().min(1).default('dev-secret-change-me'),
   APP_BASE_URL: z.string().default(''),
-  CSP_CONNECT_SRC_EXTRA: z.string().default('https://tiles.basemaps.cartocdn.com,https://*.basemaps.cartocdn.com'),
+  CSP_CONNECT_SRC_EXTRA: z.string().default(
+    [
+      'https://tiles.basemaps.cartocdn.com',
+      'https://*.basemaps.cartocdn.com',
+      'https://overpass-api.de',
+      'https://lz4.overpass-api.de',
+      'https://z.overpass-api.de',
+      'https://maps.mail.ru',
+      'https://overpass.openstreetmap.fr',
+      'https://overpass.kumi.systems'
+    ].join(',')
+  ),
   DB_PROVIDER: z.string().default(''),
   DATABASE_URL: z.string().default(''),
   SQLITE_URL: z.string().default('')

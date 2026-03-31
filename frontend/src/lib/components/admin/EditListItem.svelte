@@ -5,7 +5,8 @@
     getChangeCounters,
     getDisplayEditStatusMeta,
     getEditAddress,
-    getSyncBadgeMeta
+    getSyncBadgeMeta,
+    isOverpassBackedEdit
   } from '$lib/utils/edit-ui';
 
   import { UiCheckbox, UiTableCell, UiTableRow } from '$lib/components/base';
@@ -20,9 +21,12 @@
   export let selectionBusy = false;
   export let showSelection = false;
 
+  let overpassBacked;
+
   $: statusMeta = getDisplayEditStatusMeta(edit, translateNow, 'admin.edits');
   $: counters = getChangeCounters(edit?.changes);
   $: syncMeta = getSyncBadgeMeta(edit?.syncStatus, translateNow, 'admin.edits');
+  $: overpassBacked = isOverpassBackedEdit(edit);
   $: showIssueBadges = Boolean(edit?.orphaned || (!edit?.osmPresent && !edit?.orphaned) || edit?.sourceOsmChanged);
 </script>
 
@@ -85,8 +89,11 @@
             <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">
               {$t('admin.edits.orphaned')}
             </span>
-          {/if}
-          {#if !edit.osmPresent && !edit.orphaned}
+          {:else if overpassBacked}
+            <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">
+              {$t('admin.edits.overpassSource')}
+            </span>
+          {:else if !edit.osmPresent && !edit.orphaned}
             <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">
               {$t('admin.edits.missingTarget')}
             </span>

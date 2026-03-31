@@ -207,7 +207,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   async function getOsmContourRow(osmType, osmId) {
     return await db.prepare(`
-      SELECT osm_type, osm_id, tags_json, updated_at
+      SELECT osm_type, osm_id, tags_json, geometry_json, updated_at
       FROM osm.building_contours
       WHERE osm_type = ? AND osm_id = ?
       LIMIT 1
@@ -443,6 +443,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       status,
       syncStatus,
       syncReadOnly,
+      hasSourceSnapshot: Boolean(row?.source_geometry_json != null),
       osmPresent,
       orphaned,
       hasMergedLocal,
@@ -484,6 +485,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       mergedBy: row.merged_by ?? null,
       mergedAt: row.merged_at ?? null,
       sourceOsmVersion: row.source_osm_version ?? null,
+      hasSourceSnapshot: runtimeState.hasSourceSnapshot,
       osmPresent: runtimeState.osmPresent,
       orphaned: runtimeState.orphaned,
       hasMergedLocal: runtimeState.hasMergedLocal,

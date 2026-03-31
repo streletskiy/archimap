@@ -24,16 +24,19 @@
   - `data/archimap.db` (main app DB)
   - `data/osm.db` (OSM contours/search source)
   - `data/local-edits.db` (accepted local edits)
-  - `data/user-edits.db` (moderation queue)
+  - `data/user-edits.db` (moderation queue + stored source geometry/tags snapshots for contour-less Overpass edits)
   - `data/users.db` (auth/users)
 - Redis (optional): session store backend.
 - PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`.
+- Browser-local map fallback cache: Overpass-loaded building tiles are stored in IndexedDB from `frontend/src/lib/services/map/overpass-buildings.ts` so uncovered viewports can be revisited without re-downloading the same area in one session. When the user saves an edit for one of those buildings, the app also persists a server-side snapshot of the source geometry/tags in `user_edits.building_user_edits`, so later account/admin views do not depend on the browser cache. The same client-side module also tracks the last sync timestamp, exposes explicit load/refresh/clear controls, and uses a small concurrent worker pool that prefers the last working public endpoint for each tile while cooling down `403/504/5xx` hosts.
 
 ## Execution boundaries
 
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
 - Shared UI composition follows `ui/** -> base/** -> shell/routes`; product code should not consume generated primitives directly.
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.ts`.
+  - `frontend/src/lib/services/map/overpass-buildings.ts`: client-side Overpass fallback loader/cache with viewport tiling, browser-local persistence, explicit load/refresh/clear controls, and a small concurrent worker pool that prefers the last working public endpoint while cooling down failing hosts.
+  - `frontend/src/lib/services/map/overpass-data-utils.ts`: normalization helpers for locally loaded Overpass building features and their search/filter/detail payloads, including source snapshots used when saving Overpass-backed edits.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
 - Building filter backend decomposition:
@@ -49,7 +52,7 @@
   - `src/lib/server/services/building-edits/moderation.ts`: reassignment/delete flows and merged-local-state safety checks
   - `src/lib/server/services/building-edits/personal-overlays.ts`: pending/rejected personal overlay lookup for feature info and filter payloads
 - Building data access:
-  - `src/lib/server/services/buildings.repository.ts`: SQL access for building contour lookups, region slug resolution, local architectural info attachment, and pending building-info draft persistence shared by `buildings.route.ts` and `feature-info.http.ts`
+  - `src/lib/server/services/buildings.repository.ts`: SQL access for building contour lookups, region slug resolution, local architectural info attachment, and pending building-info draft persistence plus stored source snapshot lookup shared by `buildings.route.ts` and `feature-info.http.ts`
 - Auth backend decomposition:
   - `src/lib/server/auth/index.ts`: auth bootstrap and route registration entrypoint
   - `src/lib/server/auth/schema.ts`: auth schema bootstrap for SQLite

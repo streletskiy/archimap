@@ -46,6 +46,7 @@ export function createUrlStateManager({
   let filterApplyInFlight = false;
   let lastAppliedCameraKey = '';
   let handledUrlSignature = '';
+  let pendingUrlSignature = '';
   let lastUrlBuildingKey = '';
   let lastUrlFilterKey = '';
 
@@ -55,9 +56,16 @@ export function createUrlStateManager({
     const next = patchUrlState(current, patch);
     if (next.toString() === current.toString()) return;
     const nextState = parseUrlState(next);
+    const nextHasCamera = Boolean(nextState.camera);
     urlUpdateInFlight = true;
     try {
-      handledUrlSignature = getUrlStateSignature(nextState);
+      const nextSignature = getUrlStateSignature(nextState);
+      if (pendingUrlSignature && nextHasCamera) {
+        pendingUrlSignature = nextSignature;
+      } else {
+        handledUrlSignature = nextSignature;
+        pendingUrlSignature = '';
+      }
       lastUrlBuildingKey = getUrlBuildingKey(nextState);
       lastUrlFilterKey = getUrlFilterKey(nextState);
       const target = resolve(`${next.pathname}${next.search}${next.hash}`, {});
@@ -78,6 +86,7 @@ export function createUrlStateManager({
     const osmId = Number(building?.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return;
     const buildingKey = `${osmType}/${osmId}`;
+    if (buildingApplyInFlight) return;
     if (buildingKey === getSelectedBuildingKey(selectedBuilding) && buildingModalOpen) return;
     buildingApplyInFlight = true;
     try {
@@ -113,9 +122,13 @@ export function createUrlStateManager({
 
     const state = parseUrlState(new URL(window.location.href));
     const signature = getUrlStateSignature(state);
-    if (signature === handledUrlSignature) return;
-    handledUrlSignature = signature;
+    const hasCamera = Boolean(state.camera);
+    const cameraDeferred = Boolean(hasCamera && !mapReady);
+    if (signature === handledUrlSignature && !cameraDeferred) return;
     if (buildingCloseInFlight) return;
+    if (cameraDeferred) {
+      pendingUrlSignature = signature;
+    }
     const nextUrlBuildingKey = getUrlBuildingKey(state);
     const hadUrlBuildingKey = lastUrlBuildingKey;
     lastUrlBuildingKey = nextUrlBuildingKey;
@@ -167,6 +180,11 @@ export function createUrlStateManager({
       if (!buildingApplyInFlight) {
         onClearBuildingSelection?.();
       }
+    }
+
+    if (!cameraDeferred) {
+      handledUrlSignature = signature;
+      pendingUrlSignature = '';
     }
   }
 

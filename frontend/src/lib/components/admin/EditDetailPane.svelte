@@ -1,5 +1,5 @@
 <script>
-  import { formatUiDate, getStatusBadgeMeta, getSyncBadgeMeta } from '$lib/utils/edit-ui';
+  import { formatUiDate, getStatusBadgeMeta, getSyncBadgeMeta, isOverpassBackedEdit } from '$lib/utils/edit-ui';
   import { t, translateNow } from '$lib/i18n/index';
   import {
     UiButton,
@@ -29,6 +29,9 @@
   export let applyDecision = () => {};
   export let reassignSelectedEdit = () => {};
   export let deleteSelectedEdit = () => {};
+
+  let overpassBacked;
+  $: overpassBacked = isOverpassBackedEdit(selectedEdit);
 </script>
 
 <EditDetailModal
@@ -82,12 +85,19 @@
         </div>
       {/if}
 
-      {#if selectedEdit.orphaned || !selectedEdit.osmPresent || selectedEdit.sourceOsmChanged}
+      {#if overpassBacked}
+        <div class="rounded-xl border ui-border ui-surface-info p-3 text-sm ui-text-body">
+          <p class="font-semibold ui-text-info">{$t('admin.edits.overpassSource')}</p>
+          <p class="mt-1 text-xs ui-text-muted">{$t('admin.edits.overpassSourceHelp')}</p>
+        </div>
+      {/if}
+
+      {#if selectedEdit.orphaned || (!selectedEdit.osmPresent && !selectedEdit.orphaned && !overpassBacked) || selectedEdit.sourceOsmChanged}
         <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
           {#if selectedEdit.orphaned}
             <p>{$t('admin.edits.orphanedHelp')}</p>
           {/if}
-          {#if !selectedEdit.osmPresent && !selectedEdit.orphaned}
+          {#if !selectedEdit.osmPresent && !selectedEdit.orphaned && !overpassBacked}
             <p>{$t('admin.edits.missingTargetHelp')}</p>
           {/if}
           {#if selectedEdit.sourceOsmChanged}

@@ -19,10 +19,10 @@
   let modalEl = null;
   let hadOpenState = false;
   let detailCandidate;
-  let candidateAddress = '';
+  let candidateAddress;
   let currentTags = {};
   let desiredTags = {};
-  let computedDiff = [];
+  let computedDiff;
 
   function isArchivedCandidate(candidate) {
     const normalized = String(candidate?.syncStatus || 'unsynced').trim().toLowerCase();

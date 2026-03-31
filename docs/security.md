@@ -12,7 +12,7 @@
   - `style-src-attr 'unsafe-inline'`
   - `img-src 'self' data: blob: <extra-origins>`
   - `font-src 'self' data: <extra-origins>`
-  - `connect-src 'self' <extra-origins>`
+  - `connect-src 'self' <extra-origins>` where the default extra origins include CARTO tile hosts and the public Overpass instances used by the browser fallback
   - `object-src 'none'`
   - `base-uri 'self'`
   - `frame-ancestors 'none'`

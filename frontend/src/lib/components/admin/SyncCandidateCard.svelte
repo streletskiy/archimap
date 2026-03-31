@@ -15,12 +15,8 @@
   export let onSync = () => {};
   export let onToggleSelection = () => {};
 
-  let candidateAddress = '';
-  let changeCounters = {
-    total: 0,
-    created: 0,
-    modified: 0
-  };
+  let candidateAddress;
+  let changeCounters;
 
   function statusVariant(status) {
     const normalized = String(status || 'unsynced').trim().toLowerCase();

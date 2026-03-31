@@ -30,10 +30,30 @@ import {
 } from '$lib/utils/architecture-style';
 import { isAbortError } from '$lib/utils/error';
 import { clampText } from '$lib/utils/text';
+import { searchOverpassBuildings } from '$lib/services/map/overpass-buildings';
 
 const SEARCH_PAGE_SIZE = 120;
 const SEARCH_MAP_RESULTS_LIMIT = 5000;
 const SEARCH_VIEWPORT_REFRESH_DEBOUNCE_MS = 260;
+
+function getSearchItemKey(item) {
+  const osmType = String(item?.osmType || '').trim();
+  const osmId = Number(item?.osmId);
+  if (!osmType || !Number.isInteger(osmId) || osmId <= 0) return '';
+  return `${osmType}/${osmId}`;
+}
+
+function mergeSearchItems(primaryItems, secondaryItems) {
+  const merged = [];
+  const seen = new Set();
+  for (const item of [...(Array.isArray(primaryItems) ? primaryItems : []), ...(Array.isArray(secondaryItems) ? secondaryItems : [])]) {
+    const key = getSearchItemKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged;
+}
 
 export function createSearchManager() {
   let activeSearchRequestToken = 0;
@@ -228,8 +248,11 @@ export function createSearchManager() {
         }));
         if (token !== activeSearchRequestToken) return;
         const merged = mergeChunkedSearchResults(chunks);
-
-        const filtered = filterSearchItemsByStyleKeys(merged, styleSearchKeys);
+        const localOverpassItems = searchOverpassBuildings(text).filter(Boolean);
+        const filtered = filterSearchItemsByStyleKeys(
+          mergeSearchItems(merged, localOverpassItems),
+          styleSearchKeys
+        );
         applySearchResults({
           query: text,
           items: filtered.slice(0, SEARCH_PAGE_SIZE),
@@ -268,7 +291,11 @@ export function createSearchManager() {
       });
       if (token !== activeSearchRequestToken) return;
       const itemsRaw = Array.isArray(data?.items) ? data.items : [];
-      const items = filterSearchItemsByStyleKey(itemsRaw, styleSearchKey);
+      const localOverpassItems = append ? [] : searchOverpassBuildings(text);
+      const items = filterSearchItemsByStyleKey(
+        mergeSearchItems(itemsRaw, localOverpassItems),
+        styleSearchKey
+      );
       applySearchResults({
         query: text,
         items,
@@ -300,7 +327,7 @@ export function createSearchManager() {
       lastSearchMapRefreshKey = '';
       return;
     }
-    if (!Boolean(get(searchState)?.mapActive)) {
+    if (!get(searchState)?.mapActive) {
       resetSearchMapState();
       lastSearchMapRefreshKey = '';
       return;
@@ -375,7 +402,14 @@ export function createSearchManager() {
       if (token !== activeSearchMapRequestToken) return;
 
       const itemsRaw = Array.isArray(data?.items) ? data.items : [];
-      const items = filterSearchItemsByStyleKey(itemsRaw, styleSearchKey);
+      const localOverpassItems = searchOverpassBuildings(text, {
+        viewport,
+        limit: SEARCH_MAP_RESULTS_LIMIT
+      });
+      const items = filterSearchItemsByStyleKey(
+        mergeSearchItems(itemsRaw, localOverpassItems),
+        styleSearchKey
+      );
       applySearchMapResults({
         query: text,
         bboxHash: viewportHash,

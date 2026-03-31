@@ -27,7 +27,7 @@
   let settingsLoading = false;
   let activeLoading = false;
   let archivedLoading = false;
-  let loading = false;
+  let loading;
   let selectedCandidate = null;
   let selectedCandidateDetail = null;
   let selectedCandidateKeys = [];

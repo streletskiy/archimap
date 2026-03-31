@@ -37,7 +37,7 @@
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { locale, t, translateNow } from '$lib/i18n/index';
   import { getEditsDateRangeParams } from '$lib/utils/edit-date-range';
-  import { formatUiDate, getChangeCounters, getDisplayEditStatusMeta, getEditAddress, getEditKey, getSyncBadgeMeta, parseEditKey } from '$lib/utils/edit-ui';
+  import { formatUiDate, getChangeCounters, getDisplayEditStatusMeta, getEditAddress, getEditKey, getSyncBadgeMeta, isOverpassBackedEdit, parseEditKey } from '$lib/utils/edit-ui';
   import { getGeometryCenter } from '$lib/utils/map-geometry';
 
   const LIGHT = '/styles/positron-custom.json';
@@ -849,14 +849,19 @@
                         address={group.latestAddress}
                         markerText={group.totalEdits > 1 ? `×${group.totalEdits}` : ''}
                         markerTitle={group.totalEdits > 1 ? $t('account.edits.groupTitle') : ''}
-                        showBadgesRow={Boolean(group.latest?.orphaned || (group.latest && !group.latest.osmPresent && !group.latest.orphaned))}
+                        showBadgesRow={Boolean(group.latest?.orphaned || (group.latest && !group.latest.osmPresent && !group.latest.orphaned) || group.latest?.sourceOsmChanged)}
                       >
                         <svelte:fragment slot="badges">
+                        {@const overpassBacked = isOverpassBackedEdit(group.latest)}
                         {#if group.latest?.orphaned}
                           <span class="rounded-md ui-surface-danger px-2 py-1 text-[11px] font-semibold ui-text-danger">{$t('account.edits.orphaned')}</span>
-                        {/if}
-                        {#if group.latest && !group.latest.osmPresent && !group.latest.orphaned}
+                        {:else if overpassBacked}
+                          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.overpassSource')}</span>
+                        {:else if group.latest && !group.latest.osmPresent && !group.latest.orphaned}
                           <span class="rounded-md ui-surface-warning px-2 py-1 text-[11px] font-semibold ui-text-warning">{$t('account.edits.missingTarget')}</span>
+                        {/if}
+                        {#if group.latest?.sourceOsmChanged}
+                          <span class="rounded-md ui-surface-info px-2 py-1 text-[11px] font-semibold ui-text-info">{$t('account.edits.osmChanged')}</span>
                         {/if}
                         </svelte:fragment>
                       </EditsIdentityCell>
@@ -1000,13 +1005,23 @@
                     </div>
                   </div>
                 {/if}
-                {#if selectedEdit.orphaned || !selectedEdit.osmPresent}
+                {@const overpassBacked = isOverpassBackedEdit(selectedEdit)}
+                {#if overpassBacked}
+                  <div class="rounded-xl border ui-border ui-surface-info p-3 text-sm ui-text-body">
+                    <p class="font-semibold ui-text-info">{$t('account.edits.overpassSource')}</p>
+                    <p class="mt-1 text-xs ui-text-muted">{$t('account.edits.overpassSourceHelp')}</p>
+                  </div>
+                {/if}
+                {#if selectedEdit.orphaned || (!selectedEdit.osmPresent && !selectedEdit.orphaned && !overpassBacked) || selectedEdit.sourceOsmChanged}
                   <div class="space-y-2 rounded-xl border p-3 text-sm" style="border-color: var(--ui-map-filter-warning-border); background: var(--ui-map-filter-warning-bg); color: var(--ui-map-filter-warning-text)">
                     {#if selectedEdit.orphaned}
                       <p>{$t('account.edits.orphanedHelp')}</p>
                     {/if}
-                    {#if !selectedEdit.osmPresent && !selectedEdit.orphaned}
+                    {#if !selectedEdit.osmPresent && !selectedEdit.orphaned && !overpassBacked}
                       <p>{$t('account.edits.missingTargetHelp')}</p>
+                    {/if}
+                    {#if selectedEdit.sourceOsmChanged}
+                      <p>{$t('account.edits.osmChangedHelp')}</p>
                     {/if}
                   </div>
                 {/if}

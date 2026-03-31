@@ -339,6 +339,7 @@ export type FilterMatchMeta = {
   coverageHash?: string;
   coverageWindow?: CoverageWindowSnapshot | null;
   zoomBucket?: number;
+  dataVersion?: number;
 };
 
 export type FilterMatchPayload = {
@@ -383,4 +384,5 @@ export type FilterCoverageContext = {
   reason?: string;
   combinedGroup?: FilterPreparedGroup | null;
   layers?: FilterLayer[];
+  dataVersion?: number;
 };

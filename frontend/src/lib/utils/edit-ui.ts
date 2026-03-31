@@ -67,6 +67,16 @@ export function getSyncBadgeMeta(status, translate, keyPrefix = 'admin.edits') {
   return { cls: 'ui-surface-soft ui-text-muted', text: translate(`${prefix}.syncUnsynced`) };
 }
 
+export function isOverpassBackedEdit(item) {
+  return Boolean(
+    item &&
+      !item?.orphaned &&
+      !item?.osmPresent &&
+      item?.hasSourceSnapshot &&
+      item?.sourceOsmUpdatedAt == null
+  );
+}
+
 export function getDisplayEditStatusMeta(item, translate, syncKeyPrefix = 'admin.edits') {
   const syncStatus = normalizeSyncStatus(item?.syncStatus);
   if (syncStatus && syncStatus !== 'unsynced') {

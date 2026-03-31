@@ -3,6 +3,7 @@
 User-side:
 
 - User submits building changes via `POST /api/building-info`.
+- Buildings loaded from browser-local Overpass cache are editable too; when there is no processed contour row, the save path persists a source snapshot (`source_geometry_json` + `source_tags_json`) in `user_edits.building_user_edits` so the edit can be reopened later in account/admin views.
 - Supported editable fields: `name`, `style`, `design`, `designRef`, `designYear`, `material`, `colour`, `levels`, `yearBuilt`, `architect`, `address`, `archimapDescription`.
 - `material` accepts the concrete variants `concrete_panels`, `concrete_blocks`, and `concrete_monolith` in addition to the regular material list.
 - When `design` is enabled as a typical project, `designRef` and `designYear` become editable; `designRef` suggestions come from a cached list of values already present in the database.
@@ -74,6 +75,9 @@ Corner cases handled:
 - Orphan accepted edit:
   - accepted / partially accepted history rows remain visible in account/admin lists even if the original OSM contour disappears;
   - admin can reassign merged local data to another existing OSM object.
+- Overpass-only building:
+  - if the local contour row is missing, the save path uses the browser-provided snapshot or the latest stored snapshot row for that OSM id;
+  - account/admin building previews read geometry from the stored snapshot instead of re-querying Overpass.
 - Full delete by master admin:
   - `pending`, `rejected`, `superseded` edits can be removed completely from history;
   - `accepted` / `partially_accepted` can be fully deleted only when they are the only accepted edit for that OSM object;

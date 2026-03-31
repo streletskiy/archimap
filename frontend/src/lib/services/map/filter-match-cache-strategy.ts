@@ -33,10 +33,12 @@ type FilterFetcherLike = {
     rulesHash: string;
     maxResults?: number;
     renderMode?: 'contours' | 'markers';
+    dataVersion?: number;
     signal?: AbortSignal | null;
   }) => Promise<FilterMatchPayload>;
   fetchFilterMatchesFallback: (args: {
     rules: FilterRule[];
+    dataVersion?: number;
     signal?: AbortSignal | null;
   }) => Promise<FilterMatchPayload>;
   fetchFilterMatchesBatchPrimary: (args: {
@@ -45,6 +47,7 @@ type FilterFetcherLike = {
     requestSpecs: FilterRequestSpec[];
     maxResults?: number;
     renderMode?: 'contours' | 'markers';
+    dataVersion?: number;
     signal?: AbortSignal | null;
   }) => Promise<FilterMatchBatchResponse>;
 };
@@ -70,6 +73,7 @@ function normalizeMatchPayload(
     coverageWindow?: FilterMatchPayloadMeta['coverageWindow'];
     zoomBucket?: number;
     renderMode?: FilterMatchPayloadMeta['renderMode'];
+    dataVersion?: number;
     fallback?: boolean;
     cacheHit?: boolean;
     truncated?: boolean;
@@ -93,7 +97,8 @@ function normalizeMatchPayload(
       renderMode: normalizeRenderMode(payloadMeta?.renderMode ?? defaults.renderMode),
       coverageHash: payloadMeta?.coverageHash ?? defaults.coverageHash,
       coverageWindow: payloadMeta?.coverageWindow ?? defaults.coverageWindow ?? null,
-      zoomBucket: Number(payloadMeta?.zoomBucket ?? defaults.zoomBucket ?? 0)
+      zoomBucket: Number(payloadMeta?.zoomBucket ?? defaults.zoomBucket ?? 0),
+      dataVersion: Number(payloadMeta?.dataVersion ?? defaults.dataVersion ?? 0)
     }
   };
 }
@@ -101,7 +106,7 @@ function normalizeMatchPayload(
 type FilterMatchCacheStrategyOptions = {
   filterCache: FilterCacheLike;
   filterFetcher: FilterFetcherLike;
-  buildFilterRequestCacheKey: (spec: FilterRequestSpec, coverageHash: string, zoomBucket: number, renderMode?: 'contours' | 'markers') => string;
+  buildFilterRequestCacheKey: (spec: FilterRequestSpec, coverageHash: string, zoomBucket: number, renderMode?: 'contours' | 'markers', dataVersion?: number) => string;
   buildPrefetchCoverageWindow: (coverageWindow: BboxSnapshot | null | undefined) => BboxSnapshot | null;
   resolveMap: () => FilterMapLike | null | undefined;
   getLatestFilterToken: () => number;
@@ -148,12 +153,14 @@ export function createFilterMatchCacheStrategy({
     viewportBbox,
     rulesHash,
     zoomBucket,
-    renderMode
+    renderMode,
+    dataVersion
   }: {
     viewportBbox: BboxSnapshot | null | undefined;
     rulesHash: string;
     zoomBucket: number;
     renderMode?: 'contours' | 'markers';
+    dataVersion?: number;
   }) {
     const normalizedRenderMode = normalizeRenderMode(renderMode);
     return filterCache.findCachedFilterMatches((payload) => {
@@ -163,6 +170,7 @@ export function createFilterMatchCacheStrategy({
       if (String(meta?.rulesHash || '') !== String(rulesHash || '')) return false;
       if (Number(meta?.zoomBucket || 0) !== Number(zoomBucket || 0)) return false;
       if (normalizeRenderMode(meta?.renderMode) !== normalizedRenderMode) return false;
+      if (Number(meta?.dataVersion || 0) !== Number(dataVersion || 0)) return false;
       return isViewportInsideBbox(viewportBbox, coverageWindow);
     });
   }
@@ -174,7 +182,7 @@ export function createFilterMatchCacheStrategy({
     { allowCache = true }: { allowCache?: boolean } = {}
   ): Promise<Omit<FilterRequestResolution, 'spec'>> {
     const renderMode = normalizeRenderMode(context.renderMode);
-    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket, renderMode);
+    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket, renderMode, context.dataVersion);
     const maxResults = normalizeMatchLimit(context.matchLimit, 12_000);
     if (allowCache) {
       const cached = filterCache.getCachedFilterMatches(requestCacheKey);
@@ -186,6 +194,7 @@ export function createFilterMatchCacheStrategy({
             coverageHash: cached?.meta?.coverageHash || context.coverageHash,
             coverageWindow: cached?.meta?.coverageWindow ?? context.coverageWindow,
             zoomBucket: cached?.meta?.zoomBucket ?? context.zoomBucket,
+            dataVersion: cached?.meta?.dataVersion ?? context.dataVersion,
             renderMode,
             fallback: Boolean(cached?.meta?.fallback),
             cacheHit: true
@@ -206,6 +215,7 @@ export function createFilterMatchCacheStrategy({
         rulesHash: spec.rulesHash,
         maxResults,
         renderMode,
+        dataVersion: context.dataVersion,
         signal
       });
     } catch (error) {
@@ -213,6 +223,7 @@ export function createFilterMatchCacheStrategy({
       usedFallback = true;
       payload = await filterFetcher.fetchFilterMatchesFallback({
         rules: spec.rules,
+        dataVersion: context.dataVersion,
         signal
       });
     }
@@ -223,6 +234,7 @@ export function createFilterMatchCacheStrategy({
       coverageHash: context.coverageHash,
       coverageWindow: context.coverageWindow,
       zoomBucket: context.zoomBucket,
+      dataVersion: context.dataVersion,
       renderMode,
       fallback: usedFallback,
       cacheHit: Boolean(payload?.meta?.cacheHit)
@@ -240,7 +252,7 @@ export function createFilterMatchCacheStrategy({
     context: FilterCoverageContext
   ): FilterRequestResolution | null {
     const renderMode = normalizeRenderMode(context.renderMode);
-    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket, renderMode);
+    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket, renderMode, context.dataVersion);
     const cached = filterCache.getCachedFilterMatches(requestCacheKey);
     if (!cached) return null;
     return {
@@ -251,6 +263,7 @@ export function createFilterMatchCacheStrategy({
         coverageHash: cached?.meta?.coverageHash || context.coverageHash,
         coverageWindow: cached?.meta?.coverageWindow ?? context.coverageWindow,
         zoomBucket: cached?.meta?.zoomBucket ?? context.zoomBucket,
+        dataVersion: cached?.meta?.dataVersion ?? context.dataVersion,
         renderMode,
         fallback: Boolean(cached?.meta?.fallback),
         cacheHit: true
@@ -273,6 +286,7 @@ export function createFilterMatchCacheStrategy({
       requestSpecs: specs,
       maxResults,
       renderMode,
+      dataVersion: context.dataVersion,
       signal
     });
     const itemsById = new Map(
@@ -291,7 +305,8 @@ export function createFilterMatchCacheStrategy({
             truncated: false,
             elapsedMs: Number(batchPayload?.meta?.elapsedMs || 0),
             cacheHit: Boolean(batchPayload?.meta?.cacheHit),
-            renderMode
+            renderMode,
+            dataVersion: context.dataVersion
           }
         };
       const normalizedPayload = normalizeMatchPayload(payload, {
@@ -300,6 +315,7 @@ export function createFilterMatchCacheStrategy({
         coverageHash: payload?.meta?.coverageHash || context.coverageHash,
         coverageWindow: payload?.meta?.coverageWindow ?? context.coverageWindow,
         zoomBucket: payload?.meta?.zoomBucket ?? context.zoomBucket,
+        dataVersion: payload?.meta?.dataVersion ?? context.dataVersion,
         renderMode,
         fallback: Boolean(payload?.meta?.fallback),
         cacheHit: Boolean(payload?.meta?.cacheHit),
@@ -331,7 +347,7 @@ export function createFilterMatchCacheStrategy({
     const prefetchHash = buildBboxHash(prefetchBbox, 4);
     const renderMode = normalizeRenderMode(context.renderMode);
     const maxResults = normalizeMatchLimit(context.matchLimit, 12_000);
-    const prefetchCacheKey = buildFilterRequestCacheKey(spec, prefetchHash, context.zoomBucket, renderMode);
+    const prefetchCacheKey = buildFilterRequestCacheKey(spec, prefetchHash, context.zoomBucket, renderMode, context.dataVersion);
     if (filterCache.getCachedFilterMatches(prefetchCacheKey)) return;
 
     cancelPrefetch();
@@ -355,6 +371,7 @@ export function createFilterMatchCacheStrategy({
           rulesHash: spec.rulesHash,
           maxResults,
           renderMode,
+          dataVersion: context.dataVersion,
           signal
         });
         if (token !== Number(getLatestFilterToken?.() ?? token)) return;
@@ -364,6 +381,7 @@ export function createFilterMatchCacheStrategy({
           coverageHash: prefetchHash,
           coverageWindow: prefetchBbox,
           zoomBucket: context.zoomBucket,
+          dataVersion: context.dataVersion,
           renderMode,
           cacheHit: Boolean(payload?.meta?.cacheHit),
           fallback: Boolean(payload?.meta?.fallback),

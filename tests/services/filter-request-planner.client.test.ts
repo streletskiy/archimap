@@ -49,15 +49,21 @@ test('buildFilterRequestCacheKey separates contour and marker render modes', asy
   const contourKey = buildFilterRequestCacheKey({
     id: 'layer:example',
     rulesHash: 'fnv1a-test'
-  }, 'coverage-test', 12.5, 'contours');
+  }, 'coverage-test', 12.5, 'contours', 0);
   const markerKey = buildFilterRequestCacheKey({
     id: 'layer:example',
     rulesHash: 'fnv1a-test'
-  }, 'coverage-test', 12.5, 'markers');
+  }, 'coverage-test', 12.5, 'markers', 0);
+  const overpassKey = buildFilterRequestCacheKey({
+    id: 'layer:example',
+    rulesHash: 'fnv1a-test'
+  }, 'coverage-test', 12.5, 'contours', 9);
 
   assert.notEqual(contourKey, markerKey);
-  assert.equal(contourKey.endsWith(':contours'), true);
-  assert.equal(markerKey.endsWith(':markers'), true);
+  assert.equal(contourKey.endsWith(':contours:0'), true);
+  assert.equal(markerKey.endsWith(':markers:0'), true);
+  assert.notEqual(contourKey, overpassKey);
+  assert.equal(overpassKey.endsWith(':contours:9'), true);
 });
 
 test('prepareFilterRequestPlan builds a worker-ready request plan', async () => {

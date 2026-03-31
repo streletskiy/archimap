@@ -57,6 +57,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
     UPDATE user_edits.building_user_edits
     SET
       source_osm_version = @source_osm_version,
+      source_geometry_json = @source_geometry_json,
       name = @name,
       style = @style,
       design = @design,
@@ -95,12 +96,12 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
     ? `
       INSERT INTO user_edits.building_user_edits (
         osm_type, osm_id, created_by, source_osm_version,
-        name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+        source_geometry_json, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
         status, sync_status, created_at, updated_at
       )
       VALUES (
         @osm_type, @osm_id, @created_by, @source_osm_version,
-        @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+        @source_geometry_json, @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
         'pending', 'unsynced', datetime('now'), datetime('now')
       )
       RETURNING id
@@ -108,12 +109,12 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
     : `
       INSERT INTO user_edits.building_user_edits (
         osm_type, osm_id, created_by, source_osm_version,
-        name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+        source_geometry_json, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
         status, sync_status, created_at, updated_at
       )
       VALUES (
         @osm_type, @osm_id, @created_by, @source_osm_version,
-        @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+        @source_geometry_json, @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
         'pending', 'unsynced', datetime('now'), datetime('now')
       )
     `;
@@ -125,6 +126,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
       osm_id: normalizeNullable(values.osm_id),
       created_by: normalizeNullable(values.created_by),
       source_osm_version: normalizeNullable(values.source_osm_version),
+      source_geometry_json: normalizeNullable(values.source_geometry_json),
       name: normalizeNullable(values.name),
       style: normalizeNullable(values.style),
       design: normalizeNullable(values.design),
@@ -148,6 +150,19 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
     const normalized = normalizeOsmTypeId(osmType, osmId);
     if (!normalized) return null;
     return await selectBuildingById.get(normalized.osmType, normalized.osmId) || null;
+  }
+
+  async function getLatestUserEditSnapshotById(osmType, osmId) {
+    const normalized = normalizeOsmTypeId(osmType, osmId);
+    if (!normalized) return null;
+    return await db.prepare(`
+      SELECT *
+      FROM user_edits.building_user_edits
+      WHERE osm_type = ?
+        AND osm_id = ?
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    `).get(normalized.osmType, normalized.osmId) || null;
   }
 
   async function getBuildingRegionSlugsById(osmType, osmId) {
@@ -210,6 +225,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
 
   return {
     getBuildingById,
+    getLatestUserEditSnapshotById,
     getBuildingRegionSlugsById,
     getLocalArchitecturalInfoRowsByKeys,
     insertPendingUserEdit,

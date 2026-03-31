@@ -125,6 +125,36 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').layout.visibility, 'none');
 });
 
+test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as pmtiles layers', async () => {
+  const { ensureOverpassBuildingSourceAndLayers } = await loadMapLayerUtils();
+  const map = createMapStub();
+
+  ensureOverpassBuildingSourceAndLayers({
+    map,
+    data: {
+      type: 'FeatureCollection',
+      features: []
+    },
+    buildingPaint: {
+      fillColor: '#a3a3a3',
+      fillOpacity: 1,
+      lineColor: '#bcbcbc',
+      lineWidth: 0.9,
+      lineOpacity: 1
+    }
+  });
+
+  assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-color'], '#a3a3a3');
+  assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-opacity'], 1);
+  assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-color'], '#bcbcbc');
+  assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-width'], 0.9);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-color'], '#6d655b');
+  assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-opacity'], 0.72);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-color'], '#3d3832');
+  assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-width'], 2.2);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-opacity'], 1);
+});
+
 test('applyBuildingThemePaint updates hover layers with hover theme paint', async () => {
   const { applyBuildingThemePaint } = await loadMapLayerUtils();
   const map = createMapStub();

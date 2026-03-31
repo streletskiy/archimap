@@ -92,6 +92,7 @@ export interface BuildingEdit {
   mergedBy: string | null;
   mergedAt: string | null;
   sourceOsmVersion: string | number | null;
+  hasSourceSnapshot: boolean;
   osmPresent: boolean;
   orphaned: boolean;
   hasMergedLocal: boolean;

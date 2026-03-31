@@ -19,7 +19,8 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
     let geometry = null;
     let tags: LooseRecord;
     try {
-      const parsed = JSON.parse(row.geometry_json);
+      const geometryJson = row?.geometry_json ?? row?.source_geometry_json ?? null;
+      const parsed = JSON.parse(geometryJson);
       if (parsed && typeof parsed === 'object' && parsed.type && Array.isArray(parsed.coordinates)) {
         geometry = parsed;
       } else if (Array.isArray(parsed)) {
@@ -31,11 +32,13 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
       geometry = { type: 'Polygon', coordinates: [ring] };
     }
     try {
-      tags = row.tags_json ? JSON.parse(row.tags_json) : {};
+      const tagsJson = row?.tags_json ?? row?.source_tags_json ?? null;
+      tags = tagsJson ? JSON.parse(tagsJson) : {};
     } catch {
       tags = {};
     }
-    const featureKind = getFeatureKindFromTagsJson(row.tags_json);
+    const featureKind = getFeatureKindFromTagsJson(row?.tags_json ?? row?.source_tags_json ?? null);
+    const sourceOsmUpdatedAt = row?.source_osm_updated_at ?? (row?.geometry_json != null ? row?.updated_at ?? null : null);
 
     return {
       type: 'Feature',
@@ -46,7 +49,8 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
         osm_id: row.osm_id,
         osm_key: `${row.osm_type}/${row.osm_id}`,
         feature_kind: featureKind,
-        source_tags: tags
+        source_tags: tags,
+        source_osm_updated_at: sourceOsmUpdatedAt
       },
       geometry: geometry || { type: 'Polygon', coordinates: [ring] }
     };

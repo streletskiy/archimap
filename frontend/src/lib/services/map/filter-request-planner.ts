@@ -70,8 +70,8 @@ export function prepareFilterRequestPlan(input): { ok: false; invalidReason: str
   };
 }
 
-export function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket, renderMode = 'contours') {
-  return `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}:${String(renderMode || 'contours')}`;
+export function buildFilterRequestCacheKey(spec, coverageHash, zoomBucket, renderMode = 'contours', dataVersion = 0) {
+  return `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}:${String(renderMode || 'contours')}:${Math.max(0, Math.trunc(Number(dataVersion) || 0))}`;
 }
 
 export function buildFilterRequestSpecs(layers) {

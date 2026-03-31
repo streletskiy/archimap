@@ -6,6 +6,7 @@ ArchiMap is a self-hosted platform for architectural mapping and building analys
 
 - Sync OpenStreetMap building data into a local, project-owned database and tile set.
 - Explore buildings visually by floors, style, materials, function, density, and surrounding context.
+- When a viewport falls outside processed regions, load nearby buildings from a curated set of public Overpass endpoints directly in the browser via explicit controls, cache them locally, and let users create edits for them; on first save the app stores the source geometry/tags snapshot server-side so the same OSM id can be reopened later without relying on the browser cache.
 - Configure visual filters to expose missing architectural tags, compare building attributes, and focus on gaps in the map data.
 - Edit architectural tags and building metadata directly on the map with a review-and-moderation workflow.
 - Bulk edit multiple selected buildings on the map with Shift+Click and apply the same non-address changes to all of them.

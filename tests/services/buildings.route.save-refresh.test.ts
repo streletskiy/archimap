@@ -43,6 +43,41 @@ async function stopServer(server) {
   });
 }
 
+function createFeatureFromRow(row) {
+  if (!row) return null;
+  const geometryJson = row?.geometry_json ?? row?.source_geometry_json ?? null;
+  const tagsJson = row?.tags_json ?? row?.source_tags_json ?? null;
+  let geometry = null;
+  let tags = {};
+  try {
+    geometry = geometryJson ? JSON.parse(geometryJson) : null;
+  } catch {
+    geometry = null;
+  }
+  try {
+    tags = tagsJson ? JSON.parse(tagsJson) : {};
+  } catch {
+    tags = {};
+  }
+  const featureKind = Object.prototype.hasOwnProperty.call(tags, 'building:part')
+    ? 'building_part'
+    : 'building';
+  return {
+    type: 'Feature',
+    id: `${row.osm_type}/${row.osm_id}`,
+    geometry,
+    properties: {
+      ...tags,
+      osm_type: row.osm_type,
+      osm_id: row.osm_id,
+      osm_key: `${row.osm_type}/${row.osm_id}`,
+      feature_kind: featureKind,
+      source_tags: tags,
+      source_osm_updated_at: row?.source_osm_updated_at ?? null
+    }
+  };
+}
+
 function createRouteApp(options: LooseRecord = {}) {
   const app = createMiniApp();
   app.use(jsonMiddleware());
@@ -55,6 +90,16 @@ function createRouteApp(options: LooseRecord = {}) {
   const refreshPromise = new Promise<void>((resolve) => {
     resolveRefresh = resolve;
   });
+  const defaultContour = {
+    geometry_json: JSON.stringify({
+      type: 'Polygon',
+      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+    }),
+    tags_json: JSON.stringify({ building: 'yes' }),
+    updated_at: '2026-03-25T00:00:00Z'
+  };
+  const hasCurrentContour = Object.prototype.hasOwnProperty.call(options, 'currentContour');
+  const hasLatestSnapshot = Object.prototype.hasOwnProperty.call(options, 'latestSnapshot');
 
   registerBuildingsRoutes({
     app,
@@ -79,14 +124,11 @@ function createRouteApp(options: LooseRecord = {}) {
     getSessionEditActorKey: () => 'editor@example.com',
     applyPersonalEditsToFilterItems: () => [],
     isFilterTagAllowed: () => true,
-    rowToFeature: () => null,
+    rowToFeature: createFeatureFromRow,
     attachInfoToFeatures: () => {},
     applyUserEditRowToInfo: (merged, personal) => ({ ...(merged || {}), ...(personal || {}) }),
     getMergedInfoRow: async () => null,
-    getOsmContourRow: async () => options.currentContour || {
-      tags_json: JSON.stringify({ building: 'yes' }),
-      updated_at: '2026-03-25T00:00:00Z'
-    },
+    getOsmContourRow: async () => (hasCurrentContour ? options.currentContour : defaultContour),
     getLatestUserEditRow: async () => options.latestPendingEdit || null,
     normalizeUserEditStatus,
     sanitizeArchiPayload,
@@ -106,7 +148,10 @@ function createRouteApp(options: LooseRecord = {}) {
       },
       updatePendingUserEditById: async (editId, values = {}) => {
         updatedEdits.push({ editId, values });
-      }
+      },
+      getLatestUserEditSnapshotById: async () => (hasLatestSnapshot ? options.latestSnapshot : null),
+      getBuildingById: async () => null,
+      getBuildingRegionSlugsById: async () => []
     }
   });
 
@@ -241,4 +286,87 @@ test('building-info save updates an existing pending edit in place', async (t) =
   assert.equal(Number(updatedEdits[0]?.editId), 501);
   assert.equal(supersedeCalls.length, 1);
   assert.deepEqual(supersedeCalls[0], ['way', 5010, 'editor@example.com', 501]);
+});
+
+test('building-info save accepts overpass snapshot when contour row is missing', async (t) => {
+  const { app, savedEdits } = createRouteApp({
+    currentContour: null
+  });
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const port = (() => {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Server is not listening');
+    return address.port;
+  })();
+
+  const sourceGeometryJson = JSON.stringify({
+    type: 'Polygon',
+    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+  });
+  const sourceTagsJson = JSON.stringify({
+    building: 'yes',
+    name: 'Overpass house'
+  });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/building-info`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      osmType: 'way',
+      osmId: 777,
+      name: 'Overpass house',
+      editedFields: ['name'],
+      sourceGeometryJson,
+      sourceTagsJson
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(savedEdits.length, 1);
+  assert.equal(savedEdits[0]?.source_geometry_json, sourceGeometryJson);
+  assert.equal(savedEdits[0]?.source_tags_json, sourceTagsJson);
+  assert.equal(savedEdits[0]?.source_osm_updated_at, null);
+});
+
+test('building route falls back to the latest stored snapshot when contour row is missing', async (t) => {
+  const snapshotGeometry = JSON.stringify({
+    type: 'Polygon',
+    coordinates: [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]
+  });
+  const snapshotTags = JSON.stringify({
+    building: 'yes',
+    name: 'Snapshot house'
+  });
+  const { app } = createRouteApp({
+    currentContour: null,
+    latestSnapshot: {
+      osm_type: 'way',
+      osm_id: 909,
+      source_geometry_json: snapshotGeometry,
+      source_tags_json: snapshotTags,
+      source_osm_updated_at: '2026-03-20T00:00:00Z',
+      updated_at: '2026-03-21T00:00:00Z'
+    }
+  });
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const port = (() => {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Server is not listening');
+    return address.port;
+  })();
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/building/way/909`);
+  assert.equal(response.status, 200);
+  const feature = await response.json();
+  assert.equal(feature?.id, 'way/909');
+  assert.equal(feature?.geometry?.type, 'Polygon');
+  assert.equal(feature?.properties?.name, 'Snapshot house');
+  assert.equal(feature?.properties?.source_tags?.name, 'Snapshot house');
+  assert.equal(feature?.properties?.source_osm_updated_at, '2026-03-20T00:00:00Z');
 });

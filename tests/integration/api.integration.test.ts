@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
+const { pickIntegrationPort } = require('./test-ports');
 
 let pythonExtractorDepsSkipReason = null;
 try {
@@ -45,7 +46,7 @@ function setCookiesFromHeaders(cookieJar, headers) {
 
 test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-it-'));
-  const port = 3600 + Math.floor(Math.random() * 400);
+  const port = pickIntegrationPort('api');
   const baseUrl = `http://127.0.0.1:${port}`;
   const repoDataDir = path.join(__dirname, '..', '..', 'data');
   const generatedPmtilesPaths = [];

@@ -187,9 +187,6 @@ export function createFilterDiffApplyStrategy({
     const layerSignature = buildHighlightLayerSignature(layerIds, buildingPartsVisible);
     const renderMode = String(meta.renderMode || lastAppliedRenderMode || 'contours') === 'markers' ? 'markers' : 'contours';
     const previousActive = Boolean(meta.previousActive ?? lastAppliedHighlightActive);
-    const nextMatchedCount = meta.matchedCount != null && Number.isFinite(Number(meta.matchedCount))
-      ? Math.max(0, Math.trunc(Number(meta.matchedCount)))
-      : null;
     const staticPaintProperties = Boolean(
       meta.forceStaticPaintProperties
       || (

@@ -4,6 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { pickIntegrationPort } = require('./test-ports');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,7 +34,7 @@ function setCookiesFromHeaders(cookieJar, headers) {
 
 test('integration: sveltekit runtime serves api parity', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-sveltekit-it-'));
-  const port = 3900 + Math.floor(Math.random() * 400);
+  const port = pickIntegrationPort('sveltekitRuntime');
   const baseUrl = `http://127.0.0.1:${port}`;
 
   const server = spawn(process.execPath, ['--import', 'tsx', 'server.sveltekit.ts'], {
