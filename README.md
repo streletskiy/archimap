@@ -1,6 +1,6 @@
-# ArchiMap
+# Archimap
 
-ArchiMap is a self-hosted platform for architectural mapping and building analysis. It is built for architects, urban planners, GIS teams, and other specialists who need to inspect OpenStreetMap building data, enrich it with local project context, and keep it synchronized with a shared map workflow.
+Archimap is a self-hosted platform for architectural mapping and building analysis. It is built for architects, urban planners, GIS teams, and other specialists who need to inspect OpenStreetMap building data, enrich it with local project context, and keep it synchronized with a shared map workflow.
 
 ## Features
 

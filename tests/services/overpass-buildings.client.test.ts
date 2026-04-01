@@ -59,6 +59,30 @@ test('overpass coverage checks stay disabled until zoom 12', async () => {
   assert.equal(shouldCheckOverpassViewportCoverage(14), true);
 });
 
+test('coarse zoom viewport refresh does not materialize overpass tile plans', async () => {
+  const {
+    overpassBuildingsState,
+    refreshOverpassViewport
+  } = await loadOverpassBuildings();
+
+  await refreshOverpassViewport({
+    viewport: {
+      west: -180,
+      south: -85,
+      east: 180,
+      north: 85
+    },
+    zoom: 1.42,
+    covered: true
+  });
+
+  const state = readStoreValue(overpassBuildingsState);
+  assert.equal(state.covered, true);
+  assert.equal(state.promptVisible, false);
+  assert.equal(state.canLoad, false);
+  assert.equal(state.tileZoom, 13);
+});
+
 test('camera movement does not abort or restart an active Overpass load', async () => {
   const previousFetch = global.fetch;
   const fetchCalls = [];

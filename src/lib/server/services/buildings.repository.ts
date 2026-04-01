@@ -1,3 +1,5 @@
+const { toIsoTimestampOrNull } = require('../utils/timestamp');
+
 function normalizeNullable(value) {
   return value === undefined ? null : value;
 }
@@ -65,6 +67,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
       design_year = @design_year,
       material = @material,
       material_concrete = @material_concrete,
+      roof_shape = @roof_shape,
       colour = @colour,
       levels = @levels,
       year_built = @year_built,
@@ -96,12 +99,12 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
     ? `
       INSERT INTO user_edits.building_user_edits (
         osm_type, osm_id, created_by, source_osm_version,
-        source_geometry_json, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+        source_geometry_json, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
         status, sync_status, created_at, updated_at
       )
       VALUES (
         @osm_type, @osm_id, @created_by, @source_osm_version,
-        @source_geometry_json, @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+        @source_geometry_json, @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @roof_shape, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
         'pending', 'unsynced', datetime('now'), datetime('now')
       )
       RETURNING id
@@ -109,12 +112,12 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
     : `
       INSERT INTO user_edits.building_user_edits (
         osm_type, osm_id, created_by, source_osm_version,
-        source_geometry_json, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
+        source_geometry_json, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description, edited_fields_json, source_tags_json, source_osm_updated_at,
         status, sync_status, created_at, updated_at
       )
       VALUES (
         @osm_type, @osm_id, @created_by, @source_osm_version,
-        @source_geometry_json, @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
+        @source_geometry_json, @name, @style, @design, @design_ref, @design_year, @material, @material_concrete, @roof_shape, @colour, @levels, @year_built, @architect, @address, @archimap_description, @edited_fields_json, @source_tags_json, @source_osm_updated_at,
         'pending', 'unsynced', datetime('now'), datetime('now')
       )
     `;
@@ -134,6 +137,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
       design_year: normalizeNullable(values.design_year),
       material: normalizeNullable(values.material),
       material_concrete: normalizeNullable(values.material_concrete),
+      roof_shape: normalizeNullable(values.roof_shape),
       colour: normalizeNullable(values.colour),
       levels: normalizeNullable(values.levels),
       year_built: normalizeNullable(values.year_built),
@@ -142,7 +146,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
       archimap_description: normalizeNullable(values.archimap_description),
       edited_fields_json: normalizeNullable(values.edited_fields_json),
       source_tags_json: normalizeNullable(values.source_tags_json),
-      source_osm_updated_at: normalizeNullable(values.source_osm_updated_at)
+      source_osm_updated_at: toIsoTimestampOrNull(values.source_osm_updated_at)
     };
   }
 
@@ -192,7 +196,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
         params.push(key.osmType, key.osmId);
       }
       const chunkRows = await db.prepare(`
-        SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+        SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
         FROM local.architectural_info
         WHERE ${clauses}
       `).all(...params);

@@ -1,6 +1,7 @@
 import polygonClipping from 'polygon-clipping';
 import { encodeOsmFeatureId } from './filter-utils.js';
 import { normalizeBuildingMaterialSelection } from '$lib/utils/building-material';
+import { normalizeRoofShapeSelection } from '$lib/utils/roof-shape';
 import { resolveAddressText } from '$lib/utils/building-address';
 import {
   coerceNullableIntegerText,
@@ -50,6 +51,7 @@ export type OverpassFeaturePayload = {
   material: string | null;
   materialRaw: string | null;
   materialConcrete: string | null;
+  roofShape: string | null;
   colour: string | null;
   address: string | null;
   description: string | null;
@@ -280,6 +282,9 @@ export function buildOverpassArchiInfo(tags: Record<string, string> = {}) {
   const materialRaw = readTag(sourceTags, 'material', 'building:material');
   const materialConcrete = readTag(sourceTags, 'material_concrete', 'building:material:concrete');
   const normalizedMaterial = normalizeBuildingMaterialSelection(materialRaw, materialConcrete);
+  const roofShape = normalizeRoofShapeSelection(
+    readTag(sourceTags, 'roof:shape', 'roof_shape', 'building:roof:shape')
+  );
   const colour = readTag(sourceTags, 'colour', 'building:colour');
   const name = readTag(sourceTags, 'name', 'name:ru', 'name:en');
   const address = resolveAddressText(sourceTags, pickNullableText, null);
@@ -299,6 +304,7 @@ export function buildOverpassArchiInfo(tags: Record<string, string> = {}) {
     material: normalizedMaterial.material,
     materialRaw,
     materialConcrete,
+    roof_shape: roofShape,
     colour,
     address,
     description,
@@ -318,6 +324,7 @@ export function buildOverpassArchiInfo(tags: Record<string, string> = {}) {
     material: string | null;
     materialRaw: string | null;
     materialConcrete: string | null;
+    roof_shape: string | null;
     colour: string | null;
     address: string | null;
     description: string | null;
@@ -356,6 +363,7 @@ export function buildOverpassFeaturePayload(feature: OverpassFeatureLike, {
     archiInfo.design_ref,
     archiInfo.materialRaw,
     archiInfo.materialConcrete,
+    archiInfo.roof_shape,
     archiInfo.architect,
     archiInfo.description,
     archiInfo.archimap_description,
@@ -385,6 +393,7 @@ export function buildOverpassFeaturePayload(feature: OverpassFeatureLike, {
     material: archiInfo.material,
     materialRaw: archiInfo.materialRaw,
     materialConcrete: archiInfo.materialConcrete,
+    roofShape: archiInfo.roof_shape,
     colour: archiInfo.colour,
     address: archiInfo.address,
     description: archiInfo.description,
@@ -441,6 +450,8 @@ export function buildOverpassFilterDataItem(feature: OverpassFeatureLike) {
     address: payload.address,
     description: payload.description,
     archimap_description: payload.archimapDescription,
+    renderHeightMeters: payload.renderHeightMeters,
+    renderMinHeightMeters: payload.renderMinHeightMeters,
     sourceTags: payload.sourceTags,
     archiInfo: payload.archiInfo
   };
@@ -473,8 +484,12 @@ export function buildOverpassBuildingDetails(feature: OverpassFeatureLike) {
     properties: {
       archiInfo: payload.archiInfo,
       source_tags: payload.sourceTags,
-      source_osm_updated_at: null
+      source_osm_updated_at: null,
+      render_height_m: payload.renderHeightMeters,
+      render_min_height_m: payload.renderMinHeightMeters
     },
+    renderHeightMeters: payload.renderHeightMeters,
+    renderMinHeightMeters: payload.renderMinHeightMeters,
     design_ref_suggestions: []
   };
 }

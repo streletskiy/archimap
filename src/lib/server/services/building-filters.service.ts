@@ -98,6 +98,12 @@ function getRuleValue(item, key) {
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material:concrete')) return sourceTags['building:material:concrete'];
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'material_concrete')) return sourceTags.material_concrete;
   }
+  if (key === 'roof:shape' || key === 'roof_shape' || key === 'building:roof:shape') {
+    if (hasMeaningfulValue(archiInfo.roof_shape)) return archiInfo.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof:shape')) return sourceTags['roof:shape'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof_shape')) return sourceTags.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:roof:shape')) return sourceTags['building:roof:shape'];
+  }
   if (key === 'building:architecture' || key === 'architecture' || key === 'style') {
      if (hasMeaningfulValue(archiInfo.style)) return archiInfo.style;
   }

@@ -10,9 +10,11 @@
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import BulkClearAction from '$lib/components/shell/BulkClearAction.svelte';
   import FormRow from '$lib/components/shell/FormRow.svelte';
+  import RoofShapeSelect from '$lib/components/shell/RoofShapeSelect.svelte';
   import { getArchitectureStyleOptions } from '$lib/utils/architecture-style';
   import { resolveAddressText } from '$lib/utils/building-address';
   import { getBuildingMaterialOptions, toHumanBuildingMaterial } from '$lib/utils/building-material';
+  import { toHumanRoofShape } from '$lib/utils/roof-shape';
   import { filterBuildingEditedFields } from '$lib/utils/building-edit-fields';
   import { styleRegionOverrides } from '$lib/stores/style-overrides';
   import {
@@ -66,6 +68,7 @@
     'designRef',
     'designYear',
     'material',
+    'roofShape',
     'colour',
     'levels',
     'yearBuilt',
@@ -80,6 +83,7 @@
     'levels',
     'yearBuilt',
     'architect',
+    'roofShape',
     'archimapDescription'
   ]);
 
@@ -111,6 +115,7 @@
       designRef: false,
       designYear: false,
       material: false,
+      roofShape: false,
       colour: false,
       levels: false,
       yearBuilt: false,
@@ -214,6 +219,7 @@
     if (!normalized) return $t('buildingModal.notSpecified');
     if (field === 'style') return resolveDisplayStyle(normalized, $locale) || normalized;
     if (field === 'material') return toHumanBuildingMaterial(normalized, $locale) || normalized;
+    if (field === 'roofShape') return toHumanRoofShape(normalized, $t) || normalized;
     return normalized;
   }
 
@@ -335,6 +341,7 @@
       designRef: snapshot.designRef,
       designYear: snapshot.designYear,
       material: snapshot.material,
+      roofShape: snapshot.roofShape,
       colour: snapshot.colour,
       levels: snapshot.levels,
       yearBuilt: snapshot.yearBuilt,
@@ -419,6 +426,12 @@
   $: displayMaterial = displayMaterialRaw
     ? (toHumanBuildingMaterial(displayMaterialRaw, $locale) || displayMaterialRaw)
     : '';
+  $: displayRoofShapeRaw = isBulkSelection
+    ? pickFirstText(form.roofShape)
+    : pickFirstText(form.roofShape, archiInfo.roof_shape);
+  $: displayRoofShape = displayRoofShapeRaw
+    ? (toHumanRoofShape(displayRoofShapeRaw, $t) || displayRoofShapeRaw)
+    : '';
   $: displayColour = isBulkSelection ? pickFirstText(form.colour) : pickFirstText(form.colour, archiInfo.colour);
   $: displayDescription = isBulkSelection
     ? (bulkFieldState?.archimapDescription?.isMixed ? '' : pickFirstText(form.archimapDescription))
@@ -475,6 +488,7 @@
     { label: $t('buildingModal.designRef'), value: getSummaryValue('designRef', displayDesignRef) },
     { label: $t('buildingModal.designYear'), value: getSummaryValue('designYear', displayDesignYear) },
     { label: $t('buildingModal.material'), value: getSummaryValue('material', displayMaterial) },
+    { label: $t('buildingModal.roofShape'), value: getSummaryValue('roofShape', displayRoofShape) },
     { label: $t('buildingModal.colour'), value: getSummaryValue('colour', displayColour) },
     { label: $t('buildingModal.levels'), value: getSummaryValue('levels', isBulkSelection ? form.levels : pickFirstText(form.levels, archiInfo.levels)) },
     { label: $t('buildingModal.yearBuilt'), value: getSummaryValue('yearBuilt', isBulkSelection ? form.yearBuilt : pickFirstText(form.yearBuilt, archiInfo.year_built)) },
@@ -667,6 +681,26 @@
                     contentClassName="ui-floating-layer-building-modal"
                     onchange={() => markBulkFieldOverride('material')}
                   />
+                </FormRow>
+
+                <FormRow
+                  forId="building-roof-shape"
+                  label={$t('buildingModal.roofShape')}
+                  note={getBulkFieldNote('roofShape')}
+                >
+                  <BulkClearAction
+                    show={shouldShowBulkClearAction('roofShape', form.roofShape)}
+                    ariaLabel={$t('buildingModal.bulkClearField')}
+                    title={$t('buildingModal.bulkClearField')}
+                    onclick={() => clearBulkField('roofShape')}
+                  >
+                    <RoofShapeSelect
+                      bind:value={form.roofShape}
+                      placeholder={getFieldPlaceholder('roofShape')}
+                      contentClassName="ui-floating-layer-building-modal"
+                      onchange={() => markBulkFieldOverride('roofShape')}
+                    />
+                  </BulkClearAction>
                 </FormRow>
 
                 <FormRow
@@ -885,6 +919,26 @@
                     contentClassName="ui-floating-layer-building-modal"
                     onchange={() => markBulkFieldOverride('material')}
                   />
+                </FormRow>
+
+                <FormRow
+                  forId="building-roof-shape"
+                  label={$t('buildingModal.roofShape')}
+                  note={getBulkFieldNote('roofShape')}
+                >
+                  <BulkClearAction
+                    show={shouldShowBulkClearAction('roofShape', form.roofShape)}
+                    ariaLabel={$t('buildingModal.bulkClearField')}
+                    title={$t('buildingModal.bulkClearField')}
+                    onclick={() => clearBulkField('roofShape')}
+                  >
+                    <RoofShapeSelect
+                      bind:value={form.roofShape}
+                      placeholder={getFieldPlaceholder('roofShape')}
+                      contentClassName="ui-floating-layer-building-modal"
+                      onchange={() => markBulkFieldOverride('roofShape')}
+                    />
+                  </BulkClearAction>
                 </FormRow>
 
                 <FormRow

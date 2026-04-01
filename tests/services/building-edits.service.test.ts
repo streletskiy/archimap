@@ -24,6 +24,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -69,6 +70,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -340,6 +342,46 @@ test('buildChangesFromRows labels colour and architect changes with modern tags'
   assert.equal(byField.get('architect')?.osmTag, 'architect');
 });
 
+test('buildChangesFromRows labels roof shape changes with roof:shape', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `).run(
+    'way',
+    2502,
+    JSON.stringify({
+      name: 'Дом с крышей',
+      'roof:shape': 'flat'
+    })
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, roof_shape, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    25,
+    'way',
+    2502,
+    'user@example.com',
+    'Дом с крышей',
+    'gabled',
+    'pending'
+  );
+
+  const item = await service.getUserEditDetailsById(25);
+  assert.ok(item);
+  assert.equal(item?.values.roof_shape, 'gabled');
+  const byField = new Map<string, { osmTag?: string }>(
+    (item?.changes || []).map((change) => [String(change.field || ''), change])
+  );
+  assert.equal(byField.get('roof_shape')?.osmTag, 'roof:shape');
+});
+
 test('buildChangesFromRows treats concrete material variants as one selection', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
@@ -539,17 +581,20 @@ test('getUserEditDetailsById marks edit as drifted when OSM tags changed after s
 test('reassignUserEdit moves accepted local info to another building', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+  const targetSourceUpdatedAt = new Date('2026-01-02T00:00:00Z').toString();
 
   db.prepare(`
-    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
-    VALUES (?, ?, ?), (?, ?, ?)
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?), (?, ?, ?, ?)
   `).run(
     'way',
     5005,
     JSON.stringify({ name: 'Исходное здание' }),
+    '2026-01-01T00:00:00Z',
     'way',
     6006,
-    JSON.stringify({ name: 'Целевое здание' })
+    JSON.stringify({ name: 'Целевое здание' }),
+    targetSourceUpdatedAt
   );
 
   db.prepare(`
@@ -584,6 +629,45 @@ test('reassignUserEdit moves accepted local info to another building', async () 
     WHERE osm_type = ? AND osm_id = ?
   `).get('way', 5005);
   assert.equal(source, undefined);
+});
+
+test('reassignUserEdit normalizes source timestamp when moving a pending edit', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+  const targetSourceUpdatedAt = new Date('2026-02-02T00:00:00Z').toString();
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+  `).run(
+    'way',
+    7105,
+    JSON.stringify({ name: 'Исходное здание' }),
+    '2026-02-01T00:00:00Z',
+    'way',
+    7206,
+    JSON.stringify({ name: 'Целевое здание' }),
+    targetSourceUpdatedAt
+  );
+
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(15, 'way', 7105, 'user@example.com', 'Черновик', 'pending');
+
+  const updated = await service.reassignUserEdit(15, { osmType: 'way', osmId: 7206 }, { actor: 'admin@example.com' });
+  assert.equal(updated?.osmId, 7206);
+
+  const movedEditRow = db.prepare(`
+    SELECT osm_type, osm_id, source_osm_updated_at
+    FROM user_edits.building_user_edits
+    WHERE id = ?
+  `).get(15);
+  assert.equal(movedEditRow?.osm_type, 'way');
+  assert.equal(movedEditRow?.osm_id, 7206);
+  assert.equal(movedEditRow?.source_osm_updated_at, '2026-02-02T00:00:00Z');
 });
 
 test('deleteUserEdit removes pending edit history row', async () => {

@@ -9,7 +9,7 @@ import {
 } from '$lib/utils/text';
 import { buildBboxHash } from './filter-bbox.js';
 import { OVERPASS_BUILDING_SOURCE_ID } from './map-layer-utils.js';
-import { deriveBuildingLevelsText } from './map-3d-utils.js';
+import { buildBuilding3dPropertiesFromTags, deriveBuildingLevelsText } from './map-3d-utils.js';
 import type {
   FilterBuildingSourceConfig,
   FilterMapLike,
@@ -143,6 +143,13 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
     pickNullableText(archiInfo.material, feature?.properties?.material, sourceTags['building:material'], sourceTags.material),
     pickNullableText(archiInfo.materialConcrete, feature?.properties?.materialConcrete, sourceTags['building:material:concrete'], sourceTags.material_concrete)
   );
+  const render3dProperties = buildBuilding3dPropertiesFromTags(sourceTags);
+  const renderHeightMeters = Number.isFinite(Number(feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters))
+    ? Number(feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters)
+    : Number(render3dProperties.render_height_m || 0);
+  const renderMinHeightMeters = Number.isFinite(Number(feature?.properties?.render_min_height_m ?? feature?.properties?.renderMinHeightMeters))
+    ? Number(feature?.properties?.render_min_height_m ?? feature?.properties?.renderMinHeightMeters)
+    : Number(render3dProperties.render_min_height_m || 0);
   const derivedLevels = deriveBuildingLevelsText({
     tags: sourceTags,
     renderHeightMeters: feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters,
@@ -208,7 +215,9 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
     colour: normalizedArchiInfo.colour,
     address: normalizedArchiInfo.address,
     description: normalizedArchiInfo.description,
-    archimap_description: normalizedArchiInfo.archimap_description
+    archimap_description: normalizedArchiInfo.archimap_description,
+    renderHeightMeters,
+    renderMinHeightMeters
   };
 }
 

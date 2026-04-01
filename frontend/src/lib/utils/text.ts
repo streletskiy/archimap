@@ -7,6 +7,7 @@ export const BUILDING_EDITABLE_FIELDS = Object.freeze([
   'designRef',
   'designYear',
   'material',
+  'roofShape',
   'colour',
   'levels',
   'yearBuilt',

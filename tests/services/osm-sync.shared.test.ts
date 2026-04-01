@@ -34,6 +34,30 @@ test('buildDesiredTagMap writes building:levels and removes legacy levels', asyn
   assert.ok(removedKeys.includes('levels'));
 });
 
+test('buildDesiredTagMap writes roof:shape and removes legacy roof aliases', async () => {
+  const { buildDesiredTagMap } = await loadModule();
+
+  const { desired, removedKeys } = buildDesiredTagMap(
+    {
+      'roof:shape': 'flat',
+      roof_shape: 'flat',
+      'building:roof:shape': 'flat'
+    },
+    [
+      {
+        local_roof_shape: 'gabled',
+        edited_fields_json: JSON.stringify(['roof_shape'])
+      }
+    ]
+  );
+
+  assert.equal(desired['roof:shape'], 'gabled');
+  assert.equal(Object.prototype.hasOwnProperty.call(desired, 'roof_shape'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(desired, 'building:roof:shape'), false);
+  assert.ok(removedKeys.includes('roof_shape'));
+  assert.ok(removedKeys.includes('building:roof:shape'));
+});
+
 test('createPkceChallenge matches the RFC 7636 S256 example', async () => {
   const { createPkceChallenge } = await loadModule();
 

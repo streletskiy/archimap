@@ -694,10 +694,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           osmType: 'way',
           osmId: 102,
           style: 'omani',
+          roofShape: 'gabled',
           colour: '#7f6a52',
           levels: '4',
           yearBuilt: '1989',
-          editedFields: ['style', 'colour', 'levels', 'year_built']
+          editedFields: ['style', 'roofShape', 'colour', 'levels', 'year_built']
         })
       });
       assert.equal(partEdit.status, 200);
@@ -715,6 +716,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
         `).get(partEditBody.editId);
         assert.equal(pendingPartEdit?.colour, '#7f6a52');
         assert.equal(pendingPartEdit?.style, 'omani');
+        assert.equal(pendingPartEdit?.roof_shape, 'gabled');
         assert.equal(pendingPartEdit?.levels, 4);
         assert.equal(pendingPartEdit?.year_built, 1989);
         assert.equal(pendingPartEdit?.name, null);

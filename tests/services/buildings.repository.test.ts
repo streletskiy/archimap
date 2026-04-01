@@ -45,6 +45,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -71,6 +72,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -200,6 +202,8 @@ test('buildings repository inserts and updates pending edits', async () => {
   const db = createTestDb();
   try {
     const repository = createBuildingsRepository({ db });
+    const insertedSourceUpdatedAt = new Date('2026-01-01T00:00:00Z').toString();
+    const updatedSourceUpdatedAt = new Date('2026-01-04T00:00:00Z').toString();
 
     const editId = await repository.insertPendingUserEdit({
       osm_type: 'way',
@@ -214,6 +218,7 @@ test('buildings repository inserts and updates pending edits', async () => {
       design_year: 1972,
       material: 'concrete',
       material_concrete: 'blocks',
+      roof_shape: 'gabled',
       colour: '#ffffff',
       levels: 5,
       year_built: 1988,
@@ -222,7 +227,7 @@ test('buildings repository inserts and updates pending edits', async () => {
       archimap_description: 'Initial note',
       edited_fields_json: '["name"]',
       source_tags_json: '{"name":"Alpha"}',
-      source_osm_updated_at: '2026-01-01T00:00:00Z'
+      source_osm_updated_at: insertedSourceUpdatedAt
     });
 
     assert.equal(Number.isInteger(editId) && editId > 0, true);
@@ -256,6 +261,7 @@ test('buildings repository inserts and updates pending edits', async () => {
       design_year: null,
       material: 'brick',
       material_concrete: null,
+      roof_shape: 'hipped',
       colour: '#000000',
       levels: 6,
       year_built: 1989,
@@ -264,7 +270,7 @@ test('buildings repository inserts and updates pending edits', async () => {
       archimap_description: 'Updated note',
       edited_fields_json: '["style"]',
       source_tags_json: '{"name":"Alpha","style":"neo-classical"}',
-      source_osm_updated_at: '2026-01-04T00:00:00Z'
+      source_osm_updated_at: updatedSourceUpdatedAt
     });
 
     const row = db.prepare(`
@@ -276,6 +282,7 @@ test('buildings repository inserts and updates pending edits', async () => {
     assert.equal(row?.name, 'Updated House');
     assert.equal(row?.style, 'neo-classical');
     assert.equal(row?.material, 'brick');
+    assert.equal(row?.roof_shape, 'hipped');
     assert.equal(row?.status, 'pending');
     assert.equal(row?.sync_status, 'unsynced');
     assert.equal(row?.admin_comment, null);
@@ -292,10 +299,12 @@ test('buildings repository inserts and updates pending edits', async () => {
     assert.equal(row?.sync_error_text, null);
     assert.equal(row?.source_osm_version, 'v2');
     assert.equal(row?.source_geometry_json, '{"type":"Polygon","coordinates":[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}');
+    assert.equal(row?.source_osm_updated_at, '2026-01-04T00:00:00Z');
 
     const snapshot = await repository.getLatestUserEditSnapshotById('way', 101);
     assert.equal(snapshot?.id, editId);
     assert.equal(snapshot?.source_geometry_json, '{"type":"Polygon","coordinates":[[[1,1],[2,1],[2,2],[1,2],[1,1]]]}');
+    assert.equal(snapshot?.source_osm_updated_at, '2026-01-04T00:00:00Z');
   } finally {
     db.close();
   }

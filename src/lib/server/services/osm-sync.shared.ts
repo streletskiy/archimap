@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { normalizeRoofShapeSelection } = require('./edits.service');
 
 const DEFAULT_AUTH_BASE_URL = 'https://www.openstreetmap.org';
 const DEFAULT_API_BASE_URL = 'https://api.openstreetmap.org';
@@ -245,6 +246,7 @@ function stateFromLocalRow(row: LooseRecord = {}) {
     design_ref: normalizeStateValue(row.local_design_ref),
     design_year: normalizeStateValue(row.local_design_year),
     material: normalizeMaterialValue(row.local_material, row.local_material_concrete),
+    roof_shape: normalizeStateValue(normalizeRoofShapeSelection(normalizeStateValue(row.local_roof_shape))),
     colour: normalizeStateValue(row.local_colour),
     levels: normalizeStateValue(row.local_levels),
     year_built: normalizeStateValue(row.local_year_built),
@@ -262,6 +264,7 @@ function stateFromContourTags(tags: LooseRecord = {}) {
     design_ref: normalizeStateValue(tags['design:ref'] || tags.design_ref),
     design_year: normalizeStateValue(tags['design:year'] || tags.design_year),
     material: normalizeMaterialValue(tags['building:material'] || tags.material),
+    roof_shape: normalizeStateValue(normalizeRoofShapeSelection(tags['roof:shape'] || tags.roof_shape || tags['building:roof:shape'])),
     colour: normalizeStateValue(tags['building:colour'] || tags.colour),
     levels: normalizeStateValue(tags['building:levels'] || tags.levels),
     year_built: normalizeStateValue(tags['building:year'] || tags.start_date || tags.construction_date || tags.year_built),
@@ -273,7 +276,7 @@ function stateFromContourTags(tags: LooseRecord = {}) {
 
 function diffStates(before: LooseRecord = {}, after: LooseRecord = {}) {
   const changed = [];
-  const keys = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description'];
+  const keys = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'description'];
   for (const key of keys) {
     if (before[key] !== after[key]) {
       changed.push({ key, before: before[key] ?? null, after: after[key] ?? null });
@@ -302,6 +305,8 @@ function controlledKeysForField(field) {
       return ['design:year', 'design_year'];
     case 'material':
       return ['building:material', 'material', 'building:material:concrete', 'material_concrete'];
+    case 'roof_shape':
+      return ['roof:shape', 'roof_shape', 'building:roof:shape'];
     case 'colour':
       return ['building:colour', 'colour'];
     case 'levels':
@@ -362,6 +367,13 @@ function applyFieldToTagMap(tags: LooseRecord, field, value, explicitlyEdited = 
       delete tags.material;
       delete tags.material_concrete;
       return ['material', 'material_concrete'];
+    case 'roof_shape': {
+      const roofShape = normalizeRoofShapeSelection(normalized);
+      tags['roof:shape'] = roofShape || normalized;
+      delete tags.roof_shape;
+      delete tags['building:roof:shape'];
+      return ['roof_shape', 'building:roof:shape'];
+    }
     case 'colour':
       tags['building:colour'] = normalized;
       delete tags.colour;

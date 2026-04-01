@@ -1,4 +1,5 @@
 const { assertMutableSyncStatus } = require('./shared');
+const { toIsoTimestampOrNull } = require('../../utils/timestamp');
 
 function createBuildingEditModerationService(context: LooseRecord, { getUserEditDetailsById }: LooseRecord) {
   const {
@@ -18,7 +19,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
   }
 
   function mergeLocalInfoForReassign(sourceRow: LooseRecord, targetRow: LooseRecord, { force = false }: LooseRecord = {}) {
-    const fields = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'material_concrete', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+    const fields = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'material_concrete', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
     const conflicts: string[] = [];
     const merged: LooseRecord = {};
 
@@ -85,7 +86,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
             source_osm_updated_at = ?,
             updated_at = datetime('now')
           WHERE id = ?
-        `).run(targetOsmType, targetOsmId, targetContour.tags_json ?? null, targetContour.updated_at ?? null, id);
+        `).run(targetOsmType, targetOsmId, targetContour.tags_json ?? null, toIsoTimestampOrNull(targetContour.updated_at), id);
 
         await supersedePendingUserEdits(targetOsmType, targetOsmId, item.updatedBy, id);
       });
@@ -107,9 +108,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     const tx = db.transaction(async () => {
       await db.prepare(`
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
@@ -118,6 +119,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
           design_year = excluded.design_year,
           material = excluded.material,
           material_concrete = excluded.material_concrete,
+          roof_shape = excluded.roof_shape,
           colour = excluded.colour,
           levels = excluded.levels,
           year_built = excluded.year_built,
@@ -136,6 +138,7 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
         merged.design_year ?? null,
         merged.material ?? null,
         merged.material_concrete ?? null,
+        merged.roof_shape ?? null,
         merged.colour ?? null,
         merged.levels ?? null,
         merged.year_built ?? null,

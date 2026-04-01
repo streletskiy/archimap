@@ -74,6 +74,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         ai.design_year AS merged_design_year,
         ai.material AS merged_material,
         ai.material_concrete AS merged_material_concrete,
+        ai.roof_shape AS merged_roof_shape,
         ai.colour AS merged_colour,
         ai.levels AS merged_levels,
         ai.year_built AS merged_year_built,
@@ -139,6 +140,9 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     if (key === 'colour') {
       return String(normalized).trim().toLowerCase();
     }
+    if (key === 'roof_shape') {
+      return String(normalized).trim().toLowerCase();
+    }
 
     return normalized;
   }
@@ -154,6 +158,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     { key: 'design_ref', label: 'Номер проекта', osmTag: 'design:ref' },
     { key: 'design_year', label: 'Год проекта', osmTag: 'design:year' },
     { key: 'material', label: 'Материал', osmTag: 'building:material | material' },
+    { key: 'roof_shape', label: 'Форма кровли', osmTag: 'roof:shape' },
     { key: 'colour', label: 'Цвет', osmTag: 'building:colour' },
     { key: 'archimap_description', label: 'Доп. информация', osmTag: null }
   ]);
@@ -199,7 +204,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   async function getMergedInfoRow(osmType, osmId) {
     return await db.prepare(`
-      SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+      SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
     `).get(osmType, osmId) || null;
@@ -306,6 +311,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         pickTagValue(tags, ['building:material', 'material']),
         pickTagValue(tags, ['building:material:concrete', 'material_concrete'])
       ),
+      roof_shape: pickTagValue(tags, ['roof:shape', 'roof_shape', 'building:roof:shape']),
       colour: pickTagValue(tags, ['building:colour', 'colour']),
       levels: pickTagValue(tags, ['building:levels', 'levels']),
       year_built: pickTagValue(tags, ['building:year', 'start_date', 'construction_date', 'year_built']),
@@ -384,6 +390,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       || row.design_year != null
       || row.material != null
       || row.material_concrete != null
+      || row.roof_shape != null
       || row.colour != null
       || row.levels != null
       || row.year_built != null
@@ -401,6 +408,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       design_year: row.design_year ?? null,
       material: row.material ?? null,
       material_concrete: row.material_concrete ?? null,
+      roof_shape: row.roof_shape ?? null,
       colour: row.colour ?? null,
       levels: row.levels ?? null,
       year_built: row.year_built ?? null,
@@ -422,6 +430,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       design_year: row?.merged_design_year,
       material: row?.merged_material,
       material_concrete: row?.merged_material_concrete,
+      roof_shape: row?.merged_roof_shape,
       colour: row?.merged_colour,
       levels: row?.merged_levels,
       year_built: row?.merged_year_built,
@@ -536,6 +545,7 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         material: normalizeMaterialSelection(row.material, row.material_concrete),
         material_raw: row.material ?? null,
         material_concrete: row.material_concrete ?? null,
+        roof_shape: row.roof_shape ?? null,
         colour: row.colour ?? null,
         levels: row.levels ?? null,
         year_built: row.year_built ?? null,

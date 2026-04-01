@@ -443,16 +443,17 @@ function getTileBBox(zoom: number, x: number, y: number): BboxSnapshot {
 }
 
 function getViewportTilePlan(viewport: BboxSnapshot | null, zoom: number) {
-  if (!viewport) {
+  const tileZoom = resolveBboxTileZoom(zoom);
+  const tooCoarse = Number(zoom) < OVERPASS_MIN_RENDER_ZOOM;
+  if (!viewport || tooCoarse) {
     return {
-      tileZoom: resolveBboxTileZoom(zoom),
+      tileZoom,
       tileKeys: [] as string[],
       tiles: [] as Array<{ key: string; bbox: BboxSnapshot }>,
       tooCoarse: true
     };
   }
 
-  const tileZoom = resolveBboxTileZoom(zoom);
   const worldScale = 2 ** tileZoom;
   const xMin = Math.max(0, lonToTileX(viewport.west, tileZoom) - OVERPASS_TILE_PADDING);
   const xMax = Math.min(worldScale - 1, lonToTileX(viewport.east, tileZoom) + OVERPASS_TILE_PADDING);
@@ -472,7 +473,7 @@ function getViewportTilePlan(viewport: BboxSnapshot | null, zoom: number) {
     tileZoom,
     tileKeys: tiles.map((item) => item.key),
     tiles,
-    tooCoarse: Number(zoom) < OVERPASS_MIN_RENDER_ZOOM
+    tooCoarse: false
   };
 }
 

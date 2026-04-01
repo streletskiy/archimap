@@ -5,6 +5,7 @@ export const BUILDING_PART_EDITABLE_FIELDS = Object.freeze([
   'colour',
   'style',
   'material',
+  'roofShape',
   'yearBuilt'
 ]);
 

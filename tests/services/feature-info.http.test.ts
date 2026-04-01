@@ -45,6 +45,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -94,11 +95,11 @@ test('feature-info support attaches local info through the repository', async ()
   const db = createTestDb();
   try {
     db.prepare(`
-      INSERT INTO local.architectural_info (
-        osm_type, osm_id, name, style, updated_by, updated_at
+    INSERT INTO local.architectural_info (
+        osm_type, osm_id, name, style, roof_shape, updated_by, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
-    `).run('way', 101, 'Alpha House', 'constructivism', 'editor@example.test');
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run('way', 101, 'Alpha House', 'constructivism', 'gabled', 'editor@example.test');
 
     const support = createFeatureInfoSupport({
       db,
@@ -117,11 +118,50 @@ test('feature-info support attaches local info through the repository', async ()
     const result = await support.attachInfoToFeatures(features, { actorKey: '  Editor@Test.Com ' });
     assert.equal(result, features);
     assert.equal(features[0].properties.archiInfo.name, 'Alpha House');
+    assert.equal(features[0].properties.archiInfo.roof_shape, 'gabled');
     assert.equal(features[0].properties.hasExtraInfo, true);
     assert.equal(features[0].properties.personalActor, 'editor@test.com');
     assert.equal(features[1].properties.archiInfo, null);
     assert.equal(features[1].properties.hasExtraInfo, false);
     assert.equal(features[1].properties.personalActor, 'editor@test.com');
+  } finally {
+    db.close();
+  }
+});
+
+test('feature-info rowToFeature preserves render heights from contour tags', async () => {
+  const db = createTestDb();
+  try {
+    const support = createFeatureInfoSupport({ db });
+    const feature = support.rowToFeature({
+      osm_type: 'way',
+      osm_id: 303,
+      tags_json: JSON.stringify({
+        building: 'yes',
+        height: '18.5',
+        min_height: '5.5'
+      }),
+      geometry_json: JSON.stringify({
+        type: 'Polygon',
+        coordinates: [[
+          [37.6, 55.75],
+          [37.62, 55.75],
+          [37.62, 55.77],
+          [37.6, 55.77],
+          [37.6, 55.75]
+        ]]
+      }),
+      min_lon: 37.6,
+      min_lat: 55.75,
+      max_lon: 37.62,
+      max_lat: 55.77,
+      updated_at: '2026-04-01 00:00:00'
+    });
+
+    assert.equal(feature.properties.render_height_m, 18.5);
+    assert.equal(feature.properties.render_min_height_m, 5.5);
+    assert.equal(feature.properties.renderHeightMeters, 18.5);
+    assert.equal(feature.properties.renderMinHeightMeters, 5.5);
   } finally {
     db.close();
   }

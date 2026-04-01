@@ -6,6 +6,7 @@ import {
   normalizeBuildingMaterialSelection,
   splitBuildingMaterialSelection
 } from './building-material.js';
+import { normalizeRoofShapeSelection } from './roof-shape.js';
 import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from './building-address.js';
 import { normalizeIntegerField, pickFirstText } from './text.js';
 
@@ -20,6 +21,7 @@ export function createEmptyBuildingForm() {
     design: '',
     designRef: '',
     material: '',
+    roofShape: '',
     colour: '',
     archimapDescription: '',
     addressFull: '',
@@ -42,6 +44,7 @@ export function createEmptyBuildingComparable() {
     design: '',
     designRef: '',
     material: '',
+    roofShape: '',
     colour: '',
     archimapDescription: '',
     address: ''
@@ -56,6 +59,7 @@ export function createEmptyBulkBuildingFieldState() {
     designRef: { isMixed: false, sampleValues: [], initialValue: '' },
     designYear: { isMixed: false, sampleValues: [], initialValue: '' },
     material: { isMixed: false, sampleValues: [], initialValue: '' },
+    roofShape: { isMixed: false, sampleValues: [], initialValue: '' },
     colour: { isMixed: false, sampleValues: [], initialValue: '' },
     levels: { isMixed: false, sampleValues: [], initialValue: '' },
     yearBuilt: { isMixed: false, sampleValues: [], initialValue: '' },
@@ -72,6 +76,7 @@ const BULK_FIELD_FORM_MAP = Object.freeze({
   designRef: ['designRef'],
   designYear: ['designYear'],
   material: ['material'],
+  roofShape: ['roofShape'],
   colour: ['colour'],
   levels: ['levels'],
   yearBuilt: ['yearBuilt'],
@@ -177,6 +182,7 @@ export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingF
     designRef: pickFirstText(formValue.designRef),
     designYear: pickFirstText(formValue.designYear),
     material: normalizeBuildingMaterialSelection(formValue.material),
+    roofShape: normalizeRoofShapeSelection(formValue.roofShape),
     colour: pickFirstText(formValue.colour).toLowerCase(),
     levels: pickFirstText(formValue.levels),
     yearBuilt: pickFirstText(formValue.yearBuilt),
@@ -217,6 +223,12 @@ export function hydrateBuildingForm(details) {
     info.material ?? sourceTags?.['building:material'] ?? sourceTags?.material,
     info.material_concrete ?? sourceTags?.['building:material:concrete'] ?? sourceTags?.material_concrete
   );
+  const roofShape = normalizeRoofShapeSelection(
+    info.roof_shape
+    ?? sourceTags?.['roof:shape']
+    ?? sourceTags?.roof_shape
+    ?? sourceTags?.['building:roof:shape']
+  );
   const form = {
     name: pickFirstText(info.name, sourceTags?.name, sourceTags?.['name:ru'], sourceTags?.['name:en']),
     levels: normalizeIntegerField(info.levels ?? sourceTags?.['building:levels'] ?? sourceTags?.levels, 0, 300),
@@ -237,6 +249,7 @@ export function hydrateBuildingForm(details) {
     design: pickFirstText(info.design, sourceTags?.design),
     designRef: pickFirstText(info.design_ref, sourceTags?.['design:ref'], sourceTags?.design_ref),
     material: materialSelection,
+    roofShape,
     colour: pickFirstText(info.colour, sourceTags?.['building:colour'], sourceTags?.colour),
     archimapDescription: pickFirstText(info.archimap_description, info.description),
     addressFull: nextAddressFields.full,
@@ -265,6 +278,12 @@ export function hydrateBuildingForm(details) {
     if (split.materialConcrete) {
       synthesizedTags['building:material:concrete'] = split.materialConcrete;
     }
+  }
+  if (pickFirstText(info.roof_shape)) {
+    delete synthesizedTags['roof:shape'];
+    delete synthesizedTags.roof_shape;
+    delete synthesizedTags['building:roof:shape'];
+    synthesizedTags['roof:shape'] = info.roof_shape;
   }
   
   // Also check if info.material_concrete was explicitly provided independently

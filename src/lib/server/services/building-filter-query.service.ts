@@ -22,6 +22,7 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ai.design_year,
     ai.material,
     ai.material_concrete,
+    ai.roof_shape,
     ai.colour,
     ai.levels,
     ai.year_built,
@@ -92,6 +93,7 @@ function resolveBboxQueryMode(isPostgres, rtreeState) {
 }
 
 const DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2;
+const DEFAULT_BUILDING_EXTRUSION_LEVELS = 1;
 
 function parseTagNumber(value) {
   if (value == null) return null;
@@ -102,6 +104,12 @@ function parseTagNumber(value) {
   if (!match) return null;
   const parsed = Number(match[0]);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function roundMeterValue(value) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) return 0;
+  return Math.round(Math.max(0, normalized) * 100) / 100;
 }
 
 function readFirstNumericTag(tags, keys = []) {
@@ -137,6 +145,30 @@ function deriveLevelsTextFromSourceTags(sourceTags = {}) {
   return String(estimatedLevels);
 }
 
+function buildRender3dPropertiesFromSourceTags(sourceTags = {}) {
+  const levels = readFirstNumericTag(sourceTags, ['building:levels', 'levels']);
+  const explicitHeight = readFirstNumericTag(sourceTags, ['building:height', 'height']);
+  const minLevel = readFirstNumericTag(sourceTags, ['building:min_level', 'min_level']);
+  const explicitMinHeight = readFirstNumericTag(sourceTags, ['building:min_height', 'min_height']);
+  const normalizedLevels = Number.isFinite(levels) && levels > 0 ? levels : DEFAULT_BUILDING_EXTRUSION_LEVELS;
+  const normalizedExplicitHeight = Number.isFinite(explicitHeight) && explicitHeight > 0 ? explicitHeight : null;
+  const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
+  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0
+    ? explicitMinHeight
+    : 0;
+  const levelDerivedMinHeight = normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
+  const renderMinHeightMeters = Math.max(normalizedExplicitMinHeight, levelDerivedMinHeight);
+  const levelDerivedHeightMeters = renderMinHeightMeters + (normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS);
+  const renderHeightMeters = normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
+    ? normalizedExplicitHeight
+    : levelDerivedHeightMeters;
+
+  return {
+    renderHeightMeters: roundMeterValue(renderHeightMeters),
+    renderMinHeightMeters: roundMeterValue(renderMinHeightMeters)
+  };
+}
+
 function mapFilterDataRow(row) {
   const osmKey = `${row.osm_type}/${row.osm_id}`;
   let sourceTags: LooseRecord;
@@ -146,6 +178,7 @@ function mapFilterDataRow(row) {
     sourceTags = {};
   }
   const derivedLevels = deriveLevelsTextFromSourceTags(sourceTags);
+  const render3dProperties = buildRender3dPropertiesFromSourceTags(sourceTags);
   const hasExtraInfo = row.info_osm_id != null;
   const split = hasExtraInfo ? splitBuildingMaterialSelection(row.material) : null;
   const minLon = Number(row.min_lon);
@@ -158,6 +191,8 @@ function mapFilterDataRow(row) {
     osmKey,
     sourceTags,
     levels: row.levels ?? derivedLevels ?? null,
+    renderHeightMeters: render3dProperties.renderHeightMeters,
+    renderMinHeightMeters: render3dProperties.renderMinHeightMeters,
     archiInfo: hasExtraInfo
       ? {
         osm_type: row.osm_type,
@@ -169,6 +204,7 @@ function mapFilterDataRow(row) {
         design_year: row.design_year,
         material: split?.material ?? row.material,
         material_concrete: split?.material_concrete ?? row.material_concrete,
+        roof_shape: row.roof_shape,
         colour: row.colour,
         levels: row.levels,
         year_built: row.year_built,
@@ -210,6 +246,7 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       ai.design_year,
       ai.material,
       ai.material_concrete,
+      ai.roof_shape,
       ai.colour,
       ai.levels,
       ai.year_built,

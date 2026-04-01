@@ -4,6 +4,37 @@ const CONCRETE_BUILDING_MATERIAL_VARIANTS = new Map([
   ['concrete_blocks', 'blocks'],
   ['concrete_monolith', 'monolith']
 ]);
+const ROOF_SHAPE_CANONICAL_VALUES = new Set([
+  'flat',
+  'gabled',
+  'gabled_height_moved',
+  'skillion',
+  'saltbox',
+  'hipped',
+  'half-hipped',
+  'side_hipped',
+  'side_half-hipped',
+  'hipped-and-gabled',
+  'mansard',
+  'gambrel',
+  'bellcast_gable',
+  'pyramidal',
+  'crosspitched',
+  'sawtooth',
+  'butterfly',
+  'cone',
+  'dome',
+  'onion',
+  'round'
+]);
+const ROOF_SHAPE_NORMALIZED_ALIASES = new Map([
+  ['gabledheightmoved', 'gabled_height_moved'],
+  ['halfhipped', 'half-hipped'],
+  ['sidehipped', 'side_hipped'],
+  ['sidehalfhipped', 'side_half-hipped'],
+  ['hippedandgabled', 'hipped-and-gabled'],
+  ['bellcastgable', 'bellcast_gable']
+]);
 const ARCHI_EDITED_FIELD_ALIASES = new Map([
   ['name', 'name'],
   ['style', 'style'],
@@ -20,6 +51,10 @@ const ARCHI_EDITED_FIELD_ALIASES = new Map([
   ['address', 'address'],
   ['colour', 'colour'],
   ['color', 'colour'],
+  ['roofshape', 'roof_shape'],
+  ['roof_shape', 'roof_shape'],
+  ['roof-shape', 'roof_shape'],
+  ['roof:shape', 'roof_shape'],
   ['archimapdescription', 'archimap_description'],
   ['archimap_description', 'archimap_description'],
   ['description', 'archimap_description']
@@ -67,6 +102,17 @@ function normalizeConcreteBuildingMaterialVariant(value) {
   return '';
 }
 
+function normalizeRoofShapeSelection(value) {
+  const text = sanitizeFieldText(value, 120);
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (ROOF_SHAPE_CANONICAL_VALUES.has(normalized)) return normalized;
+  const collapsed = normalized.replace(/[^a-z0-9]+/g, '');
+  if (ROOF_SHAPE_NORMALIZED_ALIASES.has(normalized)) return ROOF_SHAPE_NORMALIZED_ALIASES.get(normalized);
+  if (ROOF_SHAPE_NORMALIZED_ALIASES.has(collapsed)) return ROOF_SHAPE_NORMALIZED_ALIASES.get(collapsed);
+  return normalized;
+}
+
 function splitBuildingMaterialSelection(value) {
   const selection = normalizeBuildingMaterialSelectionKey(value);
   const concreteVariant = CONCRETE_BUILDING_MATERIAL_VARIANTS.get(selection) || '';
@@ -107,6 +153,7 @@ function sanitizeArchiPayload(body) {
   const materialSelection = String(body?.material ?? '').trim();
   const explicitMaterialConcrete = normalizeConcreteBuildingMaterialVariant(body?.materialConcrete ?? body?.material_concrete);
   const explicitMaterialConcreteRaw = sanitizeFieldText(body?.materialConcrete ?? body?.material_concrete, 40);
+  const roofShape = normalizeRoofShapeSelection(body?.roofShape ?? body?.roof_shape ?? body?.['roof:shape']);
   const splitMaterial = splitBuildingMaterialSelection(materialSelection);
   const material = splitMaterial.material;
   const materialConcrete = explicitMaterialConcrete || splitMaterial.material_concrete;
@@ -145,6 +192,7 @@ function sanitizeArchiPayload(body) {
       year_built: yearBuilt,
       architect: sanitizeFieldText(body?.architect, 200),
       address: sanitizeFieldText(body?.address, 300),
+      roof_shape: roofShape,
       archimap_description: sanitizeFieldText(body?.archimapDescription ?? body?.archimap_description ?? body?.description, 1000)
     }
   };
@@ -190,5 +238,6 @@ module.exports = {
   splitBuildingMaterialSelection,
   sanitizeArchiPayload,
   sanitizeEditedFields,
+  normalizeRoofShapeSelection,
   USER_EDIT_STATUS_VALUES
 };

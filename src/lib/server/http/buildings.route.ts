@@ -11,6 +11,7 @@ const {
   compilePostgresFilterRulesPredicate
 } = require('../utils/filter-sql-builder');
 const { getFeatureKindFromTagsJson } = require('../utils/building-feature-kind');
+const { toIsoTimestampOrNull } = require('../utils/timestamp');
 
 function normalizeJsonText(value) {
   if (value == null) return null;
@@ -46,7 +47,7 @@ function buildSourceSnapshot(options: any = {}) {
     return {
       sourceGeometryJson: normalizeJsonText(contourRow.geometry_json),
       sourceTagsJson: normalizeJsonText(contourRow.tags_json),
-      sourceOsmUpdatedAt: normalizeText(contourRow.updated_at)
+      sourceOsmUpdatedAt: toIsoTimestampOrNull(contourRow.updated_at)
     };
   }
 
@@ -58,7 +59,8 @@ function buildSourceSnapshot(options: any = {}) {
   return {
     sourceGeometryJson: bodyGeometryJson || fallbackGeometryJson,
     sourceTagsJson: bodyTagsJson || fallbackTagsJson,
-    sourceOsmUpdatedAt: normalizeText(body?.sourceOsmUpdatedAt) || normalizeText(fallbackRow?.source_osm_updated_at)
+    sourceOsmUpdatedAt: toIsoTimestampOrNull(body?.sourceOsmUpdatedAt)
+      || toIsoTimestampOrNull(fallbackRow?.source_osm_updated_at)
   };
 }
 
@@ -185,6 +187,7 @@ function registerBuildingsRoutes(deps) {
       design_year: row?.design_year ?? null,
       material: row?.material ?? null,
       material_concrete: row?.material_concrete ?? null,
+      roof_shape: row?.roof_shape ?? null,
       colour: row?.colour ?? null,
       levels: row?.levels ?? null,
       year_built: row?.year_built ?? null,
@@ -241,7 +244,7 @@ function registerBuildingsRoutes(deps) {
     }
     const shouldRefreshDesignRefSuggestions = requestedEditedFields.includes('design_ref');
     if (featureKind === 'building_part') {
-      const allowedFields = new Set(['levels', 'colour', 'style', 'material', 'year_built']);
+      const allowedFields = new Set(['levels', 'colour', 'style', 'material', 'roof_shape', 'year_built']);
       const hasDisallowedRequestedFields = requestedEditedFields.some((field) => !allowedFields.has(field));
       const hasDisallowedPayloadFields = ['name', 'design', 'design_ref', 'design_year', 'architect', 'address', 'archimap_description']
         .some((field) => validated.value?.[field] != null);

@@ -361,6 +361,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       design_year: currentMergedRow?.design_year ?? null,
       material: currentMergedRow?.material ?? null,
       material_concrete: currentMergedRow?.material_concrete ?? null,
+      roof_shape: currentMergedRow?.roof_shape ?? null,
       colour: currentMergedRow?.colour ?? null,
       levels: currentMergedRow?.levels ?? null,
       year_built: currentMergedRow?.year_built ?? null,
@@ -375,7 +376,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       (await db
         .prepare(
           `
-        SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description
+        SELECT name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
@@ -391,6 +392,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       material: editSourceRow.material ?? null,
       material_raw: editSourceRow.material == null ? null : String(editSourceRow.material),
       material_concrete: editSourceRow.material_concrete ?? null,
+      roof_shape: editSourceRow.roof_shape ?? null,
       colour: editSourceRow.colour ?? null,
       levels: editSourceRow.levels ?? null,
       year_built: editSourceRow.year_built ?? null,
@@ -407,6 +409,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
       material: currentMerged?.material ?? null,
       material_raw: currentMerged?.material == null ? null : String(currentMerged.material),
       material_concrete: currentMerged?.material_concrete ?? null,
+      roof_shape: currentMerged?.roof_shape ?? null,
       colour: currentMerged?.colour ?? null,
       levels: currentMerged?.levels ?? null,
       year_built: currentMerged?.year_built ?? null,
@@ -536,9 +539,9 @@ function createAdminEditsService(options: LooseRecord = {}) {
         .prepare(
           `
         INSERT INTO local.architectural_info (
-          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
+          osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(osm_type, osm_id) DO UPDATE SET
           name = excluded.name,
           style = excluded.style,
@@ -547,6 +550,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
           design_year = excluded.design_year,
           material = excluded.material,
           material_concrete = excluded.material_concrete,
+          roof_shape = excluded.roof_shape,
           colour = excluded.colour,
           levels = excluded.levels,
           year_built = excluded.year_built,
@@ -567,6 +571,7 @@ function createAdminEditsService(options: LooseRecord = {}) {
           mergedCandidate.design_year,
           mergedCandidate.material,
           mergedCandidate.material_concrete,
+          mergedCandidate.roof_shape,
           mergedCandidate.colour,
           mergedCandidate.levels,
           mergedCandidate.year_built,

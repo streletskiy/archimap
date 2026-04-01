@@ -107,7 +107,7 @@
   } from '$lib/stores/map';
   import { buildingFilterLayers, buildingFilterRuntime, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchMapState, searchState } from '$lib/stores/search';
-  import { pointInBounds } from '$lib/services/region-pmtiles';
+  import { getActiveRegionPmtiles, isViewportCoveredByRegions } from '$lib/services/region-pmtiles';
   import { createMapRegionLayersController } from './map-region-layers-controller';
   import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
@@ -366,38 +366,15 @@
   const handleMapPointerMove = (event) => selectionController.handleMapPointerMove(event);
   const handleMapPointerLeave = () => selectionController.handleMapPointerLeave();
 
-  function getViewportSamplePoints(bounds = map?.getBounds?.(), mapRef = map) {
-    if (!bounds || !mapRef) return [];
-    const west = Number(bounds.getWest?.());
-    const east = Number(bounds.getEast?.());
-    const south = Number(bounds.getSouth?.());
-    const north = Number(bounds.getNorth?.());
-    if (![west, east, south, north].every(Number.isFinite)) return [];
-    const center = mapRef.getCenter?.();
-    if (!center) return [];
-    const midLon = (west + east) / 2;
-    const midLat = (north + south) / 2;
-    return [
-      [center.lng, center.lat],
-      [west, north],
-      [east, north],
-      [east, south],
-      [west, south],
-      [midLon, north],
-      [midLon, south],
-      [west, midLat],
-      [east, midLat]
-    ];
-  }
-
   function getCoverageRegions() {
     const activeRegions = regionLayersController.getActiveRegionPmtiles();
     if (Array.isArray(activeRegions) && activeRegions.length > 0) {
       return activeRegions;
     }
-    return Array.isArray(runtimeConfig?.buildingRegionsPmtiles)
-      ? runtimeConfig.buildingRegionsPmtiles
-      : [];
+    if (!map || !Array.isArray(runtimeConfig?.buildingRegionsPmtiles)) {
+      return [];
+    }
+    return getActiveRegionPmtiles(runtimeConfig.buildingRegionsPmtiles, map.getBounds?.());
   }
 
   function isViewportCoveredByProcessedRegions() {
@@ -405,9 +382,7 @@
       return true;
     }
     const regions = getCoverageRegions();
-    const points = getViewportSamplePoints();
-    if (regions.length === 0 || points.length === 0) return false;
-    return points.every(([lon, lat]) => regions.some((region) => pointInBounds(lon, lat, region.bounds)));
+    return isViewportCoveredByRegions(regions, map?.getBounds?.(), map?.getCenter?.());
   }
 
   function syncOverpassMapLayers() {
@@ -808,7 +783,6 @@
       });
       map.on('moveend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('moveend', () => regionLayersController.scheduleCoverageCheck());
-      map.on('move', () => regionLayersController.scheduleCoverageCheck());
       map.on('zoomend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('zoomend', syncMapZoomStore);
       map.on('zoomend', () => regionLayersController.syncMapRegionSources());

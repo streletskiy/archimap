@@ -33,5 +33,7 @@ test('server filter rows derive levels from explicit height tags for level filte
   ]);
 
   assert.equal(item.levels, '4');
+  assert.equal(item.renderHeightMeters, 18.5);
+  assert.equal(item.renderMinHeightMeters, 5.5);
   assert.deepEqual(results[0].matchedKeys, ['relation/203']);
 });

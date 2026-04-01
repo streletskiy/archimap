@@ -17,10 +17,12 @@ test('createEmptyBuildingForm and createEmptyBuildingComparable include design p
   assert.equal(createEmptyBuildingForm().design, '');
   assert.equal(createEmptyBuildingForm().designRef, '');
   assert.equal(createEmptyBuildingForm().designYear, '');
+  assert.equal(createEmptyBuildingForm().roofShape, '');
   assert.equal(createEmptyBuildingComparable().colour, '');
   assert.equal(createEmptyBuildingComparable().design, '');
   assert.equal(createEmptyBuildingComparable().designRef, '');
   assert.equal(createEmptyBuildingComparable().designYear, '');
+  assert.equal(createEmptyBuildingComparable().roofShape, '');
 });
 
 test('hydrateBuildingForm uses design and colour fallbacks and normalizes the comparable snapshot', async () => {
@@ -33,6 +35,7 @@ test('hydrateBuildingForm uses design and colour fallbacks and normalizes the co
         design: 'typical',
         design_ref: null,
         design_year: null,
+        roof_shape: null,
         colour: null,
         levels: 3,
         year_built: 1984,
@@ -42,7 +45,8 @@ test('hydrateBuildingForm uses design and colour fallbacks and normalizes the co
         _sourceTags: {
           'building:colour': 'Sandstone',
           'design:ref': '1-335',
-          'design:year': '1964'
+          'design:year': '1964',
+          'roof:shape': 'gabled'
         }
       }
     }
@@ -54,10 +58,12 @@ test('hydrateBuildingForm uses design and colour fallbacks and normalizes the co
   assert.equal(form.design, 'typical');
   assert.equal(form.designRef, '1-335');
   assert.equal(form.designYear, '1964');
+  assert.equal(form.roofShape, 'gabled');
   assert.equal(initialComparable.colour, 'sandstone');
   assert.equal(initialComparable.design, 'typical');
   assert.equal(initialComparable.designRef, '1-335');
   assert.equal(initialComparable.designYear, '1964');
+  assert.equal(initialComparable.roofShape, 'gabled');
 });
 
 test('buildBulkBuildingFormState preserves shared values and marks mixed fields', async () => {
@@ -73,6 +79,7 @@ test('buildBulkBuildingFormState preserves shared values and marks mixed fields'
           design_ref: '1-335',
           design_year: '1964',
           material: 'brick',
+          roof_shape: 'flat',
           colour: '#aa5500',
           levels: 4,
           year_built: 1988,
@@ -92,6 +99,7 @@ test('buildBulkBuildingFormState preserves shared values and marks mixed fields'
           design_ref: '1-464',
           design_year: '1968',
           material: 'glass',
+          roof_shape: 'flat',
           colour: '#aa5500',
           levels: 4,
           year_built: 1990,
@@ -119,6 +127,7 @@ test('buildBulkBuildingFormState preserves shared values and marks mixed fields'
   assert.equal(state.fieldState.designYear.isMixed, true);
   assert.deepEqual(state.fieldState.designYear.sampleValues, ['1964', '1968']);
   assert.equal(state.form.material, '');
+  assert.equal(state.form.roofShape, 'flat');
   assert.equal(state.form.yearBuilt, '');
   assert.equal(state.form.archimapDescription, '');
   assert.equal(state.fieldState.name.isMixed, true);
@@ -127,5 +136,7 @@ test('buildBulkBuildingFormState preserves shared values and marks mixed fields'
   assert.deepEqual(state.fieldState.style.sampleValues, ['modern']);
   assert.equal(state.fieldState.material.isMixed, true);
   assert.deepEqual(state.regionSlugs, ['moscow', 'center']);
+  assert.equal(state.fieldState.roofShape.isMixed, false);
+  assert.deepEqual(state.fieldState.roofShape.sampleValues, ['flat']);
 });
 

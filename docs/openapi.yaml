@@ -130,6 +130,8 @@ paths:
                   type: string
                 designYear:
                   type: integer
+                roofShape:
+                  type: string
                 levels:
                   type: integer
                 yearBuilt:

@@ -75,6 +75,7 @@ test('bulk edit skips buildings that already match the target values', async () 
         region_slugs: [],
         name: 'Alpha House',
         style: 'old-style',
+        roof_shape: 'flat',
         material: 'brick',
         colour: '#222222',
         levels: '3',
@@ -100,12 +101,13 @@ test('bulk edit skips buildings that already match the target values', async () 
         region_slugs: [],
         name: 'Beta House',
         style: 'neo-classical',
+        roof_shape: 'gabled',
         material: 'glass',
         colour: '#333333',
         levels: '5',
         year_built: '1991',
         architect: 'Bob',
-        address: 'Main street, 2',
+        address: 'Updated address',
         archimap_description: 'Second'
       });
     }
@@ -167,6 +169,7 @@ test('bulk edit skips buildings that already match the target values', async () 
       osmId: 1,
       name: 'Alpha House',
       style: 'neo-classical',
+      roofShape: 'gabled',
       material: 'brick',
       colour: '#111111',
       levels: '4',
@@ -174,7 +177,7 @@ test('bulk edit skips buildings that already match the target values', async () 
       architect: 'Alice',
       address: 'Updated address',
       archimapDescription: 'Updated note',
-      editedFields: ['style', 'address']
+      editedFields: ['style', 'address', 'roofShape']
     });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -183,8 +186,9 @@ test('bulk edit skips buildings that already match the target values', async () 
     assert.equal(postRequests.length, 1);
     assert.deepEqual(postRequests.map((request) => request.body.osmId), [1]);
     assert.deepEqual(postRequests.map((request) => request.body.editedFields), [
-      ['style']
+      ['style', 'roofShape']
     ]);
+    assert.equal(postRequests[0].body.roofShape, 'gabled');
     assert.equal(postRequests.every((request) => request.body.address === null), true);
     assert.equal(postRequests.every((request) => request.headers['x-csrf-token'] === 'csrf-token'), true);
 

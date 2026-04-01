@@ -71,6 +71,46 @@ test('buildOverpassFeaturePayload normalizes feature tags and geometry center', 
   assert.equal(details.properties.archiInfo.name, 'Villa');
 });
 
+test('buildOverpassFeaturePayload preserves render heights derived from explicit height tags', async () => {
+  const { buildOverpassFeaturePayload, buildOverpassBuildingDetails } = await loadOverpassDataUtils();
+
+  const feature = {
+    type: 'Feature',
+    id: 102,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [37.6, 55.75],
+        [37.62, 55.75],
+        [37.62, 55.77],
+        [37.6, 55.77],
+        [37.6, 55.75]
+      ]]
+    },
+    properties: {
+      type: 'way',
+      id: 102,
+      tags: {
+        name: 'Heights House',
+        height: '18.5',
+        min_height: '5.5'
+      }
+    }
+  };
+
+  const payload = buildOverpassFeaturePayload(feature);
+  assert.ok(payload);
+  assert.equal(payload.renderHeightMeters, 18.5);
+  assert.equal(payload.renderMinHeightMeters, 5.5);
+
+  const details = buildOverpassBuildingDetails(feature);
+  assert.ok(details);
+  assert.equal(details.renderHeightMeters, 18.5);
+  assert.equal(details.renderMinHeightMeters, 5.5);
+  assert.equal(details.properties.render_height_m, 18.5);
+  assert.equal(details.properties.render_min_height_m, 5.5);
+});
+
 test('buildOverpassFeaturePayload marks building parts and encodes stable ids', async () => {
   const { buildOverpassFeaturePayload, encodeOverpassFeatureId } = await loadOverpassDataUtils();
 

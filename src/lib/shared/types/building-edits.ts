@@ -34,6 +34,7 @@ export interface BuildingEditValueMap {
   material: string | null;
   material_raw: string | null;
   material_concrete: string | null;
+  roof_shape: string | null;
   colour: string | null;
   levels: string | number | null;
   year_built: string | number | null;
@@ -50,6 +51,7 @@ export interface BuildingEditMergedInfo {
   design_year: string | number | null;
   material: string | null;
   material_concrete: string | null;
+  roof_shape: string | null;
   colour: string | null;
   levels: string | number | null;
   year_built: string | number | null;

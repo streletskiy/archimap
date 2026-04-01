@@ -12,8 +12,8 @@ const FILTER_RULE_OPS = new Set([
 ]);
 
 const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description', 'design:ref', 'design:year']);
-const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description', 'design:ref', 'design:year']);
+const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
 
 function normalizeArchiRuleKey(ruleKey) {
   const key = String(ruleKey || '').trim();
@@ -22,6 +22,11 @@ function normalizeArchiRuleKey(ruleKey) {
   }
   if (key === 'design:ref') return 'design_ref';
   if (key === 'design:year') return 'design_year';
+  if (key === 'roof:shape') return 'roof_shape';
+  if (key === 'roof_shape') return 'roof_shape';
+  if (key === 'roof-shape') return 'roof_shape';
+  if (key === 'roofshape') return 'roof_shape';
+  if (key === 'building:roof:shape') return 'roof_shape';
   return key;
 }
 
@@ -41,6 +46,9 @@ function getPostgresRuleTagKeys(ruleKey) {
   }
   if (key === 'design_year' || key === 'archi.design_year') {
     return ['design:year'];
+  }
+  if (key === 'roof_shape' || key === 'archi.roof_shape') {
+    return ['roof:shape', 'roof_shape', 'building:roof:shape'];
   }
   return [key];
 }
@@ -68,6 +76,7 @@ function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
   if (key === 'design_ref') return `${alias}.design_ref`;
   if (key === 'design_year') return `${alias}.design_year::text`;
   if (key === 'material') return `${alias}.material`;
+  if (key === 'roof_shape') return `${alias}.roof_shape`;
   if (key === 'colour') return `${alias}.colour`;
   if (key === 'levels') return `${alias}.levels::text`;
   if (key === 'year_built') return `${alias}.year_built::text`;

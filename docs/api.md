@@ -67,7 +67,7 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
-  - Editable merged fields include `name`, `style`, `design`, `design_ref`, `design_year`, `material`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
+  - Editable merged fields include `name`, `style`, `design`, `design_ref`, `design_year`, `material`, `roof_shape`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
   - Response also includes `design_ref_suggestions[]`, backed by a startup-warmed in-memory cache of known project numbers.
   - `material` can represent the concrete subtypes `concrete_panels`, `concrete_blocks`, and `concrete_monolith`; the runtime stores them as `material=concrete` plus `material_concrete`.
   - Includes `region_slugs[]` for the building's current region memberships.
@@ -75,6 +75,7 @@ System notes:
 - `POST /api/building-info`
   - Submits or updates a user building edit.
   - Uses the same merged field vocabulary as `GET /api/building-info/:osmType/:osmId`.
+  - Request body may include `roofShape`, which maps to the OSM `roof:shape` tag and is also allowed for `building:part` edits.
   - Requires CSRF for session-authenticated writes.
 - `GET /api/style-overrides`
   - Public list of active style-region override rules used by the frontend style picker.

@@ -1,6 +1,5 @@
 import {
   buildDesiredTagMap,
-  cloneTagMap,
   diffStates,
   makeOsmError,
   parseEditedFields,
@@ -8,8 +7,7 @@ import {
   parseTags,
   stableJson,
   stateFromContourTags,
-  stateFromLocalRow,
-  tagsFingerprint
+  stateFromLocalRow
 } from './osm-sync.shared';
 import { fetchOsmElement } from './osm-api-client';
 import { buildChangesetTags, closeChangeset, createChangeset, updateOsmElement } from './osm-changeset-builder';
@@ -57,6 +55,7 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
         ai.design_year AS local_design_year,
         ai.material AS local_material,
         ai.material_concrete AS local_material_concrete,
+        ai.roof_shape AS local_roof_shape,
         ai.colour AS local_colour,
         ai.levels AS local_levels,
         ai.year_built AS local_year_built,
@@ -264,8 +263,8 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     const liveTagMap = liveElement ? Object.assign({}, liveElement.tags || {}) : {};
     const { desired, localState, explicitFields } = buildDesiredTagMap(liveTagMap, rows);
     const changedFields = diffStates(stateFromContourTags(liveTagMap), localState);
-    const sourceFingerprint = tagsFingerprint(rows[0]?.source_tags_json || JSON.stringify(currentContour || {}));
-    const liveFingerprint = liveElement ? JSON.stringify(stableJson(cloneTagMap(liveElement.tags || {}))) : null;
+    const sourceFingerprint = JSON.stringify(stableJson(stateFromContourTags(parseTags(rows[0]?.source_tags_json || JSON.stringify(currentContour || {})))));
+    const liveFingerprint = liveElement ? JSON.stringify(stableJson(stateFromContourTags(liveElement.tags || {}))) : null;
     const sourceMatches = liveFingerprint ? liveFingerprint === sourceFingerprint : false;
 
     return {

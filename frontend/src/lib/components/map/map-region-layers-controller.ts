@@ -36,7 +36,8 @@ import { getBuildingHoverThemePaint, getBuildingThemePaint } from '../../service
 import {
   buildRegionSourceId,
   getActiveRegionPmtiles,
-  pointInBounds
+  isViewportCoveredByRegions,
+  shouldRenderRegionBuildings
 } from '../../services/region-pmtiles.js';
 import type {
   FilterBuildingSourceConfig,
@@ -236,6 +237,9 @@ export function createMapRegionLayersController({
   function getViewportActiveRegionPmtiles(config: RuntimeConfigLike | null | undefined = getRuntimeConfig?.()) {
     const map = getMap?.();
     if (!map) return [];
+    if (!shouldRenderRegionBuildings(map.getZoom?.())) {
+      return [];
+    }
     return getActiveRegionPmtiles(getConfiguredRegionPmtiles(config), map.getBounds());
   }
 
@@ -279,39 +283,13 @@ export function createMapRegionLayersController({
     }, CARTO_SHOW_DELAY_MS);
   }
 
-  function getViewportSamplePoints() {
-    const map = getMap?.();
-    if (!map) return [];
-    const bounds = map.getBounds() as {
-      getWest?: () => number;
-      getEast?: () => number;
-      getSouth?: () => number;
-      getNorth?: () => number;
-    } | null | undefined;
-    if (!bounds) return [];
-    const west = bounds.getWest();
-    const east = bounds.getEast();
-    const south = bounds.getSouth();
-    const north = bounds.getNorth();
-    const center = map.getCenter();
-    const midLon = (west + east) / 2;
-    const midLat = (north + south) / 2;
-    return [
-      [center.lng, center.lat],
-      [west, north],
-      [east, north],
-      [east, south],
-      [west, south],
-      [midLon, north],
-      [midLon, south],
-      [west, midLat],
-      [east, midLat]
-    ];
-  }
-
   async function evaluatePmtilesCoverage() {
     const map = getMap?.();
     if (!map || !map.isStyleLoaded()) return;
+    if (!shouldRenderRegionBuildings(map.getZoom?.())) {
+      queueBasemapBuildingsVisibility('visible');
+      return;
+    }
     const token = ++coverageEvalToken;
     const runtimeConfig = getRuntimeConfig?.();
     const regions = activeRegionPmtiles.length > 0
@@ -321,15 +299,11 @@ export function createMapRegionLayersController({
       queueBasemapBuildingsVisibility('visible');
       return;
     }
-    const points = getViewportSamplePoints();
-    if (points.length === 0) return;
-    for (const [lon, lat] of points) {
-      if (token !== coverageEvalToken) return;
-      const covered = regions.some((region) => pointInBounds(lon, lat, region.bounds));
-      if (!covered) {
-        queueBasemapBuildingsVisibility('visible');
-        return;
-      }
+    if (token !== coverageEvalToken) return;
+    const covered = isViewportCoveredByRegions(regions, map.getBounds(), map.getCenter?.());
+    if (!covered) {
+      queueBasemapBuildingsVisibility('visible');
+      return;
     }
     queueBasemapBuildingsVisibility('none');
   }

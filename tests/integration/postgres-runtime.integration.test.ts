@@ -32,7 +32,7 @@ function setCookiesFromHeaders(cookieJar, headers) {
   if (parsed) cookieJar.set(parsed.name, parsed.value);
 }
 
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const ARCHI_RULE_KEYS = new Set(['name', 'style', 'roof_shape', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
 const FILTER_MATCH_CANDIDATE_CAP = 50000;
 
 function encodeOsmFeatureId(osmType, osmId) {
@@ -74,6 +74,12 @@ function getRuleValue(item, key) {
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material')) return sourceTags['building:material'];
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'material')) return sourceTags.material;
   }
+  if (key === 'roof:shape' || key === 'roof_shape' || key === 'building:roof:shape') {
+    if (hasMeaningfulValue(archiInfo.roof_shape)) return archiInfo.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof:shape')) return sourceTags['roof:shape'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof_shape')) return sourceTags.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:roof:shape')) return sourceTags['building:roof:shape'];
+  }
   if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) return archiInfo[key];
   if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   if (ARCHI_RULE_KEYS.has(key)) return archiInfo[key];
@@ -112,6 +118,7 @@ function mapFilterDataRow(row) {
         name: row.name,
         style: row.style,
         material: row.material,
+        roof_shape: row.roof_shape,
         colour: row.colour,
         levels: row.levels,
         year_built: row.year_built,
@@ -167,13 +174,14 @@ async function upsertFilterFixtures(connectionString, fixtures) {
       if (fixture.archiInfo) {
         await client.query(`
           INSERT INTO local.architectural_info (
-            osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+            osm_type, osm_id, name, style, material, roof_shape, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'postgres-runtime-test', NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'postgres-runtime-test', NOW())
           ON CONFLICT (osm_type, osm_id) DO UPDATE SET
             name = EXCLUDED.name,
             style = EXCLUDED.style,
             material = EXCLUDED.material,
+            roof_shape = EXCLUDED.roof_shape,
             colour = EXCLUDED.colour,
             levels = EXCLUDED.levels,
             year_built = EXCLUDED.year_built,
@@ -189,6 +197,7 @@ async function upsertFilterFixtures(connectionString, fixtures) {
           fixture.archiInfo.name ?? null,
           fixture.archiInfo.style ?? null,
           fixture.archiInfo.material ?? null,
+          fixture.archiInfo.roof_shape ?? null,
           fixture.archiInfo.colour ?? null,
           fixture.archiInfo.levels ?? null,
           fixture.archiInfo.year_built ?? null,

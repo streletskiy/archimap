@@ -10,7 +10,7 @@
   - `script-src 'self'` (no `unsafe-inline`)
   - `style-src 'self'`
   - `style-src-attr 'unsafe-inline'`
-  - `img-src 'self' data: blob: <extra-origins>`
+  - `img-src 'self' data: blob: <extra-origins>`; roof-shape thumbnails are now served from local static assets, so the default extra origins do not include OSM wiki / Wikimedia hosts anymore
   - `font-src 'self' data: <extra-origins>`
   - `connect-src 'self' <extra-origins>` where the default extra origins include CARTO tile hosts, `api.maptiler.com`, and the public Overpass instances used by the browser fallback
   - `object-src 'none'`
