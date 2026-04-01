@@ -201,6 +201,8 @@ When a new control is needed:
 - URL-state application and URL-state syncing on the map route must start only after `onMount`.
 - The map route must not subscribe to `$page` just to observe query-string changes.
 - The URL-state controller reads `window.location.href` directly and reacts to browser `popstate`.
+- Map deep links must preserve the current camera and 3D view state explicitly through query params: `lat`, `lng`, `z`, `pitch`, `bearing`, and `3d`.
+- When a map link is generated from another route, `patchUrlState` must carry the current 3D toggle and camera orientation forward instead of relying on local storage.
 - This avoids rerender churn in portal-heavy UI such as building dialogs, selects, and other portaled overlays.
 
 ### Shell And Page Composition

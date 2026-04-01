@@ -101,7 +101,9 @@
     selectedBuilding,
     selectedBuildings,
     setMapCenter,
+    setMapBearing,
     setMapReady,
+    setMapPitch,
     setMapViewport,
     setMapZoom
   } from '$lib/stores/map';
@@ -479,6 +481,8 @@
     if (!map || !cameraStoreSyncEnabled) return;
     setMapCenter(map.getCenter());
     setMapZoom(map.getZoom());
+    setMapPitch(map.getPitch());
+    setMapBearing(map.getBearing());
     setMapViewport(buildBboxSnapshot(map.getBounds?.()));
   }
 
@@ -566,11 +570,15 @@
 
   function applyBuildings3dCamera(enabled = $mapBuildings3dEnabled, { animate = false } = {}) {
     if (!map) return;
-    const targetPitch = enabled ? DEFAULT_MAP_3D_PITCH : 0;
     const currentPitch = Number(map.getPitch?.() ?? 0);
-    if (!Number.isFinite(currentPitch) || Math.abs(currentPitch - targetPitch) < 0.1) return;
+    if (!Number.isFinite(currentPitch)) return;
+    if (enabled) {
+      if (currentPitch > 0.1) return;
+    } else if (Math.abs(currentPitch) < 0.1) {
+      return;
+    }
     map.easeTo({
-      pitch: targetPitch,
+      pitch: enabled ? DEFAULT_MAP_3D_PITCH : 0,
       duration: animate ? 420 : 0,
       essential: true
     });
@@ -693,13 +701,20 @@
   $: if (map && $mapFocusRequest && $mapFocusRequest.id !== lastMapFocusRequestId) {
     lastMapFocusRequestId = $mapFocusRequest.id;
     const nextZoom = normalizeOptionalMapZoom($mapFocusRequest.zoom) ?? map.getZoom();
-    map.easeTo({
+    const nextCamera = {
       center: [Number($mapFocusRequest.lon), Number($mapFocusRequest.lat)],
       offset: [Number($mapFocusRequest.offsetX || 0), Number($mapFocusRequest.offsetY || 0)],
       zoom: nextZoom,
       duration: Number($mapFocusRequest.duration || 420),
       essential: true
-    });
+    };
+    if (Number.isFinite(Number($mapFocusRequest.pitch))) {
+      nextCamera.pitch = Number($mapFocusRequest.pitch);
+    }
+    if (Number.isFinite(Number($mapFocusRequest.bearing))) {
+      nextCamera.bearing = Number($mapFocusRequest.bearing);
+    }
+    map.easeTo(nextCamera);
     void lastMapFocusRequestId;
   }
 
@@ -753,18 +768,27 @@
         lat: Number(config.mapDefault.lat),
         z: Number(config.mapDefault.zoom)
       };
+      const initialPitch = $mapBuildings3dEnabled && Number.isFinite(Number(initialCamera.pitch))
+        ? Number(initialCamera.pitch)
+        : ($mapBuildings3dEnabled ? DEFAULT_MAP_3D_PITCH : 0);
+      const initialBearing = $mapBuildings3dEnabled && Number.isFinite(Number(initialCamera.bearing))
+        ? Number(initialCamera.bearing)
+        : 0;
       setMapCenter({
         lng: initialCamera.lng,
         lat: initialCamera.lat
       });
       setMapZoom(initialCamera.z);
+      setMapPitch(initialPitch);
+      setMapBearing(initialBearing);
 
       map = new maplibregl.Map({
         container,
         style: initialStyle,
         center: [initialCamera.lng, initialCamera.lat],
         zoom: Number(initialCamera.z),
-        pitch: $mapBuildings3dEnabled ? DEFAULT_MAP_3D_PITCH : 0,
+        pitch: initialPitch,
+        bearing: initialBearing,
         antialias: true,
         attributionControl: false
       });
@@ -859,6 +883,8 @@
     setMapReady(false);
     setMapCenter(null);
     setMapZoom(null);
+    setMapPitch(null);
+    setMapBearing(null);
     setMapViewport(null);
     if (themeObserver) {
       themeObserver.disconnect();

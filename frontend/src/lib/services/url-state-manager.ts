@@ -1,7 +1,11 @@
 import { resolve } from '$app/paths';
 import { getFilterLayersUrlSignature } from '$lib/client/filterUrlState';
 import { parseUrlState, patchUrlState } from '$lib/client/urlState';
-import { normalizeOptionalMapZoom, requestMapFocus } from '$lib/stores/map';
+import {
+  normalizeOptionalMapZoom,
+  requestMapFocus,
+  setMapBuildings3dEnabled
+} from '$lib/stores/map';
 
 function toBuildingUrlParam(selection) {
   const osmType = String(selection?.osmType || '').trim();
@@ -10,9 +14,32 @@ function toBuildingUrlParam(selection) {
   return { osmType, osmId };
 }
 
+function normalizeOptionalNumber(value) {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function getUrlCameraKey(camera) {
+  return [
+    camera?.lat ?? '',
+    camera?.lng ?? '',
+    camera?.z ?? '',
+    camera?.pitch ?? '',
+    camera?.bearing ?? ''
+  ].join(':');
+}
+
+function getUrlBuildings3dKey(state) {
+  if (state?.buildings3dEnabled == null) return '';
+  return state.buildings3dEnabled ? '1' : '0';
+}
+
 function getUrlStateSignature(state) {
   return [
-    `${state.camera?.lat ?? ''},${state.camera?.lng ?? ''},${state.camera?.z ?? ''}`,
+    getUrlCameraKey(state.camera),
+    getUrlBuildings3dKey(state),
     `${state.building?.osmType ?? ''}/${state.building?.osmId ?? ''}`,
     getFilterLayersUrlSignature(state.filters)
   ].join('|');
@@ -129,6 +156,9 @@ export function createUrlStateManager({
     if (cameraDeferred) {
       pendingUrlSignature = signature;
     }
+    if (state.buildings3dEnabled != null) {
+      setMapBuildings3dEnabled(state.buildings3dEnabled);
+    }
     const nextUrlBuildingKey = getUrlBuildingKey(state);
     const hadUrlBuildingKey = lastUrlBuildingKey;
     lastUrlBuildingKey = nextUrlBuildingKey;
@@ -137,13 +167,16 @@ export function createUrlStateManager({
     lastUrlFilterKey = nextUrlFilterKey;
 
     if (state.camera && mapReady) {
-      const cameraKey = `${state.camera.lat}:${state.camera.lng}:${state.camera.z ?? ''}`;
+      const cameraKey = getUrlCameraKey(state.camera);
       if (cameraKey !== lastAppliedCameraKey) {
         cameraApplyInFlight = true;
+        const allowCameraOrientation = state.buildings3dEnabled !== false;
         requestMapFocus({
           lon: state.camera.lng,
           lat: state.camera.lat,
           zoom: normalizeOptionalMapZoom(state.camera.z) ?? undefined,
+          pitch: allowCameraOrientation ? state.camera.pitch ?? undefined : undefined,
+          bearing: allowCameraOrientation ? state.camera.bearing ?? undefined : undefined,
           duration: 0
         });
         lastAppliedCameraKey = cameraKey;
@@ -197,15 +230,23 @@ export function createUrlStateManager({
     );
   }
 
-  function syncCamera({ mapReady, mapCenter, mapZoom }: LooseRecord = {}) {
+  function syncCamera({ mapReady, mapCenter, mapZoom, mapPitch, mapBearing, buildings3dEnabled }: LooseRecord = {}) {
     const normalizedZoom = normalizeOptionalMapZoom(mapZoom);
     if (!mapReady || !mapCenter || normalizedZoom == null || cameraApplyInFlight) return;
+    const nextCamera: LooseRecord = {
+      lat: mapCenter.lat,
+      lng: mapCenter.lng,
+      z: normalizedZoom
+    };
+    if (buildings3dEnabled) {
+      const pitch = normalizeOptionalNumber(mapPitch);
+      const bearing = normalizeOptionalNumber(mapBearing);
+      if (pitch != null) nextCamera.pitch = pitch;
+      if (bearing != null) nextCamera.bearing = bearing;
+    }
     updateUrlState({
-      camera: {
-        lat: mapCenter.lat,
-        lng: mapCenter.lng,
-        z: normalizedZoom
-      }
+      camera: nextCamera,
+      buildings3dEnabled: Boolean(buildings3dEnabled)
     });
   }
 

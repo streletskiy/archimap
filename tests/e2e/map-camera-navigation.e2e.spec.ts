@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const assert = require('node:assert/strict');
 const { test, expect } = require('@playwright/test');
 
 const PORT = 4150 + Math.floor(Math.random() * 120);
@@ -67,9 +68,9 @@ test.afterAll(async () => {
   }
 });
 
-async function assertMapPreservedViaInfo(page, clickTarget) {
-  const startUrl = `${BASE_URL}/app?lat=56.325304&lng=44.01357&z=15.1`;
-  await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
+async function assertMapPreservedViaInfo(page, clickTarget, { startUrl, expectedSearchParams = [] } = {}) {
+  const initialUrl = startUrl || `${BASE_URL}/app?lat=56.325304&lng=44.01357&z=15.1`;
+  await page.goto(initialUrl, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
   await page.waitForTimeout(1200);
 
@@ -82,6 +83,12 @@ async function assertMapPreservedViaInfo(page, clickTarget) {
   await expect(page).toHaveURL(/lat=56\.325304/);
   await expect(page).toHaveURL(/lng=44\.01357/);
   await expect(page).toHaveURL(/z=15\.1/);
+  if (expectedSearchParams.length > 0) {
+    const currentUrl = new URL(page.url());
+    for (const [key, value] of expectedSearchParams) {
+      assert.equal(currentUrl.searchParams.get(key), value);
+    }
+  }
 }
 
 test('logo preserves map camera from info page', async ({ page }) => {
@@ -97,5 +104,16 @@ test('menu map link preserves map camera from info page', async ({ page }) => {
     await page.locator('.menu-btn-trigger').click();
     await expect(page.locator('.menu')).toBeVisible();
     await page.locator('.menu-links a', { hasText: 'Map' }).click();
+  });
+});
+
+test('3d camera link preserves 3d state and camera orientation from info page', async ({ page }) => {
+  await assertMapPreservedViaInfo(page, () => page.locator('.logo').click(), {
+    startUrl: `${BASE_URL}/app?lat=56.325304&lng=44.01357&z=15.1&3d=1&pitch=58.5&bearing=-23.75`,
+    expectedSearchParams: [
+      ['3d', '1'],
+      ['pitch', '58.5'],
+      ['bearing', '-23.75']
+    ]
   });
 });

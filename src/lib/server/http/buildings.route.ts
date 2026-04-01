@@ -33,11 +33,6 @@ function normalizeJsonText(value) {
   }
 }
 
-function normalizeText(value) {
-  const text = String(value == null ? '' : value).trim();
-  return text ? text : null;
-}
-
 function buildSourceSnapshot(options: any = {}) {
   const snapshotOptions = options || {};
   const contourRow = snapshotOptions.contourRow ?? null;

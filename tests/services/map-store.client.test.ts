@@ -57,6 +57,24 @@ test('resolveInitialMapCamera prefers URL camera over persisted camera', async (
   assert.deepEqual(camera, { lat: 40.7128, lng: -74.006, z: 13.25 });
 });
 
+test('resolveInitialMapCamera keeps 3d orientation from URL camera', async () => {
+  const { resolveInitialMapCamera } = await loadMapStoreModule();
+
+  const camera = resolveInitialMapCamera({
+    url: 'http://localhost/app?lat=40.7128&lng=-74.006&z=13.25&pitch=58.5&bearing=-23.75',
+    persistedCamera: { lat: 56.3269, lng: 44.0059, z: 15, pitch: 10, bearing: 15 },
+    fallbackCamera: { lat: 10, lng: 20, z: 8 }
+  });
+
+  assert.deepEqual(camera, {
+    lat: 40.7128,
+    lng: -74.006,
+    z: 13.25,
+    pitch: 58.5,
+    bearing: -23.75
+  });
+});
+
 test('resolveInitialMapCamera uses fallback zoom for URL camera without z', async () => {
   const { resolveInitialMapCamera } = await loadMapStoreModule();
 
@@ -97,6 +115,27 @@ test('requestMapFocus does not coerce missing zoom to zero', async () => {
 
   unsubscribe();
   assert.equal(currentValue?.zoom, null);
+});
+
+test('requestMapFocus preserves pitch and bearing', async () => {
+  const { requestMapFocus, mapFocusRequest } = await loadMapStoreModule();
+  let currentValue = null;
+  const unsubscribe = mapFocusRequest.subscribe((value) => {
+    currentValue = value;
+  });
+
+  requestMapFocus({
+    lon: 44.0059,
+    lat: 56.3269,
+    zoom: 13.25,
+    pitch: 58.5,
+    bearing: -23.75,
+    duration: 0
+  });
+
+  unsubscribe();
+  assert.equal(currentValue?.pitch, 58.5);
+  assert.equal(currentValue?.bearing, -23.75);
 });
 
 test('mapLabelsVisible reads persisted value and writes back to storage', async () => {
