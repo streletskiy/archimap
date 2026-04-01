@@ -447,6 +447,63 @@ test('listSyncCandidates reactivates a building when a newer accepted edit is st
   assert.equal(candidate.canSync, true);
 });
 
+test('getSyncCandidate keeps untouched contour tags in the desired map when live OSM is unavailable', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+    .run('archimap', 'https://archimap.local');
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  db.prepare(`
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run(
+    'way',
+    404,
+    JSON.stringify({
+      building: 'yes',
+      source: 'survey',
+      name: 'Old Name'
+    }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(`
+    INSERT INTO local.architectural_info (
+      osm_type, osm_id, name, updated_at
+    ) VALUES (?, ?, ?, ?)
+  `).run('way', 404, 'New Name', '2026-01-02T00:00:00Z');
+  db.prepare(`
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    404,
+    'way',
+    404,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({
+      building: 'yes',
+      source: 'survey',
+      name: 'Old Name'
+    }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+
+  const candidate = await service.getSyncCandidate('way', 404);
+
+  assert.ok(candidate);
+  assert.equal(candidate.currentContourTags.building, 'yes');
+  assert.equal(candidate.desiredTags.building, 'yes');
+  assert.equal(candidate.desiredTags.source, 'survey');
+  assert.equal(candidate.desiredTags.name, 'New Name');
+});
+
 test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can list candidates', async () => {
   const rows = [
     {

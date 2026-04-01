@@ -261,8 +261,11 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     }
 
     const liveTagMap = liveElement ? Object.assign({}, liveElement.tags || {}) : {};
-    const { desired, localState, explicitFields } = buildDesiredTagMap(liveTagMap, rows);
-    const changedFields = diffStates(stateFromContourTags(liveTagMap), localState);
+    // If live OSM cannot be fetched, keep the stored contour snapshot as the diff base
+    // so untouched tags stay visible as unchanged instead of collapsing into a patch-only view.
+    const desiredBaseTags = liveElement ? liveTagMap : currentContour;
+    const { desired, localState, explicitFields } = buildDesiredTagMap(desiredBaseTags, rows);
+    const changedFields = diffStates(stateFromContourTags(desiredBaseTags), localState);
     const sourceFingerprint = JSON.stringify(stableJson(stateFromContourTags(parseTags(rows[0]?.source_tags_json || JSON.stringify(currentContour || {})))));
     const liveFingerprint = liveElement ? JSON.stringify(stableJson(stateFromContourTags(liveElement.tags || {}))) : null;
     const sourceMatches = liveFingerprint ? liveFingerprint === sourceFingerprint : false;
