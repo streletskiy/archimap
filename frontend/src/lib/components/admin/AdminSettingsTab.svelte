@@ -20,7 +20,7 @@
   };
   let generalLoading = false;
   let generalStatus = '';
-  let basemapProviderItems = [];
+  let basemapProviderItems;
 
   let smtp = {
     url: '',

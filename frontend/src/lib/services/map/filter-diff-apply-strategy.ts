@@ -55,6 +55,9 @@ function areHighlightColorGroupsEqual(left, right) {
 }
 
 function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefined, buildingPartsVisible = true) {
+  const extrusionLayerIds = Array.isArray(layerIds?.filterHighlightExtrusionLayerIds)
+    ? layerIds.filterHighlightExtrusionLayerIds
+    : [];
   const fillLayerIds = Array.isArray(layerIds?.filterHighlightFillLayerIds)
     ? layerIds.filterHighlightFillLayerIds
     : [];
@@ -64,14 +67,23 @@ function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefi
   const buildingFillLayerIds = Array.isArray(layerIds?.buildingFillLayerIds)
     ? layerIds.buildingFillLayerIds
     : [];
+  const buildingExtrusionLayerIds = Array.isArray(layerIds?.buildingExtrusionLayerIds)
+    ? layerIds.buildingExtrusionLayerIds
+    : [];
   const buildingLineLayerIds = Array.isArray(layerIds?.buildingLineLayerIds)
     ? layerIds.buildingLineLayerIds
     : [];
   const buildingPartFillLayerIds = Array.isArray(layerIds?.buildingPartFillLayerIds)
     ? layerIds.buildingPartFillLayerIds
     : [];
+  const buildingPartExtrusionLayerIds = Array.isArray(layerIds?.buildingPartExtrusionLayerIds)
+    ? layerIds.buildingPartExtrusionLayerIds
+    : [];
   const buildingPartLineLayerIds = Array.isArray(layerIds?.buildingPartLineLayerIds)
     ? layerIds.buildingPartLineLayerIds
+    : [];
+  const buildingPartFilterHighlightExtrusionLayerIds = Array.isArray(layerIds?.buildingPartFilterHighlightExtrusionLayerIds)
+    ? layerIds.buildingPartFilterHighlightExtrusionLayerIds
     : [];
   const buildingPartFilterHighlightFillLayerIds = Array.isArray(layerIds?.buildingPartFilterHighlightFillLayerIds)
     ? layerIds.buildingPartFilterHighlightFillLayerIds
@@ -80,12 +92,16 @@ function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefi
     ? layerIds.buildingPartFilterHighlightLineLayerIds
     : [];
   return [
+    `ext:${extrusionLayerIds.join(',')}`,
     `fill:${fillLayerIds.join(',')}`,
     `line:${lineLayerIds.join(',')}`,
     `bfill:${buildingFillLayerIds.join(',')}`,
+    `bext:${buildingExtrusionLayerIds.join(',')}`,
     `bline:${buildingLineLayerIds.join(',')}`,
     `pfill:${buildingPartFillLayerIds.join(',')}`,
+    `pext:${buildingPartExtrusionLayerIds.join(',')}`,
     `pline:${buildingPartLineLayerIds.join(',')}`,
+    `pfext:${buildingPartFilterHighlightExtrusionLayerIds.join(',')}`,
     `pffill:${buildingPartFilterHighlightFillLayerIds.join(',')}`,
     `pfln:${buildingPartFilterHighlightLineLayerIds.join(',')}`,
     `parts:${buildingPartsVisible ? 'visible' : 'hidden'}`
@@ -131,6 +147,10 @@ function applyBuildingLayerFilters({
   });
   const partLineFilter = partFillFilter;
   for (const layerId of layerIds.buildingPartFillLayerIds || []) {
+    if (!map.getLayer(layerId)) continue;
+    map.setFilter(layerId, partFillFilter);
+  }
+  for (const layerId of layerIds.buildingPartExtrusionLayerIds || []) {
     if (!map.getLayer(layerId)) continue;
     map.setFilter(layerId, partFillFilter);
   }
@@ -210,11 +230,13 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: [],
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.filterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.filterHighlightFillLayerIds,
         lineLayerIds: layerIds.filterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
           featureKind: BUILDING_FEATURE_KIND,
-          active: false
+          active: false,
+          hideBaseWhenParts: buildingPartsVisible
         })
       });
       buildingPartHighlightResult = applyFilterPaintHighlight({
@@ -222,6 +244,7 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: [],
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.buildingPartFilterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.buildingPartFilterHighlightFillLayerIds,
         lineLayerIds: layerIds.buildingPartFilterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
@@ -248,11 +271,13 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: filteredColorGroups,
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.filterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.filterHighlightFillLayerIds,
         lineLayerIds: layerIds.filterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
           featureKind: BUILDING_FEATURE_KIND,
-          active: false
+          active: false,
+          hideBaseWhenParts: buildingPartsVisible
         })
       });
       buildingPartHighlightResult = applyFilterPaintHighlight({
@@ -260,6 +285,7 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: filteredColorGroups,
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.buildingPartFilterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.buildingPartFilterHighlightFillLayerIds,
         lineLayerIds: layerIds.buildingPartFilterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({

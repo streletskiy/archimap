@@ -1,11 +1,15 @@
 import { get } from 'svelte/store';
 import {
+  getCurrentBuildingsExtrusionLayerIds,
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
+  getCurrentBuildingPartExtrusionLayerIds,
   getCurrentBuildingPartFillLayerIds,
   getCurrentBuildingPartLineLayerIds,
+  getCurrentBuildingHoverExtrusionLayerIds,
   getCurrentBuildingHoverFillLayerIds,
   getCurrentBuildingHoverLineLayerIds,
+  getCurrentSelectedExtrusionLayerIds,
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds
 } from '../../services/map/map-layer-utils.js';
@@ -15,7 +19,12 @@ import {
   SEARCH_RESULTS_SOURCE_ID
 } from '../../services/map/map-search-utils.js';
 import { mapSelectionShiftKey } from '$lib/stores/map';
-import { encodeOsmFeatureId, getFeatureIdentity, getSelectionFilter } from './selection-utils.js';
+import {
+  encodeOsmFeatureId,
+  getFeatureIdentity,
+  getSelectionFilter,
+  getVisibleSelectionFilter
+} from './selection-utils.js';
 import type { FilterMapLike } from '../../services/map/filter-types.js';
 
 type RegionLike = {
@@ -57,6 +66,8 @@ type SelectionDispatchPayload = SelectionIdentity & {
 type MapSelectionControllerOptions = {
   getMap?: () => FilterMapLike | null | undefined;
   getActiveRegions?: () => RegionLike[] | null | undefined;
+  getBuildings3dEnabled?: () => boolean | null | undefined;
+  getBuildingPartsVisible?: () => boolean | null | undefined;
   recordDebugSetFilter?: (layerId: string) => void;
   debugSelectionLog?: (eventName: string, payload?: Record<string, unknown>) => void;
   dispatchBuildingClick?: (payload: SelectionDispatchPayload) => void;
@@ -65,6 +76,8 @@ type MapSelectionControllerOptions = {
 export function createMapSelectionController({
   getMap,
   getActiveRegions,
+  getBuildings3dEnabled,
+  getBuildingPartsVisible,
   recordDebugSetFilter,
   debugSelectionLog,
   dispatchBuildingClick
@@ -120,9 +133,35 @@ export function createMapSelectionController({
 
   function getHoverLayerIds(activeRegions: RegionLike[] = []) {
     return {
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegions),
       hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
       hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions)
     };
+  }
+
+  function getSelectedLayerIds(activeRegions: RegionLike[] = []) {
+    return {
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(activeRegions),
+      selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegions),
+      selectedLineLayerIds: getCurrentSelectedLineLayerIds(activeRegions)
+    };
+  }
+
+  function getInteractiveBuildingLayerIds(activeRegions: RegionLike[] = []) {
+    if (getBuildings3dEnabled?.() ?? false) {
+      return [
+        ...getCurrentBuildingsExtrusionLayerIds(activeRegions),
+        ...getCurrentBuildingPartExtrusionLayerIds(activeRegions)
+      ];
+    }
+    return [
+      ...getCurrentBuildingsExtrusionLayerIds(activeRegions),
+      ...getCurrentBuildingsLineLayerIds(activeRegions),
+      ...getCurrentBuildingsFillLayerIds(activeRegions),
+      ...getCurrentBuildingPartExtrusionLayerIds(activeRegions),
+      ...getCurrentBuildingPartLineLayerIds(activeRegions),
+      ...getCurrentBuildingPartFillLayerIds(activeRegions)
+    ];
   }
 
   function getRenderableLayerIds(layerIds: string[] = []) {
@@ -135,6 +174,15 @@ export function createMapSelectionController({
     )];
   }
 
+  function getCurrentSelectionFilter(feature: SelectionFeatureLike, identity: unknown) {
+    if (typeof getBuildingPartsVisible !== 'function') {
+      return getSelectionFilter(feature, identity);
+    }
+    return getVisibleSelectionFilter(feature, identity, {
+      showBuildingParts: Boolean(getBuildingPartsVisible() ?? true)
+    });
+  }
+
   function clearHoveredBuilding({ force = false }: { force?: boolean } = {}) {
     const map = getMap?.();
     if (!map) {
@@ -143,7 +191,11 @@ export function createMapSelectionController({
     }
     if (!force && lastHoveredBuildingSig == null) return;
     const activeRegions = getActiveRegions?.() || [];
-    const { hoverFillLayerIds, hoverLineLayerIds } = getHoverLayerIds(activeRegions);
+    const { hoverExtrusionLayerIds, hoverFillLayerIds, hoverLineLayerIds } = getHoverLayerIds(activeRegions);
+    for (const layerId of hoverExtrusionLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, ['==', ['id'], -1]);
+    }
     for (const layerId of hoverFillLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, ['==', ['id'], -1]);
@@ -169,8 +221,12 @@ export function createMapSelectionController({
     const hoverKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
     if (!force && hoverKey === lastHoveredBuildingSig) return;
     const activeRegions = getActiveRegions?.() || [];
-    const filter = getSelectionFilter(feature, identity);
-    const { hoverFillLayerIds, hoverLineLayerIds } = getHoverLayerIds(activeRegions);
+    const filter = getCurrentSelectionFilter(feature, identity);
+    const { hoverExtrusionLayerIds, hoverFillLayerIds, hoverLineLayerIds } = getHoverLayerIds(activeRegions);
+    for (const layerId of hoverExtrusionLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+    }
     for (const layerId of hoverFillLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
@@ -198,12 +254,7 @@ export function createMapSelectionController({
       return null;
     }
     const activeRegions = getActiveRegions?.() || [];
-    const buildingLayerIds = getRenderableLayerIds([
-      ...getCurrentBuildingsLineLayerIds(activeRegions),
-      ...getCurrentBuildingsFillLayerIds(activeRegions),
-      ...getCurrentBuildingPartLineLayerIds(activeRegions),
-      ...getCurrentBuildingPartFillLayerIds(activeRegions)
-    ]);
+    const buildingLayerIds = getRenderableLayerIds(getInteractiveBuildingLayerIds(activeRegions));
     if (buildingLayerIds.length === 0) return null;
     const queryBounds = [
       [normalizedPoint.x - BUILDING_HIT_BUFFER_PX, normalizedPoint.y - BUILDING_HIT_BUFFER_PX],
@@ -247,12 +298,7 @@ export function createMapSelectionController({
     }
 
     const activeRegions = getActiveRegions?.() || [];
-    const buildingLayerIds = getRenderableLayerIds([
-      ...getCurrentBuildingsLineLayerIds(activeRegions),
-      ...getCurrentBuildingsFillLayerIds(activeRegions),
-      ...getCurrentBuildingPartLineLayerIds(activeRegions),
-      ...getCurrentBuildingPartFillLayerIds(activeRegions)
-    ]);
+    const buildingLayerIds = getRenderableLayerIds(getInteractiveBuildingLayerIds(activeRegions));
     if (buildingLayerIds.length === 0) {
       clearHoveredBuilding();
       setMapCursor('');
@@ -311,14 +357,24 @@ export function createMapSelectionController({
     const map = getMap?.();
     if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
-    const filter = getSelectionFilter(feature, identity);
+    const filter = getCurrentSelectionFilter(feature, identity);
     const selectionKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
-    for (const layerId of getCurrentSelectedFillLayerIds(activeRegions)) {
+    const {
+      selectedExtrusionLayerIds,
+      selectedFillLayerIds,
+      selectedLineLayerIds
+    } = getSelectedLayerIds(activeRegions);
+    for (const layerId of selectedExtrusionLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
       recordDebugSetFilter?.(layerId);
     }
-    for (const layerId of getCurrentSelectedLineLayerIds(activeRegions)) {
+    for (const layerId of selectedFillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+      recordDebugSetFilter?.(layerId);
+    }
+    for (const layerId of selectedLineLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
       recordDebugSetFilter?.(layerId);
@@ -420,12 +476,22 @@ export function createMapSelectionController({
     const map = getMap?.();
     if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
-    for (const layerId of getCurrentSelectedFillLayerIds(activeRegions)) {
+    const {
+      selectedExtrusionLayerIds,
+      selectedFillLayerIds,
+      selectedLineLayerIds
+    } = getSelectedLayerIds(activeRegions);
+    for (const layerId of selectedExtrusionLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, ['==', ['id'], -1]);
       recordDebugSetFilter?.(layerId);
     }
-    for (const layerId of getCurrentSelectedLineLayerIds(activeRegions)) {
+    for (const layerId of selectedFillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, ['==', ['id'], -1]);
+      recordDebugSetFilter?.(layerId);
+    }
+    for (const layerId of selectedLineLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, ['==', ['id'], -1]);
       recordDebugSetFilter?.(layerId);
@@ -436,13 +502,23 @@ export function createMapSelectionController({
     const map = getMap?.();
     if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
-    const filter = getSelectionFilter(null, selection);
-    for (const layerId of getCurrentSelectedFillLayerIds(activeRegions)) {
+    const filter = getCurrentSelectionFilter(null, selection);
+    const {
+      selectedExtrusionLayerIds,
+      selectedFillLayerIds,
+      selectedLineLayerIds
+    } = getSelectedLayerIds(activeRegions);
+    for (const layerId of selectedExtrusionLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
       recordDebugSetFilter?.(layerId);
     }
-    for (const layerId of getCurrentSelectedLineLayerIds(activeRegions)) {
+    for (const layerId of selectedFillLayerIds) {
+      if (!map.getLayer(layerId)) continue;
+      map.setFilter(layerId, filter);
+      recordDebugSetFilter?.(layerId);
+    }
+    for (const layerId of selectedLineLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
       recordDebugSetFilter?.(layerId);

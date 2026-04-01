@@ -80,6 +80,27 @@ test('getSelectionFilter supports multiple selected buildings', async () => {
   ]);
 });
 
+test('getVisibleSelectionFilter respects visible base and part geometry when building parts are shown', async () => {
+  const { getVisibleSelectionFilter, encodeOsmFeatureId } = await loadSelectionUtils();
+
+  assert.deepEqual(getVisibleSelectionFilter(null, { osmType: 'way', osmId: 10 }, {
+    showBuildingParts: true
+  }), [
+    'all',
+    ['any',
+      ['any',
+        ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+        ['all',
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+          ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+        ]
+      ],
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+    ],
+    ['==', ['id'], encodeOsmFeatureId('way', 10)]
+  ]);
+});
+
 test('createMapSelectionController queries part layers in the buffered building hit test', async () => {
   const { createMapSelectionController } = await loadMapSelectionController();
   const queriedCalls = [];
@@ -203,6 +224,14 @@ test('createMapSelectionController applies hover filters and cursor for buffered
   assert.equal(canvas.style.cursor, 'pointer');
   assert.deepEqual(filters, [
     {
+      layerId: 'region-buildings-7-hover-extrusion',
+      filter: ['==', ['id'], 84]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-extrusion',
+      filter: ['==', ['id'], 84]
+    },
+    {
       layerId: 'region-buildings-7-hover-fill',
       filter: ['==', ['id'], 84]
     },
@@ -226,6 +255,14 @@ test('createMapSelectionController applies hover filters and cursor for buffered
   assert.equal(canvas.style.cursor, 'pointer');
   assert.deepEqual(filters, [
     {
+      layerId: 'region-buildings-7-hover-extrusion',
+      filter: ['==', ['id'], 84]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-extrusion',
+      filter: ['==', ['id'], 84]
+    },
+    {
       layerId: 'region-buildings-7-hover-fill',
       filter: ['==', ['id'], 84]
     },
@@ -240,6 +277,215 @@ test('createMapSelectionController applies hover filters and cursor for buffered
     {
       layerId: 'overpass-buildings-source-hover-line',
       filter: ['==', ['id'], 84]
+    }
+  ]);
+});
+
+test('createMapSelectionController queries only extrusion layers in 3d mode', async () => {
+  const { createMapSelectionController } = await loadMapSelectionController();
+  const queriedCalls = [];
+  const dispatches = [];
+  const map = {
+    getLayer(layerId) {
+      return { id: layerId };
+    },
+    queryRenderedFeatures(geometry, options: { layers?: string[] } = {}) {
+      queriedCalls.push({
+        geometry,
+        layers: [...(options.layers || [])]
+      });
+      if ((options.layers || []).length === 2) {
+        return [];
+      }
+      return [{
+        id: 248,
+        layer: { id: 'region-buildings-7-part-extrusion' },
+        properties: {
+          osm_type: 'way',
+          osm_id: 42
+        }
+      }];
+    },
+    setFilter() {},
+    setLayoutProperty() {},
+    on() {},
+    off() {},
+    once() {},
+    easeTo() {}
+  };
+
+  const controller = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => [{ id: 7 }],
+    getBuildings3dEnabled: () => true,
+    recordDebugSetFilter: () => {},
+    debugSelectionLog: () => {},
+    dispatchBuildingClick: (payload) => dispatches.push(payload)
+  });
+
+  controller.handleMapBuildingClick({
+    originalEvent: { timeStamp: 1235 },
+    point: { x: 15, y: 20 },
+    lngLat: { lng: 37.5, lat: 55.7 }
+  });
+
+  assert.equal(queriedCalls.length, 2);
+  assert.deepEqual(queriedCalls[1].layers, [
+    'region-buildings-7-extrusion',
+    'overpass-buildings-source-extrusion',
+    'region-buildings-7-part-extrusion',
+    'overpass-buildings-source-part-extrusion'
+  ]);
+  assert.equal(dispatches[0].feature.layer.id, 'region-buildings-7-part-extrusion');
+});
+
+test('createMapSelectionController keeps hidden parent contours out of hover filters when parts are visible', async () => {
+  const { createMapSelectionController } = await loadMapSelectionController();
+  const filters = [];
+  const canvas = { style: { cursor: '' } };
+  const map = {
+    getLayer(layerId) {
+      return { id: layerId };
+    },
+    getCanvas() {
+      return canvas;
+    },
+    queryRenderedFeatures(geometry, options: { layers?: string[] } = {}) {
+      if ((options.layers || []).length === 2) {
+        return [];
+      }
+      return [{
+        id: 84,
+        layer: { id: 'region-buildings-7-line' },
+        properties: {
+          osm_type: 'way',
+          osm_id: 42,
+          feature_kind: 'building_remainder'
+        }
+      }];
+    },
+    setFilter(layerId, filter) {
+      filters.push({ layerId, filter });
+    },
+    setLayoutProperty() {},
+    on() {},
+    off() {},
+    once() {},
+    easeTo() {},
+    isStyleLoaded() {
+      return true;
+    }
+  };
+
+  const controller = createMapSelectionController({
+    getMap: () => map,
+    getActiveRegions: () => [{ id: 7 }],
+    getBuildingPartsVisible: () => true,
+    recordDebugSetFilter: () => {},
+    debugSelectionLog: () => {}
+  });
+
+  controller.handleMapPointerMove({
+    point: { x: 30, y: 40 }
+  });
+
+  assert.equal(canvas.style.cursor, 'pointer');
+  assert.deepEqual(filters, [
+    {
+      layerId: 'region-buildings-7-hover-extrusion',
+      filter: ['all',
+        ['any',
+          ['any',
+            ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+            ['all',
+              ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+              ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+            ]
+          ],
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+        ],
+        ['==', ['id'], 84]
+      ]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-extrusion',
+      filter: ['all',
+        ['any',
+          ['any',
+            ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+            ['all',
+              ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+              ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+            ]
+          ],
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+        ],
+        ['==', ['id'], 84]
+      ]
+    },
+    {
+      layerId: 'region-buildings-7-hover-fill',
+      filter: ['all',
+        ['any',
+          ['any',
+            ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+            ['all',
+              ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+              ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+            ]
+          ],
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+        ],
+        ['==', ['id'], 84]
+      ]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-fill',
+      filter: ['all',
+        ['any',
+          ['any',
+            ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+            ['all',
+              ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+              ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+            ]
+          ],
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+        ],
+        ['==', ['id'], 84]
+      ]
+    },
+    {
+      layerId: 'region-buildings-7-hover-line',
+      filter: ['all',
+        ['any',
+          ['any',
+            ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+            ['all',
+              ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+              ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+            ]
+          ],
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+        ],
+        ['==', ['id'], 84]
+      ]
+    },
+    {
+      layerId: 'overpass-buildings-source-hover-line',
+      filter: ['all',
+        ['any',
+          ['any',
+            ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+            ['all',
+              ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+              ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+            ]
+          ],
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+        ],
+        ['==', ['id'], 84]
+      ]
     }
   ]);
 });
@@ -290,8 +536,10 @@ test('createMapSelectionController ignores missing overpass layers during hover 
 
   assert.equal(queriedCalls.length, 1);
   assert.deepEqual(queriedCalls[0].layers, [
+    'region-buildings-7-extrusion',
     'region-buildings-7-line',
     'region-buildings-7-fill',
+    'region-buildings-7-part-extrusion',
     'region-buildings-7-part-line',
     'region-buildings-7-part-fill'
   ]);

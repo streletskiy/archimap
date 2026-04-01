@@ -91,6 +91,52 @@ function resolveBboxQueryMode(isPostgres, rtreeState) {
   return rtreeState?.ready ? 'rtree' : 'plain';
 }
 
+const DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2;
+
+function parseTagNumber(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const normalized = text.replace(',', '.');
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readFirstNumericTag(tags, keys = []) {
+  for (const key of Array.isArray(keys) ? keys : []) {
+    if (!Object.prototype.hasOwnProperty.call(tags || {}, key)) continue;
+    const value = parseTagNumber(tags?.[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function deriveLevelsTextFromSourceTags(sourceTags = {}) {
+  const explicitLevels = readFirstNumericTag(sourceTags, ['building:levels', 'levels']);
+  if (Number.isInteger(explicitLevels) && explicitLevels >= 0 && explicitLevels <= 300) {
+    return String(explicitLevels);
+  }
+  const explicitHeight = readFirstNumericTag(sourceTags, ['building:height', 'height']);
+  const minLevel = readFirstNumericTag(sourceTags, ['building:min_level', 'min_level']);
+  const explicitMinHeight = readFirstNumericTag(sourceTags, ['building:min_height', 'min_height']);
+  const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
+  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
+  const baseHeight = Math.max(
+    normalizedExplicitMinHeight,
+    normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS
+  );
+  if (!(Number.isFinite(explicitHeight) && explicitHeight > baseHeight)) {
+    return null;
+  }
+  const estimatedLevels = Math.max(1, Math.round((explicitHeight - baseHeight) / DEFAULT_BUILDING_LEVEL_HEIGHT_METERS));
+  if (!Number.isInteger(estimatedLevels) || estimatedLevels < 0 || estimatedLevels > 300) {
+    return null;
+  }
+  return String(estimatedLevels);
+}
+
 function mapFilterDataRow(row) {
   const osmKey = `${row.osm_type}/${row.osm_id}`;
   let sourceTags: LooseRecord;
@@ -99,6 +145,7 @@ function mapFilterDataRow(row) {
   } catch {
     sourceTags = {};
   }
+  const derivedLevels = deriveLevelsTextFromSourceTags(sourceTags);
   const hasExtraInfo = row.info_osm_id != null;
   const split = hasExtraInfo ? splitBuildingMaterialSelection(row.material) : null;
   const minLon = Number(row.min_lon);
@@ -110,6 +157,7 @@ function mapFilterDataRow(row) {
   return {
     osmKey,
     sourceTags,
+    levels: row.levels ?? derivedLevels ?? null,
     archiInfo: hasExtraInfo
       ? {
         osm_type: row.osm_type,

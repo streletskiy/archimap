@@ -5,17 +5,23 @@ import {
   ensureSearchResultsSourceAndLayers,
   getBasemapBuildingLayerIds,
   getBasemapSuppressedLayerIds,
+  getCurrentBuildingsExtrusionLayerIds,
   getCurrentBuildingSourceConfigs,
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
+  getCurrentBuildingPartExtrusionLayerIds,
   getCurrentBuildingPartFillLayerIds,
   getCurrentBuildingPartLineLayerIds,
+  getCurrentBuildingPartFilterHighlightExtrusionLayerIds,
   getCurrentBuildingPartFilterHighlightFillLayerIds,
   getCurrentBuildingPartFilterHighlightLineLayerIds,
+  getCurrentBuildingHoverExtrusionLayerIds,
   getCurrentBuildingHoverFillLayerIds,
   getCurrentBuildingHoverLineLayerIds,
+  getCurrentFilterHighlightExtrusionLayerIds,
   getCurrentFilterHighlightFillLayerIds,
   getCurrentFilterHighlightLineLayerIds,
+  getCurrentSelectedExtrusionLayerIds,
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds,
   removeRegionBuildingSourceAndLayers
@@ -58,6 +64,7 @@ type MapRegionLayersControllerOptions = {
   getSearchItems?: () => unknown[];
   getSelectedBuilding?: () => unknown;
   getMapLabelsVisible?: () => boolean | null | undefined;
+  getBuildings3dEnabled?: () => boolean | null | undefined;
   getBuildingPartsVisible?: () => boolean | null | undefined;
   getBuildingFilterLayers?: () => unknown[];
   getWindowOrigin?: () => string;
@@ -79,6 +86,7 @@ export function createMapRegionLayersController({
   getSearchItems,
   getSelectedBuilding,
   getMapLabelsVisible,
+  getBuildings3dEnabled,
   getBuildingPartsVisible,
   getBuildingFilterLayers,
   getWindowOrigin,
@@ -100,16 +108,22 @@ export function createMapRegionLayersController({
 
   function getCurrentMapLayerIds() {
     return {
+      buildingExtrusionLayerIds: getCurrentBuildingsExtrusionLayerIds(activeRegionPmtiles),
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(activeRegionPmtiles),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(activeRegionPmtiles),
+      buildingPartExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(activeRegionPmtiles),
       buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegionPmtiles),
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegionPmtiles),
+      buildingPartFilterHighlightExtrusionLayerIds: getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles),
-      buildingHoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles),
-      buildingHoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegionPmtiles),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles),
+      filterHighlightExtrusionLayerIds: getCurrentFilterHighlightExtrusionLayerIds(activeRegionPmtiles),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles),
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(activeRegionPmtiles),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegionPmtiles),
       selectedLineLayerIds: getCurrentSelectedLineLayerIds(activeRegionPmtiles)
     };
@@ -118,16 +132,22 @@ export function createMapRegionLayersController({
   function getAllCurrentMapLayerIds() {
     const layerIds = getCurrentMapLayerIds();
     return [
+      ...layerIds.buildingExtrusionLayerIds,
       ...layerIds.buildingFillLayerIds,
       ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartExtrusionLayerIds,
       ...layerIds.buildingPartFillLayerIds,
       ...layerIds.buildingPartLineLayerIds,
+      ...layerIds.filterHighlightExtrusionLayerIds,
       ...layerIds.filterHighlightFillLayerIds,
       ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.buildingPartFilterHighlightExtrusionLayerIds,
       ...layerIds.buildingPartFilterHighlightFillLayerIds,
       ...layerIds.buildingPartFilterHighlightLineLayerIds,
-      ...layerIds.buildingHoverFillLayerIds,
-      ...layerIds.buildingHoverLineLayerIds,
+      ...layerIds.hoverExtrusionLayerIds,
+      ...layerIds.hoverFillLayerIds,
+      ...layerIds.hoverLineLayerIds,
+      ...layerIds.selectedExtrusionLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -139,16 +159,22 @@ export function createMapRegionLayersController({
 
   function getMapLayerIdsForRegions(regions: RegionLike[] = []) {
     return {
+      buildingExtrusionLayerIds: getCurrentBuildingsExtrusionLayerIds(regions),
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(regions),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(regions),
+      buildingPartExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(regions),
       buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(regions),
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(regions),
+      buildingPartFilterHighlightExtrusionLayerIds: getCurrentBuildingPartFilterHighlightExtrusionLayerIds(regions),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(regions),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(regions),
-      buildingHoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(regions),
-      buildingHoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(regions),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(regions),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(regions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(regions),
+      filterHighlightExtrusionLayerIds: getCurrentFilterHighlightExtrusionLayerIds(regions),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(regions),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(regions),
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(regions),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(regions),
       selectedLineLayerIds: getCurrentSelectedLineLayerIds(regions)
     };
@@ -167,16 +193,22 @@ export function createMapRegionLayersController({
     if (!map) return false;
     const layerIds = getMapLayerIdsForRegions(regions);
     const allLayerIds = [
+      ...layerIds.buildingExtrusionLayerIds,
       ...layerIds.buildingFillLayerIds,
       ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartExtrusionLayerIds,
       ...layerIds.buildingPartFillLayerIds,
       ...layerIds.buildingPartLineLayerIds,
+      ...layerIds.filterHighlightExtrusionLayerIds,
       ...layerIds.filterHighlightFillLayerIds,
       ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.buildingPartFilterHighlightExtrusionLayerIds,
       ...layerIds.buildingPartFilterHighlightFillLayerIds,
       ...layerIds.buildingPartFilterHighlightLineLayerIds,
-      ...layerIds.buildingHoverFillLayerIds,
-      ...layerIds.buildingHoverLineLayerIds,
+      ...layerIds.hoverExtrusionLayerIds,
+      ...layerIds.hoverFillLayerIds,
+      ...layerIds.hoverLineLayerIds,
+      ...layerIds.selectedExtrusionLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -344,6 +376,7 @@ export function createMapRegionLayersController({
     activeRegionPmtiles = nextActiveRegions;
     const currentBuildingFilters = getBuildingFilterLayers?.() || [];
     const hasActiveBuildingFilters = Array.isArray(currentBuildingFilters) && currentBuildingFilters.length > 0;
+    const buildings3dEnabled = Boolean(getBuildings3dEnabled?.() ?? false);
     const partsVisible = Boolean(getBuildingPartsVisible?.() ?? true);
     for (const region of nextActiveRegions) {
       const hadRegionLayers = hasRegionLayersReady([region]);
@@ -353,6 +386,7 @@ export function createMapRegionLayersController({
         buildingPaint,
         hoverPaint,
         origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : '',
+        buildings3dEnabled,
         buildingPartsVisible: partsVisible,
         buildingPartHighlightVisible: partsVisible || hasActiveBuildingFilters
       });

@@ -9,6 +9,7 @@ import {
 } from '$lib/utils/text';
 import { buildBboxHash } from './filter-bbox.js';
 import { OVERPASS_BUILDING_SOURCE_ID } from './map-layer-utils.js';
+import { deriveBuildingLevelsText } from './map-3d-utils.js';
 import type {
   FilterBuildingSourceConfig,
   FilterMapLike,
@@ -142,6 +143,11 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
     pickNullableText(archiInfo.material, feature?.properties?.material, sourceTags['building:material'], sourceTags.material),
     pickNullableText(archiInfo.materialConcrete, feature?.properties?.materialConcrete, sourceTags['building:material:concrete'], sourceTags.material_concrete)
   );
+  const derivedLevels = deriveBuildingLevelsText({
+    tags: sourceTags,
+    renderHeightMeters: feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters,
+    renderMinHeightMeters: feature?.properties?.render_min_height_m ?? feature?.properties?.renderMinHeightMeters
+  });
   const normalizedArchiInfo = {
     ...archiInfo,
     _sourceTags: sourceTags,
@@ -155,7 +161,11 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
       1000,
       2100
     ),
-    levels: coerceNullableIntegerText(archiInfo.levels ?? feature?.properties?.levels ?? sourceTags['building:levels'] ?? sourceTags.levels, 0, 300),
+    levels: coerceNullableIntegerText(
+      archiInfo.levels ?? feature?.properties?.levels ?? sourceTags['building:levels'] ?? sourceTags.levels ?? derivedLevels,
+      0,
+      300
+    ),
     year_built: coerceNullableIntegerText(
       archiInfo.year_built ?? feature?.properties?.year_built ?? sourceTags['building:year'] ?? sourceTags.start_date,
       1000,

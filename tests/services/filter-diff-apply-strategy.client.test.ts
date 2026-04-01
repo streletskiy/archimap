@@ -111,8 +111,10 @@ test('createFilterDiffApplyStrategy filters building parts separately and hides 
       buildingLineLayerIds: ['building-line'],
       buildingPartFillLayerIds: ['part-fill'],
       buildingPartLineLayerIds: ['part-line'],
+      filterHighlightExtrusionLayerIds: ['highlight-extrusion'],
       filterHighlightFillLayerIds: ['highlight-fill'],
       filterHighlightLineLayerIds: ['highlight-line'],
+      buildingPartFilterHighlightExtrusionLayerIds: ['part-highlight-extrusion'],
       buildingPartFilterHighlightFillLayerIds: ['part-highlight-fill'],
       buildingPartFilterHighlightLineLayerIds: ['part-highlight-line']
     }),
@@ -143,13 +145,82 @@ test('createFilterDiffApplyStrategy filters building parts separately and hides 
   ]);
   assert.deepEqual(map.filters.get('highlight-fill'), [
     'all',
-    ['!=', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
+    ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+    ['in', ['id'], ['literal', [202]]]
+  ]);
+  assert.deepEqual(map.filters.get('highlight-extrusion'), [
+    'all',
+    ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
     ['in', ['id'], ['literal', [202]]]
   ]);
   assert.deepEqual(map.filters.get('part-highlight-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
     ['in', ['id'], ['literal', [202]]]
+  ]);
+  assert.deepEqual(map.filters.get('part-highlight-extrusion'), [
+    'all',
+    ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
+    ['in', ['id'], ['literal', [202]]]
+  ]);
+});
+
+test('createFilterDiffApplyStrategy keeps building remainder geometry in the base highlight when parts are visible', async () => {
+  const { createFilterDiffApplyStrategy } = await loadFilterDiffApplyStrategy();
+  const map = createMapStub();
+  const strategy = createFilterDiffApplyStrategy({
+    resolveMap: () => map,
+    resolveLayerIds: () => ({
+      buildingFillLayerIds: ['building-fill'],
+      buildingLineLayerIds: ['building-line'],
+      buildingPartFillLayerIds: ['part-fill'],
+      buildingPartLineLayerIds: ['part-line'],
+      filterHighlightExtrusionLayerIds: ['highlight-extrusion'],
+      filterHighlightFillLayerIds: ['highlight-fill'],
+      filterHighlightLineLayerIds: ['highlight-line'],
+      buildingPartFilterHighlightExtrusionLayerIds: ['part-highlight-extrusion'],
+      buildingPartFilterHighlightFillLayerIds: ['part-highlight-fill'],
+      buildingPartFilterHighlightLineLayerIds: ['part-highlight-line']
+    }),
+    getBuildingPartsVisible: () => true,
+    getLatestFilterToken: () => 1,
+    patchState: () => {},
+    debugFilterLog: () => {},
+    recordFilterTelemetry: () => {},
+    updateFilterRuntimeStatus: () => {},
+    updateFilterDebugHook: () => {},
+    getCurrentPhase: () => 'apply',
+    highlightMode: 'layer'
+  });
+
+  await strategy.applyFilteredFeaturePaintGroups([
+    { color: '#00ff00', ids: [303] }
+  ], 1, {
+    matchedFeatureIds: [303],
+    buildingPartsVisible: true
+  });
+
+  assert.deepEqual(map.filters.get('highlight-fill'), [
+    'all',
+    ['any',
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+      ['all',
+        ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+        ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+      ]
+    ],
+    ['in', ['id'], ['literal', [303]]]
+  ]);
+  assert.deepEqual(map.filters.get('highlight-extrusion'), [
+    'all',
+    ['any',
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+      ['all',
+        ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+        ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+      ]
+    ],
+    ['in', ['id'], ['literal', [303]]]
   ]);
 });
 

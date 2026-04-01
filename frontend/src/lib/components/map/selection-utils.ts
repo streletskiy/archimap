@@ -1,3 +1,5 @@
+import { buildVisibleBuildingSelectionScopeExpression } from '../../services/map/map-layer-utils.js';
+
 export function parseOsmKey(raw) {
   const text = String(raw || '').trim();
   if (!text || !text.includes('/')) return null;
@@ -115,4 +117,14 @@ export function getSelectionFilter(feature, identity) {
     ];
   }
   return ['==', ['id'], -1];
+}
+
+export function getVisibleSelectionFilter(feature, identity, {
+  showBuildingParts = true
+} = {}) {
+  const idFilter = getSelectionFilter(feature, identity);
+  const scopeFilter = buildVisibleBuildingSelectionScopeExpression({
+    showBuildingParts
+  });
+  return scopeFilter ? ['all', scopeFilter, idFilter] : idFilter;
 }

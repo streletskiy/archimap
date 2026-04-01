@@ -3,6 +3,7 @@
   import { fly } from 'svelte/transition';
   import { UiButton, UiSelect, UiSwitch } from '$lib/components/base';
   import ArchitectureIcon from '$lib/components/icons/ArchitectureIcon.svelte';
+  import Buildings3dIcon from '$lib/components/icons/Buildings3dIcon.svelte';
   import BuildingPartsIcon from '$lib/components/icons/BuildingPartsIcon.svelte';
   import MoonIcon from '$lib/components/icons/MoonIcon.svelte';
   import SunIcon from '$lib/components/icons/SunIcon.svelte';
@@ -11,12 +12,15 @@
   import { clearSession, session } from '$lib/stores/auth';
   import {
     mapBuildingPartsVisible,
+    mapBuildings3dEnabled,
     mapLabelsVisible,
     setMapBuildingPartsVisible,
+    setMapBuildings3dEnabled,
     setMapLabelsVisible,
     syncMapVisibilityFromStorage
   } from '$lib/stores/map';
   import { getUserInitials, getUserLabel } from '$lib/utils/user-display';
+  import { getEffectiveBuildingPartsVisibility } from '$lib/services/map/map-3d-utils';
 
   export let open = false;
   export let primaryLinks = [];
@@ -26,6 +30,7 @@
   let darkTheme = false;
   let themeObserver = null;
   let localeItems;
+  let effectiveBuildingPartsVisible;
 
   $: userInitials = getUserInitials($session.user);
   $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');
@@ -34,6 +39,10 @@
     value: item,
     label: $t(`locale.${item}`)
   }));
+  $: effectiveBuildingPartsVisible = getEffectiveBuildingPartsVisibility({
+    buildingPartsVisible: $mapBuildingPartsVisible,
+    buildings3dEnabled: $mapBuildings3dEnabled
+  });
 
   function closePanel() {
     dispatch('close');
@@ -64,6 +73,10 @@
 
   function applyBuildingPartsVisibility(visible) {
     setMapBuildingPartsVisible(Boolean(visible));
+  }
+
+  function applyBuildings3dEnabled(visible) {
+    setMapBuildings3dEnabled(Boolean(visible));
   }
 
   async function logout() {
@@ -149,14 +162,29 @@
     </div>
 
     <div class="toggle-row">
+      <span>{$t('header.buildings3d')}</span>
+      <div class="switch-row">
+        <span class="switch-icon" aria-hidden="true">
+          <Buildings3dIcon width="24" height="24" />
+        </span>
+        <UiSwitch
+          checked={$mapBuildings3dEnabled}
+          aria-label={$mapBuildings3dEnabled ? $t('header.buildings3dHide') : $t('header.buildings3dShow')}
+          onchange={(event) => applyBuildings3dEnabled(event.detail.checked)}
+        />
+      </div>
+    </div>
+
+    <div class="toggle-row">
       <span>{$t('header.buildingParts')}</span>
       <div class="switch-row">
         <span class="switch-icon" aria-hidden="true">
           <BuildingPartsIcon width="24" height="24" />
         </span>
         <UiSwitch
-          checked={$mapBuildingPartsVisible}
-          aria-label={$mapBuildingPartsVisible ? $t('header.buildingPartsHide') : $t('header.buildingPartsShow')}
+          checked={effectiveBuildingPartsVisible}
+          disabled={$mapBuildings3dEnabled}
+          aria-label={effectiveBuildingPartsVisible ? $t('header.buildingPartsHide') : $t('header.buildingPartsShow')}
           onchange={(event) => applyBuildingPartsVisibility(event.detail.checked)}
         />
       </div>

@@ -10,8 +10,244 @@ const {
   writeRowsToNdjsonFile,
   writeStreamLine
 } = require('./common');
+const { expandRowsWithBuildingRemainders } = require('./building-remainder');
 
 const POSTGRES_REGION_EXPORT_BATCH_SIZE = 20000;
+const BUILDING_JSON_KEY_SQL = '"building"';
+const BUILDING_PART_JSON_KEY_SQL = '"building:part"';
+const BUILDING_PART_ALT_JSON_KEY_SQL = '"building_part"';
+
+function buildSqliteFeatureKindSql(columnName = 'bc.tags_json') {
+  return `
+    CASE
+      WHEN instr(COALESCE(${columnName}, ''), '${BUILDING_JSON_KEY_SQL}') > 0 THEN 'building'
+      WHEN instr(COALESCE(${columnName}, ''), '${BUILDING_PART_JSON_KEY_SQL}') > 0
+        OR instr(COALESCE(${columnName}, ''), '${BUILDING_PART_ALT_JSON_KEY_SQL}') > 0 THEN 'building_part'
+      ELSE 'building'
+    END
+  `;
+}
+
+function buildPostgresFeatureKindSql(columnName = 'bc.tags_json') {
+  return `
+    CASE
+      WHEN POSITION('${BUILDING_JSON_KEY_SQL}' IN COALESCE(${columnName}, '')) > 0 THEN 'building'
+      WHEN POSITION('${BUILDING_PART_JSON_KEY_SQL}' IN COALESCE(${columnName}, '')) > 0
+        OR POSITION('${BUILDING_PART_ALT_JSON_KEY_SQL}' IN COALESCE(${columnName}, '')) > 0 THEN 'building_part'
+      ELSE 'building'
+    END
+  `;
+}
+
+function buildSqliteRegionExportQuery({ regionPlaceholder = '?', geometrySql = 'bc.geometry_json AS geometry_json' } = {}) {
+  const featureKindSql = buildSqliteFeatureKindSql('bc.tags_json');
+  return `
+    WITH region_rows AS (
+      SELECT
+        bc.osm_type,
+        bc.osm_id,
+        bc.tags_json,
+        ${featureKindSql} AS feature_kind,
+        ${geometrySql},
+        bc.min_lon,
+        bc.min_lat,
+        bc.max_lon,
+        bc.max_lat
+      FROM data_region_memberships drm
+      JOIN osm.building_contours bc
+        ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+      WHERE drm.region_id = ${regionPlaceholder}
+    ),
+    buildings_with_parts AS (
+      SELECT DISTINCT building.osm_type, building.osm_id
+      FROM region_rows building
+      JOIN region_rows part
+        ON building.feature_kind = 'building'
+       AND part.feature_kind = 'building_part'
+       AND (part.osm_type <> building.osm_type OR part.osm_id <> building.osm_id)
+       AND part.min_lon >= building.min_lon
+       AND part.max_lon <= building.max_lon
+       AND part.min_lat >= building.min_lat
+       AND part.max_lat <= building.max_lat
+    )
+    SELECT
+      region_rows.osm_type,
+      region_rows.osm_id,
+      region_rows.tags_json,
+      region_rows.feature_kind,
+      region_rows.geometry_json,
+      region_rows.min_lon,
+      region_rows.min_lat,
+      region_rows.max_lon,
+      region_rows.max_lat,
+      CASE
+        WHEN buildings_with_parts.osm_id IS NULL THEN 0
+        ELSE 1
+      END AS render_hide_base_when_parts
+    FROM region_rows
+    LEFT JOIN buildings_with_parts
+      ON buildings_with_parts.osm_type = region_rows.osm_type
+     AND buildings_with_parts.osm_id = region_rows.osm_id
+    ORDER BY region_rows.osm_type, region_rows.osm_id
+  `;
+}
+
+function buildPostgresRegionExportQuery({ regionSql = '$1', includeRemainderRows = false } = {}) {
+  const featureKindSql = buildPostgresFeatureKindSql('bc.tags_json');
+  const remainderCtesSql = includeRemainderRows
+    ? `,
+    building_remainders AS (
+      SELECT
+        building.osm_type,
+        building.osm_id,
+        building.tags_json,
+        ST_Multi(
+          ST_CollectionExtract(
+            ST_Difference(
+              ST_MakeValid(building.geom),
+              ST_UnaryUnion(ST_Collect(ST_MakeValid(part.geom)))
+            ),
+            3
+          )
+        ) AS geom
+      FROM region_rows building
+      JOIN region_rows part
+        ON building.feature_kind = 'building'
+       AND part.feature_kind = 'building_part'
+       AND (part.osm_type <> building.osm_type OR part.osm_id <> building.osm_id)
+       AND part.min_lon >= building.min_lon
+       AND part.max_lon <= building.max_lon
+       AND part.min_lat >= building.min_lat
+       AND part.max_lat <= building.max_lat
+      GROUP BY building.osm_type, building.osm_id, building.tags_json, building.geom
+    ),
+    remainder_rows AS (
+      SELECT
+        building_remainders.osm_type,
+        building_remainders.osm_id,
+        building_remainders.tags_json,
+        'building_remainder' AS feature_kind,
+        building_remainders.geom,
+        ST_XMin(building_remainders.geom) AS min_lon,
+        ST_YMin(building_remainders.geom) AS min_lat,
+        ST_XMax(building_remainders.geom) AS max_lon,
+        ST_YMax(building_remainders.geom) AS max_lat,
+        0 AS render_hide_base_when_parts
+      FROM building_remainders
+      WHERE building_remainders.geom IS NOT NULL
+        AND NOT ST_IsEmpty(building_remainders.geom)
+    )`
+    : '';
+  const exportRowsSql = includeRemainderRows
+    ? `
+    export_rows AS (
+      SELECT
+        region_rows.osm_type,
+        region_rows.osm_id,
+        region_rows.tags_json,
+        region_rows.feature_kind,
+        region_rows.geom,
+        region_rows.min_lon,
+        region_rows.min_lat,
+        region_rows.max_lon,
+        region_rows.max_lat,
+        CASE
+          WHEN buildings_with_parts.osm_id IS NULL THEN 0
+          ELSE 1
+        END AS render_hide_base_when_parts
+      FROM region_rows
+      LEFT JOIN buildings_with_parts
+        ON buildings_with_parts.osm_type = region_rows.osm_type
+       AND buildings_with_parts.osm_id = region_rows.osm_id
+
+      UNION ALL
+
+      SELECT
+        remainder_rows.osm_type,
+        remainder_rows.osm_id,
+        remainder_rows.tags_json,
+        remainder_rows.feature_kind,
+        remainder_rows.geom,
+        remainder_rows.min_lon,
+        remainder_rows.min_lat,
+        remainder_rows.max_lon,
+        remainder_rows.max_lat,
+        remainder_rows.render_hide_base_when_parts
+      FROM remainder_rows
+    )`
+    : `
+    export_rows AS (
+      SELECT
+        region_rows.osm_type,
+        region_rows.osm_id,
+        region_rows.tags_json,
+        region_rows.feature_kind,
+        region_rows.geom,
+        region_rows.min_lon,
+        region_rows.min_lat,
+        region_rows.max_lon,
+        region_rows.max_lat,
+        CASE
+          WHEN buildings_with_parts.osm_id IS NULL THEN 0
+          ELSE 1
+        END AS render_hide_base_when_parts
+      FROM region_rows
+      LEFT JOIN buildings_with_parts
+        ON buildings_with_parts.osm_type = region_rows.osm_type
+       AND buildings_with_parts.osm_id = region_rows.osm_id
+    )`;
+  return `
+    WITH region_rows AS (
+      SELECT
+        bc.osm_type,
+        bc.osm_id,
+        bc.tags_json,
+        ${featureKindSql} AS feature_kind,
+        bc.geom,
+        bc.min_lon,
+        bc.min_lat,
+        bc.max_lon,
+        bc.max_lat
+      FROM public.data_region_memberships drm
+      JOIN osm.building_contours bc
+        ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+      WHERE drm.region_id = ${regionSql}
+    ),
+    buildings_with_parts AS (
+      SELECT DISTINCT building.osm_type, building.osm_id
+      FROM region_rows building
+      JOIN region_rows part
+        ON building.feature_kind = 'building'
+       AND part.feature_kind = 'building_part'
+       AND (part.osm_type <> building.osm_type OR part.osm_id <> building.osm_id)
+       AND part.min_lon >= building.min_lon
+       AND part.max_lon <= building.max_lon
+       AND part.min_lat >= building.min_lat
+       AND part.max_lat <= building.max_lat
+    )
+    ${remainderCtesSql},
+    ${exportRowsSql}
+    SELECT
+      export_rows.osm_type,
+      export_rows.osm_id,
+      export_rows.tags_json,
+      export_rows.feature_kind,
+      ST_AsGeoJSON(export_rows.geom)::text AS geometry_json,
+      export_rows.min_lon,
+      export_rows.min_lat,
+      export_rows.max_lon,
+      export_rows.max_lat,
+      export_rows.render_hide_base_when_parts
+    FROM export_rows
+    ORDER BY
+      export_rows.osm_type,
+      export_rows.osm_id,
+      CASE
+        WHEN export_rows.feature_kind = 'building_remainder' THEN 1
+        ELSE 0
+      END
+  `;
+}
 
 function openSqliteRegionDb(archimapDbPath, osmDbPath) {
   ensureDir(archimapDbPath);
@@ -170,34 +406,20 @@ async function exportRegionMembersToNdjson({
     const client = new Client({ connectionString: databaseUrl });
     await client.connect();
     try {
-      const rows = await client.query(`
-        SELECT
-          bc.osm_type,
-          bc.osm_id,
-          bc.tags_json,
-          ST_AsGeoJSON(bc.geom)::text AS geometry_json,
-          bc.min_lon,
-          bc.min_lat,
-          bc.max_lon,
-          bc.max_lat
-        FROM public.data_region_memberships drm
-        JOIN osm.building_contours bc
-          ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-        WHERE drm.region_id = $1
-        ORDER BY bc.osm_type, bc.osm_id
-      `, [regionId]);
+      const rows = await client.query(buildPostgresRegionExportQuery(), [regionId]);
       await writeRowsToNdjsonFile(
         outputPath,
         rows.rows.map((row) => ({
           osm_type: row.osm_type,
           osm_id: row.osm_id,
           tags_json: row.tags_json,
-          feature_kind: deriveFeatureKindFromTagsJson(row.tags_json),
+          feature_kind: row.feature_kind || deriveFeatureKindFromTagsJson(row.tags_json),
           geometry_json: row.geometry_json,
           min_lon: row.min_lon,
           min_lat: row.min_lat,
           max_lon: row.max_lon,
-          max_lat: row.max_lat
+          max_lat: row.max_lat,
+          render_hide_base_when_parts: Number(row.render_hide_base_when_parts || 0)
         }))
       );
     } finally {
@@ -208,26 +430,20 @@ async function exportRegionMembersToNdjson({
 
   const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
   try {
-    const rows = db.prepare(`
-      SELECT bc.osm_type, bc.osm_id, bc.tags_json, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
-      FROM data_region_memberships drm
-      JOIN osm.building_contours bc
-        ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-      WHERE drm.region_id = ?
-      ORDER BY bc.osm_type, bc.osm_id
-    `).all(regionId);
+    const rows = expandRowsWithBuildingRemainders(db.prepare(buildSqliteRegionExportQuery()).all(regionId));
     await writeRowsToNdjsonFile(
       outputPath,
       rows.map((row) => ({
         osm_type: row.osm_type,
         osm_id: row.osm_id,
         tags_json: row.tags_json,
-        feature_kind: deriveFeatureKindFromTagsJson(row.tags_json),
+        feature_kind: row.feature_kind || deriveFeatureKindFromTagsJson(row.tags_json),
         geometry_json: row.geometry_json,
         min_lon: row.min_lon,
         min_lat: row.min_lat,
         max_lon: row.max_lon,
-        max_lat: row.max_lat
+        max_lat: row.max_lat,
+        render_hide_base_when_parts: Number(row.render_hide_base_when_parts || 0)
       }))
     );
   } finally {
@@ -254,7 +470,14 @@ async function exportRegionMembersToGeojsonNdjson({
   async function writeRow(row) {
     await writeStreamLine(
       writer,
-      formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json, row.tags_json, row.feature_kind)
+      formatGeojsonFeatureLine(
+        row.osm_type,
+        row.osm_id,
+        row.geometry_json,
+        row.tags_json,
+        row.feature_kind,
+        row.render_hide_base_when_parts
+      )
     );
     importedFeatureCount += 1;
     bounds = updateBounds(bounds, row);
@@ -273,20 +496,10 @@ async function exportRegionMembersToGeojsonNdjson({
         await client.query('BEGIN READ ONLY');
         await client.query(`
           DECLARE region_pmtiles_export_cursor NO SCROLL CURSOR FOR
-          SELECT
-            bc.osm_type,
-            bc.osm_id,
-            bc.tags_json,
-            ST_AsGeoJSON(bc.geom)::text AS geometry_json,
-            bc.min_lon,
-            bc.min_lat,
-            bc.max_lon,
-            bc.max_lat
-          FROM public.data_region_memberships drm
-          JOIN osm.building_contours bc
-            ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-          WHERE drm.region_id = ${normalizedRegionId}
-          ORDER BY bc.osm_type, bc.osm_id
+          ${buildPostgresRegionExportQuery({
+            regionSql: String(normalizedRegionId),
+            includeRemainderRows: true
+          })}
         `);
 
         while (true) {
@@ -317,14 +530,7 @@ async function exportRegionMembersToGeojsonNdjson({
     } else {
       const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
       try {
-        const rows = db.prepare(`
-          SELECT bc.osm_type, bc.osm_id, bc.tags_json, bc.geometry_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat
-          FROM data_region_memberships drm
-          JOIN osm.building_contours bc
-            ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-          WHERE drm.region_id = ?
-          ORDER BY bc.osm_type, bc.osm_id
-        `).iterate(regionId);
+        const rows = expandRowsWithBuildingRemainders(db.prepare(buildSqliteRegionExportQuery()).all(regionId));
 
         for (const row of rows) {
           await writeRow(row);

@@ -165,6 +165,7 @@ export function applyFilterPaintHighlight({
   normalizedColorGroups = null,
   previousActive = false,
   forceStaticPaintProperties = false,
+  extrusionLayerIds = [],
   fillLayerIds = [],
   lineLayerIds = [],
   additionalFilterExpression = null,
@@ -176,6 +177,7 @@ export function applyFilterPaintHighlight({
       count: 0,
       colorExpression: FILTER_TRANSPARENT_COLOR,
       filterExpression: EMPTY_LAYER_FILTER,
+      extrusionOpacityExpression: 0,
       fillOpacityExpression: 0,
       lineWidthExpression: 0,
       lineOpacityExpression: 0,
@@ -197,11 +199,29 @@ export function applyFilterPaintHighlight({
     : normalizedGroups.length === 1
       ? normalizedGroups[0].color
       : buildFilterPaintExpressionFromNormalizedGroups(normalizedGroups).expr;
+  const extrusionOpacityExpression = active ? FILTER_HIGHLIGHT_FILL_OPACITY : 0;
   const fillOpacityExpression = active ? FILTER_HIGHLIGHT_FILL_OPACITY : 0;
   const lineWidthExpression = active ? FILTER_HIGHLIGHT_LINE_WIDTH : 0;
   const lineOpacityExpression = active ? FILTER_HIGHLIGHT_LINE_OPACITY : 0;
   const shouldApplyStaticPaintProperties = forceStaticPaintProperties || !active || !previousActive;
   let paintPropertyCalls = 0;
+
+  for (const layerId of extrusionLayerIds) {
+    if (!map.getLayer(layerId)) continue;
+    map.setFilter(layerId, combinedFilterExpression);
+    map.setPaintProperty(layerId, 'fill-extrusion-color', colorExpression);
+    paintPropertyCalls += 1;
+    if (typeof onLayerPaintApplied === 'function') {
+      onLayerPaintApplied(layerId, 'fill-extrusion-color', colorExpression);
+    }
+    if (shouldApplyStaticPaintProperties) {
+      map.setPaintProperty(layerId, 'fill-extrusion-opacity', extrusionOpacityExpression);
+      paintPropertyCalls += 1;
+      if (typeof onLayerPaintApplied === 'function') {
+        onLayerPaintApplied(layerId, 'fill-extrusion-opacity', extrusionOpacityExpression);
+      }
+    }
+  }
 
   for (const layerId of fillLayerIds) {
     if (!map.getLayer(layerId)) continue;
@@ -244,6 +264,7 @@ export function applyFilterPaintHighlight({
     count,
     colorExpression,
     filterExpression: combinedFilterExpression,
+    extrusionOpacityExpression,
     fillOpacityExpression,
     lineWidthExpression,
     lineOpacityExpression,

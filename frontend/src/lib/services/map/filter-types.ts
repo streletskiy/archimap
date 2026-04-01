@@ -16,13 +16,21 @@ export type MoveVector = {
 
 export type LayerIdsSnapshot = {
   buildingFillLayerIds: string[];
+  buildingExtrusionLayerIds: string[];
   buildingLineLayerIds: string[];
   buildingPartFillLayerIds: string[];
+  buildingPartExtrusionLayerIds: string[];
   buildingPartLineLayerIds: string[];
+  filterHighlightExtrusionLayerIds: string[];
   filterHighlightFillLayerIds: string[];
   filterHighlightLineLayerIds: string[];
+  buildingPartFilterHighlightExtrusionLayerIds: string[];
   buildingPartFilterHighlightFillLayerIds: string[];
   buildingPartFilterHighlightLineLayerIds: string[];
+  hoverExtrusionLayerIds: string[];
+  hoverFillLayerIds: string[];
+  hoverLineLayerIds: string[];
+  selectedExtrusionLayerIds: string[];
   selectedFillLayerIds: string[];
   selectedLineLayerIds: string[];
 };

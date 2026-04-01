@@ -3,11 +3,13 @@ import osmtogeojson from 'osmtogeojson';
 import { translateNow } from '$lib/i18n/index';
 import { buildBboxHash, buildBboxSnapshot } from './filter-bbox.js';
 import {
+  applyBuildingPartBaseSuppression,
   buildOverpassBuildingDetails,
   buildOverpassFilterDataItem,
   buildOverpassFeaturePayload,
   buildOverpassSearchItem
 } from './overpass-data-utils.js';
+import { BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY } from './map-3d-utils.js';
 import type { BboxSnapshot } from './filter-types.js';
 
 type OverpassGeoJsonFeature = {
@@ -510,6 +512,9 @@ function normalizeTileFeature(feature: OverpassGeoJsonFeature, tileKey: string) 
       archimap_description: payload.archimapDescription,
       center_lon: payload.centerLon,
       center_lat: payload.centerLat,
+      render_height_m: payload.renderHeightMeters,
+      render_min_height_m: payload.renderMinHeightMeters,
+      [BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY]: 0,
       search_text: payload.searchText,
       tile_keys: [tileKey],
       loaded_at: Date.now()
@@ -703,9 +708,9 @@ function buildFeatureCollection() {
   if (lastRenderedFeatureCollectionVersion === featureCollectionVersion) {
     return lastRenderedFeatureCollection;
   }
-  const features = [...cachedFeatureIndex.entries()]
+  const features = applyBuildingPartBaseSuppression([...cachedFeatureIndex.entries()]
     .sort((left, right) => Number(left[1]?.updatedAt || 0) - Number(right[1]?.updatedAt || 0))
-    .map(([, entry]) => entry.feature);
+    .map(([, entry]) => entry.feature));
   lastRenderedFeatureCollection = {
     type: 'FeatureCollection',
     features

@@ -36,13 +36,23 @@ export function normalizeLayerIdsSnapshot(layerIds: Partial<LayerIdsSnapshot> | 
   const source = layerIds && typeof layerIds === 'object' ? layerIds : {};
   return {
     buildingFillLayerIds: Array.isArray(source.buildingFillLayerIds) ? source.buildingFillLayerIds : [],
+    buildingExtrusionLayerIds: Array.isArray(source.buildingExtrusionLayerIds) ? source.buildingExtrusionLayerIds : [],
     buildingLineLayerIds: Array.isArray(source.buildingLineLayerIds) ? source.buildingLineLayerIds : [],
     buildingPartFillLayerIds: Array.isArray(source.buildingPartFillLayerIds) ? source.buildingPartFillLayerIds : [],
+    buildingPartExtrusionLayerIds: Array.isArray(source.buildingPartExtrusionLayerIds) ? source.buildingPartExtrusionLayerIds : [],
     buildingPartLineLayerIds: Array.isArray(source.buildingPartLineLayerIds) ? source.buildingPartLineLayerIds : [],
+    filterHighlightExtrusionLayerIds: Array.isArray(source.filterHighlightExtrusionLayerIds) ? source.filterHighlightExtrusionLayerIds : [],
     filterHighlightFillLayerIds: Array.isArray(source.filterHighlightFillLayerIds) ? source.filterHighlightFillLayerIds : [],
     filterHighlightLineLayerIds: Array.isArray(source.filterHighlightLineLayerIds) ? source.filterHighlightLineLayerIds : [],
+    buildingPartFilterHighlightExtrusionLayerIds: Array.isArray(source.buildingPartFilterHighlightExtrusionLayerIds)
+      ? source.buildingPartFilterHighlightExtrusionLayerIds
+      : [],
     buildingPartFilterHighlightFillLayerIds: Array.isArray(source.buildingPartFilterHighlightFillLayerIds) ? source.buildingPartFilterHighlightFillLayerIds : [],
     buildingPartFilterHighlightLineLayerIds: Array.isArray(source.buildingPartFilterHighlightLineLayerIds) ? source.buildingPartFilterHighlightLineLayerIds : [],
+    hoverExtrusionLayerIds: Array.isArray(source.hoverExtrusionLayerIds) ? source.hoverExtrusionLayerIds : [],
+    hoverFillLayerIds: Array.isArray(source.hoverFillLayerIds) ? source.hoverFillLayerIds : [],
+    hoverLineLayerIds: Array.isArray(source.hoverLineLayerIds) ? source.hoverLineLayerIds : [],
+    selectedExtrusionLayerIds: Array.isArray(source.selectedExtrusionLayerIds) ? source.selectedExtrusionLayerIds : [],
     selectedFillLayerIds: Array.isArray(source.selectedFillLayerIds) ? source.selectedFillLayerIds : [],
     selectedLineLayerIds: Array.isArray(source.selectedLineLayerIds) ? source.selectedLineLayerIds : []
   };

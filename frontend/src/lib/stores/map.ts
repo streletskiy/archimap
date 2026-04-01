@@ -3,6 +3,7 @@ import { parseUrlState } from '../client/urlState.js';
 
 const MAP_LABELS_VISIBLE_STORAGE_KEY = 'archimap-map-labels-visible';
 const LAST_MAP_CAMERA_STORAGE_KEY = 'archimap-last-map-camera';
+const MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY = 'archimap-map-buildings-3d-enabled';
 const MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY = 'archimap-map-building-parts-visible';
 
 function getStorageHost(storageHost = null) {
@@ -139,6 +140,10 @@ function getInitialBuildingPartsVisibility() {
   return readStoredBoolean(getLocalStorage(), MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY, false);
 }
 
+function getInitialBuildings3dEnabled() {
+  return readStoredBoolean(getLocalStorage(), MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY, false);
+}
+
 export const selectedBuilding = writable(null);
 export const selectedBuildings = writable([]);
 export const mapSelectionShiftKey = writable(false);
@@ -148,11 +153,17 @@ export const mapZoom = writable(null);
 export const mapViewport = writable(null);
 export const mapFocusRequest = writable(null);
 export const mapLabelsVisible = writable(getInitialLabelsVisibility());
+export const mapBuildings3dEnabled = writable(getInitialBuildings3dEnabled());
 export const mapBuildingPartsVisible = writable(getInitialBuildingPartsVisibility());
 export const lastMapCamera = writable(getInitialLastMapCamera());
 
 export function syncMapVisibilityFromStorage(storageHost = null) {
   const nextLabelsVisible = readStoredBoolean(getLocalStorage(storageHost), MAP_LABELS_VISIBLE_STORAGE_KEY, true);
+  const nextBuildings3dEnabled = readStoredBoolean(
+    getLocalStorage(storageHost),
+    MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY,
+    false
+  );
   const nextBuildingPartsVisible = readStoredBoolean(
     getLocalStorage(storageHost),
     MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY,
@@ -160,6 +171,9 @@ export function syncMapVisibilityFromStorage(storageHost = null) {
   );
   if (get(mapLabelsVisible) !== nextLabelsVisible) {
     mapLabelsVisible.set(nextLabelsVisible);
+  }
+  if (get(mapBuildings3dEnabled) !== nextBuildings3dEnabled) {
+    mapBuildings3dEnabled.set(nextBuildings3dEnabled);
   }
   if (get(mapBuildingPartsVisible) !== nextBuildingPartsVisible) {
     mapBuildingPartsVisible.set(nextBuildingPartsVisible);
@@ -314,6 +328,12 @@ export function setMapLabelsVisible(value) {
   const next = Boolean(value);
   mapLabelsVisible.set(next);
   persistStoredBoolean(getLocalStorage(), MAP_LABELS_VISIBLE_STORAGE_KEY, next);
+}
+
+export function setMapBuildings3dEnabled(value) {
+  const next = Boolean(value);
+  mapBuildings3dEnabled.set(next);
+  persistStoredBoolean(getLocalStorage(), MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY, next);
 }
 
 export function setMapBuildingPartsVisible(value) {

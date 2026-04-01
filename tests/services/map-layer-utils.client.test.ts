@@ -15,6 +15,7 @@ function createMapStub({ styleLoaded = true } = {}) {
   const layers = new Map();
   const addedLayers = [];
   const layoutCalls = [];
+  const filterCalls = [];
   const moveCalls = [];
 
   function setLayerOrder(entries) {
@@ -27,6 +28,7 @@ function createMapStub({ styleLoaded = true } = {}) {
   return {
     addedLayers,
     layoutCalls,
+    filterCalls,
     moveCalls,
     layers,
     sources,
@@ -69,6 +71,13 @@ function createMapStub({ styleLoaded = true } = {}) {
       if (layer) {
         layer.layout = layer.layout || {};
         layer.layout[name] = value;
+      }
+    },
+    setFilter(layerId, filter) {
+      filterCalls.push({ layerId, filter });
+      const layer = layers.get(layerId);
+      if (layer) {
+        layer.filter = filter;
       }
     },
     isStyleLoaded() {
@@ -116,23 +125,40 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   });
 
   assert.deepEqual(map.addedLayers.map((layer) => layer.id), [
+    'region-buildings-7-extrusion',
     'region-buildings-7-fill',
     'region-buildings-7-line',
+    'region-buildings-7-part-extrusion',
     'region-buildings-7-part-fill',
     'region-buildings-7-part-line',
+    'region-buildings-7-filter-highlight-extrusion',
     'region-buildings-7-filter-highlight-fill',
     'region-buildings-7-filter-highlight-line',
+    'region-buildings-7-part-filter-highlight-extrusion',
     'region-buildings-7-part-filter-highlight-fill',
     'region-buildings-7-part-filter-highlight-line',
+    'region-buildings-7-hover-extrusion',
     'region-buildings-7-hover-fill',
     'region-buildings-7-hover-line',
+    'region-buildings-7-selected-extrusion',
     'region-buildings-7-selected-fill',
     'region-buildings-7-selected-line'
   ]);
   assert.deepEqual(map.layers.get('region-buildings-7-fill').filter, [
-    '!=',
-    ['coalesce', ['get', 'feature_kind'], 'building'],
-    'building_part'
+    'any',
+    ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+    ['all',
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+      ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+    ]
+  ]);
+  assert.deepEqual(map.layers.get('region-buildings-7-line').filter, [
+    'any',
+    ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+    ['all',
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+      ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+    ]
   ]);
   assert.deepEqual(map.layers.get('region-buildings-7-part-fill').filter, [
     '==',
@@ -145,12 +171,21 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
   assert.equal(map.layers.get('region-buildings-7-part-line').paint['line-opacity'], 1);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').paint['fill-opacity'], 0);
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').paint['line-opacity'], 0);
+  assert.equal(map.layers.get('region-buildings-7-extrusion').paint['fill-extrusion-vertical-gradient'], false);
+  assert.equal(map.layers.get('region-buildings-7-part-extrusion').paint['fill-extrusion-vertical-gradient'], false);
+  assert.equal(map.layers.get('region-buildings-7-hover-extrusion').paint['fill-extrusion-color'], '#c8bcae');
+  assert.equal(map.layers.get('region-buildings-7-hover-extrusion').paint['fill-extrusion-opacity'], 0.3);
+  assert.equal(map.layers.get('region-buildings-7-hover-extrusion').paint['fill-extrusion-vertical-gradient'], false);
   assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-color'], '#c8bcae');
   assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.3);
   assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-color'], '#7d7063');
   assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-width'], 1.2);
+  assert.equal(map.layers.get('region-buildings-7-selected-extrusion').paint['fill-extrusion-color'], '#6d655b');
+  assert.equal(map.layers.get('region-buildings-7-selected-extrusion').paint['fill-extrusion-opacity'], 0.72);
+  assert.equal(map.layers.get('region-buildings-7-selected-extrusion').paint['fill-extrusion-vertical-gradient'], false);
   assert.equal(map.layers.get('region-buildings-7-part-fill').layout.visibility, 'visible');
   assert.equal(map.layers.get('region-buildings-7-part-line').layout.visibility, 'visible');
+  assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-extrusion').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-fill').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-7-part-filter-highlight-line').layout.visibility, 'none');
 });
@@ -193,6 +228,10 @@ test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as
   assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-width'], 0.9);
   assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-color'], '#6d655b');
   assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-opacity'], 0.72);
+  assert.equal(map.layers.get('overpass-buildings-source-extrusion').paint['fill-extrusion-vertical-gradient'], false);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-extrusion').paint['fill-extrusion-color'], '#6d655b');
+  assert.equal(map.layers.get('overpass-buildings-source-selected-extrusion').paint['fill-extrusion-opacity'], 0.72);
+  assert.equal(map.layers.get('overpass-buildings-source-selected-extrusion').paint['fill-extrusion-vertical-gradient'], false);
   assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-color'], '#3d3832');
   assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-width'], 2.2);
   assert.equal(map.layers.get('overpass-buildings-source-selected-line').paint['line-opacity'], 1);
@@ -201,16 +240,20 @@ test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as
 test('applyBuildingThemePaint updates hover layers with hover theme paint', async () => {
   const { applyBuildingThemePaint } = await loadMapLayerUtils();
   const map = createMapStub();
+  map.addLayer({ id: 'region-buildings-7-hover-extrusion', type: 'fill-extrusion', paint: {} });
   map.addLayer({ id: 'region-buildings-7-hover-fill', type: 'fill', paint: {} });
   map.addLayer({ id: 'region-buildings-7-hover-line', type: 'line', paint: {} });
 
   applyBuildingThemePaint({
     map,
     theme: 'dark',
+    hoverExtrusionLayerIds: ['region-buildings-7-hover-extrusion'],
     hoverFillLayerIds: ['region-buildings-7-hover-fill'],
     hoverLineLayerIds: ['region-buildings-7-hover-line']
   });
 
+  assert.equal(map.layers.get('region-buildings-7-hover-extrusion').paint['fill-extrusion-color'], '#7189a4');
+  assert.equal(map.layers.get('region-buildings-7-hover-extrusion').paint['fill-extrusion-opacity'], 0.3);
   assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-color'], '#7189a4');
   assert.equal(map.layers.get('region-buildings-7-hover-fill').paint['fill-opacity'], 0.3);
   assert.equal(map.layers.get('region-buildings-7-hover-line').paint['line-color'], '#d7e1ea');
@@ -243,6 +286,7 @@ test('ensureRegionBuildingSourceAndLayers applies initial hidden state for build
 
   assert.equal(map.layers.get('region-buildings-9-part-fill').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-9-part-line').layout.visibility, 'none');
+  assert.equal(map.layers.get('region-buildings-9-part-filter-highlight-extrusion').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-9-part-filter-highlight-fill').layout.visibility, 'none');
   assert.equal(map.layers.get('region-buildings-9-part-filter-highlight-line').layout.visibility, 'none');
 });
@@ -255,7 +299,29 @@ test('buildRegionBuildingHighlightFilterExpression excludes building parts when 
     showBuildingParts: false
   }), [
     'all',
-    ['!=', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
+    ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+    ['in', ['id'], ['literal', [11]]]
+  ]);
+});
+
+test('buildRegionBuildingHighlightFilterExpression keeps visible remainders when building parts are shown', async () => {
+  const { buildRegionBuildingHighlightFilterExpression } = await loadMapLayerUtils();
+
+  assert.deepEqual(buildRegionBuildingHighlightFilterExpression({
+    featureIds: [11],
+    showBuildingParts: true
+  }), [
+    'all',
+    ['any',
+      ['any',
+        ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
+        ['all',
+          ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+          ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
+        ]
+      ],
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
+    ],
     ['in', ['id'], ['literal', [11]]]
   ]);
 });
@@ -263,31 +329,90 @@ test('buildRegionBuildingHighlightFilterExpression excludes building parts when 
 test('applyBuildingPartsLayerVisibility toggles part layer visibility together', async () => {
   const { applyBuildingPartsLayerVisibility } = await loadMapLayerUtils();
   const map = createMapStub();
+  map.addLayer({ id: 'region-buildings-7-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-filter-highlight-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-filter-highlight-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-filter-highlight-line', type: 'line', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-extrusion', type: 'fill-extrusion', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-part-filter-highlight-extrusion', type: 'fill-extrusion', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-filter-highlight-fill', type: 'fill', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-filter-highlight-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-selected-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-selected-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-selected-line', type: 'line', paint: {} });
 
   applyBuildingPartsLayerVisibility({
     map,
-    visible: false,
+    partVisible: false,
+    fillLayerIds: ['region-buildings-7-fill'],
+    extrusionLayerIds: ['region-buildings-7-extrusion'],
+    lineLayerIds: ['region-buildings-7-line'],
+    filterHighlightExtrusionLayerIds: ['region-buildings-7-filter-highlight-extrusion'],
+    filterHighlightFillLayerIds: ['region-buildings-7-filter-highlight-fill'],
+    filterHighlightLineLayerIds: ['region-buildings-7-filter-highlight-line'],
     partFillLayerIds: ['region-buildings-7-part-fill'],
+    partExtrusionLayerIds: ['region-buildings-7-part-extrusion'],
     partLineLayerIds: ['region-buildings-7-part-line'],
+    partFilterHighlightExtrusionLayerIds: ['region-buildings-7-part-filter-highlight-extrusion'],
     partFilterHighlightFillLayerIds: ['region-buildings-7-part-filter-highlight-fill'],
-    partFilterHighlightLineLayerIds: ['region-buildings-7-part-filter-highlight-line']
+    partFilterHighlightLineLayerIds: ['region-buildings-7-part-filter-highlight-line'],
+    hoverExtrusionLayerIds: ['region-buildings-7-hover-extrusion'],
+    hoverFillLayerIds: ['region-buildings-7-hover-fill'],
+    hoverLineLayerIds: ['region-buildings-7-hover-line'],
+    selectedExtrusionLayerIds: ['region-buildings-7-selected-extrusion'],
+    selectedFillLayerIds: ['region-buildings-7-selected-fill'],
+    selectedLineLayerIds: ['region-buildings-7-selected-line']
   });
 
+  assert.deepEqual(map.filterCalls, [
+    {
+      layerId: 'region-buildings-7-fill',
+      filter: ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building']
+    },
+    {
+      layerId: 'region-buildings-7-extrusion',
+      filter: ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building']
+    },
+    {
+      layerId: 'region-buildings-7-line',
+      filter: ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building']
+    }
+  ]);
   assert.deepEqual(map.layoutCalls, [
+    { layerId: 'region-buildings-7-fill', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-extrusion', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-line', name: 'visibility', value: 'visible' },
     { layerId: 'region-buildings-7-part-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-part-extrusion', name: 'visibility', value: 'none' },
     { layerId: 'region-buildings-7-part-line', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-filter-highlight-extrusion', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-filter-highlight-fill', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-filter-highlight-line', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-part-filter-highlight-extrusion', name: 'visibility', value: 'none' },
     { layerId: 'region-buildings-7-part-filter-highlight-fill', name: 'visibility', value: 'none' },
-    { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'none' }
+    { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-hover-extrusion', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-hover-fill', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-hover-line', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-selected-extrusion', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-selected-fill', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-selected-line', name: 'visibility', value: 'visible' }
   ]);
 });
 
 test('applyBuildingPartsLayerVisibility keeps part highlight layers visible for active filters', async () => {
   const { applyBuildingPartsLayerVisibility } = await loadMapLayerUtils();
   const map = createMapStub();
+  map.addLayer({ id: 'region-buildings-7-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-line', type: 'line', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-fill', type: 'fill', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-line', type: 'line', paint: {} });
   map.addLayer({ id: 'region-buildings-7-part-filter-highlight-fill', type: 'fill', paint: {} });
@@ -295,19 +420,88 @@ test('applyBuildingPartsLayerVisibility keeps part highlight layers visible for 
 
   applyBuildingPartsLayerVisibility({
     map,
-    visible: false,
+    partVisible: false,
     forceHighlightVisible: true,
+    fillLayerIds: ['region-buildings-7-fill'],
+    extrusionLayerIds: ['region-buildings-7-extrusion'],
+    lineLayerIds: ['region-buildings-7-line'],
     partFillLayerIds: ['region-buildings-7-part-fill'],
     partLineLayerIds: ['region-buildings-7-part-line'],
     partFilterHighlightFillLayerIds: ['region-buildings-7-part-filter-highlight-fill'],
     partFilterHighlightLineLayerIds: ['region-buildings-7-part-filter-highlight-line']
   });
 
+  assert.deepEqual(map.filterCalls, [
+    {
+      layerId: 'region-buildings-7-fill',
+      filter: ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building']
+    },
+    {
+      layerId: 'region-buildings-7-extrusion',
+      filter: ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building']
+    },
+    {
+      layerId: 'region-buildings-7-line',
+      filter: ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building']
+    }
+  ]);
   assert.deepEqual(map.layoutCalls, [
+    { layerId: 'region-buildings-7-fill', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-extrusion', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-line', name: 'visibility', value: 'visible' },
     { layerId: 'region-buildings-7-part-fill', name: 'visibility', value: 'none' },
     { layerId: 'region-buildings-7-part-line', name: 'visibility', value: 'none' },
     { layerId: 'region-buildings-7-part-filter-highlight-fill', name: 'visibility', value: 'visible' },
     { layerId: 'region-buildings-7-part-filter-highlight-line', name: 'visibility', value: 'visible' }
+  ]);
+});
+
+test('applyBuildingPartsLayerVisibility switches overlays to extrusion in 3d mode', async () => {
+  const { applyBuildingPartsLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub();
+  map.addLayer({ id: 'region-buildings-7-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-filter-highlight-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-filter-highlight-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-filter-highlight-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-hover-line', type: 'line', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-selected-extrusion', type: 'fill-extrusion', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-selected-fill', type: 'fill', paint: {} });
+  map.addLayer({ id: 'region-buildings-7-selected-line', type: 'line', paint: {} });
+
+  applyBuildingPartsLayerVisibility({
+    map,
+    buildings3dEnabled: true,
+    fillLayerIds: ['region-buildings-7-fill'],
+    extrusionLayerIds: ['region-buildings-7-extrusion'],
+    lineLayerIds: ['region-buildings-7-line'],
+    filterHighlightExtrusionLayerIds: ['region-buildings-7-filter-highlight-extrusion'],
+    filterHighlightFillLayerIds: ['region-buildings-7-filter-highlight-fill'],
+    filterHighlightLineLayerIds: ['region-buildings-7-filter-highlight-line'],
+    hoverExtrusionLayerIds: ['region-buildings-7-hover-extrusion'],
+    hoverFillLayerIds: ['region-buildings-7-hover-fill'],
+    hoverLineLayerIds: ['region-buildings-7-hover-line'],
+    selectedExtrusionLayerIds: ['region-buildings-7-selected-extrusion'],
+    selectedFillLayerIds: ['region-buildings-7-selected-fill'],
+    selectedLineLayerIds: ['region-buildings-7-selected-line']
+  });
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'region-buildings-7-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-extrusion', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-line', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-filter-highlight-extrusion', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-filter-highlight-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-filter-highlight-line', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-hover-extrusion', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-hover-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-hover-line', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-selected-extrusion', name: 'visibility', value: 'visible' },
+    { layerId: 'region-buildings-7-selected-fill', name: 'visibility', value: 'none' },
+    { layerId: 'region-buildings-7-selected-line', name: 'visibility', value: 'none' }
   ]);
 });
 
@@ -411,7 +605,7 @@ test('applyBuildingPartsLayerVisibility still applies part visibility before sty
 
   applyBuildingPartsLayerVisibility({
     map,
-    visible: false,
+    partVisible: false,
     partFillLayerIds: ['region-buildings-7-part-fill'],
     partLineLayerIds: ['region-buildings-7-part-line']
   });

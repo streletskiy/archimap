@@ -3,6 +3,7 @@ import {
   expandBboxWithMargin,
   getAdaptiveCoverageMarginRatio
 } from '../../services/map/map-math-utils.js';
+import { deriveBuildingLevelsText } from '../../services/map/map-3d-utils.js';
 import type {
   BboxSnapshot,
   FilterFeatureState,
@@ -214,6 +215,13 @@ function getFilterRuleValue(source, key) {
   }
   if (key === 'building:levels' || key === 'levels') {
      if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
+     if (hasMeaningfulValue(source?.levels)) return source.levels;
+     const derivedLevels = deriveBuildingLevelsText({
+       tags: sourceTags,
+       renderHeightMeters: source?.renderHeightMeters ?? source?.render_height_m,
+       renderMinHeightMeters: source?.renderMinHeightMeters ?? source?.render_min_height_m
+     });
+     if (hasMeaningfulValue(derivedLevels)) return derivedLevels;
   }
   if (key === 'building:year' || key === 'year_built' || key === 'start_date') {
      if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;

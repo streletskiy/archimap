@@ -103,6 +103,7 @@ function getRuleValue(item, key) {
   }
   if (key === 'building:levels' || key === 'levels') {
      if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
+     if (hasMeaningfulValue(item?.levels)) return item.levels;
   }
   if (key === 'building:year' || key === 'year_built' || key === 'start_date') {
      if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;

@@ -23,14 +23,41 @@
     applyLabelLayerVisibility as applyMapLabelLayerVisibility,
     bindMapInteractionHandlers,
     ensureOverpassBuildingSourceAndLayers,
+    getCurrentOverpassBuildingsExtrusionLayerIds,
+    getCurrentOverpassBuildingsFillLayerIds,
+    getCurrentOverpassBuildingsLineLayerIds,
+    getCurrentOverpassBuildingPartExtrusionLayerIds,
+    getCurrentOverpassBuildingPartFillLayerIds,
+    getCurrentOverpassBuildingPartLineLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightFillLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightLineLayerIds,
+    getCurrentOverpassBuildingHoverExtrusionLayerIds,
+    getCurrentOverpassBuildingHoverFillLayerIds,
+    getCurrentOverpassBuildingHoverLineLayerIds,
+    getCurrentBuildingsExtrusionLayerIds,
     getCurrentBuildingsFillLayerIds,
     getCurrentBuildingsLineLayerIds,
+    getCurrentBuildingPartExtrusionLayerIds,
     getCurrentBuildingPartFillLayerIds,
     getCurrentBuildingPartLineLayerIds,
-    getCurrentBuildingPartFilterHighlightFillLayerIds,
-    getCurrentBuildingPartFilterHighlightLineLayerIds,
+    getCurrentBuildingPartFilterHighlightExtrusionLayerIds,
+    getCurrentBuildingHoverExtrusionLayerIds,
     getCurrentBuildingHoverFillLayerIds,
-    getCurrentBuildingHoverLineLayerIds
+    getCurrentBuildingHoverLineLayerIds,
+    getCurrentFilterHighlightExtrusionLayerIds,
+    getCurrentFilterHighlightFillLayerIds,
+    getCurrentFilterHighlightLineLayerIds,
+    getCurrentOverpassFilterHighlightExtrusionLayerIds,
+    getCurrentOverpassFilterHighlightFillLayerIds,
+    getCurrentOverpassFilterHighlightLineLayerIds,
+    getCurrentOverpassSelectedExtrusionLayerIds,
+    getCurrentOverpassSelectedFillLayerIds,
+    getCurrentOverpassSelectedLineLayerIds,
+    getCurrentSelectedExtrusionLayerIds,
+    getCurrentSelectedFillLayerIds,
+    getCurrentSelectedLineLayerIds,
+    getRegionLayerIds
   } from '$lib/services/map/map-layer-utils';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
@@ -44,6 +71,10 @@
     resolveMapStyleForTheme,
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
+  import {
+    DEFAULT_MAP_3D_PITCH,
+    getEffectiveBuildingPartsVisibility
+  } from '$lib/services/map/map-3d-utils';
   import {
     shouldCheckOverpassViewportCoverage,
     cancelOverpassViewportLoad,
@@ -61,6 +92,7 @@
     lastMapCamera,
     mapFocusRequest,
     mapLabelsVisible,
+    mapBuildings3dEnabled,
     mapBuildingPartsVisible,
     mapZoom,
     setMapSelectionShiftKey,
@@ -114,6 +146,12 @@
   let lastOverpassDataVersion;
   let lastOverpassLoading;
   let cameraStoreSyncEnabled = false;
+  let effectiveBuildingPartsVisible = false;
+
+  $: effectiveBuildingPartsVisible = getEffectiveBuildingPartsVisibility({
+    buildingPartsVisible: $mapBuildingPartsVisible,
+    buildings3dEnabled: $mapBuildings3dEnabled
+  });
 
   beforeNavigate((navigation) => {
     if (typeof window === 'undefined') return;
@@ -188,6 +226,7 @@
         || Number($overpassBuildingsState.featureCount || 0) > 0
         || Number($overpassBuildingsState.tileCount || 0) > 0
     );
+    $mapBuildings3dEnabled;
     $mapBuildingPartsVisible;
     currentBuildingFilterLayers;
     overpassLayerVisible;
@@ -269,7 +308,8 @@
         : ($selectedBuilding?.osmType && $selectedBuilding?.osmId ? [$selectedBuilding] : [])
     ),
     getMapLabelsVisible: () => $mapLabelsVisible,
-    getBuildingPartsVisible: () => $mapBuildingPartsVisible,
+    getBuildings3dEnabled: () => $mapBuildings3dEnabled,
+    getBuildingPartsVisible: () => effectiveBuildingPartsVisible,
     getBuildingFilterLayers: () => currentBuildingFilterLayers,
     getWindowOrigin: () => window.location.origin,
     onBindStyleInteractionHandlers: () => bindStyleInteractionHandlers(),
@@ -277,7 +317,8 @@
     onUpdateSearchMarkers: (items) => updateSearchMarkers(items),
     onApplyBuildingThemePaint: (theme) => applyBuildingThemePaint(theme),
     onApplyLabelLayerVisibility: (visible) => applyLabelLayerVisibility(visible),
-    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
+    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility(effectiveBuildingPartsVisible, {
+      buildings3dEnabled: $mapBuildings3dEnabled,
       forceHighlightVisible: currentBuildingFilterLayers.length > 0
     }),
     onRefreshHoverFromPointer: () => selectionController.refreshHoverFromLastPointer(),
@@ -312,6 +353,8 @@
   const selectionController = createMapSelectionController({
     getMap: () => map,
     getActiveRegions: () => regionLayersController.getActiveRegionPmtiles(),
+    getBuildings3dEnabled: () => $mapBuildings3dEnabled,
+    getBuildingPartsVisible: () => effectiveBuildingPartsVisible,
     recordDebugSetFilter,
     debugSelectionLog,
     dispatchBuildingClick: (payload) => dispatch('buildingClick', payload)
@@ -377,7 +420,8 @@
       data: getOverpassFeatureCollection(),
       buildingPaint,
       hoverPaint,
-      buildingPartsVisible: $mapBuildingPartsVisible,
+      buildings3dEnabled: $mapBuildings3dEnabled,
+      buildingPartsVisible: effectiveBuildingPartsVisible,
       buildingPartHighlightVisible: currentBuildingFilterLayers.length > 0,
       visible: overpassLayerVisible
     });
@@ -473,25 +517,87 @@
     applyBuildingThemePaintToLayers({
       map,
       theme,
+      extrusionLayerIds: getCurrentBuildingsExtrusionLayerIds(activeRegions),
       fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegions),
       lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions),
+      partExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(activeRegions),
       partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
       partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegions),
       hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
       hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions)
     });
   }
 
-  function applyBuildingPartsLayerVisibility(visible = $mapBuildingPartsVisible, { forceHighlightVisible = false } = {}) {
+  function applyBuildingPartsLayerVisibility(
+    visible = effectiveBuildingPartsVisible,
+    {
+      buildings3dEnabled = $mapBuildings3dEnabled,
+      forceHighlightVisible = false
+    } = {}
+  ) {
     const activeRegions = regionLayersController.getActiveRegionPmtiles();
     applyBuildingPartsLayerVisibilityToLayers({
       map,
-      visible,
+      sourceVisible: true,
+      partVisible: visible,
+      buildings3dEnabled,
+      fillLayerIds: getRegionLayerIds(activeRegions, 'fill'),
+      extrusionLayerIds: getRegionLayerIds(activeRegions, 'extrusion'),
+      lineLayerIds: getRegionLayerIds(activeRegions, 'line'),
+      filterHighlightExtrusionLayerIds: getCurrentFilterHighlightExtrusionLayerIds(activeRegions),
+      filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegions),
+      filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegions),
       forceHighlightVisible,
-      partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
-      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
-      partFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegions),
-      partFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegions)
+      partFillLayerIds: getRegionLayerIds(activeRegions, 'part-fill'),
+      partExtrusionLayerIds: getRegionLayerIds(activeRegions, 'part-extrusion'),
+      partLineLayerIds: getRegionLayerIds(activeRegions, 'part-line'),
+      partFilterHighlightExtrusionLayerIds: getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegions),
+      partFilterHighlightFillLayerIds: getRegionLayerIds(activeRegions, 'part-filter-highlight-fill'),
+      partFilterHighlightLineLayerIds: getRegionLayerIds(activeRegions, 'part-filter-highlight-line'),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegions),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions),
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(activeRegions),
+      selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegions),
+      selectedLineLayerIds: getCurrentSelectedLineLayerIds(activeRegions)
+    });
+    applyBuildingPartsLayerVisibilityToLayers({
+      map,
+      sourceVisible: overpassLayerVisible,
+      partVisible: visible,
+      buildings3dEnabled,
+      fillLayerIds: getCurrentOverpassBuildingsFillLayerIds(),
+      extrusionLayerIds: getCurrentOverpassBuildingsExtrusionLayerIds(),
+      lineLayerIds: getCurrentOverpassBuildingsLineLayerIds(),
+      filterHighlightExtrusionLayerIds: getCurrentOverpassFilterHighlightExtrusionLayerIds(),
+      filterHighlightFillLayerIds: getCurrentOverpassFilterHighlightFillLayerIds(),
+      filterHighlightLineLayerIds: getCurrentOverpassFilterHighlightLineLayerIds(),
+      forceHighlightVisible,
+      partFillLayerIds: getCurrentOverpassBuildingPartFillLayerIds(),
+      partExtrusionLayerIds: getCurrentOverpassBuildingPartExtrusionLayerIds(),
+      partLineLayerIds: getCurrentOverpassBuildingPartLineLayerIds(),
+      partFilterHighlightExtrusionLayerIds: getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds(),
+      partFilterHighlightFillLayerIds: getCurrentOverpassBuildingPartFilterHighlightFillLayerIds(),
+      partFilterHighlightLineLayerIds: getCurrentOverpassBuildingPartFilterHighlightLineLayerIds(),
+      hoverExtrusionLayerIds: getCurrentOverpassBuildingHoverExtrusionLayerIds(),
+      hoverFillLayerIds: getCurrentOverpassBuildingHoverFillLayerIds(),
+      hoverLineLayerIds: getCurrentOverpassBuildingHoverLineLayerIds(),
+      selectedExtrusionLayerIds: getCurrentOverpassSelectedExtrusionLayerIds(),
+      selectedFillLayerIds: getCurrentOverpassSelectedFillLayerIds(),
+      selectedLineLayerIds: getCurrentOverpassSelectedLineLayerIds()
+    });
+  }
+
+  function applyBuildings3dCamera(enabled = $mapBuildings3dEnabled, { animate = false } = {}) {
+    if (!map) return;
+    const targetPitch = enabled ? DEFAULT_MAP_3D_PITCH : 0;
+    const currentPitch = Number(map.getPitch?.() ?? 0);
+    if (!Number.isFinite(currentPitch) || Math.abs(currentPitch - targetPitch) < 0.1) return;
+    map.easeTo({
+      pitch: targetPitch,
+      duration: animate ? 420 : 0,
+      essential: true
     });
   }
 
@@ -627,9 +733,17 @@
   }
 
   $: if (map) {
-    const buildingPartsVisible = $mapBuildingPartsVisible;
+    applyBuildings3dCamera(Boolean($mapBuildings3dEnabled), { animate: true });
+  }
+
+  $: if (map) {
+    const buildingPartsVisible = effectiveBuildingPartsVisible;
+    const buildings3dEnabled = $mapBuildings3dEnabled;
     const forceHighlightVisible = Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0;
-    applyBuildingPartsLayerVisibility(buildingPartsVisible, { forceHighlightVisible });
+    applyBuildingPartsLayerVisibility(buildingPartsVisible, {
+      buildings3dEnabled,
+      forceHighlightVisible
+    });
     filterPipeline.reapplyFilteredHighlight();
   }
 
@@ -675,6 +789,8 @@
         style: initialStyle,
         center: [initialCamera.lng, initialCamera.lat],
         zoom: Number(initialCamera.z),
+        pitch: $mapBuildings3dEnabled ? DEFAULT_MAP_3D_PITCH : 0,
+        antialias: true,
         attributionControl: false
       });
       // Reserve Shift+Click for bulk building selection on the main map surface.

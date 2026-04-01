@@ -2,6 +2,11 @@ import { resolvePmtilesUrl } from '../map-runtime.js';
 import { buildRegionLayerId, buildRegionSourceId } from '../region-pmtiles.js';
 import { getBuildingHoverThemePaint, getBuildingThemePaint } from './map-theme-utils.js';
 import {
+  BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY,
+  buildBuildingExtrusionBaseExpression,
+  buildBuildingExtrusionHeightExpression
+} from './map-3d-utils.js';
+import {
   EMPTY_LAYER_FILTER,
   buildFilterHighlightExpression
 } from '../../components/map/filter-highlight-utils.js';
@@ -26,6 +31,7 @@ export const BASEMAP_SUPPRESSED_LAYER_IDS = Object.freeze({
 });
 export const BUILDING_FEATURE_KIND = 'building';
 export const BUILDING_PART_FEATURE_KIND = 'building_part';
+export const BUILDING_REMAINDER_FEATURE_KIND = 'building_remainder';
 export const OVERPASS_BUILDING_SOURCE_ID = 'overpass-buildings-source';
 const BUILDING_SELECTED_THEME = Object.freeze({
   fillColor: '#6d655b',
@@ -35,16 +41,22 @@ const BUILDING_SELECTED_THEME = Object.freeze({
   lineOpacity: 1
 });
 const OVERPASS_BUILDING_LAYER_SUFFIXES = Object.freeze({
+  extrusion: 'extrusion',
   fill: 'fill',
   line: 'line',
+  partExtrusion: 'part-extrusion',
   partFill: 'part-fill',
   partLine: 'part-line',
+  partFilterHighlightExtrusion: 'part-filter-highlight-extrusion',
   partFilterHighlightFill: 'part-filter-highlight-fill',
   partFilterHighlightLine: 'part-filter-highlight-line',
+  filterHighlightExtrusion: 'filter-highlight-extrusion',
   filterHighlightFill: 'filter-highlight-fill',
   filterHighlightLine: 'filter-highlight-line',
+  hoverExtrusion: 'hover-extrusion',
   hoverFill: 'hover-fill',
   hoverLine: 'hover-line',
+  selectedExtrusion: 'selected-extrusion',
   selectedFill: 'selected-fill',
   selectedLine: 'selected-line'
 });
@@ -72,12 +84,20 @@ export function getCurrentOverpassBuildingsFillLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.fill)];
 }
 
+export function getCurrentOverpassBuildingsExtrusionLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.extrusion)];
+}
+
 export function getCurrentOverpassBuildingsLineLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.line)];
 }
 
 export function getCurrentOverpassBuildingPartFillLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFill)];
+}
+
+export function getCurrentOverpassBuildingPartExtrusionLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partExtrusion)];
 }
 
 export function getCurrentOverpassBuildingPartLineLayerIds() {
@@ -88,8 +108,16 @@ export function getCurrentOverpassBuildingPartFilterHighlightFillLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightFill)];
 }
 
+export function getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightExtrusion)];
+}
+
 export function getCurrentOverpassBuildingPartFilterHighlightLineLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightLine)];
+}
+
+export function getCurrentOverpassBuildingHoverExtrusionLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverExtrusion)];
 }
 
 export function getCurrentOverpassBuildingHoverFillLayerIds() {
@@ -104,8 +132,16 @@ export function getCurrentOverpassFilterHighlightFillLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightFill)];
 }
 
+export function getCurrentOverpassFilterHighlightExtrusionLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightExtrusion)];
+}
+
 export function getCurrentOverpassFilterHighlightLineLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightLine)];
+}
+
+export function getCurrentOverpassSelectedExtrusionLayerIds() {
+  return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedExtrusion)];
 }
 
 export function getCurrentOverpassSelectedFillLayerIds() {
@@ -116,14 +152,40 @@ export function getCurrentOverpassSelectedLineLayerIds() {
   return [buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedLine)];
 }
 
-function buildFeatureKindFilter(featureKind = BUILDING_FEATURE_KIND) {
+function buildFeatureKindExpression() {
+  return ['coalesce', ['get', 'feature_kind'], BUILDING_FEATURE_KIND];
+}
+
+function buildExactFeatureKindFilter(featureKind = BUILDING_FEATURE_KIND) {
+  return ['==', buildFeatureKindExpression(), featureKind];
+}
+
+function buildVisibleBaseBuildingFilter(hideBaseWhenParts = false) {
+  if (!hideBaseWhenParts) {
+    return buildExactFeatureKindFilter(BUILDING_FEATURE_KIND);
+  }
+  return ['any',
+    buildExactFeatureKindFilter(BUILDING_REMAINDER_FEATURE_KIND),
+    ['all',
+      buildExactFeatureKindFilter(BUILDING_FEATURE_KIND),
+      ['!=', ['coalesce', ['to-number', ['get', BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY]], 0], 1]
+    ]
+  ];
+}
+
+function buildFeatureKindFilter(featureKind = BUILDING_FEATURE_KIND, {
+  hideBaseWhenParts = false
+} = {}) {
   if (featureKind === BUILDING_PART_FEATURE_KIND) {
-    return ['==', ['coalesce', ['get', 'feature_kind'], BUILDING_FEATURE_KIND], BUILDING_PART_FEATURE_KIND];
+    return buildExactFeatureKindFilter(BUILDING_PART_FEATURE_KIND);
+  }
+  if (featureKind === BUILDING_REMAINDER_FEATURE_KIND) {
+    return buildExactFeatureKindFilter(BUILDING_REMAINDER_FEATURE_KIND);
   }
   if (featureKind === 'any') {
     return null;
   }
-  return ['!=', ['coalesce', ['get', 'feature_kind'], BUILDING_FEATURE_KIND], BUILDING_PART_FEATURE_KIND];
+  return buildVisibleBaseBuildingFilter(hideBaseWhenParts);
 }
 
 function buildFeatureIdFilter(featureIds = []) {
@@ -135,15 +197,31 @@ function buildFeatureIdFilter(featureIds = []) {
 export function buildRegionBuildingLayerFilterExpression({
   featureIds = [],
   featureKind = BUILDING_FEATURE_KIND,
-  active = false
+  active = false,
+  hideBaseWhenParts = false
 } = {}) {
-  const kindFilter = buildFeatureKindFilter(featureKind);
+  const kindFilter = buildFeatureKindFilter(featureKind, {
+    hideBaseWhenParts
+  });
   const idFilter = buildFeatureIdFilter(featureIds);
+  const baseFilters = [kindFilter].filter(Boolean);
   if (!active) {
-    return kindFilter || EMPTY_LAYER_FILTER;
+    if (baseFilters.length === 0) return EMPTY_LAYER_FILTER;
+    if (baseFilters.length === 1) return baseFilters[0];
+    return ['all', ...baseFilters];
   }
-  if (!kindFilter) return idFilter;
-  return ['all', kindFilter, idFilter];
+  if (baseFilters.length === 0) return idFilter;
+  return ['all', ...baseFilters, idFilter];
+}
+
+export function buildVisibleBuildingSelectionScopeExpression({
+  showBuildingParts = true
+} = {}) {
+  const baseFilter = buildVisibleBaseBuildingFilter(Boolean(showBuildingParts));
+  if (!showBuildingParts) {
+    return baseFilter;
+  }
+  return ['any', baseFilter, buildExactFeatureKindFilter(BUILDING_PART_FEATURE_KIND)];
 }
 
 export function buildRegionBuildingHighlightFilterExpression({
@@ -151,9 +229,10 @@ export function buildRegionBuildingHighlightFilterExpression({
   showBuildingParts = true
 } = {}) {
   const idFilter = buildFeatureIdFilter(featureIds);
-  if (showBuildingParts) return idFilter;
-  const buildingOnlyFilter = buildFeatureKindFilter(BUILDING_FEATURE_KIND);
-  return buildingOnlyFilter ? ['all', buildingOnlyFilter, idFilter] : idFilter;
+  const scopeFilter = buildVisibleBuildingSelectionScopeExpression({
+    showBuildingParts
+  });
+  return scopeFilter ? ['all', scopeFilter, idFilter] : idFilter;
 }
 
 export function getCurrentBuildingSourceConfigs(activeRegionPmtiles = []) {
@@ -180,6 +259,13 @@ export function getCurrentBuildingsFillLayerIds(activeRegionPmtiles = []) {
   ];
 }
 
+export function getCurrentBuildingsExtrusionLayerIds(activeRegionPmtiles = []) {
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'extrusion'),
+    ...getCurrentOverpassBuildingsExtrusionLayerIds()
+  ];
+}
+
 export function getCurrentBuildingsLineLayerIds(activeRegionPmtiles = []) {
   return [
     ...getRegionLayerIds(activeRegionPmtiles, 'line'),
@@ -191,6 +277,13 @@ export function getCurrentBuildingPartFillLayerIds(activeRegionPmtiles = []) {
   return [
     ...getRegionLayerIds(activeRegionPmtiles, 'part-fill'),
     ...getCurrentOverpassBuildingPartFillLayerIds()
+  ];
+}
+
+export function getCurrentBuildingPartExtrusionLayerIds(activeRegionPmtiles = []) {
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'part-extrusion'),
+    ...getCurrentOverpassBuildingPartExtrusionLayerIds()
   ];
 }
 
@@ -208,10 +301,24 @@ export function getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPm
   ];
 }
 
+export function getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegionPmtiles = []) {
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-extrusion'),
+    ...getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds()
+  ];
+}
+
 export function getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles = []) {
   return [
     ...getRegionLayerIds(activeRegionPmtiles, 'part-filter-highlight-line'),
     ...getCurrentOverpassBuildingPartFilterHighlightLineLayerIds()
+  ];
+}
+
+export function getCurrentBuildingHoverExtrusionLayerIds(activeRegionPmtiles = []) {
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'hover-extrusion'),
+    ...getCurrentOverpassBuildingHoverExtrusionLayerIds()
   ];
 }
 
@@ -236,10 +343,24 @@ export function getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles = []) 
   ];
 }
 
+export function getCurrentFilterHighlightExtrusionLayerIds(activeRegionPmtiles = []) {
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-extrusion'),
+    ...getCurrentOverpassFilterHighlightExtrusionLayerIds()
+  ];
+}
+
 export function getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles = []) {
   return [
     ...getRegionLayerIds(activeRegionPmtiles, 'filter-highlight-line'),
     ...getCurrentOverpassFilterHighlightLineLayerIds()
+  ];
+}
+
+export function getCurrentSelectedExtrusionLayerIds(activeRegionPmtiles = []) {
+  return [
+    ...getRegionLayerIds(activeRegionPmtiles, 'selected-extrusion'),
+    ...getCurrentOverpassSelectedExtrusionLayerIds()
   ];
 }
 
@@ -261,9 +382,12 @@ export function applyBuildingThemePaint({
   map,
   theme,
   fillLayerIds = [],
+  extrusionLayerIds = [],
   lineLayerIds = [],
   partFillLayerIds = [],
+  partExtrusionLayerIds = [],
   partLineLayerIds = [],
+  hoverExtrusionLayerIds = [],
   hoverFillLayerIds = [],
   hoverLineLayerIds = []
 }) {
@@ -275,6 +399,11 @@ export function applyBuildingThemePaint({
     map.setPaintProperty(layerId, 'fill-color', paint.fillColor);
     map.setPaintProperty(layerId, 'fill-opacity', paint.fillOpacity);
   }
+  for (const layerId of [...new Set([...extrusionLayerIds, ...partExtrusionLayerIds])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setPaintProperty(layerId, 'fill-extrusion-color', paint.fillColor);
+    map.setPaintProperty(layerId, 'fill-extrusion-opacity', paint.fillOpacity);
+  }
   for (const layerId of [...new Set([...lineLayerIds, ...partLineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setPaintProperty(layerId, 'line-color', paint.lineColor);
@@ -282,6 +411,11 @@ export function applyBuildingThemePaint({
     if (paint.lineOpacity != null) {
       map.setPaintProperty(layerId, 'line-opacity', paint.lineOpacity);
     }
+  }
+  for (const layerId of [...new Set([...hoverExtrusionLayerIds])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setPaintProperty(layerId, 'fill-extrusion-color', hoverPaint.fillColor);
+    map.setPaintProperty(layerId, 'fill-extrusion-opacity', hoverPaint.fillOpacity);
   }
   for (const layerId of [...new Set([...hoverFillLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
@@ -295,6 +429,39 @@ export function applyBuildingThemePaint({
     if (hoverPaint.lineOpacity != null) {
       map.setPaintProperty(layerId, 'line-opacity', hoverPaint.lineOpacity);
     }
+  }
+}
+
+function buildBuildingExtrusionPaint(buildingPaint) {
+  return {
+    'fill-extrusion-color': buildingPaint.fillColor,
+    'fill-extrusion-opacity': buildingPaint.fillOpacity,
+    'fill-extrusion-base': buildBuildingExtrusionBaseExpression(),
+    'fill-extrusion-height': buildBuildingExtrusionHeightExpression(),
+    'fill-extrusion-vertical-gradient': false
+  };
+}
+
+function buildOverlayExtrusionPaint(color = 'transparent', opacity = 0) {
+  return {
+    'fill-extrusion-color': color,
+    'fill-extrusion-opacity': opacity,
+    'fill-extrusion-base': buildBuildingExtrusionBaseExpression(),
+    'fill-extrusion-height': buildBuildingExtrusionHeightExpression(),
+    'fill-extrusion-vertical-gradient': false
+  };
+}
+
+function applyBaseBuildingLayerFilters(map, layerIds = [], {
+  hideBaseWhenParts = false
+} = {}) {
+  if (!map?.setFilter) return;
+  const filter = buildRegionBuildingLayerFilterExpression({
+    hideBaseWhenParts
+  });
+  for (const layerId of [...new Set(Array.isArray(layerIds) ? layerIds : [])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setFilter(layerId, filter);
   }
 }
 
@@ -442,22 +609,29 @@ export function ensureOverpassBuildingSourceAndLayers({
   data,
   buildingPaint,
   hoverPaint = getBuildingHoverThemePaint('light'),
+  buildings3dEnabled = false,
   buildingPartsVisible = true,
   buildingPartHighlightVisible = false,
   visible = true
 }) {
   if (!map) return;
   const sourceId = OVERPASS_BUILDING_SOURCE_ID;
+  const extrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.extrusion);
   const fillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.fill);
   const lineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.line);
+  const partExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partExtrusion);
   const partFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFill);
   const partLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partLine);
+  const filterExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightExtrusion);
   const filterFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightFill);
   const filterLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightLine);
+  const partFilterExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightExtrusion);
   const partFilterFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightFill);
   const partFilterLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightLine);
+  const hoverExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverExtrusion);
   const hoverFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverFill);
   const hoverLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverLine);
+  const selectedExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedExtrusion);
   const selectedFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedFill);
   const selectedLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.selectedLine);
 
@@ -476,19 +650,37 @@ export function ensureOverpassBuildingSourceAndLayers({
     source?.setData?.(sourceData);
   }
 
+  if (!map.getLayer(extrusionLayerId)) {
+    map.addLayer({
+      id: extrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression({
+        hideBaseWhenParts: buildingPartsVisible
+      }),
+      paint: buildBuildingExtrusionPaint(buildingPaint),
+      layout: {
+        visibility: visible && buildings3dEnabled ? 'visible' : 'none'
+      }
+    });
+  }
+
   if (!map.getLayer(fillLayerId)) {
     map.addLayer({
       id: fillLayerId,
       type: 'fill',
       source: sourceId,
       minzoom: 13,
-      filter: buildRegionBuildingLayerFilterExpression(),
+      filter: buildRegionBuildingLayerFilterExpression({
+        hideBaseWhenParts: buildingPartsVisible
+      }),
       paint: {
         'fill-color': buildingPaint.fillColor,
         'fill-opacity': buildingPaint.fillOpacity
       },
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       }
     });
   }
@@ -499,15 +691,33 @@ export function ensureOverpassBuildingSourceAndLayers({
       type: 'line',
       source: sourceId,
       minzoom: 13,
-      filter: buildRegionBuildingLayerFilterExpression(),
+      filter: buildRegionBuildingLayerFilterExpression({
+        hideBaseWhenParts: buildingPartsVisible
+      }),
       paint: {
         'line-color': buildingPaint.lineColor,
         'line-width': buildingPaint.lineWidth,
         'line-opacity': buildingPaint.lineOpacity ?? 1
       },
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       }
+    });
+  }
+
+  if (!map.getLayer(partExtrusionLayerId)) {
+    map.addLayer({
+      id: partExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression({
+        featureKind: BUILDING_PART_FEATURE_KIND
+      }),
+      layout: {
+        visibility: visible && buildingPartsVisible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildBuildingExtrusionPaint(buildingPaint)
     });
   }
 
@@ -521,7 +731,7 @@ export function ensureOverpassBuildingSourceAndLayers({
         featureKind: BUILDING_PART_FEATURE_KIND
       }),
       layout: {
-        visibility: visible && buildingPartsVisible ? 'visible' : 'none'
+        visibility: visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': buildingPaint.fillColor,
@@ -540,13 +750,27 @@ export function ensureOverpassBuildingSourceAndLayers({
         featureKind: BUILDING_PART_FEATURE_KIND
       }),
       layout: {
-        visibility: visible && buildingPartsVisible ? 'visible' : 'none'
+        visibility: visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': buildingPaint.lineColor,
         'line-width': buildingPaint.lineWidth,
         'line-opacity': buildingPaint.lineOpacity ?? 1
       }
+    });
+  }
+
+  if (!map.getLayer(filterExtrusionLayerId)) {
+    map.addLayer({
+      id: filterExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint()
     });
   }
 
@@ -558,7 +782,7 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': 'transparent',
@@ -575,13 +799,27 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': 'transparent',
         'line-width': 0,
         'line-opacity': 0
       }
+    });
+  }
+
+  if (!map.getLayer(partFilterExtrusionLayerId)) {
+    map.addLayer({
+      id: partFilterExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible && buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint()
     });
   }
 
@@ -593,7 +831,7 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible && buildingPartHighlightVisible ? 'visible' : 'none'
+        visibility: visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': 'transparent',
@@ -610,13 +848,27 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible && buildingPartHighlightVisible ? 'visible' : 'none'
+        visibility: visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': 'transparent',
         'line-width': 0,
         'line-opacity': 0
       }
+    });
+  }
+
+  if (!map.getLayer(hoverExtrusionLayerId)) {
+    map.addLayer({
+      id: hoverExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint(hoverPaint.fillColor, hoverPaint.fillOpacity)
     });
   }
 
@@ -628,7 +880,7 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': hoverPaint.fillColor,
@@ -645,13 +897,27 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': hoverPaint.lineColor,
         'line-width': hoverPaint.lineWidth,
         'line-opacity': hoverPaint.lineOpacity ?? 1
       }
+    });
+  }
+
+  if (!map.getLayer(selectedExtrusionLayerId)) {
+    map.addLayer({
+      id: selectedExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: visible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint(BUILDING_SELECTED_THEME.fillColor, BUILDING_SELECTED_THEME.fillOpacity)
     });
   }
 
@@ -663,7 +929,7 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': BUILDING_SELECTED_THEME.fillColor,
@@ -680,7 +946,7 @@ export function ensureOverpassBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: visible ? 'visible' : 'none'
+        visibility: visible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': BUILDING_SELECTED_THEME.lineColor,
@@ -690,18 +956,24 @@ export function ensureOverpassBuildingSourceAndLayers({
     });
   }
 
-  ensureLayerVisibility(map, fillLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, lineLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFillLayerId, visible && buildingPartsVisible ? 'visible' : 'none');
-  ensureLayerVisibility(map, partLineLayerId, visible && buildingPartsVisible ? 'visible' : 'none');
-  ensureLayerVisibility(map, filterFillLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, filterLineLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterFillLayerId, visible && buildingPartHighlightVisible ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterLineLayerId, visible && buildingPartHighlightVisible ? 'visible' : 'none');
-  ensureLayerVisibility(map, hoverFillLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, hoverLineLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, selectedFillLayerId, visible ? 'visible' : 'none');
-  ensureLayerVisibility(map, selectedLineLayerId, visible ? 'visible' : 'none');
+  ensureLayerVisibility(map, extrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, fillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, lineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partExtrusionLayerId, visible && buildingPartsVisible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFillLayerId, visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partLineLayerId, visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterExtrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterFillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterLineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterExtrusionLayerId, visible && buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterFillLayerId, visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterLineLayerId, visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverExtrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverFillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverLineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedExtrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedFillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedLineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
 }
 
 export function ensureRegionBuildingSourceAndLayers({
@@ -710,21 +982,28 @@ export function ensureRegionBuildingSourceAndLayers({
   buildingPaint,
   hoverPaint = getBuildingHoverThemePaint('light'),
   origin,
+  buildings3dEnabled = false,
   buildingPartsVisible = true,
   buildingPartHighlightVisible = false
 }) {
   if (!map || !region) return;
   const sourceId = buildRegionSourceId(region.id);
+  const extrusionLayerId = buildRegionLayerId(region.id, 'extrusion');
   const fillLayerId = buildRegionLayerId(region.id, 'fill');
   const lineLayerId = buildRegionLayerId(region.id, 'line');
+  const partExtrusionLayerId = buildRegionLayerId(region.id, 'part-extrusion');
   const partFillLayerId = buildRegionLayerId(region.id, 'part-fill');
   const partLineLayerId = buildRegionLayerId(region.id, 'part-line');
+  const filterExtrusionLayerId = buildRegionLayerId(region.id, 'filter-highlight-extrusion');
   const filterFillLayerId = buildRegionLayerId(region.id, 'filter-highlight-fill');
   const filterLineLayerId = buildRegionLayerId(region.id, 'filter-highlight-line');
+  const partFilterExtrusionLayerId = buildRegionLayerId(region.id, 'part-filter-highlight-extrusion');
   const partFilterFillLayerId = buildRegionLayerId(region.id, 'part-filter-highlight-fill');
   const partFilterLineLayerId = buildRegionLayerId(region.id, 'part-filter-highlight-line');
+  const hoverExtrusionLayerId = buildRegionLayerId(region.id, 'hover-extrusion');
   const hoverFillLayerId = buildRegionLayerId(region.id, 'hover-fill');
   const hoverLineLayerId = buildRegionLayerId(region.id, 'hover-line');
+  const selectedExtrusionLayerId = buildRegionLayerId(region.id, 'selected-extrusion');
   const selectedFillLayerId = buildRegionLayerId(region.id, 'selected-fill');
   const selectedLineLayerId = buildRegionLayerId(region.id, 'selected-line');
   const pmtilesUrl = resolvePmtilesUrl(region.url, origin);
@@ -736,6 +1015,23 @@ export function ensureRegionBuildingSourceAndLayers({
     });
   }
 
+  if (!map.getLayer(extrusionLayerId)) {
+    map.addLayer({
+      id: extrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression({
+        hideBaseWhenParts: buildingPartsVisible
+      }),
+      layout: {
+        visibility: buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildBuildingExtrusionPaint(buildingPaint)
+    });
+  }
+
   if (!map.getLayer(fillLayerId)) {
     map.addLayer({
       id: fillLayerId,
@@ -743,7 +1039,12 @@ export function ensureRegionBuildingSourceAndLayers({
       source: sourceId,
       'source-layer': region.sourceLayer,
       minzoom: 13,
-      filter: buildRegionBuildingLayerFilterExpression(),
+      filter: buildRegionBuildingLayerFilterExpression({
+        hideBaseWhenParts: buildingPartsVisible
+      }),
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'fill-color': buildingPaint.fillColor,
         'fill-opacity': buildingPaint.fillOpacity
@@ -758,12 +1059,34 @@ export function ensureRegionBuildingSourceAndLayers({
       source: sourceId,
       'source-layer': region.sourceLayer,
       minzoom: 13,
-      filter: buildRegionBuildingLayerFilterExpression(),
+      filter: buildRegionBuildingLayerFilterExpression({
+        hideBaseWhenParts: buildingPartsVisible
+      }),
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'line-color': buildingPaint.lineColor,
         'line-width': buildingPaint.lineWidth,
         'line-opacity': buildingPaint.lineOpacity ?? 1
       }
+    });
+  }
+
+  if (!map.getLayer(partExtrusionLayerId)) {
+    map.addLayer({
+      id: partExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: buildRegionBuildingLayerFilterExpression({
+        featureKind: BUILDING_PART_FEATURE_KIND
+      }),
+      layout: {
+        visibility: buildingPartsVisible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildBuildingExtrusionPaint(buildingPaint)
     });
   }
 
@@ -778,7 +1101,7 @@ export function ensureRegionBuildingSourceAndLayers({
         featureKind: BUILDING_PART_FEATURE_KIND
       }),
       layout: {
-        visibility: buildingPartsVisible ? 'visible' : 'none'
+        visibility: buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': buildingPaint.fillColor,
@@ -798,13 +1121,28 @@ export function ensureRegionBuildingSourceAndLayers({
         featureKind: BUILDING_PART_FEATURE_KIND
       }),
       layout: {
-        visibility: buildingPartsVisible ? 'visible' : 'none'
+        visibility: buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': buildingPaint.lineColor,
         'line-width': buildingPaint.lineWidth,
         'line-opacity': buildingPaint.lineOpacity ?? 1
       }
+    });
+  }
+
+  if (!map.getLayer(filterExtrusionLayerId)) {
+    map.addLayer({
+      id: filterExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint()
     });
   }
 
@@ -816,6 +1154,9 @@ export function ensureRegionBuildingSourceAndLayers({
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'fill-color': 'transparent',
         'fill-opacity': 0
@@ -831,11 +1172,29 @@ export function ensureRegionBuildingSourceAndLayers({
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'line-color': 'transparent',
         'line-width': 0,
         'line-opacity': 0
       }
+    });
+  }
+
+  if (!map.getLayer(partFilterExtrusionLayerId)) {
+    map.addLayer({
+      id: partFilterExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: EMPTY_LAYER_FILTER,
+      layout: {
+        visibility: buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint()
     });
   }
 
@@ -848,7 +1207,7 @@ export function ensureRegionBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: buildingPartHighlightVisible ? 'visible' : 'none'
+        visibility: buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'fill-color': 'transparent',
@@ -866,13 +1225,28 @@ export function ensureRegionBuildingSourceAndLayers({
       minzoom: 13,
       filter: EMPTY_LAYER_FILTER,
       layout: {
-        visibility: buildingPartHighlightVisible ? 'visible' : 'none'
+        visibility: buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
       },
       paint: {
         'line-color': 'transparent',
         'line-width': 0,
         'line-opacity': 0
       }
+    });
+  }
+
+  if (!map.getLayer(hoverExtrusionLayerId)) {
+    map.addLayer({
+      id: hoverExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: ['==', ['id'], -1],
+      layout: {
+        visibility: buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint(hoverPaint.fillColor, hoverPaint.fillOpacity)
     });
   }
 
@@ -884,6 +1258,9 @@ export function ensureRegionBuildingSourceAndLayers({
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: ['==', ['id'], -1],
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'fill-color': hoverPaint.fillColor,
         'fill-opacity': hoverPaint.fillOpacity
@@ -899,11 +1276,29 @@ export function ensureRegionBuildingSourceAndLayers({
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: ['==', ['id'], -1],
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'line-color': hoverPaint.lineColor,
         'line-width': hoverPaint.lineWidth,
         'line-opacity': hoverPaint.lineOpacity ?? 1
       }
+    });
+  }
+
+  if (!map.getLayer(selectedExtrusionLayerId)) {
+    map.addLayer({
+      id: selectedExtrusionLayerId,
+      type: 'fill-extrusion',
+      source: sourceId,
+      'source-layer': region.sourceLayer,
+      minzoom: 13,
+      filter: ['==', ['id'], -1],
+      layout: {
+        visibility: buildings3dEnabled ? 'visible' : 'none'
+      },
+      paint: buildOverlayExtrusionPaint(BUILDING_SELECTED_THEME.fillColor, BUILDING_SELECTED_THEME.fillOpacity)
     });
   }
 
@@ -915,6 +1310,9 @@ export function ensureRegionBuildingSourceAndLayers({
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: ['==', ['id'], -1],
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'fill-color': BUILDING_SELECTED_THEME.fillColor,
         'fill-opacity': BUILDING_SELECTED_THEME.fillOpacity
@@ -930,6 +1328,9 @@ export function ensureRegionBuildingSourceAndLayers({
       'source-layer': region.sourceLayer,
       minzoom: 13,
       filter: ['==', ['id'], -1],
+      layout: {
+        visibility: !buildings3dEnabled ? 'visible' : 'none'
+      },
       paint: {
         'line-color': BUILDING_SELECTED_THEME.lineColor,
         'line-width': BUILDING_SELECTED_THEME.lineWidth,
@@ -937,6 +1338,25 @@ export function ensureRegionBuildingSourceAndLayers({
       }
     });
   }
+
+  ensureLayerVisibility(map, extrusionLayerId, buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, fillLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, lineLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partExtrusionLayerId, buildingPartsVisible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFillLayerId, buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partLineLayerId, buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterExtrusionLayerId, buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterFillLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, filterLineLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterExtrusionLayerId, buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterFillLayerId, buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, partFilterLineLayerId, buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverExtrusionLayerId, buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverFillLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, hoverLineLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedExtrusionLayerId, buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedFillLayerId, !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(map, selectedLineLayerId, !buildings3dEnabled ? 'visible' : 'none');
 }
 
 export function removeRegionBuildingSourceAndLayers(map, regionId) {
@@ -944,16 +1364,22 @@ export function removeRegionBuildingSourceAndLayers(map, regionId) {
   const layerIds = [
     buildRegionLayerId(regionId, 'selected-line'),
     buildRegionLayerId(regionId, 'selected-fill'),
+    buildRegionLayerId(regionId, 'selected-extrusion'),
     buildRegionLayerId(regionId, 'hover-line'),
     buildRegionLayerId(regionId, 'hover-fill'),
+    buildRegionLayerId(regionId, 'hover-extrusion'),
     buildRegionLayerId(regionId, 'part-filter-highlight-line'),
     buildRegionLayerId(regionId, 'part-filter-highlight-fill'),
+    buildRegionLayerId(regionId, 'part-filter-highlight-extrusion'),
     buildRegionLayerId(regionId, 'filter-highlight-line'),
     buildRegionLayerId(regionId, 'filter-highlight-fill'),
+    buildRegionLayerId(regionId, 'filter-highlight-extrusion'),
     buildRegionLayerId(regionId, 'part-line'),
     buildRegionLayerId(regionId, 'part-fill'),
+    buildRegionLayerId(regionId, 'part-extrusion'),
     buildRegionLayerId(regionId, 'line'),
-    buildRegionLayerId(regionId, 'fill')
+    buildRegionLayerId(regionId, 'fill'),
+    buildRegionLayerId(regionId, 'extrusion')
   ];
   for (const layerId of layerIds) {
     if (map.getLayer(layerId)) {
@@ -968,28 +1394,137 @@ export function removeRegionBuildingSourceAndLayers(map, regionId) {
 
 export function applyBuildingPartsLayerVisibility({
   map,
-  visible,
+  sourceVisible = true,
+  partVisible = true,
+  buildings3dEnabled = false,
+  fillLayerIds = [],
+  extrusionLayerIds = [],
+  lineLayerIds = [],
+  filterHighlightExtrusionLayerIds = [],
+  filterHighlightFillLayerIds = [],
+  filterHighlightLineLayerIds = [],
   forceHighlightVisible = false,
   partFillLayerIds = [],
+  partExtrusionLayerIds = [],
   partLineLayerIds = [],
+  partFilterHighlightExtrusionLayerIds = [],
   partFilterHighlightFillLayerIds = [],
-  partFilterHighlightLineLayerIds = []
+  partFilterHighlightLineLayerIds = [],
+  hoverExtrusionLayerIds = [],
+  hoverFillLayerIds = [],
+  hoverLineLayerIds = [],
+  selectedExtrusionLayerIds = [],
+  selectedFillLayerIds = [],
+  selectedLineLayerIds = []
 }) {
   if (!map) return;
-  const partLayerVisibility = visible ? 'visible' : 'none';
-  const partHighlightVisibility = (visible || forceHighlightVisible) ? 'visible' : 'none';
+  applyBaseBuildingLayerFilters(map, [
+    ...fillLayerIds,
+    ...extrusionLayerIds,
+    ...lineLayerIds
+  ], {
+    hideBaseWhenParts: partVisible
+  });
+  const baseFillVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
+  const baseExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
+  const baseLineVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
+  const partLayerVisibility = sourceVisible && partVisible && !buildings3dEnabled ? 'visible' : 'none';
+  const partExtrusionVisibility = sourceVisible && partVisible && buildings3dEnabled ? 'visible' : 'none';
+  const partLineVisibility = sourceVisible && partVisible && !buildings3dEnabled ? 'visible' : 'none';
+  const filterHighlightExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
+  const filterHighlightFlatVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
+  const partHighlightExtrusionVisibility = sourceVisible && (partVisible || forceHighlightVisible) && buildings3dEnabled ? 'visible' : 'none';
+  const partHighlightFlatVisibility = sourceVisible && (partVisible || forceHighlightVisible) && !buildings3dEnabled ? 'visible' : 'none';
+  const hoverExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
+  const hoverFlatVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
+  const selectedExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
+  const selectedFlatVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
   for (const layerId of [...new Set([
-    ...partFillLayerIds,
-    ...partLineLayerIds
+    ...fillLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', baseFillVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...extrusionLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', baseExtrusionVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...lineLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', baseLineVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...partFillLayerIds
   ])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', partLayerVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...partExtrusionLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', partExtrusionVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...partLineLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', partLineVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...filterHighlightExtrusionLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', filterHighlightExtrusionVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...filterHighlightFillLayerIds,
+    ...filterHighlightLineLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', filterHighlightFlatVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...partFilterHighlightExtrusionLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', partHighlightExtrusionVisibility);
   }
   for (const layerId of [...new Set([
     ...partFilterHighlightFillLayerIds,
     ...partFilterHighlightLineLayerIds
   ])]) {
     if (!map.getLayer(layerId)) continue;
-    map.setLayoutProperty(layerId, 'visibility', partHighlightVisibility);
+    map.setLayoutProperty(layerId, 'visibility', partHighlightFlatVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...hoverExtrusionLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', hoverExtrusionVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...hoverFillLayerIds,
+    ...hoverLineLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', hoverFlatVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...selectedExtrusionLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', selectedExtrusionVisibility);
+  }
+  for (const layerId of [...new Set([
+    ...selectedFillLayerIds,
+    ...selectedLineLayerIds
+  ])]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setLayoutProperty(layerId, 'visibility', selectedFlatVisibility);
   }
 }

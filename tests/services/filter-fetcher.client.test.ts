@@ -313,6 +313,89 @@ test('createFilterFetcher merges locally loaded overpass buildings into primary 
   }
 });
 
+test('createFilterFetcher derives filterable levels from local pmtiles render heights', async () => {
+  const previousFetch = global.fetch;
+  let fetchCalls = 0;
+
+  global.fetch = (async () => {
+    fetchCalls += 1;
+    return new Response(JSON.stringify({ items: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }) as typeof fetch;
+
+  try {
+    const { createFilterFetcher } = await loadFilterFetcher();
+    const fetcher = createFilterFetcher({
+      resolveMap: () => ({
+        getLayer() {
+          return { id: 'layer' };
+        },
+        getSource(sourceId) {
+          return sourceId === 'region-buildings-source' ? { id: sourceId } : null;
+        },
+        queryRenderedFeatures() {
+          return [{
+            properties: {
+              osm_type: 'relation',
+              osm_id: 203
+            }
+          }];
+        },
+        querySourceFeatures(sourceId) {
+          if (sourceId !== 'region-buildings-source') return [];
+          return [{
+            id: 407,
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [30, 60],
+                [30.01, 60],
+                [30.01, 60.01],
+                [30, 60.01],
+                [30, 60]
+              ]]
+            },
+            properties: {
+              osm_type: 'relation',
+              osm_id: 203,
+              feature_kind: 'building_part',
+              render_height_m: 18.5,
+              render_min_height_m: 5.5
+            }
+          }];
+        }
+      }),
+      resolveLayerIds: () => ({
+        buildingFillLayerIds: ['building-fill'],
+        buildingLineLayerIds: ['building-line'],
+        buildingPartFillLayerIds: ['part-fill'],
+        buildingPartLineLayerIds: ['part-line']
+      }),
+      resolveBuildingSourceConfigs: () => [
+        { sourceId: 'region-buildings-source', sourceLayer: 'buildings' }
+      ],
+      getCurrentRulesHash: () => 'fnv1a-levels',
+      getLastViewportHash: () => 'bbox-levels',
+      matchDefaultLimit: 25,
+      dataCacheTtlMs: 60_000,
+      dataCacheMaxItems: 10,
+      dataRequestChunkSize: 10
+    });
+
+    const result = await fetcher.fetchFilterMatchesFallback({
+      rules: [{ key: 'levels', op: 'greater_or_equals', value: '4', valueNormalized: '4', numericValue: 4 }]
+    });
+
+    assert.deepEqual(result.matchedKeys, ['relation/203']);
+    assert.deepEqual(result.matchedFeatureIds, [407]);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test('createFilterFetcher forwards per-request maxResults to filter-matches', async () => {
   const previousFetch = global.fetch;
   const requestedBodies = [];

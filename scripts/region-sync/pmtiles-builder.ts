@@ -8,6 +8,7 @@ const {
   updateBounds,
   writeStreamLine
 } = require('./common');
+const { expandRowsWithBuildingRemainders } = require('./building-remainder');
 
 function runCommand(exe, args, options: LooseRecord = {}) {
   const result = spawnSync(exe, args, {
@@ -38,10 +39,21 @@ async function exportImportRowsToGeojson(importPath, geojsonPath) {
   let bounds = null;
 
   try {
+    const rows = [];
     for await (const row of readImportRows(importPath, { requireGeometryJson: true })) {
+      rows.push(row);
+    }
+    for (const row of expandRowsWithBuildingRemainders(rows)) {
       await writeStreamLine(
         out,
-        formatGeojsonFeatureLine(row.osm_type, row.osm_id, row.geometry_json, row.tags_json, row.feature_kind)
+        formatGeojsonFeatureLine(
+          row.osm_type,
+          row.osm_id,
+          row.geometry_json,
+          row.tags_json,
+          row.feature_kind,
+          row.render_hide_base_when_parts
+        )
       );
       importedFeatureCount += 1;
       bounds = updateBounds(bounds, row);

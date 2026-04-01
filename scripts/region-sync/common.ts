@@ -5,6 +5,9 @@ const { once } = require('events');
 const { moveFileSync } = require('../../src/lib/server/utils/fs');
 
 const NDJSON_STREAM_HIGH_WATER_MARK = 1024 * 1024;
+const DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2;
+const DEFAULT_BUILDING_EXTRUSION_LEVELS = 1;
+const DEFAULT_RENDER_HIDE_BASE_WHEN_PARTS = 0;
 
 function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -21,6 +24,7 @@ function encodeOsmFeatureId(osmType, osmId) {
 
 function normalizeFeatureKind(rawFeatureKind) {
   const kind = String(rawFeatureKind || '').trim().toLowerCase();
+  if (kind === 'building_remainder') return 'building_remainder';
   return kind === 'building_part' ? 'building_part' : 'building';
 }
 
@@ -42,6 +46,77 @@ function deriveFeatureKindFromTagsJson(tagsJson) {
   return 'building';
 }
 
+function parseTagsJsonObject(tagsJson) {
+  const text = String(tagsJson || '').trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function roundMeterValue(value) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) return 0;
+  return Math.round(Math.max(0, normalized) * 100) / 100;
+}
+
+function normalizeBinaryFlag(value) {
+  return Number(value) > 0 ? 1 : 0;
+}
+
+function parseTagNumber(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const normalized = text.replace(',', '.');
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readFirstNumericTag(tags, keys = []) {
+  for (const key of Array.isArray(keys) ? keys : []) {
+    if (!Object.prototype.hasOwnProperty.call(tags || {}, key)) continue;
+    const value = parseTagNumber(tags?.[key]);
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function buildFeature3dPropertiesFromTags(tags = {}) {
+  const levels = readFirstNumericTag(tags, ['building:levels', 'levels']);
+  const explicitHeight = readFirstNumericTag(tags, ['building:height', 'height']);
+  const minLevel = readFirstNumericTag(tags, ['building:min_level', 'min_level']);
+  const explicitMinHeight = readFirstNumericTag(tags, ['building:min_height', 'min_height']);
+  const normalizedLevels = Number.isFinite(levels) && levels > 0 ? levels : DEFAULT_BUILDING_EXTRUSION_LEVELS;
+  const normalizedExplicitHeight = Number.isFinite(explicitHeight) && explicitHeight > 0 ? explicitHeight : null;
+  const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
+  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0
+    ? explicitMinHeight
+    : 0;
+  const levelDerivedMinHeight = normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
+  const renderMinHeightMeters = Math.max(normalizedExplicitMinHeight, levelDerivedMinHeight);
+  const levelDerivedHeightMeters = renderMinHeightMeters + (normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS);
+  const renderHeightMeters = normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
+    ? normalizedExplicitHeight
+    : levelDerivedHeightMeters;
+
+  return {
+    render_height_m: roundMeterValue(renderHeightMeters),
+    render_min_height_m: roundMeterValue(renderMinHeightMeters)
+  };
+}
+
+function buildFeature3dPropertiesFromTagsJson(tagsJson) {
+  return buildFeature3dPropertiesFromTags(parseTagsJsonObject(tagsJson));
+}
+
 function updateBounds(bounds, row) {
   if (!row) return bounds;
   if (!bounds) {
@@ -60,15 +135,27 @@ function updateBounds(bounds, row) {
   };
 }
 
-function formatGeojsonFeatureLine(osmType, osmId, geometryJson, tagsJson = null, featureKind = null) {
+function formatGeojsonFeatureLine(
+  osmType,
+  osmId,
+  geometryJson,
+  tagsJson = null,
+  featureKind = null,
+  renderHideBaseWhenParts = DEFAULT_RENDER_HIDE_BASE_WHEN_PARTS
+) {
   const normalizedGeometryJson = String(geometryJson || '').trim();
   if (!normalizedGeometryJson) {
     throw new Error(`Missing GeoJSON geometry for ${String(osmType || '').trim()}/${Number(osmId) || 0}`);
   }
   const normalizedFeatureKind = normalizeFeatureKind(featureKind || deriveFeatureKindFromTagsJson(tagsJson));
+  const feature3dProperties = buildFeature3dPropertiesFromTagsJson(tagsJson);
+  const normalizedHideBaseWhenParts = normalizeBinaryFlag(renderHideBaseWhenParts);
   return (
     `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
-    `"properties":{"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}"},` +
+    `"properties":{"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
+    `"render_height_m":${feature3dProperties.render_height_m},` +
+    `"render_min_height_m":${feature3dProperties.render_min_height_m},` +
+    `"render_hide_base_when_parts":${normalizedHideBaseWhenParts}},` +
     `"geometry":${normalizedGeometryJson}}\n`
   );
 }
@@ -93,6 +180,7 @@ function parseRowPayload(line, options: LooseRecord = {}) {
   const minLat = Number(payload?.min_lat);
   const maxLon = Number(payload?.max_lon);
   const maxLat = Number(payload?.max_lat);
+  const renderHideBaseWhenParts = normalizeBinaryFlag(payload?.render_hide_base_when_parts);
   if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
     throw new Error('Importer produced invalid OSM identity');
   }
@@ -120,7 +208,8 @@ function parseRowPayload(line, options: LooseRecord = {}) {
     min_lon: minLon,
     min_lat: minLat,
     max_lon: maxLon,
-    max_lat: maxLat
+    max_lat: maxLat,
+    render_hide_base_when_parts: renderHideBaseWhenParts
   };
 }
 
@@ -223,6 +312,8 @@ function buildPmtilesSwap(finalPath, newBuiltPath) {
 }
 
 module.exports = {
+  buildFeature3dPropertiesFromTags,
+  buildFeature3dPropertiesFromTagsJson,
   deriveFeatureKindFromTagsJson,
   buildPmtilesSwap,
   closeWriteStream,

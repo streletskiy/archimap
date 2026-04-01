@@ -26,6 +26,8 @@ from quackosm.osm_extracts import (  # type: ignore
 
 
 BATCH_SIZE = 20000
+DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2
+DEFAULT_BUILDING_EXTRUSION_LEVELS = 1
 
 
 def encode_osm_feature_id(osm_type: str, osm_id: int) -> int:
@@ -35,6 +37,8 @@ def encode_osm_feature_id(osm_type: str, osm_id: int) -> int:
 
 def normalize_feature_kind(value: Any) -> str:
     kind = str(value or '').strip().lower()
+    if kind == 'building_remainder':
+        return 'building_remainder'
     return 'building_part' if kind == 'building_part' else 'building'
 
 
@@ -77,20 +81,106 @@ def merge_bounds(
     }
 
 
+def round_meter_value(value: Any) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not normalized or normalized < 0:
+        return 0.0
+    return round(normalized, 2)
+
+
+def normalize_binary_flag(value: Any) -> int:
+    try:
+        return 1 if float(value) > 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def parse_tag_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    normalized = text.replace(',', '.')
+    match = re.search(r'-?\d+(?:\.\d+)?', normalized)
+    if not match:
+        return None
+    try:
+        parsed = float(match.group(0))
+    except ValueError:
+        return None
+    return parsed if parsed == parsed else None
+
+
+def read_first_numeric_tag(tags: dict[str, Any], keys: list[str]) -> float | None:
+    for key in keys:
+        if key not in tags:
+            continue
+        value = parse_tag_number(tags.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def build_feature_3d_properties_from_tags(tags: dict[str, Any]) -> dict[str, float]:
+    levels = read_first_numeric_tag(tags, ['building:levels', 'levels'])
+    explicit_height = read_first_numeric_tag(tags, ['building:height', 'height'])
+    min_level = read_first_numeric_tag(tags, ['building:min_level', 'min_level'])
+    explicit_min_height = read_first_numeric_tag(tags, ['building:min_height', 'min_height'])
+    normalized_levels = levels if levels is not None and levels > 0 else DEFAULT_BUILDING_EXTRUSION_LEVELS
+    normalized_explicit_height = explicit_height if explicit_height is not None and explicit_height > 0 else None
+    normalized_min_level = min_level if min_level is not None and min_level > 0 else 0
+    normalized_explicit_min_height = explicit_min_height if explicit_min_height is not None and explicit_min_height > 0 else 0
+    level_derived_min_height = normalized_min_level * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS
+    render_min_height_m = max(normalized_explicit_min_height, level_derived_min_height)
+    level_derived_height_m = render_min_height_m + (normalized_levels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS)
+    render_height_m = (
+        normalized_explicit_height
+        if normalized_explicit_height is not None and normalized_explicit_height > render_min_height_m
+        else level_derived_height_m
+    )
+    return {
+        'render_height_m': round_meter_value(render_height_m),
+        'render_min_height_m': round_meter_value(render_min_height_m),
+    }
+
+
+def build_feature_3d_properties_from_tags_json(tags_json: str | None) -> dict[str, float]:
+    text = str(tags_json or '').strip()
+    if not text:
+        return build_feature_3d_properties_from_tags({})
+    try:
+        tags = json.loads(text)
+    except Exception:
+        return build_feature_3d_properties_from_tags({})
+    if not isinstance(tags, dict):
+        return build_feature_3d_properties_from_tags({})
+    return build_feature_3d_properties_from_tags(tags)
+
+
 def build_geojson_feature_line(
     osm_type: str,
     osm_id: int,
     geometry_json: str,
     tags_json: str | None = None,
     feature_kind: str | None = None,
+    render_hide_base_when_parts: int | float | None = None,
 ) -> str:
     normalized_geometry_json = str(geometry_json or '').strip()
     if not normalized_geometry_json:
         raise ValueError(f'Missing GeoJSON geometry for {str(osm_type or "").strip()}/{int(osm_id)}')
     normalized_feature_kind = normalize_feature_kind(feature_kind or derive_feature_kind_from_tags_json(tags_json))
+    feature_3d_properties = build_feature_3d_properties_from_tags_json(tags_json)
+    normalized_hide_base_when_parts = normalize_binary_flag(render_hide_base_when_parts)
     return (
         f'{{"type":"Feature","id":{encode_osm_feature_id(osm_type, int(osm_id))},'
-        f'"properties":{{"osm_id":{int(osm_id)},"feature_kind":"{normalized_feature_kind}"}},"geometry":{normalized_geometry_json}}}\n'
+        f'"properties":{{"osm_id":{int(osm_id)},"feature_kind":"{normalized_feature_kind}",'
+        f'"render_height_m":{feature_3d_properties["render_height_m"]},'
+        f'"render_min_height_m":{feature_3d_properties["render_min_height_m"]},'
+        f'"render_hide_base_when_parts":{normalized_hide_base_when_parts}}},"geometry":{normalized_geometry_json}}}\n'
     )
 
 
@@ -613,10 +703,10 @@ def _filtered_rows_cte_sql(import_limit: int) -> str:
     limit_sql = f'LIMIT {int(import_limit)}' if import_limit > 0 else ''
 
     return f'''
-WITH src AS (
+WITH src_raw AS (
   SELECT
     feature_id,
-    tags,
+    CAST(to_json(tags) AS VARCHAR) AS tags_json,
     geometry,
     ST_XMin(geometry) AS min_lon,
     ST_YMin(geometry) AS min_lat,
@@ -626,12 +716,148 @@ WITH src AS (
   WHERE geometry IS NOT NULL
     AND split_part(feature_id, '/', 1) IN ('way', 'relation')
     AND ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON')
+), src AS (
+  SELECT
+    feature_id,
+    tags_json,
+    CASE
+      WHEN strpos(tags_json, '"building"') > 0 THEN 'building'
+      WHEN strpos(tags_json, '"building:part"') > 0 OR strpos(tags_json, '"building_part"') > 0 THEN 'building_part'
+      ELSE 'building'
+    END AS feature_kind,
+    geometry,
+    min_lon,
+    min_lat,
+    max_lon,
+    max_lat
+  FROM src_raw
 ), filtered AS (
   SELECT *
   FROM src
   ORDER BY feature_id
   {limit_sql}
+), buildings_with_parts AS (
+  SELECT DISTINCT building.feature_id
+  FROM filtered building
+  JOIN filtered part
+    ON building.feature_kind = 'building'
+   AND part.feature_kind = 'building_part'
+   AND part.feature_id <> building.feature_id
+   AND part.min_lon >= building.min_lon
+   AND part.max_lon <= building.max_lon
+   AND part.min_lat >= building.min_lat
+   AND part.max_lat <= building.max_lat
+), enriched AS (
+  SELECT
+    filtered.feature_id,
+    filtered.tags_json,
+    filtered.feature_kind,
+    filtered.geometry,
+    filtered.min_lon,
+    filtered.min_lat,
+    filtered.max_lon,
+    filtered.max_lat,
+    CASE
+      WHEN buildings_with_parts.feature_id IS NULL THEN 0
+      ELSE 1
+    END AS render_hide_base_when_parts
+  FROM filtered
+  LEFT JOIN buildings_with_parts
+    ON buildings_with_parts.feature_id = filtered.feature_id
 )
+'''
+
+
+def _remainder_rows_cte_sql(import_limit: int) -> str:
+    return f'''
+{_filtered_rows_cte_sql(import_limit)}
+, building_remainders AS (
+  SELECT
+    building.feature_id,
+    building.tags_json,
+    ST_Multi(
+      ST_CollectionExtract(
+        ST_Difference(
+          ST_MakeValid(building.geometry),
+          ST_Union_Agg(ST_MakeValid(part.geometry))
+        ),
+        3
+      )
+    ) AS geometry
+  FROM filtered building
+  JOIN filtered part
+    ON building.feature_kind = 'building'
+   AND part.feature_kind = 'building_part'
+   AND part.feature_id <> building.feature_id
+   AND part.min_lon >= building.min_lon
+   AND part.max_lon <= building.max_lon
+   AND part.min_lat >= building.min_lat
+   AND part.max_lat <= building.max_lat
+  GROUP BY building.feature_id, building.tags_json, building.geometry
+), remainder_rows AS (
+  SELECT
+    feature_id,
+    tags_json,
+    'building_remainder' AS feature_kind,
+    geometry,
+    ST_XMin(geometry) AS min_lon,
+    ST_YMin(geometry) AS min_lat,
+    ST_XMax(geometry) AS max_lon,
+    ST_YMax(geometry) AS max_lat,
+    0 AS render_hide_base_when_parts
+  FROM building_remainders
+  WHERE geometry IS NOT NULL
+    AND NOT ST_IsEmpty(geometry)
+), export_rows AS (
+  SELECT
+    enriched.feature_id,
+    enriched.tags_json,
+    enriched.feature_kind,
+    enriched.geometry,
+    enriched.min_lon,
+    enriched.min_lat,
+    enriched.max_lon,
+    enriched.max_lat,
+    enriched.render_hide_base_when_parts
+  FROM enriched
+
+  UNION ALL
+
+  SELECT
+    remainder_rows.feature_id,
+    remainder_rows.tags_json,
+    remainder_rows.feature_kind,
+    remainder_rows.geometry,
+    remainder_rows.min_lon,
+    remainder_rows.min_lat,
+    remainder_rows.max_lon,
+    remainder_rows.max_lat,
+    remainder_rows.render_hide_base_when_parts
+  FROM remainder_rows
+)
+'''
+
+
+def _build_export_select_sql(
+    cte_sql: str,
+    source_rows_name: str,
+    geometry_sql: str,
+) -> str:
+    return f'''
+{cte_sql}
+SELECT
+  split_part(feature_id, '/', 1) AS osm_type,
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
+  tags_json,
+  feature_kind,
+  render_hide_base_when_parts,
+  {geometry_sql},
+  min_lon,
+  min_lat,
+  max_lon,
+  max_lat
+FROM {source_rows_name}
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
 '''
 
 
@@ -639,43 +865,30 @@ def _export_select_sql(import_limit: int, geometry_mode: str = 'geojson') -> str
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
     if geometry_mode_normalized == 'wkb_hex':
         geometry_sql = 'ST_AsHEXWKB(geometry) AS geometry_wkb_hex'
+        return _build_export_select_sql(_filtered_rows_cte_sql(import_limit), 'enriched', geometry_sql)
     elif geometry_mode_normalized in ('geojson', 'geojson_feature'):
         geometry_sql = 'ST_AsGeoJSON(geometry) AS geometry_json'
+        source_rows_name = 'export_rows' if geometry_mode_normalized == 'geojson_feature' else 'enriched'
+        cte_sql = _remainder_rows_cte_sql(import_limit) if geometry_mode_normalized == 'geojson_feature' else _filtered_rows_cte_sql(import_limit)
+        return _build_export_select_sql(cte_sql, source_rows_name, geometry_sql)
     else:
         raise ValueError(f'Unsupported geometry export mode: {geometry_mode}')
 
-    return f'''
-{_filtered_rows_cte_sql(import_limit)}
-SELECT
-  split_part(feature_id, '/', 1) AS osm_type,
-  try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
-  CAST(to_json(tags) AS VARCHAR) AS tags_json,
-  {geometry_sql},
-  min_lon,
-  min_lat,
-  max_lon,
-  max_lat
-FROM filtered
-WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
-'''
+
+def _export_remainder_select_sql(import_limit: int) -> str:
+    return _build_export_select_sql(
+        _remainder_rows_cte_sql(import_limit),
+        'remainder_rows',
+        'ST_AsGeoJSON(geometry) AS geometry_json',
+    )
 
 
 def _export_dual_select_sql(import_limit: int) -> str:
-    return f'''
-{_filtered_rows_cte_sql(import_limit)}
-SELECT
-  split_part(feature_id, '/', 1) AS osm_type,
-  try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
-  CAST(to_json(tags) AS VARCHAR) AS tags_json,
-  ST_AsHEXWKB(geometry) AS geometry_wkb_hex,
-  ST_AsGeoJSON(geometry) AS geometry_json,
-  min_lon,
-  min_lat,
-  max_lon,
-  max_lat
-FROM filtered
-WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
-'''
+    return _build_export_select_sql(
+        _filtered_rows_cte_sql(import_limit),
+        'enriched',
+        'ST_AsHEXWKB(geometry) AS geometry_wkb_hex, ST_AsGeoJSON(geometry) AS geometry_json',
+    )
 
 
 def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection) -> None:
@@ -802,34 +1015,43 @@ def export_rows_duckdb_ndjson(
                             'osm_type': row[0],
                             'osm_id': int(row[1]),
                             'tags_json': row[2],
-                            'feature_kind': derive_feature_kind_from_tags_json(row[2]),
-                            'min_lon': float(row[4]),
-                            'min_lat': float(row[5]),
-                            'max_lon': float(row[6]),
-                            'max_lat': float(row[7]),
+                            'feature_kind': normalize_feature_kind(row[3]),
+                            'render_hide_base_when_parts': normalize_binary_flag(row[4]),
+                            'min_lon': float(row[6]),
+                            'min_lat': float(row[7]),
+                            'max_lon': float(row[8]),
+                            'max_lat': float(row[9]),
                         }
-                        payload['geometry_wkb_hex'] = str(row[3])
+                        payload['geometry_wkb_hex'] = str(row[5])
                         out.write(json.dumps(payload, ensure_ascii=False))
                         out.write('\n')
                     elif geometry_mode_normalized == 'geojson_feature':
-                        out.write(build_geojson_feature_line(str(row[0]), int(row[1]), str(row[3]), str(row[2])))
+                        out.write(build_geojson_feature_line(
+                            str(row[0]),
+                            int(row[1]),
+                            str(row[5]),
+                            str(row[2]),
+                            str(row[3]),
+                            row[4],
+                        ))
                     else:
                         payload = {
                             'osm_type': row[0],
                             'osm_id': int(row[1]),
                             'tags_json': row[2],
-                            'feature_kind': derive_feature_kind_from_tags_json(row[2]),
-                            'min_lon': float(row[4]),
-                            'min_lat': float(row[5]),
-                            'max_lon': float(row[6]),
-                            'max_lat': float(row[7]),
+                            'feature_kind': normalize_feature_kind(row[3]),
+                            'render_hide_base_when_parts': normalize_binary_flag(row[4]),
+                            'min_lon': float(row[6]),
+                            'min_lat': float(row[7]),
+                            'max_lon': float(row[8]),
+                            'max_lat': float(row[9]),
                         }
-                        payload['geometry_json'] = row[3]
+                        payload['geometry_json'] = row[5]
                         out.write(json.dumps(payload, ensure_ascii=False))
                         out.write('\n')
                     processed += 1
                     imported += 1
-                    bounds = merge_bounds(bounds, float(row[4]), float(row[5]), float(row[6]), float(row[7]))
+                    bounds = merge_bounds(bounds, float(row[6]), float(row[7]), float(row[8]), float(row[9]))
 
     return processed, imported, bounds
 
@@ -858,17 +1080,18 @@ def export_rows_duckdb_dual_ndjson(
                 for row in chunk:
                     osm_type = str(row[0])
                     osm_id = int(row[1])
-                    min_lon = float(row[5])
-                    min_lat = float(row[6])
-                    max_lon = float(row[7])
-                    max_lat = float(row[8])
+                    min_lon = float(row[7])
+                    min_lat = float(row[8])
+                    max_lon = float(row[9])
+                    max_lat = float(row[10])
 
                     db_out.write(json.dumps({
                         'osm_type': osm_type,
                         'osm_id': osm_id,
                         'tags_json': row[2],
-                        'feature_kind': derive_feature_kind_from_tags_json(row[2]),
-                        'geometry_wkb_hex': str(row[3]),
+                        'feature_kind': normalize_feature_kind(row[3]),
+                        'render_hide_base_when_parts': normalize_binary_flag(row[4]),
+                        'geometry_wkb_hex': str(row[5]),
                         'min_lon': min_lon,
                         'min_lat': min_lat,
                         'max_lon': max_lon,
@@ -876,8 +1099,37 @@ def export_rows_duckdb_dual_ndjson(
                     }, ensure_ascii=False))
                     db_out.write('\n')
 
-                    geojson_out.write(build_geojson_feature_line(osm_type, osm_id, str(row[4]), str(row[2])))
+                    geojson_out.write(build_geojson_feature_line(
+                        osm_type,
+                        osm_id,
+                        str(row[6]),
+                        str(row[2]),
+                        str(row[3]),
+                        row[4],
+                    ))
 
+                    processed += 1
+                    imported += 1
+                    bounds = merge_bounds(bounds, min_lon, min_lat, max_lon, max_lat)
+
+            remainder_cursor = con.execute(_export_remainder_select_sql(import_limit))
+            while True:
+                chunk = remainder_cursor.fetchmany(BATCH_SIZE)
+                if not chunk:
+                    break
+                for row in chunk:
+                    min_lon = float(row[6])
+                    min_lat = float(row[7])
+                    max_lon = float(row[8])
+                    max_lat = float(row[9])
+                    geojson_out.write(build_geojson_feature_line(
+                        str(row[0]),
+                        int(row[1]),
+                        str(row[5]),
+                        str(row[2]),
+                        str(row[3]),
+                        row[4],
+                    ))
                     processed += 1
                     imported += 1
                     bounds = merge_bounds(bounds, min_lon, min_lat, max_lon, max_lat)

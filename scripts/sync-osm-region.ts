@@ -243,10 +243,12 @@ async function runRegionSync(region, runtimeOptions) {
       exportRegionExtractToNdjson({
         importerPath,
         region,
-        outputPath: importPath,
+        dbOutputPath: importPath,
+        geojsonOutputPath: geojsonPath,
+        summaryOutputPath: summaryPath,
         env: process.env
       });
-      exported = await exportImportRowsToGeojson(importPath, geojsonPath);
+      exported = readExportSummary(summaryPath) || await exportImportRowsToGeojson(importPath, geojsonPath);
     }
 
     if (exported.importedFeatureCount <= 0) {

@@ -206,12 +206,25 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   }
 
   async function getOsmContourRow(osmType, osmId) {
-    return await db.prepare(`
-      SELECT osm_type, osm_id, tags_json, geometry_json, updated_at
-      FROM osm.building_contours
-      WHERE osm_type = ? AND osm_id = ?
-      LIMIT 1
-    `).get(osmType, osmId) || null;
+    return await db.prepare(isPostgres
+      ? `
+        SELECT
+          osm_type,
+          osm_id,
+          tags_json,
+          ST_AsGeoJSON(geom)::text AS geometry_json,
+          updated_at
+        FROM osm.building_contours
+        WHERE osm_type = ? AND osm_id = ?
+        LIMIT 1
+      `
+      : `
+        SELECT osm_type, osm_id, tags_json, geometry_json, updated_at
+        FROM osm.building_contours
+        WHERE osm_type = ? AND osm_id = ?
+        LIMIT 1
+      `
+    ).get(osmType, osmId) || null;
   }
 
   async function countMergedEditsForTarget(osmType, osmId, excludeEditId = null) {

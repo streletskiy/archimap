@@ -177,6 +177,40 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', asy
   assert.equal(fields.has('architect'), false);
 });
 
+test('getOsmContourRow uses ST_AsGeoJSON projection on postgres', async () => {
+  let capturedSql = '';
+  let capturedArgs = [];
+  const expectedRow = {
+    osm_type: 'relation',
+    osm_id: 12325639,
+    tags_json: '{"building":"yes"}',
+    geometry_json: '{"type":"Polygon","coordinates":[]}',
+    updated_at: '2026-04-01T04:58:52.554Z'
+  };
+  const db = {
+    provider: 'postgres',
+    prepare(sql) {
+      capturedSql = String(sql || '');
+      return {
+        get: (...args) => {
+          capturedArgs = args;
+          return expectedRow;
+        }
+      };
+    },
+    transaction(fn) {
+      return fn;
+    }
+  };
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  const row = await service.getOsmContourRow('relation', 12325639);
+
+  assert.deepEqual(row, expectedRow);
+  assert.deepEqual(capturedArgs, ['relation', 12325639]);
+  assert.match(capturedSql, /ST_AsGeoJSON\(geom\)::text AS geometry_json/);
+});
+
 test('buildChangesFromRows does not report levels diff for numeric-equivalent values', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
