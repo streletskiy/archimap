@@ -1,4 +1,10 @@
 const { createRuntimeSettingsCache } = require('../services/runtime-settings-cache.service');
+const {
+  DEFAULT_CUSTOM_BASEMAP_URL,
+  normalizeBasemapApiKey,
+  normalizeBasemapProvider,
+  normalizeCustomBasemapUrl
+} = require('../services/basemap-config');
 
 function createRuntimeSettingsBoot(options: LooseRecord = {}) {
   const {
@@ -19,6 +25,8 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     userEditRequiresPermission = true,
     basemapProvider = 'carto',
     maptilerApiKey = '',
+    customBasemapUrl = DEFAULT_CUSTOM_BASEMAP_URL,
+    customBasemapApiKey = '',
     smtpUrl = '',
     smtpHost = '',
     smtpPort = 587,
@@ -38,7 +46,9 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     registrationEnabled,
     userEditRequiresPermission,
     basemapProvider,
-    maptilerApiKey
+    maptilerApiKey,
+    customBasemapUrl,
+    customBasemapApiKey
   };
   const smtpConfigFallback = {
     url: smtpUrl,
@@ -58,10 +68,21 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
       appBaseUrl: String(config.appBaseUrl || '').trim(),
       registrationEnabled: Boolean(config.registrationEnabled),
       userEditRequiresPermission: Boolean(config.userEditRequiresPermission),
-      basemapProvider: String(config.basemapProvider || basemapProvider).trim().toLowerCase() === 'maptiler'
-        ? 'maptiler'
-        : 'carto',
-      maptilerApiKey: String(config.maptilerApiKey || '').trim()
+      basemapProvider: (() => {
+        const provider = normalizeBasemapProvider(config.basemapProvider || basemapProvider);
+        const nextMaptilerApiKey = normalizeBasemapApiKey(config.maptilerApiKey);
+        const nextCustomBasemapUrl = normalizeCustomBasemapUrl(config.customBasemapUrl, customBasemapUrl);
+        if (provider === 'maptiler' && !nextMaptilerApiKey) {
+          return 'carto';
+        }
+        if (provider === 'custom' && !nextCustomBasemapUrl) {
+          return 'carto';
+        }
+        return provider;
+      })(),
+      maptilerApiKey: normalizeBasemapApiKey(config.maptilerApiKey),
+      customBasemapUrl: normalizeCustomBasemapUrl(config.customBasemapUrl, customBasemapUrl),
+      customBasemapApiKey: normalizeBasemapApiKey(config.customBasemapApiKey)
     })
   });
 

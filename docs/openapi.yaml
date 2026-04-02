@@ -662,8 +662,12 @@ paths:
                       type: boolean
                     basemapProvider:
                       type: string
-                      enum: [carto, maptiler]
+                      enum: [carto, maptiler, custom]
                     maptilerApiKey:
+                      type: string
+                    customBasemapUrl:
+                      type: string
+                    customBasemapApiKey:
                       type: string
       responses:
         '200':
@@ -776,7 +780,7 @@ paths:
       summary: Get runtime JS config payload
       responses:
         '200':
-          description: window.__ARCHIMAP_CONFIG bootstrap payload, including `basemap` runtime settings and available region PMTiles metadata
+          description: window.__ARCHIMAP_CONFIG bootstrap payload, including `basemap` runtime settings and available region PMTiles metadata. Custom basemap TileJSON and tile requests are served through same-origin proxy routes, while sprite and glyph assets are served from local static files.
   /api/filter-presets:
     get:
       summary: Get public runtime filter presets

@@ -50,6 +50,16 @@ docker compose up --build
 
 `docker-compose.yml` defaults to PostgreSQL + PostGIS. SQLite is still available for local development or explicit env override.
 
+### Basemap provider
+
+Open `Admin -> Settings` and choose `CARTO`, `MapTiler`, or `Custom`.
+
+- `Custom` accepts any TileJSON URL, for example `http://localhost:8080/current.json` during local PMTiles testing.
+- An optional API key can be stored alongside the URL when the upstream basemap service expects `?key=...`.
+- If ArchiMap runs in Docker and the basemap service runs on the host machine, use a host-reachable address such as `http://host.docker.internal:8080/current.json` instead of raw `localhost`.
+- Custom basemap TileJSON and tile requests are proxied through same-origin routes, while sprite and glyph assets are served from local static files, so the browser does not need direct access to the upstream host or `protomaps.github.io`.
+- The custom Protomaps style uses a monochrome, high-contrast palette inspired by Protomaps `white`/`black` themes while still using the local PMTiles schema.
+
 ## Docs
 
 - Full index -> [docs/README.md](docs/README.md)

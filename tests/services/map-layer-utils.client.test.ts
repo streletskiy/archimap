@@ -115,9 +115,9 @@ test('ensureRegionBuildingSourceAndLayers adds building and part layers in stabl
       sourceLayer: 'buildings'
     },
     buildingPaint: {
-      fillColor: '#a3a3a3',
+      fillColor: '#d3d3d1',
       fillOpacity: 1,
-      lineColor: '#bcbcbc',
+      lineColor: '#a9a9a9',
       lineWidth: 0.9,
       lineOpacity: 1
     },
@@ -198,9 +198,11 @@ test('getBasemapBuildingLayerIds resolves provider-specific base building layers
 
   assert.deepEqual(getBasemapBuildingLayerIds('carto'), ['building', 'building-top']);
   assert.deepEqual(getBasemapBuildingLayerIds('maptiler'), ['Building']);
+  assert.deepEqual(getBasemapBuildingLayerIds('custom'), ['buildings']);
   assert.deepEqual(getBasemapBuildingLayerIds('unknown'), ['building', 'building-top']);
   assert.deepEqual(getBasemapSuppressedLayerIds('carto'), []);
   assert.deepEqual(getBasemapSuppressedLayerIds('maptiler'), ['Building 3D']);
+  assert.deepEqual(getBasemapSuppressedLayerIds('custom'), ['pois']);
 });
 
 test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as pmtiles layers', async () => {
@@ -214,17 +216,17 @@ test('ensureOverpassBuildingSourceAndLayers applies the same selected styling as
       features: []
     },
     buildingPaint: {
-      fillColor: '#a3a3a3',
+      fillColor: '#d3d3d1',
       fillOpacity: 1,
-      lineColor: '#bcbcbc',
+      lineColor: '#a9a9a9',
       lineWidth: 0.9,
       lineOpacity: 1
     }
   });
 
-  assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-color'], '#a3a3a3');
+  assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-color'], '#d3d3d1');
   assert.equal(map.layers.get('overpass-buildings-source-fill').paint['fill-opacity'], 1);
-  assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-color'], '#bcbcbc');
+  assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-color'], '#a9a9a9');
   assert.equal(map.layers.get('overpass-buildings-source-line').paint['line-width'], 0.9);
   assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-color'], '#6d655b');
   assert.equal(map.layers.get('overpass-buildings-source-selected-fill').paint['fill-opacity'], 0.72);
@@ -273,9 +275,9 @@ test('ensureRegionBuildingSourceAndLayers applies initial hidden state for build
       sourceLayer: 'buildings'
     },
     buildingPaint: {
-      fillColor: '#a3a3a3',
+      fillColor: '#d3d3d1',
       fillOpacity: 1,
-      lineColor: '#bcbcbc',
+      lineColor: '#a9a9a9',
       lineWidth: 0.9,
       lineOpacity: 1
     },
@@ -537,6 +539,21 @@ test('applyLabelLayerVisibility does not force hidden MapTiler POI layers visibl
   ]);
   assert.equal(map.layers.get('Food').layout.visibility, 'none');
   assert.equal(map.layers.get('Road labels').layout.visibility, 'visible');
+});
+
+test('applyLabelLayerVisibility does not force hidden Protomaps POI layers visible again', async () => {
+  const { applyLabelLayerVisibility } = await loadMapLayerUtils();
+  const map = createMapStub();
+  map.addLayer({ id: 'pois', type: 'symbol', 'source-layer': 'pois', layout: { visibility: 'none' } });
+  map.addLayer({ id: 'places', type: 'symbol', 'source-layer': 'place', layout: { visibility: 'none' } });
+
+  applyLabelLayerVisibility(map, true);
+
+  assert.deepEqual(map.layoutCalls, [
+    { layerId: 'places', name: 'visibility', value: 'visible' }
+  ]);
+  assert.equal(map.layers.get('pois').layout.visibility, 'none');
+  assert.equal(map.layers.get('places').layout.visibility, 'visible');
 });
 
 test('applyLabelLayerVisibility does not force hidden ferry labels visible again', async () => {

@@ -44,6 +44,14 @@ function setCookiesFromHeaders(cookieJar, headers) {
   if (parsed) cookieJar.set(parsed.name, parsed.value);
 }
 
+function parseAppConfigJsPayload(text) {
+  const match = String(text || '').match(/window\.__ARCHIMAP_CONFIG\s*=\s*(\{[\s\S]*\});?\s*$/);
+  if (!match) {
+    throw new Error('Failed to parse app-config.js payload');
+  }
+  return JSON.parse(match[1]);
+}
+
 test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-it-'));
   const port = pickIntegrationPort('api');
@@ -196,9 +204,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const appConfig = await callApi('/app-config.js');
       assert.equal(appConfig.status, 200);
       const appConfigText = await appConfig.text();
-      assert.match(appConfigText, /window\.__ARCHIMAP_CONFIG/);
-      assert.match(appConfigText, /"basemap":\{"provider":"carto","maptilerApiKey":""\}/);
-      assert.match(appConfigText, /"mapSelection":\{"debug":false\}/);
+      const appConfigPayload = parseAppConfigJsPayload(appConfigText);
+      assert.equal(appConfigPayload.basemap.provider, 'carto');
+      assert.equal(appConfigPayload.basemap.maptilerApiKey, '');
+      assert.equal(appConfigPayload.basemap.customBasemapUrl, '');
+      assert.equal(appConfigPayload.basemap.customBasemapApiKey, '');
+      assert.equal(appConfigPayload.mapSelection.debug, false);
     });
 
     await t.test('registration does not depend on bootstrap first admin', async () => {
@@ -355,7 +366,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const appConfig = await callApi('/app-config.js');
       assert.equal(appConfig.status, 200);
       const appConfigText = await appConfig.text();
-      assert.match(appConfigText, /"basemap":\{"provider":"maptiler","maptilerApiKey":"integration-maptiler-key"\}/);
+      const appConfigPayload = parseAppConfigJsPayload(appConfigText);
+      assert.equal(appConfigPayload.basemap.provider, 'maptiler');
+      assert.equal(appConfigPayload.basemap.maptilerApiKey, 'integration-maptiler-key');
+      assert.equal(appConfigPayload.basemap.customBasemapUrl, '');
+      assert.equal(appConfigPayload.basemap.customBasemapApiKey, '');
 
       const invalidGeneral = await callApi('/api/admin/app-settings/general', {
         method: 'POST',
@@ -374,6 +389,44 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(invalidGeneral.status, 400);
       const invalidGeneralBody = await invalidGeneral.json();
       assert.match(String(invalidGeneralBody?.error || ''), /MapTiler API key/i);
+    });
+
+    await t.test('custom basemap settings are exposed in admin api and runtime config', async () => {
+      const generalSettings = await callApi('/api/admin/app-settings/general');
+      assert.equal(generalSettings.status, 200);
+      const generalSettingsBody = await generalSettings.json();
+
+      const saveCustomGeneral = await callApi('/api/admin/app-settings/general', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          general: {
+            ...(generalSettingsBody?.item?.general || {}),
+            appDisplayName: 'archimap',
+            appBaseUrl: baseUrl,
+            basemapProvider: 'custom',
+            customBasemapUrl: 'https://tiles.example.com/current.json',
+            customBasemapApiKey: 'integration-custom-key'
+          }
+        })
+      });
+      assert.equal(saveCustomGeneral.status, 200);
+      const saveCustomGeneralBody = await saveCustomGeneral.json();
+      assert.equal(saveCustomGeneralBody?.ok, true);
+      assert.equal(saveCustomGeneralBody?.item?.general?.basemapProvider, 'custom');
+      assert.equal(saveCustomGeneralBody?.item?.general?.customBasemapUrl, 'https://tiles.example.com/current.json');
+      assert.equal(saveCustomGeneralBody?.item?.general?.customBasemapApiKey, 'integration-custom-key');
+
+      const customAppConfig = await callApi('/app-config.js');
+      assert.equal(customAppConfig.status, 200);
+      const customAppConfigText = await customAppConfig.text();
+      const customAppConfigPayload = parseAppConfigJsPayload(customAppConfigText);
+      assert.equal(customAppConfigPayload.basemap.provider, 'custom');
+      assert.equal(customAppConfigPayload.basemap.customBasemapUrl, 'https://tiles.example.com/current.json');
+      assert.equal(customAppConfigPayload.basemap.customBasemapApiKey, 'integration-custom-key');
     });
 
     await t.test('style override admin endpoints work and building-info returns region_slugs', async () => {

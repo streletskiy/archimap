@@ -26,6 +26,7 @@ import {
   getCurrentSelectedLineLayerIds,
   removeRegionBuildingSourceAndLayers
 } from '../../services/map/map-layer-utils.js';
+import { normalizeBasemapProvider } from '../../services/map/basemap-config.js';
 import {
   SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
   SEARCH_RESULTS_CLUSTER_LAYER_ID,
@@ -244,9 +245,7 @@ export function createMapRegionLayersController({
   }
 
   function getBasemapProvider() {
-    return String(getRuntimeConfig?.()?.basemap?.provider || '').trim().toLowerCase() === 'maptiler'
-      ? 'maptiler'
-      : 'carto';
+    return normalizeBasemapProvider(getRuntimeConfig?.()?.basemap?.provider);
   }
 
   function setBasemapBuildingsVisibility(nextVisibility) {

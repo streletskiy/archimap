@@ -37,6 +37,8 @@ function enableBasemapColumns(db) {
   db.exec(`
     ALTER TABLE app_general_settings ADD COLUMN basemap_provider TEXT NOT NULL DEFAULT 'carto';
     ALTER TABLE app_general_settings ADD COLUMN maptiler_api_key TEXT;
+    ALTER TABLE app_general_settings ADD COLUMN custom_basemap_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE app_general_settings ADD COLUMN custom_basemap_api_key TEXT;
   `);
 }
 
@@ -186,15 +188,56 @@ test('saveGeneralSettings persists basemap provider and maptiler api key when sc
   const row = db.prepare(`
     SELECT
       basemap_provider,
-      maptiler_api_key
+      maptiler_api_key,
+      custom_basemap_url,
+      custom_basemap_api_key
     FROM app_general_settings
     WHERE id = 1
   `).get();
 
   assert.equal(row.basemap_provider, 'maptiler');
   assert.equal(row.maptiler_api_key, 'test-maptiler-key');
+  assert.equal(row.custom_basemap_url, '');
+  assert.equal(row.custom_basemap_api_key, null);
   assert.equal(settings.general.basemapProvider, 'maptiler');
   assert.equal(settings.general.maptilerApiKey, 'test-maptiler-key');
+});
+
+test('saveGeneralSettings persists custom basemap url and api key when schema supports it', async () => {
+  const db = createTestDb();
+  enableBasemapColumns(db);
+  db.exec('ALTER TABLE app_general_settings ADD COLUMN metrics_token TEXT;');
+  const service = createAppSettingsService({
+    db,
+    settingsSecret: 'test-secret',
+    fallbackGeneral: {}
+  });
+
+  const settings = await service.saveGeneralSettings({
+    appDisplayName: 'custom-basemap-test',
+    appBaseUrl: 'https://example.com',
+    registrationEnabled: true,
+    userEditRequiresPermission: false,
+    basemapProvider: 'custom',
+    customBasemapUrl: 'https://tiles.example.com/current.json',
+    customBasemapApiKey: 'test-custom-key'
+  }, 'admin@example.com');
+
+  const row = db.prepare(`
+    SELECT
+      basemap_provider,
+      custom_basemap_url,
+      custom_basemap_api_key
+    FROM app_general_settings
+    WHERE id = 1
+  `).get();
+
+  assert.equal(row.basemap_provider, 'custom');
+  assert.equal(row.custom_basemap_url, 'https://tiles.example.com/current.json');
+  assert.equal(row.custom_basemap_api_key, 'test-custom-key');
+  assert.equal(settings.general.basemapProvider, 'custom');
+  assert.equal(settings.general.customBasemapUrl, 'https://tiles.example.com/current.json');
+  assert.equal(settings.general.customBasemapApiKey, 'test-custom-key');
 });
 
 test('saveGeneralSettings rejects maptiler provider without api key', async () => {
@@ -215,6 +258,30 @@ test('saveGeneralSettings rejects maptiler provider without api key', async () =
     (error) => {
       assert.equal(error?.status, 400);
       assert.match(String(error?.message || ''), /MapTiler API key/i);
+      return true;
+    }
+  );
+});
+
+test('saveGeneralSettings rejects custom provider without url', async () => {
+  const db = createTestDb();
+  enableBasemapColumns(db);
+  const service = createAppSettingsService({
+    db,
+    settingsSecret: 'test-secret',
+    fallbackGeneral: {}
+  });
+
+  await assert.rejects(
+    () => service.saveGeneralSettings({
+      appDisplayName: 'invalid-custom',
+      basemapProvider: 'custom',
+      customBasemapUrl: '',
+      customBasemapApiKey: 'test-custom-key'
+    }, 'admin@example.com'),
+    (error) => {
+      assert.equal(error?.status, 400);
+      assert.match(String(error?.message || ''), /Custom basemap URL/i);
       return true;
     }
   );

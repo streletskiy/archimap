@@ -12,7 +12,7 @@
   - `style-src-attr 'unsafe-inline'`
   - `img-src 'self' data: blob: <extra-origins>`; roof-shape thumbnails are now served from local static assets, so the default extra origins do not include OSM wiki / Wikimedia hosts anymore
   - `font-src 'self' data: <extra-origins>`
-  - `connect-src 'self' <extra-origins>` where the default extra origins include CARTO tile hosts, `api.maptiler.com`, and the public Overpass instances used by the browser fallback
+  - `connect-src 'self' <extra-origins>` where the default extra origins include CARTO tile hosts, `api.maptiler.com`, and the public Overpass instances used by the browser fallback; custom basemap TileJSON and tile requests are proxied through same-origin routes, while sprite and glyph assets are served from local static files, so the browser does not need direct access to `protomaps.github.io` or any custom basemap host
   - `object-src 'none'`
   - `base-uri 'self'`
   - `frame-ancestors 'none'`

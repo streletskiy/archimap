@@ -65,7 +65,8 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 ## DB-backed general settings
 
 - `Admin -> Settings` stores runtime general settings in DB.
-- Basemap selection (`carto|maptiler`) and the public `MapTiler` browser key are delivered to clients only through `/app-config.js`.
+- Basemap selection (`carto|maptiler|custom`) and the public `MapTiler` browser key are delivered to clients only through `/app-config.js`.
+- Custom basemap TileJSON URL and optional API key are also stored in DB settings, but the browser uses same-origin proxy routes for custom TileJSON and tiles, while glyphs and sprites are served from local static assets, so no custom basemap host needs to be added to CSP.
 
 ## Region defaults
 

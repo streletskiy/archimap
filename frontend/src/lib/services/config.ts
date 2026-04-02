@@ -1,7 +1,19 @@
+import {
+  DEFAULT_CUSTOM_BASEMAP_URL,
+  normalizeBasemapApiKey,
+  normalizeBasemapProvider,
+  normalizeCustomBasemapUrl
+} from './map/basemap-config.js';
+
 const FALLBACK_CONFIG = Object.freeze({
   mapDefault: { lon: 44.0059, lat: 56.3269, zoom: 15 },
   buildingRegionsPmtiles: [],
-  basemap: { provider: 'carto', maptilerApiKey: '' },
+  basemap: {
+    provider: 'carto',
+    maptilerApiKey: '',
+    customBasemapUrl: DEFAULT_CUSTOM_BASEMAP_URL,
+    customBasemapApiKey: ''
+  },
   mapSelection: { debug: false }
 });
 
@@ -40,16 +52,34 @@ function normalizeRegionPmtiles(item) {
 }
 
 function normalizeBasemapConfig(value) {
-  const provider = String(value?.provider || '').trim().toLowerCase() === 'maptiler'
-    ? 'maptiler'
-    : 'carto';
-  const maptilerApiKey = String(value?.maptilerApiKey || '').trim();
+  const provider = normalizeBasemapProvider(value?.provider);
+  const maptilerApiKey = normalizeBasemapApiKey(value?.maptilerApiKey);
+  const customBasemapUrl = normalizeCustomBasemapUrl(
+    value?.customBasemapUrl,
+    FALLBACK_CONFIG.basemap.customBasemapUrl
+  );
+  const customBasemapApiKey = normalizeBasemapApiKey(value?.customBasemapApiKey);
   if (provider === 'maptiler' && !maptilerApiKey) {
-    return { ...FALLBACK_CONFIG.basemap };
+    return {
+      provider: 'carto',
+      maptilerApiKey: '',
+      customBasemapUrl,
+      customBasemapApiKey
+    };
+  }
+  if (provider === 'custom' && !customBasemapUrl) {
+    return {
+      provider: 'carto',
+      maptilerApiKey,
+      customBasemapUrl,
+      customBasemapApiKey
+    };
   }
   return {
     provider,
-    maptilerApiKey
+    maptilerApiKey,
+    customBasemapUrl,
+    customBasemapApiKey
   };
 }
 

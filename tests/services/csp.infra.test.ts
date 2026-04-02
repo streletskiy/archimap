@@ -73,6 +73,8 @@ test('parseRuntimeEnv defaults CSP connect origins for carto and overpass fallba
     assert.ok(connectOrigins.has('https://api.maptiler.com'));
     assert.ok(connectOrigins.has('https://overpass-api.de'));
     assert.ok(connectOrigins.has('https://overpass.kumi.systems'));
+    assert.equal(connectOrigins.has('https://protomaps.github.io'), false);
+    assert.equal(connectOrigins.has('http://localhost:8080'), false);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousNodeEnv;
@@ -109,6 +111,8 @@ test('frontend hook CSP allows browser Overpass requests by default', async () =
     assert.ok(connectSrc.has('https://api.maptiler.com'));
     assert.ok(connectSrc.has('https://overpass-api.de'));
     assert.ok(connectSrc.has('https://maps.mail.ru'));
+    assert.equal(connectSrc.has('https://protomaps.github.io'), false);
+    assert.equal(connectSrc.has('http://localhost:8080'), false);
     assert.equal(/\bscript-src\s[^;]*unsafe-inline/.test(csp), false);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;

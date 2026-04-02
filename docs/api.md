@@ -99,11 +99,12 @@ System notes:
 - `POST /api/admin/users/edit-permission`, `POST /api/admin/users/role`
 - `GET /api/admin/app-settings/general`
   - Returns DB-backed general runtime settings.
-  - `general` includes `appDisplayName`, `appBaseUrl`, `registrationEnabled`, `userEditRequiresPermission`, `metricsToken`, `basemapProvider`, and `maptilerApiKey`.
+  - `general` includes `appDisplayName`, `appBaseUrl`, `registrationEnabled`, `userEditRequiresPermission`, `metricsToken`, `basemapProvider`, `maptilerApiKey`, `customBasemapUrl`, and `customBasemapApiKey`.
 - `POST /api/admin/app-settings/general`
   - Saves the same `general` payload as above.
-  - `basemapProvider` supports `carto` and `maptiler`.
+  - `basemapProvider` supports `carto`, `maptiler`, and `custom`.
   - When `basemapProvider=maptiler`, `maptilerApiKey` is required.
+  - When `basemapProvider=custom`, `customBasemapUrl` is required and `customBasemapApiKey` is optional.
 - `GET /api/admin/app-settings/smtp`
 - `POST /api/admin/app-settings/smtp`
 - `POST /api/admin/app-settings/smtp/test`
@@ -226,8 +227,10 @@ System notes:
 
 - `GET /app-config.js`
   - Returns `window.__ARCHIMAP_CONFIG`.
-  - Includes `basemap: { provider, maptilerApiKey }`.
+  - Includes `basemap: { provider, maptilerApiKey, customBasemapUrl, customBasemapApiKey }`.
   - Invalid `maptiler` runtime config without a key is normalized back to `carto` so the client map still boots.
+  - Invalid `custom` runtime config without a basemap URL is normalized back to `carto` so the client map still boots.
+  - Custom basemap TileJSON and tile requests are served through same-origin routes; sprite and glyph assets come from local static files.
   - Multi-region payload adds `buildingRegionsPmtiles[]`, each item containing:
     - `id`
     - `slug`

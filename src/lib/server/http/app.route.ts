@@ -4,6 +4,20 @@ const { pathToFileURL } = require('url');
 const { sendCachedJson } = require('../infra/http-cache.infra');
 const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
 const {
+  CUSTOM_BASEMAP_TILEJSON_PROXY_URL,
+  CUSTOM_BASEMAP_TILE_PROXY_URL,
+  DEFAULT_CUSTOM_BASEMAP_URL,
+  buildBasemapSourceUrl,
+  normalizeBasemapApiKey,
+  normalizeBasemapProvider,
+  normalizeCustomBasemapUrl
+} = require('../services/basemap-config');
+const {
+  fetchRemoteJson,
+  rewriteCustomBasemapTileJson,
+  sendProxiedBinaryResponse
+} = require('../services/basemap-proxy.service');
+const {
   resolveExistingRegionPmtilesPath,
   resolveRegionPmtilesPath
 } = require('../services/data-settings.service');
@@ -55,20 +69,57 @@ function registerAppRoutes(deps) {
   const invokeSvelteNodeHandler = createSvelteNodeHandlerInvoker(rootDir);
 
   function normalizeBasemapConfig(raw: LooseRecord = {}) {
-    const provider = String(raw?.basemapProvider || '').trim().toLowerCase() === 'maptiler'
-      ? 'maptiler'
-      : 'carto';
-    const maptilerApiKey = String(raw?.maptilerApiKey || '').trim();
+    const provider = normalizeBasemapProvider(raw?.basemapProvider);
+    const maptilerApiKey = normalizeBasemapApiKey(raw?.maptilerApiKey);
+    const customBasemapUrl = normalizeCustomBasemapUrl(raw?.customBasemapUrl, DEFAULT_CUSTOM_BASEMAP_URL);
+    const customBasemapApiKey = normalizeBasemapApiKey(raw?.customBasemapApiKey);
     if (provider === 'maptiler' && !maptilerApiKey) {
       return {
         provider: 'carto',
-        maptilerApiKey: ''
+        maptilerApiKey: '',
+        customBasemapUrl,
+        customBasemapApiKey
+      };
+    }
+    if (provider === 'custom' && !customBasemapUrl) {
+      return {
+        provider: 'carto',
+        maptilerApiKey,
+        customBasemapUrl,
+        customBasemapApiKey
       };
     }
     return {
       provider,
-      maptilerApiKey
+      maptilerApiKey,
+      customBasemapUrl,
+      customBasemapApiKey
     };
+  }
+
+  async function getEffectiveBasemapSettings() {
+    const effectiveGeneralSettings = typeof loadEffectiveGeneralConfig === 'function'
+      ? await Promise.resolve(loadEffectiveGeneralConfig()).catch(() => null)
+      : null;
+    const generalConfig = effectiveGeneralSettings?.config && typeof effectiveGeneralSettings.config === 'object'
+      ? effectiveGeneralSettings.config
+      : {};
+    return {
+      config: generalConfig,
+      customBasemapUrl: normalizeCustomBasemapUrl(generalConfig?.customBasemapUrl, DEFAULT_CUSTOM_BASEMAP_URL),
+      customBasemapApiKey: normalizeBasemapApiKey(generalConfig?.customBasemapApiKey)
+    };
+  }
+
+  function getRequestOrigin(req) {
+    const forwardedProto = String(req.get?.('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase();
+    const protocol = forwardedProto === 'https' || forwardedProto === 'http'
+      ? forwardedProto
+      : String(req.protocol || 'http').trim().toLowerCase() || 'http';
+    const forwardedHost = String(req.get?.('x-forwarded-host') || '').split(',')[0].trim();
+    const host = forwardedHost || String(req.get?.('host') || '').trim();
+    if (!host) return '';
+    return `${protocol}://${host.replace(/\/+$/, '')}`;
   }
 
   async function getAvailableRegionPmtiles() {
@@ -86,12 +137,8 @@ function registerAppRoutes(deps) {
     const mapDefault = normalizeMapConfig();
     const regionalPmtiles = await getAvailableRegionPmtiles();
     const buildInfo = getBuildInfo();
-    const effectiveGeneralSettings = typeof loadEffectiveGeneralConfig === 'function'
-      ? await Promise.resolve(loadEffectiveGeneralConfig()).catch(() => null)
-      : null;
-    const generalConfig = effectiveGeneralSettings?.config && typeof effectiveGeneralSettings.config === 'object'
-      ? effectiveGeneralSettings.config
-      : {};
+    const effectiveBasemapSettings = await getEffectiveBasemapSettings();
+    const generalConfig = effectiveBasemapSettings.config;
     const mapSelection = {
       debug: String(process.env.MAP_SELECTION_ATOMIC_DEBUG || '').trim() === 'true'
     };
@@ -116,6 +163,62 @@ function registerAppRoutes(deps) {
         mapSelection
       })};`
     );
+  });
+
+  app.get(CUSTOM_BASEMAP_TILEJSON_PROXY_URL, async (req, res) => {
+    try {
+      const { customBasemapUrl, customBasemapApiKey } = await getEffectiveBasemapSettings();
+      if (!customBasemapUrl) {
+        return res.status(400).json({
+          code: 'ERR_CUSTOM_BASEMAP_NOT_CONFIGURED',
+          error: 'Custom basemap URL is not configured'
+        });
+      }
+
+      const upstreamUrl = buildBasemapSourceUrl(customBasemapUrl, customBasemapApiKey);
+      const tilejson = await fetchRemoteJson(upstreamUrl, {
+        accept: 'application/json'
+      });
+      const proxiedTilejson = rewriteCustomBasemapTileJson(
+        tilejson,
+        upstreamUrl,
+        customBasemapApiKey,
+        getRequestOrigin(req)
+      );
+      return sendCachedJson(req, res, proxiedTilejson, {
+        cacheControl: 'private, no-cache'
+      });
+    } catch (error) {
+      return res.status(Number(error?.status) || 502).json({
+        code: 'ERR_CUSTOM_BASEMAP_TILEJSON_FAILED',
+        error: 'Failed to load custom basemap tilejson'
+      });
+    }
+  });
+
+  app.get(CUSTOM_BASEMAP_TILE_PROXY_URL, async (req, res) => {
+    try {
+      const upstreamTemplate = String(req.query?.u || '').trim();
+      const z = String(req.query?.z || '').trim();
+      const x = String(req.query?.x || '').trim();
+      const y = String(req.query?.y || '').trim();
+      if (!upstreamTemplate || !z || !x || !y) {
+        return res.status(400).json({
+          code: 'ERR_CUSTOM_BASEMAP_TILE_REQUEST_INVALID',
+          error: 'Invalid custom basemap tile request'
+        });
+      }
+      const upstreamUrl = upstreamTemplate
+        .replace(/\{z\}/g, z)
+        .replace(/\{x\}/g, x)
+        .replace(/\{y\}/g, y);
+      return await sendProxiedBinaryResponse(req, res, upstreamUrl);
+    } catch {
+      return res.status(500).json({
+        code: 'ERR_CUSTOM_BASEMAP_TILE_FAILED',
+        error: 'Failed to load custom basemap tile'
+      });
+    }
   });
 
   app.get('/api/version', publicApiRateLimiter, (req, res) => {

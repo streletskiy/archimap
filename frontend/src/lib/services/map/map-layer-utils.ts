@@ -19,15 +19,18 @@ import {
   SEARCH_RESULTS_LAYER_ID,
   SEARCH_RESULTS_SOURCE_ID
 } from './map-search-utils.js';
+import { normalizeBasemapProvider } from './basemap-config.js';
 import { hasPositiveStyleFilterMatch } from './map-style-filter-utils.js';
 
 export const BASEMAP_BUILDING_LAYER_IDS = Object.freeze({
   carto: Object.freeze(['building', 'building-top']),
-  maptiler: Object.freeze(['Building'])
+  maptiler: Object.freeze(['Building']),
+  custom: Object.freeze(['buildings'])
 });
 export const BASEMAP_SUPPRESSED_LAYER_IDS = Object.freeze({
   carto: Object.freeze([]),
-  maptiler: Object.freeze(['Building 3D'])
+  maptiler: Object.freeze(['Building 3D']),
+  custom: Object.freeze(['pois'])
 });
 export const BUILDING_FEATURE_KIND = 'building';
 export const BUILDING_PART_FEATURE_KIND = 'building_part';
@@ -62,17 +65,13 @@ const OVERPASS_BUILDING_LAYER_SUFFIXES = Object.freeze({
 });
 
 export function getBasemapBuildingLayerIds(provider = 'carto') {
-  const normalizedProvider = String(provider || '').trim().toLowerCase() === 'maptiler'
-    ? 'maptiler'
-    : 'carto';
-  return BASEMAP_BUILDING_LAYER_IDS[normalizedProvider];
+  const normalizedProvider = normalizeBasemapProvider(provider);
+  return BASEMAP_BUILDING_LAYER_IDS[normalizedProvider] || BASEMAP_BUILDING_LAYER_IDS.carto;
 }
 
 export function getBasemapSuppressedLayerIds(provider = 'carto') {
-  const normalizedProvider = String(provider || '').trim().toLowerCase() === 'maptiler'
-    ? 'maptiler'
-    : 'carto';
-  return BASEMAP_SUPPRESSED_LAYER_IDS[normalizedProvider];
+  const normalizedProvider = normalizeBasemapProvider(provider);
+  return BASEMAP_SUPPRESSED_LAYER_IDS[normalizedProvider] || BASEMAP_SUPPRESSED_LAYER_IDS.carto;
 }
 
 function buildOverpassBuildingLayerId(suffix = '') {
@@ -483,11 +482,13 @@ export function bindMapInteractionHandlers({
 
 export function isBaseLabelLayer(layer) {
   if (!layer || layer.type !== 'symbol') return false;
-  if (String(layer?.['source-layer'] || '').trim().toLowerCase() === 'poi') return false;
+  const sourceLayer = String(layer?.['source-layer'] || '').trim().toLowerCase();
+  const layerId = String(layer.id || '').trim().toLowerCase();
+  if (sourceLayer === 'poi' || sourceLayer === 'pois') return false;
+  if (layerId === 'pois' || layerId.startsWith('pois-')) return false;
   if (hasPositiveStyleFilterMatch(layer?.filter, 'class', 'ferry')) return false;
-  const id = String(layer.id || '').toLowerCase();
-  if (id === SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID) return false;
-  if (id.startsWith('search-results-')) return false;
+  if (layerId === SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID) return false;
+  if (layerId.startsWith('search-results-')) return false;
   return true;
 }
 

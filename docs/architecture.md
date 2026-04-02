@@ -65,6 +65,7 @@
   - `src/lib/server/services/admin/admin-settings.service.ts`: email-preview, app-settings, data-settings, and region-sync orchestration
   - `src/lib/server/services/admin/admin-edits.service.ts`: admin edit moderation, merge flows, and admin user detail queries
   - `src/lib/server/services/style-region-overrides.service.ts`: public/admin style-region override rule persistence and validation
+  - `src/lib/server/services/basemap-proxy.service.ts`: same-origin proxy and TileJSON rewrite helpers for custom basemaps; Protomaps glyph/sprite assets are served from local static files under `frontend/static/basemaps-assets`
   - `src/lib/server/services/osm-sync.service.ts`: thin façade over `osm-oauth.ts`, `osm-api-client.ts`, `osm-changeset-builder.ts`, and `osm-candidate-resolver.ts` for OSM admin sync and OAuth flows
 - Frontend map filter decomposition:
   - `frontend/src/lib/services/map/map-filter-pipeline.ts`: filter lifecycle orchestration entrypoint for viewport events and status transitions
@@ -77,7 +78,7 @@
   - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, 2D contour vs 3D extrusion hit-testing, and search-result click routing
   - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, provider-aware basemap building visibility, and base-label stacking
   - `frontend/src/lib/services/map/map-3d-utils.ts`: shared 3D height/base derivation rules, parent-footprint suppression property names, and MapLibre extrusion expressions for PMTiles and Overpass buildings
-  - `frontend/src/lib/services/map/map-theme-utils.ts`: basemap style resolution for CARTO/MapTiler, MapTiler POI/ferry/3D-building suppression, and locale-aware label transformation before styles reach MapLibre
+  - `frontend/src/lib/services/map/map-theme-utils.ts`: basemap style resolution for CARTO/MapTiler/custom proxied basemaps, local Protomaps sprite/glyph asset wiring, a custom high-contrast monochrome Protomaps flavor for custom basemaps, MapTiler POI/ferry/3D-building suppression, and locale-aware label transformation before styles reach MapLibre
   - `frontend/src/lib/services/map/map-style-sync.ts`: shared theme/locale-driven basemap style synchronization used by secondary map widgets outside the main canvas
 - Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.

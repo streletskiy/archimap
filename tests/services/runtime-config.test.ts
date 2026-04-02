@@ -28,7 +28,12 @@ test('getRuntimeConfig falls back to region-only runtime config when window payl
     const runtimeConfig = getRuntimeConfig();
     assert.deepEqual(runtimeConfig.mapDefault, { lon: 44.0059, lat: 56.3269, zoom: 15 });
     assert.deepEqual(runtimeConfig.buildingRegionsPmtiles, []);
-    assert.deepEqual(runtimeConfig.basemap, { provider: 'carto', maptilerApiKey: '' });
+    assert.deepEqual(runtimeConfig.basemap, {
+      provider: 'carto',
+      maptilerApiKey: '',
+      customBasemapUrl: '',
+      customBasemapApiKey: ''
+    });
     assert.deepEqual(runtimeConfig.mapSelection, { debug: false });
   } finally {
     restoreWindow(originalWindow);
@@ -89,7 +94,9 @@ test('getRuntimeConfig normalizes regional PMTiles payload and viewport helper a
     assert.equal(runtimeConfig.mapSelection.debug, true);
     assert.deepEqual(runtimeConfig.basemap, {
       provider: 'maptiler',
-      maptilerApiKey: 'sample-maptiler-key'
+      maptilerApiKey: 'sample-maptiler-key',
+      customBasemapUrl: '',
+      customBasemapApiKey: ''
     });
 
     const activeRegions = getActiveRegionPmtiles(runtimeConfig.buildingRegionsPmtiles, {
@@ -129,7 +136,36 @@ test('getRuntimeConfig falls back to carto when maptiler provider is missing an 
     const runtimeConfig = getRuntimeConfig();
     assert.deepEqual(runtimeConfig.basemap, {
       provider: 'carto',
-      maptilerApiKey: ''
+      maptilerApiKey: '',
+      customBasemapUrl: '',
+      customBasemapApiKey: ''
+    });
+  } finally {
+    restoreWindow(originalWindow);
+  }
+});
+
+test('getRuntimeConfig falls back to carto when custom basemap provider is missing a url', async () => {
+  const { getRuntimeConfig } = await importFrontendModule('lib', 'services', 'config.ts');
+  const originalWindow = globalThis.window;
+
+  try {
+    globalThis.window = {
+      __ARCHIMAP_CONFIG: {
+        basemap: {
+          provider: 'custom',
+          customBasemapUrl: '',
+          customBasemapApiKey: 'test-key'
+        }
+      }
+    } as unknown as Window & typeof globalThis;
+
+    const runtimeConfig = getRuntimeConfig();
+    assert.deepEqual(runtimeConfig.basemap, {
+      provider: 'carto',
+      maptilerApiKey: '',
+      customBasemapUrl: '',
+      customBasemapApiKey: 'test-key'
     });
   } finally {
     restoreWindow(originalWindow);

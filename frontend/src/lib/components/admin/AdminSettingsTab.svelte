@@ -4,19 +4,42 @@
   import { UiButton, UiCheckbox, UiInput, UiSelect } from '$lib/components/base';
   import { t, translateNow } from '$lib/i18n/index';
   import { apiJson } from '$lib/services/http';
+  import {
+    DEFAULT_CUSTOM_BASEMAP_URL,
+    normalizeBasemapApiKey,
+    normalizeBasemapProvider,
+    normalizeCustomBasemapUrl
+  } from '$lib/services/map/basemap-config.js';
 
   export let isMasterAdmin = false;
 
   const msg = (error, fallback) => String(error?.message || fallback);
 
-  let general = {
+  const DEFAULT_GENERAL = {
     appDisplayName: 'archimap',
     appBaseUrl: '',
     registrationEnabled: true,
     userEditRequiresPermission: true,
     metricsToken: '',
     basemapProvider: 'carto',
-    maptilerApiKey: ''
+    maptilerApiKey: '',
+    customBasemapUrl: DEFAULT_CUSTOM_BASEMAP_URL,
+    customBasemapApiKey: ''
+  };
+
+  function normalizeGeneralConfig(value = {}) {
+    return {
+      ...DEFAULT_GENERAL,
+      ...value,
+      basemapProvider: normalizeBasemapProvider(value.basemapProvider),
+      maptilerApiKey: normalizeBasemapApiKey(value.maptilerApiKey),
+      customBasemapUrl: normalizeCustomBasemapUrl(value.customBasemapUrl, DEFAULT_GENERAL.customBasemapUrl),
+      customBasemapApiKey: normalizeBasemapApiKey(value.customBasemapApiKey)
+    };
+  }
+
+  let general = {
+    ...DEFAULT_GENERAL
   };
   let generalLoading = false;
   let generalStatus = '';
@@ -42,7 +65,7 @@
 
     try {
       const data = await apiJson('/api/admin/app-settings/general');
-      general = data?.item?.general || general;
+      general = normalizeGeneralConfig(data?.item?.general || general);
       generalStatus = '';
     } catch (error) {
       generalStatus = msg(error, translateNow('admin.settings.loadGeneralFailed'));
@@ -57,6 +80,10 @@
       generalStatus = translateNow('admin.settings.maptilerApiKeyRequired');
       return;
     }
+    if (general.basemapProvider === 'custom' && String(general.customBasemapUrl || '').trim() === '') {
+      generalStatus = translateNow('admin.settings.customBasemapUrlRequired');
+      return;
+    }
     generalLoading = true;
     generalStatus = translateNow('admin.settings.saving');
 
@@ -66,12 +93,14 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ general })
       });
-      general = data?.item?.general || general;
+      general = normalizeGeneralConfig(data?.item?.general || general);
       if (typeof window !== 'undefined') {
         window.__ARCHIMAP_CONFIG = window.__ARCHIMAP_CONFIG || {};
         window.__ARCHIMAP_CONFIG.basemap = {
           provider: general.basemapProvider,
-          maptilerApiKey: general.maptilerApiKey
+          maptilerApiKey: general.maptilerApiKey,
+          customBasemapUrl: general.customBasemapUrl,
+          customBasemapApiKey: general.customBasemapApiKey
         };
       }
       generalStatus = translateNow('admin.settings.saved');
@@ -90,6 +119,10 @@
     {
       value: 'maptiler',
       label: $t('admin.settings.basemapProviderMaptiler')
+    },
+    {
+      value: 'custom',
+      label: $t('admin.settings.basemapProviderCustom')
     }
   ];
 
@@ -190,16 +223,37 @@
           placeholder={$t('admin.settings.basemapTitle')}
         />
       </div>
-      <div class="space-y-1">
-        <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.maptilerApiKey')}</div>
-        <UiInput
-          type="password"
-          bind:value={general.maptilerApiKey}
-          placeholder={$t('admin.settings.maptilerApiKeyPlaceholder')}
-          disabled={general.basemapProvider !== 'maptiler'}
-        />
-        <p class="text-xs ui-text-muted">{$t('admin.settings.basemapHelp')}</p>
-      </div>
+      {#if general.basemapProvider === 'maptiler'}
+        <div class="space-y-1">
+          <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.maptilerApiKey')}</div>
+          <UiInput
+            type="password"
+            bind:value={general.maptilerApiKey}
+            placeholder={$t('admin.settings.maptilerApiKeyPlaceholder')}
+          />
+          <p class="text-xs ui-text-muted">{$t('admin.settings.basemapHelp')}</p>
+        </div>
+      {/if}
+      {#if general.basemapProvider === 'custom'}
+        <div class="space-y-1">
+          <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.customBasemapUrl')}</div>
+          <UiInput
+            type="text"
+            bind:value={general.customBasemapUrl}
+            placeholder={$t('admin.settings.customBasemapUrlPlaceholder')}
+          />
+          <p class="text-xs ui-text-muted">{$t('admin.settings.customBasemapHelp')}</p>
+        </div>
+        <div class="space-y-1">
+          <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.customBasemapApiKey')}</div>
+          <UiInput
+            type="password"
+            bind:value={general.customBasemapApiKey}
+            placeholder={$t('admin.settings.customBasemapApiKeyPlaceholder')}
+          />
+          <p class="text-xs ui-text-muted">{$t('admin.settings.customBasemapApiKeyHelp')}</p>
+        </div>
+      {/if}
       <div class="mt-2 text-sm text-gray-500">
         <div class="font-semibold text-gray-700">{$t('admin.settings.metricsToken')}:</div>
         <div class="flex items-center gap-2 mt-1">
