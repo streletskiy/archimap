@@ -129,10 +129,14 @@ export function createUrlStateManager({
     }
   }
 
-  function applyFiltersFromUrl(filters: LooseRecord, currentFilters: LooseRecord[] = []) {
+  function applyFiltersFromUrl(
+    filters: LooseRecord,
+    currentFilters: LooseRecord[] = [],
+    { force = false }: LooseRecord = {}
+  ) {
     const nextFilterKey = getFilterLayersUrlSignature(filters);
     const currentFilterKey = getFilterLayersUrlSignature(currentFilters);
-    if (nextFilterKey === currentFilterKey) return;
+    if (!force && nextFilterKey === currentFilterKey) return;
     filterApplyInFlight = true;
     try {
       onApplyFilters?.(filters);
@@ -151,6 +155,12 @@ export function createUrlStateManager({
     const signature = getUrlStateSignature(state);
     const hasCamera = Boolean(state.camera);
     const cameraDeferred = Boolean(hasCamera && !mapReady);
+    const replayDeferredFilters = Boolean(
+      state.filters
+      && pendingUrlSignature
+      && pendingUrlSignature === signature
+      && !cameraDeferred
+    );
     if (signature === handledUrlSignature && !cameraDeferred) return;
     if (buildingCloseInFlight) return;
     if (cameraDeferred) {
@@ -187,7 +197,10 @@ export function createUrlStateManager({
     }
 
     if (state.filters) {
-      applyFiltersFromUrl(state.filters, currentFilters);
+      // Deep links that carry both camera and filters can resolve the filter store
+      // before the map is ready. Re-emit the same filters once the deferred camera
+      // has been applied so the map pipeline rebuilds against the final viewport.
+      applyFiltersFromUrl(state.filters, currentFilters, { force: replayDeferredFilters });
     } else if (
       hadUrlFilterKey
       && !filterApplyInFlight

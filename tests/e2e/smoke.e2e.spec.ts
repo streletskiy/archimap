@@ -6,6 +6,8 @@ const { test, expect } = require('@playwright/test');
 
 const PORT = 4020 + Math.floor(Math.random() * 120);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const BUILDING_LEVELS_FILTER_URL =
+  'AgEPYnVpbGRpbmc6bGV2ZWxzBgKG76wBAAEBMQL94EcBAAEBMgL9unQCAAcBMwAIATUC-5I8AgAHATUACAE5AvhxcQIABwE5AAgCMTYCwIT8AQAHAjE2';
 
 let server;
 let tmpRoot;
@@ -172,6 +174,22 @@ test('keeps map deep link params and renders map', async ({ page }) => {
   await expect(page).toHaveURL(/[?&]lat=/);
   await expect(page).toHaveURL(/[?&]lng=/);
   await expect(page).toHaveURL(/[?&]z=/);
+});
+
+test('resolves URL filter state on initial deep link load without moving the camera', async ({ page }) => {
+  await page.goto(
+    `${BASE_URL}/app?lat=56.320654&lng=44.002728&z=13.37&3d=0&f=${BUILDING_LEVELS_FILTER_URL}`,
+    { waitUntil: 'domcontentloaded' }
+  );
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect.poll(async () => page.locator('.map-canvas').getAttribute('data-filter-phase'), {
+    timeout: 15000
+  }).toBe('authoritative');
+  await expect.poll(async () => page.evaluate(() => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const stats = debug.filterRequests || {};
+    return Number(stats.finish || 0);
+  }), { timeout: 15000 }).toBeGreaterThan(0);
 });
 
 test('map attribution includes archimap', async ({ page }) => {

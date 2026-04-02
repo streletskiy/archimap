@@ -113,6 +113,7 @@
   import { createMapRegionLayersController } from './map-region-layers-controller';
   import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
+  import { resolveInitialFilterReplayAction } from '$lib/services/map/filter-initial-replay';
   import OverpassFallbackOverlay from './OverpassFallbackOverlay.svelte';
 
   const FILTER_APPLY_PROGRESS_TICK_MS = 120;
@@ -149,6 +150,9 @@
   let lastOverpassLoading;
   let cameraStoreSyncEnabled = false;
   let effectiveBuildingPartsVisible = false;
+  let initialFilterReplayEnabled = false;
+  let initialFilterReplayQueued = false;
+  let initialFilterReplayRetryTimer = null;
 
   $: effectiveBuildingPartsVisible = getEffectiveBuildingPartsVisibility({
     buildingPartsVisible: $mapBuildingPartsVisible,
@@ -451,6 +455,76 @@
     syncOverpassMapLayers();
   }
 
+  function hasInitialFilterReplayLayersReady() {
+    if (!map) return false;
+    const layerIds = regionLayersController.getCurrentMapLayerIds();
+    const candidateLayerIds = [
+      ...(Array.isArray(layerIds?.filterHighlightExtrusionLayerIds) ? layerIds.filterHighlightExtrusionLayerIds : []),
+      ...(Array.isArray(layerIds?.filterHighlightFillLayerIds) ? layerIds.filterHighlightFillLayerIds : []),
+      ...(Array.isArray(layerIds?.filterHighlightLineLayerIds) ? layerIds.filterHighlightLineLayerIds : []),
+      ...(Array.isArray(layerIds?.buildingPartFilterHighlightExtrusionLayerIds) ? layerIds.buildingPartFilterHighlightExtrusionLayerIds : []),
+      ...(Array.isArray(layerIds?.buildingPartFilterHighlightFillLayerIds) ? layerIds.buildingPartFilterHighlightFillLayerIds : []),
+      ...(Array.isArray(layerIds?.buildingPartFilterHighlightLineLayerIds) ? layerIds.buildingPartFilterHighlightLineLayerIds : [])
+    ];
+    return candidateLayerIds.some((layerId) => Boolean(map.getLayer?.(layerId)));
+  }
+
+  function scheduleInitialFilterReplay() {
+    if (!map || initialFilterReplayQueued || !initialFilterReplayEnabled) return;
+    if (!Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) return;
+    if (typeof map.once !== 'function' && typeof map.loaded !== 'function') return;
+
+    const runReplay = () => {
+      if (!map || !initialFilterReplayEnabled) {
+        initialFilterReplayQueued = false;
+        return;
+      }
+      if (initialFilterReplayRetryTimer) {
+        clearTimeout(initialFilterReplayRetryTimer);
+        initialFilterReplayRetryTimer = null;
+      }
+      if (!Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) {
+        initialFilterReplayEnabled = false;
+        initialFilterReplayQueued = false;
+        return;
+      }
+
+      // Fast desktop loads can reach the URL filter state before region layers exist.
+      // Keep retrying until the highlight layers are attached, then apply once.
+      regionLayersController.syncMapRegionSources();
+      if (!hasInitialFilterReplayLayersReady()) {
+        initialFilterReplayRetryTimer = window.setTimeout(runReplay, 120);
+        return;
+      }
+
+      const nextReplayAction = resolveInitialFilterReplayAction({
+        hasFilters: true,
+        phase: $filterState.phase,
+        paintCalls: $filterState.setPaintPropertyCallsLast
+      });
+      initialFilterReplayEnabled = false;
+      initialFilterReplayQueued = false;
+      if (nextReplayAction === 'refresh') {
+        filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
+        return;
+      }
+      if (nextReplayAction === 'reapply') {
+        filterPipeline.reapplyFilteredHighlight();
+      }
+    };
+
+    initialFilterReplayQueued = true;
+    if (typeof map.loaded === 'function' && map.loaded()) {
+      queueMicrotask(runReplay);
+      return;
+    }
+    if (typeof map.once === 'function') {
+      map.once('load', runReplay);
+      return;
+    }
+    queueMicrotask(runReplay);
+  }
+
   function handleOverpassFallbackLoad() {
     const payload = getOverpassViewportPayload();
     if (!payload) return;
@@ -735,6 +809,7 @@
       forceHighlightVisible
     });
     filterPipeline.reapplyFilteredHighlight();
+    scheduleInitialFilterReplay();
   }
 
   onMount(() => {
@@ -839,6 +914,8 @@
         filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();
         syncOverpassViewportState();
+        initialFilterReplayEnabled = Array.isArray(currentBuildingFilterLayers) && currentBuildingFilterLayers.length > 0;
+        scheduleInitialFilterReplay();
       });
 
       themeObserver = new MutationObserver(() => {
@@ -899,11 +976,17 @@
       clearTimeout(overpassViewportPrimeTimer);
       overpassViewportPrimeTimer = null;
     }
+    if (initialFilterReplayRetryTimer) {
+      clearTimeout(initialFilterReplayRetryTimer);
+      initialFilterReplayRetryTimer = null;
+    }
     recordOverpassDebugState();
     if (filterApplyClockTimer) {
       clearInterval(filterApplyClockTimer);
       filterApplyClockTimer = null;
     }
+    initialFilterReplayQueued = false;
+    initialFilterReplayEnabled = false;
     selectionController.destroy();
     regionLayersController.destroy();
     filterPipeline.destroy();
