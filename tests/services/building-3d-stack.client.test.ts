@@ -48,3 +48,15 @@ test('building-3d-stack exposes building layer filters and ids', async () => {
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
   );
 });
+
+test('building-3d-stack exposes the active renderer backend contract', async () => {
+  const { BUILDING_RENDERER_KIND, getBuildingRendererBackend } = await loadBuilding3dStack();
+
+  const renderer = getBuildingRendererBackend();
+  assert.equal(BUILDING_RENDERER_KIND, 'maplibre-extrusion');
+  assert.equal(renderer.kind, 'maplibre-extrusion');
+  assert.equal(typeof renderer.ensureRegionBuildingSourceAndLayers, 'function');
+  assert.equal(typeof renderer.ensureOverpassBuildingSourceAndLayers, 'function');
+  assert.equal(typeof renderer.applyBuildingThemePaint, 'function');
+  assert.equal(typeof renderer.applyBuildingPartsLayerVisibility, 'function');
+});
