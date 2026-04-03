@@ -3,15 +3,12 @@ import { encodeOsmFeatureId } from './filter-utils.js';
 import { normalizeBuildingMaterialSelection } from '$lib/utils/building-material';
 import { normalizeRoofShapeSelection } from '$lib/utils/roof-shape';
 import { resolveAddressText } from '$lib/utils/building-address';
-import {
-  coerceNullableIntegerText,
-  pickNullableText
-} from '$lib/utils/text';
+import { coerceNullableIntegerText, pickNullableText } from '$lib/utils/text';
 import {
   BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY,
   buildBuilding3dPropertiesFromTags,
   deriveBuildingLevelsText
-} from './map-3d-utils.js';
+} from './building-3d-stack.js';
 
 type GeoJSONLike = {
   type?: string | null;
@@ -25,12 +22,15 @@ type GeometryBounds = {
   maxLat: number;
 };
 
-type OverpassFeatureLike = {
-  type: 'Feature';
-  id?: number | string | null;
-  geometry?: GeoJSONLike | null;
-  properties?: Record<string, unknown> | null;
-} | null | undefined;
+type OverpassFeatureLike =
+  | {
+      type: 'Feature';
+      id?: number | string | null;
+      geometry?: GeoJSONLike | null;
+      properties?: Record<string, unknown> | null;
+    }
+  | null
+  | undefined;
 
 export type OverpassFeaturePayload = {
   osmType: string;
@@ -67,7 +67,10 @@ function normalizeTags(rawTags: Record<string, unknown> | null | undefined) {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(rawTags || {})) {
     const text = Array.isArray(value)
-      ? value.map((item) => String(item ?? '').trim()).filter(Boolean).join(';')
+      ? value
+          .map((item) => String(item ?? '').trim())
+          .filter(Boolean)
+          .join(';')
       : String(value ?? '').trim();
     if (!key || !text) continue;
     out[String(key)] = text;
@@ -84,17 +87,18 @@ function readTag(tags: Record<string, string>, ...keys: string[]) {
 }
 
 function inferFeatureKind(tags: Record<string, string>) {
-  return Object.prototype.hasOwnProperty.call(tags, 'building:part')
-    ? 'building_part'
-    : 'building';
+  return Object.prototype.hasOwnProperty.call(tags, 'building:part') ? 'building_part' : 'building';
 }
 
-function collectBounds(coords: unknown, bounds = {
-  minLon: Number.POSITIVE_INFINITY,
-  minLat: Number.POSITIVE_INFINITY,
-  maxLon: Number.NEGATIVE_INFINITY,
-  maxLat: Number.NEGATIVE_INFINITY
-}) {
+function collectBounds(
+  coords: unknown,
+  bounds = {
+    minLon: Number.POSITIVE_INFINITY,
+    minLat: Number.POSITIVE_INFINITY,
+    maxLon: Number.NEGATIVE_INFINITY,
+    maxLat: Number.NEGATIVE_INFINITY
+  }
+) {
   if (!Array.isArray(coords)) return bounds;
   if (coords.length >= 2 && typeof coords[0] === 'number' && typeof coords[1] === 'number') {
     const lon = Number(coords[0]);
@@ -201,7 +205,10 @@ function fromPolygonClippingMultiPolygon(multiPolygon: unknown) {
   };
 }
 
-function buildDifferenceGeometry(baseGeometry: GeoJSONLike | null | undefined, subtractGeometries: Array<GeoJSONLike | null | undefined> = []) {
+function buildDifferenceGeometry(
+  baseGeometry: GeoJSONLike | null | undefined,
+  subtractGeometries: Array<GeoJSONLike | null | undefined> = []
+) {
   const subject = toPolygonClippingMultiPolygon(normalizePolygonGeometry(baseGeometry));
   const clipGeometries = subtractGeometries
     .map((geometry) => toPolygonClippingMultiPolygon(normalizePolygonGeometry(geometry)))
@@ -213,9 +220,7 @@ function buildDifferenceGeometry(baseGeometry: GeoJSONLike | null | undefined, s
     return { ok: true, geometry: normalizePolygonGeometry(baseGeometry) };
   }
   try {
-    const clipMask = clipGeometries.length === 1
-      ? clipGeometries[0]
-      : polygonClipping.union(...clipGeometries);
+    const clipMask = clipGeometries.length === 1 ? clipGeometries[0] : polygonClipping.union(...clipGeometries);
     const difference = clipMask ? polygonClipping.difference(subject, clipMask) : subject;
     return {
       ok: true,
@@ -229,10 +234,10 @@ function buildDifferenceGeometry(baseGeometry: GeoJSONLike | null | undefined, s
 function getGeometryBounds(geometry: GeoJSONLike | null | undefined): GeometryBounds | null {
   const bounds = collectBounds(geometry?.coordinates);
   if (
-    !Number.isFinite(bounds.minLon)
-    || !Number.isFinite(bounds.minLat)
-    || !Number.isFinite(bounds.maxLon)
-    || !Number.isFinite(bounds.maxLat)
+    !Number.isFinite(bounds.minLon) ||
+    !Number.isFinite(bounds.minLat) ||
+    !Number.isFinite(bounds.maxLon) ||
+    !Number.isFinite(bounds.maxLat)
   ) {
     return null;
   }
@@ -241,15 +246,22 @@ function getGeometryBounds(geometry: GeoJSONLike | null | undefined): GeometryBo
 
 function boundsContainBounds(container: GeometryBounds | null, inner: GeometryBounds | null) {
   if (!container || !inner) return false;
-  return inner.minLon >= container.minLon
-    && inner.maxLon <= container.maxLon
-    && inner.minLat >= container.minLat
-    && inner.maxLat <= container.maxLat;
+  return (
+    inner.minLon >= container.minLon &&
+    inner.maxLon <= container.maxLon &&
+    inner.minLat >= container.minLat &&
+    inner.maxLat <= container.maxLat
+  );
 }
 
 function getGeometryCenter(geometry: GeoJSONLike | null | undefined) {
   const bounds = collectBounds(geometry?.coordinates);
-  if (!Number.isFinite(bounds.minLon) || !Number.isFinite(bounds.minLat) || !Number.isFinite(bounds.maxLon) || !Number.isFinite(bounds.maxLat)) {
+  if (
+    !Number.isFinite(bounds.minLon) ||
+    !Number.isFinite(bounds.minLat) ||
+    !Number.isFinite(bounds.maxLon) ||
+    !Number.isFinite(bounds.maxLat)
+  ) {
     return { lon: null, lat: null };
   }
   return {
@@ -282,9 +294,7 @@ export function buildOverpassArchiInfo(tags: Record<string, string> = {}) {
   const materialRaw = readTag(sourceTags, 'material', 'building:material');
   const materialConcrete = readTag(sourceTags, 'material_concrete', 'building:material:concrete');
   const normalizedMaterial = normalizeBuildingMaterialSelection(materialRaw, materialConcrete);
-  const roofShape = normalizeRoofShapeSelection(
-    readTag(sourceTags, 'roof:shape', 'roof_shape', 'building:roof:shape')
-  );
+  const roofShape = normalizeRoofShapeSelection(readTag(sourceTags, 'roof:shape', 'roof_shape', 'building:roof:shape'));
   const colour = readTag(sourceTags, 'colour', 'building:colour');
   const name = readTag(sourceTags, 'name', 'name:ru', 'name:en');
   const address = resolveAddressText(sourceTags, pickNullableText, null);
@@ -334,15 +344,17 @@ export function buildOverpassArchiInfo(tags: Record<string, string> = {}) {
   };
 }
 
-export function buildOverpassFeaturePayload(feature: OverpassFeatureLike, {
-  tileKey = ''
-} = {} as { tileKey?: string }) {
+export function buildOverpassFeaturePayload(
+  feature: OverpassFeatureLike,
+  { tileKey = '' } = {} as { tileKey?: string }
+) {
   const properties = feature?.properties && typeof feature.properties === 'object' ? feature.properties : {};
-  const rawTags = properties?.tags && typeof properties.tags === 'object'
-    ? properties.tags
-    : (properties?.source_tags && typeof properties.source_tags === 'object'
-      ? properties.source_tags
-      : properties);
+  const rawTags =
+    properties?.tags && typeof properties.tags === 'object'
+      ? properties.tags
+      : properties?.source_tags && typeof properties.source_tags === 'object'
+        ? properties.source_tags
+        : properties;
   const sourceTags = normalizeTags(rawTags as Record<string, unknown>);
   const osmType = String(properties?.type || properties?.osm_type || '').trim();
   const osmId = Number(properties?.id || properties?.osm_id);
@@ -460,9 +472,7 @@ export function buildOverpassFilterDataItem(feature: OverpassFeatureLike) {
 export function buildOverpassBuildingDetails(feature: OverpassFeatureLike) {
   const payload = buildOverpassFeaturePayload(feature);
   if (!payload) return null;
-  const sourceGeometryJson = feature?.geometry == null
-    ? null
-    : JSON.stringify(feature.geometry);
+  const sourceGeometryJson = feature?.geometry == null ? null : JSON.stringify(feature.geometry);
   const sourceTagsJson = JSON.stringify(payload.sourceTags || {});
   return {
     source: 'overpass',
@@ -500,7 +510,9 @@ export function buildOverpassBuildingKey(feature: OverpassFeatureLike) {
 }
 
 export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[] = []) {
-  const normalizedFeatures = (Array.isArray(features) ? features : []).filter(Boolean) as Array<Exclude<OverpassFeatureLike, null | undefined>>;
+  const normalizedFeatures = (Array.isArray(features) ? features : []).filter(Boolean) as Array<
+    Exclude<OverpassFeatureLike, null | undefined>
+  >;
   const buildings: Array<{ feature: OverpassFeatureLike; bounds: GeometryBounds | null }> = [];
   const parts: Array<{ bounds: GeometryBounds; geometry: GeoJSONLike }> = [];
   const syntheticRemainders: OverpassFeatureLike[] = [];
@@ -510,7 +522,9 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
     if (properties) {
       properties[BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY] = 0;
     }
-    const featureKind = String(properties?.feature_kind || '').trim().toLowerCase();
+    const featureKind = String(properties?.feature_kind || '')
+      .trim()
+      .toLowerCase();
     const polygonGeometry = normalizePolygonGeometry(feature?.geometry || null);
     const bounds = getGeometryBounds(polygonGeometry || feature?.geometry || null);
     if (featureKind === 'building_part') {
@@ -536,9 +550,10 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
   if (parts.length === 0) return normalizedFeatures;
 
   for (const building of buildings) {
-    const properties = building.feature?.properties && typeof building.feature.properties === 'object'
-      ? building.feature.properties
-      : null;
+    const properties =
+      building.feature?.properties && typeof building.feature.properties === 'object'
+        ? building.feature.properties
+        : null;
     if (!properties || !building.bounds) continue;
     const containedParts = parts.filter((part) => boundsContainBounds(building.bounds, part.bounds));
     if (containedParts.length === 0) continue;
@@ -561,9 +576,7 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
     });
   }
 
-  return syntheticRemainders.length > 0
-    ? [...syntheticRemainders, ...normalizedFeatures]
-    : normalizedFeatures;
+  return syntheticRemainders.length > 0 ? [...syntheticRemainders, ...normalizedFeatures] : normalizedFeatures;
 }
 
 export function encodeOverpassFeatureId(feature: OverpassFeatureLike) {

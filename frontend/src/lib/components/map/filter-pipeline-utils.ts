@@ -3,7 +3,7 @@ import {
   expandBboxWithMargin,
   getAdaptiveCoverageMarginRatio
 } from '../../services/map/map-math-utils.js';
-import { deriveBuildingLevelsText } from '../../services/map/map-3d-utils.js';
+import { deriveBuildingLevelsText } from '../../services/map/building-3d-stack.js';
 import type {
   BboxSnapshot,
   FilterFeatureState,
@@ -15,10 +15,7 @@ import type {
   FilterRule,
   FilterRuleInput
 } from '../../services/map/filter-types.js';
-import {
-  FILTER_LAYER_BASE_COLOR,
-  FILTER_LAYER_COLOR_PALETTE
-} from '../../constants/filter-presets.js';
+import { FILTER_LAYER_BASE_COLOR, FILTER_LAYER_COLOR_PALETTE } from '../../constants/filter-presets.js';
 
 const FILTER_RULE_OPS = new Set([
   'contains',
@@ -50,7 +47,7 @@ export function parseOsmKey(raw) {
 
 export function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 export function createFilterLayerId(prefix = 'filter-layer') {
@@ -59,7 +56,9 @@ export function createFilterLayerId(prefix = 'filter-layer') {
 }
 
 export function normalizeFilterLayerMode(rawMode): FilterLayer['mode'] {
-  const mode = String(rawMode || 'and').trim().toLowerCase();
+  const mode = String(rawMode || 'and')
+    .trim()
+    .toLowerCase();
   return FILTER_LAYER_MODES.has(mode) ? (mode as FilterLayerMode) : 'and';
 }
 
@@ -75,7 +74,9 @@ export function normalizeFilterColor(rawColor, fallbackColor = FILTER_LAYER_BASE
   if (FILTER_COLOR_RE.test(color)) {
     return color.toLowerCase();
   }
-  return String(fallbackColor || FILTER_LAYER_BASE_COLOR).trim().toLowerCase();
+  return String(fallbackColor || FILTER_LAYER_BASE_COLOR)
+    .trim()
+    .toLowerCase();
 }
 
 export function normalizeFilterRules(rawRules: FilterRuleInput[] | null | undefined) {
@@ -155,8 +156,7 @@ export function normalizeFilterLayers(
 }
 
 export function flattenFilterLayers(rawLayers: FilterLayer[] | null | undefined) {
-  return sortFilterLayersByPriority(rawLayers)
-    .flatMap((layer) => (Array.isArray(layer?.rules) ? layer.rules : []));
+  return sortFilterLayersByPriority(rawLayers).flatMap((layer) => (Array.isArray(layer?.rules) ? layer.rules : []));
 }
 
 export function isHeavyRule(rule: FilterRule | null | undefined) {
@@ -174,26 +174,42 @@ export function computeRulesHash(rules: Array<unknown> | null | undefined) {
 }
 
 export function parseNumericFilterValue(rawValue) {
-  const text = String(rawValue ?? '').trim().replace(',', '.');
+  const text = String(rawValue ?? '')
+    .trim()
+    .replace(',', '.');
   if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
   const value = Number(text);
   return Number.isFinite(value) ? value : null;
 }
 
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const ARCHI_RULE_KEYS = new Set([
+  'name',
+  'style',
+  'material',
+  'colour',
+  'levels',
+  'year_built',
+  'architect',
+  'address',
+  'description',
+  'archimap_description'
+]);
 
 function getFilterRuleValue(source, key) {
-  const sourceTags = source?.sourceTags && typeof source.sourceTags === 'object'
-    ? source.sourceTags
-    : (source && typeof source === 'object' ? source : {});
+  const sourceTags =
+    source?.sourceTags && typeof source.sourceTags === 'object'
+      ? source.sourceTags
+      : source && typeof source === 'object'
+        ? source
+        : {};
   const archiInfo = source?.archiInfo && typeof source.archiInfo === 'object' ? source.archiInfo : {};
   const hasMeaningfulValue = (value) => {
-    const normalized = Array.isArray(value) ? value.join(';') : (value == null ? null : String(value));
+    const normalized = Array.isArray(value) ? value.join(';') : value == null ? null : String(value);
     return normalized != null && String(normalized).trim().length > 0;
   };
-  
+
   if (key.startsWith('archi.')) return archiInfo[key.slice(6)];
-  
+
   // Apply archiInfo overrides for common OSM tags
   if (key === 'building:colour' || key === 'colour') {
     if (hasMeaningfulValue(archiInfo.colour)) return archiInfo.colour;
@@ -207,34 +223,35 @@ function getFilterRuleValue(source, key) {
   }
   if (key === 'building:material:concrete' || key === 'material_concrete') {
     if (hasMeaningfulValue(archiInfo.material_concrete)) return archiInfo.material_concrete;
-    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material:concrete')) return sourceTags['building:material:concrete'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material:concrete'))
+      return sourceTags['building:material:concrete'];
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'material_concrete')) return sourceTags.material_concrete;
   }
   if (key === 'building:architecture' || key === 'architecture' || key === 'style') {
-     if (hasMeaningfulValue(archiInfo.style)) return archiInfo.style;
+    if (hasMeaningfulValue(archiInfo.style)) return archiInfo.style;
   }
   if (key === 'building:levels' || key === 'levels') {
-     if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
-     if (hasMeaningfulValue(source?.levels)) return source.levels;
-     const derivedLevels = deriveBuildingLevelsText({
-       tags: sourceTags,
-       renderHeightMeters: source?.renderHeightMeters ?? source?.render_height_m,
-       renderMinHeightMeters: source?.renderMinHeightMeters ?? source?.render_min_height_m
-     });
-     if (hasMeaningfulValue(derivedLevels)) return derivedLevels;
+    if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
+    if (hasMeaningfulValue(source?.levels)) return source.levels;
+    const derivedLevels = deriveBuildingLevelsText({
+      tags: sourceTags,
+      renderHeightMeters: source?.renderHeightMeters ?? source?.render_height_m,
+      renderMinHeightMeters: source?.renderMinHeightMeters ?? source?.render_min_height_m
+    });
+    if (hasMeaningfulValue(derivedLevels)) return derivedLevels;
   }
   if (key === 'building:year' || key === 'year_built' || key === 'start_date') {
-     if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;
+    if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;
   }
   if (key === 'architect' || key === 'architect_name') {
-     if (hasMeaningfulValue(archiInfo.architect)) return archiInfo.architect;
+    if (hasMeaningfulValue(archiInfo.architect)) return archiInfo.architect;
   }
   if (key === 'name' || key === 'name:ru' || key === 'name:en') {
-     if (hasMeaningfulValue(archiInfo.name)) return archiInfo.name;
+    if (hasMeaningfulValue(archiInfo.name)) return archiInfo.name;
   }
   if (key === 'description' || key === 'archimap_description') {
-     if (hasMeaningfulValue(archiInfo.archimap_description)) return archiInfo.archimap_description;
-     if (hasMeaningfulValue(archiInfo.description)) return archiInfo.description;
+    if (hasMeaningfulValue(archiInfo.archimap_description)) return archiInfo.archimap_description;
+    if (hasMeaningfulValue(archiInfo.description)) return archiInfo.description;
   }
 
   if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) {
@@ -248,7 +265,7 @@ function getFilterRuleValue(source, key) {
 export function matchesFilterRule(tags, rule) {
   if (!rule || !rule.key) return true;
   const actualRaw = getFilterRuleValue(tags, rule.key);
-  const actual = Array.isArray(actualRaw) ? actualRaw.join(';') : (actualRaw == null ? null : String(actualRaw));
+  const actual = Array.isArray(actualRaw) ? actualRaw.join(';') : actualRaw == null ? null : String(actualRaw);
   const hasValue = actual != null && String(actual).trim().length > 0;
   if (rule.op === 'exists') return hasValue;
   if (rule.op === 'not_exists') return !hasValue;
@@ -294,10 +311,13 @@ export function toFeatureIdSetFromMatches(
 }
 
 function normalizeFeatureStateEntry(
-  rawEntry: {
-    id?: number | string | null;
-    state?: Partial<FilterFeatureState> | null;
-  } | null | undefined
+  rawEntry:
+    | {
+        id?: number | string | null;
+        state?: Partial<FilterFeatureState> | null;
+      }
+    | null
+    | undefined
 ): FilterFeatureStateEntry | null {
   const id = Number(rawEntry?.id);
   if (!Number.isInteger(id) || id <= 0) return null;
@@ -320,7 +340,8 @@ export function buildFeatureStateEntry(
 export function areFeatureStatesEqual(left, right) {
   return (
     Boolean(left?.isFiltered) === Boolean(right?.isFiltered) &&
-    normalizeFilterColor(left?.filterColor, FILTER_CLEAR_COLOR) === normalizeFilterColor(right?.filterColor, FILTER_CLEAR_COLOR)
+    normalizeFilterColor(left?.filterColor, FILTER_CLEAR_COLOR) ===
+      normalizeFilterColor(right?.filterColor, FILTER_CLEAR_COLOR)
   );
 }
 
@@ -387,12 +408,17 @@ export function buildFeatureStateDiffPlan(prevFeatureIds, nextFeatureIds) {
   };
 }
 
-export function buildBboxSnapshot(bounds: {
-  getWest?: () => number | null | undefined;
-  getSouth?: () => number | null | undefined;
-  getEast?: () => number | null | undefined;
-  getNorth?: () => number | null | undefined;
-} | null | undefined): BboxSnapshot | null {
+export function buildBboxSnapshot(
+  bounds:
+    | {
+        getWest?: () => number | null | undefined;
+        getSouth?: () => number | null | undefined;
+        getEast?: () => number | null | undefined;
+        getNorth?: () => number | null | undefined;
+      }
+    | null
+    | undefined
+): BboxSnapshot | null {
   const west = Number(bounds?.getWest?.());
   const south = Number(bounds?.getSouth?.());
   const east = Number(bounds?.getEast?.());
@@ -425,19 +451,19 @@ export function isViewportInsideBbox(
   const boxSouth = Number(containerBbox.south);
   const boxEast = Number(containerBbox.east);
   const boxNorth = Number(containerBbox.north);
-  if (![viewportWest, viewportSouth, viewportEast, viewportNorth, boxWest, boxSouth, boxEast, boxNorth].every(Number.isFinite)) {
+  if (
+    ![viewportWest, viewportSouth, viewportEast, viewportNorth, boxWest, boxSouth, boxEast, boxNorth].every(
+      Number.isFinite
+    )
+  ) {
     return false;
   }
   return (
-    viewportWest >= (boxWest - epsilon) &&
-    viewportSouth >= (boxSouth - epsilon) &&
-    viewportEast <= (boxEast + epsilon) &&
-    viewportNorth <= (boxNorth + epsilon)
+    viewportWest >= boxWest - epsilon &&
+    viewportSouth >= boxSouth - epsilon &&
+    viewportEast <= boxEast + epsilon &&
+    viewportNorth <= boxNorth + epsilon
   );
 }
 
-export {
-  clampNumber,
-  expandBboxWithMargin,
-  getAdaptiveCoverageMarginRatio
-};
+export { clampNumber, expandBboxWithMargin, getAdaptiveCoverageMarginRatio };

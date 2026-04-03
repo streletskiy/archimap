@@ -18,36 +18,41 @@
   import {
     bringBaseLabelLayersAboveCustomLayers,
     bringSearchResultsLayersToFront,
-    applyBuildingThemePaint as applyBuildingThemePaintToLayers,
+    applyLabelLayerVisibility as applyMapLabelLayerVisibility
+  } from '$lib/services/map/map-layer-utils';
+  import {
+    DEFAULT_MAP_3D_PITCH,
     applyBuildingPartsLayerVisibility as applyBuildingPartsLayerVisibilityToLayers,
-    applyLabelLayerVisibility as applyMapLabelLayerVisibility,
+    applyBuildingThemePaint as applyBuildingThemePaintToLayers,
     bindMapInteractionHandlers,
     ensureOverpassBuildingSourceAndLayers,
-    getCurrentOverpassBuildingsExtrusionLayerIds,
-    getCurrentOverpassBuildingsFillLayerIds,
-    getCurrentOverpassBuildingsLineLayerIds,
-    getCurrentOverpassBuildingPartExtrusionLayerIds,
-    getCurrentOverpassBuildingPartFillLayerIds,
-    getCurrentOverpassBuildingPartLineLayerIds,
-    getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds,
-    getCurrentOverpassBuildingPartFilterHighlightFillLayerIds,
-    getCurrentOverpassBuildingPartFilterHighlightLineLayerIds,
-    getCurrentOverpassBuildingHoverExtrusionLayerIds,
-    getCurrentOverpassBuildingHoverFillLayerIds,
-    getCurrentOverpassBuildingHoverLineLayerIds,
     getCurrentBuildingsExtrusionLayerIds,
     getCurrentBuildingsFillLayerIds,
     getCurrentBuildingsLineLayerIds,
-    getCurrentBuildingPartExtrusionLayerIds,
-    getCurrentBuildingPartFillLayerIds,
-    getCurrentBuildingPartLineLayerIds,
-    getCurrentBuildingPartFilterHighlightExtrusionLayerIds,
     getCurrentBuildingHoverExtrusionLayerIds,
     getCurrentBuildingHoverFillLayerIds,
     getCurrentBuildingHoverLineLayerIds,
+    getCurrentBuildingPartExtrusionLayerIds,
+    getCurrentBuildingPartFillLayerIds,
+    getCurrentBuildingPartFilterHighlightExtrusionLayerIds,
+    getCurrentBuildingPartFilterHighlightFillLayerIds,
+    getCurrentBuildingPartFilterHighlightLineLayerIds,
+    getCurrentBuildingPartLineLayerIds,
     getCurrentFilterHighlightExtrusionLayerIds,
     getCurrentFilterHighlightFillLayerIds,
     getCurrentFilterHighlightLineLayerIds,
+    getCurrentOverpassBuildingsExtrusionLayerIds,
+    getCurrentOverpassBuildingsFillLayerIds,
+    getCurrentOverpassBuildingsLineLayerIds,
+    getCurrentOverpassBuildingHoverExtrusionLayerIds,
+    getCurrentOverpassBuildingHoverFillLayerIds,
+    getCurrentOverpassBuildingHoverLineLayerIds,
+    getCurrentOverpassBuildingPartExtrusionLayerIds,
+    getCurrentOverpassBuildingPartFillLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightFillLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightLineLayerIds,
+    getCurrentOverpassBuildingPartLineLayerIds,
     getCurrentOverpassFilterHighlightExtrusionLayerIds,
     getCurrentOverpassFilterHighlightFillLayerIds,
     getCurrentOverpassFilterHighlightLineLayerIds,
@@ -57,8 +62,9 @@
     getCurrentSelectedExtrusionLayerIds,
     getCurrentSelectedFillLayerIds,
     getCurrentSelectedLineLayerIds,
-    getRegionLayerIds
-  } from '$lib/services/map/map-layer-utils';
+    getRegionLayerIds,
+    getEffectiveBuildingPartsVisibility
+  } from '$lib/services/map/building-3d-stack';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
     updateSearchMarkers as updateSearchMarkerSource
@@ -71,10 +77,6 @@
     resolveMapStyleForTheme,
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
-  import {
-    DEFAULT_MAP_3D_PITCH,
-    getEffectiveBuildingPartsVisibility
-  } from '$lib/services/map/map-3d-utils';
   import {
     shouldCheckOverpassViewportCoverage,
     cancelOverpassViewportLoad,

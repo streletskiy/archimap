@@ -3,13 +3,13 @@ import { matchesFilterRules } from '../../components/map/filter-pipeline-utils.j
 import { encodeOsmFeatureId, parseOsmKey, resolveFeatureIdentity } from './filter-utils.js';
 import { normalizeBuildingMaterialSelection } from '$lib/utils/building-material';
 import { resolveAddressText } from '$lib/utils/building-address';
-import {
-  coerceNullableIntegerText,
-  pickNullableText
-} from '$lib/utils/text';
+import { coerceNullableIntegerText, pickNullableText } from '$lib/utils/text';
 import { buildBboxHash } from './filter-bbox.js';
-import { OVERPASS_BUILDING_SOURCE_ID } from './map-layer-utils.js';
-import { buildBuilding3dPropertiesFromTags, deriveBuildingLevelsText } from './map-3d-utils.js';
+import {
+  OVERPASS_BUILDING_SOURCE_ID,
+  buildBuilding3dPropertiesFromTags,
+  deriveBuildingLevelsText
+} from './building-3d-stack.js';
 import type {
   FilterBuildingSourceConfig,
   FilterMapLike,
@@ -53,7 +53,10 @@ function normalizeTags(raw: Record<string, unknown> | null | undefined) {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw || {})) {
     const text = Array.isArray(value)
-      ? value.map((item) => String(item ?? '').trim()).filter(Boolean).join(';')
+      ? value
+          .map((item) => String(item ?? '').trim())
+          .filter(Boolean)
+          .join(';')
       : String(value ?? '').trim();
     if (!key || !text) continue;
     out[String(key)] = text;
@@ -61,12 +64,15 @@ function normalizeTags(raw: Record<string, unknown> | null | undefined) {
   return out;
 }
 
-function collectGeometryBounds(coords: unknown, bounds = {
-  minLon: Number.POSITIVE_INFINITY,
-  minLat: Number.POSITIVE_INFINITY,
-  maxLon: Number.NEGATIVE_INFINITY,
-  maxLat: Number.NEGATIVE_INFINITY
-}) {
+function collectGeometryBounds(
+  coords: unknown,
+  bounds = {
+    minLon: Number.POSITIVE_INFINITY,
+    minLat: Number.POSITIVE_INFINITY,
+    maxLon: Number.NEGATIVE_INFINITY,
+    maxLat: Number.NEGATIVE_INFINITY
+  }
+) {
   if (!Array.isArray(coords)) return bounds;
   if (coords.length >= 2 && typeof coords[0] === 'number' && typeof coords[1] === 'number') {
     const lon = Number(coords[0]);
@@ -87,7 +93,12 @@ function collectGeometryBounds(coords: unknown, bounds = {
 
 function getGeometryCenter(feature: { geometry?: { coordinates?: unknown } | null } | null | undefined) {
   const bounds = collectGeometryBounds(feature?.geometry?.coordinates);
-  if (!Number.isFinite(bounds.minLon) || !Number.isFinite(bounds.minLat) || !Number.isFinite(bounds.maxLon) || !Number.isFinite(bounds.maxLat)) {
+  if (
+    !Number.isFinite(bounds.minLon) ||
+    !Number.isFinite(bounds.minLat) ||
+    !Number.isFinite(bounds.maxLon) ||
+    !Number.isFinite(bounds.maxLat)
+  ) {
     return { lon: null, lat: null };
   }
   return {
@@ -126,28 +137,45 @@ function normalizeBbox(value: unknown) {
 
 function buildFilterDataItemFromFeature(feature: LooseRecord) {
   const identity = resolveFeatureIdentity(feature);
-  const osmKey = String(feature?.properties?.osm_key || (identity ? `${identity.osmType}/${identity.osmId}` : '')).trim();
+  const osmKey = String(
+    feature?.properties?.osm_key || (identity ? `${identity.osmType}/${identity.osmId}` : '')
+  ).trim();
   if (!osmKey) return null;
   const sourceTags = normalizeTags(
-    (feature?.properties?.source_tags && typeof feature.properties.source_tags === 'object')
+    feature?.properties?.source_tags && typeof feature.properties.source_tags === 'object'
       ? feature.properties.source_tags
-      : (feature?.properties?.tags && typeof feature.properties.tags === 'object'
+      : feature?.properties?.tags && typeof feature.properties.tags === 'object'
         ? feature.properties.tags
-        : {})
+        : {}
   );
-  const archiInfo = feature?.properties?.archiInfo && typeof feature.properties.archiInfo === 'object'
-    ? feature.properties.archiInfo
-    : {};
+  const archiInfo =
+    feature?.properties?.archiInfo && typeof feature.properties.archiInfo === 'object'
+      ? feature.properties.archiInfo
+      : {};
   const center = getGeometryCenter(feature);
   const normalizedMaterial = normalizeBuildingMaterialSelection(
-    pickNullableText(archiInfo.material, feature?.properties?.material, sourceTags['building:material'], sourceTags.material),
-    pickNullableText(archiInfo.materialConcrete, feature?.properties?.materialConcrete, sourceTags['building:material:concrete'], sourceTags.material_concrete)
+    pickNullableText(
+      archiInfo.material,
+      feature?.properties?.material,
+      sourceTags['building:material'],
+      sourceTags.material
+    ),
+    pickNullableText(
+      archiInfo.materialConcrete,
+      feature?.properties?.materialConcrete,
+      sourceTags['building:material:concrete'],
+      sourceTags.material_concrete
+    )
   );
   const render3dProperties = buildBuilding3dPropertiesFromTags(sourceTags);
-  const renderHeightMeters = Number.isFinite(Number(feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters))
+  const renderHeightMeters = Number.isFinite(
+    Number(feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters)
+  )
     ? Number(feature?.properties?.render_height_m ?? feature?.properties?.renderHeightMeters)
     : Number(render3dProperties.render_height_m || 0);
-  const renderMinHeightMeters = Number.isFinite(Number(feature?.properties?.render_min_height_m ?? feature?.properties?.renderMinHeightMeters))
+  const renderMinHeightMeters = Number.isFinite(
+    Number(feature?.properties?.render_min_height_m ?? feature?.properties?.renderMinHeightMeters)
+  )
     ? Number(feature?.properties?.render_min_height_m ?? feature?.properties?.renderMinHeightMeters)
     : Number(render3dProperties.render_min_height_m || 0);
   const derivedLevels = deriveBuildingLevelsText({
@@ -158,18 +186,48 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
   const normalizedArchiInfo = {
     ...archiInfo,
     _sourceTags: sourceTags,
-    name: pickNullableText(archiInfo.name, feature?.properties?.name, sourceTags.name, sourceTags['name:ru'], sourceTags['name:en']),
-    style: pickNullableText(archiInfo.style, feature?.properties?.style, sourceTags['building:architecture'], sourceTags['building:style'], sourceTags.architecture, sourceTags.style),
-    styleRaw: pickNullableText(archiInfo.styleRaw, feature?.properties?.styleRaw, feature?.properties?.style, sourceTags['building:architecture'], sourceTags['building:style'], sourceTags.architecture, sourceTags.style),
+    name: pickNullableText(
+      archiInfo.name,
+      feature?.properties?.name,
+      sourceTags.name,
+      sourceTags['name:ru'],
+      sourceTags['name:en']
+    ),
+    style: pickNullableText(
+      archiInfo.style,
+      feature?.properties?.style,
+      sourceTags['building:architecture'],
+      sourceTags['building:style'],
+      sourceTags.architecture,
+      sourceTags.style
+    ),
+    styleRaw: pickNullableText(
+      archiInfo.styleRaw,
+      feature?.properties?.styleRaw,
+      feature?.properties?.style,
+      sourceTags['building:architecture'],
+      sourceTags['building:style'],
+      sourceTags.architecture,
+      sourceTags.style
+    ),
     design: pickNullableText(archiInfo.design, feature?.properties?.design, sourceTags.design),
-    design_ref: pickNullableText(archiInfo.design_ref, feature?.properties?.design_ref, sourceTags['design:ref'], sourceTags.design_ref),
+    design_ref: pickNullableText(
+      archiInfo.design_ref,
+      feature?.properties?.design_ref,
+      sourceTags['design:ref'],
+      sourceTags.design_ref
+    ),
     design_year: coerceNullableIntegerText(
       archiInfo.design_year ?? feature?.properties?.design_year ?? sourceTags['design:year'] ?? sourceTags.design_year,
       1000,
       2100
     ),
     levels: coerceNullableIntegerText(
-      archiInfo.levels ?? feature?.properties?.levels ?? sourceTags['building:levels'] ?? sourceTags.levels ?? derivedLevels,
+      archiInfo.levels ??
+        feature?.properties?.levels ??
+        sourceTags['building:levels'] ??
+        sourceTags.levels ??
+        derivedLevels,
       0,
       300
     ),
@@ -178,20 +236,52 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
       1000,
       2100
     ),
-    architect: pickNullableText(archiInfo.architect, feature?.properties?.architect, sourceTags.architect, sourceTags['building:architect']),
+    architect: pickNullableText(
+      archiInfo.architect,
+      feature?.properties?.architect,
+      sourceTags.architect,
+      sourceTags['building:architect']
+    ),
     material: normalizedMaterial.material,
-    materialRaw: pickNullableText(archiInfo.materialRaw, feature?.properties?.materialRaw, feature?.properties?.material, sourceTags['building:material'], sourceTags.material),
-    materialConcrete: pickNullableText(archiInfo.materialConcrete, feature?.properties?.materialConcrete, sourceTags['building:material:concrete'], sourceTags.material_concrete),
-    colour: pickNullableText(archiInfo.colour, feature?.properties?.colour, sourceTags.colour, sourceTags['building:colour']),
-    address: pickNullableText(archiInfo.address, resolveAddressText({
-      ...sourceTags,
-      ...feature?.properties
-    }, pickNullableText, feature?.properties?.address)),
+    materialRaw: pickNullableText(
+      archiInfo.materialRaw,
+      feature?.properties?.materialRaw,
+      feature?.properties?.material,
+      sourceTags['building:material'],
+      sourceTags.material
+    ),
+    materialConcrete: pickNullableText(
+      archiInfo.materialConcrete,
+      feature?.properties?.materialConcrete,
+      sourceTags['building:material:concrete'],
+      sourceTags.material_concrete
+    ),
+    colour: pickNullableText(
+      archiInfo.colour,
+      feature?.properties?.colour,
+      sourceTags.colour,
+      sourceTags['building:colour']
+    ),
+    address: pickNullableText(
+      archiInfo.address,
+      resolveAddressText(
+        {
+          ...sourceTags,
+          ...feature?.properties
+        },
+        pickNullableText,
+        feature?.properties?.address
+      )
+    ),
     description: pickNullableText(archiInfo.description, feature?.properties?.description, sourceTags.description),
-    archimap_description: pickNullableText(archiInfo.archimap_description, feature?.properties?.archimap_description, feature?.properties?.description, sourceTags.archimap_description, sourceTags.description),
-    design_ref_suggestions: Array.isArray(archiInfo.design_ref_suggestions)
-      ? archiInfo.design_ref_suggestions
-      : []
+    archimap_description: pickNullableText(
+      archiInfo.archimap_description,
+      feature?.properties?.archimap_description,
+      feature?.properties?.description,
+      sourceTags.archimap_description,
+      sourceTags.description
+    ),
+    design_ref_suggestions: Array.isArray(archiInfo.design_ref_suggestions) ? archiInfo.design_ref_suggestions : []
   };
 
   return {
@@ -223,11 +313,13 @@ function buildFilterDataItemFromFeature(feature: LooseRecord) {
 
 function getRenderableLayerIds(currentMap: FilterMapLike | null | undefined, layerIds: string[] = []) {
   if (!currentMap) return [];
-  return [...new Set(
-    (Array.isArray(layerIds) ? layerIds : [])
-      .map((layerId) => String(layerId || '').trim())
-      .filter((layerId) => layerId && Boolean(currentMap.getLayer?.(layerId)))
-  )];
+  return [
+    ...new Set(
+      (Array.isArray(layerIds) ? layerIds : [])
+        .map((layerId) => String(layerId || '').trim())
+        .filter((layerId) => layerId && Boolean(currentMap.getLayer?.(layerId)))
+    )
+  ];
 }
 
 function getLoadedSourceBuildingDataMap(
@@ -238,9 +330,7 @@ function getLoadedSourceBuildingDataMap(
   const out = new Map<string, FilterDataItem>();
   for (const sourceConfig of buildingSourceConfigs) {
     if (!sourceConfig?.sourceId || !currentMap.getSource(sourceConfig.sourceId)) continue;
-    const queryOptions = sourceConfig.sourceLayer
-      ? { sourceLayer: sourceConfig.sourceLayer }
-      : {};
+    const queryOptions = sourceConfig.sourceLayer ? { sourceLayer: sourceConfig.sourceLayer } : {};
     const features = currentMap.querySourceFeatures(sourceConfig.sourceId, queryOptions as { sourceLayer?: string });
     for (const feature of Array.isArray(features) ? features : []) {
       const item = buildFilterDataItemFromFeature(feature as LooseRecord);
@@ -260,9 +350,7 @@ function getLoadedOverpassBuildingDataMap(
   for (const sourceConfig of buildingSourceConfigs) {
     if (String(sourceConfig?.sourceId || '') !== OVERPASS_BUILDING_SOURCE_ID) continue;
     if (!sourceConfig?.sourceId || !currentMap.getSource(sourceConfig.sourceId)) continue;
-    const queryOptions = sourceConfig.sourceLayer
-      ? { sourceLayer: sourceConfig.sourceLayer }
-      : {};
+    const queryOptions = sourceConfig.sourceLayer ? { sourceLayer: sourceConfig.sourceLayer } : {};
     let features: unknown[];
     try {
       features = currentMap.querySourceFeatures(sourceConfig.sourceId, queryOptions as { sourceLayer?: string });
@@ -363,7 +451,13 @@ function mergeMatchPayloads(
   const seenIds = new Set<number>();
   const seenLocationIds = new Set<number>();
 
-  function addPayload(source: Pick<FilterMatchPayload, 'matchedKeys' | 'matchedFeatureIds' | 'matchedLocations'> | FilterMatchPayload | null | undefined) {
+  function addPayload(
+    source:
+      | Pick<FilterMatchPayload, 'matchedKeys' | 'matchedFeatureIds' | 'matchedLocations'>
+      | FilterMatchPayload
+      | null
+      | undefined
+  ) {
     for (const key of Array.isArray(source?.matchedKeys) ? source.matchedKeys : []) {
       const normalizedKey = String(key || '').trim();
       if (!normalizedKey || seenKeys.has(normalizedKey)) continue;
@@ -393,13 +487,16 @@ function mergeMatchPayloads(
     addPayload(overpass);
   }
 
-  const maxResults = Math.max(1, Math.trunc(Number(defaults.maxResults) || mergedFeatureIds.length || mergedKeys.length || 1));
+  const maxResults = Math.max(
+    1,
+    Math.trunc(Number(defaults.maxResults) || mergedFeatureIds.length || mergedKeys.length || 1)
+  );
   const truncated = Boolean(
-    payload?.meta?.truncated
-    || overpass?.truncated
-    || mergedKeys.length >= maxResults
-    || mergedFeatureIds.length >= maxResults
-    || mergedLocations.length >= maxResults
+    payload?.meta?.truncated ||
+    overpass?.truncated ||
+    mergedKeys.length >= maxResults ||
+    mergedFeatureIds.length >= maxResults ||
+    mergedLocations.length >= maxResults
   );
   const limitedKeys = mergedKeys.slice(0, maxResults);
   const limitedFeatureIds = mergedFeatureIds.slice(0, maxResults);
@@ -428,17 +525,19 @@ function mergeMatchPayloads(
   };
 }
 
-export function createFilterFetcher({
-  resolveMap,
-  resolveLayerIds,
-  resolveBuildingSourceConfigs,
-  getCurrentRulesHash,
-  getLastViewportHash,
-  matchDefaultLimit,
-  dataCacheTtlMs,
-  dataCacheMaxItems,
-  dataRequestChunkSize
-}: FilterFetcherOptions = {} as FilterFetcherOptions) {
+export function createFilterFetcher(
+  {
+    resolveMap,
+    resolveLayerIds,
+    resolveBuildingSourceConfigs,
+    getCurrentRulesHash,
+    getLastViewportHash,
+    matchDefaultLimit,
+    dataCacheTtlMs,
+    dataCacheMaxItems,
+    dataRequestChunkSize
+  }: FilterFetcherOptions = {} as FilterFetcherOptions
+) {
   let filterDataByOsmKeyCache = new Map<string, { cachedAt: number; item: FilterDataItem }>();
 
   function getVisibleBuildingOsmKeys() {
@@ -472,7 +571,16 @@ export function createFilterFetcher({
     return getLoadedSourceBuildingOsmKeys();
   }
 
-  async function fetchFilterMatchesPrimary({ bbox, zoomBucket, rules, rulesHash, maxResults, renderMode, dataVersion, signal }: {
+  async function fetchFilterMatchesPrimary({
+    bbox,
+    zoomBucket,
+    rules,
+    rulesHash,
+    maxResults,
+    renderMode,
+    dataVersion,
+    signal
+  }: {
     bbox: unknown;
     zoomBucket: number;
     rules: FilterRule[];
@@ -482,11 +590,9 @@ export function createFilterFetcher({
     dataVersion?: number;
     signal?: AbortSignal | null;
   }): Promise<FilterMatchPayload> {
-    const requestedMaxResults = Number.isFinite(Number(maxResults))
-      ? Number(maxResults)
-      : matchDefaultLimit;
+    const requestedMaxResults = Number.isFinite(Number(maxResults)) ? Number(maxResults) : matchDefaultLimit;
     const normalizedBbox = normalizeBbox(bbox);
-    const payload = await apiJson('/api/buildings/filter-matches', {
+    const payload = (await apiJson('/api/buildings/filter-matches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -498,7 +604,7 @@ export function createFilterFetcher({
         maxResults: Math.max(1, Math.trunc(requestedMaxResults))
       }),
       signal
-    }) as FilterMatchPayload;
+    })) as FilterMatchPayload;
     const overpassPayload = buildOverpassMatchPayload({
       currentMap: resolveMap(),
       buildingSourceConfigs: resolveBuildingSourceConfigs(),
@@ -517,7 +623,15 @@ export function createFilterFetcher({
     });
   }
 
-  async function fetchFilterMatchesBatchPrimary({ bbox, zoomBucket, requestSpecs, maxResults, renderMode, dataVersion, signal }: {
+  async function fetchFilterMatchesBatchPrimary({
+    bbox,
+    zoomBucket,
+    requestSpecs,
+    maxResults,
+    renderMode,
+    dataVersion,
+    signal
+  }: {
     bbox: unknown;
     zoomBucket: number;
     requestSpecs: FilterRequestSpec[];
@@ -526,10 +640,8 @@ export function createFilterFetcher({
     dataVersion?: number;
     signal?: AbortSignal | null;
   }): Promise<FilterMatchBatchResponse> {
-    const requestedMaxResults = Number.isFinite(Number(maxResults))
-      ? Number(maxResults)
-      : matchDefaultLimit;
-    const batchPayload = await apiJson('/api/buildings/filter-matches-batch', {
+    const requestedMaxResults = Number.isFinite(Number(maxResults)) ? Number(maxResults) : matchDefaultLimit;
+    const batchPayload = (await apiJson('/api/buildings/filter-matches-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -544,11 +656,14 @@ export function createFilterFetcher({
         }))
       }),
       signal
-    }) as FilterMatchBatchResponse;
+    })) as FilterMatchBatchResponse;
     const maxResultsInt = Math.max(1, Math.trunc(requestedMaxResults));
     const normalizedBbox = normalizeBbox(bbox);
     const items = (Array.isArray(requestSpecs) ? requestSpecs : []).map((spec) => {
-      const serverItem = (Array.isArray(batchPayload?.items) ? batchPayload.items : []).find((item) => String(item?.id || '') === String(spec?.id || '')) || null;
+      const serverItem =
+        (Array.isArray(batchPayload?.items) ? batchPayload.items : []).find(
+          (item) => String(item?.id || '') === String(spec?.id || '')
+        ) || null;
       const overpassPayload = buildOverpassMatchPayload({
         currentMap: resolveMap(),
         buildingSourceConfigs: resolveBuildingSourceConfigs(),
@@ -576,10 +691,13 @@ export function createFilterFetcher({
   }
 
   async function fetchFilterDataByOsmKeys(keys: string[], signal?: AbortSignal | null) {
-    const normalized = [...new Set((Array.isArray(keys) ? keys : [])
-      .map((key) => String(key || '').trim())
-      .filter((key) => /^(way|relation)\/\d+$/.test(key))
-    )];
+    const normalized = [
+      ...new Set(
+        (Array.isArray(keys) ? keys : [])
+          .map((key) => String(key || '').trim())
+          .filter((key) => /^(way|relation)\/\d+$/.test(key))
+      )
+    ];
     if (normalized.length === 0) return new Map<string, FilterDataItem>();
 
     const out = new Map<string, FilterDataItem>();
@@ -597,7 +715,7 @@ export function createFilterFetcher({
         continue;
       }
       const cached = filterDataByOsmKeyCache.get(key);
-      if (cached && (now - cached.cachedAt) <= dataCacheTtlMs) {
+      if (cached && now - cached.cachedAt <= dataCacheTtlMs) {
         out.set(key, cached.item);
       } else {
         if (cached) filterDataByOsmKeyCache.delete(key);
@@ -633,7 +751,11 @@ export function createFilterFetcher({
     return out;
   }
 
-  async function fetchFilterMatchesFallback({ rules, dataVersion, signal }: {
+  async function fetchFilterMatchesFallback({
+    rules,
+    dataVersion,
+    signal
+  }: {
     rules: FilterRule[];
     dataVersion?: number;
     signal?: AbortSignal | null;

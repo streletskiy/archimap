@@ -14,8 +14,8 @@
 - `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
 - `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`, plus tab-local subcomponents for list/filter/detail panes (`EditListFilters`, `EditDetailPane`, `SyncCandidateCard`, `SyncCandidateDetailPane`, `AdminDataForm`, `AdminDataRegionList`, `AdminDataHistorySection`, `AdminFilterTagsSection`, `AdminFilterPresetsSection`, `StyleOverridesDialog`, `StyleDefaultsSection`).
-- `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre, including the 2D/3D building mode toggle, URL-synced 3D camera state, automatic `building:part` activation for 3D building rendering, extrusion-based hover/selection/filter overlays in 3D mode, pitch changes, and Overpass fallback synchronization.
-- `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
+- `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre, including the 2D/3D building mode toggle, URL-synced 3D camera state, automatic `building:part` activation for 3D building rendering, extrusion-based hover/selection/filter overlays in 3D mode, pitch changes, Overpass fallback synchronization, and the public `building-3d-stack.ts` facade for 3D building orchestration.
+- `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers, plus the public `building-3d-stack.ts` facade for building/3D rendering helpers).
 - `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
 - PostgreSQL runtime storage:
   - `osm.building_contours`: PostGIS `geom` + bbox/tags metadata; GeoJSON is rendered on demand for API/PMTiles export.
@@ -77,6 +77,7 @@
 - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, URL-synced 2D/3D camera switching, and overlay markup
   - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, 2D contour vs 3D extrusion hit-testing, and search-result click routing
   - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, provider-aware basemap building visibility, and base-label stacking
+  - `frontend/src/lib/services/map/building-3d-stack.ts`: public facade for building layer ids, 3D height/base helpers, and the current MapLibre-based building rendering implementation
   - `frontend/src/lib/services/map/map-3d-utils.ts`: shared 3D height/base derivation rules, parent-footprint suppression property names, and MapLibre extrusion expressions for PMTiles and Overpass buildings
   - `frontend/src/lib/services/map/map-theme-utils.ts`: basemap style resolution for CARTO/MapTiler/custom proxied basemaps, local Protomaps sprite/glyph asset wiring, a custom high-contrast monochrome Protomaps flavor for custom basemaps, MapTiler POI/ferry/3D-building suppression, and locale-aware label transformation before styles reach MapLibre
   - `frontend/src/lib/services/map/map-style-sync.ts`: shared theme/locale-driven basemap style synchronization used by secondary map widgets outside the main canvas

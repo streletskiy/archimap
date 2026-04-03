@@ -12,7 +12,7 @@ import {
   getCurrentSelectedExtrusionLayerIds,
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds
-} from '../../services/map/map-layer-utils.js';
+} from '../../services/map/building-3d-stack.js';
 import {
   SEARCH_RESULTS_CLUSTER_LAYER_ID,
   SEARCH_RESULTS_LAYER_ID,
@@ -46,14 +46,17 @@ type SelectionPointLike = {
   y?: number;
 };
 
-type SelectionFeatureLike = {
-  layer?: { id?: string };
-  id?: number | string | null;
-  properties?: Record<string, unknown> | null;
-  geometry?: {
-    coordinates?: unknown;
-  } | null;
-} | null | undefined;
+type SelectionFeatureLike =
+  | {
+      layer?: { id?: string };
+      id?: number | string | null;
+      properties?: Record<string, unknown> | null;
+      geometry?: {
+        coordinates?: unknown;
+      } | null;
+    }
+  | null
+  | undefined;
 
 type SelectionDispatchPayload = SelectionIdentity & {
   lon: number | null;
@@ -92,15 +95,20 @@ export function createMapSelectionController({
     return String(feature?.properties?.feature_kind || '').trim() || null;
   }
 
-  function getEventShiftKey(event: {
-    shiftKey?: boolean;
-    originalEvent?: {
-      shiftKey?: boolean;
-      getModifierState?: (key: string) => boolean;
-      srcEvent?: { shiftKey?: boolean };
-    };
-    srcEvent?: { shiftKey?: boolean };
-  } | null | undefined) {
+  function getEventShiftKey(
+    event:
+      | {
+          shiftKey?: boolean;
+          originalEvent?: {
+            shiftKey?: boolean;
+            getModifierState?: (key: string) => boolean;
+            srcEvent?: { shiftKey?: boolean };
+          };
+          srcEvent?: { shiftKey?: boolean };
+        }
+      | null
+      | undefined
+  ) {
     if (event?.shiftKey) return true;
     if (event?.srcEvent?.shiftKey) return true;
     if (event?.originalEvent?.shiftKey) return true;
@@ -167,11 +175,13 @@ export function createMapSelectionController({
   function getRenderableLayerIds(layerIds: string[] = []) {
     const map = getMap?.();
     if (!map) return [];
-    return [...new Set(
-      (Array.isArray(layerIds) ? layerIds : [])
-        .map((layerId) => String(layerId || '').trim())
-        .filter((layerId) => layerId && Boolean(map.getLayer(layerId)))
-    )];
+    return [
+      ...new Set(
+        (Array.isArray(layerIds) ? layerIds : [])
+          .map((layerId) => String(layerId || '').trim())
+          .filter((layerId) => layerId && Boolean(map.getLayer(layerId)))
+      )
+    ];
   }
 
   function getCurrentSelectionFilter(feature: SelectionFeatureLike, identity: unknown) {
@@ -245,11 +255,12 @@ export function createMapSelectionController({
     const normalizedPoint = getNormalizedPoint(event?.point);
     if (!normalizedPoint) return null;
     const searchLayerIds = getRenderableLayerIds([SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]);
-    const searchFeatures = searchLayerIds.length > 0
-      ? map.queryRenderedFeatures(normalizedPoint, {
-          layers: searchLayerIds
-        })
-      : [];
+    const searchFeatures =
+      searchLayerIds.length > 0
+        ? map.queryRenderedFeatures(normalizedPoint, {
+            layers: searchLayerIds
+          })
+        : [];
     if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
       return null;
     }
@@ -266,9 +277,12 @@ export function createMapSelectionController({
     return features?.[0] || null;
   }
 
-  function handleMapPointerMove(event: {
-    point?: SelectionPointLike | null;
-  }, { forceHover = false }: { forceHover?: boolean } = {}) {
+  function handleMapPointerMove(
+    event: {
+      point?: SelectionPointLike | null;
+    },
+    { forceHover = false }: { forceHover?: boolean } = {}
+  ) {
     const map = getMap?.();
     if (!map) return;
     if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) {
@@ -286,11 +300,12 @@ export function createMapSelectionController({
     lastPointerPoint = { x: normalizedPoint.x, y: normalizedPoint.y };
 
     const searchLayerIds = getRenderableLayerIds([SEARCH_RESULTS_CLUSTER_LAYER_ID, SEARCH_RESULTS_LAYER_ID]);
-    const searchFeatures = searchLayerIds.length > 0
-      ? map.queryRenderedFeatures(normalizedPoint, {
-          layers: searchLayerIds
-        })
-      : [];
+    const searchFeatures =
+      searchLayerIds.length > 0
+        ? map.queryRenderedFeatures(normalizedPoint, {
+            layers: searchLayerIds
+          })
+        : [];
     if (Array.isArray(searchFeatures) && searchFeatures.length > 0) {
       clearHoveredBuilding();
       setMapCursor('pointer');
@@ -359,11 +374,8 @@ export function createMapSelectionController({
     const activeRegions = getActiveRegions?.() || [];
     const filter = getCurrentSelectionFilter(feature, identity);
     const selectionKey = `${identity?.osmType || '?'}/${identity?.osmId || '?'}`;
-    const {
-      selectedExtrusionLayerIds,
-      selectedFillLayerIds,
-      selectedLineLayerIds
-    } = getSelectedLayerIds(activeRegions);
+    const { selectedExtrusionLayerIds, selectedFillLayerIds, selectedLineLayerIds } =
+      getSelectedLayerIds(activeRegions);
     for (const layerId of selectedExtrusionLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
@@ -382,15 +394,15 @@ export function createMapSelectionController({
     debugSelectionLog?.('highlight-applied', {
       method: 'setFilter',
       selectionKey,
-      encodedId: identity?.osmType && Number.isInteger(identity?.osmId)
-        ? encodeOsmFeatureId(identity.osmType, identity.osmId)
-        : null
+      encodedId:
+        identity?.osmType && Number.isInteger(identity?.osmId)
+          ? encodeOsmFeatureId(identity.osmType, identity.osmId)
+          : null
     });
 
     if (!lngLat || !shouldZoom) return;
-    const desktopOffsetX = typeof window !== 'undefined' && window.innerWidth >= 1024
-      ? -Math.round(window.innerWidth * 0.18)
-      : 0;
+    const desktopOffsetX =
+      typeof window !== 'undefined' && window.innerWidth >= 1024 ? -Math.round(window.innerWidth * 0.18) : 0;
     debugSelectionLog?.('zoom-start', {
       selectionKey,
       center: { lon: Number(lngLat.lng), lat: Number(lngLat.lat) }
@@ -476,11 +488,8 @@ export function createMapSelectionController({
     const map = getMap?.();
     if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
-    const {
-      selectedExtrusionLayerIds,
-      selectedFillLayerIds,
-      selectedLineLayerIds
-    } = getSelectedLayerIds(activeRegions);
+    const { selectedExtrusionLayerIds, selectedFillLayerIds, selectedLineLayerIds } =
+      getSelectedLayerIds(activeRegions);
     for (const layerId of selectedExtrusionLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, ['==', ['id'], -1]);
@@ -498,16 +507,19 @@ export function createMapSelectionController({
     }
   }
 
-  function applySelectionFromStore(selection: { osmType?: string | null; osmId?: number | string | null } | Array<{ osmType?: string | null; osmId?: number | string | null }> | null | undefined) {
+  function applySelectionFromStore(
+    selection:
+      | { osmType?: string | null; osmId?: number | string | null }
+      | Array<{ osmType?: string | null; osmId?: number | string | null }>
+      | null
+      | undefined
+  ) {
     const map = getMap?.();
     if (!map) return;
     const activeRegions = getActiveRegions?.() || [];
     const filter = getCurrentSelectionFilter(null, selection);
-    const {
-      selectedExtrusionLayerIds,
-      selectedFillLayerIds,
-      selectedLineLayerIds
-    } = getSelectedLayerIds(activeRegions);
+    const { selectedExtrusionLayerIds, selectedFillLayerIds, selectedLineLayerIds } =
+      getSelectedLayerIds(activeRegions);
     for (const layerId of selectedExtrusionLayerIds) {
       if (!map.getLayer(layerId)) continue;
       map.setFilter(layerId, filter);
@@ -573,7 +585,7 @@ export function createMapSelectionController({
 
     const lng = Number(feature?.geometry?.coordinates?.[0]);
     const lat = Number(feature?.geometry?.coordinates?.[1]);
-    const lngLat = (Number.isFinite(lng) && Number.isFinite(lat)) ? { lng, lat } : event?.lngLat;
+    const lngLat = Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : event?.lngLat;
     selectBuildingOnMap({
       source: 'search-result',
       feature: null,

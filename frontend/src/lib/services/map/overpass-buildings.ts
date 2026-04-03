@@ -9,7 +9,7 @@ import {
   buildOverpassFeaturePayload,
   buildOverpassSearchItem
 } from './overpass-data-utils.js';
-import { BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY } from './map-3d-utils.js';
+import { BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY } from './building-3d-stack.js';
 import type { BboxSnapshot } from './filter-types.js';
 
 type OverpassGeoJsonFeature = {
@@ -273,7 +273,11 @@ function readStoredNumber(storageKey: string, storageArea: 'localStorage' | 'ses
   }
 }
 
-function setStoredNumber(storageKey: string, value: number, storageArea: 'localStorage' | 'sessionStorage' = 'localStorage') {
+function setStoredNumber(
+  storageKey: string,
+  value: number,
+  storageArea: 'localStorage' | 'sessionStorage' = 'localStorage'
+) {
   const host = getStorageHost();
   if (!host) return;
   try {
@@ -304,7 +308,10 @@ function buildViewportContextSignature(context: OverpassViewportContext | null |
   return `${viewportHash}:${zoom}:${context.covered ? 'covered' : 'open'}`;
 }
 
-function areViewportContextsEqual(left: OverpassViewportContext | null | undefined, right: OverpassViewportContext | null | undefined) {
+function areViewportContextsEqual(
+  left: OverpassViewportContext | null | undefined,
+  right: OverpassViewportContext | null | undefined
+) {
   return buildViewportContextSignature(left) === buildViewportContextSignature(right);
 }
 
@@ -370,7 +377,8 @@ async function clearTileRecordsFromDb() {
 }
 
 async function evictTileRecord(tileKey: string) {
-  const existing = memoryTileCache.get(tileKey) || memoryDbFallback.get(tileKey) || await readTileRecordFromDb(tileKey);
+  const existing =
+    memoryTileCache.get(tileKey) || memoryDbFallback.get(tileKey) || (await readTileRecordFromDb(tileKey));
   const changed = detachTileRecordFromFeatureIndex(tileKey, existing);
   memoryTileCache.delete(tileKey);
   memoryDbFallback.delete(tileKey);
@@ -411,7 +419,7 @@ function latToTileY(lat: number, zoom: number) {
   const scale = 2 ** zoom;
   const latClamped = Math.max(-85.05112878, Math.min(85.05112878, lat));
   const rad = (latClamped * Math.PI) / 180;
-  return Math.floor(((1 - Math.log(Math.tan(rad) + (1 / Math.cos(rad))) / Math.PI) / 2) * scale);
+  return Math.floor(((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * scale);
 }
 
 function tileXToLon(x: number, zoom: number) {
@@ -482,7 +490,9 @@ function normalizeTileFeature(feature: OverpassGeoJsonFeature, tileKey: string) 
   if (!payload) return null;
   return {
     type: 'Feature' as const,
-    id: Number.isInteger(encodeFeatureId(payload.osmType, payload.osmId)) ? encodeFeatureId(payload.osmType, payload.osmId) : undefined,
+    id: Number.isInteger(encodeFeatureId(payload.osmType, payload.osmId))
+      ? encodeFeatureId(payload.osmType, payload.osmId)
+      : undefined,
     geometry: feature?.geometry || null,
     properties: {
       ...(feature?.properties && typeof feature.properties === 'object' ? feature.properties : {}),
@@ -524,7 +534,7 @@ function normalizeTileFeature(feature: OverpassGeoJsonFeature, tileKey: string) 
 }
 
 function encodeFeatureId(osmType: string, osmId: number) {
-  return (Number(osmId) * 2) + (osmType === 'relation' ? 1 : 0);
+  return Number(osmId) * 2 + (osmType === 'relation' ? 1 : 0);
 }
 
 function addTileKeyAccess(tileKey: string) {
@@ -674,7 +684,7 @@ async function fetchOverpassJson(endpoint: string, query: string, signal?: Abort
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-      'Accept': 'application/json'
+      Accept: 'application/json'
     },
     body: requestBody,
     signal: signal || undefined,
@@ -709,9 +719,11 @@ function buildFeatureCollection() {
   if (lastRenderedFeatureCollectionVersion === featureCollectionVersion) {
     return lastRenderedFeatureCollection;
   }
-  const features = applyBuildingPartBaseSuppression([...cachedFeatureIndex.entries()]
-    .sort((left, right) => Number(left[1]?.updatedAt || 0) - Number(right[1]?.updatedAt || 0))
-    .map(([, entry]) => entry.feature));
+  const features = applyBuildingPartBaseSuppression(
+    [...cachedFeatureIndex.entries()]
+      .sort((left, right) => Number(left[1]?.updatedAt || 0) - Number(right[1]?.updatedAt || 0))
+      .map(([, entry]) => entry.feature)
+  );
   lastRenderedFeatureCollection = {
     type: 'FeatureCollection',
     features
@@ -724,11 +736,13 @@ function buildSearchItemFromFeature(feature: OverpassGeoJsonFeature) {
   return buildOverpassSearchItem(feature);
 }
 
-function normalizeViewportContext(input: {
-  viewport?: unknown;
-  zoom?: number | string | null;
-  covered?: boolean | null;
-} = {}) {
+function normalizeViewportContext(
+  input: {
+    viewport?: unknown;
+    zoom?: number | string | null;
+    covered?: boolean | null;
+  } = {}
+) {
   const viewport = normalizeBbox(input.viewport);
   const zoom = Number(input.zoom);
   const covered = Boolean(input.covered);
@@ -799,16 +813,18 @@ function updateViewportState({
   const canLoad = Boolean(!context.covered && !plan.tooCoarse && missingTiles.length > 0 && !currentLoading);
   const messageKey: OverpassRequestState['messageKey'] = context.covered
     ? 'idle'
-    : (plan.tooCoarse
+    : plan.tooCoarse
       ? 'zoomIn'
-      : (missingTiles.length > 0 ? 'loadArea' : 'cacheReady'));
+      : missingTiles.length > 0
+        ? 'loadArea'
+        : 'cacheReady';
   const message = context.covered
     ? ''
-    : (plan.tooCoarse
+    : plan.tooCoarse
       ? translateNow('mapPage.overpassFallback.zoomIn')
-      : (missingTiles.length > 0
+      : missingTiles.length > 0
         ? translateNow('mapPage.overpassFallback.loadArea')
-        : translateNow('mapPage.overpassFallback.cacheReady')));
+        : translateNow('mapPage.overpassFallback.cacheReady');
 
   patchOverpassState({
     phase: 'ready',
@@ -858,9 +874,7 @@ export function getOverpassBuildingSearchItem(osmKey: string) {
 
 export function getOverpassBuildingDetails(osmKeyOrFeature: string | OverpassGeoJsonFeature | null | undefined) {
   if (!osmKeyOrFeature) return null;
-  const feature = typeof osmKeyOrFeature === 'string'
-    ? getOverpassBuildingFeature(osmKeyOrFeature)
-    : osmKeyOrFeature;
+  const feature = typeof osmKeyOrFeature === 'string' ? getOverpassBuildingFeature(osmKeyOrFeature) : osmKeyOrFeature;
   return feature ? buildOverpassBuildingDetails(feature) : null;
 }
 
@@ -869,12 +883,14 @@ export function getOverpassBuildingFilterData(osmKey: string) {
   return feature ? buildOverpassFilterDataItem(feature) : null;
 }
 
-export async function scheduleOverpassViewportRefresh(input: {
-  viewport?: unknown;
-  zoom?: number | string | null;
-  covered?: boolean | null;
-  force?: boolean;
-} = {}) {
+export async function scheduleOverpassViewportRefresh(
+  input: {
+    viewport?: unknown;
+    zoom?: number | string | null;
+    covered?: boolean | null;
+    force?: boolean;
+  } = {}
+) {
   latestViewportContext = normalizeViewportContext(input);
   if (viewportRefreshTimer) {
     clearTimeout(viewportRefreshTimer);
@@ -949,7 +965,11 @@ export async function refreshOverpassViewport(contextInput: OverpassViewportCont
   });
 }
 
-async function fetchTileRecordFromOverpass(tile: { key: string; bbox: BboxSnapshot }, signal?: AbortSignal | null, endpoint?: string | null) {
+async function fetchTileRecordFromOverpass(
+  tile: { key: string; bbox: BboxSnapshot },
+  signal?: AbortSignal | null,
+  endpoint?: string | null
+) {
   const targetEndpoint = String(endpoint || '').trim() || getOverpassEndpointRoster()[0];
   const query = buildOverpassQueryForBbox(tile.bbox);
   const raw = await fetchOverpassJson(targetEndpoint, query, signal);
@@ -995,11 +1015,14 @@ async function fetchTileRecordWithEndpointFallback(
   throw lastError || new Error('Failed to fetch Overpass tile');
 }
 
-async function loadMissingTilesForViewport(context: OverpassViewportContext, {
-  forceRefresh = false
-}: {
-  forceRefresh?: boolean;
-} = {}) {
+async function loadMissingTilesForViewport(
+  context: OverpassViewportContext,
+  {
+    forceRefresh = false
+  }: {
+    forceRefresh?: boolean;
+  } = {}
+) {
   const normalizedContext = normalizeViewportContext(context);
   latestViewportContext = normalizedContext;
   if (forceRefresh) {
@@ -1112,9 +1135,10 @@ async function loadMissingTilesForViewport(context: OverpassViewportContext, {
     };
   }
 
-  const nextViewportContext = latestViewportContext && !areViewportContextsEqual(latestViewportContext, normalizedContext)
-    ? latestViewportContext
-    : null;
+  const nextViewportContext =
+    latestViewportContext && !areViewportContextsEqual(latestViewportContext, normalizedContext)
+      ? latestViewportContext
+      : null;
   if (nextViewportContext) {
     await refreshOverpassViewport(nextViewportContext);
     return {
@@ -1168,11 +1192,13 @@ function abortActiveOverpassLoad() {
   });
 }
 
-export async function requestOverpassViewportLoad(input: {
-  viewport?: unknown;
-  zoom?: number | string | null;
-  covered?: boolean | null;
-} = {}) {
+export async function requestOverpassViewportLoad(
+  input: {
+    viewport?: unknown;
+    zoom?: number | string | null;
+    covered?: boolean | null;
+  } = {}
+) {
   const context = normalizeViewportContext(input);
   if (!context.viewport || context.covered) return;
   if (viewportRefreshTimer) {
@@ -1182,11 +1208,13 @@ export async function requestOverpassViewportLoad(input: {
   await loadMissingTilesForViewport(context);
 }
 
-export async function refreshOverpassViewportData(input: {
-  viewport?: unknown;
-  zoom?: number | string | null;
-  covered?: boolean | null;
-} = {}) {
+export async function refreshOverpassViewportData(
+  input: {
+    viewport?: unknown;
+    zoom?: number | string | null;
+    covered?: boolean | null;
+  } = {}
+) {
   const context = normalizeViewportContext(input);
   if (!context.viewport || context.covered) return;
   if (viewportRefreshTimer) {
@@ -1263,14 +1291,19 @@ export function resetOverpassState() {
   });
 }
 
-export function searchOverpassBuildings(query: string, {
-  viewport = null,
-  limit = 250
-}: {
-  viewport?: unknown;
-  limit?: number;
-} = {}) {
-  const text = String(query || '').trim().toLowerCase();
+export function searchOverpassBuildings(
+  query: string,
+  {
+    viewport = null,
+    limit = 250
+  }: {
+    viewport?: unknown;
+    limit?: number;
+  } = {}
+) {
+  const text = String(query || '')
+    .trim()
+    .toLowerCase();
   if (text.length < 2) return [];
   const viewportBbox = normalizeBbox(viewport);
   const items: Array<{ item: Record<string, unknown>; score: number }> = [];
@@ -1285,20 +1318,38 @@ export function searchOverpassBuildings(query: string, {
       continue;
     }
     if (viewportBbox && Number.isFinite(lon) && Number.isFinite(lat)) {
-      const inside = lon >= viewportBbox.west
-        && lon <= viewportBbox.east
-        && lat >= viewportBbox.south
-        && lat <= viewportBbox.north;
+      const inside =
+        lon >= viewportBbox.west && lon <= viewportBbox.east && lat >= viewportBbox.south && lat <= viewportBbox.north;
       if (!inside) continue;
     }
     const item = buildSearchItemFromFeature(feature);
     if (!item) continue;
     const scoreParts = [
-      String(item.name || '').toLowerCase().includes(text) ? 6 : 0,
-      String(item.address || '').toLowerCase().includes(text) ? 5 : 0,
-      String(item.style || '').toLowerCase().includes(text) ? 4 : 0,
-      String(item.architect || '').toLowerCase().includes(text) ? 3 : 0,
-      String(item.designRef || '').toLowerCase().includes(text) ? 2 : 0,
+      String(item.name || '')
+        .toLowerCase()
+        .includes(text)
+        ? 6
+        : 0,
+      String(item.address || '')
+        .toLowerCase()
+        .includes(text)
+        ? 5
+        : 0,
+      String(item.style || '')
+        .toLowerCase()
+        .includes(text)
+        ? 4
+        : 0,
+      String(item.architect || '')
+        .toLowerCase()
+        .includes(text)
+        ? 3
+        : 0,
+      String(item.designRef || '')
+        .toLowerCase()
+        .includes(text)
+        ? 2
+        : 0,
       searchText.includes(text) ? 1 : 0
     ];
     items.push({

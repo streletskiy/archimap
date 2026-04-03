@@ -1,8 +1,10 @@
 import {
   bringBaseLabelLayersAboveCustomLayers,
   bringSearchResultsLayersToFront,
+  ensureSearchResultsSourceAndLayers
+} from '../../services/map/map-layer-utils.js';
+import {
   ensureRegionBuildingSourceAndLayers,
-  ensureSearchResultsSourceAndLayers,
   getBasemapBuildingLayerIds,
   getBasemapSuppressedLayerIds,
   getCurrentBuildingsExtrusionLayerIds,
@@ -25,7 +27,7 @@ import {
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds,
   removeRegionBuildingSourceAndLayers
-} from '../../services/map/map-layer-utils.js';
+} from '../../services/map/building-3d-stack.js';
 import { normalizeBasemapProvider } from '../../services/map/basemap-config.js';
 import {
   SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
@@ -40,10 +42,7 @@ import {
   isViewportCoveredByRegions,
   shouldRenderRegionBuildings
 } from '../../services/region-pmtiles.js';
-import type {
-  FilterBuildingSourceConfig,
-  FilterMapLike
-} from '../../services/map/filter-types.js';
+import type { FilterBuildingSourceConfig, FilterMapLike } from '../../services/map/filter-types.js';
 
 const CARTO_SHOW_DELAY_MS = 160;
 
@@ -116,7 +115,8 @@ export function createMapRegionLayersController({
       buildingPartExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(activeRegionPmtiles),
       buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegionPmtiles),
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegionPmtiles),
-      buildingPartFilterHighlightExtrusionLayerIds: getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegionPmtiles),
+      buildingPartFilterHighlightExtrusionLayerIds:
+        getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles),
       hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegionPmtiles),
@@ -225,10 +225,12 @@ export function createMapRegionLayersController({
   function hasSearchResultLayersReady() {
     const map = getMap?.();
     if (!map) return false;
-    return Boolean(map.getSource(SEARCH_RESULTS_SOURCE_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID));
+    return (
+      Boolean(map.getSource(SEARCH_RESULTS_SOURCE_ID)) &&
+      Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID)) &&
+      Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID)) &&
+      Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID))
+    );
   }
 
   function getConfiguredRegionPmtiles(config: RuntimeConfigLike | null | undefined = getRuntimeConfig?.()) {
@@ -291,9 +293,8 @@ export function createMapRegionLayersController({
     }
     const token = ++coverageEvalToken;
     const runtimeConfig = getRuntimeConfig?.();
-    const regions = activeRegionPmtiles.length > 0
-      ? activeRegionPmtiles
-      : getViewportActiveRegionPmtiles(runtimeConfig);
+    const regions =
+      activeRegionPmtiles.length > 0 ? activeRegionPmtiles : getViewportActiveRegionPmtiles(runtimeConfig);
     if (regions.length === 0) {
       queueBasemapBuildingsVisibility('visible');
       return;
@@ -318,10 +319,7 @@ export function createMapRegionLayersController({
     }, 80);
   }
 
-  function ensureMapSourcesAndLayers(
-    config: RuntimeConfigLike,
-    { force = false }: { force?: boolean } = {}
-  ) {
+  function ensureMapSourcesAndLayers(config: RuntimeConfigLike, { force = false }: { force?: boolean } = {}) {
     const map = getMap?.();
     if (!map) return;
     const theme = getCurrentTheme?.();

@@ -1,4 +1,4 @@
-import { buildVisibleBuildingSelectionScopeExpression } from '../../services/map/map-layer-utils.js';
+import { buildVisibleBuildingSelectionScopeExpression } from '../../services/map/building-3d-stack.js';
 
 export function parseOsmKey(raw) {
   const text = String(raw || '').trim();
@@ -14,7 +14,7 @@ export function parseOsmKey(raw) {
 export function decodeOsmFeatureId(featureId) {
   const n = Number(featureId);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
-  const osmType = (n % 2) === 1 ? 'relation' : 'way';
+  const osmType = n % 2 === 1 ? 'relation' : 'way';
   const osmId = Math.floor(n / 2);
   if (!Number.isInteger(osmId) || osmId <= 0) return null;
   return { osmType, osmId };
@@ -22,7 +22,7 @@ export function decodeOsmFeatureId(featureId) {
 
 export function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 function normalizeSelectionIdentity(selection) {
@@ -74,9 +74,7 @@ function buildSelectionFilterFromIdentities(feature, identities) {
     return getSelectionFilter(feature, normalizedIdentities[0]);
   }
 
-  const fallbackFilters = normalizedIdentities
-    .map((identity) => getSelectionFilter(null, identity))
-    .filter(Boolean);
+  const fallbackFilters = normalizedIdentities.map((identity) => getSelectionFilter(null, identity)).filter(Boolean);
 
   if (fallbackFilters.length === 0) {
     return ['==', ['id'], -1];
@@ -111,7 +109,8 @@ export function getSelectionFilter(feature, identity) {
     return ['==', ['id'], byFeatureId];
   }
   if (identity?.osmType && Number.isInteger(identity?.osmId)) {
-    return ['all',
+    return [
+      'all',
       ['==', ['get', 'osm_type'], identity.osmType],
       ['==', ['to-number', ['get', 'osm_id']], identity.osmId]
     ];
@@ -119,9 +118,7 @@ export function getSelectionFilter(feature, identity) {
   return ['==', ['id'], -1];
 }
 
-export function getVisibleSelectionFilter(feature, identity, {
-  showBuildingParts = true
-} = {}) {
+export function getVisibleSelectionFilter(feature, identity, { showBuildingParts = true } = {}) {
   const idFilter = getSelectionFilter(feature, identity);
   const scopeFilter = buildVisibleBuildingSelectionScopeExpression({
     showBuildingParts

@@ -20,7 +20,7 @@
     syncMapVisibilityFromStorage
   } from '$lib/stores/map';
   import { getUserInitials, getUserLabel } from '$lib/utils/user-display';
-  import { getEffectiveBuildingPartsVisibility } from '$lib/services/map/map-3d-utils';
+  import { getEffectiveBuildingPartsVisibility } from '$lib/services/map/building-3d-stack';
 
   export let open = false;
   export let primaryLinks = [];
