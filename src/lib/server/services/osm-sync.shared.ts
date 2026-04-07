@@ -382,9 +382,12 @@ function applyFieldToTagMap(tags: LooseRecord, field, value, explicitlyEdited = 
       tags['building:levels'] = normalized;
       delete tags.levels;
       return ['levels'];
-    case 'year_built':
-      tags['building:year'] = normalized;
-      return [];
+        case 'year_built':
+      tags['start_date'] = normalized;
+      delete tags['building:year'];
+      delete tags.construction_date;
+      delete tags.year_built;
+      return ['building:year', 'construction_date', 'year_built'];
     case 'architect':
       tags.architect = normalized;
       delete tags.architect_name;
@@ -418,6 +421,17 @@ function buildDesiredTagMap(currentTags: LooseRecord, candidateRows) {
     if (Array.isArray(fieldRemovedKeys)) {
       for (const key of fieldRemovedKeys) removedKeys.add(key);
     }
+  }
+
+    if (desired['building:year']) {
+    if (!desired['start_date']) desired['start_date'] = desired['building:year'];
+    delete desired['building:year'];
+    removedKeys.add('building:year');
+  }
+  if (desired['construction_date']) {
+    if (!desired['start_date']) desired['start_date'] = desired['construction_date'];
+    delete desired['construction_date'];
+    removedKeys.add('construction_date');
   }
 
   for (const key of Object.keys(desired)) {
