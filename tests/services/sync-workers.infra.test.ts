@@ -57,6 +57,12 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
       const item = regionMap.get(Number(regionId));
       return item ? { ...item } : null;
     },
+    getRegionUpstreamState: async (regionOrId) => {
+      const region = typeof regionOrId === 'object' && regionOrId
+        ? regionOrId
+        : regionMap.get(Number(regionOrId));
+      return region ? { ...region } : null;
+    },
     createQueuedRun: async (regionId, triggerReason, requestedBy) => {
       const run = {
         id: nextRunId += 1,
@@ -117,6 +123,13 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
         run: { ...run },
         region: region ? { ...region } : null
       };
+    },
+    rescheduleRegionAfterSkippedSync: async (regionId) => {
+      const region = regionMap.get(Number(regionId));
+      if (region) {
+        region.nextSyncAt = 'rescheduled';
+      }
+      return region ? { ...region } : null;
     },
     ...overrides
   };
@@ -427,4 +440,160 @@ test('managed sync workers disable standalone runtime followup in child env', as
 
   workers.stop();
   await waitForMicrotasks();
+});
+
+test('managed sync workers reject manual sync when upstream data is already up to date', async () => {
+  let spawnCalls = 0;
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 11,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle',
+      lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+    }
+  ], {
+    getRegionUpstreamState: async (regionOrId) => {
+      const region = typeof regionOrId === 'object' && regionOrId
+        ? regionOrId
+        : await dataSettingsService.getRegionById(regionOrId);
+      return {
+        ...region,
+        upstreamStatus: 'up_to_date',
+        latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
+      };
+    }
+  });
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      spawnCalls += 1;
+      return createChildProcessStub();
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  await assert.rejects(
+    () => workers.requestRegionSync(11, { triggerReason: 'manual', requestedBy: 'tester' }),
+    /No upstream update is available/
+  );
+  assert.equal(spawnCalls, 0);
+});
+
+test('managed sync workers skip scheduled sync when upstream data is already up to date', async () => {
+  let spawnCalls = 0;
+  let rescheduled = 0;
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 12,
+      enabled: true,
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      nextSyncAt: '2026-04-08T00:00:00.000Z',
+      lastSyncStatus: 'idle',
+      lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+    }
+  ], {
+    getRegionUpstreamState: async (regionOrId) => {
+      const region = typeof regionOrId === 'object' && regionOrId
+        ? regionOrId
+        : await dataSettingsService.getRegionById(regionOrId);
+      return {
+        ...region,
+        upstreamStatus: 'up_to_date',
+        latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
+      };
+    },
+    rescheduleRegionAfterSkippedSync: async (regionId) => {
+      rescheduled += 1;
+      return dataSettingsService.getRegionById(regionId);
+    }
+  });
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      spawnCalls += 1;
+      return createChildProcessStub();
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const result = await workers.requestRegionSync(12, {
+    triggerReason: 'scheduled',
+    requestedBy: 'system'
+  });
+
+  assert.equal(result.queued, false);
+  assert.equal(result.skipped, true);
+  assert.equal(spawnCalls, 0);
+  assert.equal(rescheduled, 1);
+});
+
+test('managed sync workers pass imported source version marker to successful runs', async () => {
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 13,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ], {
+    getRegionUpstreamState: async (regionOrId) => {
+      const region = typeof regionOrId === 'object' && regionOrId
+        ? regionOrId
+        : await dataSettingsService.getRegionById(regionOrId);
+      return {
+        ...region,
+        latestSourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
+      };
+    }
+  });
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await workers.requestRegionSync(13, {
+    triggerReason: 'manual',
+    requestedBy: 'tester'
+  });
+  assert.ok(queued?.run?.id);
+
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":5}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  const savedRun = await dataSettingsService.getRunById(queued.run.id);
+  assert.equal(savedRun?.summary?.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
 });

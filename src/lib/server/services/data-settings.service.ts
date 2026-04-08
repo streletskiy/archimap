@@ -8,6 +8,7 @@ const { createBootstrapDomain } = require('./data-settings/bootstrap');
 const { createExtractsDomain } = require('./data-settings/extracts');
 const { createRegionsDomain } = require('./data-settings/regions');
 const { createSyncRunsDomain } = require('./data-settings/sync-runs');
+const { createUpstreamDomain } = require('./data-settings/upstream');
 const { createPresetsDomain } = require('./data-settings/presets');
 const { createPythonExtractResolver } = require('../../../../scripts/region-sync/python-extractor');
 import type { AdminDataSettings, Region } from '$shared/types';
@@ -223,8 +224,31 @@ function createDataSettingsService(options: LooseRecord = {}) {
   const regionsDomain = createRegionsDomain(context);
   Object.assign(context, regionsDomain);
 
+  const upstreamDomain = createUpstreamDomain(context);
+  Object.assign(context, upstreamDomain);
+
   const syncRunsDomain = createSyncRunsDomain(context);
   const presetsDomain = createPresetsDomain(context);
+
+  async function mapWithConcurrency(items = [], limit = 4, iteratee = async (value, _index) => value) {
+    const source = Array.isArray(items) ? items : [];
+    if (source.length === 0) return [];
+    const normalizedLimit = Math.max(1, Math.min(16, Math.trunc(Number(limit) || 4)));
+    const results = new Array(source.length);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: Math.min(normalizedLimit, source.length) }, async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        if (currentIndex >= source.length) return;
+        results[currentIndex] = await iteratee(source[currentIndex], currentIndex);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  }
 
   async function getDataSettingsForAdmin(): Promise<AdminDataSettings> {
     await bootstrapDomain.ensureBootstrapped();
@@ -241,6 +265,24 @@ function createDataSettingsService(options: LooseRecord = {}) {
     };
   }
 
+  async function getRegionsUpstreamState(regionIds = [], options: LooseRecord = {}): Promise<Region[]> {
+    await bootstrapDomain.ensureBootstrapped();
+    const normalizedIds = [...new Set(
+      (Array.isArray(regionIds) ? regionIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )];
+    if (normalizedIds.length === 0) {
+      return [];
+    }
+
+    const items = await mapWithConcurrency(normalizedIds, 4, async (regionId) =>
+      upstreamDomain.getRegionUpstreamState(regionId, options)
+    );
+
+    return items.filter((item): item is Region => Boolean(item));
+  }
+
   return {
     slugify: context.slugify,
     normalizeBounds: context.normalizeBounds,
@@ -254,6 +296,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
     saveRegion: regionsDomain.saveRegion,
     deleteRegion: regionsDomain.deleteRegion,
     getDataSettingsForAdmin,
+    getRegionsUpstreamState,
     getFilterTagAllowlistForAdmin,
     getEffectiveFilterTagAllowlistConfig,
     saveFilterTagAllowlist,
@@ -262,6 +305,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
     getFilterPresetsForRuntime: presetsDomain.getFilterPresetsForRuntime,
     saveFilterPreset: presetsDomain.saveFilterPreset,
     deleteFilterPresetById: presetsDomain.deleteFilterPresetById,
+    getRegionUpstreamState: upstreamDomain.getRegionUpstreamState,
     getRecentRuns: syncRunsDomain.getRecentRuns,
     getRunById: syncRunsDomain.getRunById,
     createQueuedRun: syncRunsDomain.createQueuedRun,
@@ -269,6 +313,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
     markRunSucceeded: syncRunsDomain.markRunSucceeded,
     markRunFailed: syncRunsDomain.markRunFailed,
     recoverInterruptedRuns: syncRunsDomain.recoverInterruptedRuns,
+    rescheduleRegionAfterSkippedSync: syncRunsDomain.rescheduleRegionAfterSkippedSync,
     refreshRegionNextSyncAt: syncRunsDomain.refreshRegionNextSyncAt,
     refreshAllNextSyncAt: syncRunsDomain.refreshAllNextSyncAt,
     validateOverlap: regionsDomain.validateOverlap

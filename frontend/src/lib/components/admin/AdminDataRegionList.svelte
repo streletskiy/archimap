@@ -16,6 +16,7 @@
   let regionPageCount = 0;
   let lastRegionListKey = '';
   let lastSelectedDataRegionId = null;
+  let lastVisibleRegionIdsKey = '';
 
   function buildRegionListKey(items) {
     return (Array.isArray(items) ? items : []).map((region) => Number(region?.id || 0)).join(':');
@@ -41,8 +42,18 @@
     regionPage = normalizedPage;
   }
 
+  function getVisibleRegions(items, page) {
+    const source = Array.isArray(items) ? items : [];
+    const start = (Math.max(1, Math.trunc(Number(page) || 1)) - 1) * REGION_LIST_PAGE_SIZE;
+    return source.slice(start, start + REGION_LIST_PAGE_SIZE);
+  }
+
   $: regionPageCount = Math.ceil(Math.max(0, Number(regions?.length || 0)) / REGION_LIST_PAGE_SIZE);
   $: regionPage = normalizeRegionPage(regionPage, regionPageCount);
+  $: visibleRegions = getVisibleRegions(regions, regionPage);
+  $: if (dataLoading) {
+    lastVisibleRegionIdsKey = '';
+  }
 
   $: {
     const nextRegionListKey = buildRegionListKey(regions);
@@ -71,6 +82,19 @@
 
     void lastRegionListKey;
     void lastSelectedDataRegionId;
+  }
+
+  $: {
+    const nextVisibleRegionIdsKey = (Array.isArray(visibleRegions) ? visibleRegions : [])
+      .map((region) => Number(region?.id || 0))
+      .join(':');
+    if (!dataLoading && nextVisibleRegionIdsKey && nextVisibleRegionIdsKey !== lastVisibleRegionIdsKey) {
+      lastVisibleRegionIdsKey = nextVisibleRegionIdsKey;
+      void controller?.refreshRegionUpstreamStatuses?.(
+        (Array.isArray(visibleRegions) ? visibleRegions : []).map((region) => region?.id),
+        { silent: true }
+      );
+    }
   }
 
 </script>
@@ -118,8 +142,9 @@
     </p>
   {:else}
     <div class="space-y-2">
-      {#each (Array.isArray(regions) ? regions : []).slice((regionPage - 1) * REGION_LIST_PAGE_SIZE, regionPage * REGION_LIST_PAGE_SIZE) as region (`data-region-${region.id}`)}
+      {#each visibleRegions as region (`data-region-${region.id}`)}
         {@const statusMeta = controller.getRegionStatusMeta(region.lastSyncStatus, region)}
+        {@const updateMeta = controller.getRegionUpdateMeta(region)}
         {@const extractSummary = controller.getRegionExtractSummaryText(region)}
         <UiPressableCard
           selected={selectedDataRegionId === region.id}
@@ -141,7 +166,11 @@
           </div>
 
           <div class="data-region-meta mt-1.5 flex flex-wrap gap-2 text-xs ui-text-subtle">
+            <span class="badge-pill data-status-pill rounded-full px-2 py-1" data-tone={updateMeta.tone}>
+              {$t('admin.data.list.updateStatus')}: {updateMeta.text}
+            </span>
             <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.lastSync')}: {formatUiDate(region.lastSuccessfulSyncAt) || '---'}</span>
+            <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.upstreamLatest')}: {formatUiDate(region.latestSourceDataUpdatedAt) || '---'}</span>
             <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.nextSync')}: {formatUiDate(region.nextSyncAt) || '---'}</span>
             <span class="rounded-full ui-surface-soft px-2 py-1">{$t('admin.data.list.pmtilesSize')}: {controller.formatStorageBytes(region.pmtilesBytes)}</span>
             <span class="rounded-full ui-surface-soft px-2 py-1">

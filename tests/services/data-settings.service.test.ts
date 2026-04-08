@@ -9,6 +9,7 @@ const migration = require('../../db/migrations/003_data_regions.migration.ts');
 const filterTagAllowlistMigration = require('../../db/migrations/005_filter_tag_allowlist.migration.ts');
 const filterPresetsMigration = require('../../db/migrations/011_filter_presets.migration.ts');
 const filterPresetNameI18nMigration = require('../../db/migrations/012_filter_preset_name_i18n.migration.ts');
+const regionSourceDataUpdatedAtMigration = require('../../db/migrations/023_region_source_data_updated_at.migration.ts');
 const {
   createDataSettingsService,
   buildRegionPmtilesFileName,
@@ -25,6 +26,7 @@ function createTestDb() {
   filterTagAllowlistMigration.up(db);
   filterPresetsMigration.up(db);
   filterPresetNameI18nMigration.up(db);
+  regionSourceDataUpdatedAtMigration.up(db);
   return db;
 }
 
@@ -105,6 +107,7 @@ function createService(options: LooseRecord = {}) {
     db: options.db,
     dataDir: options.dataDir,
     now: options.now,
+    fetchImpl: options.fetchImpl,
     extractResolver: options.extractResolver || createMockExtractResolver(),
     fallbackData: options.fallbackData || {
       autoSyncEnabled: true,
@@ -678,6 +681,164 @@ test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage byt
   }
 });
 
+test('getDataSettingsForAdmin returns quickly without live upstream checks', async () => {
+  const db = createTestDb();
+  let fetchCalls = 0;
+  const service = createService({
+    db,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return new Response('', {
+        status: 200,
+        headers: {
+          'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
+        }
+      });
+    },
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'geofabrik:geofabrik_asia_afghanistan': {
+          candidate: {
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_asia_afghanistan',
+            extractLabel: 'Afghanistan',
+            downloadUrl: 'https://download.geofabrik.de/asia/afghanistan-latest.osm.pbf'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    })
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Afghanistan',
+    slug: 'afghanistan',
+    searchQuery: 'Afghanistan',
+    extractSource: 'geofabrik',
+    extractId: 'geofabrik_asia_afghanistan',
+    extractLabel: 'Afghanistan'
+  }), 'tester');
+
+  db.prepare(`
+    UPDATE data_sync_regions
+    SET
+      last_successful_sync_at = ?,
+      source_data_updated_at = ?
+    WHERE id = ?
+  `).run('2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', region.id);
+
+  const settings = await service.getDataSettingsForAdmin();
+  const saved = settings.regions.find((item) => item.id === region.id);
+  assert.ok(saved);
+  assert.equal(saved.upstreamStatus, 'unknown');
+  assert.equal(saved.updateAvailable, false);
+  assert.equal(saved.latestSourceDataUpdatedAt, null);
+  assert.equal(fetchCalls, 0);
+});
+
+test('getRegionsUpstreamState marks region when upstream source has a newer version', async () => {
+  const db = createTestDb();
+  const service = createService({
+    db,
+    fetchImpl: async () => new Response('', {
+      status: 200,
+      headers: {
+        'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
+      }
+    }),
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'geofabrik:geofabrik_asia_afghanistan': {
+          candidate: {
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_asia_afghanistan',
+            extractLabel: 'Afghanistan',
+            downloadUrl: 'https://download.geofabrik.de/asia/afghanistan-latest.osm.pbf'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    })
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Afghanistan',
+    slug: 'afghanistan',
+    searchQuery: 'Afghanistan',
+    extractSource: 'geofabrik',
+    extractId: 'geofabrik_asia_afghanistan',
+    extractLabel: 'Afghanistan'
+  }), 'tester');
+
+  db.prepare(`
+    UPDATE data_sync_regions
+    SET
+      last_successful_sync_at = ?,
+      source_data_updated_at = ?
+    WHERE id = ?
+  `).run('2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', region.id);
+
+  const [saved] = await service.getRegionsUpstreamState([region.id]);
+  assert.ok(saved);
+  assert.equal(saved.upstreamStatus, 'update_available');
+  assert.equal(saved.updateAvailable, true);
+  assert.equal(saved.latestSourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
+  assert.equal(saved.sourceDataUpdatedAt, '2026-04-01T00:00:00.000Z');
+});
+
+test('getRegionsUpstreamState keeps upstream state unknown when local source version was never recorded', async () => {
+  const db = createTestDb();
+  const service = createService({
+    db,
+    fetchImpl: async () => new Response('', {
+      status: 200,
+      headers: {
+        'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
+      }
+    }),
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'geofabrik:geofabrik_asia_afghanistan': {
+          candidate: {
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_asia_afghanistan',
+            extractLabel: 'Afghanistan',
+            downloadUrl: 'https://download.geofabrik.de/asia/afghanistan-latest.osm.pbf'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    })
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Afghanistan',
+    slug: 'afghanistan',
+    searchQuery: 'Afghanistan',
+    extractSource: 'geofabrik',
+    extractId: 'geofabrik_asia_afghanistan',
+    extractLabel: 'Afghanistan'
+  }), 'tester');
+
+  db.prepare(`
+    UPDATE data_sync_regions
+    SET
+      last_successful_sync_at = ?,
+      source_data_updated_at = NULL
+    WHERE id = ?
+  `).run('2026-04-01T00:00:00.000Z', region.id);
+
+  const [saved] = await service.getRegionsUpstreamState([region.id]);
+  assert.ok(saved);
+  assert.equal(saved.upstreamStatus, 'unknown');
+  assert.equal(saved.updateAvailable, false);
+  assert.equal(saved.latestSourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
+  assert.equal(saved.sourceDataUpdatedAt, null);
+});
+
 test('overlapping enabled region bounds are allowed to complete syncs', async () => {
   const db = createTestDb();
   const service = createService({
@@ -848,12 +1009,34 @@ test('run lifecycle updates region status, history and nextSyncAt', async () => 
   assert.equal(result.region.lastFeatureCount, 490);
   assert.equal(result.region.bounds.west, 44);
   assert.equal(result.region.lastSuccessfulSyncAt, '2026-03-07T12:30:00.000Z');
+  assert.equal(result.region.sourceDataUpdatedAt, null);
   assert.equal(result.region.nextSyncAt, '2026-03-08T12:30:00.000Z');
 
   const history = await service.getRecentRuns(region.id, 10);
   assert.equal(history.length, 1);
   assert.equal(history[0].importedFeatureCount, 500);
   assert.equal(history[0].activeFeatureCount, 490);
+});
+
+test('markRunSucceeded stores imported upstream source version on the region', async () => {
+  const db = createTestDb();
+  const service = createService({ db });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Versioned Region',
+    slug: 'versioned-region',
+    extractId: 'versioned-region'
+  }), 'tester');
+
+  const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(queuedRun.id);
+  const result = await service.markRunSucceeded(queuedRun.id, {
+    importedFeatureCount: 10,
+    activeFeatureCount: 10,
+    sourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
+  });
+
+  assert.equal(result.region.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
 });
 
 test('failed first sync schedules retry after interval instead of immediate rerun', async () => {

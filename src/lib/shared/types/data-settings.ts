@@ -7,6 +7,12 @@ export type RegionResolutionStatus =
   | 'resolution_required'
   | 'resolution_error';
 
+export type RegionUpstreamStatus =
+  | 'unknown'
+  | 'up_to_date'
+  | 'update_available'
+  | 'error';
+
 export type RegionSourceType = 'extract';
 
 export interface RegionBounds {
@@ -41,6 +47,12 @@ export interface Region {
   lastSyncStatus: string;
   lastSyncError: string | null;
   lastSuccessfulSyncAt: string | null;
+  sourceDataUpdatedAt: string | null;
+  latestSourceDataUpdatedAt: string | null;
+  upstreamCheckedAt: string | null;
+  upstreamStatus: RegionUpstreamStatus;
+  upstreamError: string | null;
+  updateAvailable: boolean;
   nextSyncAt: string | null;
   bounds: RegionBounds | null;
   lastFeatureCount: number | null;

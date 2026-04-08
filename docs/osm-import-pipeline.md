@@ -157,7 +157,7 @@ flowchart TD
 ### `quackosm`
 
 - Resolves the configured extract query.
-- Downloads or reuses the matching extract.
+- For managed region sync, resolves the canonical extract id first, deletes the previously downloaded local `*.osm.pbf` for that extract from the workspace cache, and forces a fresh download/conversion before import.
 - If the precalculated index download is rate-limited, the importer retries with local index recalculation and caches the result for future runs.
 - Filters source data by `tags_filter={'building': True, 'building:part': True}` before the project-specific SQL stage.
 - Writes the raw import result into DuckDB as `quackosm_raw`.
@@ -247,6 +247,7 @@ flowchart TD
   - `region.pmtiles`
 - Persistent intermediate extraction cache:
   - `data/quackosm/*.duckdb`
+  - `data/quackosm/*.osm.pbf` downloaded by QuackOSM for canonical extract imports
   - QuackOSM source indexes under `data/cache/QuackOSM/*.geojson` when the container uses the persisted cache root
 - Persistent runtime outputs:
   - `osm.building_contours`
@@ -266,6 +267,7 @@ flowchart TD
 ## Failure handling and invariants
 
 - Syncs are serialized through one in-process queue; parallel region imports are not allowed.
+- Manual sync requests are skipped when the region already has a successful import and the upstream extract version is unchanged; scheduled checks reschedule the next attempt instead of reimporting the same extract immediately.
 - A `0`-feature import is treated as failure; DB state and PMTiles stay untouched.
 - QuackOSM index rate limits are treated as recoverable: the importer falls back to local index recalculation instead of failing the sync immediately.
 - PMTiles swap is protected by a backup file and explicit rollback path.

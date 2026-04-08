@@ -87,6 +87,24 @@ function createExtractsDomain(context: LooseRecord = {}) {
     };
   }
 
+  async function resolveExactExtractCandidate(query, options: LooseRecord = {}) {
+    await ensureBootstrapped();
+    const normalizedQuery = normalizeNullableText(query, 240);
+    if (!normalizedQuery) {
+      return {
+        candidate: null,
+        errorCode: 'not_found',
+        message: 'Exact canonical extract was not found.'
+      };
+    }
+
+    const result = await requireExtractResolver().resolveExactExtract(normalizedQuery, options);
+    return {
+      ...result,
+      candidate: normalizeExtractCandidate(result?.candidate || {})
+    };
+  }
+
   async function validateSelectedExtract(
     input: LooseRecord = {},
     previous: { extractSource?: string | null; extractId?: string | null; extractLabel?: string | null } | null = null
@@ -140,6 +158,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
 
   return {
     searchExtractCandidates,
+    resolveExactExtractCandidate,
     validateSelectedExtract
   };
 }

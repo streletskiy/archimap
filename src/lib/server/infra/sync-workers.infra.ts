@@ -122,6 +122,17 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     return `Sync failed with exit code ${code}`;
   }
 
+  function shouldSkipSyncBecauseUpToDate(region: LooseRecord = {}) {
+    const lastSyncStatus = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
+    return Boolean(
+      region?.lastSuccessfulSyncAt
+      && lastSyncStatus !== 'failed'
+      && region?.upstreamStatus === 'up_to_date'
+    );
+  }
+
   async function flushDeferredSyncSuccess() {
     if (typeof onSyncSuccess !== 'function') {
       deferredSyncSuccessPayload = null;
@@ -168,7 +179,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     }
   }
 
-  function startChildForRun(run: LooseRecord, region: LooseRecord) {
+  function startChildForRun(run: LooseRecord, region: LooseRecord, queueEntry: LooseRecord = {}) {
     let stdoutBuffer = '';
     let stderrBuffer = '';
     let outputTail = '';
@@ -242,7 +253,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       if (code === 0 && parsedSummary) {
         finalizeRun(run.id, {
           success: true,
-          summary: parsedSummary
+          summary: {
+            ...parsedSummary,
+            sourceDataUpdatedAt: queueEntry.sourceDataUpdatedAt || null
+          }
         }).catch(() => {});
         return;
       }
@@ -276,7 +290,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         });
         return;
       }
-      startChildForRun(run, region);
+      startChildForRun(run, region, next);
     } finally {
       draining = false;
     }
@@ -329,6 +343,32 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         };
       }
 
+      let upstreamRegion = region;
+      if (typeof dataSettingsService.getRegionUpstreamState === 'function') {
+        try {
+          upstreamRegion = await dataSettingsService.getRegionUpstreamState(region, {
+            forceRefresh: true
+          }) || region;
+        } catch {
+          upstreamRegion = region;
+        }
+      }
+
+      if (shouldSkipSyncBecauseUpToDate(upstreamRegion)) {
+        if (options.triggerReason === 'manual') {
+          throw new Error('No upstream update is available for this region');
+        }
+        if (typeof dataSettingsService.rescheduleRegionAfterSkippedSync === 'function') {
+          await dataSettingsService.rescheduleRegionAfterSkippedSync(numericRegionId);
+        }
+        return {
+          queued: false,
+          skipped: true,
+          run: null,
+          region: await dataSettingsService.getRegionById(numericRegionId)
+        };
+      }
+
       const run = await dataSettingsService.createQueuedRun(
         numericRegionId,
         options.triggerReason || 'manual',
@@ -336,7 +376,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       );
       queue.push({
         runId: run.id,
-        regionId: numericRegionId
+        regionId: numericRegionId,
+        sourceDataUpdatedAt: upstreamRegion?.latestSourceDataUpdatedAt || null
       });
       queuedRegionIds.add(numericRegionId);
       reloadSchedulesInBackground(`enqueue:${numericRegionId}`);

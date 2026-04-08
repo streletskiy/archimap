@@ -25,6 +25,19 @@ function normalizeObject(value) {
   return value && typeof value === 'object' ? value : {};
 }
 
+function normalizeRegionIdList(value) {
+  const rawItems = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? String(value).split(',')
+      : [];
+  return [...new Set(
+    rawItems
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item > 0)
+  )];
+}
+
 function createAdminSettingsService(options: LooseRecord = {}) {
   const {
     appSettingsService,
@@ -306,6 +319,22 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     });
   }
 
+  async function getRegionsUpstreamStatus(regionIdsRaw, forceRefreshRaw = false) {
+    const regionIds = normalizeRegionIdList(regionIdsRaw);
+    if (regionIds.length === 0) {
+      return [];
+    }
+
+    try {
+      return await ensureDataSettingsService().getRegionsUpstreamState(regionIds, {
+        forceRefresh: String(forceRefreshRaw ?? '').trim().toLowerCase() === 'true'
+      });
+    } catch (error) {
+      if (error?.status) throw error;
+      throw createAdminError(400, String(error?.message || error || 'Failed to load region upstream status'));
+    }
+  }
+
   async function resolveExtractCandidates({ query, source }: LooseRecord = {}) {
     try {
       const resolved = await ensureDataSettingsService().searchExtractCandidates(String(query || '').trim(), {
@@ -420,6 +449,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     saveFilterPreset,
     deleteFilterPreset,
     listRegions,
+    getRegionsUpstreamStatus,
     resolveExtractCandidates,
     getRegionRuns,
     saveRegion,

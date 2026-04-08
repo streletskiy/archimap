@@ -334,7 +334,7 @@ paths:
       summary: Get DB-backed data settings summary
       responses:
         '200':
-          description: Data settings payload
+          description: Data settings payload without blocking live upstream checks for every region
         '401':
           description: Unauthorized
         '403':
@@ -367,6 +367,28 @@ paths:
           description: Saved region
         '400':
           description: Validation failed
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/data/regions/upstream-status:
+    get:
+      summary: Get live upstream status for selected managed data regions
+      parameters:
+        - in: query
+          name: ids
+          required: true
+          schema:
+            type: string
+          description: Comma-separated managed region ids.
+        - in: query
+          name: force
+          schema:
+            type: boolean
+          description: Force bypass of the short-lived server-side upstream cache.
+      responses:
+        '200':
+          description: Region upstream status list
+        '400':
+          description: Invalid region ids
         '403':
           description: Master admin required
   /api/admin/app-settings/data/regions/{regionId}:

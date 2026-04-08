@@ -292,6 +292,28 @@ function registerAdminRoutes(deps: LooseRecord) {
     )
   );
 
+  app.get(
+    '/api/admin/app-settings/data/regions/upstream-status',
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return sendPrivateJson(req, res, {
+          ok: true,
+          items: await adminSettingsService.getRegionsUpstreamStatus(
+            req.query?.ids,
+            req.query?.force
+          )
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
   app.post(
     '/api/admin/app-settings/data/regions/resolve-extract',
     requireCsrfSession,

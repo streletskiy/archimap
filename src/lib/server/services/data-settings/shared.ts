@@ -80,6 +80,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
   const db = ensureCompatDb(options.db);
   const dataDir = String(options.dataDir || '');
   const extractResolver = options.extractResolver || null;
+  const fetchImpl = typeof options.fetchImpl === 'function'
+    ? options.fetchImpl
+    : (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null);
   const now = typeof options.now === 'function'
     ? options.now
     : () => new Date();
@@ -268,6 +271,12 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       lastSyncStatus: String(row.last_sync_status || 'idle'),
       lastSyncError: row.last_sync_error ? String(row.last_sync_error) : null,
       lastSuccessfulSyncAt: row.last_successful_sync_at ? String(row.last_successful_sync_at) : null,
+      sourceDataUpdatedAt: row.source_data_updated_at ? String(row.source_data_updated_at) : null,
+      latestSourceDataUpdatedAt: null,
+      upstreamCheckedAt: null,
+      upstreamStatus: 'unknown',
+      upstreamError: null,
+      updateAvailable: false,
       nextSyncAt: row.next_sync_at ? String(row.next_sync_at) : null,
       bounds: boundsFromRow(row),
       lastFeatureCount: row.last_feature_count == null ? null : Number(row.last_feature_count),
@@ -349,6 +358,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
           last_sync_status,
           last_sync_error,
           last_successful_sync_at,
+          source_data_updated_at,
           next_sync_at,
           bounds_west,
           bounds_south,
@@ -393,6 +403,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
         last_sync_status,
         last_sync_error,
         last_successful_sync_at,
+        source_data_updated_at,
         next_sync_at,
         bounds_west,
         bounds_south,
@@ -500,6 +511,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     rowToRegion,
     rowToRun,
     extractResolver,
+    fetchImpl,
     readAppDataSettingsRow,
     listRegionRows,
     getRegionRowById,
@@ -507,7 +519,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     countRegionMemberships,
     computeRegionDbBytes,
     state: {
-      bootstrapPromise: null
+      bootstrapPromise: null,
+      resolvedExtractsByKey: new Map(),
+      upstreamMetadataByKey: new Map()
     }
   };
 }

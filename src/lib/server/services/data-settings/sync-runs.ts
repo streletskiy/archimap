@@ -185,6 +185,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const activeFeatureCount = summary.activeFeatureCount == null ? null : Number(summary.activeFeatureCount);
     const orphanDeletedCount = summary.orphanDeletedCount == null ? null : Number(summary.orphanDeletedCount);
     const pmtilesBytes = summary.pmtilesBytes == null ? null : Number(summary.pmtilesBytes);
+    const sourceDataUpdatedAt = toIsoOrNull(summary.sourceDataUpdatedAt);
     const { dbBytes, dbBytesApproximate } = await computeRegionDbBytes(region.id);
     const nextSyncAt = computeNextSyncAt({
       ...region,
@@ -230,6 +231,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         last_sync_finished_at = ?,
         last_sync_error = NULL,
         last_successful_sync_at = ?,
+        source_data_updated_at = ?,
         next_sync_at = ?,
         bounds_west = ?,
         bounds_south = ?,
@@ -241,6 +243,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     `).run(
       finishedAt,
       finishedAt,
+      sourceDataUpdatedAt || region.sourceDataUpdatedAt || null,
       nextSyncAt,
       bounds?.west ?? null,
       bounds?.south ?? null,
@@ -254,6 +257,30 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       run: await getRunById(run.id),
       region: await getRegionById(region.id)
     };
+  }
+
+  async function rescheduleRegionAfterSkippedSync(regionId, referenceDate = now()) {
+    await ensureBootstrapped();
+    const region = await getRegionById(regionId);
+    if (!region) {
+      throw new Error('Region not found');
+    }
+
+    const referenceIso = toIsoOrNull(referenceDate);
+    const nextSyncAt = computeNextSyncAt({
+      ...region,
+      lastSuccessfulSyncAt: referenceIso || region.lastSuccessfulSyncAt
+    }, referenceIso || referenceDate);
+
+    await db.prepare(`
+      UPDATE data_sync_regions
+      SET
+        next_sync_at = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(nextSyncAt, region.id);
+
+    return getRegionById(region.id);
   }
 
   async function markRunFailed(runId, errorText, options: LooseRecord = {}) {
@@ -379,6 +406,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     markRunSucceeded,
     markRunFailed,
     recoverInterruptedRuns,
+    rescheduleRegionAfterSkippedSync,
     refreshRegionNextSyncAt,
     refreshAllNextSyncAt
   };

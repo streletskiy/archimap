@@ -112,7 +112,8 @@ System notes:
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
   - Also returns filter presets config for admin (`filterPresets.source`, `filterPresets.items[]`).
-  - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`) and storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`).
+  - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`), storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`), and the last locally known source-version fields (`sourceDataUpdatedAt`, `latestSourceDataUpdatedAt`, `upstreamCheckedAt`, `upstreamStatus`, `upstreamError`, `updateAvailable`).
+  - The endpoint intentionally avoids live upstream checks for every region so the admin list can load quickly even with many regions.
   - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
   - `filterPresets.items[]` includes `id`, `key`, `name`, `nameI18n`, `description`, `layers[]`, `createdAt`, `updatedAt`, `updatedBy`.
 - `POST /api/admin/app-settings/data/filter-tag-allowlist`
@@ -134,6 +135,10 @@ System notes:
 - `GET /api/admin/app-settings/data/regions`
   - Returns region list for admin UI.
   - Region payload mirrors admin data summary items, including extract-resolution fields plus cached storage stats `pmtilesBytes`, `dbBytes`, `dbBytesApproximate`.
+- `GET /api/admin/app-settings/data/regions/upstream-status`
+  - Master-admin only.
+  - Query: `ids=1,2,3` and optional `force=true`.
+  - Returns live upstream status only for the requested region ids, so the admin UI can lazily refresh the visible page and the selected region without blocking the initial list load.
 - `POST /api/admin/app-settings/data/regions/resolve-extract`
   - Master-admin only.
   - Body: `{ query: "Moscow", source?: "any|..." }`.
@@ -155,6 +160,7 @@ System notes:
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
+  - Returns `400` when the region has already been successfully synced and the upstream extract is still up to date.
 - `GET /api/admin/app-settings/osm`
   - Master-admin only.
   - Returns OSM sync settings, connection state, and OAuth capability metadata for the `Admin -> Send to OSM` tab.

@@ -686,6 +686,10 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
     if duckdb_path.exists():
         duckdb_path.unlink()
 
+    cached_pbf_path = work_dir / f'{resolved_query}.osm.pbf'
+    if cached_pbf_path.exists():
+        cached_pbf_path.unlink()
+
     convert_osm_extract_to_duckdb(
         osm_extract_query=resolved_query,
         osm_extract_source=normalized_source,
@@ -693,8 +697,9 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
         result_file_path=duckdb_path,
         keep_all_tags=True,
         explode_tags=False,
-        ignore_cache=False,
+        ignore_cache=True,
         duckdb_table_name='quackosm_raw',
+        working_directory=work_dir,
     )
     return duckdb_path
 

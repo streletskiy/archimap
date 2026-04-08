@@ -336,7 +336,9 @@ export function createAdminDataController() {
   const REGION_RUNS_PAGE_SIZE = 20;
   let nextOptimisticRegionId = -1;
   let regionRunsRequestToken = 0;
+  let regionRunsAbortController: AbortController | null = null;
   const pendingOptimisticRegions = new Map();
+  const pendingUpstreamRegionIds = new Set<number>();
 
   const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
     sortFilterTagKeys($dataSettings?.filterTags?.availableKeys, getSavedFilterTagAllowlist($dataSettings))
@@ -522,6 +524,11 @@ export function createAdminDataController() {
       extractResolutionError: source?.extractResolutionError ?? base?.extractResolutionError ?? null,
       resolutionRequired:
         String(source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved') !== 'resolved',
+      canSync: source?.canSync ?? base?.canSync ?? Boolean(
+        String(source?.extractSource || base?.extractSource || '').trim()
+        && String(source?.extractId || base?.extractId || '').trim()
+        && String(source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved') === 'resolved'
+      ),
       enabled: source?.enabled ?? base?.enabled ?? true,
       autoSyncEnabled: source?.autoSyncEnabled ?? base?.autoSyncEnabled ?? true,
       autoSyncOnStart: source?.autoSyncOnStart ?? base?.autoSyncOnStart ?? false,
@@ -532,6 +539,12 @@ export function createAdminDataController() {
       lastSyncStatus: String(source?.lastSyncStatus || base?.lastSyncStatus || 'idle'),
       lastSyncError: source?.lastSyncError ?? base?.lastSyncError ?? null,
       lastSuccessfulSyncAt: source?.lastSuccessfulSyncAt ?? base?.lastSuccessfulSyncAt ?? null,
+      sourceDataUpdatedAt: source?.sourceDataUpdatedAt ?? base?.sourceDataUpdatedAt ?? null,
+      latestSourceDataUpdatedAt: source?.latestSourceDataUpdatedAt ?? base?.latestSourceDataUpdatedAt ?? null,
+      upstreamCheckedAt: source?.upstreamCheckedAt ?? base?.upstreamCheckedAt ?? null,
+      upstreamStatus: String(source?.upstreamStatus || base?.upstreamStatus || 'unknown') as DataRegion['upstreamStatus'],
+      upstreamError: source?.upstreamError ?? base?.upstreamError ?? null,
+      updateAvailable: Boolean(source?.updateAvailable ?? base?.updateAvailable),
       lastSyncFinishedAt: source?.lastSyncFinishedAt ?? base?.lastSyncFinishedAt ?? null,
       nextSyncAt: source?.nextSyncAt ?? base?.nextSyncAt ?? null,
       pmtilesBytes: Number(source?.pmtilesBytes ?? base?.pmtilesBytes ?? 0) || 0,
@@ -604,6 +617,39 @@ export function createAdminDataController() {
     return nextRegions.sort(compareRegions);
   }
 
+  function mergeKnownRegionUpstreamState(nextRegions: DataRegion[] = [], previousRegions: DataRegion[] = []): DataRegion[] {
+    const previousById = new Map(
+      (Array.isArray(previousRegions) ? previousRegions : [])
+        .map((region) => [Number(region?.id || 0), region] as const)
+        .filter(([regionId]) => Number.isInteger(regionId) && regionId > 0)
+    );
+
+    return (Array.isArray(nextRegions) ? nextRegions : []).map((region) => {
+      const previous = previousById.get(Number(region?.id || 0));
+      if (!previous) return region;
+
+      const hasFreshUpstreamPayload = Boolean(
+        region?.latestSourceDataUpdatedAt
+        || region?.upstreamCheckedAt
+        || region?.upstreamError
+        || region?.updateAvailable
+        || String(region?.upstreamStatus || 'unknown') !== 'unknown'
+      );
+      if (hasFreshUpstreamPayload) {
+        return region;
+      }
+
+      return {
+        ...region,
+        latestSourceDataUpdatedAt: previous.latestSourceDataUpdatedAt ?? region.latestSourceDataUpdatedAt ?? null,
+        upstreamCheckedAt: previous.upstreamCheckedAt ?? region.upstreamCheckedAt ?? null,
+        upstreamStatus: previous.upstreamStatus ?? region.upstreamStatus,
+        upstreamError: previous.upstreamError ?? region.upstreamError ?? null,
+        updateAvailable: previous.updateAvailable ?? region.updateAvailable
+      };
+    });
+  }
+
   function upsertRegionSnapshot(region: Partial<DataRegion> | null): DataRegion | null {
     const snapshot = (region && typeof region === 'object' ? region : null) as Partial<DataRegion> | null;
     const numericRegionId = Number(snapshot?.id || 0);
@@ -671,6 +717,8 @@ export function createAdminDataController() {
     if (!resetRuns) return;
 
     regionRunsRequestToken += 1;
+    regionRunsAbortController?.abort();
+    regionRunsAbortController = null;
     regionRunsLoading.set(false);
     regionRuns.set([]);
     regionRunsTotal.set(0);
@@ -687,6 +735,7 @@ export function createAdminDataController() {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
+      nextSettings.regions = mergeKnownRegionUpstreamState(nextSettings.regions as DataRegion[], currentSettings?.regions as DataRegion[]);
       nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
 
       dataSettings.set(nextSettings);
@@ -706,7 +755,10 @@ export function createAdminDataController() {
             nextSettings.regions.find((item) => Number(item?.id || 0) === numericSelectedRegionId) || null;
           if (refreshedRegion) {
             selectRegionLocally(refreshedRegion, { resetRuns: false });
-            await loadRegionRuns(numericSelectedRegionId);
+            void refreshRegionUpstreamStatuses([numericSelectedRegionId], {
+              silent: true
+            });
+            void loadRegionRuns(numericSelectedRegionId);
           }
         }
       }
@@ -722,6 +774,53 @@ export function createAdminDataController() {
         dataStatus.set(preservedStatus);
       }
       return false;
+    }
+  }
+
+  async function refreshRegionUpstreamStatuses(regionIds: Array<number | string> = [], options: LooseRecord = {}) {
+    const normalizedIds = [...new Set(
+      (Array.isArray(regionIds) ? regionIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )];
+    if (normalizedIds.length === 0) {
+      return [];
+    }
+
+    const forceRefresh = options.forceRefresh === true;
+    const requestedIds = normalizedIds.filter((regionId) => forceRefresh || !pendingUpstreamRegionIds.has(regionId));
+    if (requestedIds.length === 0) {
+      return [];
+    }
+
+    for (const regionId of requestedIds) {
+      pendingUpstreamRegionIds.add(regionId);
+    }
+
+    try {
+      const query = new URLSearchParams({
+        ids: requestedIds.join(',')
+      });
+      if (forceRefresh) {
+        query.set('force', 'true');
+      }
+
+      const data = await apiJson(`/api/admin/app-settings/data/regions/upstream-status?${query.toString()}`);
+      const items = Array.isArray(data?.items) ? data.items : [];
+      for (const item of items) {
+        const existing = getRegionById(item?.id);
+        upsertRegionSnapshot(buildRegionSnapshot(item, existing));
+      }
+      return items;
+    } catch (error) {
+      if (options.silent !== true) {
+        dataStatus.set(msg(error, dataT('status.loadRegionUpstreamFailed')));
+      }
+      return [];
+    } finally {
+      for (const regionId of requestedIds) {
+        pendingUpstreamRegionIds.delete(regionId);
+      }
     }
   }
 
@@ -746,6 +845,8 @@ export function createAdminDataController() {
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
       regionRunsRequestToken += 1;
+      regionRunsAbortController?.abort();
+      regionRunsAbortController = null;
       regionRunsLoading.set(false);
       regionRuns.set([]);
       regionRunsTotal.set(0);
@@ -757,6 +858,8 @@ export function createAdminDataController() {
 
     const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
     const requestToken = ++regionRunsRequestToken;
+    regionRunsAbortController?.abort();
+    regionRunsAbortController = new AbortController();
     regionRunsLoading.set(true);
     regionRunsStatus.set('');
     try {
@@ -764,7 +867,9 @@ export function createAdminDataController() {
         page: String(normalizedPage),
         limit: String(REGION_RUNS_PAGE_SIZE)
       });
-      const data = await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/runs?${query.toString()}`);
+      const data = await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/runs?${query.toString()}`, {
+        signal: regionRunsAbortController.signal
+      });
       if (requestToken !== regionRunsRequestToken) return;
 
       const total = Math.max(0, Number(data?.total || 0));
@@ -780,6 +885,7 @@ export function createAdminDataController() {
       regionRunsPageCount.set(pageCount);
       regionRunsPage.set(pageCount > 0 ? Math.min(responsePage, pageCount) : 1);
     } catch (error) {
+      if (String(error?.name || '') === 'AbortError') return;
       if (requestToken !== regionRunsRequestToken) return;
       regionRuns.set([]);
       regionRunsTotal.set(0);
@@ -787,6 +893,7 @@ export function createAdminDataController() {
       regionRunsStatus.set(msg(error, dataT('status.loadHistoryFailed')));
     } finally {
       if (requestToken === regionRunsRequestToken) {
+        regionRunsAbortController = null;
         regionRunsLoading.set(false);
       }
     }
@@ -809,8 +916,13 @@ export function createAdminDataController() {
     }
 
     if (nextSelectedRegionId) {
+      void refreshRegionUpstreamStatuses([nextSelectedRegionId], {
+        silent: true
+      });
       if (resetRuns) {
         regionRunsRequestToken += 1;
+        regionRunsAbortController?.abort();
+        regionRunsAbortController = null;
         regionRunsLoading.set(false);
         regionRuns.set([]);
         regionRunsTotal.set(0);
@@ -818,11 +930,13 @@ export function createAdminDataController() {
         regionRunsPage.set(1);
         regionRunsStatus.set('');
       }
-      await loadRegionRuns(nextSelectedRegionId, resetRuns ? 1 : get(regionRunsPage));
+      void loadRegionRuns(nextSelectedRegionId, resetRuns ? 1 : get(regionRunsPage));
       return;
     }
 
     regionRunsRequestToken += 1;
+    regionRunsAbortController?.abort();
+    regionRunsAbortController = null;
     regionRunsLoading.set(false);
     regionRuns.set([]);
     regionRunsTotal.set(0);
@@ -849,6 +963,7 @@ export function createAdminDataController() {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
+      nextSettings.regions = mergeKnownRegionUpstreamState(nextSettings.regions as DataRegion[], currentSettings?.regions as DataRegion[]);
       nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
 
       dataSettings.set(nextSettings);
@@ -935,6 +1050,8 @@ export function createAdminDataController() {
     regionResolveBusy.set(false);
     regionExtractCandidates.set([]);
     regionRunsRequestToken += 1;
+    regionRunsAbortController?.abort();
+    regionRunsAbortController = null;
     regionRunsLoading.set(false);
     regionRuns.set([]);
     regionRunsTotal.set(0);
@@ -1119,6 +1236,14 @@ export function createAdminDataController() {
     if (!ensureFilterTagChangesDiscarded()) return;
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) return;
+    const region = getRegionById(numericRegionId);
+    const blockedReason = getRegionSyncBlockedReason(region);
+    if (!canSyncRegionNow(region)) {
+      if (blockedReason) {
+        dataStatus.set(blockedReason);
+      }
+      return;
+    }
 
     regionSyncBusy.set(true);
     dataStatus.set(dataT('status.queueingSync'));
@@ -1145,7 +1270,14 @@ export function createAdminDataController() {
         preserveStatus: true
       });
     } catch (error) {
-      const errorText = msg(error, dataT('status.syncFailed'));
+      const rawErrorText = msg(error, dataT('status.syncFailed'));
+      const errorText = /No upstream update is available/i.test(rawErrorText)
+        ? dataT('status.syncSkippedNoUpdate')
+        : rawErrorText;
+      if (errorText === dataT('status.syncSkippedNoUpdate')) {
+        dataStatus.set(errorText);
+        return;
+      }
       const failedRegion = upsertRegionSnapshot(
         buildRegionSnapshot(getRegionById(numericRegionId), null, {
           lastSyncStatus: 'failed',
@@ -1182,6 +1314,60 @@ export function createAdminDataController() {
 
   function getRegionSyncState(region) {
     return mapRegionController.getRegionSyncState(region);
+  }
+
+  function getRegionUpdateMeta(region) {
+    const lastSyncStatus = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
+    const upstreamStatus = String(region?.upstreamStatus || 'unknown')
+      .trim()
+      .toLowerCase();
+
+    if (!region?.lastSuccessfulSyncAt) {
+      return { text: dataT('updates.initialSync'), tone: 'idle' };
+    }
+    if (lastSyncStatus === 'failed') {
+      return { text: dataT('updates.retryRequired'), tone: 'failed' };
+    }
+    if (upstreamStatus === 'update_available') {
+      return { text: dataT('updates.available'), tone: 'queued' };
+    }
+    if (upstreamStatus === 'up_to_date') {
+      return { text: dataT('updates.upToDate'), tone: 'success' };
+    }
+    if (upstreamStatus === 'error') {
+      return { text: dataT('updates.checkFailed'), tone: 'failed' };
+    }
+    if (region?.latestSourceDataUpdatedAt && !region?.sourceDataUpdatedAt) {
+      return { text: dataT('updates.localVersionUnknown'), tone: 'idle' };
+    }
+    return { text: dataT('updates.unknown'), tone: 'idle' };
+  }
+
+  function canSyncRegionNow(region) {
+    if (!region?.canSync) return false;
+    const lastSyncStatus = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
+    if (lastSyncStatus === 'queued' || lastSyncStatus === 'running') return false;
+    if (!region?.lastSuccessfulSyncAt) return true;
+    if (lastSyncStatus === 'failed') return true;
+    return String(region?.upstreamStatus || 'unknown') !== 'up_to_date';
+  }
+
+  function getRegionSyncBlockedReason(region) {
+    if (!region?.canSync) return dataT('status.syncUnavailable');
+    const lastSyncStatus = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
+    if (lastSyncStatus === 'queued' || lastSyncStatus === 'running') {
+      return dataT('status.syncAlreadyInProgress');
+    }
+    if (region?.lastSuccessfulSyncAt && lastSyncStatus !== 'failed' && String(region?.upstreamStatus || 'unknown') === 'up_to_date') {
+      return dataT('status.syncSkippedNoUpdate');
+    }
+    return '';
   }
 
   function getRegionStatusMeta(status, context = null) {
@@ -1301,6 +1487,9 @@ export function createAdminDataController() {
     getRegionExtractSecondaryText,
     getRegionExtractSummaryText,
     getRegionSyncState,
+    canSyncRegionNow,
+    getRegionSyncBlockedReason,
+    getRegionUpdateMeta,
     getRegionStatusMeta,
     getRegionSyncModeLabel,
     getMapRegionFeatureMeta,
@@ -1309,6 +1498,7 @@ export function createAdminDataController() {
     loadFilterPresets,
     loadDataSettings,
     loadRegionRuns,
+    refreshRegionUpstreamStatuses,
     patchFilterPresetDraft,
     patchRegionDraft,
     findRegionByMapFeature,

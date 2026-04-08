@@ -1,4 +1,4 @@
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 
 function getDefaultImporterPath() {
@@ -84,8 +84,7 @@ function parseJsonPayload(raw) {
   }
 }
 
-function runImporterJson(importerPath, args, env = process.env) {
-  const pythonCandidate = ensurePythonImporterDeps(env);
+function runImporterJson(importerPath, args, env = process.env, pythonCandidate = ensurePythonImporterDeps(env)) {
   const result = spawnSync(pythonCandidate.exe, [
     ...pythonCandidate.prefixArgs,
     importerPath,
@@ -106,31 +105,89 @@ function runImporterJson(importerPath, args, env = process.env) {
   return parseJsonPayload(stdout);
 }
 
+function runImporterJsonAsync(importerPath, args, env = process.env, pythonCandidate = ensurePythonImporterDeps(env)) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(pythonCandidate.exe, [
+      ...pythonCandidate.prefixArgs,
+      importerPath,
+      ...args
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      env
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    child.stdout?.setEncoding?.('utf8');
+    child.stderr?.setEncoding?.('utf8');
+    child.stdout?.on?.('data', (chunk) => {
+      stdout += String(chunk || '');
+    });
+    child.stderr?.on?.('data', (chunk) => {
+      stderr += String(chunk || '');
+    });
+
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (Number(code || 0) !== 0) {
+        const message = stderr.trim() || stdout.trim() || 'Python extractor command failed';
+        reject(new Error(message));
+        return;
+      }
+
+      try {
+        resolve(parseJsonPayload(stdout));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
 function createPythonExtractResolver(options: LooseRecord = {}) {
   const importerPath = String(options.importerPath || getDefaultImporterPath()).trim() || getDefaultImporterPath();
   const env = options.env || process.env;
+  let cachedPythonCandidate = null;
+
+  function getPythonCandidate() {
+    if (cachedPythonCandidate) {
+      return cachedPythonCandidate;
+    }
+    cachedPythonCandidate = ensurePythonImporterDeps(env);
+    return cachedPythonCandidate;
+  }
 
   return {
     async searchExtractCandidates(query, searchOptions: LooseRecord = {}) {
       const limit = Math.max(1, Math.min(50, Number(searchOptions.limit || 12) || 12));
       const source = String(searchOptions.source || 'any').trim() || 'any';
-      return runImporterJson(importerPath, [
+      return runImporterJsonAsync(importerPath, [
         '--resolve-extract-query',
         String(query || ''),
         '--extract-source',
         source,
         '--limit',
         String(limit)
-      ], env);
+      ], env, getPythonCandidate());
     },
     async resolveExactExtract(query, resolveOptions: LooseRecord = {}) {
       const source = String(resolveOptions.source || 'any').trim() || 'any';
-      return runImporterJson(importerPath, [
+      return runImporterJsonAsync(importerPath, [
         '--resolve-exact-extract',
         String(query || ''),
         '--extract-source',
         source
-      ], env);
+      ], env, getPythonCandidate());
     }
   };
 }
