@@ -717,7 +717,7 @@
                       <div class="colour-picker-row">
                       <UiColorPicker
                         value={form.colour}
-                          label={$t('buildingModal.colour')}
+                        label={$t('buildingModal.colour')}
                           swatches={buildingColourSwatches}
                           contentClassName="ui-floating-layer-building-modal"
                           onchange={handleColourChange}

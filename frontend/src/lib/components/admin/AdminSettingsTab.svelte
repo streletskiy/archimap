@@ -216,7 +216,7 @@
         {$t('admin.settings.editRequiresPermission')}</label
       >
       <div class="space-y-1">
-        <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.basemapTitle')}</div>
+        <div class="text-sm font-semibold ui-text-strong">{$t('admin.settings.basemapTitle')}</div>
         <UiSelect
           items={basemapProviderItems}
           bind:value={general.basemapProvider}
@@ -225,7 +225,7 @@
       </div>
       {#if general.basemapProvider === 'maptiler'}
         <div class="space-y-1">
-          <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.maptilerApiKey')}</div>
+          <div class="text-sm font-semibold ui-text-strong">{$t('admin.settings.maptilerApiKey')}</div>
           <UiInput
             type="password"
             bind:value={general.maptilerApiKey}
@@ -236,7 +236,7 @@
       {/if}
       {#if general.basemapProvider === 'custom'}
         <div class="space-y-1">
-          <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.customBasemapUrl')}</div>
+          <div class="text-sm font-semibold ui-text-strong">{$t('admin.settings.customBasemapUrl')}</div>
           <UiInput
             type="text"
             bind:value={general.customBasemapUrl}
@@ -245,7 +245,7 @@
           <p class="text-xs ui-text-muted">{$t('admin.settings.customBasemapHelp')}</p>
         </div>
         <div class="space-y-1">
-          <div class="text-sm font-semibold text-gray-700">{$t('admin.settings.customBasemapApiKey')}</div>
+          <div class="text-sm font-semibold ui-text-strong">{$t('admin.settings.customBasemapApiKey')}</div>
           <UiInput
             type="password"
             bind:value={general.customBasemapApiKey}
@@ -254,8 +254,8 @@
           <p class="text-xs ui-text-muted">{$t('admin.settings.customBasemapApiKeyHelp')}</p>
         </div>
       {/if}
-      <div class="mt-2 text-sm text-gray-500">
-        <div class="font-semibold text-gray-700">{$t('admin.settings.metricsToken')}:</div>
+      <div class="mt-2 text-sm ui-text-muted">
+        <div class="font-semibold ui-text-strong">{$t('admin.settings.metricsToken')}:</div>
         <div class="flex items-center gap-2 mt-1">
           <UiInput type="text" className="flex-1 font-mono text-xs" readonly value={general.metricsToken || $t('admin.settings.metricsTokenGenerating')} />
           <UiButton type="button" variant="secondary" onclick={() => { general.metricsToken = ''; saveGeneral({preventDefault: () => {}}); }}>{$t('admin.settings.metricsTokenRegenerate')}</UiButton>
