@@ -959,6 +959,7 @@
     "syncSkippedNoUpdate": "No upstream region update is available",
     "syncAlreadyInProgress": "Region sync is already queued or running",
     "syncUnavailable": "Region is not ready for sync",
+    "syncSkippedNoUpstream": "Upstream status hasn't been loaded yet",
     "syncFailed": "Failed to start region sync",
         "loadingFilterPresets": "Loading filter presets...",
         "loadFilterPresetsFailed": "Failed to load filter presets",

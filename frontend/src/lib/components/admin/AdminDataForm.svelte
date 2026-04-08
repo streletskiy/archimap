@@ -9,8 +9,6 @@
   export let regionSaving = false;
   export let regionDeleting = false;
   export let regionResolveBusy = false;
-  export let selectedRegion = null;
-  export let regionSyncBusy = false;
 
   function getExtractCandidateValue(candidate) {
     return `${String(candidate?.extractSource || '').trim()}::${String(candidate?.extractId || '').trim()}`;
@@ -210,39 +208,6 @@
         </div>
       </div>
     </details>
-  </div>
-
-  <div class="flex flex-wrap items-center gap-2 border-t ui-border pt-3 sm:justify-end">
-    <UiButton
-      type="submit"
-      form={formId}
-      disabled={regionSaving
-        || regionDeleting
-        || !String($regionDraft.extractId || '').trim()
-        || !String($regionDraft.extractSource || '').trim()
-        || !String($regionDraft.name || '').trim()
-        || !String($regionDraft.slug || '').trim()}
-    >
-      {$regionDraft.id ? $t('admin.data.form.saveRegion') : $t('admin.data.form.createRegion')}
-    </UiButton>
-    {#if $regionDraft.id}
-      <UiButton
-        type="button"
-        variant="secondary"
-        disabled={regionSaving || regionDeleting || regionSyncBusy || !controller.canSyncRegionNow(selectedRegion)}
-        onclick={() => controller.syncRegionNow($regionDraft.id)}
-      >
-        {$t('admin.data.form.syncNow')}
-      </UiButton>
-      <UiButton
-        type="button"
-        variant="danger"
-        disabled={regionSaving || regionDeleting || regionSyncBusy}
-        onclick={() => controller.deleteDataRegion($regionDraft.id)}
-      >
-        {regionDeleting ? $t('admin.data.form.deleting') : $t('admin.data.form.deleteRegion')}
-      </UiButton>
-    {/if}
   </div>
 </form>
 

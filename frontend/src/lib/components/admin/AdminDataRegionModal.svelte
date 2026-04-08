@@ -193,9 +193,49 @@
                 {selectedRegion?.dbBytesApproximate ? '~' : ''}{controller.formatStorageBytes(selectedRegion?.dbBytes)}
               </dd>
             </div>
-            <div class="data-region-status-item data-region-status-item--wide">
-              <dt class="data-region-status-label">{$t('admin.data.form.bounds')}</dt>
-              <dd class="data-region-status-value break-words">{formatBounds(selectedRegion?.bounds)}</dd>
+            <div class="data-region-status-item data-region-status-item--wide data-region-status-item--bounds">
+              <div class="data-region-status-item-main">
+                <dt class="data-region-status-label">{$t('admin.data.form.bounds')}</dt>
+                <dd class="data-region-status-value break-words">{formatBounds(selectedRegion?.bounds)}</dd>
+              </div>
+              <div class="data-region-status-actions">
+                <UiButton
+                  type="submit"
+                  form={REGION_FORM_ID}
+                  size="xs"
+                  className="whitespace-nowrap shrink-0"
+                  disabled={regionSaving
+                    || regionDeleting
+                    || !String($regionDraft.extractId || '').trim()
+                    || !String($regionDraft.extractSource || '').trim()
+                    || !String($regionDraft.name || '').trim()
+                    || !String($regionDraft.slug || '').trim()}
+                >
+                  {$regionDraft.id ? $t('admin.data.form.saveRegion') : $t('admin.data.form.createRegion')}
+                </UiButton>
+                {#if $regionDraft.id}
+                  <UiButton
+                    type="button"
+                    variant="secondary"
+                    size="xs"
+                    className="whitespace-nowrap shrink-0"
+                    disabled={regionSaving || regionDeleting || regionSyncBusy || !controller.canSyncRegionNow(selectedRegion)}
+                    onclick={() => controller.syncRegionNow($regionDraft.id)}
+                  >
+                    {$t('admin.data.form.syncNow')}
+                  </UiButton>
+                  <UiButton
+                    type="button"
+                    variant="danger"
+                    size="xs"
+                    className="whitespace-nowrap shrink-0"
+                    disabled={regionSaving || regionDeleting || regionSyncBusy}
+                    onclick={() => controller.deleteDataRegion($regionDraft.id)}
+                  >
+                    {regionDeleting ? $t('admin.data.form.deleting') : $t('admin.data.form.deleteRegion')}
+                  </UiButton>
+                {/if}
+              </div>
             </div>
           </dl>
 
@@ -216,8 +256,6 @@
             regionSaving={regionSaving}
             regionDeleting={regionDeleting}
             regionResolveBusy={regionResolveBusy}
-            {selectedRegion}
-            regionSyncBusy={regionSyncBusy}
           />
         </div>
 
@@ -347,6 +385,30 @@
     grid-column: 1 / -1;
   }
 
+  .data-region-status-item--bounds {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .data-region-status-item-main {
+    min-width: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .data-region-status-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.35rem;
+  }
+
   .data-region-status-label {
     font-size: 0.68rem;
     font-weight: 600;
@@ -403,6 +465,23 @@
 
     .data-region-status-grid {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .data-region-status-item--bounds {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .data-region-status-actions {
+      justify-content: flex-start;
+      overflow-x: auto;
+      max-width: 100%;
+      padding-bottom: 0.05rem;
+      scrollbar-width: none;
+    }
+
+    .data-region-status-actions::-webkit-scrollbar {
+      display: none;
     }
   }
 </style>

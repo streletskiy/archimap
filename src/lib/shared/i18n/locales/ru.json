@@ -959,6 +959,7 @@
     "syncSkippedNoUpdate": "Для региона нет нового upstream-обновления",
     "syncAlreadyInProgress": "Синхронизация региона уже выполняется или стоит в очереди",
     "syncUnavailable": "Регион пока не готов к синхронизации",
+    "syncSkippedNoUpstream": "Статус апстрима ещё не загружен",
     "syncFailed": "Не удалось запустить синхронизацию региона",
         "loadingFilterPresets": "Загружаем пресеты фильтров...",
         "loadFilterPresetsFailed": "Не удалось загрузить пресеты фильтров",

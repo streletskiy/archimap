@@ -1353,6 +1353,8 @@ export function createAdminDataController() {
     if (lastSyncStatus === 'queued' || lastSyncStatus === 'running') return false;
     if (!region?.lastSuccessfulSyncAt) return true;
     if (lastSyncStatus === 'failed') return true;
+    // Block sync while upstream status hasn't been loaded yet
+    if (!region?.upstreamCheckedAt) return false;
     return String(region?.upstreamStatus || 'unknown') !== 'up_to_date';
   }
 
@@ -1363,6 +1365,9 @@ export function createAdminDataController() {
       .toLowerCase();
     if (lastSyncStatus === 'queued' || lastSyncStatus === 'running') {
       return dataT('status.syncAlreadyInProgress');
+    }
+    if (!region?.upstreamCheckedAt) {
+      return dataT('status.syncSkippedNoUpstream');
     }
     if (region?.lastSuccessfulSyncAt && lastSyncStatus !== 'failed' && String(region?.upstreamStatus || 'unknown') === 'up_to_date') {
       return dataT('status.syncSkippedNoUpdate');

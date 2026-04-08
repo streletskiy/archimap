@@ -159,7 +159,7 @@ When a new control is needed:
 - Admin data region create/edit flows open in a shared full-screen modal instead of an inline page form.
 - The modal uses a stacked layout with the current-status summary spanning the full modal width and the editable form below it, so the form keeps usable space on large screens.
 - The current-status card keeps itself compact by rendering its fields as a responsive grid instead of a tall vertical list.
-- Save, sync, and delete actions live at the bottom of the region form instead of inside the current-status card.
+- Save, sync, and delete actions live on the right side of the bounds row inside the current-status card instead of floating outside the status block.
 - The current-status card must show both the imported source version and the latest upstream version, so admins can see whether a real region update exists before starting a sync.
 - If the upstream extract is already up to date, the manual sync action stays disabled; failed or never-synced regions remain actionable.
 - Region list loading should stay fast even with many regions: load the base region list first, then lazily refresh upstream status only for the visible page and the currently selected region.
