@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const { Readable } = require('node:stream');
 const {
   CUSTOM_BASEMAP_TILE_PROXY_URL,
@@ -6,6 +8,66 @@ const {
   normalizeBasemapApiKey,
   normalizeCustomBasemapUrl
 } = require('./basemap-config');
+
+const LOCAL_BASEMAP_GLYPH_FONTSTACK_ALIASES = Object.freeze({
+  'Open Sans Bold': 'Noto Sans Medium',
+  'Open Sans Regular': 'Noto Sans Regular',
+  'Open Sans Italic': 'Noto Sans Italic'
+});
+const LOCAL_BASEMAP_GLYPH_RANGE_PATTERN = /^\d+-\d+\.pbf$/;
+
+function decodeGlyphPathSegment(value) {
+  let text = String(value || '').trim().replace(/\+/g, ' ');
+  for (let index = 0; index < 2; index += 1) {
+    try {
+      const decoded = decodeURIComponent(text);
+      if (decoded === text) break;
+      text = decoded;
+    } catch {
+      break;
+    }
+  }
+  return text;
+}
+
+function normalizeGlyphPathSegment(value) {
+  const text = decodeGlyphPathSegment(value);
+  if (!text) return '';
+  if (text.includes('\0')) return '';
+  if (text.includes('/') || text.includes('\\')) return '';
+  if (text === '.' || text === '..' || text.includes('..')) return '';
+  return text;
+}
+
+function resolveLocalBasemapGlyphPath(rootDir, fontstack, range) {
+  const normalizedRootDir = String(rootDir || '').trim();
+  const normalizedFontstack = normalizeGlyphPathSegment(fontstack);
+  const normalizedRange = normalizeGlyphPathSegment(range);
+  if (!normalizedRootDir || !normalizedFontstack || !LOCAL_BASEMAP_GLYPH_RANGE_PATTERN.test(normalizedRange)) {
+    return '';
+  }
+
+  const fontDirs = [
+    path.join(normalizedRootDir, 'frontend', 'build', 'client', 'basemaps-assets', 'fonts'),
+    path.join(normalizedRootDir, 'frontend', 'static', 'basemaps-assets', 'fonts')
+  ];
+  const candidates = [normalizedFontstack];
+  const aliasedFontstack = LOCAL_BASEMAP_GLYPH_FONTSTACK_ALIASES[normalizedFontstack];
+  if (aliasedFontstack && !candidates.includes(aliasedFontstack)) {
+    candidates.push(aliasedFontstack);
+  }
+
+  for (const fontsDir of fontDirs) {
+    for (const candidate of candidates) {
+      const candidatePath = path.join(fontsDir, candidate, normalizedRange);
+      if (fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
+    }
+  }
+
+  return '';
+}
 
 function cloneJson(value) {
   if (typeof globalThis.structuredClone === 'function') {
@@ -217,6 +279,7 @@ module.exports = {
   CUSTOM_BASEMAP_TILEJSON_PROXY_URL,
   fetchRemoteJson,
   getCustomBasemapRouteConfig,
+  resolveLocalBasemapGlyphPath,
   resolveCustomBasemapSourceUrl,
   rewriteCustomBasemapTileJson,
   sendProxiedBinaryResponse

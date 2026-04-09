@@ -44,7 +44,7 @@ const INTERNAL_EXACT_PATHS = new Set([
   '/favicon.ico',
   '/.well-known/appspecific/com.chrome.devtools.json'
 ]);
-const INTERNAL_PREFIX_PATHS = ['/api', '/ui'];
+const INTERNAL_PREFIX_PATHS = ['/api', '/ui', '/basemaps-assets/fonts'];
 
 function shouldDispatchInternal(pathname) {
   if (INTERNAL_EXACT_PATHS.has(pathname)) return true;

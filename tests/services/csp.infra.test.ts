@@ -123,6 +123,37 @@ test('frontend hook CSP allows browser Overpass requests by default', async () =
   }
 });
 
+test('frontend hook disables CSS preload hints while keeping JS preloads enabled', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  let resolveOptions;
+
+  try {
+    const { handle } = await loadHooksServerModule();
+    await handle({
+      event: {
+        request: new Request('http://localhost/'),
+        url: new URL('http://localhost/')
+      },
+      resolve: async (_event, options) => {
+        resolveOptions = options;
+        return new Response('<!doctype html><html><head></head><body>ok</body></html>', {
+          headers: {
+            'content-type': 'text/html; charset=utf-8'
+          }
+        });
+      }
+    });
+
+    assert.equal(typeof resolveOptions?.preload, 'function');
+    assert.equal(resolveOptions.preload({ type: 'css', path: '/_app/immutable/assets/app.css' }), false);
+    assert.equal(resolveOptions.preload({ type: 'js', path: '/_app/immutable/start.js' }), true);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
+});
+
 test('extractInlineScriptHashesFromHtml tolerates spaced and malformed script closing tags', () => {
   const firstBody = 'window.__ARCHIMAP__ = { ready: true };';
   const secondBody = 'console.log("inline");';

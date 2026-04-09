@@ -83,6 +83,23 @@ test('createMiniApp handles simple route matching and parameters', async (t) => 
   assert.deepEqual(payload, { id: '123', query: { q: 'search' } });
 });
 
+test('createMiniApp keeps dots inside a single route param segment', async (t) => {
+  const app = createMiniApp();
+  app.get('/glyphs/:range', (req, res) => {
+    res.json({ range: req.params.range });
+  });
+
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const port = getServerPort(server);
+  const response = await fetch(`http://127.0.0.1:${port}/glyphs/0-255.pbf`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload, { range: '0-255.pbf' });
+});
+
 test('createMiniApp handles jsonMiddleware', async (t) => {
   const app = createMiniApp();
   app.use(jsonMiddleware());

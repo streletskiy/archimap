@@ -141,3 +141,22 @@ test('marker fallback gets a larger match budget on lower zooms and suppresses t
   assert.equal(getFilterStatusCodeForRenderMode('contours', false), 'applied');
 });
 
+test('viewport duplicate skip only applies after a completed authoritative request', async () => {
+  const { shouldSkipViewportAuthoritativeRequest } = await loadMapFilterPipeline();
+  assert.equal(shouldSkipViewportAuthoritativeRequest({
+    requestKey: 'abc',
+    lastCompletedRequestKey: '',
+    reason: 'viewport'
+  }), false);
+  assert.equal(shouldSkipViewportAuthoritativeRequest({
+    requestKey: 'abc',
+    lastCompletedRequestKey: 'abc',
+    reason: 'viewport'
+  }), true);
+  assert.equal(shouldSkipViewportAuthoritativeRequest({
+    requestKey: 'abc',
+    lastCompletedRequestKey: 'abc',
+    reason: 'rules'
+  }), false);
+});
+

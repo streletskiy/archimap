@@ -1,7 +1,7 @@
 const DEFAULT_CUSTOM_BASEMAP_URL = '';
 const CUSTOM_BASEMAP_TILEJSON_PROXY_URL = '/api/basemaps/custom/current.json';
 const CUSTOM_BASEMAP_TILE_PROXY_URL = '/api/basemaps/custom/tiles';
-const PROTOMAPS_GLYPHS_PROXY_URL = '/basemaps-assets/fonts/{fontstack}/{range}.pbf';
+const PROTOMAPS_GLYPHS_PROXY_URL = '/api/basemaps/glyphs/{fontstack}/{range}.pbf';
 const PROTOMAPS_SPRITES_LOCAL_BASE_URL = '/basemaps-assets/sprites/v4';
 
 function normalizeBasemapProvider(value) {

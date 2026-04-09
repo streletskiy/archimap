@@ -287,7 +287,7 @@ test('getMapStyleForTheme returns a high-contrast monochrome Protomaps style for
     const lightRoadsTunnelsOtherCasingLayer = lightStyle.layers.find((layer) => layer.id === 'roads_tunnels_other_casing') as any;
     assert.equal(typeof darkStyle, 'object');
     assert.equal(darkStyle.sources?.protomaps?.url, 'https://app.example.com/api/basemaps/custom/current.json');
-    assert.equal(darkStyle.glyphs, 'https://app.example.com/basemaps-assets/fonts/{fontstack}/{range}.pbf');
+    assert.equal(darkStyle.glyphs, 'https://app.example.com/api/basemaps/glyphs/{fontstack}/{range}.pbf');
     assert.equal(darkStyle.sprite, 'https://app.example.com/basemaps-assets/sprites/v4/dark');
     assert.equal(lightStyle.sprite, 'https://app.example.com/basemaps-assets/sprites/v4/light');
     assert.equal(darkBackgroundLayer.paint['background-color'], '#101010');
@@ -475,7 +475,7 @@ test('getMapStyleForTheme returns a high-contrast monochrome Protomaps style for
     assert.equal(resolvedStyle.sources?.protomaps?.url, 'https://app.example.com/api/basemaps/custom/current.json');
     assert.equal(resolvedStyle.sources?.protomaps?.tiles, undefined);
     assert.equal(resolvedStyle.sprite, 'https://app.example.com/basemaps-assets/sprites/v4/dark');
-    assert.equal(resolvedStyle.glyphs, 'https://app.example.com/basemaps-assets/fonts/{fontstack}/{range}.pbf');
+    assert.equal(resolvedStyle.glyphs, 'https://app.example.com/api/basemaps/glyphs/{fontstack}/{range}.pbf');
   } finally {
     if (previousLocation === undefined) {
       delete (globalThis as any).location;

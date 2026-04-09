@@ -14,6 +14,7 @@ const {
 } = require('../services/basemap-config');
 const {
   fetchRemoteJson,
+  resolveLocalBasemapGlyphPath,
   rewriteCustomBasemapTileJson,
   sendProxiedBinaryResponse
 } = require('../services/basemap-proxy.service');
@@ -249,6 +250,23 @@ function registerAppRoutes(deps) {
   app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => {
     return res.status(204).end();
   });
+
+  function sendLocalBasemapGlyph(req, res) {
+    const fontstack = String(req.params.fontstack || '').trim();
+    const rawRange = String(req.params.range || '').trim();
+    const range = rawRange.toLowerCase().endsWith('.pbf') ? rawRange : `${rawRange}.pbf`;
+    const glyphPath = resolveLocalBasemapGlyphPath(rootDir, fontstack, range);
+    if (!glyphPath) {
+      return res.status(404).type('text/plain').send('Glyph not found');
+    }
+
+    res.type('application/x-protobuf');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.sendFile(glyphPath);
+  }
+
+  app.get('/api/basemaps/glyphs/:fontstack/:range', sendLocalBasemapGlyph);
+  app.get('/basemaps-assets/fonts/:fontstack/:range', sendLocalBasemapGlyph);
 
   app.get(['/', /^\/(?:admin|account|info|app)(?:\/.*)?$/], async (req, res, next) => {
     if (!fs.existsSync(frontendIndexPath)) {

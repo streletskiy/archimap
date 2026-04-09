@@ -15,6 +15,7 @@
     getFilterApplyOverlayState,
     shouldShowFilterRefiningMessage
   } from '$lib/services/map/filter-overlay-utils';
+  import { FILTER_FALLBACK_MARKER_MAX_ZOOM } from '$lib/services/map/filter-fallback-marker-utils';
   import {
     bringBaseLabelLayersAboveCustomLayers,
     bringSearchResultsLayersToFront,
@@ -115,7 +116,10 @@
   import { createMapRegionLayersController } from './map-region-layers-controller';
   import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
-  import { resolveInitialFilterReplayAction } from '$lib/services/map/filter-initial-replay';
+  import {
+    hasInitialFilterReplayTargetReady,
+    resolveInitialFilterReplayAction
+  } from '$lib/services/map/filter-initial-replay';
   import OverpassFallbackOverlay from './OverpassFallbackOverlay.svelte';
 
   const FILTER_APPLY_PROGRESS_TICK_MS = 120;
@@ -350,10 +354,27 @@
     onStatusChange: setBuildingFilterRuntimeStatus,
     translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
   });
+  const filterState = filterPipeline.state;
+
+  function shouldPrimeLowZoomInitialFilterReplay() {
+    if (!map || !Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) return false;
+    if (typeof map.loaded === 'function' && !map.loaded()) return false;
+    const zoom = Number(map.getZoom?.());
+    if (!Number.isFinite(zoom) || zoom >= FILTER_FALLBACK_MARKER_MAX_ZOOM) return false;
+    return String(get(filterState)?.phase || 'idle') !== 'authoritative';
+  }
 
   stopBuildingFilterLayers = buildingFilterLayers.subscribe((layers) => {
     currentBuildingFilterLayers = Array.isArray(layers) ? layers : [];
     if (map) {
+      if (shouldPrimeLowZoomInitialFilterReplay()) {
+        initialFilterReplayEnabled = true;
+        initialFilterReplayQueued = false;
+        if (initialFilterReplayRetryTimer) {
+          clearTimeout(initialFilterReplayRetryTimer);
+          initialFilterReplayRetryTimer = null;
+        }
+      }
       filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
     }
   });
@@ -457,7 +478,7 @@
     syncOverpassMapLayers();
   }
 
-  function hasInitialFilterReplayLayersReady() {
+  function hasInitialFilterReplayHighlightLayersReady() {
     if (!map) return false;
     const layerIds = regionLayersController.getCurrentMapLayerIds();
     const candidateLayerIds = [
@@ -491,10 +512,13 @@
         return;
       }
 
-      // Fast desktop loads can reach the URL filter state before region layers exist.
-      // Keep retrying until the highlight layers are attached, then apply once.
+      // Marker-mode deep links can replay immediately; contour mode still needs
+      // the region highlight layers to exist before a static reapply is useful.
       regionLayersController.syncMapRegionSources();
-      if (!hasInitialFilterReplayLayersReady()) {
+      if (!hasInitialFilterReplayTargetReady({
+        zoom: map.getZoom?.(),
+        hasHighlightLayers: hasInitialFilterReplayHighlightLayersReady()
+      })) {
         initialFilterReplayRetryTimer = window.setTimeout(runReplay, 120);
         return;
       }
@@ -542,8 +566,6 @@
   function handleOverpassFallbackClear() {
     void clearOverpassCache();
   }
-
-  const filterState = filterPipeline.state;
 
   function updateSearchMarkers(items) {
     updateSearchMarkerSource(map, items);

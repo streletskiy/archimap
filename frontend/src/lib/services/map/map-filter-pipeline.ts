@@ -97,6 +97,22 @@ export function getFilterStatusCodeForRenderMode(renderMode: 'contours' | 'marke
   return truncated ? 'truncated' : 'applied';
 }
 
+export function shouldSkipViewportAuthoritativeRequest({
+  requestKey = '',
+  lastCompletedRequestKey = '',
+  reason = ''
+}: {
+  requestKey?: string | null | undefined;
+  lastCompletedRequestKey?: string | null | undefined;
+  reason?: string | null | undefined;
+} = {}) {
+  return (
+    String(reason || '') === 'viewport'
+    && String(requestKey || '') !== ''
+    && String(requestKey || '') === String(lastCompletedRequestKey || '')
+  );
+}
+
 export function createFilterPipeline({
   map,
   mapDebug,
@@ -144,7 +160,7 @@ export function createFilterPipeline({
   let filterAuthoritativeTimer = null;
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
-  let lastAuthoritativeRequestKey = '';
+  let lastCompletedAuthoritativeRequestKey = '';
   let activeFilterCoverageWindow: (FilterCoverageContext['coverageWindow'] & {
     rulesHash?: string;
     zoomBucket?: number;
@@ -385,10 +401,13 @@ export function createFilterPipeline({
       const matchLimit = Number.isFinite(Number(context?.matchLimit))
         ? Number(context.matchLimit)
         : (renderMode === 'markers' ? getMarkerMatchLimit(context.zoomBucket) : FILTER_MATCH_DEFAULT_LIMIT);
-      if (requestKey === lastAuthoritativeRequestKey && context.reason === 'viewport') {
+      if (shouldSkipViewportAuthoritativeRequest({
+        requestKey,
+        lastCompletedRequestKey: lastCompletedAuthoritativeRequestKey,
+        reason: context.reason
+      })) {
         return;
       }
-      lastAuthoritativeRequestKey = requestKey;
       filterMatchCacheStrategy.cancelPrefetch();
       if (activeFilterAbortController) {
         debugFilterLog('filter request abort', { requestKey });
@@ -536,6 +555,7 @@ export function createFilterPipeline({
           statusCode: 'too_many_matches',
           count: matchedSize
         });
+        lastCompletedAuthoritativeRequestKey = requestKey;
         setFilterPhase('authoritative');
         recordFilterTelemetry('request_degraded', {
           requestKey,
@@ -573,6 +593,7 @@ export function createFilterPipeline({
         lastCacheHit: Boolean(resolvedPayload?.meta?.cacheHit),
         lastCount: matchedSize
       });
+      lastCompletedAuthoritativeRequestKey = requestKey;
       setFilterPhase('authoritative');
       debugFilterLog('filter request finish', {
         requestKey,
@@ -631,6 +652,7 @@ export function createFilterPipeline({
     activeFilterCoverageWindow = null;
     activeFilterCoverageKey = '';
     activeFilterRenderMode = 'contours';
+    lastCompletedAuthoritativeRequestKey = '';
     setFilterPhase('idle');
     updateFilterRuntimeStatus({
       statusCode: 'idle',
@@ -956,7 +978,7 @@ export function createFilterPipeline({
     activeFilterCoverageWindow = null;
     activeFilterCoverageKey = '';
     activeFilterRenderMode = 'contours';
-    lastAuthoritativeRequestKey = '';
+    lastCompletedAuthoritativeRequestKey = '';
     currentFilterRulesHash = 'fnv1a-0';
     lastViewportHash = '';
     filterLastMoveEndAt = 0;
