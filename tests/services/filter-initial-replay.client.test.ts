@@ -13,13 +13,21 @@ test('resolveInitialFilterReplayAction refreshes once idle when filters exist bu
   assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'idle', paintCalls: 0 }), 'refresh');
 });
 
-test('resolveInitialFilterReplayAction reapplies when filters exist and paint is still missing after an initial request', async () => {
-  const { resolveInitialFilterReplayAction } = await loadFilterInitialReplayModule();
-  assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'authoritative', paintCalls: 0 }), 'reapply');
+test('hasInitialFilterReplayTargetReady skips contour-layer waiting below marker zoom', async () => {
+  const { hasInitialFilterReplayTargetReady } = await loadFilterInitialReplayModule();
+  assert.equal(hasInitialFilterReplayTargetReady({ zoom: 12.5, hasHighlightLayers: false }), true);
+  assert.equal(hasInitialFilterReplayTargetReady({ zoom: 13, hasHighlightLayers: false }), false);
+  assert.equal(hasInitialFilterReplayTargetReady({ zoom: 13, hasHighlightLayers: true }), true);
 });
 
-test('resolveInitialFilterReplayAction ignores paint-call history for initial replay decisions', async () => {
+test('resolveInitialFilterReplayAction refreshes again while the first optimistic pass still has no paint', async () => {
+  const { resolveInitialFilterReplayAction } = await loadFilterInitialReplayModule();
+  assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'optimistic', paintCalls: 0 }), 'refresh');
+});
+
+test('resolveInitialFilterReplayAction reapplies once paint already happened', async () => {
   const { resolveInitialFilterReplayAction } = await loadFilterInitialReplayModule();
   assert.equal(resolveInitialFilterReplayAction({ hasFilters: false, phase: 'idle', paintCalls: 0 }), 'none');
-  assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'authoritative', paintCalls: 3 }), 'reapply');
+  assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'optimistic', paintCalls: 3 }), 'reapply');
+  assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'authoritative', paintCalls: 0 }), 'reapply');
 });

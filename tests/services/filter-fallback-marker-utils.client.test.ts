@@ -30,8 +30,12 @@ test('applyFilterFallbackMarkerGroups builds search-like cluster layers without 
   } = await loadFallbackMarkerUtils();
 
   const sources = new Map();
+  const layers = new Map([
+    ['search-results-clusters-layer', { id: 'search-results-clusters-layer' }]
+  ]);
   const addedSources = [];
   const addedLayers = [];
+  const moveLayerCalls = [];
   const removedLayers = [];
   const removedSources = [];
 
@@ -52,13 +56,33 @@ test('applyFilterFallbackMarkerGroups builds search-like cluster layers without 
       sources.delete(sourceId);
     },
     getLayer(layerId) {
-      return addedLayers.some((layer) => layer.id === layerId) ? { id: layerId } : null;
+      return layers.get(layerId) || null;
     },
     addLayer(layer) {
       addedLayers.push(layer);
+      layers.set(layer.id, { id: layer.id, ...layer });
     },
     removeLayer(layerId) {
       removedLayers.push(layerId);
+      layers.delete(layerId);
+    },
+    moveLayer(layerId, beforeId) {
+      moveLayerCalls.push({ layerId, beforeId });
+      const layer = layers.get(layerId);
+      if (!layer) return;
+      const nextLayers = Array.from(layers.entries()).filter(([existingLayerId]) => existingLayerId !== layerId);
+      const beforeIndex = beforeId
+        ? nextLayers.findIndex(([existingLayerId]) => existingLayerId === beforeId)
+        : -1;
+      if (beforeIndex >= 0) {
+        nextLayers.splice(beforeIndex, 0, [layerId, layer]);
+      } else {
+        nextLayers.push([layerId, layer]);
+      }
+      layers.clear();
+      for (const [existingLayerId, existingLayer] of nextLayers) {
+        layers.set(existingLayerId, existingLayer);
+      }
     }
   };
 
@@ -90,8 +114,41 @@ test('applyFilterFallbackMarkerGroups builds search-like cluster layers without 
   assert.equal(addedLayers.some((layer) => layer.id === clusterLayerId), true);
   assert.equal(addedLayers.some((layer) => layer.id === countLayerId), true);
   assert.equal(addedLayers.some((layer) => layer.id === pointLayerId), true);
+  assert.deepEqual(moveLayerCalls.map((item) => item.layerId), [
+    clusterLayerId,
+    countLayerId,
+    pointLayerId
+  ]);
   assert.equal(Boolean(addedLayers.find((layer) => layer.id === clusterLayerId)?.paint?.['circle-translate']), false);
   assert.equal(Boolean(addedLayers.find((layer) => layer.id === pointLayerId)?.paint?.['circle-translate']), false);
   assert.equal(removedLayers.length, 0);
   assert.equal(removedSources.length, 0);
+
+  moveLayerCalls.length = 0;
+  applyFilterFallbackMarkerGroups({
+    map,
+    groups: [
+      {
+        color: '#ff6600',
+        points: [
+          { id: 101, lon: 37.61, lat: 55.75 },
+          { id: 102, lon: 37.61, lat: 55.75 }
+        ]
+      }
+    ],
+    previousGroups: [
+      {
+        color: '#ff6600',
+        points: [
+          { id: 101, lon: 37.61, lat: 55.75 },
+          { id: 102, lon: 37.61, lat: 55.75 }
+        ]
+      }
+    ]
+  });
+  assert.deepEqual(moveLayerCalls.map((item) => item.layerId), [
+    clusterLayerId,
+    countLayerId,
+    pointLayerId
+  ]);
 });

@@ -192,6 +192,22 @@ test('resolves URL filter state on initial deep link load without moving the cam
   }), { timeout: 15000 }).toBeGreaterThan(0);
 });
 
+test('resolves URL filter state on initial deep link load at marker zoom without moving the camera', async ({ page }) => {
+  await page.goto(
+    `${BASE_URL}/app?lat=56.320654&lng=44.002728&z=12.5&3d=0&f=${BUILDING_LEVELS_FILTER_URL}`,
+    { waitUntil: 'domcontentloaded' }
+  );
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect.poll(async () => page.locator('.map-canvas').getAttribute('data-filter-phase'), {
+    timeout: 15000
+  }).toBe('authoritative');
+  await expect.poll(async () => page.evaluate(() => {
+    const debug = globalThis.window.__MAP_DEBUG__ || {};
+    const stats = debug.filterRequests || {};
+    return Number(stats.finish || 0);
+  }), { timeout: 15000 }).toBeGreaterThan(0);
+});
+
 test('map attribution includes archimap', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });

@@ -234,6 +234,20 @@ function ensureFilterFallbackMarkerGroup(
       }
     }, beforeId);
   }
+
+  // Re-assert layer order on every apply so marker stacks stay above the map
+  // base layers even after other controllers reshuffle the style.
+  if (map.moveLayer) {
+    if (map.getLayer?.(clusterLayerId)) {
+      map.moveLayer(clusterLayerId, beforeId);
+    }
+    if (map.getLayer?.(clusterCountLayerId)) {
+      map.moveLayer(clusterCountLayerId, beforeId);
+    }
+    if (map.getLayer?.(pointLayerId)) {
+      map.moveLayer(pointLayerId, beforeId);
+    }
+  }
 }
 
 export function applyFilterFallbackMarkerGroups({
