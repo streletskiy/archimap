@@ -322,6 +322,7 @@ export function createAdminDataController() {
   const regionSaving: Writable<boolean> = writable(false);
   const regionDeleting: Writable<boolean> = writable(false);
   const regionSyncBusy: Writable<boolean> = writable(false);
+  const regionSyncCancelBusy: Writable<boolean> = writable(false);
   const regionResolveBusy: Writable<boolean> = writable(false);
   const regionExtractCandidates: Writable<RegionExtractCandidate[]> = writable([]);
   const selectedDataRegionId: Writable<number | null> = writable(null);
@@ -339,6 +340,55 @@ export function createAdminDataController() {
   let regionRunsAbortController: AbortController | null = null;
   const pendingOptimisticRegions = new Map();
   const pendingUpstreamRegionIds = new Set<number>();
+  const SYNC_PROGRESS_POLL_INTERVAL_MS = 2000;
+  let syncProgressPollTimer: ReturnType<typeof setTimeout> | null = null;
+  let syncProgressPollInFlight = false;
+
+  function hasLiveSyncRegions(regions: any[] = []): boolean {
+    return (Array.isArray(regions) ? regions : []).some((region) => {
+      const status = String(region?.lastSyncStatus || '').trim().toLowerCase();
+      return status === 'queued' || status === 'running';
+    });
+  }
+
+  function stopSyncProgressPolling() {
+    if (syncProgressPollTimer) {
+      clearTimeout(syncProgressPollTimer);
+      syncProgressPollTimer = null;
+    }
+  }
+
+  function scheduleSyncProgressPoll() {
+    if (syncProgressPollTimer || syncProgressPollInFlight) return;
+    syncProgressPollTimer = setTimeout(async () => {
+      syncProgressPollTimer = null;
+      syncProgressPollInFlight = true;
+      try {
+        const currentRegions = get(dataSettings)?.regions as any[] || [];
+        if (!hasLiveSyncRegions(currentRegions)) return;
+        const selectedId = Number(get(selectedDataRegionId) || 0) || null;
+        await refreshDataSettingsInBackground({
+          selectedRegionId: selectedId,
+          preserveStatus: true
+        });
+      } finally {
+        syncProgressPollInFlight = false;
+        const nextRegions = get(dataSettings)?.regions as any[] || [];
+        if (hasLiveSyncRegions(nextRegions)) {
+          scheduleSyncProgressPoll();
+        }
+      }
+    }, SYNC_PROGRESS_POLL_INTERVAL_MS);
+  }
+
+  function ensureSyncProgressPolling() {
+    const regions = get(dataSettings)?.regions as any[] || [];
+    if (hasLiveSyncRegions(regions)) {
+      scheduleSyncProgressPoll();
+    } else {
+      stopSyncProgressPolling();
+    }
+  }
 
   const sortedAvailableFilterTagKeys = derived(dataSettings, ($dataSettings) =>
     sortFilterTagKeys($dataSettings?.filterTags?.availableKeys, getSavedFilterTagAllowlist($dataSettings))
@@ -758,7 +808,9 @@ export function createAdminDataController() {
             void refreshRegionUpstreamStatuses([numericSelectedRegionId], {
               silent: true
             });
-            void loadRegionRuns(numericSelectedRegionId);
+            void loadRegionRuns(numericSelectedRegionId, get(regionRunsPage), {
+              background: true
+            });
           }
         }
       }
@@ -841,7 +893,11 @@ export function createAdminDataController() {
     return filterSettingsController.resetFilterTagAllowlistToDefault();
   }
 
-  async function loadRegionRuns(regionId: number | string = get(selectedDataRegionId), page: number | string = get(regionRunsPage)) {
+  async function loadRegionRuns(
+    regionId: number | string = get(selectedDataRegionId),
+    page: number | string = get(regionRunsPage),
+    options: LooseRecord = {}
+  ) {
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
       regionRunsRequestToken += 1;
@@ -857,11 +913,21 @@ export function createAdminDataController() {
     }
 
     const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const background = options.background === true;
+    const preserveRowsDuringLoad = background && get(regionRuns).length > 0;
+    const preserveStatusDuringLoad = background && preserveRowsDuringLoad;
     const requestToken = ++regionRunsRequestToken;
     regionRunsAbortController?.abort();
     regionRunsAbortController = new AbortController();
-    regionRunsLoading.set(true);
-    regionRunsStatus.set('');
+    if (preserveRowsDuringLoad) {
+      regionRunsLoading.set(false);
+    }
+    if (!preserveRowsDuringLoad) {
+      regionRunsLoading.set(true);
+    }
+    if (!preserveStatusDuringLoad) {
+      regionRunsStatus.set('');
+    }
     try {
       const query = new URLSearchParams({
         page: String(normalizedPage),
@@ -884,17 +950,22 @@ export function createAdminDataController() {
       regionRunsTotal.set(total);
       regionRunsPageCount.set(pageCount);
       regionRunsPage.set(pageCount > 0 ? Math.min(responsePage, pageCount) : 1);
+      regionRunsStatus.set('');
     } catch (error) {
       if (String(error?.name || '') === 'AbortError') return;
       if (requestToken !== regionRunsRequestToken) return;
-      regionRuns.set([]);
-      regionRunsTotal.set(0);
-      regionRunsPageCount.set(0);
-      regionRunsStatus.set(msg(error, dataT('status.loadHistoryFailed')));
+      if (!preserveRowsDuringLoad) {
+        regionRuns.set([]);
+        regionRunsTotal.set(0);
+        regionRunsPageCount.set(0);
+        regionRunsStatus.set(msg(error, dataT('status.loadHistoryFailed')));
+      }
     } finally {
       if (requestToken === regionRunsRequestToken) {
         regionRunsAbortController = null;
-        regionRunsLoading.set(false);
+        if (!preserveRowsDuringLoad) {
+          regionRunsLoading.set(false);
+        }
       }
     }
   }
@@ -1290,6 +1361,34 @@ export function createAdminDataController() {
       dataStatus.set(errorText);
     } finally {
       regionSyncBusy.set(false);
+      ensureSyncProgressPolling();
+    }
+  }
+
+  async function cancelRegionSync(regionId) {
+    const numericRegionId = Number(regionId || 0);
+    if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) return;
+    const region = getRegionById(numericRegionId);
+    const lastStatus = String(region?.lastSyncStatus || '').trim().toLowerCase();
+    if (lastStatus !== 'queued' && lastStatus !== 'running') return;
+
+    regionSyncCancelBusy.set(true);
+    dataStatus.set(dataT('status.cancellingSync'));
+    try {
+      await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      dataStatus.set(dataT('status.syncCancelRequested'));
+      void refreshDataSettingsInBackground({
+        selectedRegionId: numericRegionId,
+        preserveStatus: true
+      });
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.cancelSyncFailed')));
+    } finally {
+      regionSyncCancelBusy.set(false);
     }
   }
 
@@ -1441,6 +1540,17 @@ export function createAdminDataController() {
     return filterSettingsController.isFilterTagSelected(key);
   }
 
+  // Auto-start/stop progress polling when any region transitions into
+  // queued/running or back to idle.
+  dataSettings.subscribe(($dataSettings) => {
+    const regions = Array.isArray($dataSettings?.regions) ? ($dataSettings.regions as any[]) : [];
+    if (hasLiveSyncRegions(regions)) {
+      scheduleSyncProgressPoll();
+    } else {
+      stopSyncProgressPolling();
+    }
+  });
+
   return {
     dataSettings,
     dataLoading,
@@ -1466,6 +1576,7 @@ export function createAdminDataController() {
     regionSaving,
     regionDeleting,
     regionSyncBusy,
+    regionSyncCancelBusy,
     regionResolveBusy,
     regionExtractCandidates,
     selectedDataRegionId,
@@ -1520,6 +1631,7 @@ export function createAdminDataController() {
     startNewRegionDraft,
     closeRegionEditor,
     syncRegionNow,
+    cancelRegionSync,
     toggleFilterTagSelection,
     deleteDataRegion,
     deleteFilterPreset

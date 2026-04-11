@@ -4,6 +4,44 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const SHOULD_EMIT_STAGE_JSON = String(process.env.REGION_SYNC_EMIT_STAGE_JSON || '').trim().toLowerCase() === 'true';
+
+function emitStageJson(stage, progress = null, detail = null) {
+  if (!SHOULD_EMIT_STAGE_JSON) return;
+  const payload: LooseRecord = { stage: String(stage || '').trim() };
+  if (!payload.stage) return;
+  if (progress != null && Number.isFinite(Number(progress))) {
+    payload.progress = Math.max(0, Math.min(100, Math.round(Number(progress))));
+  }
+  if (detail != null && String(detail).trim()) {
+    payload.detail = String(detail).trim().slice(0, 200);
+  }
+  try {
+    process.stdout.write(`SYNC_STAGE_JSON=${JSON.stringify(payload)}\n`);
+  } catch {
+    // ignore stdout write failures (e.g. closed pipe during cancellation)
+  }
+}
+
+let cancelRequested = false;
+function handleCancellationSignal(signal) {
+  cancelRequested = true;
+  emitStageJson('cancelling', null, `signal=${signal}`);
+  // Allow any current spawnSync child to finish its exit so we can shut down
+  // cleanly; the Node exit handler below will propagate the cancellation
+  // code. On Windows, the parent sync-workers manager uses taskkill /T /F
+  // so the whole tree (including tippecanoe / python) is already going down.
+  setTimeout(() => {
+    try {
+      process.exit(130);
+    } catch {
+      // ignore
+    }
+  }, 50).unref?.();
+}
+process.on('SIGTERM', () => handleCancellationSignal('SIGTERM'));
+process.on('SIGINT', () => handleCancellationSignal('SIGINT'));
+
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { createWorkspace } = require('./region-sync/common');
 const { exportRegionExtractToNdjson } = require('./region-sync/python-extractor');
@@ -36,6 +74,7 @@ const LOCAL_EDITS_DB_PATH = String(
 const DATA_DIR = String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() || path.join(__dirname, '..', 'data');
 const TIPPECANOE_PROGRESS_JSON = String(process.env.TIPPECANOE_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
 const TIPPECANOE_PROGRESS_INTERVAL_SEC = Math.max(1, Math.min(300, Number(process.env.TIPPECANOE_PROGRESS_INTERVAL_SEC || 5)));
+const REGION_SYNC_SHARD_KM_RAW = process.env.REGION_SYNC_SHARD_KM;
 const ROOT_DIR = path.join(__dirname, '..');
 
 function parseArgs(argv): LooseRecord {
@@ -136,13 +175,23 @@ function runRuntimeFollowups({ region, runtimeOptions, env = process.env, rootDi
   });
 }
 
-function buildPmtilesStep(region, geojsonPath, outputPath) {
-  buildPmtilesFromGeojson({
+async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}) {
+  await buildPmtilesFromGeojson({
     region,
     geojsonPath,
     outputPath,
+    bounds: exportSummary?.bounds || null,
+    featureCount: Number.isFinite(exportSummary?.importedFeatureCount)
+      ? Number(exportSummary.importedFeatureCount)
+      : null,
+    shardKm: REGION_SYNC_SHARD_KM_RAW === undefined
+      ? undefined
+      : Number(REGION_SYNC_SHARD_KM_RAW),
     progressJson: TIPPECANOE_PROGRESS_JSON,
     progressIntervalSec: TIPPECANOE_PROGRESS_INTERVAL_SEC,
+    onShardProgress: (stageInfo) => {
+      emitStageJson('build', stageInfo?.progress ?? null, stageInfo?.detail || null);
+    },
     env: process.env
   });
 }
@@ -190,6 +239,7 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
   try {
+    emitStageJson('export', null, 'reading region members');
     const exported = await exportRegionMembersToGeojsonNdjson({
       ...runtimeOptions,
       regionId: region.id,
@@ -199,7 +249,9 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
       throw new Error('Region has no features, PMTiles rebuild aborted');
     }
 
-    buildPmtilesStep(region, geojsonPath, builtPmtilesPath);
+    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
+    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
+    emitStageJson('publish', null, 'publishing pmtiles archive');
     const finalArchivePath = publishPmtilesArchive({
       dataDir: runtimeOptions.dataDir,
       region,
@@ -229,6 +281,7 @@ async function runRegionSync(region, runtimeOptions) {
 
   try {
     let exported = null;
+    emitStageJson('extract', null, 'downloading + extracting OSM data');
     if (runtimeOptions.dbProvider === 'postgres') {
       exportRegionExtractToNdjson({
         importerPath,
@@ -255,7 +308,9 @@ async function runRegionSync(region, runtimeOptions) {
       throw new Error('Sync returned 0 features; keeping previous PMTiles and current data untouched');
     }
 
-    buildPmtilesStep(region, geojsonPath, builtPmtilesPath);
+    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
+    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
+    emitStageJson('apply', null, 'applying region import to database');
     const dbResult = await applyRegionImport({
       ...runtimeOptions,
       region,
@@ -263,6 +318,7 @@ async function runRegionSync(region, runtimeOptions) {
       builtPmtilesPath
     });
     if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
+      emitStageJson('followup', null, 'rebuilding search indexes');
       runRuntimeFollowups({
         region,
         runtimeOptions

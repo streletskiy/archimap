@@ -427,6 +427,26 @@ function registerAdminRoutes(deps: LooseRecord) {
     )
   );
 
+  app.post(
+    '/api/admin/app-settings/data/regions/:regionId/sync-cancel',
+    requireCsrfSession,
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return res.json({
+          ok: true,
+          item: await adminSettingsService.requestRegionSyncCancel(req.params.regionId)
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
   app.get(
     '/api/admin/app-settings/osm',
     requireAuth,

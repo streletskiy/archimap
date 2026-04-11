@@ -891,8 +891,24 @@
         "saveRegion": "Save region",
         "createRegion": "Create region",
         "syncNow": "Sync now",
+        "cancelSync": "Cancel sync",
+        "cancelling": "Cancelling...",
         "deleting": "Deleting...",
-        "deleteRegion": "Delete region"
+        "deleteRegion": "Delete region",
+        "syncStageTitle": "Current stage",
+        "syncStageProgressLabel": "Stage progress",
+        "syncStageWorking": "Working..."
+      },
+      "stage": {
+        "starting": "Starting",
+        "extract": "Downloading OSM extract",
+        "export": "Exporting region data",
+        "build": "Building PMTiles",
+        "apply": "Writing to database",
+        "publish": "Publishing PMTiles",
+        "followup": "Rebuilding indexes",
+        "cancelling": "Cancelling",
+        "done": "Done"
       },
       "history": {
         "title": "Run history",
@@ -912,7 +928,8 @@
         "queued": "queued",
         "failed": "failed",
         "success": "success",
-        "planned": "planned"
+        "planned": "planned",
+        "abandoned": "cancelled"
       },
   "triggers": {
     "manual": "manual",
@@ -961,6 +978,11 @@
     "syncUnavailable": "Region is not ready for sync",
     "syncSkippedNoUpstream": "Upstream status hasn't been loaded yet",
     "syncFailed": "Failed to start region sync",
+    "cancellingSync": "Cancelling region sync...",
+    "syncCancelRequested": "Cancellation requested",
+    "syncCancelled": "Region sync cancelled",
+    "cancelSyncFailed": "Failed to cancel region sync",
+    "cancelSyncUnavailable": "No active sync to cancel",
         "loadingFilterPresets": "Loading filter presets...",
         "loadFilterPresetsFailed": "Failed to load filter presets",
         "savingFilterPreset": "Saving filter preset...",

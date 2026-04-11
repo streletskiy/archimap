@@ -48,6 +48,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     onSmtpSettingsSaved,
     onDataRegionsSaved,
     onRegionSyncRequested,
+    onRegionSyncCancelRequested,
     onFilterPresetsSaved,
     registrationCodeHtmlTemplate = defaultRegistrationCodeHtmlTemplate,
     registrationCodeTextTemplate = defaultRegistrationCodeTextTemplate,
@@ -436,6 +437,23 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     }
   }
 
+  async function requestRegionSyncCancel(regionIdRaw) {
+    ensureDataSettingsService();
+    if (typeof onRegionSyncCancelRequested !== 'function') {
+      throw createAdminError(503, 'Sync queue is currently unavailable');
+    }
+    const regionId = parseRegionId(regionIdRaw);
+    if (!regionId) {
+      throw createAdminError(400, 'Invalid region id');
+    }
+
+    try {
+      return await onRegionSyncCancelRequested(regionId);
+    } catch (error) {
+      throw createAdminError(400, String(error?.message || error || 'Failed to cancel region sync'));
+    }
+  }
+
   return {
     buildEmailPreviewPayload,
     getSmtpSettingsItem,
@@ -454,7 +472,8 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     getRegionRuns,
     saveRegion,
     deleteRegion,
-    requestRegionSync
+    requestRegionSync,
+    requestRegionSyncCancel
   };
 }
 

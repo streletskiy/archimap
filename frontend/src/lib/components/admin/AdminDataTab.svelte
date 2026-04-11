@@ -16,6 +16,7 @@
   const regionSaving = controller.regionSaving;
   const regionDeleting = controller.regionDeleting;
   const regionSyncBusy = controller.regionSyncBusy;
+  const regionSyncCancelBusy = controller.regionSyncCancelBusy;
   const regionResolveBusy = controller.regionResolveBusy;
   const regionExtractCandidates = controller.regionExtractCandidates;
   const selectedDataRegionId = controller.selectedDataRegionId;
@@ -114,6 +115,7 @@
       regionSaving={$regionSaving}
       regionDeleting={$regionDeleting}
       regionSyncBusy={$regionSyncBusy}
+      regionSyncCancelBusy={$regionSyncCancelBusy}
       regionResolveBusy={$regionResolveBusy}
       selectedDataRegionId={$selectedDataRegionId}
       regionRuns={$regionRuns}

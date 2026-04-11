@@ -20,6 +20,11 @@ const RUN_SELECT_FIELDS = `
   bounds_south,
   bounds_east,
   bounds_north,
+  stage,
+  stage_progress,
+  stage_detail,
+  stage_updated_at,
+  cancel_requested,
   created_at,
   updated_at
 `;
@@ -308,6 +313,11 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       dbBytes: row.db_bytes == null ? null : Number(row.db_bytes),
       dbBytesApproximate: Boolean(row.db_bytes_approximate),
       bounds: boundsFromRow(row),
+      stage: row.stage ? String(row.stage) : null,
+      stageProgress: row.stage_progress == null ? null : Number(row.stage_progress),
+      stageDetail: row.stage_detail ? String(row.stage_detail) : null,
+      stageUpdatedAt: row.stage_updated_at ? String(row.stage_updated_at) : null,
+      cancelRequested: Boolean(row.cancel_requested),
       createdAt: row.created_at ? String(row.created_at) : null,
       updatedAt: row.updated_at ? String(row.updated_at) : null
     };

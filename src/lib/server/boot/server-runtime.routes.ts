@@ -115,6 +115,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
       }
     },
     onRegionSyncRequested: (regionId, options) => runtime.syncWorkers?.requestRegionSync?.(regionId, options),
+    onRegionSyncCancelRequested: (regionId) => runtime.syncWorkers?.requestRegionSyncCancel?.(regionId),
     appDisplayName: runtime.config.appDisplayName,
     getAppDisplayName: runtime.getAppDisplayName,
     appBaseUrl: runtime.config.appBaseUrl,

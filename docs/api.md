@@ -161,6 +161,12 @@ System notes:
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
   - Returns `400` when the region has already been successfully synced and the upstream extract is still up to date.
+- `POST /api/admin/app-settings/data/regions/:regionId/sync-cancel`
+  - Master-admin only.
+  - Requests cancellation of the region's queued or running sync. Running syncs have their entire worker process tree terminated (graceful SIGTERM/taskkill, then SIGKILL fallback after 10s); queued syncs are dropped from the queue.
+  - On success the affected run transitions to status `abandoned` and the region returns to its previous state. The response body contains `{ cancelled, target }` where `target` is `running`, `queued`, or `none`.
+  - Returns `503` when the managed sync queue is not available in the current runtime mode.
+  - While a sync is active, the run row exposes live stage metadata (`stage`, `stageProgress`, `stageDetail`, `stageUpdatedAt`, `cancelRequested`) that the admin UI polls to render a progress bar and cancel button.
 - `GET /api/admin/app-settings/osm`
   - Master-admin only.
   - Returns OSM sync settings, connection state, and OAuth capability metadata for the `Admin -> Send to OSM` tab.

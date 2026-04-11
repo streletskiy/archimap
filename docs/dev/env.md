@@ -89,6 +89,9 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `LOCAL_EDITS_DB_PATH`, `USER_EDITS_DB_PATH`, `USER_AUTH_DB_PATH`
 - `PYTHON_BIN`
 - `TIPPECANOE_BIN`
+- `TILE_JOIN_BIN` - optional absolute path to the `tile-join` binary shipped with tippecanoe; auto-discovered from `PATH` when omitted. Required only if sharded PMTiles builds are enabled.
+- `REGION_SYNC_SHARD_KM` - cell size (in kilometers) for sharded PMTiles builds; `60` by default. Every region whose bbox spans more than one cell is built in sharded mode: each cell runs tippecanoe independently and the archives are merged with `tile-join`. This keeps peak tippecanoe memory bounded by the densest cell and is enabled by default on all hardware. Set to `0` to disable sharding and fall back to a single tippecanoe pass.
+- `REGION_SYNC_SHARD_MIN_FEATURES` - optional feature-count floor for sharding; `0` (always shard multi-cell regions) by default. Setting it to a positive value forces small regions onto the single-pass path — useful only for benchmarking.
 - `ADMIN_REGIONS_PMTILES_ON_START` - `auto` (default), `always`, or `never`; controls whether the container startup checks and optionally rebuilds `frontend/build/client/admin-regions.pmtiles`.
 - `SESSION_SECRET`, `APP_SETTINGS_SECRET`, SMTP credentials, Redis/session settings
 

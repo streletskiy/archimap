@@ -23,3 +23,12 @@
 
 - Byte-range and validators are CDN-friendly.
 - Keep region URLs stable by addressing PMTiles through `regionId`; the on-disk file may use the current region slug.
+
+## Sharded builds for large regions
+
+- `scripts/region-sync/pmtiles-builder.ts` splits every multi-cell region into a square km-grid before running `tippecanoe`, then merges the per-cell archives with `tile-join`. Each tippecanoe invocation processes only one cell, so peak RSS scales with the *densest* cell instead of the whole region. Sharding is enabled by default on all hardware because building-only pmtiles are safe to split at cell boundaries (each feature is routed to exactly one cell by its bbox center, so footprints never straddle shards).
+- Cell size is controlled by `REGION_SYNC_SHARD_KM` (default `60`). The grid is planned from the region bbox using a cosine-adjusted longitude step so cells stay roughly square on the ground at the region's latitude. Set `REGION_SYNC_SHARD_KM=0` to force the legacy single-pass path for the whole deployment.
+- Single-cell regions (bbox smaller than one shard cell) automatically collapse to a direct tippecanoe call, so small cities still take the fast path. `REGION_SYNC_SHARD_MIN_FEATURES` (default `0`) can force additional small regions onto the single-pass path for benchmarking.
+- Each feature is assigned to a cell by the bbox center of its geometry, so building footprints and `building:part` geometry never straddle two shards. Invalid or geometry-less lines are counted as `skippedFeatureCount` and reported at the start of the sharded build.
+- `tile-join` is invoked with `--no-tile-size-limit` and the region source layer name so the merged archive keeps the same `buildings` layer the runtime expects. Intermediate per-shard NDJSON and PMTiles files are removed after the merge, regardless of success or failure.
+- The builder also accepts `TILE_JOIN_BIN` as an override path for the `tile-join` binary (default: auto-discovered from `PATH`).

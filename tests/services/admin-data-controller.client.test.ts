@@ -120,3 +120,73 @@ test('new region save stays pending until the create request resolves and skips 
     mock.restoreAll();
   }
 });
+
+test('background region run refresh preserves current history rows without enabling skeleton loading', async () => {
+  const { createAdminDataController } = await loadControllerModule();
+  const runsGate = createDeferred();
+
+  mock.method(globalThis, 'fetch', async (input, init: LooseRecord = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+
+    if (method === 'GET' && url.startsWith('/api/admin/app-settings/data/regions/77/runs?')) {
+      return runsGate.promise;
+    }
+
+    throw new Error(`unexpected request: ${method} ${url}`);
+  });
+
+  try {
+    const controller = createAdminDataController();
+    controller.regionRuns.set([
+      {
+        id: 501,
+        status: 'running',
+        triggerReason: 'manual'
+      }
+    ]);
+    controller.regionRunsTotal.set(1);
+    controller.regionRunsPage.set(1);
+    controller.regionRunsPageCount.set(1);
+
+    const loadPromise = controller.loadRegionRuns(77, 1, {
+      background: true
+    });
+
+    assert.equal(get(controller.regionRunsLoading), false);
+    assert.deepEqual(get(controller.regionRuns), [
+      {
+        id: 501,
+        status: 'running',
+        triggerReason: 'manual'
+      }
+    ]);
+
+    runsGate.resolve(createJsonResponse({
+      items: [
+        {
+          id: 502,
+          status: 'running',
+          triggerReason: 'manual'
+        }
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+      pageCount: 1
+    }));
+
+    await loadPromise;
+
+    assert.equal(get(controller.regionRunsLoading), false);
+    assert.deepEqual(get(controller.regionRuns), [
+      {
+        id: 502,
+        status: 'running',
+        triggerReason: 'manual'
+      }
+    ]);
+  } finally {
+    mock.restoreAll();
+  }
+});

@@ -14,8 +14,9 @@ from typing import Any, Tuple
 
 import duckdb  # type: ignore
 import pandas as pd  # type: ignore
+import requests  # type: ignore
 from requests import HTTPError  # type: ignore
-from quackosm import PbfFileReader, convert_osm_extract_to_duckdb  # type: ignore
+from quackosm import PbfFileReader  # type: ignore
 from quackosm.osm_extracts import (  # type: ignore
     OSM_EXTRACT_SOURCE_INDEX_FUNCTION,
     OsmExtractMultipleMatchesError,
@@ -28,6 +29,147 @@ from quackosm.osm_extracts import (  # type: ignore
 BATCH_SIZE = 20000
 DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2
 DEFAULT_BUILDING_EXTRUSION_LEVELS = 1
+DOWNLOAD_PROGRESS_CHUNK_BYTES = 1024 * 1024
+DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC = 1.0
+DOWNLOAD_PHASE_MAX_RATIO = 0.85
+SHOULD_EMIT_STAGE_JSON = str(os.getenv('REGION_SYNC_EMIT_STAGE_JSON', '')).strip().lower() == 'true'
+
+
+def emit_stage_json(stage: str, progress: Any = None, detail: str | None = None) -> None:
+    if not SHOULD_EMIT_STAGE_JSON:
+        return
+
+    payload: dict[str, Any] = {
+        'stage': str(stage or '').strip(),
+    }
+    if not payload['stage']:
+        return
+
+    try:
+        normalized_progress = float(progress)
+        if normalized_progress == normalized_progress:
+            payload['progress'] = max(0, min(100, round(normalized_progress)))
+    except (TypeError, ValueError):
+        pass
+
+    normalized_detail = str(detail or '').strip()
+    if normalized_detail:
+        payload['detail'] = normalized_detail[:200]
+
+    print(f'SYNC_STAGE_JSON={json.dumps(payload, ensure_ascii=False)}', flush=True)
+
+
+def truncate_text(value: Any, limit: int = 80) -> str:
+    text = str(value or '').strip()
+    if len(text) <= limit:
+        return text
+    return f'{text[: max(0, limit - 3)]}...'
+
+
+def format_bytes_compact(value: Any) -> str:
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return '0 B'
+    if size <= 0:
+        return '0 B'
+
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    unit_index = 0
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+    if unit_index == 0:
+        return f'{int(size)} {units[unit_index]}'
+    return f'{size:.1f} {units[unit_index]}'
+
+
+def build_extract_stage_progress(index: int, total: int, phase_ratio: float) -> int:
+    total_steps = max(1, int(total or 1))
+    current_step = min(total_steps, max(1, int(index or 1)))
+    normalized_ratio = max(0.0, min(1.0, float(phase_ratio)))
+    slot_start = (current_step - 1) / total_steps
+    slot_size = 1 / total_steps
+    return round((slot_start + (slot_size * normalized_ratio)) * 100)
+
+
+def download_extract_with_progress(
+    extract_url: str,
+    output_path: Path,
+    *,
+    extract_query: str,
+    index: int,
+    total: int,
+) -> None:
+    temp_path = output_path.with_suffix(f'{output_path.suffix}.download')
+    if temp_path.exists():
+        temp_path.unlink()
+
+    query_label = truncate_text(extract_query, 96)
+    prefix = f'[{max(1, int(index or 1))}/{max(1, int(total or 1))}] {query_label}'
+    emit_stage_json('extract', build_extract_stage_progress(index, total, 0), f'{prefix} | starting download')
+
+    last_emit_ts = 0.0
+    last_percent = -1
+
+    try:
+        with requests.get(extract_url, stream=True, timeout=(15, 300)) as response:
+            response.raise_for_status()
+            content_length_raw = str(response.headers.get('Content-Length') or '').strip()
+            try:
+                total_bytes = int(content_length_raw) if content_length_raw else 0
+            except ValueError:
+                total_bytes = 0
+            total_bytes = total_bytes if total_bytes > 0 else None
+
+            downloaded_bytes = 0
+            with temp_path.open('wb') as fh:
+                for chunk in response.iter_content(chunk_size=DOWNLOAD_PROGRESS_CHUNK_BYTES):
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    downloaded_bytes += len(chunk)
+
+                    now = time.time()
+                    if total_bytes is not None:
+                        percent = min(100, round((downloaded_bytes / total_bytes) * 100))
+                        if percent == last_percent and (now - last_emit_ts) < DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
+                            continue
+                        last_percent = percent
+                        last_emit_ts = now
+                        emit_stage_json(
+                            'extract',
+                            build_extract_stage_progress(
+                                index,
+                                total,
+                                min(DOWNLOAD_PHASE_MAX_RATIO, (downloaded_bytes / total_bytes) * DOWNLOAD_PHASE_MAX_RATIO),
+                            ),
+                            (
+                                f'{prefix} | {percent}% | '
+                                f'{format_bytes_compact(downloaded_bytes)} / {format_bytes_compact(total_bytes)}'
+                            ),
+                        )
+                    elif (now - last_emit_ts) >= DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
+                        last_emit_ts = now
+                        emit_stage_json(
+                            'extract',
+                            None,
+                            f'{prefix} | downloaded {format_bytes_compact(downloaded_bytes)}',
+                        )
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+
+    if output_path.exists():
+        output_path.unlink()
+    temp_path.replace(output_path)
+
+    emit_stage_json(
+        'extract',
+        build_extract_stage_progress(index, total, 0.9),
+        f'{prefix} | download complete | extracting buildings',
+    )
 
 
 def encode_osm_feature_id(osm_type: str, osm_id: int) -> int:
@@ -649,8 +791,8 @@ ON building_contours (min_lon, max_lon, min_lat, max_lat);
         ensure_sqlite_rtree_schema(conn)
 
 
-def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
-    duckdb_path = work_dir / 'quackosm-buildings.duckdb'
+def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path, result_path: Path | None = None) -> Path:
+    duckdb_path = result_path or (work_dir / 'quackosm-buildings.duckdb')
     if duckdb_path.exists():
         duckdb_path.unlink()
 
@@ -671,13 +813,20 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path) -> Path:
     return duckdb_path
 
 
-def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work_dir: Path, index: int) -> Path:
+def run_quackosm_extract_to_duckdb(
+    extract_query: str,
+    extract_source: str,
+    work_dir: Path,
+    index: int,
+    total: int = 1,
+) -> Path:
     resolved_query = str(extract_query or '').strip()
     normalized_source = normalize_extract_source(extract_source)
     get_extract_index(normalized_source)
     resolved = resolve_exact_extract_alias(resolved_query, normalized_source)
     if resolved.get('candidate'):
         resolved_query = str(resolved['candidate'].get('extractId') or resolved_query).strip() or resolved_query
+    resolved_extract = get_extract_by_query(resolved_query, source=normalized_source)
 
     safe_slug = ''.join(ch if ch.isalnum() else '-' for ch in resolved_query.lower()).strip('-')
     if not safe_slug:
@@ -690,18 +839,18 @@ def run_quackosm_extract_to_duckdb(extract_query: str, extract_source: str, work
     if cached_pbf_path.exists():
         cached_pbf_path.unlink()
 
-    convert_osm_extract_to_duckdb(
-        osm_extract_query=resolved_query,
-        osm_extract_source=normalized_source,
-        tags_filter={'building': True, 'building:part': True},
-        result_file_path=duckdb_path,
-        keep_all_tags=True,
-        explode_tags=False,
-        ignore_cache=True,
-        duckdb_table_name='quackosm_raw',
-        working_directory=work_dir,
+    extract_url = str(getattr(resolved_extract, 'url', '') or '').strip()
+    if not extract_url:
+        raise ValueError(f'OSM extract URL is missing for {resolved_query}')
+
+    download_extract_with_progress(
+        extract_url,
+        cached_pbf_path,
+        extract_query=resolved_query,
+        index=index,
+        total=total,
     )
-    return duckdb_path
+    return run_quackosm_to_duckdb(str(cached_pbf_path), work_dir, duckdb_path)
 
 
 def _filtered_rows_cte_sql(import_limit: int) -> str:
@@ -1262,7 +1411,12 @@ def main() -> None:
                 print(f'IMPORT_LIMIT reached: {import_limit}', flush=True)
                 break
             print(f'[{idx}/{len(extract_queries)}] Loading extract: source={extract_source}, id={query}', flush=True)
-            duckdb_path = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx)
+            duckdb_path = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx, len(extract_queries))
+            emit_stage_json(
+                'extract',
+                build_extract_stage_progress(idx, len(extract_queries), 0.94),
+                f'[{idx}/{len(extract_queries)}] {truncate_text(query, 96)} | exporting filtered rows',
+            )
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
             if ndjson_path is not None:
                 p, i, bounds = export_rows_duckdb_ndjson(
@@ -1315,9 +1469,16 @@ def main() -> None:
                     bounds['east'],
                     bounds['north'],
                 )
+            emit_stage_json(
+                'extract',
+                build_extract_stage_progress(idx, len(extract_queries), 0.99),
+                f'[{idx}/{len(extract_queries)}] exported {int(i)} features',
+            )
     else:
         print(f'PBF import started (QuackOSM + DuckDB): {pbf_path}', flush=True)
+        emit_stage_json('extract', 0, f'loading local PBF {truncate_text(pbf_path, 96)}')
         duckdb_path = run_quackosm_to_duckdb(pbf_path, work_dir)
+        emit_stage_json('extract', 94, 'exporting filtered rows')
         if ndjson_path is not None:
             processed, imported, export_bounds = export_rows_duckdb_ndjson(
                 duckdb_path=duckdb_path,
@@ -1358,6 +1519,7 @@ def main() -> None:
                 import_limit=import_limit,
                 run_marker=run_marker,
             )
+        emit_stage_json('extract', 99, f'exported {int(imported)} features')
 
     if ndjson_path is not None or db_ndjson_path is not None or geojson_ndjson_path is not None:
         if summary_json_path is not None:

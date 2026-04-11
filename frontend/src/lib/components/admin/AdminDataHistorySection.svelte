@@ -43,7 +43,7 @@
     {#if isSelectedRegion()}
       <UiScrollArea className="ui-scroll-surface h-full min-h-0" contentClassName="h-full">
         <div class="data-history-scroll-content flex min-h-full flex-col gap-3">
-          {#if regionRunsLoading}
+          {#if regionRunsLoading && regionRuns.length === 0}
             <UiTable framed={false}>
               <UiTableHeader>
                 <UiTableRow className="hover:[&>th]:bg-transparent">

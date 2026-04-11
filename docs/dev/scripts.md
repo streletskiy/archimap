@@ -47,6 +47,7 @@
 Notes:
 
 - `scripts/sync-osm-region.ts` is intentionally thin; implementation stages live in `scripts/region-sync/python-extractor.ts`, `db-ingester.ts`, `region-db.ts`, `import-applier.ts`, and `pmtiles-builder.ts`.
+- `pmtiles-builder.ts` shards large regions into a km-aligned grid (see `REGION_SYNC_SHARD_KM`, default `60`) and merges per-cell archives with `tile-join`, keeping peak tippecanoe memory bounded for country-sized rebuilds on low-RAM SBCs; `REGION_SYNC_SHARD_KM=0` restores the single-pass build.
 - `frontend/src/bootstrap/svelte.config.ts` is the source of truth for the frontend SvelteKit config. The generated `frontend/svelte.config.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - `frontend/src/theme-init.ts` is the source of truth for the initial theme bootstrap. The generated `frontend/static/theme-init.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - Docker containers start through `scripts/runtime-start.ts`, which runs `scripts/ensure-admin-regions-pmtiles.ts` before booting `server.sveltekit.ts`.

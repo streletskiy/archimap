@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const http = require('http');
+const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const {
   createPythonExtractResolver,
@@ -12,8 +16,9 @@ const resolver = createPythonExtractResolver({
 });
 
 let pythonDepsSkipReason = null;
+let pythonCandidate = null;
 try {
-  ensurePythonImporterDeps();
+  pythonCandidate = ensurePythonImporterDeps();
 } catch (error) {
   pythonDepsSkipReason = String(error?.message || error || 'Python extractor dependencies are unavailable');
 }
@@ -71,4 +76,98 @@ test('resolveExactExtract reports ambiguous exact-name matches instead of auto-s
   assert.equal(result.candidate, null);
   assert.equal(result.errorCode, 'multiple');
   assert.match(String(result.message || ''), /Multiple extracts matched/i);
+});
+
+test('download_extract_with_progress emits managed stage markers for local HTTP downloads', pythonExtractorTestOptions, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-python-download-progress-'));
+  const sourceBuffer = Buffer.alloc(3 * 1024 * 1024, 'a');
+  const outputPath = path.join(workspace, 'downloaded.osm.pbf');
+  const importerPath = path.resolve(__dirname, '..', '..', 'scripts', 'sync-osm-buildings.py');
+
+  const server = http.createServer((request, response) => {
+    if (request.url !== '/extract.osm.pbf') {
+      response.statusCode = 404;
+      response.end('not found');
+      return;
+    }
+    response.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(sourceBuffer.length)
+    });
+    response.end(sourceBuffer);
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) reject(error);
+      else resolve(undefined);
+    });
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const url = `http://127.0.0.1:${address.port}/extract.osm.pbf`;
+  const pythonScript = [
+    'import importlib.util',
+    'import pathlib',
+    'spec = importlib.util.spec_from_file_location("sync_osm_buildings", r"' + importerPath.replace(/\\/g, '\\\\') + '")',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'module.download_extract_with_progress(',
+    '    r"' + url + '",',
+    '    pathlib.Path(r"' + outputPath.replace(/\\/g, '\\\\') + '"),',
+    '    extract_query="geofabrik_test_region",',
+    '    index=1,',
+    '    total=1,',
+    ')'
+  ].join('\n');
+
+  try {
+    const result: { code: number | null; stdout: string; stderr: string } = await new Promise((resolve, reject) => {
+      const child = spawn(pythonCandidate.exe, [
+        ...pythonCandidate.prefixArgs,
+        '-c',
+        pythonScript
+      ], {
+        cwd: path.resolve(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          REGION_SYNC_EMIT_STAGE_JSON: 'true'
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk || '');
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk || '');
+      });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        resolve({ code, stdout, stderr });
+      });
+    });
+
+    assert.equal(result.code, 0, result.stderr || result.stdout || 'python helper failed');
+    assert.equal(fs.existsSync(outputPath), true);
+    assert.equal(fs.statSync(outputPath).size, sourceBuffer.length);
+
+    const stagePayloads = String(result.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => String(line || '').trim())
+      .filter((line) => line.startsWith('SYNC_STAGE_JSON='))
+      .map((line) => JSON.parse(line.slice('SYNC_STAGE_JSON='.length)));
+
+    assert.ok(stagePayloads.length >= 2, `expected multiple stage markers, got ${result.stdout}`);
+    assert.ok(stagePayloads.some((payload) => Number(payload?.progress) > 0));
+    assert.ok(stagePayloads.some((payload) => String(payload?.detail || '').includes('download complete')));
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve(undefined)));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });

@@ -891,8 +891,24 @@
         "saveRegion": "Сохранить регион",
         "createRegion": "Создать регион",
         "syncNow": "Синхронизировать сейчас",
+        "cancelSync": "Отменить синхронизацию",
+        "cancelling": "Отменяем...",
         "deleting": "Удаляем...",
-        "deleteRegion": "Удалить регион"
+        "deleteRegion": "Удалить регион",
+        "syncStageTitle": "Текущая стадия",
+        "syncStageProgressLabel": "Прогресс стадии",
+        "syncStageWorking": "Выполняется..."
+      },
+      "stage": {
+        "starting": "Запуск",
+        "extract": "Скачиваем OSM-extract",
+        "export": "Экспорт данных региона",
+        "build": "Сборка PMTiles",
+        "apply": "Запись в базу",
+        "publish": "Публикация PMTiles",
+        "followup": "Пересборка индексов",
+        "cancelling": "Отмена",
+        "done": "Готово"
       },
       "history": {
         "title": "История запусков",
@@ -912,7 +928,8 @@
         "queued": "в очереди",
         "failed": "ошибка",
         "success": "успешно",
-        "planned": "запланировано"
+        "planned": "запланировано",
+        "abandoned": "отменено"
       },
   "triggers": {
     "manual": "вручную",
@@ -961,6 +978,11 @@
     "syncUnavailable": "Регион пока не готов к синхронизации",
     "syncSkippedNoUpstream": "Статус апстрима ещё не загружен",
     "syncFailed": "Не удалось запустить синхронизацию региона",
+    "cancellingSync": "Отменяем синхронизацию региона...",
+    "syncCancelRequested": "Запрошена отмена",
+    "syncCancelled": "Синхронизация региона отменена",
+    "cancelSyncFailed": "Не удалось отменить синхронизацию региона",
+    "cancelSyncUnavailable": "Нет активной синхронизации для отмены",
         "loadingFilterPresets": "Загружаем пресеты фильтров...",
         "loadFilterPresetsFailed": "Не удалось загрузить пресеты фильтров",
         "savingFilterPreset": "Сохраняем пресет фильтра...",

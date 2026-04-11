@@ -10,6 +10,7 @@ const filterTagAllowlistMigration = require('../../db/migrations/005_filter_tag_
 const filterPresetsMigration = require('../../db/migrations/011_filter_presets.migration.ts');
 const filterPresetNameI18nMigration = require('../../db/migrations/012_filter_preset_name_i18n.migration.ts');
 const regionSourceDataUpdatedAtMigration = require('../../db/migrations/023_region_source_data_updated_at.migration.ts');
+const syncRunStageMigration = require('../../db/migrations/024_sync_run_stage.migration.ts');
 const {
   createDataSettingsService,
   buildRegionPmtilesFileName,
@@ -27,6 +28,7 @@ function createTestDb() {
   filterPresetsMigration.up(db);
   filterPresetNameI18nMigration.up(db);
   regionSourceDataUpdatedAtMigration.up(db);
+  syncRunStageMigration.up(db);
   return db;
 }
 
@@ -1037,6 +1039,85 @@ test('markRunSucceeded stores imported upstream source version on the region', a
   });
 
   assert.equal(result.region.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
+});
+
+test('updateRunStage normalizes progress/detail and only persists for running runs', async () => {
+  const db = createTestDb();
+  let currentNow = new Date('2026-04-09T10:00:00.000Z');
+  const service = createService({
+    db,
+    now: () => currentNow
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Stage Region',
+    slug: 'stage-region',
+    extractId: 'stage-region'
+  }), 'tester');
+
+  const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  const untouchedQueued = await service.updateRunStage(queuedRun.id, 'extract', 12, 'queued should ignore');
+  assert.equal(untouchedQueued?.stage, null);
+  assert.equal(untouchedQueued?.stageProgress, null);
+
+  const runningRun = await service.markRunStarted(queuedRun.id);
+  assert.equal(runningRun.stage, 'starting');
+  assert.equal(runningRun.stageUpdatedAt, '2026-04-09T10:00:00.000Z');
+
+  currentNow = new Date('2026-04-09T10:05:00.000Z');
+  const updatedRun = await service.updateRunStage(
+    queuedRun.id,
+    ' build ',
+    142.6,
+    `  ${'x'.repeat(240)}  `
+  );
+  assert.equal(updatedRun?.stage, 'build');
+  assert.equal(updatedRun?.stageProgress, 100);
+  assert.equal(updatedRun?.stageDetail, 'x'.repeat(200));
+  assert.equal(updatedRun?.stageUpdatedAt, '2026-04-09T10:05:00.000Z');
+});
+
+test('markRunCancelRequested sets cancelling stage and finalization clears transient fields', async () => {
+  const db = createTestDb();
+  let currentNow = new Date('2026-04-09T11:00:00.000Z');
+  const service = createService({
+    db,
+    now: () => currentNow
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Cancel Region',
+    slug: 'cancel-region',
+    extractId: 'cancel-region',
+    autoSyncEnabled: true,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 24
+  }), 'tester');
+
+  const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(queuedRun.id);
+
+  currentNow = new Date('2026-04-09T11:02:00.000Z');
+  await service.updateRunStage(queuedRun.id, 'build', 50, 'halfway');
+
+  currentNow = new Date('2026-04-09T11:03:00.000Z');
+  const cancellingRun = await service.markRunCancelRequested(queuedRun.id);
+  assert.equal(cancellingRun?.cancelRequested, true);
+  assert.equal(cancellingRun?.stage, 'cancelling');
+  assert.equal(cancellingRun?.stageProgress, 50);
+  assert.equal(cancellingRun?.stageDetail, 'halfway');
+  assert.equal(cancellingRun?.stageUpdatedAt, '2026-04-09T11:03:00.000Z');
+
+  currentNow = new Date('2026-04-09T11:04:00.000Z');
+  const failed = await service.markRunFailed(queuedRun.id, 'Sync cancelled by user', {
+    status: 'abandoned'
+  });
+  assert.equal(failed.run.cancelRequested, false);
+  assert.equal(failed.run.stage, null);
+  assert.equal(failed.run.stageProgress, null);
+  assert.equal(failed.run.stageDetail, null);
+  assert.equal(failed.run.stageUpdatedAt, '2026-04-09T11:04:00.000Z');
+  assert.equal(failed.region.lastSyncStatus, 'abandoned');
 });
 
 test('failed first sync schedules retry after interval instead of immediate rerun', async () => {

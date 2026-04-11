@@ -153,9 +153,13 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       SET
         status = 'running',
         started_at = ?,
+        stage = 'starting',
+        stage_progress = NULL,
+        stage_detail = NULL,
+        stage_updated_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(startedAt, run.id);
+    `).run(startedAt, startedAt, run.id);
     await db.prepare(`
       UPDATE data_sync_regions
       SET
@@ -165,6 +169,50 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         updated_at = datetime('now')
       WHERE id = ?
     `).run(startedAt, run.regionId);
+    return getRunById(run.id);
+  }
+
+  async function updateRunStage(runId, stage, progress = null, detail = null) {
+    await ensureBootstrapped();
+    const numericRunId = Number(runId);
+    if (!Number.isInteger(numericRunId) || numericRunId <= 0) {
+      return null;
+    }
+    const normalizedStage = normalizeNullableText(stage, 32) || null;
+    if (!normalizedStage) return null;
+    const numericProgress = Number(progress);
+    const safeProgress = Number.isFinite(numericProgress)
+      ? Math.max(0, Math.min(100, Math.round(numericProgress)))
+      : null;
+    const normalizedDetail = normalizeNullableText(detail, 200);
+    const updatedAt = toIsoOrNull(now());
+    await db.prepare(`
+      UPDATE data_region_sync_runs
+      SET
+        stage = ?,
+        stage_progress = ?,
+        stage_detail = ?,
+        stage_updated_at = ?,
+        updated_at = datetime('now')
+      WHERE id = ? AND status = 'running'
+    `).run(normalizedStage, safeProgress, normalizedDetail, updatedAt, numericRunId);
+    return getRunById(numericRunId);
+  }
+
+  async function markRunCancelRequested(runId) {
+    await ensureBootstrapped();
+    const run = await getRunById(runId);
+    if (!run) return null;
+    const updatedAt = toIsoOrNull(now());
+    await db.prepare(`
+      UPDATE data_region_sync_runs
+      SET
+        cancel_requested = TRUE,
+        stage = 'cancelling',
+        stage_updated_at = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(updatedAt, run.id);
     return getRunById(run.id);
   }
 
@@ -207,6 +255,11 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         bounds_south = ?,
         bounds_east = ?,
         bounds_north = ?,
+        stage = 'done',
+        stage_progress = 100,
+        stage_detail = NULL,
+        stage_updated_at = ?,
+        cancel_requested = FALSE,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -221,6 +274,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       bounds?.south ?? null,
       bounds?.east ?? null,
       bounds?.north ?? null,
+      finishedAt,
       run.id
     );
 
@@ -309,25 +363,32 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         status = ?,
         finished_at = ?,
         error_text = ?,
+        stage = NULL,
+        stage_progress = NULL,
+        stage_detail = NULL,
+        stage_updated_at = ?,
+        cancel_requested = FALSE,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
       failedStatus,
       finishedAt,
       message,
+      finishedAt,
       run.id
     );
 
     await db.prepare(`
       UPDATE data_sync_regions
       SET
-        last_sync_status = 'failed',
+        last_sync_status = ?,
         last_sync_finished_at = ?,
         last_sync_error = ?,
         next_sync_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
+      failedStatus,
       finishedAt,
       message,
       nextSyncAt,
@@ -405,6 +466,8 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     markRunStarted,
     markRunSucceeded,
     markRunFailed,
+    markRunCancelRequested,
+    updateRunStage,
     recoverInterruptedRuns,
     rescheduleRegionAfterSkippedSync,
     refreshRegionNextSyncAt,

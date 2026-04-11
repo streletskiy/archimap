@@ -1,4 +1,53 @@
 const MAX_NODE_TIMER_MS = 2_147_483_647;
+const STAGE_UPDATE_MIN_INTERVAL_MS = 250;
+const CANCEL_FORCE_KILL_MS = 10_000;
+
+function signalProcessTree(child, signal = 'SIGTERM', log = console, options: LooseRecord = {}) {
+  const platform = String(options.platform || process.platform);
+  const killRef = typeof options.killRef === 'function'
+    ? options.killRef
+    : process.kill.bind(process);
+
+  if (!child || typeof child !== 'object' || child.killed) {
+    return false;
+  }
+  if (platform === 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
+    try {
+      const spawnRef = typeof options.spawnRef === 'function'
+        ? options.spawnRef
+        : require('child_process').spawn;
+      const killer = spawnRef('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+        stdio: 'ignore',
+        shell: false
+      });
+      killer.on('error', (error) => {
+        log?.error?.(`[region-sync] taskkill failed: ${String(error?.message || error)}`);
+      });
+      return true;
+    } catch (error) {
+      log?.error?.(`[region-sync] taskkill spawn threw: ${String(error?.message || error)}`);
+    }
+  }
+  if (Number.isInteger(child.pid) && child.pid > 0) {
+    try {
+      // The managed sync child is spawned detached on POSIX, making it the
+      // leader of its own process group. Signalling `-pid` stops the whole
+      // group, including the Python importer / tippecanoe grandchildren.
+      killRef(-child.pid, signal);
+      return true;
+    } catch {
+      // Fall back to the direct child kill below if process-group signalling
+      // is unavailable for some reason.
+    }
+  }
+  try {
+    child.kill(signal);
+    return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
 
 function initManagedSyncWorkers(options: LooseRecord = {}) {
   const {
@@ -19,6 +68,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   const regionTimers = new Map();
   let currentRun = null;
   let currentSyncChild = null;
+  let currentSyncCancelRequested = false;
+  let currentSyncForceKillTimer = null;
   let deferredSyncSuccessPayload = null;
   let initialized = false;
   let draining = false;
@@ -184,16 +235,48 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     let stderrBuffer = '';
     let outputTail = '';
     let parsedSummary = null;
+    let pendingStagePromise: Promise<unknown> = Promise.resolve();
+    let lastStagePersistTs = 0;
+    let lastStageSignature = '';
 
     const child = spawn(processExecPath, ['--import', 'tsx', syncRegionScriptPath, `--region-id=${region.id}`], {
       cwd,
       env: {
         ...env,
-        REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true'
+        REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true',
+        REGION_SYNC_EMIT_STAGE_JSON: 'true'
       },
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32'
     });
     currentSyncChild = child;
+    currentSyncCancelRequested = false;
+
+    function persistStage(stage, progress, detail, { force = false } = {}) {
+      if (typeof dataSettingsService.updateRunStage !== 'function') {
+        return;
+      }
+      const signature = `${stage}|${progress ?? ''}|${detail ?? ''}`;
+      if (!force && signature === lastStageSignature) {
+        return;
+      }
+      const nowMs = Date.now();
+      const isTerminalStage = stage === 'done' || stage === 'cancelling' || stage === 'cancelled';
+      const previousStage = lastStageSignature ? String(lastStageSignature).split('|')[0] : '';
+      const isStageTransition = previousStage !== stage;
+      // Throttle only repeat progress/detail updates within the same stage;
+      // always let a transition to a new stage through so the UI stays snappy.
+      if (!force && !isTerminalStage && !isStageTransition && nowMs - lastStagePersistTs < STAGE_UPDATE_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastStagePersistTs = nowMs;
+      lastStageSignature = signature;
+      pendingStagePromise = pendingStagePromise
+        .then(() => dataSettingsService.updateRunStage(run.id, stage, progress, detail))
+        .catch((error) => {
+          log.error(`[region-sync:${region.id}] failed to persist stage: ${String(error?.message || error)}`);
+        });
+    }
 
     function appendOutput(chunkText, isError = false) {
       const text = String(chunkText || '');
@@ -207,6 +290,21 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
             parsedSummary = JSON.parse(trimmed.slice('SYNC_RESULT_JSON='.length));
           } catch {
             // ignore malformed summary line
+          }
+          continue;
+        }
+        if (trimmed.startsWith('SYNC_STAGE_JSON=')) {
+          try {
+            const payload = JSON.parse(trimmed.slice('SYNC_STAGE_JSON='.length));
+            const stageName = String(payload?.stage || '').trim();
+            if (!stageName) continue;
+            const progressValue = Number.isFinite(Number(payload?.progress))
+              ? Number(payload.progress)
+              : null;
+            const detailText = typeof payload?.detail === 'string' ? payload.detail : null;
+            persistStage(stageName, progressValue, detailText);
+          } catch {
+            // ignore malformed stage line
           }
           continue;
         }
@@ -227,23 +325,54 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       appendOutput(chunk, true);
     });
 
+    function clearForceKillTimer() {
+      if (currentSyncForceKillTimer) {
+        clearTimeout(currentSyncForceKillTimer);
+        currentSyncForceKillTimer = null;
+      }
+    }
+
+    function waitForPendingStage() {
+      return pendingStagePromise.catch(() => {});
+    }
+
     child.on('error', (error) => {
       currentSyncChild = null;
       currentRun = null;
-      finalizeRun(run.id, {
+      const wasCancelled = currentSyncCancelRequested;
+      currentSyncCancelRequested = false;
+      clearForceKillTimer();
+      const finalization = waitForPendingStage().then(() => finalizeRun(run.id, {
         success: false,
-        error: buildFailureMessage({
-          outputTail: `${stdoutBuffer}\n${stderrBuffer}`,
-          error
-        })
-      }).catch(() => {});
+        status: wasCancelled ? 'abandoned' : 'failed',
+        error: wasCancelled
+          ? 'Sync cancelled by user'
+          : buildFailureMessage({
+            outputTail: `${stdoutBuffer}\n${stderrBuffer}`,
+            error
+          })
+      }));
+      finalization.catch(() => {});
     });
 
     child.on('close', (code, signal) => {
       currentSyncChild = null;
       currentRun = null;
+      const wasCancelled = currentSyncCancelRequested;
+      currentSyncCancelRequested = false;
+      clearForceKillTimer();
+      const finalize = (payload) => waitForPendingStage().then(() => finalizeRun(run.id, payload));
+
+      if (wasCancelled) {
+        finalize({
+          success: false,
+          status: 'abandoned',
+          error: 'Sync cancelled by user'
+        }).catch(() => {});
+        return;
+      }
       if (isShuttingDown() && (signal === 'SIGTERM' || signal === 'SIGINT')) {
-        finalizeRun(run.id, {
+        finalize({
           success: false,
           status: 'abandoned',
           error: 'Sync interrupted by shutdown'
@@ -251,7 +380,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         return;
       }
       if (code === 0 && parsedSummary) {
-        finalizeRun(run.id, {
+        finalize({
           success: true,
           summary: {
             ...parsedSummary,
@@ -260,7 +389,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         }).catch(() => {});
         return;
       }
-      finalizeRun(run.id, {
+      finalize({
         success: false,
         error: buildFailureMessage({
           code,
@@ -428,22 +557,85 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     await reloadSchedules();
   }
 
+  async function requestRegionSyncCancel(regionId) {
+    const numericRegionId = Number(regionId);
+    if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+      throw new Error('Invalid region id');
+    }
+
+    if (currentRun?.regionId === numericRegionId && currentSyncChild) {
+      currentSyncCancelRequested = true;
+      try {
+        if (typeof dataSettingsService.markRunCancelRequested === 'function') {
+          await dataSettingsService.markRunCancelRequested(currentRun.runId);
+        }
+      } catch (error) {
+        log.error(`[region-sync] failed to mark cancel requested: ${String(error?.message || error)}`);
+      }
+      signalProcessTree(currentSyncChild, 'SIGTERM', log);
+      if (currentSyncForceKillTimer) {
+        clearTimeout(currentSyncForceKillTimer);
+      }
+      currentSyncForceKillTimer = setTimeout(() => {
+        if (currentSyncChild && !currentSyncChild.killed) {
+          signalProcessTree(currentSyncChild, 'SIGKILL', log);
+        }
+      }, CANCEL_FORCE_KILL_MS);
+      if (typeof currentSyncForceKillTimer?.unref === 'function') {
+        currentSyncForceKillTimer.unref();
+      }
+      return {
+        cancelled: true,
+        target: 'running',
+        regionId: numericRegionId
+      };
+    }
+
+    if (queuedRegionIds.has(numericRegionId)) {
+      const removedIndex = queue.findIndex((entry) => entry.regionId === numericRegionId);
+      let removedEntry = null;
+      if (removedIndex >= 0) {
+        removedEntry = queue[removedIndex];
+        queue.splice(removedIndex, 1);
+      }
+      queuedRegionIds.delete(numericRegionId);
+      if (removedEntry?.runId) {
+        try {
+          await dataSettingsService.markRunFailed(removedEntry.runId, 'Sync cancelled by user', {
+            status: 'abandoned'
+          });
+        } catch (error) {
+          log.error(`[region-sync] failed to mark queued run cancelled: ${String(error?.message || error)}`);
+        }
+      }
+      reloadSchedulesInBackground(`cancel-queued:${numericRegionId}`);
+      return {
+        cancelled: true,
+        target: 'queued',
+        regionId: numericRegionId
+      };
+    }
+
+    return {
+      cancelled: false,
+      target: 'none',
+      regionId: numericRegionId
+    };
+  }
+
   function stop() {
     clearRegionTimers();
     queue.length = 0;
     queuedRegionIds.clear();
     if (currentSyncChild && !currentSyncChild.killed) {
-      try {
-        currentSyncChild.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
+      signalProcessTree(currentSyncChild, 'SIGTERM', log);
     }
   }
 
   return {
     initAutoSync,
     requestRegionSync,
+    requestRegionSyncCancel,
     reloadSchedules,
     stop,
     isSyncInProgress: () => Boolean(currentSyncChild)
@@ -460,6 +652,9 @@ function initSyncWorkersInfra(options: LooseRecord = {}) {
     return {
       initAutoSync: async () => {},
       requestRegionSync: async () => {
+        throw new Error('DB-backed region sync is not configured in the current runtime mode');
+      },
+      requestRegionSyncCancel: async () => {
         throw new Error('DB-backed region sync is not configured in the current runtime mode');
       },
       reloadSchedules: async () => {},
@@ -503,6 +698,16 @@ function initSyncWorkersInfra(options: LooseRecord = {}) {
       }
       return managedWorkers.requestRegionSync(regionId, options);
     },
+    async requestRegionSyncCancel(regionId) {
+      let mode = await resolveMode();
+      if (mode !== 'managed') {
+        mode = await resolveMode(true);
+      }
+      if (mode !== 'managed') {
+        throw new Error('DB-backed region sync is not configured in the current runtime mode');
+      }
+      return managedWorkers.requestRegionSyncCancel(regionId);
+    },
     async reloadSchedules() {
       const mode = await resolveMode(true);
       if (mode === 'managed') {
@@ -519,5 +724,8 @@ function initSyncWorkersInfra(options: LooseRecord = {}) {
 }
 
 module.exports = {
-  initSyncWorkersInfra
+  initSyncWorkersInfra,
+  _test_: {
+    signalProcessTree
+  }
 };

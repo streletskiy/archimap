@@ -51,7 +51,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - `--extract-source <region.extractSource>`
    - PostgreSQL full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
    - SQLite full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
-6. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query and materialize the result into a DuckDB file under `data/quackosm/`.
+6. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query, downloads the canonical `*.osm.pbf` into `data/quackosm/`, emits managed extract-stage progress updates while the file is downloading, and materializes the result into a DuckDB file under the same cache root.
 7. The Python importer opens that DuckDB file, loads the `spatial` extension, and runs SQL over `quackosm_raw` to:
    - keep only OSM `way` and `relation`
    - keep only `POLYGON` and `MULTIPOLYGON`
@@ -73,7 +73,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - `--pmtiles-only`: `scripts/region-sync/region-db.ts` streams region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file and applies the same synthetic remainder expansion for SQLite exports
    - every exported feature carries `feature_kind` so the client can split `building`, `building_part`, and synthetic `building_remainder` geometry without a second PMTiles archive
    - PMTiles features also carry `render_height_m`, `render_min_height_m`, and `render_hide_base_when_parts` so the client can extrude parts and suppress the parent fill/extrusion when the part toggle is enabled
-10. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`.
+10. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`. Every region whose bbox spans more than one `REGION_SYNC_SHARD_KM` cell (default `60` km) is built in a sharded pass: the builder plans a km-aligned grid from the export bounds, splits `region-build.ndjson` into per-cell NDJSON files by feature bbox center, invokes `tippecanoe` per cell, then merges the archives with `tile-join`. This keeps peak tippecanoe memory bounded by the densest cell and is enabled by default on all hardware. Regions that fit into a single grid cell automatically collapse to a direct tippecanoe call.
 11. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.ts`:
     - PostgreSQL: `region_import_tmp` with `geometry_wkb_hex`
     - SQLite: `temp.region_import_tmp` with `geometry_json`
@@ -216,8 +216,9 @@ flowchart TD
 ### `scripts/region-sync/pmtiles-builder.ts`
 
 - Converts import NDJSON rows into newline-delimited GeoJSON features for `tippecanoe` when the importer did not already emit a dedicated GeoJSON build artifact, including synthetic `building_remainder` expansion for partially covered parent footprints.
-- Detects `tippecanoe` from `TIPPECANOE_BIN` or `PATH`.
+- Detects `tippecanoe` and `tile-join` from `TIPPECANOE_BIN` / `TILE_JOIN_BIN` or `PATH`.
 - Computes region bounds during export for Node-side conversions; PostgreSQL full sync reuses importer-produced summary metadata instead of re-reading `region-import.ndjson`.
+- Builds every multi-cell region in a sharded pass controlled by `REGION_SYNC_SHARD_KM` (default `60`). The region bbox is divided into a km-aligned grid, `region-build.ndjson` is split into per-cell NDJSON files by feature bbox center, each cell runs `tippecanoe` into its own archive, and `tile-join` merges the archives into the final `region.pmtiles`. Sharding is enabled by default on all hardware; setting `REGION_SYNC_SHARD_KM=0` falls back to the legacy single-pass build. `REGION_SYNC_SHARD_MIN_FEATURES` (default `0`) can be raised to force small regions onto the single-pass path for benchmarking.
 
 ## Why the pipeline is split this way
 

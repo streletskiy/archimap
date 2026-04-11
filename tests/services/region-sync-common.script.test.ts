@@ -11,7 +11,19 @@ const {
   parseRowPayload,
   writeRowsToNdjsonFile
 } = require('../../scripts/region-sync/common');
-const { exportImportRowsToGeojson, summarizeImportRows } = require('../../scripts/region-sync/pmtiles-builder');
+const {
+  assignCellIndex,
+  buildPmtilesFromGeojson,
+  computeGeometryBounds,
+  DEFAULT_SHARD_KM,
+  DEFAULT_SHARD_MIN_FEATURES,
+  exportImportRowsToGeojson,
+  planShardGrid,
+  resolveShardKm,
+  resolveShardMinFeatures,
+  summarizeImportRows,
+  writeShardNdjsons
+} = require('../../scripts/region-sync/pmtiles-builder');
 const { exportRegionMembersToGeojsonNdjson } = require('../../scripts/region-sync/region-db');
 
 test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () => {
@@ -397,6 +409,248 @@ test('exportImportRowsToGeojson adds building_remainder features for partially c
       ]]
     });
     assert.equal(baseBuilding.properties.render_hide_base_when_parts, 1);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('resolveShardKm honors explicit argument, env fallback, and default', () => {
+  assert.equal(resolveShardKm(120, {}), 120);
+  assert.equal(resolveShardKm(0, {}), 0);
+  assert.equal(resolveShardKm(undefined, { REGION_SYNC_SHARD_KM: '45' }), 45);
+  assert.equal(resolveShardKm(undefined, { REGION_SYNC_SHARD_KM: 'not-a-number' }), DEFAULT_SHARD_KM);
+  assert.equal(resolveShardKm(undefined, {}), DEFAULT_SHARD_KM);
+  assert.equal(resolveShardKm(-25, {}), 0);
+});
+
+test('resolveShardMinFeatures honors env override and clamps invalid values', () => {
+  assert.equal(resolveShardMinFeatures({}), DEFAULT_SHARD_MIN_FEATURES);
+  assert.equal(resolveShardMinFeatures({ REGION_SYNC_SHARD_MIN_FEATURES: '25000' }), 25000);
+  assert.equal(resolveShardMinFeatures({ REGION_SYNC_SHARD_MIN_FEATURES: '-10' }), DEFAULT_SHARD_MIN_FEATURES);
+  assert.equal(resolveShardMinFeatures({ REGION_SYNC_SHARD_MIN_FEATURES: 'foo' }), DEFAULT_SHARD_MIN_FEATURES);
+});
+
+test('planShardGrid returns null for disabled sharding or invalid bounds', () => {
+  assert.equal(planShardGrid(null, 60), null);
+  assert.equal(planShardGrid({ west: 0, south: 0, east: 1, north: 1 }, 0), null);
+  assert.equal(planShardGrid({ west: 1, south: 1, east: 1, north: 1 }, 60), null);
+  assert.equal(planShardGrid({ west: 0, south: 0, east: NaN, north: 1 }, 60), null);
+});
+
+test('planShardGrid divides a Poland-sized bbox into roughly km-sized cells', () => {
+  // Poland bbox ~ (14.12, 49.00, 24.15, 54.84)
+  const grid = planShardGrid({ west: 14.12, south: 49.00, east: 24.15, north: 54.84 }, 60);
+
+  assert.ok(grid);
+  assert.equal(grid.minLon, 14.12);
+  assert.equal(grid.minLat, 49.00);
+  assert.equal(grid.shardKm, 60);
+  // 5.84° lat / (60/111.32)° per cell ≈ 10.84 → 11 rows
+  assert.equal(grid.rows, 11);
+  // ~10° lon / cell step at ~52° lat ≈ 0.875° → 12 cols
+  assert.equal(grid.cols, 12);
+  assert.equal(grid.cellCount, grid.rows * grid.cols);
+  assert.ok(grid.latStep > 0);
+  assert.ok(grid.lonStep > grid.latStep); // lon degrees are smaller at mid-latitudes
+});
+
+test('planShardGrid collapses tiny regions into a single cell', () => {
+  const grid = planShardGrid({ west: 14.42, south: 50.07, east: 14.46, north: 50.10 }, 60);
+  assert.ok(grid);
+  assert.equal(grid.rows, 1);
+  assert.equal(grid.cols, 1);
+  assert.equal(grid.cellCount, 1);
+});
+
+test('assignCellIndex maps feature bbox centers into the right cell and clamps outliers', () => {
+  const grid = planShardGrid({ west: 14.00, south: 49.00, east: 24.00, north: 55.00 }, 60);
+
+  const swCorner = assignCellIndex({ west: 14.05, south: 49.05, east: 14.06, north: 49.06 }, grid);
+  const neCorner = assignCellIndex({ west: 23.95, south: 54.95, east: 23.96, north: 54.96 }, grid);
+  const outside = assignCellIndex({ west: 30.0, south: 60.0, east: 30.1, north: 60.1 }, grid);
+
+  assert.deepEqual(swCorner, { row: 0, col: 0, key: '0-0' });
+  assert.equal(neCorner.row, grid.rows - 1);
+  assert.equal(neCorner.col, grid.cols - 1);
+  assert.equal(outside.row, grid.rows - 1);
+  assert.equal(outside.col, grid.cols - 1);
+});
+
+test('computeGeometryBounds handles Point, Polygon, MultiPolygon and GeometryCollection', () => {
+  assert.deepEqual(computeGeometryBounds({ type: 'Point', coordinates: [37.6, 55.7] }), {
+    west: 37.6,
+    south: 55.7,
+    east: 37.6,
+    north: 55.7
+  });
+  assert.deepEqual(
+    computeGeometryBounds({
+      type: 'Polygon',
+      coordinates: [[[14.0, 49.0], [15.5, 49.0], [15.5, 50.5], [14.0, 50.5], [14.0, 49.0]]]
+    }),
+    { west: 14.0, south: 49.0, east: 15.5, north: 50.5 }
+  );
+  assert.deepEqual(
+    computeGeometryBounds({
+      type: 'MultiPolygon',
+      coordinates: [
+        [[[14.0, 49.0], [14.5, 49.0], [14.5, 49.5], [14.0, 49.5], [14.0, 49.0]]],
+        [[[23.0, 54.0], [23.5, 54.0], [23.5, 54.5], [23.0, 54.5], [23.0, 54.0]]]
+      ]
+    }),
+    { west: 14.0, south: 49.0, east: 23.5, north: 54.5 }
+  );
+  assert.deepEqual(
+    computeGeometryBounds({
+      type: 'GeometryCollection',
+      geometries: [
+        { type: 'Point', coordinates: [14.0, 49.0] },
+        { type: 'Point', coordinates: [23.5, 54.5] }
+      ]
+    }),
+    { west: 14.0, south: 49.0, east: 23.5, north: 54.5 }
+  );
+  assert.equal(computeGeometryBounds(null), null);
+  assert.equal(computeGeometryBounds({ type: 'Point', coordinates: [] }), null);
+});
+
+test('writeShardNdjsons splits GeoJSON NDJSON into per-cell files', async () => {
+  const workspace = createWorkspace(2001);
+  const geojsonPath = path.join(workspace, 'region-build.ndjson');
+  const shardDir = path.join(workspace, 'shards');
+
+  try {
+    const lines = [
+      formatGeojsonFeatureLine(
+        'way', 900001,
+        '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}'
+      ),
+      formatGeojsonFeatureLine(
+        'way', 900002,
+        '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}'
+      ),
+      formatGeojsonFeatureLine(
+        'way', 900003,
+        '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}'
+      )
+    ];
+    fs.writeFileSync(geojsonPath, lines.join(''), 'utf8');
+
+    const grid = planShardGrid({ west: 14.00, south: 49.00, east: 24.00, north: 55.00 }, 60);
+    const result = await writeShardNdjsons({ geojsonPath, grid, workspaceDir: shardDir });
+
+    assert.equal(result.skippedFeatureCount, 0);
+    assert.equal(result.shards.length, 2);
+    const counts = result.shards.map((shard) => shard.count).sort((a, b) => a - b);
+    assert.deepEqual(counts, [1, 2]);
+    for (const shard of result.shards) {
+      const shardLines = fs.readFileSync(shard.path, 'utf8').trim().split('\n');
+      assert.equal(shardLines.length, shard.count);
+      for (const line of shardLines) {
+        const parsed = JSON.parse(line);
+        assert.equal(parsed.type, 'Feature');
+      }
+    }
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('writeShardNdjsons skips unparseable lines and features without geometry', async () => {
+  const workspace = createWorkspace(2002);
+  const geojsonPath = path.join(workspace, 'region-build.ndjson');
+  const shardDir = path.join(workspace, 'shards');
+
+  try {
+    fs.writeFileSync(
+      geojsonPath,
+      [
+        'not json at all',
+        JSON.stringify({ type: 'Feature', properties: {}, geometry: null }),
+        formatGeojsonFeatureLine(
+          'way', 900010,
+          '{"type":"Point","coordinates":[14.1,49.1]}'
+        ).trim()
+      ].join('\n'),
+      'utf8'
+    );
+
+    const grid = planShardGrid({ west: 14.0, south: 49.0, east: 24.0, north: 55.0 }, 60);
+    const result = await writeShardNdjsons({ geojsonPath, grid, workspaceDir: shardDir });
+
+    assert.equal(result.skippedFeatureCount, 2);
+    assert.equal(result.shards.length, 1);
+    assert.equal(result.shards[0].count, 1);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or under floor', async () => {
+  if (process.platform === 'win32') {
+    // Bash-based fake binary is only reliable on POSIX; the functional path is
+    // covered by the Docker smoke build on CI/Linux.
+    return;
+  }
+
+  const workspace = createWorkspace(2003);
+  const geojsonPath = path.join(workspace, 'region-build.ndjson');
+  const outputPath = path.join(workspace, 'region.pmtiles');
+  const fakeTippecanoePath = path.join(workspace, 'fake-tippecanoe.sh');
+  const logPath = path.join(workspace, 'exec.log');
+
+  try {
+    fs.writeFileSync(
+      geojsonPath,
+      `${formatGeojsonFeatureLine('way', 900100, '{"type":"Point","coordinates":[14.1,49.1]}').trim()}\n`,
+      'utf8'
+    );
+    fs.writeFileSync(
+      fakeTippecanoePath,
+      [
+        '#!/usr/bin/env bash',
+        'set -e',
+        `printf '%s\\n' "$@" >> "${logPath}"`,
+        'out=""',
+        'for ((i=1;i<=$#;i++)); do',
+        '  if [[ "${!i}" == "-o" ]]; then',
+        '    j=$((i+1)); out="${!j}";',
+        '  fi',
+        'done',
+        'if [[ "$1" == "--version" ]]; then echo "fake-tippecanoe"; exit 0; fi',
+        'if [[ -n "$out" ]]; then : > "$out"; fi',
+        'exit 0',
+        ''
+      ].join('\n'),
+      { mode: 0o755 }
+    );
+
+    const fakeEnv = { ...process.env, TIPPECANOE_BIN: fakeTippecanoePath, TILE_JOIN_BIN: fakeTippecanoePath };
+
+    const disabled = await buildPmtilesFromGeojson({
+      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
+      geojsonPath,
+      outputPath,
+      bounds: { west: 14, south: 49, east: 24, north: 55 },
+      featureCount: 500_000,
+      shardKm: 0,
+      env: fakeEnv
+    });
+    assert.equal(disabled.mode, 'single');
+    assert.equal(disabled.shardCount, 1);
+
+    // An explicit REGION_SYNC_SHARD_MIN_FEATURES floor still short-circuits
+    // sharding for small regions even though the default is now 0 (always-shard).
+    const belowFloor = await buildPmtilesFromGeojson({
+      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
+      geojsonPath,
+      outputPath,
+      bounds: { west: 14, south: 49, east: 24, north: 55 },
+      featureCount: 100,
+      shardKm: 60,
+      env: { ...fakeEnv, REGION_SYNC_SHARD_MIN_FEATURES: '1000' }
+    });
+    assert.equal(belowFloor.mode, 'single');
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

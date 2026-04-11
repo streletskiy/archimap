@@ -464,6 +464,34 @@ paths:
           description: Invalid region id or region cannot be queued
         '403':
           description: Master admin required
+  /api/admin/app-settings/data/regions/{regionId}/sync-cancel:
+    post:
+      summary: Cancel a queued or running region sync
+      description: |
+        Requests cancellation of the region's active sync run. If the run is currently executing,
+        the child process tree is terminated and the run transitions to `abandoned` after cleanup.
+        If the run is only queued, it is removed from the queue and immediately marked `abandoned`.
+        The response indicates which target was cancelled (`running`, `queued`, or `none`).
+      parameters:
+        - in: path
+          name: regionId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cancellation result
+        '400':
+          description: Invalid region id or cancel request refused
+        '403':
+          description: Master admin required
+        '503':
+          description: Sync queue is currently unavailable
   /api/buildings/filter-data-bbox:
     get:
       summary: Get filter payload for visible bbox

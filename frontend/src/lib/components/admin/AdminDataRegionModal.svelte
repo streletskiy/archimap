@@ -17,6 +17,7 @@
   export let regionSaving = false;
   export let regionDeleting = false;
   export let regionSyncBusy = false;
+  export let regionSyncCancelBusy = false;
   export let regionResolveBusy = false;
   export let selectedDataRegionId = null;
   export let regionRuns = [];
@@ -79,12 +80,38 @@
     return `${bounds.west.toFixed(4)}, ${bounds.south.toFixed(4)} .. ${bounds.east.toFixed(4)}, ${bounds.north.toFixed(4)}`;
   }
 
+  function findActiveRun(runs) {
+    if (!Array.isArray(runs) || runs.length === 0) return null;
+    return runs.find((run) => {
+      const status = String(run?.status || '').trim().toLowerCase();
+      return status === 'queued' || status === 'running';
+    }) || null;
+  }
+
+  function formatStageLabel(stage) {
+    const code = String(stage || '').trim().toLowerCase();
+    if (!code) return '';
+    const key = `admin.data.stage.${code}`;
+    const translated = $t(key);
+    return translated && translated !== key ? translated : code;
+  }
+
   $: modalTitle = getRegionTitle($regionDraft, selectedRegion);
   $: modalMetaLine = getRegionMetaLine($regionDraft, selectedRegion);
   $: modalAriaLabel = modalTitle;
   $: selectedStatusMeta = controller.getRegionStatusMeta(selectedRegion?.lastSyncStatus, selectedRegion);
   $: selectedUpdateMeta = controller.getRegionUpdateMeta(selectedRegion);
   $: syncBlockedReason = $regionDraft.id ? controller.getRegionSyncBlockedReason(selectedRegion) : '';
+  $: activeRun = findActiveRun(regionRuns);
+  $: activeStageLabel = activeRun ? formatStageLabel(activeRun.stage) : '';
+  $: activeStageProgress = activeRun && Number.isFinite(Number(activeRun.stageProgress))
+    ? Math.max(0, Math.min(100, Math.round(Number(activeRun.stageProgress))))
+    : null;
+  $: activeStageDetail = activeRun?.stageDetail ? String(activeRun.stageDetail) : '';
+  $: syncIsActive = Boolean(selectedRegion) && ['queued', 'running'].includes(
+    String(selectedRegion?.lastSyncStatus || '').trim().toLowerCase()
+  );
+  $: cancelRequested = Boolean(activeRun?.cancelRequested) || String(activeRun?.stage || '').toLowerCase() === 'cancelling';
 
   $: if (open && !hadOpenState) {
     hadOpenState = true;
@@ -158,6 +185,42 @@
 
           <div class="data-region-status-divider"></div>
 
+          {#if syncIsActive}
+            <div class="data-region-stage-panel" role="status" aria-live="polite">
+              <div class="data-region-stage-head">
+                <span class="data-region-stage-spinner" aria-hidden="true"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="data-region-stage-title">
+                    {$t('admin.data.form.syncStageTitle')}:
+                    <span class="data-region-stage-name">{activeStageLabel || $t('admin.data.form.syncStageWorking')}</span>
+                    {#if activeStageProgress != null}
+                      <span class="data-region-stage-percent">{activeStageProgress}%</span>
+                    {/if}
+                  </div>
+                  {#if activeStageDetail}
+                    <div class="data-region-stage-detail">{activeStageDetail}</div>
+                  {/if}
+                </div>
+              </div>
+              {#if activeStageProgress != null}
+                <div
+                  class="data-region-stage-progress"
+                  role="progressbar"
+                  aria-label={$t('admin.data.form.syncStageProgressLabel')}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow={activeStageProgress}
+                >
+                  <div class="data-region-stage-progress-bar" style="width: {activeStageProgress}%"></div>
+                </div>
+              {:else}
+                <div class="data-region-stage-progress data-region-stage-progress--indeterminate" aria-hidden="true">
+                  <div class="data-region-stage-progress-bar data-region-stage-progress-bar--indeterminate"></div>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
           <dl class="data-region-status-grid">
             <div class="data-region-status-item">
               <dt class="data-region-status-label">{$t('admin.data.form.lastSync')}</dt>
@@ -214,22 +277,37 @@
                   {$regionDraft.id ? $t('admin.data.form.saveRegion') : $t('admin.data.form.createRegion')}
                 </UiButton>
                 {#if $regionDraft.id}
-                  <UiButton
-                    type="button"
-                    variant="secondary"
-                    size="xs"
-                    className="whitespace-nowrap shrink-0"
-                    disabled={regionSaving || regionDeleting || regionSyncBusy || !controller.canSyncRegionNow(selectedRegion)}
-                    onclick={() => controller.syncRegionNow($regionDraft.id)}
-                  >
-                    {$t('admin.data.form.syncNow')}
-                  </UiButton>
+                  {#if syncIsActive}
+                    <UiButton
+                      type="button"
+                      variant="danger"
+                      size="xs"
+                      className="whitespace-nowrap shrink-0"
+                      disabled={cancelRequested || regionSyncCancelBusy}
+                      onclick={() => controller.cancelRegionSync($regionDraft.id)}
+                    >
+                      {cancelRequested || regionSyncCancelBusy
+                        ? $t('admin.data.form.cancelling')
+                        : $t('admin.data.form.cancelSync')}
+                    </UiButton>
+                  {:else}
+                    <UiButton
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      className="whitespace-nowrap shrink-0"
+                      disabled={regionSaving || regionDeleting || regionSyncBusy || !controller.canSyncRegionNow(selectedRegion)}
+                      onclick={() => controller.syncRegionNow($regionDraft.id)}
+                    >
+                      {$t('admin.data.form.syncNow')}
+                    </UiButton>
+                  {/if}
                   <UiButton
                     type="button"
                     variant="danger"
                     size="xs"
                     className="whitespace-nowrap shrink-0"
-                    disabled={regionSaving || regionDeleting || regionSyncBusy}
+                    disabled={regionSaving || regionDeleting || regionSyncBusy || syncIsActive}
                     onclick={() => controller.deleteDataRegion($regionDraft.id)}
                   >
                     {regionDeleting ? $t('admin.data.form.deleting') : $t('admin.data.form.deleteRegion')}
@@ -362,6 +440,91 @@
     margin: 0.75rem 0;
     height: 1px;
     background: var(--panel-border);
+  }
+
+  .data-region-stage-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin-bottom: 0.75rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 40%, var(--panel-border));
+    border-radius: 0.85rem;
+    background: color-mix(in srgb, var(--accent, #2563eb) 6%, var(--panel-solid));
+  }
+
+  .data-region-stage-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+
+  .data-region-stage-spinner {
+    flex: 0 0 auto;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--accent, #2563eb) 30%, transparent);
+    border-top-color: var(--accent, #2563eb);
+    animation: data-region-stage-spin 0.9s linear infinite;
+  }
+
+  @keyframes data-region-stage-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .data-region-stage-title {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--ui-text-strong);
+  }
+
+  .data-region-stage-name {
+    color: var(--accent, #2563eb);
+  }
+
+  .data-region-stage-percent {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--ui-text-muted);
+  }
+
+  .data-region-stage-detail {
+    font-size: 0.72rem;
+    line-height: 1.3;
+    color: var(--ui-text-muted);
+    word-break: break-word;
+  }
+
+  .data-region-stage-progress {
+    position: relative;
+    width: 100%;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent);
+    overflow: hidden;
+  }
+
+  .data-region-stage-progress-bar {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent, #2563eb);
+    transition: width 0.3s ease;
+  }
+
+  .data-region-stage-progress--indeterminate .data-region-stage-progress-bar--indeterminate {
+    width: 30%;
+    animation: data-region-stage-indeterminate 1.4s ease-in-out infinite;
+  }
+
+  @keyframes data-region-stage-indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
   }
 
   .data-region-status-grid {

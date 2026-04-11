@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('events');
 
-const { initSyncWorkersInfra } = require('../../src/lib/server/infra/sync-workers.infra');
+const { initSyncWorkersInfra, _test_ } = require('../../src/lib/server/infra/sync-workers.infra');
 
 type ManagedDataSettingsOverrides = {
   refreshAllNextSyncAt?: () => Promise<Array<Record<string, unknown>>>;
@@ -111,18 +111,33 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
         region: region ? { ...region } : null
       };
     },
-    markRunFailed: async (runId, errorText) => {
+    markRunFailed: async (runId, errorText, options: LooseRecord = {}) => {
       const run = runMap.get(Number(runId));
-      run.status = 'failed';
+      run.status = String(options?.status || 'failed');
       run.error = String(errorText || '');
       const region = regionMap.get(run.regionId);
       if (region) {
-        region.lastSyncStatus = 'failed';
+        region.lastSyncStatus = run.status;
       }
       return {
         run: { ...run },
         region: region ? { ...region } : null
       };
+    },
+    updateRunStage: async (runId, stage, progress = null, detail = null) => {
+      const run = runMap.get(Number(runId));
+      if (!run) return null;
+      run.stage = stage || null;
+      run.stageProgress = Number.isFinite(Number(progress)) ? Number(progress) : null;
+      run.stageDetail = detail || null;
+      return { ...run };
+    },
+    markRunCancelRequested: async (runId) => {
+      const run = runMap.get(Number(runId));
+      if (!run) return null;
+      run.cancelRequested = true;
+      run.stage = 'cancelling';
+      return { ...run };
     },
     rescheduleRegionAfterSkippedSync: async (regionId) => {
       const region = regionMap.get(Number(regionId));
@@ -596,4 +611,241 @@ test('managed sync workers pass imported source version marker to successful run
 
   const savedRun = await dataSettingsService.getRunById(queued.run.id);
   assert.equal(savedRun?.summary?.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
+});
+
+test('managed sync workers parse SYNC_STAGE_JSON markers and persist stage updates', async () => {
+  const stageCalls = [];
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 21,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseUpdateRunStage = dataSettingsService.updateRunStage;
+  dataSettingsService.updateRunStage = async (runId, stage, progress, detail) => {
+    stageCalls.push({ runId, stage, progress, detail });
+    return baseUpdateRunStage(runId, stage, progress, detail);
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: (_execPath, _args, spawnOptions = {}) => {
+      const child = createChildProcessStub();
+      child.spawnOptions = spawnOptions;
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await workers.requestRegionSync(21, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.ok(queued?.run?.id);
+
+  // Ensure the child is spawned with the stage-emission env flag
+  assert.equal(children[0].spawnOptions?.env?.REGION_SYNC_EMIT_STAGE_JSON, 'true');
+
+  // First stage: extract (no progress). Second stage: build with progress. Third: done (terminal, forced).
+  children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"extract","detail":"downloading"}\n'));
+  // Same stage again within the throttle window — must be ignored
+  children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"extract","detail":"downloading"}\n'));
+  children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"build","progress":42,"detail":"shard 1/3"}\n'));
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  // Let pending stage promises settle
+  await waitForMicrotasks();
+
+  const stagesSeen = stageCalls.map((entry) => entry.stage);
+  assert.ok(stagesSeen.includes('extract'), `expected extract stage, got ${stagesSeen.join(',')}`);
+  assert.ok(stagesSeen.includes('build'), `expected build stage, got ${stagesSeen.join(',')}`);
+  // Duplicate extract entry within throttle window must have been suppressed
+  assert.equal(stagesSeen.filter((value) => value === 'extract').length, 1);
+  const buildEntry = stageCalls.find((entry) => entry.stage === 'build');
+  assert.equal(buildEntry?.progress, 42);
+  assert.equal(buildEntry?.detail, 'shard 1/3');
+});
+
+test('managed sync workers cancel a running sync and finalize it as abandoned', async () => {
+  const cancelMarks = [];
+  const children = [];
+  const killedPids = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 31,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseMarkCancel = dataSettingsService.markRunCancelRequested;
+  dataSettingsService.markRunCancelRequested = async (runId) => {
+    cancelMarks.push(runId);
+    return baseMarkCancel(runId);
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      child.pid = 12345;
+      const originalKill = child.kill.bind(child);
+      child.kill = (signal = 'SIGTERM') => {
+        killedPids.push({ pid: child.pid, signal });
+        originalKill(signal);
+      };
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await workers.requestRegionSync(31, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(children.length, 1);
+
+  const result = await workers.requestRegionSyncCancel(31);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.target, 'running');
+  assert.deepEqual(cancelMarks, [queued.run.id]);
+
+  // On non-Windows platforms the worker uses child.kill('SIGTERM').
+  // On Windows it delegates to taskkill without calling child.kill — so
+  // killedPids may be empty. The test must tolerate both.
+  if (process.platform !== 'win32') {
+    assert.ok(killedPids.length >= 1);
+  }
+
+  // The child then emits close (which createChildProcessStub already did
+  // synchronously via child.kill on non-Windows). For Windows, emit manually:
+  if (process.platform === 'win32') {
+    children[0].emit('close', null, 'SIGTERM');
+  }
+  await waitForMicrotasks();
+  await waitForMicrotasks();
+
+  const finalRun = await dataSettingsService.getRunById(queued.run.id);
+  assert.equal(finalRun?.status, 'abandoned');
+});
+
+test('signalProcessTree targets the detached POSIX process group', () => {
+  const killCalls = [];
+  const child = createChildProcessStub();
+  child.pid = 4242;
+  child.kill = () => {
+    throw new Error('child.kill fallback should not be used when group signalling succeeds');
+  };
+
+  const result = _test_.signalProcessTree(child, 'SIGTERM', { error() {} }, {
+    platform: 'linux',
+    killRef: (pid, signal) => {
+      killCalls.push({ pid, signal });
+    }
+  });
+
+  assert.equal(result, true);
+  assert.deepEqual(killCalls, [{ pid: -4242, signal: 'SIGTERM' }]);
+});
+
+test('managed sync workers cancel a queued sync by removing it from the queue', async () => {
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 41,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 42,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const firstQueued = await workers.requestRegionSync(41, { triggerReason: 'manual', requestedBy: 'tester' });
+  const secondQueued = await workers.requestRegionSync(42, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(children.length, 1); // only first drained
+
+  const result = await workers.requestRegionSyncCancel(42);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.target, 'queued');
+
+  const cancelledRun = await dataSettingsService.getRunById(secondQueued.run.id);
+  assert.equal(cancelledRun?.status, 'abandoned');
+
+  // Finish the first to avoid dangling child
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  // First one must still be success, not touched by cancel
+  const firstRun = await dataSettingsService.getRunById(firstQueued.run.id);
+  assert.equal(firstRun?.status, 'success');
+});
+
+test('requestRegionSyncCancel returns no-op when region has no active sync', async () => {
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 51,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => createChildProcessStub(),
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const result = await workers.requestRegionSyncCancel(51);
+  assert.equal(result.cancelled, false);
+  assert.equal(result.target, 'none');
 });
