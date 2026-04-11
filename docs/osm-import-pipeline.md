@@ -274,6 +274,7 @@ flowchart TD
 - PMTiles swap is protected by a backup file and explicit rollback path.
 - Cleanup deletes only contours that have no remaining membership in any region.
 - Interrupted runs are recoverable because region sync status and run history are stored separately from the import workspace.
+- On runtime restart, any `queued`/`running` run is first archived as `abandoned` in history, then the worker immediately requeues the affected region without waiting for a fresh upstream-version check. This keeps restart recovery fast and clears the stale region-level error banner as soon as the replacement run is queued.
 
 ## Local edits and sync corner cases
 

@@ -472,8 +472,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         };
       }
 
+      const skipUpstreamCheck = options.skipUpstreamCheck === true;
       let upstreamRegion = region;
-      if (typeof dataSettingsService.getRegionUpstreamState === 'function') {
+      if (!skipUpstreamCheck && typeof dataSettingsService.getRegionUpstreamState === 'function') {
         try {
           upstreamRegion = await dataSettingsService.getRegionUpstreamState(region, {
             forceRefresh: true
@@ -483,7 +484,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         }
       }
 
-      if (shouldSkipSyncBecauseUpToDate(upstreamRegion)) {
+      if (!skipUpstreamCheck && shouldSkipSyncBecauseUpToDate(upstreamRegion)) {
         if (options.triggerReason === 'manual') {
           throw new Error('No upstream update is available for this region');
         }
@@ -540,7 +541,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     for (const regionId of recoveredRegionIds) {
       await requestRegionSync(regionId, {
         triggerReason: 'startup',
-        requestedBy: 'system'
+        requestedBy: 'system',
+        skipUpstreamCheck: true
       });
     }
 

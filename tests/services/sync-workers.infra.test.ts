@@ -613,6 +613,51 @@ test('managed sync workers pass imported source version marker to successful run
   assert.equal(savedRun?.summary?.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
 });
 
+test('initAutoSync requeues recovered interrupted runs without waiting for upstream refresh', async () => {
+  const children = [];
+  let upstreamChecks = 0;
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 14,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'abandoned',
+      lastSyncError: 'Sync interrupted by process restart'
+    }
+  ], {
+    recoverInterruptedRuns: async () => [{ id: 91, regionId: 14, status: 'abandoned' }],
+    getRegionUpstreamState: async () => {
+      upstreamChecks += 1;
+      throw new Error('recovery should bypass upstream refresh');
+    }
+  });
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  await workers.initAutoSync();
+
+  assert.equal(upstreamChecks, 0);
+  assert.equal(children.length, 1);
+  const region = await dataSettingsService.getRegionById(14);
+  assert.equal(region?.lastSyncStatus, 'running');
+});
+
 test('managed sync workers parse SYNC_STAGE_JSON markers and persist stage updates', async () => {
   const stageCalls = [];
   const children = [];

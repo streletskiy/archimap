@@ -134,6 +134,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       UPDATE data_sync_regions
       SET
         last_sync_status = 'queued',
+        last_sync_error = NULL,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(region.id);

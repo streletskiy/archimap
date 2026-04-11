@@ -1120,6 +1120,43 @@ test('markRunCancelRequested sets cancelling stage and finalization clears trans
   assert.equal(failed.region.lastSyncStatus, 'abandoned');
 });
 
+test('createQueuedRun clears stale region sync errors before a retry starts', async () => {
+  const db = createTestDb();
+  const service = createService({
+    db,
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Recovered Region',
+    slug: 'recovered-region',
+    extractId: 'recovered-region'
+  }), 'tester');
+
+  const firstRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(firstRun.id);
+  await service.markRunFailed(firstRun.id, 'Sync interrupted by process restart', {
+    status: 'abandoned'
+  });
+
+  const failedRegion = await service.getRegionById(region.id);
+  assert.equal(failedRegion?.lastSyncStatus, 'abandoned');
+  assert.equal(failedRegion?.lastSyncError, 'Sync interrupted by process restart');
+
+  await service.createQueuedRun(region.id, 'startup', 'system');
+
+  const queuedRegion = await service.getRegionById(region.id);
+  assert.equal(queuedRegion?.lastSyncStatus, 'queued');
+  assert.equal(queuedRegion?.lastSyncError, null);
+});
+
 test('failed first sync schedules retry after interval instead of immediate rerun', async () => {
   const db = createTestDb();
   let currentNow = new Date('2026-03-07T10:00:00.000Z');
