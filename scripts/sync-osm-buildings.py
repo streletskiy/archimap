@@ -140,10 +140,30 @@ def resolve_export_progress_interval_sec() -> float:
     return parsed if parsed > 0 else DEFAULT_EXPORT_PROGRESS_INTERVAL_SEC
 
 
-def is_low_power_arm_host() -> bool:
+def is_low_power_host() -> bool:
+    """Detect low-power hosts that need reduced memory/CPU usage.
+
+    Triggers on:
+    - Explicit env var REGION_SYNC_LOW_POWER=true
+    - ARM with ≤4 CPUs (e.g. Raspberry Pi, cheap VPS)
+    - Any host with ≤4 CPUs and a memory limit set (user is explicitly constraining resources)
+    """
+    low_power_env = str(os.getenv('REGION_SYNC_LOW_POWER', '')).strip().lower()
+    if low_power_env in ('true', '1', 'yes'):
+        return True
     machine = str(platform.machine() or '').strip().lower()
     cpu_count = int(os.cpu_count() or 0)
-    return machine in {'aarch64', 'arm64'} and 0 < cpu_count <= 4
+    if machine in {'aarch64', 'arm64'} and 0 < cpu_count <= 4:
+        return True
+    memory_limit = str(os.getenv('REGION_SYNC_DUCKDB_MEMORY_LIMIT', '')).strip()
+    if memory_limit and 0 < cpu_count <= 4:
+        return True
+    return False
+
+
+def is_low_power_arm_host() -> bool:
+    """Legacy alias — kept for backward compat with callers that check ARM specifically."""
+    return is_low_power_host()
 
 
 def resolve_duckdb_threads() -> int:
@@ -171,6 +191,13 @@ def configure_duckdb_connection(con: duckdb.DuckDBPyConnection, work_dir: Path |
     con.execute(f"SET temp_directory = '{escape_sql_literal(str(temp_dir))}'")
 
     memory_limit = str(os.getenv('REGION_SYNC_DUCKDB_MEMORY_LIMIT', '')).strip()
+    if not memory_limit:
+        try:
+            import psutil
+            total_ram_bytes = psutil.virtual_memory().total
+            memory_limit = f'{int(total_ram_bytes * 0.75) // (1024 * 1024)}MB'
+        except Exception:
+            pass
     if memory_limit:
         con.execute(f"SET memory_limit = '{escape_sql_literal(memory_limit)}'")
 
@@ -971,22 +998,39 @@ ON building_contours (min_lon, max_lon, min_lat, max_lat);
         ensure_sqlite_rtree_schema(conn)
 
 
-def build_quackosm_duckdb_conn_kwargs() -> dict:
+def build_quackosm_duckdb_conn_kwargs(work_dir: Path | None = None) -> dict:
     """Build duckdb_conn_kwargs for QuackOSM's PbfFileReader from env config.
 
-    Propagates REGION_SYNC_DUCKDB_MEMORY_LIMIT and REGION_SYNC_DUCKDB_THREADS into
-    QuackOSM's internal DuckDB connection so the extract stage respects the same
-    resource caps as our own DuckDB queries.  Without this, QuackOSM allocates memory
-    freely and can OOM on large regions (e.g. whole-country extracts > 500 MB PBF).
+    Propagates REGION_SYNC_DUCKDB_MEMORY_LIMIT, REGION_SYNC_DUCKDB_THREADS and
+    temp_directory into QuackOSM's internal DuckDB connection so the extract stage
+    respects the same resource caps as our own DuckDB queries.  Without this,
+    QuackOSM allocates memory freely and can OOM on large regions (e.g. whole-country
+    extracts > 500 MB PBF).
     """
     config: dict = {}
     memory_limit = str(os.getenv('REGION_SYNC_DUCKDB_MEMORY_LIMIT', '')).strip()
+    if not memory_limit:
+        # Default to 75% of total RAM so DuckDB spills to disk instead of OOM-killing.
+        try:
+            import psutil  # already a quackosm dependency
+            total_ram_bytes = psutil.virtual_memory().total
+            default_limit_bytes = int(total_ram_bytes * 0.75)
+            memory_limit = f'{default_limit_bytes // (1024 * 1024)}MB'
+        except Exception:
+            pass
     if memory_limit:
         config['memory_limit'] = memory_limit
     threads = resolve_duckdb_threads()
     if threads > 0:
         config['threads'] = threads
-    return {'config_kwargs': config} if config else {}
+    # Ensure QuackOSM's DuckDB can spill to disk when memory-limited, preventing
+    # OOM on large PBF files (e.g. Poland whole ~2 GB).
+    target_work_dir = Path(work_dir or Path.cwd()).expanduser().resolve()
+    temp_dir_raw = str(os.getenv('REGION_SYNC_DUCKDB_TEMP_DIRECTORY', '')).strip()
+    temp_dir = Path(temp_dir_raw).expanduser().resolve() if temp_dir_raw else (target_work_dir / 'duckdb-tmp')
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    config['temp_directory'] = str(temp_dir)
+    return {'config_kwargs': config}
 
 
 def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path, result_path: Path | None = None) -> Path:
@@ -994,15 +1038,21 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path, result_path: Path | No
     if duckdb_path.exists():
         duckdb_path.unlink()
 
-    quackosm_duckdb_kwargs = build_quackosm_duckdb_conn_kwargs()
+    quackosm_duckdb_kwargs = build_quackosm_duckdb_conn_kwargs(work_dir)
     cpu_limit = resolve_duckdb_threads() or None
 
+    # Smaller row groups + snappy compression reduce peak memory during QuackOSM's
+    # intermediate Parquet I/O.  These intermediates are discarded after conversion,
+    # so the slightly larger file size from snappy vs zstd doesn't matter.
     reader = PbfFileReader(
         tags_filter={'building': True, 'building:part': True},
         working_directory=work_dir,
         verbosity_mode='transient',
         cpu_limit=cpu_limit,
-        duckdb_conn_kwargs=quackosm_duckdb_kwargs if quackosm_duckdb_kwargs else None,
+        row_group_size=25_000,
+        compression='snappy',
+        compression_level=1,
+        duckdb_conn_kwargs=quackosm_duckdb_kwargs,
     )
 
     reader.convert_pbf_to_duckdb(
@@ -1011,6 +1061,7 @@ def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path, result_path: Path | No
         keep_all_tags=True,
         explode_tags=False,
         ignore_cache=True,
+        sort_result=False,
         duckdb_table_name='quackosm_raw'
     )
     return duckdb_path
