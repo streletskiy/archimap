@@ -1267,7 +1267,8 @@ def run_quackosm_extract_to_duckdb(
             total=total,
         )
     filtered_pbf = prefilter_pbf_with_osmium(str(cached_pbf_path), work_dir)
-    emit_stage_json('extract', 0, f'{prefix} | extracting buildings into DuckDB')
+    filtered_size = format_bytes_compact(Path(filtered_pbf).stat().st_size)
+    emit_stage_json('extract', 0, f'{prefix} | QuackOSM: parsing {filtered_size} PBF into DuckDB (this may take a while)')
     result = run_quackosm_to_duckdb(filtered_pbf, work_dir, duckdb_path)
     emit_stage_json('extract', 100, f'{prefix} | buildings extracted to DuckDB')
     return result
@@ -2049,7 +2050,8 @@ def main() -> None:
         print(f'PBF import started (QuackOSM + DuckDB): {pbf_path}', flush=True)
         local_pbf_label = truncate_text(pbf_path, 96)
         filtered_pbf = prefilter_pbf_with_osmium(pbf_path, work_dir)
-        emit_stage_json('extract', 0, f'{local_pbf_label} | extracting local PBF into DuckDB')
+        filtered_size = format_bytes_compact(Path(filtered_pbf).stat().st_size)
+        emit_stage_json('extract', 0, f'{local_pbf_label} | QuackOSM: parsing {filtered_size} PBF into DuckDB (this may take a while)')
         duckdb_path = run_quackosm_to_duckdb(filtered_pbf, work_dir)
         emit_stage_json('extract', 100, f'{local_pbf_label} | buildings extracted to DuckDB')
         emit_stage_json('export', 0, f'{local_pbf_label} | exporting filtered rows')
