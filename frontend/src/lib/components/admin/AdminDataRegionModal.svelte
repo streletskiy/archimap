@@ -102,12 +102,50 @@
   $: selectedStatusMeta = controller.getRegionStatusMeta(selectedRegion?.lastSyncStatus, selectedRegion);
   $: selectedUpdateMeta = controller.getRegionUpdateMeta(selectedRegion);
   $: syncBlockedReason = $regionDraft.id ? controller.getRegionSyncBlockedReason(selectedRegion) : '';
+  const SYNC_PIPELINE_STAGES = ['download', 'extract', 'export', 'build', 'apply', 'publish', 'followup'];
+
+  function computePipelineState(run) {
+    if (!run) return { steps: [], overallProgress: 0 };
+    const currentStage = String(run.stage || '').trim().toLowerCase();
+    const stageProgress = Number.isFinite(Number(run.stageProgress))
+      ? Math.max(0, Math.min(100, Math.round(Number(run.stageProgress))))
+      : null;
+
+    // tile_join is a sub-stage of build
+    const effectiveStage = currentStage === 'tile_join' ? 'build' : currentStage;
+    const currentIdx = SYNC_PIPELINE_STAGES.indexOf(effectiveStage);
+
+    const steps = SYNC_PIPELINE_STAGES.map((stage, i) => {
+      let state = 'pending';
+      if (currentIdx >= 0) {
+        if (i < currentIdx) state = 'done';
+        else if (i === currentIdx) state = 'active';
+      } else if (currentStage === 'done') {
+        state = 'done';
+      }
+      return { stage, state, label: formatStageLabel(stage) };
+    });
+
+    const totalStages = SYNC_PIPELINE_STAGES.length;
+    let overallProgress = 0;
+    if (currentStage === 'done') {
+      overallProgress = 100;
+    } else if (currentIdx >= 0) {
+      const completedFraction = currentIdx / totalStages;
+      const stageFraction = (stageProgress != null ? stageProgress / 100 : 0.5) / totalStages;
+      overallProgress = Math.round((completedFraction + stageFraction) * 100);
+    }
+
+    return { steps, overallProgress };
+  }
+
   $: activeRun = findActiveRun(regionRuns);
   $: activeStageLabel = activeRun ? formatStageLabel(activeRun.stage) : '';
   $: activeStageProgress = activeRun && Number.isFinite(Number(activeRun.stageProgress))
     ? Math.max(0, Math.min(100, Math.round(Number(activeRun.stageProgress))))
     : null;
   $: activeStageDetail = activeRun?.stageDetail ? String(activeRun.stageDetail) : '';
+  $: pipeline = computePipelineState(activeRun);
   $: syncIsActive = Boolean(selectedRegion) && ['queued', 'running'].includes(
     String(selectedRegion?.lastSyncStatus || '').trim().toLowerCase()
   );
@@ -196,31 +234,37 @@
                   <div class="data-region-stage-title">
                     {$t('admin.data.form.syncStageTitle')}:
                     <span class="data-region-stage-name">{activeStageLabel || $t('admin.data.form.syncStageWorking')}</span>
-                    {#if activeStageProgress != null}
-                      <span class="data-region-stage-percent">{activeStageProgress}%</span>
-                    {/if}
+                    <span class="data-region-stage-percent">{pipeline.overallProgress}%</span>
                   </div>
                   {#if activeStageDetail}
                     <div class="data-region-stage-detail">{activeStageDetail}</div>
                   {/if}
                 </div>
               </div>
-              {#if activeStageProgress != null}
-                <div
-                  class="data-region-stage-progress"
-                  role="progressbar"
-                  aria-label={$t('admin.data.form.syncStageProgressLabel')}
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                  aria-valuenow={activeStageProgress}
-                >
-                  <div class="data-region-stage-progress-bar" style="width: {activeStageProgress}%"></div>
-                </div>
-              {:else}
-                <div class="data-region-stage-progress data-region-stage-progress--indeterminate" aria-hidden="true">
-                  <div class="data-region-stage-progress-bar data-region-stage-progress-bar--indeterminate"></div>
-                </div>
-              {/if}
+
+              <div class="data-region-pipeline-steps">
+                {#each pipeline.steps as step}
+                  <div
+                    class="data-region-pipeline-step"
+                    data-state={step.state}
+                    title={step.label}
+                  >
+                    <div class="data-region-pipeline-dot"></div>
+                    <span class="data-region-pipeline-label">{step.label}</span>
+                  </div>
+                {/each}
+              </div>
+
+              <div
+                class="data-region-stage-progress"
+                role="progressbar"
+                aria-label={$t('admin.data.form.syncStageProgressLabel')}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={pipeline.overallProgress}
+              >
+                <div class="data-region-stage-progress-bar" style="width: {pipeline.overallProgress}%"></div>
+              </div>
             </div>
           {/if}
 
@@ -504,6 +548,70 @@
     word-break: break-word;
   }
 
+  .data-region-pipeline-steps {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.15rem;
+    padding: 0 0.1rem;
+  }
+
+  .data-region-pipeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .data-region-pipeline-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent, #2563eb) 20%, transparent);
+    border: 1.5px solid color-mix(in srgb, var(--accent, #2563eb) 30%, transparent);
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+  }
+
+  .data-region-pipeline-step[data-state="done"] .data-region-pipeline-dot {
+    background: var(--accent, #2563eb);
+    border-color: var(--accent, #2563eb);
+  }
+
+  .data-region-pipeline-step[data-state="active"] .data-region-pipeline-dot {
+    background: var(--accent, #2563eb);
+    border-color: var(--accent, #2563eb);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #2563eb) 25%, transparent);
+    animation: data-region-pipeline-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes data-region-pipeline-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #2563eb) 25%, transparent); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #2563eb) 12%, transparent); }
+  }
+
+  .data-region-pipeline-label {
+    font-size: 0.58rem;
+    line-height: 1.15;
+    text-align: center;
+    color: var(--ui-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    transition: color 0.3s ease;
+  }
+
+  .data-region-pipeline-step[data-state="active"] .data-region-pipeline-label {
+    color: var(--accent, #2563eb);
+    font-weight: 600;
+  }
+
+  .data-region-pipeline-step[data-state="done"] .data-region-pipeline-label {
+    color: var(--ui-text-subtle);
+  }
+
   .data-region-stage-progress {
     position: relative;
     width: 100%;
@@ -518,16 +626,6 @@
     border-radius: inherit;
     background: var(--accent, #2563eb);
     transition: width 0.3s ease;
-  }
-
-  .data-region-stage-progress--indeterminate .data-region-stage-progress-bar--indeterminate {
-    width: 30%;
-    animation: data-region-stage-indeterminate 1.4s ease-in-out infinite;
-  }
-
-  @keyframes data-region-stage-indeterminate {
-    0%   { transform: translateX(-100%); }
-    100% { transform: translateX(400%); }
   }
 
   .data-region-status-grid {
@@ -649,6 +747,15 @@
     .data-region-status-item--bounds {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .data-region-pipeline-label {
+      display: none;
+    }
+
+    .data-region-pipeline-dot {
+      width: 0.45rem;
+      height: 0.45rem;
     }
 
     .data-region-status-actions {
