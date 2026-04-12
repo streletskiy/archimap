@@ -4,7 +4,9 @@ import json
 import os
 import platform
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -1033,6 +1035,103 @@ def build_quackosm_duckdb_conn_kwargs(work_dir: Path | None = None) -> dict:
     return {'config_kwargs': config}
 
 
+def _find_osmium_bin() -> str | None:
+    """Find osmium-tool binary.  Returns path or None if not installed."""
+    env_bin = str(os.getenv('OSMIUM_BIN', '')).strip()
+    if env_bin:
+        return env_bin if os.path.isfile(env_bin) else None
+    return shutil.which('osmium')
+
+
+def prefilter_pbf_with_osmium(pbf_path: str, work_dir: Path) -> str:
+    """Pre-filter a PBF file to only building/building:part features using osmium.
+
+    osmium tags-filter is a C++ tool that streams through the PBF in a single pass,
+    outputting only matching ways/relations and their referenced nodes.  For a
+    country-sized PBF (e.g. Poland ~2 GB → ~200-400 MB) this reduces QuackOSM
+    processing time by 3-5x.
+
+    Returns the path to the filtered PBF (or the original path if osmium is unavailable).
+    """
+    osmium_bin = _find_osmium_bin()
+    if not osmium_bin:
+        print('[region-sync] osmium-tool not found, skipping PBF pre-filter', flush=True)
+        return pbf_path
+
+    src = Path(pbf_path)
+    filtered_path = work_dir / f'{src.stem}.buildings-only.osm.pbf'
+
+    # Reuse existing filtered file if source hasn't changed (same size + mtime).
+    if filtered_path.exists():
+        try:
+            src_stat = src.stat()
+            marker_path = work_dir / f'{src.stem}.buildings-only.marker'
+            if marker_path.exists():
+                marker = json.loads(marker_path.read_text())
+                if marker.get('src_size') == src_stat.st_size and marker.get('src_mtime') == src_stat.st_mtime:
+                    print(
+                        f'[region-sync] Reusing pre-filtered PBF: {filtered_path.name} '
+                        f'({format_bytes_compact(filtered_path.stat().st_size)})',
+                        flush=True,
+                    )
+                    return str(filtered_path)
+        except Exception:
+            pass
+
+    src_size = src.stat().st_size
+    print(
+        f'[region-sync] Pre-filtering PBF with osmium ({format_bytes_compact(src_size)})...',
+        flush=True,
+    )
+    emit_stage_json('extract', 0, f'osmium pre-filter: {src.name} ({format_bytes_compact(src_size)})')
+
+    started_at = time.time()
+    tmp_out = work_dir / f'{src.stem}.buildings-only.tmp.osm.pbf'
+    try:
+        subprocess.run(
+            [
+                osmium_bin, 'tags-filter', str(src),
+                'w/building', 'w/building:part',
+                'r/building', 'r/building:part',
+                '-o', str(tmp_out),
+                '--overwrite',
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if filtered_path.exists():
+            filtered_path.unlink()
+        tmp_out.rename(filtered_path)
+
+        # Write marker for cache validation.
+        src_stat = src.stat()
+        marker_path = work_dir / f'{src.stem}.buildings-only.marker'
+        marker_path.write_text(json.dumps({
+            'src_size': src_stat.st_size,
+            'src_mtime': src_stat.st_mtime,
+        }))
+
+        elapsed = time.time() - started_at
+        filtered_size = filtered_path.stat().st_size
+        ratio = (filtered_size / src_size * 100) if src_size > 0 else 0
+        print(
+            f'[region-sync] osmium pre-filter done in {elapsed:.1f}s: '
+            f'{format_bytes_compact(src_size)} → {format_bytes_compact(filtered_size)} '
+            f'({ratio:.0f}%)',
+            flush=True,
+        )
+        emit_stage_json('extract', 0, f'osmium done: {format_bytes_compact(filtered_size)} ({ratio:.0f}% of original)')
+        return str(filtered_path)
+    except FileNotFoundError:
+        print('[region-sync] osmium binary not found at runtime, skipping pre-filter', flush=True)
+        return pbf_path
+    except subprocess.CalledProcessError as e:
+        print(f'[region-sync] osmium pre-filter failed: {e.stderr or e}', flush=True)
+        tmp_out.unlink(missing_ok=True)
+        return pbf_path
+
+
 def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path, result_path: Path | None = None) -> Path:
     duckdb_path = result_path or (work_dir / 'quackosm-buildings.duckdb')
     if duckdb_path.exists():
@@ -1128,8 +1227,9 @@ def run_quackosm_extract_to_duckdb(
             index=index,
             total=total,
         )
+    filtered_pbf = prefilter_pbf_with_osmium(str(cached_pbf_path), work_dir)
     emit_stage_json('extract', 0, f'{prefix} | extracting buildings into DuckDB')
-    result = run_quackosm_to_duckdb(str(cached_pbf_path), work_dir, duckdb_path)
+    result = run_quackosm_to_duckdb(filtered_pbf, work_dir, duckdb_path)
     emit_stage_json('extract', 100, f'{prefix} | buildings extracted to DuckDB')
     return result
 
@@ -1909,8 +2009,9 @@ def main() -> None:
     else:
         print(f'PBF import started (QuackOSM + DuckDB): {pbf_path}', flush=True)
         local_pbf_label = truncate_text(pbf_path, 96)
+        filtered_pbf = prefilter_pbf_with_osmium(pbf_path, work_dir)
         emit_stage_json('extract', 0, f'{local_pbf_label} | extracting local PBF into DuckDB')
-        duckdb_path = run_quackosm_to_duckdb(pbf_path, work_dir)
+        duckdb_path = run_quackosm_to_duckdb(filtered_pbf, work_dir)
         emit_stage_json('extract', 100, f'{local_pbf_label} | buildings extracted to DuckDB')
         emit_stage_json('export', 0, f'{local_pbf_label} | exporting filtered rows')
         if ndjson_path is not None:

@@ -86,6 +86,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     python3-venv \
     ca-certificates \
     libsqlite3-0 \
+    osmium-tool \
     zlib1g \
   && rm -rf /var/lib/apt/lists/*
 
