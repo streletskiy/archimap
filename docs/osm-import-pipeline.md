@@ -52,7 +52,7 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - `--extract-source <region.extractSource>`
    - PostgreSQL full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
    - SQLite full sync: `--out-db-ndjson <workspace>/region-import.ndjson` plus `--out-geojson-ndjson <workspace>/region-build.ndjson` and `--out-summary-json <workspace>/region-export-summary.json`
-7. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query, downloads the canonical `*.osm.pbf` into `data/quackosm/`, emits managed extract-stage progress updates while the file is downloading, and materializes the result into a DuckDB file under the same cache root. Both the Node orchestrator and the Python importer watch their parent PID and self-terminate when the owner process disappears, which prevents orphaned extract jobs from continuing after a server crash or restart.
+7. [`scripts/sync-osm-buildings.py`](../scripts/sync-osm-buildings.py) uses `quackosm` to resolve the extract query, downloads the canonical `*.osm.pbf` into `data/quackosm/`, emits separate managed `download` and `extract` stage updates while the file is downloading and while DuckDB is being materialized, and writes the result into a DuckDB file under the same cache root. Both the Node orchestrator and the Python importer watch their parent PID and self-terminate when the owner process disappears, which prevents orphaned extract jobs from continuing after a server crash or restart.
 8. The Python importer opens that DuckDB file, loads the `spatial` extension, and runs SQL over `quackosm_raw` to:
    - keep only OSM `way` and `relation`
    - keep only `POLYGON` and `MULTIPOLYGON`
@@ -64,28 +64,32 @@ The Docker runtime image already contains Python, `quackosm`, `duckdb`, and `tip
    - derive a lightweight `render_hide_base_when_parts` hint by checking whether a pure `building_part` bbox is fully inside a base building bbox from the same export set
    - for GeoJSON PMTiles export paths, derive synthetic `building_remainder` geometry as `base - union(parts)` so partially covered parent footprints can still render in 3D without keeping the full base extrusion
    - compute `min_lon`, `min_lat`, `max_lon`, `max_lat`
-   - fetch DuckDB rows in bounded Python batches (`REGION_SYNC_EXPORT_BATCH_SIZE`, default `2000`) and optionally honor explicit DuckDB memory/thread/temp-directory limits for low-RAM hardware
+   - fetch DuckDB rows in bounded Python batches (`REGION_SYNC_EXPORT_BATCH_SIZE`, default `2000`) and optionally honor explicit DuckDB memory/thread/temp-directory limits for low-RAM hardware; when `REGION_SYNC_DUCKDB_THREADS` is unset, low-power 4-core ARM boards default to `3` DuckDB threads to keep one core free
+   - emit periodic `export` stage detail updates (`REGION_SYNC_EXPORT_PROGRESS_INTERVAL_SEC`, default `5`) with exported row counts and current throughput without adding a full counting pass
 9. Filtered rows are exported as workspace artifacts:
    - PostgreSQL full sync: `region-import.ndjson` (WKB hex + bbox + tags), `region-build.ndjson` (GeoJSON features for `tippecanoe`), and `region-export-summary.json` (feature count + bounds)
    - SQLite full sync: `region-import.ndjson` (GeoJSON + bbox + tags), `region-build.ndjson` (GeoJSON features for `tippecanoe`), and `region-export-summary.json` (feature count + bounds)
    - DB-import artifacts now come from a lighter DuckDB query than the PMTiles build artifact: the DB path skips `building_part`/remainder render enrichment and avoids the old full-table sort, while the PMTiles path still computes the richer geometry metadata needed by the client
+   - when both DB and PMTiles artifacts are requested during full sync, the exporter streams them from one DuckDB cursor pass instead of running two separate export queries
 10. The PMTiles input is prepared as newline-delimited GeoJSON features for `tippecanoe`:
-   - PostgreSQL full sync: reuses the already exported `region-build.ndjson`
-   - SQLite full sync: also reuses the already exported `region-build.ndjson`
-   - fallback conversions without a dedicated build artifact still go through `scripts/region-sync/pmtiles-builder.ts`, which derives the same `building_remainder` geometry from import NDJSON before running `tippecanoe`
-   - `--pmtiles-only`: `scripts/region-sync/region-db.ts` streams region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file and applies the same synthetic remainder expansion for SQLite exports
-   - every exported feature carries `feature_kind` so the client can split `building`, `building_part`, and synthetic `building_remainder` geometry without a second PMTiles archive
-   - PMTiles features also carry `render_height_m`, `render_min_height_m`, and `render_hide_base_when_parts` so the client can extrude parts and suppress the parent fill/extrusion when the part toggle is enabled
+
+- PostgreSQL full sync: reuses the already exported `region-build.ndjson`
+- SQLite full sync: also reuses the already exported `region-build.ndjson`
+- fallback conversions without a dedicated build artifact still go through `scripts/region-sync/pmtiles-builder.ts`, which derives the same `building_remainder` geometry from import NDJSON before running `tippecanoe`
+- `--pmtiles-only`: `scripts/region-sync/region-db.ts` streams region members directly from the runtime DB into `region-build.ndjson` without creating an intermediate import NDJSON file and applies the same synthetic remainder expansion for SQLite exports
+- every exported feature carries `feature_kind` so the client can split `building`, `building_part`, and synthetic `building_remainder` geometry without a second PMTiles archive
+- PMTiles features also carry `render_height_m`, `render_min_height_m`, and `render_hide_base_when_parts` so the client can extrude parts and suppress the parent fill/extrusion when the part toggle is enabled
+
 11. The same module runs `tippecanoe` and builds a region archive into `<workspace>/region.pmtiles`. Every region whose bbox spans more than one `REGION_SYNC_SHARD_KM` cell (default `60` km) is built in a sharded pass: the builder plans a km-aligned grid from the export bounds, splits `region-build.ndjson` into per-cell NDJSON files by feature bbox center, invokes `tippecanoe` per cell, then merges the archives with `tile-join`. This keeps peak tippecanoe memory bounded by the densest cell and is enabled by default on all hardware. Regions that fit into a single grid cell automatically collapse to a direct tippecanoe call.
-12. The imported DB NDJSON is loaded into a DB temp staging table by `scripts/region-sync/import-applier.ts`:
-    - PostgreSQL: `region_import_tmp` with `geometry_wkb_hex`
-    - SQLite: `temp.region_import_tmp` with `geometry_json`
+12. The imported DB NDJSON is loaded into provider-specific temp state by `scripts/region-sync/import-applier.ts`:
+    - PostgreSQL: the full `region-import.ndjson` is streamed into `region_import_stage_tmp` via `COPY FROM STDIN`, using WKB hex rows and a set-based apply path
+    - SQLite: rows are read in bounded Node batches into `temp.region_import_batch_tmp` with `geometry_json`
 13. Inside one DB transaction the sync:
     - upserts all imported rows into `osm.building_contours`
     - upserts `(region_id, osm_type, osm_id)` into `data_region_memberships`
     - removes memberships that disappeared from the import for that region
-    - deletes only true orphans from `osm.building_contours`, meaning objects no longer referenced by any region
-14. PostgreSQL also refreshes `osm.building_contours_summary` in the same transaction.
+    - tracks only the ids whose memberships were removed in this run and deletes true orphans from `osm.building_contours` only for that candidate set, meaning objects no longer referenced by any region
+14. PostgreSQL also updates `osm.building_contours_summary` in the same transaction, using insert/orphan deltas from the current run instead of a full-table aggregate on every sync.
 15. `scripts/region-sync/import-applier.ts` swaps the new PMTiles archive into `data/regions/buildings-region-<slug>.pmtiles` with backup-and-rollback protection.
 16. If the DB transaction commits, the backup is dropped and the new archive becomes active.
 17. If any step fails after swap staging, the DB transaction is rolled back and the previous PMTiles file is restored.
@@ -121,7 +125,7 @@ flowchart TD
   L --> M["tippecanoe"]
   M --> N["temp region.pmtiles"]
   J --> O["scripts/region-sync/import-applier.ts"]
-  O --> P["temp staging table region_import_tmp"]
+  O --> P["PostgreSQL COPY / SQLite temp batch staging"]
   P --> Q["Upsert osm.building_contours"]
   P --> R["Upsert data_region_memberships"]
   R --> S["Delete stale memberships for this region"]
@@ -194,6 +198,7 @@ flowchart TD
 - Produces provider-specific handoff artifacts:
   - PostgreSQL full sync: WKB-based NDJSON for DB import, GeoJSON feature NDJSON for PMTiles, and summary metadata in one DuckDB pass
   - SQLite full sync: GeoJSON-based NDJSON for DB import, GeoJSON feature NDJSON for PMTiles, and summary metadata in one DuckDB pass
+  - emits stage detail for `download`, `extract`, and `export` so large `*.osm.pbf` syncs no longer appear stalled between network transfer and row export
 
 ### PostgreSQL / SQLite
 
@@ -238,7 +243,8 @@ flowchart TD
 - NDJSON is the handoff format between importer, DB upsert logic, and PMTiles generation.
 - PostgreSQL full sync keeps DB import and PMTiles build artifacts separate so the DB path can use WKB instead of serializing GeoJSON only to parse it back into PostGIS later.
 - The DB-import artifact is exported through a lighter DuckDB query than the PMTiles build artifact, so country-sized syncs avoid paying the `building_part`/remainder enrichment cost on the DB path.
-- The DB apply stage streams `region-import.ndjson` in fixed-size batches and upserts rows immediately; the only persistent temp state kept for the full run is the compact imported id set used to remove stale region memberships safely at the end.
+- When both artifacts are needed, the exporter writes DB NDJSON and PMTiles GeoJSON from one DuckDB scan instead of re-running the filtered export twice.
+- PostgreSQL full sync streams `region-import.ndjson` once into a temp staging table via `COPY FROM STDIN`, then applies contours/memberships with set-based SQL in one transaction. SQLite keeps the bounded Node batch path; `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` tunes that apply loop. The only persistent temp state kept for cleanup is the compact orphan-candidate id set used to remove stale memberships and clean up only rows that actually became deletion candidates during this sync.
 - The runtime DB stores the authoritative union dataset used by all building/search/filter APIs.
 - Region membership tracking makes overlapping regional syncs safe.
 - PMTiles are region-local read models optimized for map delivery, not the source of truth for search/building endpoints.

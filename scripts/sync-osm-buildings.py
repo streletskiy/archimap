@@ -2,6 +2,7 @@ import argparse
 import difflib
 import json
 import os
+import platform
 import re
 import sqlite3
 import sys
@@ -11,7 +12,7 @@ import urllib.parse
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any, Callable, Tuple
 
 import duckdb  # type: ignore
 import pandas as pd  # type: ignore
@@ -30,9 +31,10 @@ from quackosm.osm_extracts import (  # type: ignore
 DEFAULT_EXPORT_BATCH_SIZE = 2000
 DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2
 DEFAULT_BUILDING_EXTRUSION_LEVELS = 1
+DEFAULT_EXPORT_PROGRESS_INTERVAL_SEC = 5.0
+DEFAULT_LOW_POWER_ARM_DUCKDB_THREADS = 3
 DOWNLOAD_PROGRESS_CHUNK_BYTES = 1024 * 1024
 DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC = 1.0
-DOWNLOAD_PHASE_MAX_RATIO = 0.85
 SHOULD_EMIT_STAGE_JSON = str(os.getenv('REGION_SYNC_EMIT_STAGE_JSON', '')).strip().lower() == 'true'
 DEFAULT_PARENT_WATCHDOG_INTERVAL_SEC = 5.0
 
@@ -129,6 +131,34 @@ def resolve_export_batch_size() -> int:
     return parsed if parsed > 0 else DEFAULT_EXPORT_BATCH_SIZE
 
 
+def resolve_export_progress_interval_sec() -> float:
+    raw_value = str(os.getenv('REGION_SYNC_EXPORT_PROGRESS_INTERVAL_SEC', '')).strip()
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        parsed = 0.0
+    return parsed if parsed > 0 else DEFAULT_EXPORT_PROGRESS_INTERVAL_SEC
+
+
+def is_low_power_arm_host() -> bool:
+    machine = str(platform.machine() or '').strip().lower()
+    cpu_count = int(os.cpu_count() or 0)
+    return machine in {'aarch64', 'arm64'} and 0 < cpu_count <= 4
+
+
+def resolve_duckdb_threads() -> int:
+    threads_raw = str(os.getenv('REGION_SYNC_DUCKDB_THREADS', '')).strip()
+    try:
+        threads = int(threads_raw)
+    except (TypeError, ValueError):
+        threads = 0
+    if threads > 0:
+        return threads
+    if is_low_power_arm_host():
+        return max(1, min(DEFAULT_LOW_POWER_ARM_DUCKDB_THREADS, int(os.cpu_count() or DEFAULT_LOW_POWER_ARM_DUCKDB_THREADS)))
+    return 0
+
+
 def escape_sql_literal(value: str) -> str:
     return str(value or '').replace("'", "''")
 
@@ -144,11 +174,7 @@ def configure_duckdb_connection(con: duckdb.DuckDBPyConnection, work_dir: Path |
     if memory_limit:
         con.execute(f"SET memory_limit = '{escape_sql_literal(memory_limit)}'")
 
-    threads_raw = str(os.getenv('REGION_SYNC_DUCKDB_THREADS', '')).strip()
-    try:
-        threads = int(threads_raw)
-    except (TypeError, ValueError):
-        threads = 0
+    threads = resolve_duckdb_threads()
     if threads > 0:
         con.execute(f'SET threads = {threads}')
 
@@ -178,13 +204,18 @@ def format_bytes_compact(value: Any) -> str:
     return f'{size:.1f} {units[unit_index]}'
 
 
-def build_extract_stage_progress(index: int, total: int, phase_ratio: float) -> int:
-    total_steps = max(1, int(total or 1))
-    current_step = min(total_steps, max(1, int(index or 1)))
-    normalized_ratio = max(0.0, min(1.0, float(phase_ratio)))
-    slot_start = (current_step - 1) / total_steps
-    slot_size = 1 / total_steps
-    return round((slot_start + (slot_size * normalized_ratio)) * 100)
+def format_duration_compact(value: Any) -> str:
+    try:
+        total_seconds = max(0, int(float(value)))
+    except (TypeError, ValueError):
+        total_seconds = 0
+    minutes, seconds = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f'{hours}h {minutes}m'
+    if minutes > 0:
+        return f'{minutes}m {seconds}s'
+    return f'{seconds}s'
 
 
 def download_extract_with_progress(
@@ -201,7 +232,7 @@ def download_extract_with_progress(
 
     query_label = truncate_text(extract_query, 96)
     prefix = f'[{max(1, int(index or 1))}/{max(1, int(total or 1))}] {query_label}'
-    emit_stage_json('extract', build_extract_stage_progress(index, total, 0), f'{prefix} | starting download')
+    emit_stage_json('download', 0, f'{prefix} | starting download')
 
     last_emit_ts = 0.0
     last_percent = -1
@@ -232,12 +263,8 @@ def download_extract_with_progress(
                         last_percent = percent
                         last_emit_ts = now
                         emit_stage_json(
-                            'extract',
-                            build_extract_stage_progress(
-                                index,
-                                total,
-                                min(DOWNLOAD_PHASE_MAX_RATIO, (downloaded_bytes / total_bytes) * DOWNLOAD_PHASE_MAX_RATIO),
-                            ),
+                            'download',
+                            percent,
                             (
                                 f'{prefix} | {percent}% | '
                                 f'{format_bytes_compact(downloaded_bytes)} / {format_bytes_compact(total_bytes)}'
@@ -246,7 +273,7 @@ def download_extract_with_progress(
                     elif (now - last_emit_ts) >= DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
                         last_emit_ts = now
                         emit_stage_json(
-                            'extract',
+                            'download',
                             None,
                             f'{prefix} | downloaded {format_bytes_compact(downloaded_bytes)}',
                         )
@@ -259,11 +286,7 @@ def download_extract_with_progress(
         output_path.unlink()
     temp_path.replace(output_path)
 
-    emit_stage_json(
-        'extract',
-        build_extract_stage_progress(index, total, 0.9),
-        f'{prefix} | download complete | extracting buildings',
-    )
+    emit_stage_json('download', 100, f'{prefix} | download complete')
 
 
 def encode_osm_feature_id(osm_type: str, osm_id: int) -> int:
@@ -916,10 +939,12 @@ def run_quackosm_extract_to_duckdb(
 ) -> Path:
     resolved_query = str(extract_query or '').strip()
     normalized_source = normalize_extract_source(extract_source)
+    prefix = f'[{max(1, int(index or 1))}/{max(1, int(total or 1))}] {truncate_text(resolved_query, 96)}'
     get_extract_index(normalized_source)
     resolved = resolve_exact_extract_alias(resolved_query, normalized_source)
     if resolved.get('candidate'):
         resolved_query = str(resolved['candidate'].get('extractId') or resolved_query).strip() or resolved_query
+        prefix = f'[{max(1, int(index or 1))}/{max(1, int(total or 1))}] {truncate_text(resolved_query, 96)}'
     resolved_extract = get_extract_by_query(resolved_query, source=normalized_source)
 
     safe_slug = ''.join(ch if ch.isalnum() else '-' for ch in resolved_query.lower()).strip('-')
@@ -944,7 +969,10 @@ def run_quackosm_extract_to_duckdb(
         index=index,
         total=total,
     )
-    return run_quackosm_to_duckdb(str(cached_pbf_path), work_dir, duckdb_path)
+    emit_stage_json('extract', 0, f'{prefix} | extracting buildings into DuckDB')
+    result = run_quackosm_to_duckdb(str(cached_pbf_path), work_dir, duckdb_path)
+    emit_stage_json('extract', 100, f'{prefix} | buildings extracted to DuckDB')
+    return result
 
 
 def _limit_clause_sql(import_limit: int) -> str:
@@ -1171,11 +1199,84 @@ def _export_select_sql(import_limit: int, geometry_mode: str = 'geojson_feature'
         raise ValueError(f'Unsupported geometry export mode: {geometry_mode}')
 
 
+def _build_dual_export_select_sql(import_limit: int, db_geometry_mode: str = 'wkb_hex') -> str:
+    db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
+    if db_geometry_mode_normalized == 'wkb_hex':
+        db_geometry_sql = (
+            "CASE WHEN feature_kind = 'building_remainder' THEN NULL "
+            "ELSE ST_AsHEXWKB(geometry) END AS geometry_wkb_hex"
+        )
+    elif db_geometry_mode_normalized == 'geojson':
+        db_geometry_sql = 'NULL AS geometry_wkb_hex'
+    else:
+        raise ValueError(f'Unsupported DB geometry export mode: {db_geometry_mode}')
+
+    return f'''
+{_remainder_rows_cte_sql(import_limit)}
+SELECT
+  split_part(feature_id, '/', 1) AS osm_type,
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
+  tags_json,
+  feature_kind,
+  render_hide_base_when_parts,
+  ST_AsGeoJSON(geometry) AS geometry_json,
+  min_lon,
+  min_lat,
+  max_lon,
+  max_lat,
+  {db_geometry_sql}
+FROM export_rows
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
+'''
+
+
 def _export_remainder_select_sql(import_limit: int) -> str:
     return _build_export_select_sql(
         _remainder_rows_cte_sql(import_limit),
         'remainder_rows',
         'ST_AsGeoJSON(geometry) AS geometry_json',
+    )
+
+
+def maybe_emit_export_progress(
+    callback: Callable[[dict[str, Any]], None] | None,
+    *,
+    started_at: float,
+    last_emit_ts: float,
+    db_imported_count: int,
+    build_imported_count: int,
+    interval_sec: float,
+    force: bool = False,
+) -> float:
+    if callback is None:
+        return last_emit_ts
+    now = time.time()
+    if not force and (now - last_emit_ts) < interval_sec:
+        return last_emit_ts
+    elapsed = max(0.001, now - started_at)
+    callback({
+        'dbImportedCount': int(db_imported_count),
+        'buildImportedCount': int(build_imported_count),
+        'elapsedSec': elapsed,
+        'ratePerSec': float(build_imported_count) / elapsed if build_imported_count > 0 else 0.0,
+    })
+    return now
+
+
+def build_export_progress_detail(prefix: str, stats: dict[str, Any]) -> str:
+    db_imported_count = max(0, int(stats.get('dbImportedCount') or 0))
+    build_imported_count = max(0, int(stats.get('buildImportedCount') or 0))
+    elapsed = max(0.0, float(stats.get('elapsedSec') or 0.0))
+    rate = max(0.0, float(stats.get('ratePerSec') or 0.0))
+
+    if db_imported_count == build_imported_count:
+        export_counts = f'rows={build_imported_count}'
+    else:
+        export_counts = f'db={db_imported_count}, geojson={build_imported_count}'
+
+    return (
+        f'{prefix} | {export_counts} | '
+        f'{rate:.0f} rows/s | elapsed {format_duration_compact(elapsed)}'
     )
 
 
@@ -1283,9 +1384,11 @@ def export_rows_duckdb_ndjson(
     import_limit: int,
     geometry_mode: str = 'geojson',
     append: bool = False,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> Tuple[int, int, dict[str, float] | None]:
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
     export_batch_size = resolve_export_batch_size()
+    export_progress_interval_sec = resolve_export_progress_interval_sec()
     if geometry_mode_normalized in ('wkb_hex', 'geojson'):
         select_sql = _build_db_export_select_sql(import_limit, geometry_mode_normalized)
     else:
@@ -1294,6 +1397,8 @@ def export_rows_duckdb_ndjson(
     processed = 0
     imported = 0
     bounds: dict[str, float] | None = None
+    started_at = time.time()
+    last_emit_ts = 0.0
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con, duckdb_path.parent)
@@ -1344,6 +1449,24 @@ def export_rows_duckdb_ndjson(
                         bounds = merge_bounds(bounds, float(row[4]), float(row[5]), float(row[6]), float(row[7]))
                     processed += 1
                     imported += 1
+                last_emit_ts = maybe_emit_export_progress(
+                    on_progress,
+                    started_at=started_at,
+                    last_emit_ts=last_emit_ts,
+                    db_imported_count=imported,
+                    build_imported_count=imported,
+                    interval_sec=export_progress_interval_sec,
+                )
+
+    maybe_emit_export_progress(
+        on_progress,
+        started_at=started_at,
+        last_emit_ts=last_emit_ts,
+        db_imported_count=imported,
+        build_imported_count=imported,
+        interval_sec=export_progress_interval_sec,
+        force=True,
+    )
 
     return processed, imported, bounds
 
@@ -1355,42 +1478,25 @@ def export_rows_duckdb_dual_ndjson(
     import_limit: int,
     db_geometry_mode: str = 'wkb_hex',
     append: bool = False,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> Tuple[int, int, dict[str, float] | None]:
     db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
     export_batch_size = resolve_export_batch_size()
+    export_progress_interval_sec = resolve_export_progress_interval_sec()
     mode = 'a' if append else 'w'
     processed = 0
     imported = 0
+    db_imported = 0
     bounds: dict[str, float] | None = None
+    started_at = time.time()
+    last_emit_ts = 0.0
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con, duckdb_path.parent)
         with db_out_path.open(mode, encoding='utf-8') as db_out, geojson_out_path.open(mode, encoding='utf-8') as geojson_out:
-            db_cursor = con.execute(_build_db_export_select_sql(import_limit, db_geometry_mode_normalized))
+            dual_cursor = con.execute(_build_dual_export_select_sql(import_limit, db_geometry_mode_normalized))
             while True:
-                chunk = db_cursor.fetchmany(export_batch_size)
-                if not chunk:
-                    break
-                for row in chunk:
-                    payload = {
-                        'osm_type': str(row[0]),
-                        'osm_id': int(row[1]),
-                        'tags_json': row[2],
-                        'min_lon': float(row[4]),
-                        'min_lat': float(row[5]),
-                        'max_lon': float(row[6]),
-                        'max_lat': float(row[7]),
-                    }
-                    if db_geometry_mode_normalized == 'wkb_hex':
-                        payload['geometry_wkb_hex'] = str(row[3])
-                    else:
-                        payload['geometry_json'] = row[3]
-                    db_out.write(json.dumps(payload, ensure_ascii=False))
-                    db_out.write('\n')
-
-            geojson_cursor = con.execute(_export_select_sql(import_limit, 'geojson_feature'))
-            while True:
-                chunk = geojson_cursor.fetchmany(export_batch_size)
+                chunk = dual_cursor.fetchmany(export_batch_size)
                 if not chunk:
                     break
                 for row in chunk:
@@ -1398,19 +1504,57 @@ def export_rows_duckdb_dual_ndjson(
                     min_lat = float(row[7])
                     max_lon = float(row[8])
                     max_lat = float(row[9])
+                    feature_kind = str(row[3])
+                    geometry_json = str(row[5])
+
+                    if feature_kind != 'building_remainder':
+                        payload = {
+                            'osm_type': str(row[0]),
+                            'osm_id': int(row[1]),
+                            'tags_json': row[2],
+                            'min_lon': min_lon,
+                            'min_lat': min_lat,
+                            'max_lon': max_lon,
+                            'max_lat': max_lat,
+                        }
+                        if db_geometry_mode_normalized == 'wkb_hex':
+                            payload['geometry_wkb_hex'] = str(row[10])
+                        else:
+                            payload['geometry_json'] = geometry_json
+                        db_out.write(json.dumps(payload, ensure_ascii=False))
+                        db_out.write('\n')
+                        db_imported += 1
 
                     geojson_out.write(build_geojson_feature_line(
                         str(row[0]),
                         int(row[1]),
-                        str(row[5]),
+                        geometry_json,
                         str(row[2]),
-                        str(row[3]),
+                        feature_kind,
                         row[4],
                     ))
 
                     processed += 1
                     imported += 1
                     bounds = merge_bounds(bounds, min_lon, min_lat, max_lon, max_lat)
+                last_emit_ts = maybe_emit_export_progress(
+                    on_progress,
+                    started_at=started_at,
+                    last_emit_ts=last_emit_ts,
+                    db_imported_count=db_imported,
+                    build_imported_count=imported,
+                    interval_sec=export_progress_interval_sec,
+                )
+
+    maybe_emit_export_progress(
+        on_progress,
+        started_at=started_at,
+        last_emit_ts=last_emit_ts,
+        db_imported_count=db_imported,
+        build_imported_count=imported,
+        interval_sec=export_progress_interval_sec,
+        force=True,
+    )
 
     return processed, imported, bounds
 
@@ -1525,6 +1669,10 @@ def main() -> None:
     db_ndjson_path = Path(out_db_ndjson).expanduser().resolve() if out_db_ndjson else None
     geojson_ndjson_path = Path(out_geojson_ndjson).expanduser().resolve() if out_geojson_ndjson else None
     summary_json_path = Path(out_summary_json).expanduser().resolve() if out_summary_json else None
+
+    def emit_export_progress(prefix: str, stats: dict[str, Any]) -> None:
+        emit_stage_json('export', None, build_export_progress_detail(prefix, stats))
+
     for candidate_path in (ndjson_path, db_ndjson_path, geojson_ndjson_path, summary_json_path):
         if candidate_path is not None:
             candidate_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1539,11 +1687,8 @@ def main() -> None:
                 break
             print(f'[{idx}/{len(extract_queries)}] Loading extract: source={extract_source}, id={query}', flush=True)
             duckdb_path = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx, len(extract_queries))
-            emit_stage_json(
-                'extract',
-                build_extract_stage_progress(idx, len(extract_queries), 0.94),
-                f'[{idx}/{len(extract_queries)}] {truncate_text(query, 96)} | exporting filtered rows',
-            )
+            export_prefix = f'[{idx}/{len(extract_queries)}] {truncate_text(query, 96)}'
+            emit_stage_json('export', 0, f'{export_prefix} | exporting filtered rows')
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
             if ndjson_path is not None:
                 p, i, bounds = export_rows_duckdb_ndjson(
@@ -1552,6 +1697,7 @@ def main() -> None:
                     import_limit=per_query_limit,
                     geometry_mode='geojson',
                     append=(idx > 1),
+                    on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
                 )
             elif db_ndjson_path is not None or geojson_ndjson_path is not None:
                 if db_ndjson_path is not None and geojson_ndjson_path is not None:
@@ -1562,6 +1708,7 @@ def main() -> None:
                         import_limit=per_query_limit,
                         db_geometry_mode=db_geometry_mode,
                         append=(idx > 1),
+                        on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
                     )
                 elif db_ndjson_path is not None:
                     p, i, bounds = export_rows_duckdb_ndjson(
@@ -1570,6 +1717,7 @@ def main() -> None:
                         import_limit=per_query_limit,
                         geometry_mode=db_geometry_mode,
                         append=(idx > 1),
+                        on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
                     )
                 else:
                     p, i, bounds = export_rows_duckdb_ndjson(
@@ -1578,6 +1726,7 @@ def main() -> None:
                         import_limit=per_query_limit,
                         geometry_mode='geojson_feature',
                         append=(idx > 1),
+                        on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
                     )
             else:
                 p, i = import_rows_direct_duckdb_sqlite(
@@ -1597,16 +1746,14 @@ def main() -> None:
                     bounds['east'],
                     bounds['north'],
                 )
-            emit_stage_json(
-                'extract',
-                build_extract_stage_progress(idx, len(extract_queries), 0.99),
-                f'[{idx}/{len(extract_queries)}] exported {int(i)} features',
-            )
+            emit_stage_json('export', 100, f'{export_prefix} | exported {int(i)} features')
     else:
         print(f'PBF import started (QuackOSM + DuckDB): {pbf_path}', flush=True)
-        emit_stage_json('extract', 0, f'loading local PBF {truncate_text(pbf_path, 96)}')
+        local_pbf_label = truncate_text(pbf_path, 96)
+        emit_stage_json('extract', 0, f'{local_pbf_label} | extracting local PBF into DuckDB')
         duckdb_path = run_quackosm_to_duckdb(pbf_path, work_dir)
-        emit_stage_json('extract', 94, 'exporting filtered rows')
+        emit_stage_json('extract', 100, f'{local_pbf_label} | buildings extracted to DuckDB')
+        emit_stage_json('export', 0, f'{local_pbf_label} | exporting filtered rows')
         if ndjson_path is not None:
             processed, imported, export_bounds = export_rows_duckdb_ndjson(
                 duckdb_path=duckdb_path,
@@ -1614,6 +1761,7 @@ def main() -> None:
                 import_limit=import_limit,
                 geometry_mode='geojson',
                 append=False,
+                on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
             )
         elif db_ndjson_path is not None or geojson_ndjson_path is not None:
             if db_ndjson_path is not None and geojson_ndjson_path is not None:
@@ -1624,6 +1772,7 @@ def main() -> None:
                     import_limit=import_limit,
                     db_geometry_mode=db_geometry_mode,
                     append=False,
+                    on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
                 )
             elif db_ndjson_path is not None:
                 processed, imported, export_bounds = export_rows_duckdb_ndjson(
@@ -1632,6 +1781,7 @@ def main() -> None:
                     import_limit=import_limit,
                     geometry_mode=db_geometry_mode,
                     append=False,
+                    on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
                 )
             else:
                 processed, imported, export_bounds = export_rows_duckdb_ndjson(
@@ -1640,6 +1790,7 @@ def main() -> None:
                     import_limit=import_limit,
                     geometry_mode='geojson_feature',
                     append=False,
+                    on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
                 )
         else:
             processed, imported = import_rows_direct_duckdb_sqlite(
@@ -1648,7 +1799,7 @@ def main() -> None:
                 import_limit=import_limit,
                 run_marker=run_marker,
             )
-        emit_stage_json('extract', 99, f'exported {int(imported)} features')
+        emit_stage_json('export', 100, f'{local_pbf_label} | exported {int(imported)} features')
 
     try:
         if ndjson_path is not None or db_ndjson_path is not None or geojson_ndjson_path is not None:

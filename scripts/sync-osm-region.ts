@@ -4,7 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const SHOULD_EMIT_STAGE_JSON = String(process.env.REGION_SYNC_EMIT_STAGE_JSON || '').trim().toLowerCase() === 'true';
+const SHOULD_EMIT_STAGE_JSON =
+  String(process.env.REGION_SYNC_EMIT_STAGE_JSON || '')
+    .trim()
+    .toLowerCase() === 'true';
 
 function emitStageJson(stage, progress = null, detail = null) {
   if (!SHOULD_EMIT_STAGE_JSON) return;
@@ -23,9 +26,7 @@ function emitStageJson(stage, progress = null, detail = null) {
   }
 }
 
-let cancelRequested = false;
 function handleCancellationSignal(signal) {
-  cancelRequested = true;
   emitStageJson('cancelling', null, `signal=${signal}`);
   // Allow any current spawnSync child to finish its exit so we can shut down
   // cleanly; the Node exit handler below will propagate the cancellation
@@ -52,27 +53,31 @@ const {
   loadRegion,
   publishPmtilesArchive
 } = require('./region-sync/db-ingester');
-const {
-  buildPmtilesFromGeojson,
-  summarizeImportRows
-} = require('./region-sync/pmtiles-builder');
+const { buildPmtilesFromGeojson, summarizeImportRows } = require('./region-sync/pmtiles-builder');
 
 const DB_PROVIDER = getDbProvider(process.env);
 const DATABASE_URL = getPostgresConnectionString(process.env);
-const ARCHIMAP_DB_PATH = String(
-  process.env.DATABASE_PATH
-  || process.env.ARCHIMAP_DB_PATH
-  || process.env.SQLITE_URL
-  || path.join(__dirname, '..', 'data', 'archimap.db')
-).trim() || path.join(__dirname, '..', 'data', 'archimap.db');
-const OSM_DB_PATH = String(process.env.OSM_DB_PATH || path.join(__dirname, '..', 'data', 'osm.db')).trim() || path.join(__dirname, '..', 'data', 'osm.db');
-const LOCAL_EDITS_DB_PATH = String(
-  process.env.LOCAL_EDITS_DB_PATH
-  || path.join(__dirname, '..', 'data', 'local-edits.db')
-).trim() || path.join(__dirname, '..', 'data', 'local-edits.db');
-const DATA_DIR = String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() || path.join(__dirname, '..', 'data');
+const ARCHIMAP_DB_PATH =
+  String(
+    process.env.DATABASE_PATH ||
+      process.env.ARCHIMAP_DB_PATH ||
+      process.env.SQLITE_URL ||
+      path.join(__dirname, '..', 'data', 'archimap.db')
+  ).trim() || path.join(__dirname, '..', 'data', 'archimap.db');
+const OSM_DB_PATH =
+  String(process.env.OSM_DB_PATH || path.join(__dirname, '..', 'data', 'osm.db')).trim() ||
+  path.join(__dirname, '..', 'data', 'osm.db');
+const LOCAL_EDITS_DB_PATH =
+  String(process.env.LOCAL_EDITS_DB_PATH || path.join(__dirname, '..', 'data', 'local-edits.db')).trim() ||
+  path.join(__dirname, '..', 'data', 'local-edits.db');
+const DATA_DIR =
+  String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() ||
+  path.join(__dirname, '..', 'data');
 const TIPPECANOE_PROGRESS_JSON = String(process.env.TIPPECANOE_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
-const TIPPECANOE_PROGRESS_INTERVAL_SEC = Math.max(1, Math.min(300, Number(process.env.TIPPECANOE_PROGRESS_INTERVAL_SEC || 5)));
+const TIPPECANOE_PROGRESS_INTERVAL_SEC = Math.max(
+  1,
+  Math.min(300, Number(process.env.TIPPECANOE_PROGRESS_INTERVAL_SEC || 5))
+);
 const REGION_SYNC_SHARD_KM_RAW = process.env.REGION_SYNC_SHARD_KM;
 const ROOT_DIR = path.join(__dirname, '..');
 const DEFAULT_PARENT_WATCHDOG_INTERVAL_MS = 5_000;
@@ -145,7 +150,10 @@ function startParentWatchdog(options: LooseRecord = {}) {
     return () => {};
   }
 
-  const intervalMs = Math.max(1_000, Math.trunc(Number(options.intervalMs || DEFAULT_PARENT_WATCHDOG_INTERVAL_MS) || DEFAULT_PARENT_WATCHDOG_INTERVAL_MS));
+  const intervalMs = Math.max(
+    1_000,
+    Math.trunc(Number(options.intervalMs || DEFAULT_PARENT_WATCHDOG_INTERVAL_MS) || DEFAULT_PARENT_WATCHDOG_INTERVAL_MS)
+  );
   const setIntervalRef = typeof options.setIntervalRef === 'function' ? options.setIntervalRef : setInterval;
   const clearIntervalRef = typeof options.clearIntervalRef === 'function' ? options.clearIntervalRef : clearInterval;
   const killRef = typeof options.killRef === 'function' ? options.killRef : process.kill.bind(process);
@@ -184,29 +192,44 @@ function buildExtractorEnv(env: LooseRecord = process.env) {
 }
 
 function resolveImporterDbGeometryMode(runtimeOptions: LooseRecord = {}) {
-  return String(runtimeOptions.dbProvider || DB_PROVIDER).trim().toLowerCase() === 'postgres'
+  return String(runtimeOptions.dbProvider || DB_PROVIDER)
+    .trim()
+    .toLowerCase() === 'postgres'
     ? 'wkb_hex'
     : 'geojson';
 }
 
 function getRegionImportReadOptions(runtimeOptions: LooseRecord = {}) {
-  return String(runtimeOptions.dbProvider || DB_PROVIDER).trim().toLowerCase() === 'postgres'
+  return String(runtimeOptions.dbProvider || DB_PROVIDER)
+    .trim()
+    .toLowerCase() === 'postgres'
     ? { requireGeometryWkbHex: true }
     : { requireGeometryJson: true };
 }
 
 function shouldUseLowMemoryPipeline(runtimeOptions: LooseRecord = {}, env: LooseRecord = process.env) {
-  const enabled = String(env.REGION_SYNC_LOW_MEMORY_PIPELINE || '').trim().toLowerCase() === 'true';
+  const enabled =
+    String(env.REGION_SYNC_LOW_MEMORY_PIPELINE || '')
+      .trim()
+      .toLowerCase() === 'true';
   if (!enabled) return false;
   // SQLite still materializes the full region during remainder expansion when
   // exporting region members back out for PMTiles rebuilds, so apply-first mode
   // would not actually lower peak memory there yet.
-  return String(runtimeOptions.dbProvider || DB_PROVIDER).trim().toLowerCase() === 'postgres';
+  return (
+    String(runtimeOptions.dbProvider || DB_PROVIDER)
+      .trim()
+      .toLowerCase() === 'postgres'
+  );
 }
 
 function shouldRunRuntimeFollowup(options: LooseRecord = {}) {
   if (options.pmtilesOnly) return false;
-  return String(options.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP || '').trim().toLowerCase() !== 'true';
+  return (
+    String(options.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP || '')
+      .trim()
+      .toLowerCase() !== 'true'
+  );
 }
 
 function buildRuntimeFollowupEnv(runtimeOptions: LooseRecord = {}, env: LooseRecord = process.env) {
@@ -214,14 +237,25 @@ function buildRuntimeFollowupEnv(runtimeOptions: LooseRecord = {}, env: LooseRec
     ...env,
     DB_PROVIDER: String(runtimeOptions.dbProvider || env.DB_PROVIDER || DB_PROVIDER).trim() || DB_PROVIDER,
     DATABASE_URL: String(runtimeOptions.databaseUrl || env.DATABASE_URL || DATABASE_URL).trim() || DATABASE_URL,
-    ARCHIMAP_DB_PATH: String(runtimeOptions.archimapDbPath || env.ARCHIMAP_DB_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
-    DATABASE_PATH: String(runtimeOptions.archimapDbPath || env.DATABASE_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
+    ARCHIMAP_DB_PATH:
+      String(runtimeOptions.archimapDbPath || env.ARCHIMAP_DB_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
+    DATABASE_PATH:
+      String(runtimeOptions.archimapDbPath || env.DATABASE_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
     OSM_DB_PATH: String(runtimeOptions.osmDbPath || env.OSM_DB_PATH || OSM_DB_PATH).trim() || OSM_DB_PATH,
-    LOCAL_EDITS_DB_PATH: String(runtimeOptions.localEditsDbPath || env.LOCAL_EDITS_DB_PATH || LOCAL_EDITS_DB_PATH).trim() || LOCAL_EDITS_DB_PATH
+    LOCAL_EDITS_DB_PATH:
+      String(runtimeOptions.localEditsDbPath || env.LOCAL_EDITS_DB_PATH || LOCAL_EDITS_DB_PATH).trim() ||
+      LOCAL_EDITS_DB_PATH
   };
 }
 
-function runWorkerScript({ label, scriptPath, env, rootDir = ROOT_DIR, spawnSyncRef = spawnSync, processExecPath = process.execPath }: LooseRecord) {
+function runWorkerScript({
+  label,
+  scriptPath,
+  env,
+  rootDir = ROOT_DIR,
+  spawnSyncRef = spawnSync,
+  processExecPath = process.execPath
+}: LooseRecord) {
   const result = spawnSyncRef(processExecPath, ['--import', 'tsx', scriptPath], {
     cwd: rootDir,
     env,
@@ -236,7 +270,14 @@ function runWorkerScript({ label, scriptPath, env, rootDir = ROOT_DIR, spawnSync
   }
 }
 
-function runRuntimeFollowups({ region, runtimeOptions, env = process.env, rootDir = ROOT_DIR, spawnSyncRef = spawnSync, processExecPath = process.execPath }) {
+function runRuntimeFollowups({
+  region,
+  runtimeOptions,
+  env = process.env,
+  rootDir = ROOT_DIR,
+  spawnSyncRef = spawnSync,
+  processExecPath = process.execPath
+}) {
   const followupEnv = buildRuntimeFollowupEnv(runtimeOptions, env);
   const reason = `region-sync:${Number(region?.id || 0) || 'unknown'}`;
 
@@ -274,13 +315,12 @@ async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: 
     featureCount: Number.isFinite(exportSummary?.importedFeatureCount)
       ? Number(exportSummary.importedFeatureCount)
       : null,
-    shardKm: REGION_SYNC_SHARD_KM_RAW === undefined
-      ? undefined
-      : Number(REGION_SYNC_SHARD_KM_RAW),
+    shardKm: REGION_SYNC_SHARD_KM_RAW === undefined ? undefined : Number(REGION_SYNC_SHARD_KM_RAW),
     progressJson: TIPPECANOE_PROGRESS_JSON,
     progressIntervalSec: TIPPECANOE_PROGRESS_INTERVAL_SEC,
     onShardProgress: (stageInfo) => {
-      emitStageJson('build', stageInfo?.progress ?? null, stageInfo?.detail || null);
+      const stage = String(stageInfo?.stage || 'build').trim() || 'build';
+      emitStageJson(stage, stageInfo?.progress ?? null, stageInfo?.detail || null);
     },
     env: process.env
   });
@@ -295,22 +335,20 @@ function readExportSummary(summaryPath) {
   try {
     const payload = JSON.parse(fs.readFileSync(normalizedPath, 'utf8'));
     const importedFeatureCount = Number(payload?.importedFeatureCount);
-    const bounds = payload?.bounds && typeof payload.bounds === 'object'
-      ? {
-        west: Number(payload.bounds.west),
-        south: Number(payload.bounds.south),
-        east: Number(payload.bounds.east),
-        north: Number(payload.bounds.north)
-      }
-      : null;
+    const bounds =
+      payload?.bounds && typeof payload.bounds === 'object'
+        ? {
+            west: Number(payload.bounds.west),
+            south: Number(payload.bounds.south),
+            east: Number(payload.bounds.east),
+            north: Number(payload.bounds.north)
+          }
+        : null;
 
     if (!Number.isInteger(importedFeatureCount) || importedFeatureCount < 0) {
       return null;
     }
-    if (
-      bounds
-      && ![bounds.west, bounds.south, bounds.east, bounds.north].every(Number.isFinite)
-    ) {
+    if (bounds && ![bounds.west, bounds.south, bounds.east, bounds.north].every(Number.isFinite)) {
       return null;
     }
 
@@ -388,7 +426,7 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
   const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
 
   try {
-    emitStageJson('extract', null, 'downloading + extracting OSM data');
+    emitStageJson('download', null, 'starting OSM extract pipeline');
     exportRegionExtractToNdjson({
       importerPath,
       region,
@@ -463,7 +501,7 @@ async function runRegionSync(region, runtimeOptions) {
   const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
 
   try {
-    emitStageJson('extract', null, 'downloading + extracting OSM data');
+    emitStageJson('download', null, 'starting OSM extract pipeline');
     exportRegionExtractToNdjson({
       importerPath,
       region,
@@ -523,15 +561,17 @@ async function main() {
       ? await buildRegionPmtilesOnly(region, runtimeOptions)
       : await runRegionSync(region, runtimeOptions);
 
-    console.log(`SYNC_RESULT_JSON=${JSON.stringify({
-      regionId: region.id,
-      importedFeatureCount: summary.importedFeatureCount,
-      activeFeatureCount: summary.activeFeatureCount,
-      orphanDeletedCount: summary.orphanDeletedCount,
-      pmtilesBytes: summary.pmtilesBytes,
-      pmtilesPath: summary.pmtilesPath,
-      bounds: summary.bounds || null
-    })}`);
+    console.log(
+      `SYNC_RESULT_JSON=${JSON.stringify({
+        regionId: region.id,
+        importedFeatureCount: summary.importedFeatureCount,
+        activeFeatureCount: summary.activeFeatureCount,
+        orphanDeletedCount: summary.orphanDeletedCount,
+        pmtilesBytes: summary.pmtilesBytes,
+        pmtilesPath: summary.pmtilesPath,
+        bounds: summary.bounds || null
+      })}`
+    );
   } finally {
     stopParentWatchdog();
   }

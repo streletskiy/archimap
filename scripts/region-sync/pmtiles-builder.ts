@@ -448,9 +448,7 @@ async function buildPmtilesFromGeojson({
     );
 
     const totalShards = shardPlan.shards.length;
-    // Reserve the last 5 % for tile-join so the bar never stays at 100 %
-    // while we are still merging.
-    const shardSharePercent = 95 / totalShards;
+    const shardSharePercent = 100 / totalShards;
     for (let index = 0; index < totalShards; index += 1) {
       const shard = shardPlan.shards[index];
       const shardOutputPath = path.join(workspaceDir, `shard-${shard.key}.pmtiles`);
@@ -459,6 +457,7 @@ async function buildPmtilesFromGeojson({
           + `key=${shard.key} features=${shard.count}`
       );
       reportShardProgress({
+        stage: 'build',
         progress: Math.round(index * shardSharePercent),
         detail: `tippecanoe shard ${index + 1}/${totalShards}`
       });
@@ -480,8 +479,9 @@ async function buildPmtilesFromGeojson({
     }
 
     reportShardProgress({
-      progress: 95,
-      detail: `tile-join ${totalShards} shards`
+      stage: 'tile_join',
+      progress: null,
+      detail: `tile-join: merging ${totalShards} shards`
     });
     runTileJoin({
       tileJoinExe,
@@ -491,6 +491,7 @@ async function buildPmtilesFromGeojson({
       env
     });
     reportShardProgress({
+      stage: 'tile_join',
       progress: 100,
       detail: `tile-join done (${totalShards} shards)`
     });

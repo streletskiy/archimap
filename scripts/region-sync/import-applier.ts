@@ -1,15 +1,58 @@
 const fs = require('fs');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const { Client } = require('pg');
+const { from: copyFrom } = require('pg-copy-streams');
 const { resolveRegionPmtilesPath } = require('../../src/lib/server/services/data-settings.service');
 const { buildPmtilesSwap, readImportRows } = require('./common');
 const { openSqliteRegionDb } = require('./region-db');
 
-const IMPORT_APPLY_BATCH_SIZE = 1000;
+const DEFAULT_IMPORT_APPLY_BATCH_SIZE = 1000;
+const MAX_IMPORT_APPLY_BATCH_SIZE = 8000;
 const APPLY_ROWS_PROGRESS_MAX = 90;
 const APPLY_STALE_MEMBERSHIPS_PROGRESS = 94;
 const APPLY_ORPHAN_CLEANUP_PROGRESS = 98;
 const APPLY_SUMMARY_REFRESH_PROGRESS = 99;
 const APPLY_COMPLETE_PROGRESS = 100;
+
+function resolveImportApplyBatchSize(env: LooseRecord = process.env) {
+  const rawValue = Number(env.REGION_SYNC_IMPORT_APPLY_BATCH_SIZE);
+  if (!Number.isInteger(rawValue) || rawValue <= 0) {
+    return DEFAULT_IMPORT_APPLY_BATCH_SIZE;
+  }
+  return Math.min(rawValue, MAX_IMPORT_APPLY_BATCH_SIZE);
+}
+
+function escapePostgresCopyTextValue(value) {
+  if (value == null) return '\\N';
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\t/g, '\\t')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+}
+
+function buildPostgresCopyTextLine(row) {
+  return [
+    escapePostgresCopyTextValue(row.osm_type),
+    escapePostgresCopyTextValue(row.osm_id),
+    escapePostgresCopyTextValue(row.tags_json),
+    escapePostgresCopyTextValue(row.geometry_wkb_hex),
+    escapePostgresCopyTextValue(row.min_lon),
+    escapePostgresCopyTextValue(row.min_lat),
+    escapePostgresCopyTextValue(row.max_lon),
+    escapePostgresCopyTextValue(row.max_lat)
+  ].join('\t') + '\n';
+}
+
+function computePostgresContourSummaryTotal(previousTotal, insertedCount, orphanDeletedCount) {
+  return Math.max(
+    0,
+    Math.trunc(Number(previousTotal) || 0)
+      + Math.trunc(Number(insertedCount) || 0)
+      - Math.trunc(Number(orphanDeletedCount) || 0)
+  );
+}
 
 function normalizeProgress(progress) {
   const numericProgress = Number(progress);
@@ -81,7 +124,8 @@ function createApplyProgressReporter({ onProgress, totalFeatureCount }) {
   };
 }
 
-async function readImportRowsInBatches(ndjsonPath, readOptions, onBatch) {
+async function readImportRowsInBatches(ndjsonPath, readOptions, onBatch, batchSize = DEFAULT_IMPORT_APPLY_BATCH_SIZE) {
+  const resolvedBatchSize = Math.max(1, Math.trunc(Number(batchSize) || DEFAULT_IMPORT_APPLY_BATCH_SIZE));
   let batch = [];
   let importedFeatureCount = 0;
 
@@ -94,7 +138,7 @@ async function readImportRowsInBatches(ndjsonPath, readOptions, onBatch) {
 
   for await (const row of readImportRows(ndjsonPath, readOptions)) {
     batch.push(row);
-    if (batch.length >= IMPORT_APPLY_BATCH_SIZE) {
+    if (batch.length >= resolvedBatchSize) {
       await flush();
     }
   }
@@ -102,42 +146,9 @@ async function readImportRowsInBatches(ndjsonPath, readOptions, onBatch) {
   return importedFeatureCount;
 }
 
-async function insertImportRowsIntoPostgresBatch(client, rows) {
-  if (!Array.isArray(rows) || rows.length === 0) return;
-  const values = [];
-  const params = [];
-  let cursor = 1;
-  for (const row of rows) {
-    values.push(`($${cursor++}, $${cursor++}, $${cursor++}, $${cursor++}, $${cursor++}, $${cursor++}, $${cursor++}, $${cursor++})`);
-    params.push(
-      row.osm_type,
-      row.osm_id,
-      row.tags_json,
-      row.geometry_wkb_hex,
-      row.min_lon,
-      row.min_lat,
-      row.max_lon,
-      row.max_lat
-    );
-  }
+async function createPostgresImportState(client) {
   await client.query(`
-    INSERT INTO region_import_batch_tmp (
-      osm_type,
-      osm_id,
-      tags_json,
-      geometry_wkb_hex,
-      min_lon,
-      min_lat,
-      max_lon,
-      max_lat
-    )
-    VALUES ${values.join(', ')}
-  `, params);
-}
-
-async function createPostgresImportBatchState(client) {
-  await client.query(`
-    CREATE TEMP TABLE region_import_batch_tmp (
+    CREATE TEMP TABLE region_import_stage_tmp (
       osm_type text NOT NULL,
       osm_id bigint NOT NULL,
       tags_json text,
@@ -149,89 +160,187 @@ async function createPostgresImportBatchState(client) {
     ) ON COMMIT DROP
   `);
   await client.query(`
-    CREATE TEMP TABLE region_import_seen_tmp (
+    CREATE TEMP TABLE region_orphan_candidates_tmp (
       osm_type text NOT NULL,
       osm_id bigint NOT NULL,
       PRIMARY KEY (osm_type, osm_id)
     ) ON COMMIT DROP
   `);
+}
+
+async function copyImportRowsIntoPostgresStage(client, {
+  ndjsonPath,
+  onProgress,
+  progressInterval = DEFAULT_IMPORT_APPLY_BATCH_SIZE
+}) {
+  const normalizedProgressInterval = Math.max(1, Math.trunc(Number(progressInterval) || DEFAULT_IMPORT_APPLY_BATCH_SIZE));
+  let importedFeatureCount = 0;
+
+  const source = Readable.from((async function*() {
+    for await (const row of readImportRows(ndjsonPath, { requireGeometryWkbHex: true })) {
+      importedFeatureCount += 1;
+      if ((importedFeatureCount % normalizedProgressInterval) === 0 && typeof onProgress === 'function') {
+        await onProgress(importedFeatureCount);
+      }
+      yield buildPostgresCopyTextLine(row);
+    }
+  })());
+
+  const copyStream = client.query(copyFrom(`
+    COPY region_import_stage_tmp (
+      osm_type,
+      osm_id,
+      tags_json,
+      geometry_wkb_hex,
+      min_lon,
+      min_lat,
+      max_lon,
+      max_lat
+    )
+    FROM STDIN WITH (FORMAT text)
+  `));
+
+  await pipeline(source, copyStream);
+  if (typeof onProgress === 'function') {
+    await onProgress(importedFeatureCount);
+  }
+  return importedFeatureCount;
+}
+
+async function countPostgresInsertedContours(client) {
+  const insertedCountResult = await client.query(`
+    SELECT COUNT(*)::bigint AS total
+    FROM region_import_stage_tmp src
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM osm.building_contours bc
+      WHERE bc.osm_type = src.osm_type
+        AND bc.osm_id = src.osm_id
+    )
+  `);
+  return Number(insertedCountResult.rows[0]?.total || 0);
+}
+
+async function upsertPostgresContoursFromStage(client, runMarker) {
+  await client.query(`
+    INSERT INTO osm.building_contours (
+      osm_type,
+      osm_id,
+      tags_json,
+      min_lon,
+      min_lat,
+      max_lon,
+      max_lat,
+      geom,
+      updated_at
+    )
+    SELECT
+      osm_type,
+      osm_id,
+      tags_json,
+      min_lon,
+      min_lat,
+      max_lon,
+      max_lat,
+      ST_Multi(ST_GeomFromWKB(decode(geometry_wkb_hex, 'hex'), 4326)),
+      $1::timestamptz
+    FROM region_import_stage_tmp
+    ON CONFLICT (osm_type, osm_id) DO UPDATE SET
+      tags_json = excluded.tags_json,
+      min_lon = excluded.min_lon,
+      min_lat = excluded.min_lat,
+      max_lon = excluded.max_lon,
+      max_lat = excluded.max_lat,
+      geom = excluded.geom,
+      updated_at = excluded.updated_at
+  `, [runMarker]);
+}
+
+async function upsertPostgresMembershipsFromStage(client, regionId) {
+  await client.query(`
+    INSERT INTO public.data_region_memberships (
+      region_id,
+      osm_type,
+      osm_id
+    )
+    SELECT
+      $1::bigint,
+      osm_type,
+      osm_id
+    FROM region_import_stage_tmp
+    ON CONFLICT (region_id, osm_type, osm_id) DO NOTHING
+  `, [regionId]);
+}
+
+async function deletePostgresStaleMemberships(client, regionId) {
+  await client.query('TRUNCATE region_orphan_candidates_tmp');
+  await client.query(`
+    WITH stale AS (
+      DELETE FROM public.data_region_memberships drm
+      WHERE drm.region_id = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM region_import_stage_tmp src
+          WHERE src.osm_type = drm.osm_type
+            AND src.osm_id = drm.osm_id
+        )
+      RETURNING drm.osm_type, drm.osm_id
+    )
+    INSERT INTO region_orphan_candidates_tmp (
+      osm_type,
+      osm_id
+    )
+    SELECT
+      stale.osm_type,
+      stale.osm_id
+    FROM stale
+    ON CONFLICT (osm_type, osm_id) DO NOTHING
+  `, [regionId]);
+}
+
+async function lockPostgresContourSummary(client) {
+  const existing = await client.query(`
+    SELECT total, last_updated
+    FROM osm.building_contours_summary
+    WHERE singleton_id = 1
+    FOR UPDATE
+  `);
+  if ((existing.rowCount || 0) > 0) {
+    return {
+      total: Number(existing.rows[0]?.total || 0),
+      lastUpdated: existing.rows[0]?.last_updated || null
+    };
+  }
+
+  const fallback = await client.query(`
+    SELECT COUNT(*)::bigint AS total, MAX(updated_at) AS last_updated
+    FROM osm.building_contours
+  `);
+  const row = fallback.rows[0] || {};
+  await client.query(`
+    INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
+    VALUES (1, $1::bigint, $2::timestamptz, NOW())
+    ON CONFLICT (singleton_id) DO NOTHING
+  `, [
+    Number(row.total || 0),
+    row.last_updated || null
+  ]);
 
   return {
-    async applyBatch(rows, regionId, runMarker) {
-      if (!Array.isArray(rows) || rows.length === 0) return;
-      await client.query('TRUNCATE region_import_batch_tmp');
-      await insertImportRowsIntoPostgresBatch(client, rows);
-      await client.query(`
-        INSERT INTO osm.building_contours (
-          osm_type,
-          osm_id,
-          tags_json,
-          min_lon,
-          min_lat,
-          max_lon,
-          max_lat,
-          geom,
-          updated_at
-        )
-        SELECT
-          osm_type,
-          osm_id,
-          tags_json,
-          min_lon,
-          min_lat,
-          max_lon,
-          max_lat,
-          ST_Multi(ST_GeomFromWKB(decode(geometry_wkb_hex, 'hex'), 4326)),
-          $1::timestamptz
-        FROM region_import_batch_tmp
-        ON CONFLICT (osm_type, osm_id) DO UPDATE SET
-          tags_json = excluded.tags_json,
-          min_lon = excluded.min_lon,
-          min_lat = excluded.min_lat,
-          max_lon = excluded.max_lon,
-          max_lat = excluded.max_lat,
-          geom = excluded.geom,
-          updated_at = excluded.updated_at
-      `, [runMarker]);
-      await client.query(`
-        INSERT INTO region_import_seen_tmp (
-          osm_type,
-          osm_id
-        )
-        SELECT
-          osm_type,
-          osm_id
-        FROM region_import_batch_tmp
-        ON CONFLICT (osm_type, osm_id) DO NOTHING
-      `);
-      await client.query(`
-        INSERT INTO public.data_region_memberships (
-          region_id,
-          osm_type,
-          osm_id
-        )
-        SELECT
-          $1::bigint,
-          osm_type,
-          osm_id
-        FROM region_import_batch_tmp
-        ON CONFLICT (region_id, osm_type, osm_id) DO NOTHING
-      `, [regionId]);
-      await client.query('TRUNCATE region_import_batch_tmp');
-    },
-    async deleteStaleMemberships(regionId) {
-      await client.query(`
-        DELETE FROM public.data_region_memberships drm
-        WHERE drm.region_id = $1
-          AND NOT EXISTS (
-            SELECT 1
-            FROM region_import_seen_tmp src
-            WHERE src.osm_type = drm.osm_type
-              AND src.osm_id = drm.osm_id
-          )
-      `, [regionId]);
-    }
+    total: Number(row.total || 0),
+    lastUpdated: row.last_updated || null
   };
+}
+
+async function writePostgresContourSummary(client, total, lastUpdated) {
+  await client.query(`
+    INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
+    VALUES (1, $1::bigint, $2::timestamptz, NOW())
+    ON CONFLICT (singleton_id) DO UPDATE SET
+      total = EXCLUDED.total,
+      last_updated = EXCLUDED.last_updated,
+      refreshed_at = EXCLUDED.refreshed_at
+  `, [Number(total || 0), lastUpdated || null]);
 }
 
 function createSqliteImportBatchState(db) {
@@ -251,11 +360,18 @@ function createSqliteImportBatchState(db) {
       osm_id INTEGER NOT NULL,
       PRIMARY KEY (osm_type, osm_id)
     ) WITHOUT ROWID;
+    CREATE TEMP TABLE IF NOT EXISTS region_orphan_candidates_tmp (
+      osm_type TEXT NOT NULL,
+      osm_id INTEGER NOT NULL,
+      PRIMARY KEY (osm_type, osm_id)
+    ) WITHOUT ROWID;
     DELETE FROM temp.region_import_batch_tmp;
     DELETE FROM temp.region_import_seen_tmp;
+    DELETE FROM temp.region_orphan_candidates_tmp;
   `);
 
   const clearBatch = db.prepare('DELETE FROM temp.region_import_batch_tmp');
+  const clearOrphanCandidates = db.prepare('DELETE FROM temp.region_orphan_candidates_tmp');
   const insertBatchRow = db.prepare(`
     INSERT INTO temp.region_import_batch_tmp (
       osm_type,
@@ -334,6 +450,23 @@ function createSqliteImportBatchState(db) {
   const deleteStaleMemberships = db.prepare(`
     DELETE FROM data_region_memberships
     WHERE region_id = ?
+      AND EXISTS (
+        SELECT 1
+        FROM temp.region_orphan_candidates_tmp candidates
+        WHERE candidates.osm_type = data_region_memberships.osm_type
+          AND candidates.osm_id = data_region_memberships.osm_id
+      )
+  `);
+  const recordOrphanCandidates = db.prepare(`
+    INSERT OR IGNORE INTO temp.region_orphan_candidates_tmp (
+      osm_type,
+      osm_id
+    )
+    SELECT
+      osm_type,
+      osm_id
+    FROM data_region_memberships
+    WHERE region_id = ?
       AND NOT EXISTS (
         SELECT 1
         FROM temp.region_import_seen_tmp src
@@ -364,6 +497,8 @@ function createSqliteImportBatchState(db) {
       clearBatch.run();
     },
     deleteStaleMemberships(regionId) {
+      clearOrphanCandidates.run();
+      recordOrphanCandidates.run(regionId);
       deleteStaleMemberships.run(regionId);
     }
   };
@@ -390,6 +525,7 @@ async function applyRegionImportToSqlite({
     onProgress,
     totalFeatureCount
   });
+  const importApplyBatchSize = resolveImportApplyBatchSize();
 
   try {
     const batchState = createSqliteImportBatchState(db);
@@ -404,7 +540,8 @@ async function applyRegionImportToSqlite({
           batchState.applyBatch(rows, region.id, runMarker);
           processedFeatureCount += rows.length;
           await progressReporter.reportRows(processedFeatureCount);
-        }
+        },
+        importApplyBatchSize
       );
 
       if (finalPmtilesPath) {
@@ -427,7 +564,13 @@ async function applyRegionImportToSqlite({
       );
       const orphanDeletedCount = Number(db.prepare(`
         DELETE FROM osm.building_contours
-        WHERE NOT EXISTS (
+        WHERE EXISTS (
+          SELECT 1
+          FROM temp.region_orphan_candidates_tmp candidates
+          WHERE candidates.osm_type = osm.building_contours.osm_type
+            AND candidates.osm_id = osm.building_contours.osm_id
+        )
+          AND NOT EXISTS (
           SELECT 1
           FROM data_region_memberships drm
           WHERE drm.osm_type = osm.building_contours.osm_type
@@ -497,23 +640,25 @@ async function applyRegionImportToPostgres({
     onProgress,
     totalFeatureCount
   });
+  const importApplyBatchSize = resolveImportApplyBatchSize();
 
   await client.connect();
   try {
     await client.query('BEGIN');
     try {
-      const batchState = await createPostgresImportBatchState(client);
-      let processedFeatureCount = 0;
+      await createPostgresImportState(client);
+      const summaryBefore = await lockPostgresContourSummary(client);
       await progressReporter.reportRows(0);
-      const importedFeatureCount = await readImportRowsInBatches(
+      const importedFeatureCount = await copyImportRowsIntoPostgresStage(client, {
         ndjsonPath,
-        { requireGeometryWkbHex: true },
-        async (rows) => {
-          await batchState.applyBatch(rows, region.id, runMarker);
-          processedFeatureCount += rows.length;
+        onProgress: async (processedFeatureCount) => {
           await progressReporter.reportRows(processedFeatureCount);
-        }
-      );
+        },
+        progressInterval: importApplyBatchSize
+      });
+      const insertedContourCount = await countPostgresInsertedContours(client);
+      await upsertPostgresContoursFromStage(client, runMarker);
+      await upsertPostgresMembershipsFromStage(client, region.id);
 
       if (finalPmtilesPath) {
         swap = buildPmtilesSwap(finalPmtilesPath, normalizedBuiltPmtilesPath);
@@ -525,7 +670,7 @@ async function applyRegionImportToPostgres({
         'removing stale region memberships',
         { processedFeatureCount: importedFeatureCount }
       );
-      await batchState.deleteStaleMemberships(region.id);
+      await deletePostgresStaleMemberships(client, region.id);
 
       await progressReporter.reportStep(
         'orphan_cleanup',
@@ -535,13 +680,20 @@ async function applyRegionImportToPostgres({
       );
       const orphanDeleted = await client.query(`
         DELETE FROM osm.building_contours bc
-        WHERE NOT EXISTS (
+        WHERE EXISTS (
+          SELECT 1
+          FROM region_orphan_candidates_tmp candidates
+          WHERE candidates.osm_type = bc.osm_type
+            AND candidates.osm_id = bc.osm_id
+        )
+          AND NOT EXISTS (
           SELECT 1
           FROM public.data_region_memberships drm
           WHERE drm.osm_type = bc.osm_type
             AND drm.osm_id = bc.osm_id
         )
       `);
+      const orphanDeletedCount = Number(orphanDeleted.rowCount || 0);
 
       await progressReporter.reportStep(
         'summary_refresh',
@@ -549,15 +701,16 @@ async function applyRegionImportToPostgres({
         'refreshing contour summary',
         { processedFeatureCount: importedFeatureCount }
       );
-      await client.query(`
-        INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
-        SELECT 1, COUNT(*)::bigint, MAX(updated_at), NOW()
-        FROM osm.building_contours
-        ON CONFLICT (singleton_id) DO UPDATE SET
-          total = EXCLUDED.total,
-          last_updated = EXCLUDED.last_updated,
-          refreshed_at = EXCLUDED.refreshed_at
-      `);
+      const nextSummaryTotal = computePostgresContourSummaryTotal(
+        summaryBefore.total,
+        insertedContourCount,
+        orphanDeletedCount
+      );
+      await writePostgresContourSummary(
+        client,
+        nextSummaryTotal,
+        nextSummaryTotal > 0 ? runMarker : null
+      );
 
       await client.query('COMMIT');
       if (swap) {
@@ -581,7 +734,7 @@ async function applyRegionImportToPostgres({
       return {
         importedFeatureCount,
         activeFeatureCount,
-        orphanDeletedCount: Number(orphanDeleted.rowCount || 0),
+        orphanDeletedCount,
         pmtilesBytes: finalPmtilesPath ? Number(fs.statSync(finalPmtilesPath).size || 0) : null,
         pmtilesPath: finalPmtilesPath
       };
@@ -617,5 +770,9 @@ function publishPmtilesArchive({ dataDir, region, builtPmtilesPath }) {
 
 module.exports = {
   applyRegionImport,
-  publishPmtilesArchive
+  buildPostgresCopyTextLine,
+  computePostgresContourSummaryTotal,
+  escapePostgresCopyTextValue,
+  publishPmtilesArchive,
+  resolveImportApplyBatchSize
 };

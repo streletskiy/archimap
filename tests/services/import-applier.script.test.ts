@@ -5,8 +5,53 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { applyRegionImport } = require('../../scripts/region-sync/import-applier');
+const {
+  applyRegionImport,
+  buildPostgresCopyTextLine,
+  computePostgresContourSummaryTotal,
+  escapePostgresCopyTextValue,
+  resolveImportApplyBatchSize
+} = require('../../scripts/region-sync/import-applier');
 const { writeRowsToNdjsonFile } = require('../../scripts/region-sync/common');
+
+test('resolveImportApplyBatchSize keeps defaults and clamps oversized env values', () => {
+  assert.equal(resolveImportApplyBatchSize({}), 1000);
+  assert.equal(resolveImportApplyBatchSize({
+    REGION_SYNC_IMPORT_APPLY_BATCH_SIZE: '5000'
+  }), 5000);
+  assert.equal(resolveImportApplyBatchSize({
+    REGION_SYNC_IMPORT_APPLY_BATCH_SIZE: '50000'
+  }), 8000);
+  assert.equal(resolveImportApplyBatchSize({
+    REGION_SYNC_IMPORT_APPLY_BATCH_SIZE: 'invalid'
+  }), 1000);
+});
+
+test('escapePostgresCopyTextValue formats nulls and control characters for COPY text', () => {
+  assert.equal(escapePostgresCopyTextValue(null), '\\N');
+  assert.equal(
+    escapePostgresCopyTextValue('one\\two\tthree\nfour\rfive'),
+    'one\\\\two\\tthree\\nfour\\rfive'
+  );
+});
+
+test('buildPostgresCopyTextLine serializes importer rows for COPY text format', () => {
+  assert.equal(buildPostgresCopyTextLine({
+    osm_type: 'way',
+    osm_id: 42,
+    tags_json: '{"name":"A\\tB"}',
+    geometry_wkb_hex: 'ABCD',
+    min_lon: 1.25,
+    min_lat: 2.5,
+    max_lon: 3.75,
+    max_lat: 4
+  }), 'way\t42\t{"name":"A\\\\tB"}\tABCD\t1.25\t2.5\t3.75\t4\n');
+});
+
+test('computePostgresContourSummaryTotal applies insert and orphan deltas', () => {
+  assert.equal(computePostgresContourSummaryTotal(100, 25, 10), 115);
+  assert.equal(computePostgresContourSummaryTotal(3, 0, 10), 0);
+});
 
 test('applyRegionImport batches sqlite imports and keeps only ids in temp cleanup state', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-import-applier-'));

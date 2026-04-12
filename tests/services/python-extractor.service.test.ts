@@ -164,6 +164,7 @@ test('download_extract_with_progress emits managed stage markers for local HTTP 
       .map((line) => JSON.parse(line.slice('SYNC_STAGE_JSON='.length)));
 
     assert.ok(stagePayloads.length >= 2, `expected multiple stage markers, got ${result.stdout}`);
+    assert.ok(stagePayloads.some((payload) => String(payload?.stage || '') === 'download'));
     assert.ok(stagePayloads.some((payload) => Number(payload?.progress) > 0));
     assert.ok(stagePayloads.some((payload) => String(payload?.detail || '').includes('download complete')));
   } finally {
