@@ -208,6 +208,45 @@ def configure_duckdb_connection(con: duckdb.DuckDBPyConnection, work_dir: Path |
         con.execute(f'SET threads = {threads}')
 
 
+def cleanup_work_dir(work_dir: Path) -> None:
+    """Remove intermediate artifacts from work_dir after sync completes.
+
+    Deletes cached PBF downloads, osmium-filtered PBFs, DuckDB files, QuackOSM
+    intermediate Parquet files, and DuckDB temp spill directory.  The work_dir
+    itself (data/quackosm/) is kept so it can be reused by the next sync.
+    """
+    if not work_dir or not work_dir.is_dir():
+        return
+    removed_bytes = 0
+    removed_count = 0
+    patterns = ('*.osm.pbf', '*.duckdb', '*.duckdb.wal', '*.marker', '*.parquet')
+    for pattern in patterns:
+        for f in work_dir.glob(pattern):
+            try:
+                size = f.stat().st_size
+                f.unlink()
+                removed_bytes += size
+                removed_count += 1
+            except Exception:
+                pass
+    # QuackOSM creates intermediate directories with parquet files.
+    for child in work_dir.iterdir():
+        if child.is_dir():
+            try:
+                dir_size = sum(f.stat().st_size for f in child.rglob('*') if f.is_file())
+                shutil.rmtree(child, ignore_errors=True)
+                removed_bytes += dir_size
+                removed_count += 1
+            except Exception:
+                pass
+    if removed_count > 0:
+        print(
+            f'[region-sync] Cleaned up work_dir: removed {removed_count} items, '
+            f'freed {format_bytes_compact(removed_bytes)}',
+            flush=True,
+        )
+
+
 def truncate_text(value: Any, limit: int = 80) -> str:
     text = str(value or '').strip()
     if len(text) <= limit:
@@ -2088,6 +2127,7 @@ def main() -> None:
         )
     finally:
         parent_watchdog_stop.set()
+        cleanup_work_dir(work_dir)
 
 
 if __name__ == '__main__':
