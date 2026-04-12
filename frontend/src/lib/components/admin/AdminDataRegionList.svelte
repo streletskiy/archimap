@@ -146,6 +146,8 @@
         {@const statusMeta = controller.getRegionStatusMeta(region.lastSyncStatus, region)}
         {@const updateMeta = controller.getRegionUpdateMeta(region)}
         {@const extractSummary = controller.getRegionExtractSummaryText(region)}
+        {@const showSyncError = !['queued', 'running'].includes(String(region?.lastSyncStatus || '').trim().toLowerCase())
+          && Boolean(region?.lastSyncError)}
         <UiPressableCard
           selected={selectedDataRegionId === region.id}
           className="data-region-card"
@@ -179,7 +181,7 @@
             <span class="rounded-full ui-surface-soft px-2 py-1">{controller.getRegionEnabledLabel(region.enabled)}</span>
           </div>
 
-          {#if region.lastSyncError}
+          {#if showSyncError}
             <p class="mt-2 text-xs ui-text-danger break-words">{region.lastSyncError}</p>
           {/if}
         </UiPressableCard>

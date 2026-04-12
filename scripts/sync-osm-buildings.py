@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -26,13 +27,14 @@ from quackosm.osm_extracts import (  # type: ignore
 )
 
 
-BATCH_SIZE = 20000
+DEFAULT_EXPORT_BATCH_SIZE = 2000
 DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2
 DEFAULT_BUILDING_EXTRUSION_LEVELS = 1
 DOWNLOAD_PROGRESS_CHUNK_BYTES = 1024 * 1024
 DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC = 1.0
 DOWNLOAD_PHASE_MAX_RATIO = 0.85
 SHOULD_EMIT_STAGE_JSON = str(os.getenv('REGION_SYNC_EMIT_STAGE_JSON', '')).strip().lower() == 'true'
+DEFAULT_PARENT_WATCHDOG_INTERVAL_SEC = 5.0
 
 
 def emit_stage_json(stage: str, progress: Any = None, detail: str | None = None) -> None:
@@ -57,6 +59,98 @@ def emit_stage_json(stage: str, progress: Any = None, detail: str | None = None)
         payload['detail'] = normalized_detail[:200]
 
     print(f'SYNC_STAGE_JSON={json.dumps(payload, ensure_ascii=False)}', flush=True)
+
+
+def resolve_parent_watchdog_pid() -> int | None:
+    raw_value = str(os.getenv('REGION_SYNC_PARENT_PID', '')).strip()
+    try:
+        parent_pid = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if parent_pid <= 0 or parent_pid == os.getpid():
+        return None
+    return parent_pid
+
+
+def is_process_alive(pid: int) -> bool:
+    if int(pid or 0) <= 0:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as error:
+        return getattr(error, 'errno', None) not in {3}
+
+
+def start_parent_watchdog() -> threading.Event:
+    stop_event = threading.Event()
+    parent_pid = resolve_parent_watchdog_pid()
+    if parent_pid is None:
+        return stop_event
+
+    interval_raw = str(os.getenv('REGION_SYNC_PARENT_WATCHDOG_INTERVAL_SEC', '')).strip()
+    try:
+        interval_sec = float(interval_raw)
+    except (TypeError, ValueError):
+        interval_sec = DEFAULT_PARENT_WATCHDOG_INTERVAL_SEC
+    interval_sec = max(1.0, interval_sec)
+
+    def run_watchdog() -> None:
+        while not stop_event.wait(interval_sec):
+            if is_process_alive(parent_pid):
+                continue
+            try:
+                sys.stderr.write(
+                    f'[region-sync] parent process {parent_pid} is gone; stopping orphaned importer\n'
+                )
+                sys.stderr.flush()
+            except Exception:
+                pass
+            os._exit(131)
+
+    threading.Thread(
+        target=run_watchdog,
+        name='region-sync-parent-watchdog',
+        daemon=True,
+    ).start()
+    return stop_event
+
+
+def resolve_export_batch_size() -> int:
+    raw_value = str(os.getenv('REGION_SYNC_EXPORT_BATCH_SIZE', '')).strip()
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 0
+    return parsed if parsed > 0 else DEFAULT_EXPORT_BATCH_SIZE
+
+
+def escape_sql_literal(value: str) -> str:
+    return str(value or '').replace("'", "''")
+
+
+def configure_duckdb_connection(con: duckdb.DuckDBPyConnection, work_dir: Path | None = None) -> None:
+    target_work_dir = Path(work_dir or Path.cwd()).expanduser().resolve()
+    temp_dir_raw = str(os.getenv('REGION_SYNC_DUCKDB_TEMP_DIRECTORY', '')).strip()
+    temp_dir = Path(temp_dir_raw).expanduser().resolve() if temp_dir_raw else (target_work_dir / 'duckdb-tmp')
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    con.execute(f"SET temp_directory = '{escape_sql_literal(str(temp_dir))}'")
+
+    memory_limit = str(os.getenv('REGION_SYNC_DUCKDB_MEMORY_LIMIT', '')).strip()
+    if memory_limit:
+        con.execute(f"SET memory_limit = '{escape_sql_literal(memory_limit)}'")
+
+    threads_raw = str(os.getenv('REGION_SYNC_DUCKDB_THREADS', '')).strip()
+    try:
+        threads = int(threads_raw)
+    except (TypeError, ValueError):
+        threads = 0
+    if threads > 0:
+        con.execute(f'SET threads = {threads}')
 
 
 def truncate_text(value: Any, limit: int = 80) -> str:
@@ -853,10 +947,12 @@ def run_quackosm_extract_to_duckdb(
     return run_quackosm_to_duckdb(str(cached_pbf_path), work_dir, duckdb_path)
 
 
-def _filtered_rows_cte_sql(import_limit: int) -> str:
-    limit_sql = f'LIMIT {int(import_limit)}' if import_limit > 0 else ''
+def _limit_clause_sql(import_limit: int) -> str:
+    return f'LIMIT {int(import_limit)}' if import_limit > 0 else ''
 
-    return f'''
+
+def _src_raw_cte_sql() -> str:
+    return '''
 WITH src_raw AS (
   SELECT
     feature_id,
@@ -870,7 +966,32 @@ WITH src_raw AS (
   WHERE geometry IS NOT NULL
     AND split_part(feature_id, '/', 1) IN ('way', 'relation')
     AND ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON')
-), src AS (
+)
+'''
+
+
+def _db_rows_cte_sql(import_limit: int) -> str:
+    return f'''
+{_src_raw_cte_sql()}
+, db_rows AS (
+  SELECT
+    feature_id,
+    tags_json,
+    geometry,
+    min_lon,
+    min_lat,
+    max_lon,
+    max_lat
+  FROM src_raw
+  {_limit_clause_sql(import_limit)}
+)
+'''
+
+
+def _filtered_rows_cte_sql(import_limit: int) -> str:
+    return f'''
+{_src_raw_cte_sql()}
+, src AS (
   SELECT
     feature_id,
     tags_json,
@@ -888,8 +1009,7 @@ WITH src_raw AS (
 ), filtered AS (
   SELECT *
   FROM src
-  ORDER BY feature_id
-  {limit_sql}
+  {_limit_clause_sql(import_limit)}
 ), buildings_with_parts AS (
   SELECT DISTINCT building.feature_id
   FROM filtered building
@@ -1015,12 +1135,34 @@ WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
 '''
 
 
-def _export_select_sql(import_limit: int, geometry_mode: str = 'geojson') -> str:
+def _build_db_export_select_sql(import_limit: int, geometry_mode: str = 'geojson') -> str:
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
     if geometry_mode_normalized == 'wkb_hex':
         geometry_sql = 'ST_AsHEXWKB(geometry) AS geometry_wkb_hex'
-        return _build_export_select_sql(_filtered_rows_cte_sql(import_limit), 'enriched', geometry_sql)
-    elif geometry_mode_normalized in ('geojson', 'geojson_feature'):
+    elif geometry_mode_normalized == 'geojson':
+        geometry_sql = 'ST_AsGeoJSON(geometry) AS geometry_json'
+    else:
+        raise ValueError(f'Unsupported DB geometry export mode: {geometry_mode}')
+
+    return f'''
+{_db_rows_cte_sql(import_limit)}
+SELECT
+  split_part(feature_id, '/', 1) AS osm_type,
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
+  tags_json,
+  {geometry_sql},
+  min_lon,
+  min_lat,
+  max_lon,
+  max_lat
+FROM db_rows
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
+'''
+
+
+def _export_select_sql(import_limit: int, geometry_mode: str = 'geojson_feature') -> str:
+    geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
+    if geometry_mode_normalized in ('geojson', 'geojson_feature'):
         geometry_sql = 'ST_AsGeoJSON(geometry) AS geometry_json'
         source_rows_name = 'export_rows' if geometry_mode_normalized == 'geojson_feature' else 'enriched'
         cte_sql = _remainder_rows_cte_sql(import_limit) if geometry_mode_normalized == 'geojson_feature' else _filtered_rows_cte_sql(import_limit)
@@ -1037,15 +1179,8 @@ def _export_remainder_select_sql(import_limit: int) -> str:
     )
 
 
-def _export_dual_select_sql(import_limit: int) -> str:
-    return _build_export_select_sql(
-        _filtered_rows_cte_sql(import_limit),
-        'enriched',
-        'ST_AsHEXWKB(geometry) AS geometry_wkb_hex, ST_AsGeoJSON(geometry) AS geometry_json',
-    )
-
-
-def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection) -> None:
+def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection, work_dir: Path | None = None) -> None:
+    configure_duckdb_connection(con, work_dir)
     for ext in ('spatial',):
         try:
             con.load_extension(ext)
@@ -1061,10 +1196,11 @@ def import_rows_direct_duckdb_sqlite(
     run_marker: str,
 ) -> Tuple[int, int]:
     started_at = time.time()
-    select_sql = _export_select_sql(import_limit, 'geojson')
+    export_batch_size = resolve_export_batch_size()
+    select_sql = _build_db_export_select_sql(import_limit, 'geojson')
 
     with duckdb.connect(str(duckdb_path)) as con:
-        _load_duckdb_extensions(con)
+        _load_duckdb_extensions(con, duckdb_path.parent)
         con.execute(f'CREATE OR REPLACE TEMP TABLE import_rows AS {select_sql}')
         imported = int(con.execute('SELECT COUNT(*) FROM import_rows').fetchone()[0] or 0)
         processed = imported
@@ -1098,7 +1234,7 @@ SELECT osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, ma
 FROM import_rows
 ''')
             while True:
-                chunk = cursor.fetchmany(BATCH_SIZE)
+                chunk = cursor.fetchmany(export_batch_size)
                 if not chunk:
                     break
                 sqlite_conn.executemany(insert_tmp_sql, chunk)
@@ -1149,18 +1285,22 @@ def export_rows_duckdb_ndjson(
     append: bool = False,
 ) -> Tuple[int, int, dict[str, float] | None]:
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
-    select_sql = _export_select_sql(import_limit, geometry_mode_normalized)
+    export_batch_size = resolve_export_batch_size()
+    if geometry_mode_normalized in ('wkb_hex', 'geojson'):
+        select_sql = _build_db_export_select_sql(import_limit, geometry_mode_normalized)
+    else:
+        select_sql = _export_select_sql(import_limit, geometry_mode_normalized)
     mode = 'a' if append else 'w'
     processed = 0
     imported = 0
     bounds: dict[str, float] | None = None
 
     with duckdb.connect(str(duckdb_path)) as con:
-        _load_duckdb_extensions(con)
+        _load_duckdb_extensions(con, duckdb_path.parent)
         cursor = con.execute(select_sql)
         with out_path.open(mode, encoding='utf-8') as out:
             while True:
-                chunk = cursor.fetchmany(BATCH_SIZE)
+                chunk = cursor.fetchmany(export_batch_size)
                 if not chunk:
                     break
                 for row in chunk:
@@ -1169,16 +1309,15 @@ def export_rows_duckdb_ndjson(
                             'osm_type': row[0],
                             'osm_id': int(row[1]),
                             'tags_json': row[2],
-                            'feature_kind': normalize_feature_kind(row[3]),
-                            'render_hide_base_when_parts': normalize_binary_flag(row[4]),
-                            'min_lon': float(row[6]),
-                            'min_lat': float(row[7]),
-                            'max_lon': float(row[8]),
-                            'max_lat': float(row[9]),
+                            'min_lon': float(row[4]),
+                            'min_lat': float(row[5]),
+                            'max_lon': float(row[6]),
+                            'max_lat': float(row[7]),
                         }
-                        payload['geometry_wkb_hex'] = str(row[5])
+                        payload['geometry_wkb_hex'] = str(row[3])
                         out.write(json.dumps(payload, ensure_ascii=False))
                         out.write('\n')
+                        bounds = merge_bounds(bounds, float(row[4]), float(row[5]), float(row[6]), float(row[7]))
                     elif geometry_mode_normalized == 'geojson_feature':
                         out.write(build_geojson_feature_line(
                             str(row[0]),
@@ -1188,24 +1327,23 @@ def export_rows_duckdb_ndjson(
                             str(row[3]),
                             row[4],
                         ))
+                        bounds = merge_bounds(bounds, float(row[6]), float(row[7]), float(row[8]), float(row[9]))
                     else:
                         payload = {
                             'osm_type': row[0],
                             'osm_id': int(row[1]),
                             'tags_json': row[2],
-                            'feature_kind': normalize_feature_kind(row[3]),
-                            'render_hide_base_when_parts': normalize_binary_flag(row[4]),
-                            'min_lon': float(row[6]),
-                            'min_lat': float(row[7]),
-                            'max_lon': float(row[8]),
-                            'max_lat': float(row[9]),
+                            'min_lon': float(row[4]),
+                            'min_lat': float(row[5]),
+                            'max_lon': float(row[6]),
+                            'max_lat': float(row[7]),
                         }
-                        payload['geometry_json'] = row[5]
+                        payload['geometry_json'] = row[3]
                         out.write(json.dumps(payload, ensure_ascii=False))
                         out.write('\n')
+                        bounds = merge_bounds(bounds, float(row[4]), float(row[5]), float(row[6]), float(row[7]))
                     processed += 1
                     imported += 1
-                    bounds = merge_bounds(bounds, float(row[6]), float(row[7]), float(row[8]), float(row[9]))
 
     return processed, imported, bounds
 
@@ -1215,60 +1353,44 @@ def export_rows_duckdb_dual_ndjson(
     db_out_path: Path,
     geojson_out_path: Path,
     import_limit: int,
+    db_geometry_mode: str = 'wkb_hex',
     append: bool = False,
 ) -> Tuple[int, int, dict[str, float] | None]:
-    select_sql = _export_dual_select_sql(import_limit)
+    db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
+    export_batch_size = resolve_export_batch_size()
     mode = 'a' if append else 'w'
     processed = 0
     imported = 0
     bounds: dict[str, float] | None = None
 
     with duckdb.connect(str(duckdb_path)) as con:
-        _load_duckdb_extensions(con)
-        cursor = con.execute(select_sql)
+        _load_duckdb_extensions(con, duckdb_path.parent)
         with db_out_path.open(mode, encoding='utf-8') as db_out, geojson_out_path.open(mode, encoding='utf-8') as geojson_out:
+            db_cursor = con.execute(_build_db_export_select_sql(import_limit, db_geometry_mode_normalized))
             while True:
-                chunk = cursor.fetchmany(BATCH_SIZE)
+                chunk = db_cursor.fetchmany(export_batch_size)
                 if not chunk:
                     break
                 for row in chunk:
-                    osm_type = str(row[0])
-                    osm_id = int(row[1])
-                    min_lon = float(row[7])
-                    min_lat = float(row[8])
-                    max_lon = float(row[9])
-                    max_lat = float(row[10])
-
-                    db_out.write(json.dumps({
-                        'osm_type': osm_type,
-                        'osm_id': osm_id,
+                    payload = {
+                        'osm_type': str(row[0]),
+                        'osm_id': int(row[1]),
                         'tags_json': row[2],
-                        'feature_kind': normalize_feature_kind(row[3]),
-                        'render_hide_base_when_parts': normalize_binary_flag(row[4]),
-                        'geometry_wkb_hex': str(row[5]),
-                        'min_lon': min_lon,
-                        'min_lat': min_lat,
-                        'max_lon': max_lon,
-                        'max_lat': max_lat,
-                    }, ensure_ascii=False))
+                        'min_lon': float(row[4]),
+                        'min_lat': float(row[5]),
+                        'max_lon': float(row[6]),
+                        'max_lat': float(row[7]),
+                    }
+                    if db_geometry_mode_normalized == 'wkb_hex':
+                        payload['geometry_wkb_hex'] = str(row[3])
+                    else:
+                        payload['geometry_json'] = row[3]
+                    db_out.write(json.dumps(payload, ensure_ascii=False))
                     db_out.write('\n')
 
-                    geojson_out.write(build_geojson_feature_line(
-                        osm_type,
-                        osm_id,
-                        str(row[6]),
-                        str(row[2]),
-                        str(row[3]),
-                        row[4],
-                    ))
-
-                    processed += 1
-                    imported += 1
-                    bounds = merge_bounds(bounds, min_lon, min_lat, max_lon, max_lat)
-
-            remainder_cursor = con.execute(_export_remainder_select_sql(import_limit))
+            geojson_cursor = con.execute(_export_select_sql(import_limit, 'geojson_feature'))
             while True:
-                chunk = remainder_cursor.fetchmany(BATCH_SIZE)
+                chunk = geojson_cursor.fetchmany(export_batch_size)
                 if not chunk:
                     break
                 for row in chunk:
@@ -1276,6 +1398,7 @@ def export_rows_duckdb_dual_ndjson(
                     min_lat = float(row[7])
                     max_lon = float(row[8])
                     max_lat = float(row[9])
+
                     geojson_out.write(build_geojson_feature_line(
                         str(row[0]),
                         int(row[1]),
@@ -1284,6 +1407,7 @@ def export_rows_duckdb_dual_ndjson(
                         str(row[3]),
                         row[4],
                     ))
+
                     processed += 1
                     imported += 1
                     bounds = merge_bounds(bounds, min_lon, min_lat, max_lon, max_lat)
@@ -1309,6 +1433,7 @@ def print_json(payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    parent_watchdog_stop = start_parent_watchdog()
     parser = argparse.ArgumentParser()
     parser.add_argument('--pbf', required=False)
     parser.add_argument('--extract-query', action='append', default=[])
@@ -1320,6 +1445,7 @@ def main() -> None:
     parser.add_argument('--out-db-ndjson', required=False)
     parser.add_argument('--out-geojson-ndjson', required=False)
     parser.add_argument('--out-summary-json', required=False)
+    parser.add_argument('--db-geometry-mode', required=False, default='wkb_hex')
     parser.add_argument('--limit', type=int, default=12)
     args = parser.parse_args()
 
@@ -1366,6 +1492,7 @@ def main() -> None:
     out_db_ndjson = str(args.out_db_ndjson or '').strip()
     out_geojson_ndjson = str(args.out_geojson_ndjson or '').strip()
     out_summary_json = str(args.out_summary_json or '').strip()
+    db_geometry_mode = str(args.db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
     if out_ndjson and (out_db_ndjson or out_geojson_ndjson):
         raise ValueError('Use either --out-ndjson or --out-db-ndjson/--out-geojson-ndjson')
     if out_db_ndjson and out_geojson_ndjson:
@@ -1433,6 +1560,7 @@ def main() -> None:
                         db_out_path=db_ndjson_path,
                         geojson_out_path=geojson_ndjson_path,
                         import_limit=per_query_limit,
+                        db_geometry_mode=db_geometry_mode,
                         append=(idx > 1),
                     )
                 elif db_ndjson_path is not None:
@@ -1440,7 +1568,7 @@ def main() -> None:
                         duckdb_path=duckdb_path,
                         out_path=db_ndjson_path,
                         import_limit=per_query_limit,
-                        geometry_mode='wkb_hex',
+                        geometry_mode=db_geometry_mode,
                         append=(idx > 1),
                     )
                 else:
@@ -1494,6 +1622,7 @@ def main() -> None:
                     db_out_path=db_ndjson_path,
                     geojson_out_path=geojson_ndjson_path,
                     import_limit=import_limit,
+                    db_geometry_mode=db_geometry_mode,
                     append=False,
                 )
             elif db_ndjson_path is not None:
@@ -1501,7 +1630,7 @@ def main() -> None:
                     duckdb_path=duckdb_path,
                     out_path=db_ndjson_path,
                     import_limit=import_limit,
-                    geometry_mode='wkb_hex',
+                    geometry_mode=db_geometry_mode,
                     append=False,
                 )
             else:
@@ -1521,30 +1650,33 @@ def main() -> None:
             )
         emit_stage_json('extract', 99, f'exported {int(imported)} features')
 
-    if ndjson_path is not None or db_ndjson_path is not None or geojson_ndjson_path is not None:
-        if summary_json_path is not None:
-            write_export_summary(summary_json_path, processed, imported, export_bounds)
+    try:
+        if ndjson_path is not None or db_ndjson_path is not None or geojson_ndjson_path is not None:
+            if summary_json_path is not None:
+                write_export_summary(summary_json_path, processed, imported, export_bounds)
+            print(
+                'Export done. '
+                f'processed={processed}, exported={imported}, '
+                f'db_ndjson={db_ndjson_path}, geojson_ndjson={geojson_ndjson_path}, ndjson={ndjson_path}',
+                flush=True,
+            )
+            return
+
+        deleted = cleanup_stale(conn, import_limit, run_marker)
+        rebuild_sqlite_rtree_if_needed(conn)
+        conn.commit()
+
+        row = conn.execute('SELECT COUNT(*) AS total, MAX(updated_at) AS last_updated FROM building_contours').fetchone()
+        total = row[0] if row else 0
+        last_updated = row[1] if row else None
+
         print(
-            'Export done. '
-            f'processed={processed}, exported={imported}, '
-            f'db_ndjson={db_ndjson_path}, geojson_ndjson={geojson_ndjson_path}, ndjson={ndjson_path}',
+            f'Sync done. processed={processed}, imported={imported}, '
+            f'deleted={deleted}, total_in_db={total}, last_updated={last_updated}',
             flush=True,
         )
-        return
-
-    deleted = cleanup_stale(conn, import_limit, run_marker)
-    rebuild_sqlite_rtree_if_needed(conn)
-    conn.commit()
-
-    row = conn.execute('SELECT COUNT(*) AS total, MAX(updated_at) AS last_updated FROM building_contours').fetchone()
-    total = row[0] if row else 0
-    last_updated = row[1] if row else None
-
-    print(
-        f'Sync done. processed={processed}, imported={imported}, '
-        f'deleted={deleted}, total_in_db={total}, last_updated={last_updated}',
-        flush=True,
-    )
+    finally:
+        parent_watchdog_stop.set()
 
 
 if __name__ == '__main__':

@@ -1077,6 +1077,144 @@ test('updateRunStage normalizes progress/detail and only persists for running ru
   assert.equal(updatedRun?.stageUpdatedAt, '2026-04-09T10:05:00.000Z');
 });
 
+test('touchRunHeartbeat refreshes only queued/running runs', async () => {
+  const db = createTestDb();
+  const service = createService({ db });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Heartbeat Region',
+    slug: 'heartbeat-region',
+    extractId: 'heartbeat-region'
+  }), 'tester');
+
+  const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = '2000-01-01 00:00:00'
+    WHERE id = ?
+  `).run(queuedRun.id);
+
+  await service.touchRunHeartbeat(queuedRun.id);
+
+  const touchedQueuedRow = db.prepare(`
+    SELECT updated_at
+    FROM data_region_sync_runs
+    WHERE id = ?
+  `).get(queuedRun.id);
+  assert.notEqual(touchedQueuedRow?.updated_at, '2000-01-01 00:00:00');
+
+  await service.markRunStarted(queuedRun.id);
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = '2000-01-01 00:00:00'
+    WHERE id = ?
+  `).run(queuedRun.id);
+
+  await service.touchRunHeartbeat(queuedRun.id);
+
+  const touchedRunningRow = db.prepare(`
+    SELECT updated_at
+    FROM data_region_sync_runs
+    WHERE id = ?
+  `).get(queuedRun.id);
+  assert.notEqual(touchedRunningRow?.updated_at, '2000-01-01 00:00:00');
+
+  await service.markRunSucceeded(queuedRun.id, {
+    importedFeatureCount: 1,
+    activeFeatureCount: 1
+  });
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = '2000-01-01 00:00:00'
+    WHERE id = ?
+  `).run(queuedRun.id);
+
+  await service.touchRunHeartbeat(queuedRun.id);
+
+  const untouchedFinishedRow = db.prepare(`
+    SELECT updated_at
+    FROM data_region_sync_runs
+    WHERE id = ?
+  `).get(queuedRun.id);
+  assert.equal(untouchedFinishedRow?.updated_at, '2000-01-01 00:00:00');
+});
+
+test('recoverInterruptedRuns only abandons stale active runs when staleMs is provided', async () => {
+  const db = createTestDb();
+  const service = createService({
+    db,
+    now: () => new Date('2026-04-10T12:00:00.000Z')
+  });
+
+  const recentRegion = await service.saveRegion(buildRegionInput({
+    name: 'Recent Running Region',
+    slug: 'recent-running-region',
+    extractId: 'recent-running-region'
+  }), 'tester');
+  const staleRunningRegion = await service.saveRegion(buildRegionInput({
+    name: 'Stale Running Region',
+    slug: 'stale-running-region',
+    extractId: 'stale-running-region'
+  }), 'tester');
+  const staleQueuedRegion = await service.saveRegion(buildRegionInput({
+    name: 'Stale Queued Region',
+    slug: 'stale-queued-region',
+    extractId: 'stale-queued-region'
+  }), 'tester');
+
+  const recentRun = await service.createQueuedRun(recentRegion.id, 'manual', 'tester');
+  await service.markRunStarted(recentRun.id);
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = '2026-04-10 11:59:45'
+    WHERE id = ?
+  `).run(recentRun.id);
+
+  const staleRunningRun = await service.createQueuedRun(staleRunningRegion.id, 'manual', 'tester');
+  await service.markRunStarted(staleRunningRun.id);
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = '2026-04-10 11:58:30'
+    WHERE id = ?
+  `).run(staleRunningRun.id);
+
+  const staleQueuedRun = await service.createQueuedRun(staleQueuedRegion.id, 'manual', 'tester');
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = '2026-04-10 11:58:00'
+    WHERE id = ?
+  `).run(staleQueuedRun.id);
+
+  const recovered = await service.recoverInterruptedRuns('Sync interrupted by process restart', {
+    staleMs: 30_000
+  });
+
+  assert.deepEqual(
+    recovered.map((run) => run.id).sort((left, right) => left - right),
+    [staleRunningRun.id, staleQueuedRun.id]
+  );
+
+  const recentSavedRun = await service.getRunById(recentRun.id);
+  assert.equal(recentSavedRun?.status, 'running');
+
+  const staleRunningSavedRun = await service.getRunById(staleRunningRun.id);
+  assert.equal(staleRunningSavedRun?.status, 'abandoned');
+  assert.equal(staleRunningSavedRun?.error, 'Sync interrupted by process restart');
+
+  const staleQueuedSavedRun = await service.getRunById(staleQueuedRun.id);
+  assert.equal(staleQueuedSavedRun?.status, 'abandoned');
+  assert.equal(staleQueuedSavedRun?.error, 'Sync interrupted by process restart');
+
+  const recentRegionState = await service.getRegionById(recentRegion.id);
+  assert.equal(recentRegionState?.lastSyncStatus, 'running');
+
+  const staleRunningRegionState = await service.getRegionById(staleRunningRegion.id);
+  assert.equal(staleRunningRegionState?.lastSyncStatus, 'abandoned');
+
+  const staleQueuedRegionState = await service.getRegionById(staleQueuedRegion.id);
+  assert.equal(staleQueuedRegionState?.lastSyncStatus, 'abandoned');
+});
+
 test('markRunCancelRequested sets cancelling stage and finalization clears transient fields', async () => {
   const db = createTestDb();
   let currentNow = new Date('2026-04-09T11:00:00.000Z');

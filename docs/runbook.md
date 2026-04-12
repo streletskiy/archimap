@@ -118,6 +118,12 @@
 - Verify Python packages `quackosm` and `duckdb` are installed for the interpreter used by the app.
 - If the failure is later in PMTiles build, verify `tippecanoe` or `TIPPECANOE_BIN`.
 
+### Region shows `Sync interrupted by process restart` while a sync is still alive
+
+- Current managed sync workers keep a heartbeat on every owned `queued`/`running` run, so another runtime instance should no longer archive a live sync immediately.
+- If you still see this after upgrading, look for an actual second app process/container pointing at the same DB or an old release still running without the heartbeat fix.
+- Long-running orphaned extract jobs should now self-stop because both `scripts/sync-osm-region.ts` and `scripts/sync-osm-buildings.py` watch their parent PID.
+
 ### Building selection in map UI
 
 - Selection is atomic on first click: highlight + focus + modal open.

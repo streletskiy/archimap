@@ -132,6 +132,14 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
       run.stageDetail = detail || null;
       return { ...run };
     },
+    touchRunHeartbeat: async (runId) => {
+      const run = runMap.get(Number(runId));
+      if (!run || !['queued', 'running'].includes(String(run.status || ''))) {
+        return run ? { ...run } : null;
+      }
+      run.updatedAt = `heartbeat:${Date.now()}`;
+      return { ...run };
+    },
     markRunCancelRequested: async (runId) => {
       const run = runMap.get(Number(runId));
       if (!run) return null;
@@ -452,9 +460,99 @@ test('managed sync workers disable standalone runtime followup in child env', as
 
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0]?.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP, 'true');
+  assert.equal(spawnCalls[0]?.env?.REGION_SYNC_PARENT_PID, String(process.pid));
 
   workers.stop();
   await waitForMicrotasks();
+});
+
+test('managed sync workers heartbeat queued and running runs while using stale-only recovery sweeps', async () => {
+  const children = [];
+  const heartbeatCalls = [];
+  const recoveryCalls = [];
+  const intervals = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 61,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 62,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseTouchRunHeartbeat = dataSettingsService.touchRunHeartbeat;
+  dataSettingsService.touchRunHeartbeat = async (runId) => {
+    heartbeatCalls.push(Number(runId));
+    return baseTouchRunHeartbeat(runId);
+  };
+  dataSettingsService.recoverInterruptedRuns = async (reason, options) => {
+    recoveryCalls.push({ reason, options });
+    return [];
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} },
+    setIntervalRef: (fn, ms) => {
+      const timer = { fn, ms, unref() {} };
+      intervals.push(timer);
+      return timer;
+    },
+    clearIntervalRef: () => {},
+    runHeartbeatIntervalMs: 5_000,
+    interruptedRunStaleMs: 45_000,
+    recoverySweepIntervalMs: 20_000
+  });
+
+  await workers.initAutoSync();
+  await workers.requestRegionSync(61, { triggerReason: 'manual', requestedBy: 'tester' });
+  await workers.requestRegionSync(62, { triggerReason: 'manual', requestedBy: 'tester' });
+
+  const heartbeatTimer = intervals.find((timer) => timer.ms === 5_000);
+  const recoveryTimer = intervals.find((timer) => timer.ms === 20_000);
+  assert.ok(heartbeatTimer);
+  assert.ok(recoveryTimer);
+
+  await heartbeatTimer.fn();
+  await waitForMicrotasks();
+
+  assert.ok(heartbeatCalls.length >= 2);
+  assert.ok(heartbeatCalls.includes(2), `expected running run heartbeat, got ${heartbeatCalls.join(',')}`);
+  assert.ok(heartbeatCalls.includes(3), `expected queued run heartbeat, got ${heartbeatCalls.join(',')}`);
+
+  const initialRecoveryCall = recoveryCalls[0];
+  assert.equal(initialRecoveryCall?.reason, 'Sync interrupted by process restart');
+  assert.equal(initialRecoveryCall?.options?.staleMs, 45_000);
+
+  await recoveryTimer.fn();
+  await waitForMicrotasks();
+  assert.ok(recoveryCalls.length >= 2);
+
+  // Finish the running child to avoid dangling state in the test process.
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  workers.stop();
 });
 
 test('managed sync workers reject manual sync when upstream data is already up to date', async () => {

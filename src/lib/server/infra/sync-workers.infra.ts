@@ -1,6 +1,9 @@
 const MAX_NODE_TIMER_MS = 2_147_483_647;
 const STAGE_UPDATE_MIN_INTERVAL_MS = 250;
 const CANCEL_FORCE_KILL_MS = 10_000;
+const DEFAULT_RUN_HEARTBEAT_INTERVAL_MS = 5_000;
+const DEFAULT_INTERRUPTED_RUN_STALE_MS = 30_000;
+const DEFAULT_RECOVERY_SWEEP_INTERVAL_MS = 10_000;
 
 function signalProcessTree(child, signal = 'SIGTERM', log = console, options: LooseRecord = {}) {
   const platform = String(options.platform || process.platform);
@@ -59,7 +62,12 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     dataSettingsService,
     isShuttingDown,
     onSyncSuccess,
-    log = console
+    log = console,
+    setIntervalRef = setInterval,
+    clearIntervalRef = clearInterval,
+    runHeartbeatIntervalMs = DEFAULT_RUN_HEARTBEAT_INTERVAL_MS,
+    interruptedRunStaleMs = DEFAULT_INTERRUPTED_RUN_STALE_MS,
+    recoverySweepIntervalMs = DEFAULT_RECOVERY_SWEEP_INTERVAL_MS
   } = options;
 
   const queue = [];
@@ -75,12 +83,119 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   let draining = false;
   let reloadSchedulesPromise = null;
   let reloadSchedulesRequested = false;
+  let runHeartbeatTimer = null;
+  let recoverySweepTimer = null;
+  let heartbeatInFlight = Promise.resolve();
+  let recoveryInFlight = Promise.resolve();
 
   function clearRegionTimers() {
     for (const timer of regionTimers.values()) {
       clearTimeout(timer);
     }
     regionTimers.clear();
+  }
+
+  function clearRunMaintenanceTimers() {
+    if (runHeartbeatTimer) {
+      clearIntervalRef(runHeartbeatTimer);
+      runHeartbeatTimer = null;
+    }
+    if (recoverySweepTimer) {
+      clearIntervalRef(recoverySweepTimer);
+      recoverySweepTimer = null;
+    }
+  }
+
+  function getOwnedRunIds() {
+    const runIds = new Set();
+    if (Number.isInteger(Number(currentRun?.runId)) && Number(currentRun.runId) > 0) {
+      runIds.add(Number(currentRun.runId));
+    }
+    for (const entry of queue) {
+      const runId = Number(entry?.runId);
+      if (Number.isInteger(runId) && runId > 0) {
+        runIds.add(runId);
+      }
+    }
+    return [...runIds];
+  }
+
+  function scheduleRunHeartbeatTick() {
+    if (typeof dataSettingsService.touchRunHeartbeat !== 'function') {
+      return;
+    }
+    const ownedRunIds = getOwnedRunIds();
+    if (ownedRunIds.length === 0) {
+      return;
+    }
+    heartbeatInFlight = heartbeatInFlight
+      .then(async () => {
+        for (const runId of ownedRunIds) {
+          await dataSettingsService.touchRunHeartbeat(runId);
+        }
+      })
+      .catch((error) => {
+        log.error(`[region-sync] failed to persist run heartbeat: ${String(error?.message || error)}`);
+      });
+  }
+
+  async function recoverInterruptedRunsAndRequeue(reason = 'Sync interrupted by process restart') {
+    const numericStaleMs = Number(interruptedRunStaleMs);
+    const staleMs = Number.isFinite(numericStaleMs)
+      ? Math.max(0, Math.trunc(numericStaleMs))
+      : DEFAULT_INTERRUPTED_RUN_STALE_MS;
+    const recoveredRuns = await dataSettingsService.recoverInterruptedRuns(reason, { staleMs });
+    const recoveredRegionIds = new Set(
+      (Array.isArray(recoveredRuns) ? recoveredRuns : [])
+        .map((run) => Number(run?.regionId || 0))
+        .filter((regionId) => Number.isInteger(regionId) && regionId > 0)
+    );
+
+    for (const regionId of recoveredRegionIds) {
+      await requestRegionSync(regionId, {
+        triggerReason: 'startup',
+        requestedBy: 'system',
+        skipUpstreamCheck: true
+      });
+    }
+
+    return recoveredRuns;
+  }
+
+  function scheduleRecoverySweepTick() {
+    recoveryInFlight = recoveryInFlight
+      .then(() => recoverInterruptedRunsAndRequeue())
+      .catch((error) => {
+        log.error(`[region-sync] failed to recover interrupted runs: ${String(error?.message || error)}`);
+      });
+  }
+
+  function ensureRunMaintenanceTimers() {
+    const numericHeartbeatMs = Number(runHeartbeatIntervalMs);
+    const heartbeatMs = Number.isFinite(numericHeartbeatMs)
+      ? Math.max(1_000, Math.trunc(numericHeartbeatMs))
+      : DEFAULT_RUN_HEARTBEAT_INTERVAL_MS;
+    const numericRecoveryMs = Number(recoverySweepIntervalMs);
+    const recoveryMs = Number.isFinite(numericRecoveryMs)
+      ? Math.max(1_000, Math.trunc(numericRecoveryMs))
+      : DEFAULT_RECOVERY_SWEEP_INTERVAL_MS;
+
+    if (!runHeartbeatTimer) {
+      runHeartbeatTimer = setIntervalRef(() => {
+        scheduleRunHeartbeatTick();
+      }, heartbeatMs);
+      if (typeof runHeartbeatTimer?.unref === 'function') {
+        runHeartbeatTimer.unref();
+      }
+    }
+    if (!recoverySweepTimer) {
+      recoverySweepTimer = setIntervalRef(() => {
+        scheduleRecoverySweepTick();
+      }, recoveryMs);
+      if (typeof recoverySweepTimer?.unref === 'function') {
+        recoverySweepTimer.unref();
+      }
+    }
   }
 
   function scheduleTimer(region: LooseRecord) {
@@ -244,7 +359,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       env: {
         ...env,
         REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true',
-        REGION_SYNC_EMIT_STAGE_JSON: 'true'
+        REGION_SYNC_EMIT_STAGE_JSON: 'true',
+        REGION_SYNC_PARENT_PID: String(process.pid)
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32'
@@ -426,6 +542,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   }
 
   async function requestRegionSync(regionId, options: LooseRecord = {}) {
+    ensureRunMaintenanceTimers();
     const numericRegionId = Number(regionId);
     const previousLock = enqueueLocksByRegionId.get(numericRegionId) || Promise.resolve();
     let releaseLock;
@@ -528,23 +645,11 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   async function initAutoSync() {
     if (initialized) return;
     initialized = true;
+    ensureRunMaintenanceTimers();
 
     await dataSettingsService.bootstrapFromEnvIfNeeded('startup');
-    const recoveredRuns = await dataSettingsService.recoverInterruptedRuns();
-    const recoveredRegionIds = new Set(
-      (Array.isArray(recoveredRuns) ? recoveredRuns : [])
-        .map((run) => Number(run?.regionId || 0))
-        .filter((regionId) => Number.isInteger(regionId) && regionId > 0)
-    );
+    await recoverInterruptedRunsAndRequeue();
     const regions = await dataSettingsService.listRegions({ includeDisabled: false });
-
-    for (const regionId of recoveredRegionIds) {
-      await requestRegionSync(regionId, {
-        triggerReason: 'startup',
-        requestedBy: 'system',
-        skipUpstreamCheck: true
-      });
-    }
 
     for (const region of regions) {
       if (!region.enabled) continue;
@@ -627,6 +732,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
 
   function stop() {
     clearRegionTimers();
+    clearRunMaintenanceTimers();
     queue.length = 0;
     queuedRegionIds.clear();
     if (currentSyncChild && !currentSyncChild.killed) {

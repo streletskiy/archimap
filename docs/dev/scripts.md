@@ -48,6 +48,8 @@ Notes:
 
 - `scripts/sync-osm-region.ts` is intentionally thin; implementation stages live in `scripts/region-sync/python-extractor.ts`, `db-ingester.ts`, `region-db.ts`, `import-applier.ts`, and `pmtiles-builder.ts`.
 - `pmtiles-builder.ts` shards large regions into a km-aligned grid (see `REGION_SYNC_SHARD_KM`, default `60`) and merges per-cell archives with `tile-join`, keeping peak tippecanoe memory bounded for country-sized rebuilds on low-RAM SBCs; `REGION_SYNC_SHARD_KM=0` restores the single-pass build.
+- The Python importer/exporter supports low-memory tuning through `REGION_SYNC_EXPORT_BATCH_SIZE`, `REGION_SYNC_DUCKDB_MEMORY_LIMIT`, `REGION_SYNC_DUCKDB_THREADS`, and `REGION_SYNC_DUCKDB_TEMP_DIRECTORY`.
+- `REGION_SYNC_LOW_MEMORY_PIPELINE=true` switches PostgreSQL region syncs to an apply-first path that lowers peak intermediate artifact usage; this mode trades away the default build-first atomicity.
 - `frontend/src/bootstrap/svelte.config.ts` is the source of truth for the frontend SvelteKit config. The generated `frontend/svelte.config.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - `frontend/src/theme-init.ts` is the source of truth for the initial theme bootstrap. The generated `frontend/static/theme-init.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - Docker containers start through `scripts/runtime-start.ts`, which runs `scripts/ensure-admin-regions-pmtiles.ts` before booting `server.sveltekit.ts`.

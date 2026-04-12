@@ -111,6 +111,9 @@
   $: syncIsActive = Boolean(selectedRegion) && ['queued', 'running'].includes(
     String(selectedRegion?.lastSyncStatus || '').trim().toLowerCase()
   );
+  $: visibleSyncError = !syncIsActive && selectedRegion?.lastSyncError
+    ? String(selectedRegion.lastSyncError)
+    : '';
   $: cancelRequested = Boolean(activeRun?.cancelRequested) || String(activeRun?.stage || '').toLowerCase() === 'cancelling';
 
   $: if (open && !hadOpenState) {
@@ -317,8 +320,8 @@
             </div>
           </dl>
 
-          {#if selectedRegion?.lastSyncError}
-            <p class="data-region-status-error mt-3 text-xs ui-text-danger break-words">{selectedRegion.lastSyncError}</p>
+          {#if visibleSyncError}
+            <p class="data-region-status-error mt-3 text-xs ui-text-danger break-words">{visibleSyncError}</p>
           {/if}
           {#if selectedRegion?.upstreamError}
             <p class="data-region-status-error mt-2 text-xs ui-text-danger break-words">{selectedRegion.upstreamError}</p>
@@ -622,12 +625,25 @@
 
     .data-region-modal-body {
       --data-region-history-height: clamp(10rem, 28dvh, 13rem);
+      grid-template-rows: auto auto auto;
+      align-content: start;
       gap: 0.75rem;
       padding: 0.75rem;
+      overflow: auto;
     }
 
     .data-region-status-grid {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .data-region-form-pane {
+      overflow: visible;
+      padding-right: 0;
+    }
+
+    .data-region-modal-body :global(.data-history-card) {
+      min-height: clamp(11rem, 30dvh, 15rem);
+      max-height: min(18rem, 38dvh);
     }
 
     .data-region-status-item--bounds {

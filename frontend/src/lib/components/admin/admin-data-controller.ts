@@ -338,6 +338,8 @@ export function createAdminDataController() {
   let nextOptimisticRegionId = -1;
   let regionRunsRequestToken = 0;
   let regionRunsAbortController: AbortController | null = null;
+  let dataSettingsFetchRequestToken = 0;
+  let regionSnapshotMutationVersion = 0;
   const pendingOptimisticRegions = new Map();
   const pendingUpstreamRegionIds = new Set<number>();
   const SYNC_PROGRESS_POLL_INTERVAL_MS = 2000;
@@ -379,6 +381,7 @@ export function createAdminDataController() {
         }
       }
     }, SYNC_PROGRESS_POLL_INTERVAL_MS);
+    syncProgressPollTimer?.unref?.();
   }
 
   function ensureSyncProgressPolling() {
@@ -724,8 +727,29 @@ export function createAdminDataController() {
         regions: nextRegions
       };
     });
+    regionSnapshotMutationVersion += 1;
 
     return mergedRegion;
+  }
+
+  function applyRegionUpstreamSnapshot(region: Partial<DataRegion> | null): DataRegion | null {
+    const snapshot = (region && typeof region === 'object' ? region : null) as Partial<DataRegion> | null;
+    const numericRegionId = Number(snapshot?.id || 0);
+    if (!snapshot || !Number.isInteger(numericRegionId) || numericRegionId <= 0) return null;
+
+    const existingRegion = getRegionById(numericRegionId);
+    if (!existingRegion) {
+      return upsertRegionSnapshot(buildRegionSnapshot(snapshot, null));
+    }
+
+    return upsertRegionSnapshot({
+      id: numericRegionId,
+      latestSourceDataUpdatedAt: snapshot.latestSourceDataUpdatedAt ?? existingRegion.latestSourceDataUpdatedAt ?? null,
+      upstreamCheckedAt: snapshot.upstreamCheckedAt ?? existingRegion.upstreamCheckedAt ?? null,
+      upstreamStatus: snapshot.upstreamStatus ?? existingRegion.upstreamStatus,
+      upstreamError: snapshot.upstreamError ?? existingRegion.upstreamError ?? null,
+      updateAvailable: snapshot.updateAvailable ?? existingRegion.updateAvailable
+    });
   }
 
   function removeRegionSnapshot(regionId) {
@@ -749,6 +773,7 @@ export function createAdminDataController() {
         regions: nextRegions
       };
     });
+    regionSnapshotMutationVersion += 1;
 
     return removed;
   }
@@ -780,10 +805,21 @@ export function createAdminDataController() {
   async function refreshDataSettingsInBackground(options: LooseRecord = {}) {
     const { selectedRegionId = null, preserveStatus = true, silent = true } = options;
     const preservedStatus = get(dataStatus);
+    const requestToken = ++dataSettingsFetchRequestToken;
+    const expectedMutationVersion = regionSnapshotMutationVersion;
 
     try {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
+      if (
+        requestToken !== dataSettingsFetchRequestToken
+        || expectedMutationVersion !== regionSnapshotMutationVersion
+      ) {
+        if (preserveStatus) {
+          dataStatus.set(preservedStatus);
+        }
+        return true;
+      }
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
       nextSettings.regions = mergeKnownRegionUpstreamState(nextSettings.regions as DataRegion[], currentSettings?.regions as DataRegion[]);
       nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
@@ -860,8 +896,7 @@ export function createAdminDataController() {
       const data = await apiJson(`/api/admin/app-settings/data/regions/upstream-status?${query.toString()}`);
       const items = Array.isArray(data?.items) ? data.items : [];
       for (const item of items) {
-        const existing = getRegionById(item?.id);
-        upsertRegionSnapshot(buildRegionSnapshot(item, existing));
+        applyRegionUpstreamSnapshot(item);
       }
       return items;
     } catch (error) {
@@ -1029,10 +1064,18 @@ export function createAdminDataController() {
 
     dataLoading.set(true);
     dataStatus.set(dataT('status.loadingSettings'));
+    const requestToken = ++dataSettingsFetchRequestToken;
+    const expectedMutationVersion = regionSnapshotMutationVersion;
 
     try {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
+      if (
+        requestToken !== dataSettingsFetchRequestToken
+        || expectedMutationVersion !== regionSnapshotMutationVersion
+      ) {
+        return true;
+      }
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
       nextSettings.regions = mergeKnownRegionUpstreamState(nextSettings.regions as DataRegion[], currentSettings?.regions as DataRegion[]);
       nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);

@@ -15,6 +15,16 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     now
   } = context;
 
+  function parseTimestampMs(value) {
+    if (value == null) return NaN;
+    const text = String(value).trim();
+    if (!text) return NaN;
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(text)) {
+      return Date.parse(text.replace(' ', 'T') + 'Z');
+    }
+    return Date.parse(text);
+  }
+
   function buildRegionSyncEligibilityError(region) {
     if (!region) {
       return 'Region not found';
@@ -197,6 +207,22 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         updated_at = datetime('now')
       WHERE id = ? AND status = 'running'
     `).run(normalizedStage, safeProgress, normalizedDetail, updatedAt, numericRunId);
+    return getRunById(numericRunId);
+  }
+
+  async function touchRunHeartbeat(runId) {
+    await ensureBootstrapped();
+    const numericRunId = Number(runId);
+    if (!Number.isInteger(numericRunId) || numericRunId <= 0) {
+      return null;
+    }
+    await db.prepare(`
+      UPDATE data_region_sync_runs
+      SET
+        updated_at = datetime('now')
+      WHERE id = ?
+        AND status IN ('queued', 'running')
+    `).run(numericRunId);
     return getRunById(numericRunId);
   }
 
@@ -402,14 +428,32 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     };
   }
 
-  async function recoverInterruptedRuns(reason = 'Sync interrupted by process restart') {
+  async function recoverInterruptedRuns(reason = 'Sync interrupted by process restart', options: LooseRecord = {}) {
     await ensureBootstrapped();
-    const stuckRuns = await db.prepare(`
-      SELECT id
+    const requestedStaleMs = Number(options?.staleMs);
+    const staleMs = Number.isFinite(requestedStaleMs)
+      ? Math.max(0, Math.trunc(requestedStaleMs))
+      : 0;
+    const nowTs = parseTimestampMs(toIsoOrNull(now()) || now());
+    const staleBeforeTs = staleMs > 0 && Number.isFinite(nowTs)
+      ? nowTs - staleMs
+      : null;
+
+    const candidateRuns = await db.prepare(`
+      SELECT id, updated_at
       FROM data_region_sync_runs
       WHERE status IN ('queued', 'running')
       ORDER BY id
     `).all();
+    const stuckRuns = staleBeforeTs == null
+      ? candidateRuns
+      : candidateRuns.filter((row) => {
+        const updatedAtTs = parseTimestampMs(row?.updated_at);
+        if (!Number.isFinite(updatedAtTs)) {
+          return true;
+        }
+        return updatedAtTs <= staleBeforeTs;
+      });
 
     const recovered = [];
     for (const row of stuckRuns) {
@@ -469,6 +513,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     markRunFailed,
     markRunCancelRequested,
     updateRunStage,
+    touchRunHeartbeat,
     recoverInterruptedRuns,
     rescheduleRegionAfterSkippedSync,
     refreshRegionNextSyncAt,
