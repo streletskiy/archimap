@@ -225,62 +225,125 @@ def download_extract_with_progress(
     extract_query: str,
     index: int,
     total: int,
+    max_retries: int = 4,
+    retry_delay_sec: float = 30.0,
 ) -> None:
+    """Download *extract_url* to *output_path*, resuming partial downloads on transient errors.
+
+    Uses HTTP Range requests so that a connection drop mid-download resumes from the
+    last byte written rather than restarting from zero.  Up to *max_retries* resume
+    attempts are made before giving up and propagating the exception.
+    """
     temp_path = output_path.with_suffix(f'{output_path.suffix}.download')
-    if temp_path.exists():
-        temp_path.unlink()
 
     query_label = truncate_text(extract_query, 96)
     prefix = f'[{max(1, int(index or 1))}/{max(1, int(total or 1))}] {query_label}'
-    emit_stage_json('download', 0, f'{prefix} | starting download')
 
     last_emit_ts = 0.0
     last_percent = -1
 
-    try:
-        with requests.get(extract_url, stream=True, timeout=(15, 300)) as response:
-            response.raise_for_status()
-            content_length_raw = str(response.headers.get('Content-Length') or '').strip()
-            try:
-                total_bytes = int(content_length_raw) if content_length_raw else 0
-            except ValueError:
-                total_bytes = 0
-            total_bytes = total_bytes if total_bytes > 0 else None
+    for attempt in range(max_retries + 1):
+        # Use any partial .download file as a resume point.
+        resume_offset = temp_path.stat().st_size if temp_path.exists() else 0
 
-            downloaded_bytes = 0
-            with temp_path.open('wb') as fh:
-                for chunk in response.iter_content(chunk_size=DOWNLOAD_PROGRESS_CHUNK_BYTES):
-                    if not chunk:
-                        continue
-                    fh.write(chunk)
-                    downloaded_bytes += len(chunk)
+        if attempt > 0:
+            msg = (
+                f'resuming from {format_bytes_compact(resume_offset)}'
+                if resume_offset > 0
+                else 'restarting from scratch'
+            )
+            print(
+                f'[region-sync] Download attempt {attempt + 1}/{max_retries + 1}: {msg}',
+                flush=True,
+            )
 
-                    now = time.time()
-                    if total_bytes is not None:
-                        percent = min(100, round((downloaded_bytes / total_bytes) * 100))
-                        if percent == last_percent and (now - last_emit_ts) < DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
+        emit_stage_json(
+            'download',
+            None if resume_offset > 0 else 0,
+            f'{prefix} | {"resuming" if resume_offset > 0 else "starting"} download',
+        )
+
+        try:
+            headers: dict = {}
+            if resume_offset > 0:
+                headers['Range'] = f'bytes={resume_offset}-'
+
+            with requests.get(extract_url, stream=True, timeout=(15, 300), headers=headers) as response:
+                if response.status_code == 416:
+                    # Range Not Satisfiable: our offset is past the server's EOF.
+                    # Discard the partial file and retry with a full download.
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    resume_offset = 0
+                    raise IOError('Range Not Satisfiable (416); partial file discarded, will retry')
+
+                response.raise_for_status()
+
+                is_range_response = response.status_code == 206
+                if resume_offset > 0 and not is_range_response:
+                    # Server ignored our Range header and returned the full file.
+                    # Discard the partial data so we don't corrupt the output.
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    resume_offset = 0
+
+                content_length_raw = str(response.headers.get('Content-Length') or '').strip()
+                try:
+                    content_bytes = int(content_length_raw) if content_length_raw else 0
+                except ValueError:
+                    content_bytes = 0
+
+                # Total = already on disk + what the server will still send.
+                total_bytes: int | None = (resume_offset + content_bytes) if content_bytes > 0 else None
+                downloaded_bytes = resume_offset
+
+                open_mode = 'ab' if resume_offset > 0 else 'wb'
+                with temp_path.open(open_mode) as fh:
+                    for chunk in response.iter_content(chunk_size=DOWNLOAD_PROGRESS_CHUNK_BYTES):
+                        if not chunk:
                             continue
-                        last_percent = percent
-                        last_emit_ts = now
-                        emit_stage_json(
-                            'download',
-                            percent,
-                            (
-                                f'{prefix} | {percent}% | '
-                                f'{format_bytes_compact(downloaded_bytes)} / {format_bytes_compact(total_bytes)}'
-                            ),
-                        )
-                    elif (now - last_emit_ts) >= DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
-                        last_emit_ts = now
-                        emit_stage_json(
-                            'download',
-                            None,
-                            f'{prefix} | downloaded {format_bytes_compact(downloaded_bytes)}',
-                        )
-    except Exception:
-        if temp_path.exists():
-            temp_path.unlink()
-        raise
+                        fh.write(chunk)
+                        downloaded_bytes += len(chunk)
+
+                        now = time.time()
+                        if total_bytes is not None:
+                            percent = min(100, round((downloaded_bytes / total_bytes) * 100))
+                            if percent == last_percent and (now - last_emit_ts) < DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
+                                continue
+                            last_percent = percent
+                            last_emit_ts = now
+                            emit_stage_json(
+                                'download',
+                                percent,
+                                (
+                                    f'{prefix} | {percent}% | '
+                                    f'{format_bytes_compact(downloaded_bytes)} / {format_bytes_compact(total_bytes)}'
+                                ),
+                            )
+                        elif (now - last_emit_ts) >= DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC:
+                            last_emit_ts = now
+                            emit_stage_json(
+                                'download',
+                                None,
+                                f'{prefix} | downloaded {format_bytes_compact(downloaded_bytes)}',
+                            )
+
+            # Completed without exception — exit the retry loop.
+            break
+
+        except Exception as exc:
+            if attempt < max_retries:
+                print(
+                    f'[region-sync] Download attempt {attempt + 1} failed '
+                    f'(retrying in {int(retry_delay_sec)}s): {exc}',
+                    flush=True,
+                )
+                time.sleep(retry_delay_sec)
+            else:
+                # All retries exhausted — clean up the incomplete file and propagate.
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
 
     if output_path.exists():
         output_path.unlink()
@@ -908,15 +971,38 @@ ON building_contours (min_lon, max_lon, min_lat, max_lat);
         ensure_sqlite_rtree_schema(conn)
 
 
+def build_quackosm_duckdb_conn_kwargs() -> dict:
+    """Build duckdb_conn_kwargs for QuackOSM's PbfFileReader from env config.
+
+    Propagates REGION_SYNC_DUCKDB_MEMORY_LIMIT and REGION_SYNC_DUCKDB_THREADS into
+    QuackOSM's internal DuckDB connection so the extract stage respects the same
+    resource caps as our own DuckDB queries.  Without this, QuackOSM allocates memory
+    freely and can OOM on large regions (e.g. whole-country extracts > 500 MB PBF).
+    """
+    config: dict = {}
+    memory_limit = str(os.getenv('REGION_SYNC_DUCKDB_MEMORY_LIMIT', '')).strip()
+    if memory_limit:
+        config['memory_limit'] = memory_limit
+    threads = resolve_duckdb_threads()
+    if threads > 0:
+        config['threads'] = threads
+    return {'config_kwargs': config} if config else {}
+
+
 def run_quackosm_to_duckdb(pbf_path: str, work_dir: Path, result_path: Path | None = None) -> Path:
     duckdb_path = result_path or (work_dir / 'quackosm-buildings.duckdb')
     if duckdb_path.exists():
         duckdb_path.unlink()
 
+    quackosm_duckdb_kwargs = build_quackosm_duckdb_conn_kwargs()
+    cpu_limit = resolve_duckdb_threads() or None
+
     reader = PbfFileReader(
         tags_filter={'building': True, 'building:part': True},
         working_directory=work_dir,
-        verbosity_mode='transient'
+        verbosity_mode='transient',
+        cpu_limit=cpu_limit,
+        duckdb_conn_kwargs=quackosm_duckdb_kwargs if quackosm_duckdb_kwargs else None,
     )
 
     reader.convert_pbf_to_duckdb(
@@ -955,20 +1041,42 @@ def run_quackosm_extract_to_duckdb(
         duckdb_path.unlink()
 
     cached_pbf_path = work_dir / f'{resolved_query}.osm.pbf'
-    if cached_pbf_path.exists():
-        cached_pbf_path.unlink()
 
     extract_url = str(getattr(resolved_extract, 'url', '') or '').strip()
     if not extract_url:
         raise ValueError(f'OSM extract URL is missing for {resolved_query}')
 
-    download_extract_with_progress(
-        extract_url,
-        cached_pbf_path,
-        extract_query=resolved_query,
-        index=index,
-        total=total,
-    )
+    # Skip re-download when a previously cached PBF file already has the expected size.
+    # This saves time on retries after failed extract/export steps (e.g. OOM) because the
+    # download phase can be the largest time cost for big regions (Poland whole ≈ 600 MB).
+    skip_download = False
+    if cached_pbf_path.exists():
+        try:
+            head = requests.head(extract_url, timeout=15, allow_redirects=True)
+            remote_size = int(head.headers.get('Content-Length', 0) or 0)
+            local_size = cached_pbf_path.stat().st_size
+            if remote_size > 0 and local_size == remote_size:
+                print(
+                    f'[region-sync] Reusing cached PBF: {cached_pbf_path.name} '
+                    f'({format_bytes_compact(local_size)}, matches remote)',
+                    flush=True,
+                )
+                emit_stage_json('download', 100, f'{prefix} | using cached PBF ({format_bytes_compact(local_size)})')
+                skip_download = True
+        except Exception as e:
+            print(f'[region-sync] PBF cache check failed, will re-download: {e}', flush=True)
+            cached_pbf_path.unlink(missing_ok=True)
+
+    if not skip_download:
+        if cached_pbf_path.exists():
+            cached_pbf_path.unlink()
+        download_extract_with_progress(
+            extract_url,
+            cached_pbf_path,
+            extract_query=resolved_query,
+            index=index,
+            total=total,
+        )
     emit_stage_json('extract', 0, f'{prefix} | extracting buildings into DuckDB')
     result = run_quackosm_to_duckdb(str(cached_pbf_path), work_dir, duckdb_path)
     emit_stage_json('extract', 100, f'{prefix} | buildings extracted to DuckDB')

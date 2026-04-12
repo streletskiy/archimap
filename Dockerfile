@@ -97,6 +97,31 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
   && /opt/pyosm/bin/pip install "pip==${PIP_VERSION}" \
   && /opt/pyosm/bin/pip install "quackosm==${QUACKOSM_VERSION}" "duckdb==${DUCKDB_VERSION}"
 
+# Pre-install DuckDB spatial extension so it does not need to be downloaded at runtime.
+# The extensions.duckdb.org server requires a DuckDB User-Agent and is unreachable from inside
+# running containers (Docker network blocks the request). Pre-baking the extension avoids this.
+RUN <<PYEOF
+/opt/pyosm/bin/python3 - << 'INNER'
+import urllib.request, gzip, shutil, io, os, platform
+import sys
+
+ver = os.environ.get('DUCKDB_VERSION', '1.4.4')
+machine = platform.machine()
+plat = 'linux_amd64' if machine == 'x86_64' else 'linux_arm64'
+url = 'http://extensions.duckdb.org/v{}/{}/spatial.duckdb_extension.gz'.format(ver, plat)
+target = os.path.expanduser('~/.duckdb/extensions/v{}/{}/spatial.duckdb_extension'.format(ver, plat))
+os.makedirs(os.path.dirname(target), exist_ok=True)
+req = urllib.request.Request(url, headers={'User-Agent': 'DuckDB/v{} ({})'.format(ver, plat)})
+resp = urllib.request.urlopen(req, timeout=120)
+data = resp.read()
+buf = io.BytesIO(data)
+with gzip.open(buf) as gz:
+    with open(target, 'wb') as out:
+        shutil.copyfileobj(gz, out)
+print('DuckDB spatial extension installed: ' + target)
+INNER
+PYEOF
+
 RUN mkdir -p /app/data/cache /app/data/quackosm
 
 ENV PYTHON_BIN=/opt/pyosm/bin/python
