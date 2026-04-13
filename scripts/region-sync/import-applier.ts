@@ -221,6 +221,43 @@ async function countPostgresInsertedContours(client) {
   return Number(insertedCountResult.rows[0]?.total || 0);
 }
 
+async function dropPostgresBulkLoadIndexes(client) {
+  // Drop expensive indexes and disable triggers before bulk upsert.
+  // GiST index updates are extremely costly for bulk inserts (~10M rows).
+  // Re-creating them after is orders of magnitude faster (bulk build vs per-row update).
+  await client.query(`DROP INDEX IF EXISTS osm.idx_building_contours_geom_gist`);
+  await client.query(`DROP INDEX IF EXISTS osm.idx_building_contours_building_levels_num`);
+  await client.query(`
+    ALTER TABLE osm.building_contours
+    DISABLE TRIGGER trg_building_contours_sync_building_levels_num
+  `);
+}
+
+async function recreatePostgresBulkLoadIndexes(client) {
+  // Re-enable trigger first so it fires on future DML.
+  await client.query(`
+    ALTER TABLE osm.building_contours
+    ENABLE TRIGGER trg_building_contours_sync_building_levels_num
+  `);
+  // Backfill building_levels_num for rows inserted while trigger was disabled.
+  await client.query(`
+    UPDATE osm.building_contours
+    SET building_levels_num = osm.extract_building_levels_numeric(tags_json)
+    WHERE building_levels_num IS NULL AND tags_json IS NOT NULL
+  `);
+  // Recreate indexes (bulk build is much faster than per-row updates).
+  await client.query(`
+    CREATE INDEX idx_building_contours_geom_gist
+    ON osm.building_contours USING GIST (geom)
+  `);
+  await client.query(`
+    CREATE INDEX idx_building_contours_building_levels_num
+    ON osm.building_contours USING BTREE (building_levels_num)
+    WHERE building_levels_num IS NOT NULL
+  `);
+  await client.query(`ANALYZE osm.building_contours`);
+}
+
 async function upsertPostgresContoursFromStage(client, runMarker) {
   await client.query(`
     INSERT INTO osm.building_contours (
@@ -657,6 +694,7 @@ async function applyRegionImportToPostgres({
         progressInterval: importApplyBatchSize
       });
       const insertedContourCount = await countPostgresInsertedContours(client);
+      await dropPostgresBulkLoadIndexes(client);
       await upsertPostgresContoursFromStage(client, runMarker);
       await upsertPostgresMembershipsFromStage(client, region.id);
 
@@ -713,6 +751,9 @@ async function applyRegionImportToPostgres({
       );
 
       await client.query('COMMIT');
+      // Recreate indexes outside transaction — bulk GiST build is much faster
+      // than per-row index maintenance during the upsert.
+      await recreatePostgresBulkLoadIndexes(client);
       if (swap) {
         swap.commit();
       }
@@ -743,6 +784,12 @@ async function applyRegionImportToPostgres({
         await client.query('ROLLBACK');
       } catch {
         // ignore rollback failure
+      }
+      // Recreate indexes even on failure — they were dropped before upsert.
+      try {
+        await recreatePostgresBulkLoadIndexes(client);
+      } catch {
+        // best-effort: indexes will be recreated on next successful sync
       }
       if (swap) {
         swap.rollback();
