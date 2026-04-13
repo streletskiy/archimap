@@ -293,6 +293,7 @@ flowchart TD
 - Cleanup deletes only contours that have no remaining membership in any region.
 - Interrupted runs are recoverable because region sync status and run history are stored separately from the import workspace.
 - Managed sync workers keep a heartbeat on every owned `queued`/`running` run. Restart recovery only archives stale active runs as `abandoned`, then immediately requeues the affected region without waiting for a fresh upstream-version check. This prevents false `Sync interrupted by process restart` errors when a different runtime instance starts while the original sync is still alive.
+- Manual admin cancel also has a stale-run fallback: if the current process no longer owns the worker, it can still abandon stale active runs for that region and repair a stuck region row whose status stayed `queued`/`running` after the worker disappeared.
 - The Node region-sync worker and the Python extractor both watch their parent PID and self-exit when the owner process disappears, which prevents the most expensive import stage from continuing as an orphan after a crash or restart.
 
 ## Local edits and sync corner cases

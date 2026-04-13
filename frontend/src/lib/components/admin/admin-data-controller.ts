@@ -23,9 +23,56 @@ import type {
 const DATA_I18N_PREFIX = 'admin.data';
 const FILTER_PRESET_LOCALE_RE = /^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i;
 const FILTER_PRESET_NAME_LOCALES = Object.freeze([...(Array.isArray(SUPPORTED_LOCALES) ? SUPPORTED_LOCALES : [])]);
+const REGION_EDITOR_STORAGE_KEY = 'archimap-admin-data-region-editor-v1';
 
 const msg = (error, fallback) => String(error?.message || fallback);
 const dataT = (key, params = {}) => translateNow(`${DATA_I18N_PREFIX}.${key}`, params);
+
+function getSessionStorage(): Storage | null {
+  const storage = typeof globalThis !== 'undefined'
+    ? (globalThis as typeof globalThis & { sessionStorage?: Storage }).sessionStorage
+    : null;
+  if (!storage || typeof storage.getItem !== 'function') return null;
+  return storage;
+}
+
+function readPersistedRegionEditorState() {
+  const storage = getSessionStorage();
+  if (!storage) return { regionId: null, open: false };
+
+  try {
+    const raw = storage.getItem(REGION_EDITOR_STORAGE_KEY);
+    if (!raw) return { regionId: null, open: false };
+    const parsed = JSON.parse(raw);
+    const regionId = Number(parsed?.regionId || 0);
+    const normalizedRegionId = Number.isInteger(regionId) && regionId > 0 ? regionId : null;
+    return {
+      regionId: normalizedRegionId,
+      open: Boolean(parsed?.open) && normalizedRegionId != null
+    };
+  } catch {
+    return { regionId: null, open: false };
+  }
+}
+
+function writePersistedRegionEditorState(regionId: number | null, open: boolean) {
+  const storage = getSessionStorage();
+  if (!storage) return;
+
+  try {
+    const normalizedRegionId = Number(regionId || 0);
+    if (!open || !Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
+      storage.removeItem(REGION_EDITOR_STORAGE_KEY);
+      return;
+    }
+    storage.setItem(REGION_EDITOR_STORAGE_KEY, JSON.stringify({
+      regionId: normalizedRegionId,
+      open: true
+    }));
+  } catch {
+    // Ignore storage quota/privacy failures and keep the editor state in memory only.
+  }
+}
 
 function createEmptyDataSettings(): AdminDataSettings {
   return {
@@ -307,6 +354,7 @@ function sortFilterTagKeys(keys: readonly string[] = [], selected: readonly stri
 }
 
 export function createAdminDataController() {
+  const persistedRegionEditorState = readPersistedRegionEditorState();
   const dataSettings: Writable<DataSettings> = writable(createEmptyDataSettings());
   const dataLoading: Writable<boolean> = writable(false);
   const dataStatus: Writable<string> = writable('');
@@ -325,16 +373,18 @@ export function createAdminDataController() {
   const regionSyncCancelBusy: Writable<boolean> = writable(false);
   const regionResolveBusy: Writable<boolean> = writable(false);
   const regionExtractCandidates: Writable<RegionExtractCandidate[]> = writable([]);
-  const selectedDataRegionId: Writable<number | null> = writable(null);
+  const selectedDataRegionId: Writable<number | null> = writable(persistedRegionEditorState.regionId);
   const regionRuns: Writable<LooseRecord[]> = writable([]);
   const regionRunsLoading: Writable<boolean> = writable(false);
   const regionRunsStatus: Writable<string> = writable('');
+  const REGION_RUNS_PAGE_SIZE = 20;
   const regionRunsPage: Writable<number> = writable(1);
   const regionRunsPageCount: Writable<number> = writable(0);
   const regionRunsTotal: Writable<number> = writable(0);
+  const regionRunsLimit: Writable<number> = writable(REGION_RUNS_PAGE_SIZE);
   const regionEditorOpen: Writable<boolean> = writable(false);
   const initialized: Writable<boolean> = writable(false);
-  const REGION_RUNS_PAGE_SIZE = 20;
+  let pendingInitialRegionEditorOpen = persistedRegionEditorState.open && persistedRegionEditorState.regionId != null;
   let nextOptimisticRegionId = -1;
   let regionRunsRequestToken = 0;
   let regionRunsAbortController: AbortController | null = null;
@@ -789,6 +839,10 @@ export function createAdminDataController() {
     regionResolveBusy.set(false);
     regionExtractCandidates.set([]);
 
+    if (get(regionEditorOpen) && nextSelectedRegionId) {
+      writePersistedRegionEditorState(nextSelectedRegionId, true);
+    }
+
     if (!resetRuns) return;
 
     regionRunsRequestToken += 1;
@@ -948,6 +1002,11 @@ export function createAdminDataController() {
     }
 
     const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
+    const requestedLimitSource = options.limit ?? get(regionRunsLimit);
+    const requestedLimit = Math.max(
+      1,
+      Math.min(1000, Math.trunc(Number(requestedLimitSource || REGION_RUNS_PAGE_SIZE) || REGION_RUNS_PAGE_SIZE))
+    );
     const background = options.background === true;
     const preserveRowsDuringLoad = background && get(regionRuns).length > 0;
     const preserveStatusDuringLoad = background && preserveRowsDuringLoad;
@@ -966,7 +1025,7 @@ export function createAdminDataController() {
     try {
       const query = new URLSearchParams({
         page: String(normalizedPage),
-        limit: String(REGION_RUNS_PAGE_SIZE)
+        limit: String(requestedLimit)
       });
       const data = await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/runs?${query.toString()}`, {
         signal: regionRunsAbortController.signal
@@ -974,7 +1033,7 @@ export function createAdminDataController() {
       if (requestToken !== regionRunsRequestToken) return;
 
       const total = Math.max(0, Number(data?.total || 0));
-      const pageSize = Math.max(1, Math.trunc(Number(data?.pageSize || REGION_RUNS_PAGE_SIZE) || REGION_RUNS_PAGE_SIZE));
+      const pageSize = Math.max(1, Math.trunc(Number(data?.pageSize || requestedLimit) || requestedLimit));
       const pageCount = Math.max(0, Number(data?.pageCount || 0) || (total > 0 ? Math.ceil(total / pageSize) : 0));
       const responsePage = Number.isInteger(Number(data?.page)) && Number(data.page) > 0
         ? Number(data.page)
@@ -1005,6 +1064,11 @@ export function createAdminDataController() {
     }
   }
 
+  function setRegionRunsLimit(limit: number | string = REGION_RUNS_PAGE_SIZE) {
+    const normalizedLimit = Math.max(1, Math.min(1000, Math.trunc(Number(limit) || REGION_RUNS_PAGE_SIZE) || REGION_RUNS_PAGE_SIZE));
+    regionRunsLimit.set(normalizedLimit);
+  }
+
   async function selectDataRegion(region: DataRegion | null, options: { openEditor?: boolean; resetRuns?: boolean } = {}) {
     if (isOptimisticRegion(region)) return;
 
@@ -1017,9 +1081,8 @@ export function createAdminDataController() {
     regionDraft.set(createRegionDraft(region || null));
     regionResolveBusy.set(false);
     regionExtractCandidates.set([]);
-    if (shouldOpenEditor) {
-      regionEditorOpen.set(true);
-    }
+    regionEditorOpen.set(shouldOpenEditor);
+    writePersistedRegionEditorState(nextSelectedRegionId, shouldOpenEditor);
 
     if (nextSelectedRegionId) {
       void refreshRegionUpstreamStatuses([nextSelectedRegionId], {
@@ -1056,7 +1119,7 @@ export function createAdminDataController() {
       selectedRegionId = null,
       preserveSelection = true,
       ignoreUnsavedFilterTags = false,
-      openEditor = get(regionEditorOpen)
+      openEditor = get(regionEditorOpen) || pendingInitialRegionEditorOpen
     } = options;
     if (!ignoreUnsavedFilterTags && !ensureFilterTagChangesDiscarded()) {
       return false;
@@ -1111,6 +1174,7 @@ export function createAdminDataController() {
       dataStatus.set(msg(error, dataT('status.loadSettingsFailed')));
       return false;
     } finally {
+      pendingInitialRegionEditorOpen = false;
       dataLoading.set(false);
     }
   }
@@ -1173,6 +1237,7 @@ export function createAdminDataController() {
     regionRunsPage.set(1);
     regionRunsStatus.set('');
     dataStatus.set('');
+    writePersistedRegionEditorState(null, false);
     regionEditorOpen.set(true);
     return true;
   }
@@ -1576,6 +1641,7 @@ export function createAdminDataController() {
   }
 
   function closeRegionEditor() {
+    writePersistedRegionEditorState(null, false);
     regionEditorOpen.set(false);
   }
 
@@ -1629,6 +1695,7 @@ export function createAdminDataController() {
     regionRunsPage,
     regionRunsPageCount,
     regionRunsTotal,
+    regionRunsLimit,
     regionEditorOpen,
     initialized,
     applyRegionExtractCandidate,
@@ -1657,6 +1724,7 @@ export function createAdminDataController() {
     loadFilterPresets,
     loadDataSettings,
     loadRegionRuns,
+    setRegionRunsLimit,
     refreshRegionUpstreamStatuses,
     patchFilterPresetDraft,
     patchRegionDraft,

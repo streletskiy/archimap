@@ -44,7 +44,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const hasPageArgument = limitMaybe !== undefined;
     const rawPage = hasPageArgument ? pageOrLimit : 1;
     const rawLimit = hasPageArgument ? limitMaybe : pageOrLimit;
-    const safeLimit = Math.max(1, Math.min(200, Math.trunc(Number(rawLimit) || 25)));
+    const safeLimit = Math.max(1, Math.min(1000, Math.trunc(Number(rawLimit) || 25)));
     const numericRegionId = Number(regionId);
     const hasRegionId = Number.isInteger(numericRegionId) && numericRegionId > 0;
     const whereSql = hasRegionId ? 'WHERE region_id = ?' : '';
@@ -241,6 +241,113 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       WHERE id = ?
     `).run(updatedAt, run.id);
     return getRunById(run.id);
+  }
+
+  async function abandonActiveRunsForRegion(regionId, errorText = 'Sync cancelled by user', options: LooseRecord = {}) {
+    await ensureBootstrapped();
+    const numericRegionId = Number(regionId);
+    if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+      return {
+        runs: [],
+        region: null,
+        repairedRegionState: false
+      };
+    }
+
+    const region = await getRegionById(numericRegionId);
+    if (!region) {
+      return {
+        runs: [],
+        region: null,
+        repairedRegionState: false
+      };
+    }
+
+    const requestedStaleMs = Number(options?.staleMs);
+    const staleMs = Number.isFinite(requestedStaleMs)
+      ? Math.max(0, Math.trunc(requestedStaleMs))
+      : null;
+    const nowTs = parseTimestampMs(toIsoOrNull(now()) || now());
+    const staleBeforeTs = staleMs != null && staleMs > 0 && Number.isFinite(nowTs)
+      ? nowTs - staleMs
+      : null;
+    const activeRows = await db.prepare(`
+      SELECT id, updated_at
+      FROM data_region_sync_runs
+      WHERE region_id = ?
+        AND status IN ('queued', 'running')
+      ORDER BY id
+    `).all(numericRegionId);
+    const candidateRows = staleBeforeTs == null
+      ? activeRows
+      : activeRows.filter((row) => {
+        const updatedAtTs = parseTimestampMs(row?.updated_at);
+        if (!Number.isFinite(updatedAtTs)) {
+          return true;
+        }
+        return updatedAtTs <= staleBeforeTs;
+      });
+
+    const abandonedRuns = [];
+    for (const row of candidateRows) {
+      const result = await markRunFailed(row.id, errorText, {
+        status: String(options?.status || 'abandoned')
+      });
+      if (result?.run) {
+        abandonedRuns.push(result.run);
+      }
+    }
+
+    if (abandonedRuns.length > 0) {
+      return {
+        runs: abandonedRuns,
+        region: await getRegionById(numericRegionId),
+        repairedRegionState: false
+      };
+    }
+
+    const shouldRepairRegionState = options?.repairRegionState !== false
+      && activeRows.length === 0
+      && ['queued', 'running'].includes(String(region.lastSyncStatus || '').trim().toLowerCase());
+    if (!shouldRepairRegionState) {
+      return {
+        runs: [],
+        region,
+        repairedRegionState: false
+      };
+    }
+
+    const finishedAt = toIsoOrNull(now());
+    const abandonedMessage = normalizeNullableText(errorText, 4000) || 'Sync cancelled by user';
+    const abandonedStatus = String(options?.status || 'abandoned');
+    const nextSyncAt = computeNextSyncAt({
+      ...region,
+      lastSyncStatus: abandonedStatus,
+      lastSyncFinishedAt: finishedAt
+    }, finishedAt);
+
+    await db.prepare(`
+      UPDATE data_sync_regions
+      SET
+        last_sync_status = ?,
+        last_sync_finished_at = ?,
+        last_sync_error = ?,
+        next_sync_at = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      abandonedStatus,
+      finishedAt,
+      abandonedMessage,
+      nextSyncAt,
+      region.id
+    );
+
+    return {
+      runs: [],
+      region: await getRegionById(region.id),
+      repairedRegionState: true
+    };
   }
 
   async function markRunSucceeded(runId, summary: LooseRecord = {}) {
@@ -512,6 +619,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     markRunSucceeded,
     markRunFailed,
     markRunCancelRequested,
+    abandonActiveRunsForRegion,
     updateRunStage,
     touchRunHeartbeat,
     recoverInterruptedRuns,

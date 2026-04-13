@@ -12,6 +12,7 @@
 2. Pull release image: `docker pull streletskiy/archimap:<version>`.
 3. Set `ARCHIMAP_IMAGE=streletskiy/archimap:<version>` in environment (or `.env` used by Compose).
 4. Start/update service: `docker compose up -d`.
+   - `docker-compose.yml` sets `pull_policy: never` for the app service, so Compose will not auto-pull the image for you at this step.
    - Pending PostgreSQL migrations are applied automatically by the app container during startup.
    - Do not bind-mount local `./db` over `/app/db`; the image already contains the migration SQL.
 5. Validate:
@@ -123,6 +124,8 @@
 - Current managed sync workers keep a heartbeat on every owned `queued`/`running` run, so another runtime instance should no longer archive a live sync immediately.
 - If you still see this after upgrading, look for an actual second app process/container pointing at the same DB or an old release still running without the heartbeat fix.
 - Long-running orphaned extract jobs should now self-stop because both `scripts/sync-osm-region.ts` and `scripts/sync-osm-buildings.py` watch their parent PID.
+- Admin cancel now has a stale-state fallback: when the current runtime no longer owns the worker, it can still abandon `queued`/`running` runs whose DB heartbeat is already stale and repair a stuck region row that still says `queued`/`running` even though no active run remains.
+- Region update/delete checks now block only on real active sync runs, not on a stale `last_sync_status` value left behind after an interrupted worker.
 
 ### Building selection in map UI
 

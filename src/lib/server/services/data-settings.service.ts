@@ -313,6 +313,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
     markRunSucceeded: syncRunsDomain.markRunSucceeded,
     markRunFailed: syncRunsDomain.markRunFailed,
     markRunCancelRequested: syncRunsDomain.markRunCancelRequested,
+    abandonActiveRunsForRegion: syncRunsDomain.abandonActiveRunsForRegion,
     updateRunStage: syncRunsDomain.updateRunStage,
     touchRunHeartbeat: syncRunsDomain.touchRunHeartbeat,
     recoverInterruptedRuns: syncRunsDomain.recoverInterruptedRuns,

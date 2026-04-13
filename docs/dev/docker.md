@@ -116,8 +116,13 @@ Docker downloads only changed layers during pull.
 
 `docker-compose.yml` reads `ARCHIMAP_IMAGE`, so the same compose file can be used for:
 
-- local source builds (`docker compose up --build`, default image tag `streletskiy/archimap:dev`)
+- local source builds (`docker compose up --build`, default image tag `archimap-local:dev`)
 - registry deploys (`ARCHIMAP_IMAGE=streletskiy/archimap:<version> docker compose up -d`)
+
+The `archimap` service also sets `pull_policy: never`. Compose therefore does not silently pull a registry image for the app service when the local Docker image cache was wiped or Docker was reinstalled. This avoids accidentally booting an older published tag while iterating on the local working tree:
+
+- for local source changes, rebuild explicitly with `docker compose up -d --build archimap`
+- for published releases, pull the image first (`docker pull streletskiy/archimap:<version>`) and then run `docker compose up -d`
 
 `admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` only when the archive is missing or out of date.
 

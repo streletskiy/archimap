@@ -160,10 +160,15 @@ When a new control is needed:
 - The modal uses a stacked layout with the current-status summary spanning the full modal width and the editable form below it, so the form keeps usable space on large screens.
 - The current-status card keeps itself compact by rendering its fields as a responsive grid instead of a tall vertical list.
 - Save, sync, and delete actions live on the right side of the bounds row inside the current-status card instead of floating outside the status block.
+- On narrow screens, save/sync/delete actions stack vertically and stretch to the available width instead of introducing horizontal scrolling inside the status card.
 - The current-status card must show both the imported source version and the latest upstream version, so admins can see whether a real region update exists before starting a sync.
 - If the upstream extract is already up to date, the manual sync action stays disabled; failed or never-synced regions remain actionable.
 - Region list loading should stay fast even with many regions: load the base region list first, then lazily refresh upstream status only for the visible page and the currently selected region.
 - Opening a region modal must stay responsive: upstream checks and sync-history loading run independently in the background and must not block the modal shell from rendering.
+- On narrow screens, region editor modals use one vertical scroll surface for the body content; avoid nested vertical scroll panes for the form and sync history there.
+- On desktop, the sync-history pane may stay pinned beside the editor as a full-height card with its own internal scroll, while the form keeps the remaining column.
+- Desktop sync history stays paginated with a fixed 20-row page size; on narrow screens the same modal may expand history into the main scroll surface and request the full available run list instead of showing page controls.
+- Opening a region modal must lock background page scrolling until the modal closes.
 - Sync history uses paginated table rows and loading skeletons so the history pane behaves like edits and region lists elsewhere.
 - Map/list selection for admin regions should open the modal rather than embedding a second editor pane on the page.
 - Region lists use edits-style page controls and loading skeletons so long result sets stay predictable without infinite scroll.

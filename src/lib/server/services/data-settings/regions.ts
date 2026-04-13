@@ -1,6 +1,12 @@
 import type { Region, RegionInput } from '$shared/types';
 
 const DELETE_REGION_SQL = {
+  countActiveRuns: `
+    SELECT COUNT(*) AS total
+    FROM data_region_sync_runs
+    WHERE region_id = ?
+      AND status IN ('queued', 'running')
+  `,
   countMemberships: `
     SELECT COUNT(*) AS total
     FROM data_region_memberships
@@ -67,6 +73,10 @@ function createRegionsDomain(context: LooseRecord = {}) {
   async function getRegionById(regionId): Promise<Region | null> {
     await ensureBootstrapped();
     return rowToRegion(await getRegionRowById(regionId));
+  }
+
+  async function countActiveRuns(regionId) {
+    return Number((await db.prepare(DELETE_REGION_SQL.countActiveRuns).get(Number(regionId)))?.total || 0);
   }
 
   async function listRegions(options: { includeDisabled?: boolean; includeStorageStats?: boolean } = {}): Promise<Region[]> {
@@ -241,7 +251,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     if (regionId > 0 && !existing) {
       throw new Error('Region not found');
     }
-    if (existing && ['queued', 'running'].includes(existing.lastSyncStatus)) {
+    if (existing && ['queued', 'running'].includes(existing.lastSyncStatus) && await countActiveRuns(existing.id) > 0) {
       throw new Error('Region cannot be updated while it is queued or actively syncing');
     }
 
@@ -444,7 +454,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     if (!existing) {
       throw new Error('Region not found');
     }
-    if (['queued', 'running'].includes(existing.lastSyncStatus)) {
+    if (['queued', 'running'].includes(existing.lastSyncStatus) && await countActiveRuns(existing.id) > 0) {
       throw new Error('Region cannot be deleted while it is queued or actively syncing');
     }
 

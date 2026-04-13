@@ -215,14 +215,14 @@ test('applyRegionImport batches sqlite imports and keeps only ids in temp cleanu
       },
       {
         step: 'rows',
-        progress: 89,
+        progress: 69,
         detail: 'writing imported rows 1000/1002',
         processedFeatureCount: 1000,
         totalFeatureCount: 1002
       },
       {
         step: 'rows',
-        progress: 90,
+        progress: 70,
         detail: 'writing imported rows 1002/1002',
         processedFeatureCount: 1002,
         totalFeatureCount: 1002

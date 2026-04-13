@@ -33,6 +33,21 @@ async function loadControllerModule() {
   return import(pathToFileURL(modulePath).href);
 }
 
+function createStorage(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
+    }
+  };
+}
+
 test('new region save stays pending until the create request resolves and skips the heavy refresh path', async () => {
   const { createAdminDataController } = await loadControllerModule();
   const saveGate = createDeferred();
@@ -184,6 +199,54 @@ test('background region run refresh preserves current history rows without enabl
         id: 502,
         status: 'running',
         triggerReason: 'manual'
+      }
+    ]);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test('region run load uses the configured expanded history limit', async () => {
+  const { createAdminDataController } = await loadControllerModule();
+  let requestedUrl = '';
+
+  mock.method(globalThis, 'fetch', async (input, init: LooseRecord = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+
+    if (method === 'GET' && url.startsWith('/api/admin/app-settings/data/regions/77/runs?')) {
+      requestedUrl = url;
+      return createJsonResponse({
+        items: [
+          {
+            id: 801,
+            status: 'success',
+            triggerReason: 'scheduled'
+          }
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 1000,
+        pageCount: 1
+      });
+    }
+
+    throw new Error(`unexpected request: ${method} ${url}`);
+  });
+
+  try {
+    const controller = createAdminDataController();
+    controller.setRegionRunsLimit(1000);
+
+    await controller.loadRegionRuns(77, 1);
+
+    assert.match(requestedUrl, /limit=1000/);
+    assert.equal(get(controller.regionRunsPageCount), 1);
+    assert.deepEqual(get(controller.regionRuns), [
+      {
+        id: 801,
+        status: 'success',
+        triggerReason: 'scheduled'
       }
     ]);
   } finally {
@@ -516,5 +579,125 @@ test('stale upstream status refresh does not clear a live queued sync state', as
     assert.equal(region?.upstreamStatus, 'update_available');
   } finally {
     mock.restoreAll();
+  }
+});
+
+test('controller restores the persisted region editor selection and clears it on close', async () => {
+  const { createAdminDataController } = await loadControllerModule();
+  const previousSessionStorage = global.sessionStorage;
+  const sessionStorage = createStorage({
+    'archimap-admin-data-region-editor-v1': JSON.stringify({
+      regionId: 77,
+      open: true
+    })
+  });
+
+  const region = {
+    id: 77,
+    slug: 'demo-region',
+    name: 'Demo Region',
+    sourceType: 'extract',
+    searchQuery: 'Demo',
+    extractSource: 'geofabrik',
+    extractId: 'demo/region',
+    extractLabel: 'Demo Region',
+    extractResolutionStatus: 'resolved',
+    extractResolutionError: null,
+    canSync: true,
+    enabled: true,
+    autoSyncEnabled: true,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 24,
+    pmtilesMinZoom: 13,
+    pmtilesMaxZoom: 16,
+    sourceLayer: 'buildings',
+    lastSyncStatus: 'idle',
+    lastSyncError: null,
+    lastSuccessfulSyncAt: '2026-04-10T00:00:00.000Z',
+    sourceDataUpdatedAt: '2026-04-10T00:00:00.000Z',
+    latestSourceDataUpdatedAt: null,
+    upstreamCheckedAt: '2026-04-10T01:00:00.000Z',
+    upstreamStatus: 'unknown',
+    upstreamError: null,
+    updateAvailable: false,
+    lastSyncFinishedAt: '2026-04-10T00:00:00.000Z',
+    nextSyncAt: '2026-04-12T00:00:00.000Z',
+    pmtilesBytes: 1024,
+    dbBytes: 2048,
+    dbBytesApproximate: false,
+    bounds: null
+  };
+
+  global.sessionStorage = sessionStorage;
+
+  mock.method(globalThis, 'fetch', async (input, init: LooseRecord = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+
+    if (method === 'GET' && url === '/api/admin/app-settings/data') {
+      return createJsonResponse({
+        ok: true,
+        item: {
+          source: 'db',
+          bootstrap: { completed: true, source: null },
+          regions: [region],
+          filterTags: {
+            source: 'default',
+            allowlist: [],
+            defaultAllowlist: [],
+            availableKeys: [],
+            updatedBy: null,
+            updatedAt: null
+          },
+          filterPresets: {
+            source: 'db',
+            items: []
+          }
+        }
+      });
+    }
+
+    if (method === 'GET' && url.startsWith('/api/admin/app-settings/data/regions/77/runs?')) {
+      return createJsonResponse({
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        pageCount: 0
+      });
+    }
+
+    if (method === 'GET' && url.startsWith('/api/admin/app-settings/data/regions/upstream-status?')) {
+      return createJsonResponse({
+        ok: true,
+        items: []
+      });
+    }
+
+    throw new Error(`unexpected request: ${method} ${url}`);
+  });
+
+  try {
+    const controller = createAdminDataController();
+    await controller.ensureLoaded({ preserveSelection: true });
+
+    assert.equal(get(controller.selectedDataRegionId), 77);
+    assert.equal(get(controller.regionEditorOpen), true);
+    assert.equal(
+      sessionStorage.getItem('archimap-admin-data-region-editor-v1'),
+      JSON.stringify({ regionId: 77, open: true })
+    );
+
+    controller.closeRegionEditor();
+
+    assert.equal(get(controller.regionEditorOpen), false);
+    assert.equal(sessionStorage.getItem('archimap-admin-data-region-editor-v1'), null);
+  } finally {
+    mock.restoreAll();
+    if (typeof previousSessionStorage === 'undefined') {
+      delete global.sessionStorage;
+    } else {
+      global.sessionStorage = previousSessionStorage;
+    }
   }
 });

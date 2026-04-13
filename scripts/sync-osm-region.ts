@@ -208,22 +208,20 @@ function getRegionImportReadOptions(runtimeOptions: LooseRecord = {}) {
 }
 
 function shouldUseLowMemoryPipeline(runtimeOptions: LooseRecord = {}, env: LooseRecord = process.env) {
+  const enabled =
+    String(env.REGION_SYNC_LOW_MEMORY_PIPELINE || '')
+      .trim()
+      .toLowerCase() === 'true';
+  if (!enabled) return false;
+
   // SQLite still materializes the full region during remainder expansion when
   // exporting region members back out for PMTiles rebuilds, so apply-first mode
-  // does not actually lower peak memory there yet.
-  const isPostgres =
+  // would not actually lower peak memory there yet.
+  return (
     String(runtimeOptions.dbProvider || DB_PROVIDER)
       .trim()
-      .toLowerCase() === 'postgres';
-  if (!isPostgres) return false;
-
-  // For Postgres the low-memory pipeline is enabled by default: it applies the DB
-  // import first (so the database is not stale if PMTiles build fails) and re-exports
-  // GeoJSON from the DB, which also includes building_remainder rows that the direct
-  // DuckDB→GeoJSON path omits.  Set REGION_SYNC_LOW_MEMORY_PIPELINE=false to opt out.
-  const override = String(env.REGION_SYNC_LOW_MEMORY_PIPELINE || '').trim().toLowerCase();
-  if (override === 'false') return false;
-  return true;
+      .toLowerCase() === 'postgres'
+  );
 }
 
 function shouldRunRuntimeFollowup(options: LooseRecord = {}) {

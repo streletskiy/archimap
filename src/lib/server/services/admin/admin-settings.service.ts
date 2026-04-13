@@ -358,7 +358,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       throw createAdminError(400, 'Invalid region id');
     }
     const page = Math.max(1, Math.trunc(Number(pageRaw) || 1));
-    const limit = parseLimit(limitRaw, 20, 1, 200);
+    const limit = parseLimit(limitRaw, 20, 1, 1000);
     const region = await service.getRegionById(regionId);
     if (!region) {
       throw createAdminError(404, 'Region not found');

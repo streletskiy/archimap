@@ -723,6 +723,38 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       };
     }
 
+    if (typeof dataSettingsService.abandonActiveRunsForRegion === 'function') {
+      try {
+        const abandoned = await dataSettingsService.abandonActiveRunsForRegion(
+          numericRegionId,
+          'Sync cancelled by user',
+          {
+            status: 'abandoned',
+            staleMs: interruptedRunStaleMs,
+            repairRegionState: true
+          }
+        );
+        if (Array.isArray(abandoned?.runs) && abandoned.runs.length > 0) {
+          reloadSchedulesInBackground(`cancel-stale:${numericRegionId}`);
+          return {
+            cancelled: true,
+            target: 'stale',
+            regionId: numericRegionId
+          };
+        }
+        if (abandoned?.repairedRegionState) {
+          reloadSchedulesInBackground(`cancel-repair:${numericRegionId}`);
+          return {
+            cancelled: true,
+            target: 'stale',
+            regionId: numericRegionId
+          };
+        }
+      } catch (error) {
+        log.error(`[region-sync] failed to abandon stale run for region ${numericRegionId}: ${String(error?.message || error)}`);
+      }
+    }
+
     return {
       cancelled: false,
       target: 'none',

@@ -1,5 +1,5 @@
 <script>
-  import { tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
 
   import { t } from '$lib/i18n/index';
   import { formatUiDate } from '$lib/utils/edit-ui';
@@ -31,9 +31,19 @@
   export let onClose = () => {};
 
   const REGION_FORM_ID = 'admin-data-region-form';
+  const DESKTOP_REGION_RUNS_LIMIT = 20;
+  const MOBILE_REGION_RUNS_LIMIT = 1000;
+  const MOBILE_HISTORY_MEDIA_QUERY = '(max-width: 767px)';
+  const SYNC_PIPELINE_STAGES = ['download', 'extract', 'export', 'build', 'apply', 'publish', 'followup'];
+  const SYNC_PIPELINE_STORAGE_PREFIX = 'archimap-admin-region-pipeline-v1:';
 
   let modalEl = null;
   let hadOpenState = false;
+  let seenStages;
+  let scrollLockState = null;
+  let historyUsesExpandedMobileList = false;
+  let historyViewportMediaQuery = null;
+  let lastAppliedRegionRunsLimit = DESKTOP_REGION_RUNS_LIMIT;
 
   function closeModal() {
     if (closeDisabled) return;
@@ -102,35 +112,167 @@
   $: selectedStatusMeta = controller.getRegionStatusMeta(selectedRegion?.lastSyncStatus, selectedRegion);
   $: selectedUpdateMeta = controller.getRegionUpdateMeta(selectedRegion);
   $: syncBlockedReason = $regionDraft.id ? controller.getRegionSyncBlockedReason(selectedRegion) : '';
-  const SYNC_PIPELINE_STAGES = ['download', 'extract', 'export', 'build', 'apply', 'publish', 'followup'];
 
-  // Track which stages have been seen as active/done so we can mark them
-  // correctly regardless of execution order (standard vs low-memory pipeline).
-  let seenStages = new Set();
-  let lastRunId = null;
+  function getPipelineStorage() {
+    if (typeof window === 'undefined' || !window.sessionStorage) return null;
+    return window.sessionStorage;
+  }
 
-  function computePipelineState(run) {
-    if (!run) return { steps: [], overallProgress: 0 };
+  function getRunId(run) {
+    const runId = Number(run?.id || run?.runId || 0);
+    return Number.isInteger(runId) && runId > 0 ? runId : null;
+  }
 
-    // Reset seen stages when the run changes
-    const runId = run.id || run.runId || null;
-    if (runId && runId !== lastRunId) {
-      seenStages = new Set();
-      lastRunId = runId;
+  function getRunStorageKey(runId) {
+    return runId ? `${SYNC_PIPELINE_STORAGE_PREFIX}${runId}` : '';
+  }
+
+  function normalizePipelineStage(stage) {
+    const code = String(stage || '').trim().toLowerCase();
+    if (!code) return '';
+    if (code === 'tile_join') return 'build';
+    if (SYNC_PIPELINE_STAGES.includes(code)) return code;
+    return '';
+  }
+
+  function inferSeenStages(currentStage) {
+    const effectiveStage = normalizePipelineStage(currentStage);
+    const stageIndex = SYNC_PIPELINE_STAGES.indexOf(effectiveStage);
+    if (stageIndex <= 0) return new Set();
+    return new Set(SYNC_PIPELINE_STAGES.slice(0, stageIndex));
+  }
+
+  function readPersistedSeenStages(runId) {
+    const storage = getPipelineStorage();
+    const storageKey = getRunStorageKey(runId);
+    if (!storage || !storageKey) return new Set();
+
+    try {
+      const raw = storage.getItem(storageKey);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      const stages = Array.isArray(parsed?.stages) ? parsed.stages : [];
+      return new Set(
+        stages
+          .map((stage) => normalizePipelineStage(stage))
+          .filter(Boolean)
+      );
+    } catch {
+      return new Set();
     }
+  }
+
+  function persistSeenStages(runId, stages) {
+    const storage = getPipelineStorage();
+    const storageKey = getRunStorageKey(runId);
+    if (!storage || !storageKey) return;
+
+    try {
+      const serializedStages = [...stages].filter((stage) => SYNC_PIPELINE_STAGES.includes(stage));
+      if (serializedStages.length === 0) {
+        storage.removeItem(storageKey);
+        return;
+      }
+      storage.setItem(storageKey, JSON.stringify({
+        stages: serializedStages,
+        updatedAt: Date.now()
+      }));
+    } catch {
+      // Ignore storage quota/privacy failures and keep the progress state in memory only.
+    }
+  }
+
+  function lockBackgroundScroll() {
+    if (typeof window === 'undefined' || typeof document === 'undefined' || scrollLockState) return;
+
+    const html = document.documentElement;
+    const body = document.body;
+    if (!html || !body) return;
+
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    scrollLockState = {
+      scrollY,
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyLeft: body.style.left,
+      bodyRight: body.style.right,
+      bodyWidth: body.style.width
+    };
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+  }
+
+  function unlockBackgroundScroll() {
+    if (typeof window === 'undefined' || typeof document === 'undefined' || !scrollLockState) return;
+
+    const html = document.documentElement;
+    const body = document.body;
+    const {
+      scrollY,
+      htmlOverflow,
+      bodyOverflow,
+      bodyPosition,
+      bodyTop,
+      bodyLeft,
+      bodyRight,
+      bodyWidth
+    } = scrollLockState;
+
+    html.style.overflow = htmlOverflow;
+    body.style.overflow = bodyOverflow;
+    body.style.position = bodyPosition;
+    body.style.top = bodyTop;
+    body.style.left = bodyLeft;
+    body.style.right = bodyRight;
+    body.style.width = bodyWidth;
+    scrollLockState = null;
+    window.scrollTo(0, scrollY);
+  }
+
+  function getPreferredRegionRunsLimit() {
+    return open && historyUsesExpandedMobileList
+      ? MOBILE_REGION_RUNS_LIMIT
+      : DESKTOP_REGION_RUNS_LIMIT;
+  }
+
+  function syncHistoryViewportMode() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      historyUsesExpandedMobileList = false;
+      return;
+    }
+    historyUsesExpandedMobileList = Boolean(window.matchMedia(MOBILE_HISTORY_MEDIA_QUERY).matches);
+  }
+
+  function handleHistoryViewportChange(event) {
+    historyUsesExpandedMobileList = Boolean(event?.matches);
+  }
+
+  function applyRegionRunsLimit(nextRegionRunsLimit) {
+    lastAppliedRegionRunsLimit = nextRegionRunsLimit;
+    controller?.setRegionRunsLimit?.(nextRegionRunsLimit);
+
+    const numericSelectedRegionId = Number(selectedDataRegionId || 0);
+    if (open && Number.isInteger(numericSelectedRegionId) && numericSelectedRegionId > 0) {
+      void controller?.loadRegionRuns?.(numericSelectedRegionId, 1, { limit: nextRegionRunsLimit });
+    }
+  }
+
+  function computePipelineState(run, trackedStages = new Set()) {
+    if (!run) return { steps: [], overallProgress: 0 };
 
     const currentStage = String(run.stage || '').trim().toLowerCase();
     const stageProgress = Number.isFinite(Number(run.stageProgress))
       ? Math.max(0, Math.min(100, Math.round(Number(run.stageProgress))))
       : null;
-
-    // tile_join is a sub-stage of build
-    const effectiveStage = currentStage === 'tile_join' ? 'build' : currentStage;
-
-    // Remember every stage we've visited
-    if (effectiveStage && effectiveStage !== 'done') {
-      seenStages.add(effectiveStage);
-    }
+    const effectiveStage = normalizePipelineStage(currentStage);
 
     const steps = SYNC_PIPELINE_STAGES.map((stage) => {
       let state = 'pending';
@@ -138,7 +280,7 @@
         state = 'done';
       } else if (stage === effectiveStage) {
         state = 'active';
-      } else if (seenStages.has(stage) && stage !== effectiveStage) {
+      } else if (trackedStages.has(stage) && stage !== effectiveStage) {
         state = 'done';
       }
       return { stage, state, label: formatStageLabel(stage) };
@@ -146,16 +288,35 @@
 
     const doneCount = steps.filter(s => s.state === 'done').length;
     const totalStages = SYNC_PIPELINE_STAGES.length;
-    let overallProgress = 0;
-    if (currentStage === 'done') {
-      overallProgress = 100;
-    } else {
-      const completedFraction = doneCount / totalStages;
-      const stageFraction = (stageProgress != null ? stageProgress / 100 : 0.5) / totalStages;
-      overallProgress = Math.round((completedFraction + stageFraction) * 100);
-    }
+    const overallProgress = currentStage === 'done'
+      ? 100
+      : Math.round((
+        (doneCount / totalStages)
+        + ((stageProgress != null ? stageProgress / 100 : 0.5) / totalStages)
+      ) * 100);
 
     return { steps, overallProgress };
+  }
+
+  function resolveSeenStages(run) {
+    const runId = getRunId(run);
+    if (!runId || !run) return new Set();
+
+    const currentStage = String(run.stage || '').trim().toLowerCase();
+    const effectiveStage = normalizePipelineStage(currentStage);
+    let nextSeenStages = readPersistedSeenStages(runId);
+
+    if (currentStage === 'done') {
+      nextSeenStages = new Set(SYNC_PIPELINE_STAGES);
+    } else if (effectiveStage) {
+      if (nextSeenStages.size === 0) {
+        nextSeenStages = new Set(inferSeenStages(effectiveStage));
+      }
+      nextSeenStages.add(effectiveStage);
+    }
+
+    persistSeenStages(runId, nextSeenStages);
+    return nextSeenStages;
   }
 
   $: activeRun = findActiveRun(regionRuns);
@@ -164,7 +325,8 @@
     ? Math.max(0, Math.min(100, Math.round(Number(activeRun.stageProgress))))
     : null;
   $: activeStageDetail = activeRun?.stageDetail ? String(activeRun.stageDetail) : '';
-  $: pipeline = computePipelineState(activeRun);
+  $: seenStages = activeRun ? resolveSeenStages(activeRun) : new Set();
+  $: pipeline = computePipelineState(activeRun, seenStages || new Set());
   $: syncIsActive = Boolean(selectedRegion) && ['queued', 'running'].includes(
     String(selectedRegion?.lastSyncStatus || '').trim().toLowerCase()
   );
@@ -172,6 +334,7 @@
     ? String(selectedRegion.lastSyncError)
     : '';
   $: cancelRequested = Boolean(activeRun?.cancelRequested) || String(activeRun?.stage || '').toLowerCase() === 'cancelling';
+  $: showRegionRunsPagination = !historyUsesExpandedMobileList;
 
   $: if (open && !hadOpenState) {
     hadOpenState = true;
@@ -179,7 +342,44 @@
   } else if (!open && hadOpenState) {
     hadOpenState = false;
   }
+  $: if (open) {
+    lockBackgroundScroll();
+  } else {
+    unlockBackgroundScroll();
+  }
+  $: {
+    const nextRegionRunsLimit = getPreferredRegionRunsLimit();
+    if (nextRegionRunsLimit !== lastAppliedRegionRunsLimit) {
+      applyRegionRunsLimit(nextRegionRunsLimit);
+    }
+  }
   $: void hadOpenState;
+
+  onMount(() => {
+    syncHistoryViewportMode();
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+
+    historyViewportMediaQuery = window.matchMedia(MOBILE_HISTORY_MEDIA_QUERY);
+    historyUsesExpandedMobileList = Boolean(historyViewportMediaQuery.matches);
+    if (typeof historyViewportMediaQuery.addEventListener === 'function') {
+      historyViewportMediaQuery.addEventListener('change', handleHistoryViewportChange);
+    } else {
+      historyViewportMediaQuery.addListener?.(handleHistoryViewportChange);
+    }
+
+    return () => {
+      if (typeof historyViewportMediaQuery?.removeEventListener === 'function') {
+        historyViewportMediaQuery.removeEventListener('change', handleHistoryViewportChange);
+      } else {
+        historyViewportMediaQuery?.removeListener?.(handleHistoryViewportChange);
+      }
+      historyViewportMediaQuery = null;
+    };
+  });
+
+  onDestroy(() => {
+    unlockBackgroundScroll();
+  });
 </script>
 
 {#if open}
@@ -332,7 +532,7 @@
                   type="submit"
                   form={REGION_FORM_ID}
                   size="xs"
-                  className="whitespace-nowrap shrink-0"
+                  className="data-region-status-action-button"
                   disabled={regionSaving
                     || regionDeleting
                     || !String($regionDraft.extractId || '').trim()
@@ -348,7 +548,7 @@
                       type="button"
                       variant="danger"
                       size="xs"
-                      className="whitespace-nowrap shrink-0"
+                      className="data-region-status-action-button"
                       disabled={cancelRequested || regionSyncCancelBusy}
                       onclick={() => controller.cancelRegionSync($regionDraft.id)}
                     >
@@ -361,7 +561,7 @@
                       type="button"
                       variant="secondary"
                       size="xs"
-                      className="whitespace-nowrap shrink-0"
+                      className="data-region-status-action-button"
                       disabled={regionSaving || regionDeleting || regionSyncBusy || !controller.canSyncRegionNow(selectedRegion)}
                       onclick={() => controller.syncRegionNow($regionDraft.id)}
                     >
@@ -372,7 +572,7 @@
                     type="button"
                     variant="danger"
                     size="xs"
-                    className="whitespace-nowrap shrink-0"
+                    className="data-region-status-action-button"
                     disabled={regionSaving || regionDeleting || regionSyncBusy || syncIsActive}
                     onclick={() => controller.deleteDataRegion($regionDraft.id)}
                   >
@@ -391,28 +591,31 @@
           {/if}
         </section>
 
-        <div class="data-region-form-pane">
-          <AdminDataForm
+        <div class="data-region-editor-grid">
+          <div class="data-region-form-pane">
+            <AdminDataForm
+              {controller}
+              formId={REGION_FORM_ID}
+              regionDraft={regionDraft}
+              regionExtractCandidates={regionExtractCandidates}
+              regionSaving={regionSaving}
+              regionDeleting={regionDeleting}
+              regionResolveBusy={regionResolveBusy}
+            />
+          </div>
+
+          <AdminDataHistorySection
             {controller}
-            formId={REGION_FORM_ID}
-            regionDraft={regionDraft}
-            regionExtractCandidates={regionExtractCandidates}
-            regionSaving={regionSaving}
-            regionDeleting={regionDeleting}
-            regionResolveBusy={regionResolveBusy}
+            {selectedDataRegionId}
+            {regionRuns}
+            {regionRunsLoading}
+            {regionRunsStatus}
+            {regionRunsPage}
+            {regionRunsPageCount}
+            {regionRunsTotal}
+            showPagination={showRegionRunsPagination}
           />
         </div>
-
-        <AdminDataHistorySection
-          {controller}
-          {selectedDataRegionId}
-          {regionRuns}
-          {regionRunsLoading}
-          {regionRunsStatus}
-          {regionRunsPage}
-          {regionRunsPageCount}
-          {regionRunsTotal}
-        />
       </div>
     </div>
   </div>
@@ -470,22 +673,28 @@
   }
 
   .data-region-modal-body {
-    --data-region-history-height: clamp(11rem, 24vh, 15rem);
     min-height: 0;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) var(--data-region-history-height);
+    display: flex;
+    flex-direction: column;
     gap: 0.9rem;
     padding: 0.8rem;
-    overflow: hidden;
+    overflow: auto;
     border: 1px solid var(--panel-border);
     border-radius: 1.15rem;
     background: var(--panel-solid);
   }
 
+  .data-region-editor-grid {
+    min-height: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+
   .data-region-form-pane {
-    min-height: 0;
-    overflow: auto;
-    padding-right: 0.1rem;
+    min-height: auto;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .data-region-status-card {
@@ -686,10 +895,14 @@
   .data-region-status-actions {
     display: flex;
     flex: 0 0 auto;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
     gap: 0.35rem;
+  }
+
+  :global(.data-region-status-action-button) {
+    white-space: nowrap;
   }
 
   .data-region-status-label {
@@ -720,6 +933,29 @@
   }
 
   @media (min-width: 960px) {
+    .data-region-modal-body {
+      overflow: hidden;
+    }
+
+    .data-region-editor-grid {
+      min-height: 0;
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+      align-items: stretch;
+    }
+
+    .data-region-form-pane {
+      min-height: 0;
+      overflow: auto;
+      padding-right: 0.2rem;
+    }
+
+    .data-region-editor-grid :global(.data-history-card) {
+      min-height: 0;
+      height: 100%;
+    }
+
     .data-region-status-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
@@ -741,12 +977,13 @@
     }
 
     .data-region-modal-body {
-      --data-region-history-height: clamp(10rem, 28dvh, 13rem);
-      grid-template-rows: auto auto auto;
-      align-content: start;
       gap: 0.75rem;
       padding: 0.75rem;
       overflow: auto;
+    }
+
+    .data-region-editor-grid {
+      gap: 0.75rem;
     }
 
     .data-region-status-grid {
@@ -756,11 +993,6 @@
     .data-region-form-pane {
       overflow: visible;
       padding-right: 0;
-    }
-
-    .data-region-modal-body :global(.data-history-card) {
-      min-height: clamp(11rem, 30dvh, 15rem);
-      max-height: min(18rem, 38dvh);
     }
 
     .data-region-status-item--bounds {
@@ -778,15 +1010,18 @@
     }
 
     .data-region-status-actions {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
       justify-content: flex-start;
-      overflow-x: auto;
-      max-width: 100%;
-      padding-bottom: 0.05rem;
-      scrollbar-width: none;
+      overflow: visible;
+      padding-bottom: 0;
+      gap: 0.45rem;
     }
 
-    .data-region-status-actions::-webkit-scrollbar {
-      display: none;
+    :global(.data-region-status-action-button) {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>

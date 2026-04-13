@@ -147,6 +147,29 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
       run.stage = 'cancelling';
       return { ...run };
     },
+    abandonActiveRunsForRegion: async (regionId) => {
+      const numericRegionId = Number(regionId);
+      const runs = [...runMap.values()]
+        .filter((run) => run.regionId === numericRegionId && ['queued', 'running'].includes(String(run.status || '')))
+        .map((run) => {
+          run.status = 'abandoned';
+          run.error = 'Sync cancelled by user';
+          return { ...run };
+        });
+      const region = regionMap.get(numericRegionId);
+      let repairedRegionState = false;
+      if (region && runs.length > 0) {
+        region.lastSyncStatus = 'abandoned';
+      } else if (region && ['queued', 'running'].includes(String(region.lastSyncStatus || ''))) {
+        region.lastSyncStatus = 'abandoned';
+        repairedRegionState = true;
+      }
+      return {
+        runs,
+        region: region ? { ...region } : null,
+        repairedRegionState
+      };
+    },
     rescheduleRegionAfterSkippedSync: async (regionId) => {
       const region = regionMap.get(Number(regionId));
       if (region) {
@@ -991,4 +1014,41 @@ test('requestRegionSyncCancel returns no-op when region has no active sync', asy
   const result = await workers.requestRegionSyncCancel(51);
   assert.equal(result.cancelled, false);
   assert.equal(result.target, 'none');
+});
+
+test('requestRegionSyncCancel abandons stale runs when no local worker owns the region sync', async () => {
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 61,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const staleRun = await dataSettingsService.createQueuedRun(61, 'manual', 'tester');
+  await dataSettingsService.markRunStarted(staleRun.id);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => createChildProcessStub(),
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const result = await workers.requestRegionSyncCancel(61);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.target, 'stale');
+
+  const finalRun = await dataSettingsService.getRunById(staleRun.id);
+  assert.equal(finalRun?.status, 'abandoned');
+  const region = await dataSettingsService.getRegionById(61);
+  assert.equal(region?.lastSyncStatus, 'abandoned');
 });

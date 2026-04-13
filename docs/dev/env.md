@@ -56,6 +56,12 @@ The exhaustive template with current defaults and comments is [`.env.example`](.
 - `METRICS_ENABLED`
 - `APP_DISPLAY_NAME`
 
+## Docker image selection
+
+- `ARCHIMAP_IMAGE` - optional compose image tag for the `archimap` service.
+- Local source builds should usually leave it unset or point it to a local tag such as `archimap-local:dev`.
+- Pull-based deploys should set it to a published registry tag such as `streletskiy/archimap:1.2.3`.
+
 ## DB-backed data settings
 
 - Runtime OSM region settings live in `Admin -> Data`.

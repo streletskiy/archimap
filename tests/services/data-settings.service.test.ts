@@ -1258,6 +1258,66 @@ test('markRunCancelRequested sets cancelling stage and finalization clears trans
   assert.equal(failed.region.lastSyncStatus, 'abandoned');
 });
 
+test('abandonActiveRunsForRegion abandons stale active runs and repairs stuck region state', async () => {
+  const db = createTestDb();
+  let currentNow = new Date('2026-04-09T11:00:00.000Z');
+  const service = createService({
+    db,
+    now: () => currentNow
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Stale Cancel Region',
+    slug: 'stale-cancel-region',
+    extractId: 'stale-cancel-region',
+    autoSyncEnabled: true,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 24
+  }), 'tester');
+
+  const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(queuedRun.id);
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET updated_at = ?
+    WHERE id = ?
+  `).run('2026-04-09T11:00:00.000Z', queuedRun.id);
+
+  currentNow = new Date('2026-04-09T11:03:00.000Z');
+  const abandoned = await service.abandonActiveRunsForRegion(region.id, 'Sync cancelled by user', {
+    staleMs: 30_000,
+    repairRegionState: true
+  });
+  assert.equal(abandoned.runs.length, 1);
+  assert.equal(abandoned.runs[0].status, 'abandoned');
+  assert.equal(abandoned.region?.lastSyncStatus, 'abandoned');
+
+  const staleRegion = await service.saveRegion(buildRegionInput({
+    name: 'Stale Region State',
+    slug: 'stale-region-state',
+    extractId: 'stale-region-state',
+    autoSyncEnabled: false,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 0
+  }), 'tester');
+  db.prepare(`
+    UPDATE data_sync_regions
+    SET
+      last_sync_status = 'running',
+      last_sync_error = NULL
+    WHERE id = ?
+  `).run(staleRegion.id);
+
+  currentNow = new Date('2026-04-09T11:05:00.000Z');
+  const repaired = await service.abandonActiveRunsForRegion(staleRegion.id, 'Sync cancelled by user', {
+    staleMs: 30_000,
+    repairRegionState: true
+  });
+  assert.equal(repaired.runs.length, 0);
+  assert.equal(repaired.repairedRegionState, true);
+  assert.equal(repaired.region?.lastSyncStatus, 'abandoned');
+});
+
 test('createQueuedRun clears stale region sync errors before a retry starts', async () => {
   const db = createTestDb();
   const service = createService({
@@ -1421,4 +1481,41 @@ test('deleteRegion removes only orphan features and preserves shared data of oth
   assert.deepEqual(contours, [
     { osm_type: 'way', osm_id: 202 }
   ]);
+});
+
+test('deleteRegion allows stale queued status when no active runs remain', async () => {
+  const db = createTestDb();
+  ensureContoursTable(db);
+  const service = createService({
+    db,
+    fallbackData: {
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Delete Stale Region',
+    slug: 'delete-stale-region',
+    extractId: 'delete-stale-region',
+    autoSyncEnabled: false,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 0
+  }), 'tester');
+
+  db.prepare(`
+    UPDATE data_sync_regions
+    SET
+      last_sync_status = 'queued',
+      last_sync_error = 'stale queued state'
+    WHERE id = ?
+  `).run(region.id);
+
+  const deleted = await service.deleteRegion(region.id, 'tester');
+  assert.equal(deleted.region.id, region.id);
+  assert.equal(await service.getRegionById(region.id), null);
 });

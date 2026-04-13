@@ -48,11 +48,19 @@
     return source.slice(start, start + REGION_LIST_PAGE_SIZE);
   }
 
+  function resetLastVisibleRegionIdsKey() {
+    lastVisibleRegionIdsKey = '';
+  }
+
+  function updateLastVisibleRegionIdsKey(value) {
+    lastVisibleRegionIdsKey = value;
+  }
+
   $: regionPageCount = Math.ceil(Math.max(0, Number(regions?.length || 0)) / REGION_LIST_PAGE_SIZE);
   $: regionPage = normalizeRegionPage(regionPage, regionPageCount);
   $: visibleRegions = getVisibleRegions(regions, regionPage);
   $: if (dataLoading) {
-    lastVisibleRegionIdsKey = '';
+    resetLastVisibleRegionIdsKey();
   }
 
   $: {
@@ -89,7 +97,7 @@
       .map((region) => Number(region?.id || 0))
       .join(':');
     if (!dataLoading && nextVisibleRegionIdsKey && nextVisibleRegionIdsKey !== lastVisibleRegionIdsKey) {
-      lastVisibleRegionIdsKey = nextVisibleRegionIdsKey;
+      updateLastVisibleRegionIdsKey(nextVisibleRegionIdsKey);
       void controller?.refreshRegionUpstreamStatuses?.(
         (Array.isArray(visibleRegions) ? visibleRegions : []).map((region) => region?.id),
         { silent: true }

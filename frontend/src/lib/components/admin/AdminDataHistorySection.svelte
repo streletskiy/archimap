@@ -1,7 +1,7 @@
 <script>
   import { t } from '$lib/i18n/index';
   import { formatUiDate } from '$lib/utils/edit-ui';
-  import { UiScrollArea, UiTable, UiTableBody, UiTableCell, UiTableHead, UiTableHeader, UiTableRow } from '$lib/components/base';
+  import { UiTable, UiTableBody, UiTableCell, UiTableHead, UiTableHeader, UiTableRow } from '$lib/components/base';
   import { EditsPagination } from '$lib/components/edits';
 
   export let controller = null;
@@ -12,6 +12,7 @@
   export let regionRunsPage = 1;
   export let regionRunsPageCount = 0;
   export let regionRunsTotal = 0;
+  export let showPagination = true;
 
   const REGION_RUNS_PAGE_SIZE = 20;
   const REGION_RUNS_SKELETON_DELAY_MS = 40;
@@ -39,90 +40,94 @@
     {/if}
   </div>
 
-  <div class="mt-3 min-h-0 flex-1">
+  <div class="data-history-body">
     {#if isSelectedRegion()}
-      <UiScrollArea className="ui-scroll-surface h-full min-h-0" contentClassName="h-full">
-        <div class="data-history-scroll-content flex min-h-full flex-col gap-3">
+      <div class="data-history-scroll-shell">
+        <div class="data-history-scroll-content">
           {#if regionRunsLoading && regionRuns.length === 0}
-            <UiTable framed={false}>
-              <UiTableHeader>
-                <UiTableRow className="hover:[&>th]:bg-transparent">
-                  <UiTableHead>{$t('admin.data.history.run')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.trigger')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.status')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.requested')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.finished')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.features')}</UiTableHead>
-                </UiTableRow>
-              </UiTableHeader>
-              <UiTableBody>
-                {#each Array.from({ length: REGION_RUNS_PAGE_SIZE }, (_, index) => index) as row (row)}
-                  <UiTableRow
-                    aria-hidden="true"
-                    className="pointer-events-none select-none animate-pulse"
-                    style={`animation-delay: ${row * REGION_RUNS_SKELETON_DELAY_MS}ms;`}
-                  >
-                    <UiTableCell>
-                      <div class="flex items-center gap-2">
-                        <span class="h-4 w-[3.5rem] rounded-full bg-black/10 dark:bg-white/10"></span>
-                        <span class="h-4 w-[7ch] rounded-full bg-black/10 dark:bg-white/10"></span>
-                      </div>
-                    </UiTableCell>
-                    <UiTableCell>
-                      <div class="h-4 w-[12ch] rounded-full bg-black/10 dark:bg-white/10"></div>
-                    </UiTableCell>
-                    <UiTableCell>
-                      <div class="h-6 w-[8ch] rounded-full bg-black/10 dark:bg-white/10"></div>
-                    </UiTableCell>
-                    <UiTableCell>
-                      <div class="h-4 w-[13ch] rounded-full bg-black/10 dark:bg-white/10"></div>
-                    </UiTableCell>
-                    <UiTableCell>
-                      <div class="h-4 w-[13ch] rounded-full bg-black/10 dark:bg-white/10"></div>
-                    </UiTableCell>
-                    <UiTableCell>
-                      <div class="h-5 w-[6ch] rounded-full bg-black/10 dark:bg-white/10"></div>
-                    </UiTableCell>
+            <div class="data-history-table-wrap">
+              <UiTable framed={false}>
+                <UiTableHeader>
+                  <UiTableRow className="hover:[&>th]:bg-transparent">
+                    <UiTableHead>{$t('admin.data.history.run')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.trigger')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.status')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.requested')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.finished')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.features')}</UiTableHead>
                   </UiTableRow>
-                {/each}
-              </UiTableBody>
-            </UiTable>
-          {:else if regionRuns.length > 0}
-            <UiTable framed={false}>
-              <UiTableHeader>
-                <UiTableRow className="hover:[&>th]:bg-transparent">
-                  <UiTableHead>{$t('admin.data.history.run')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.trigger')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.status')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.requested')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.finished')}</UiTableHead>
-                  <UiTableHead>{$t('admin.data.history.features')}</UiTableHead>
-                </UiTableRow>
-              </UiTableHeader>
-              <UiTableBody>
-                {#each regionRuns as run (`region-run-${run.id}`)}
-                  {@const runStatusMeta = controller.getRegionStatusMeta(run.status, run)}
-                  <UiTableRow>
-                    <UiTableCell className="font-medium ui-text-strong">#{run.id}</UiTableCell>
-                    <UiTableCell className="ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</UiTableCell>
-                    <UiTableCell>
-                      <span
-                        class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
-                        data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
-                      >
-                    </UiTableCell>
-                    <UiTableCell className="ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</UiTableCell>
-                    <UiTableCell className="ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</UiTableCell>
-                    <UiTableCell className="ui-text-muted">{run.activeFeatureCount ?? run.importedFeatureCount ?? '---'}</UiTableCell>
-                  </UiTableRow>
-                  {#if run.error}
-                    <UiTableRow className="ui-surface-danger-soft">
-                      <UiTableCell colspan="6" className="text-xs ui-text-danger break-words">{run.error}</UiTableCell>
+                </UiTableHeader>
+                <UiTableBody>
+                  {#each Array.from({ length: REGION_RUNS_PAGE_SIZE }, (_, index) => index) as row (row)}
+                    <UiTableRow
+                      aria-hidden="true"
+                      className="pointer-events-none select-none animate-pulse"
+                      style={`animation-delay: ${row * REGION_RUNS_SKELETON_DELAY_MS}ms;`}
+                    >
+                      <UiTableCell>
+                        <div class="flex items-center gap-2">
+                          <span class="h-4 w-[3.5rem] rounded-full bg-black/10 dark:bg-white/10"></span>
+                          <span class="h-4 w-[7ch] rounded-full bg-black/10 dark:bg-white/10"></span>
+                        </div>
+                      </UiTableCell>
+                      <UiTableCell>
+                        <div class="h-4 w-[12ch] rounded-full bg-black/10 dark:bg-white/10"></div>
+                      </UiTableCell>
+                      <UiTableCell>
+                        <div class="h-6 w-[8ch] rounded-full bg-black/10 dark:bg-white/10"></div>
+                      </UiTableCell>
+                      <UiTableCell>
+                        <div class="h-4 w-[13ch] rounded-full bg-black/10 dark:bg-white/10"></div>
+                      </UiTableCell>
+                      <UiTableCell>
+                        <div class="h-4 w-[13ch] rounded-full bg-black/10 dark:bg-white/10"></div>
+                      </UiTableCell>
+                      <UiTableCell>
+                        <div class="h-5 w-[6ch] rounded-full bg-black/10 dark:bg-white/10"></div>
+                      </UiTableCell>
                     </UiTableRow>
-                  {/if}
-                {/each}
-              </UiTableBody>
-            </UiTable>
+                  {/each}
+                </UiTableBody>
+              </UiTable>
+            </div>
+          {:else if regionRuns.length > 0}
+            <div class="data-history-table-wrap">
+              <UiTable framed={false}>
+                <UiTableHeader>
+                  <UiTableRow className="hover:[&>th]:bg-transparent">
+                    <UiTableHead>{$t('admin.data.history.run')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.trigger')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.status')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.requested')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.finished')}</UiTableHead>
+                    <UiTableHead>{$t('admin.data.history.features')}</UiTableHead>
+                  </UiTableRow>
+                </UiTableHeader>
+                <UiTableBody>
+                  {#each regionRuns as run (`region-run-${run.id}`)}
+                    {@const runStatusMeta = controller.getRegionStatusMeta(run.status, run)}
+                    <UiTableRow>
+                      <UiTableCell className="font-medium ui-text-strong">#{run.id}</UiTableCell>
+                      <UiTableCell className="ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</UiTableCell>
+                      <UiTableCell>
+                        <span
+                          class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
+                          data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
+                        >
+                      </UiTableCell>
+                      <UiTableCell className="ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</UiTableCell>
+                      <UiTableCell className="ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</UiTableCell>
+                      <UiTableCell className="ui-text-muted">{run.activeFeatureCount ?? run.importedFeatureCount ?? '---'}</UiTableCell>
+                    </UiTableRow>
+                    {#if run.error}
+                      <UiTableRow className="ui-surface-danger-soft">
+                        <UiTableCell colspan="6" className="text-xs ui-text-danger break-words">{run.error}</UiTableCell>
+                      </UiTableRow>
+                    {/if}
+                  {/each}
+                </UiTableBody>
+              </UiTable>
+            </div>
           {:else if !regionRunsStatus}
             <div class="flex min-h-full items-center justify-center px-3 py-6">
               <p class="rounded-xl border border-dashed ui-border-strong ui-surface-soft px-4 py-5 text-sm ui-text-subtle">
@@ -131,7 +136,7 @@
             </div>
           {/if}
         </div>
-      </UiScrollArea>
+      </div>
     {:else}
       <div class="flex min-h-full items-center justify-center px-3 py-6">
         <p class="rounded-xl border border-dashed ui-border-strong ui-surface-soft px-4 py-5 text-sm ui-text-subtle">
@@ -141,15 +146,17 @@
     {/if}
   </div>
 
-  <EditsPagination
-    page={regionRunsPage}
-    pageCount={regionRunsPageCount}
-    pageInfo={regionRunsPageCount > 0 ? $t('admin.data.history.pageInfo', { page: regionRunsPage, pages: regionRunsPageCount }) : ''}
-    loading={regionRunsLoading}
-    previousLabel={$t('common.previous')}
-    nextLabel={$t('common.next')}
-    onPageChange={(nextPage) => controller.loadRegionRuns(selectedDataRegionId, nextPage)}
-  />
+  {#if showPagination}
+    <EditsPagination
+      page={regionRunsPage}
+      pageCount={regionRunsPageCount}
+      pageInfo={regionRunsPageCount > 0 ? $t('admin.data.history.pageInfo', { page: regionRunsPage, pages: regionRunsPageCount }) : ''}
+      loading={regionRunsLoading}
+      previousLabel={$t('common.previous')}
+      nextLabel={$t('common.next')}
+      onPageChange={(nextPage) => controller.loadRegionRuns(selectedDataRegionId, nextPage)}
+    />
+  {/if}
 </section>
 
 <style>
@@ -157,6 +164,35 @@
     border: 1px solid var(--panel-border);
     background: var(--panel-solid);
     box-shadow: var(--shadow-soft);
+  }
+
+  .data-history-body {
+    margin-top: 0.75rem;
+    min-height: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .data-history-scroll-shell {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+  }
+
+  .data-history-scroll-content {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .data-history-table-wrap {
+    overflow-x: auto;
+  }
+
+  .data-history-table-wrap :global(table) {
+    min-width: 42rem;
   }
 
   .data-status-pill {
@@ -186,5 +222,20 @@
   .data-status-pill[data-tone='failed'] {
     background: #fee2e2;
     color: #b91c1c;
+  }
+
+  @media (max-width: 767px) {
+    .data-history-card {
+      overflow: visible;
+    }
+
+    .data-history-body {
+      min-height: auto;
+      flex: 0 0 auto;
+    }
+
+    .data-history-scroll-shell {
+      overflow: visible;
+    }
   }
 </style>
