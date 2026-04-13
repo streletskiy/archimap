@@ -1579,6 +1579,140 @@ def build_export_progress_detail(prefix: str, stats: dict[str, Any]) -> str:
     )
 
 
+def _materialize_export_tables(con: duckdb.DuckDBPyConnection, import_limit: int) -> None:
+    """Materialize intermediate tables for building export.
+
+    The CTE chain (filtered → buildings_with_parts → building_remainders → export_rows)
+    references `filtered` 6+ times causing DuckDB to potentially re-evaluate it.
+    Materializing into temp tables lets DuckDB build each only once and use hash joins
+    for the self-JOINs.
+    """
+    con.execute(f'''
+        CREATE OR REPLACE TEMP TABLE _export_filtered AS
+        SELECT
+            feature_id,
+            tags_json,
+            CASE
+                WHEN strpos(tags_json, '"building"') > 0 THEN 'building'
+                WHEN strpos(tags_json, '"building:part"') > 0
+                  OR strpos(tags_json, '"building_part"') > 0 THEN 'building_part'
+                ELSE 'building'
+            END AS feature_kind,
+            geometry,
+            ST_XMin(geometry) AS min_lon,
+            ST_YMin(geometry) AS min_lat,
+            ST_XMax(geometry) AS max_lon,
+            ST_YMax(geometry) AS max_lat
+        FROM (
+            SELECT
+                feature_id,
+                CAST(to_json(tags) AS VARCHAR) AS tags_json,
+                geometry
+            FROM quackosm_raw
+            WHERE geometry IS NOT NULL
+              AND split_part(feature_id, '/', 1) IN ('way', 'relation')
+              AND ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON')
+        ) raw
+        {_limit_clause_sql(import_limit)}
+    ''')
+
+    # Single pass: find buildings that have parts (bbox containment).
+    # Used for both render_hide_base_when_parts flag and building_remainders.
+    con.execute('''
+        CREATE OR REPLACE TEMP TABLE _export_buildings_with_parts AS
+        SELECT DISTINCT building.feature_id
+        FROM _export_filtered building
+        JOIN _export_filtered part
+          ON building.feature_kind = 'building'
+         AND part.feature_kind = 'building_part'
+         AND part.feature_id <> building.feature_id
+         AND part.min_lon >= building.min_lon
+         AND part.max_lon <= building.max_lon
+         AND part.min_lat >= building.min_lat
+         AND part.max_lat <= building.max_lat
+    ''')
+
+    # Building remainders: subtract parts from parent buildings.
+    con.execute('''
+        CREATE OR REPLACE TEMP TABLE _export_remainders AS
+        SELECT
+            building.feature_id,
+            building.tags_json,
+            'building_remainder' AS feature_kind,
+            ST_Multi(
+                ST_CollectionExtract(
+                    ST_Difference(
+                        ST_MakeValid(building.geometry),
+                        ST_Union_Agg(ST_MakeValid(part.geometry))
+                    ),
+                    3
+                )
+            ) AS geometry,
+            0 AS render_hide_base_when_parts
+        FROM _export_filtered building
+        JOIN _export_buildings_with_parts bwp ON bwp.feature_id = building.feature_id
+        JOIN _export_filtered part
+          ON part.feature_kind = 'building_part'
+         AND part.feature_id <> building.feature_id
+         AND part.min_lon >= building.min_lon
+         AND part.max_lon <= building.max_lon
+         AND part.min_lat >= building.min_lat
+         AND part.max_lat <= building.max_lat
+        GROUP BY building.feature_id, building.tags_json, building.geometry
+    ''')
+
+
+def _materialized_dual_export_select_sql(db_geometry_mode: str = 'wkb_hex') -> str:
+    """Build SELECT for dual export using pre-materialized temp tables."""
+    db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
+    if db_geometry_mode_normalized == 'wkb_hex':
+        db_geometry_sql = (
+            "CASE WHEN feature_kind = 'building_remainder' THEN NULL "
+            "ELSE ST_AsHEXWKB(geometry) END AS geometry_wkb_hex"
+        )
+    elif db_geometry_mode_normalized == 'geojson':
+        db_geometry_sql = 'NULL AS geometry_wkb_hex'
+    else:
+        raise ValueError(f'Unsupported DB geometry export mode: {db_geometry_mode}')
+
+    return f'''
+    SELECT
+      split_part(f.feature_id, '/', 1) AS osm_type,
+      try_cast(split_part(f.feature_id, '/', 2) AS BIGINT) AS osm_id,
+      f.tags_json,
+      f.feature_kind,
+      CASE WHEN bwp.feature_id IS NULL THEN 0 ELSE 1 END AS render_hide_base_when_parts,
+      ST_AsGeoJSON(f.geometry) AS geometry_json,
+      ST_XMin(f.geometry) AS min_lon,
+      ST_YMin(f.geometry) AS min_lat,
+      ST_XMax(f.geometry) AS max_lon,
+      ST_YMax(f.geometry) AS max_lat,
+      {db_geometry_sql}
+    FROM _export_filtered f
+    LEFT JOIN _export_buildings_with_parts bwp ON bwp.feature_id = f.feature_id
+    WHERE try_cast(split_part(f.feature_id, '/', 2) AS BIGINT) IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+      split_part(r.feature_id, '/', 1) AS osm_type,
+      try_cast(split_part(r.feature_id, '/', 2) AS BIGINT) AS osm_id,
+      r.tags_json,
+      r.feature_kind,
+      r.render_hide_base_when_parts,
+      ST_AsGeoJSON(r.geometry) AS geometry_json,
+      ST_XMin(r.geometry) AS min_lon,
+      ST_YMin(r.geometry) AS min_lat,
+      ST_XMax(r.geometry) AS max_lon,
+      ST_YMax(r.geometry) AS max_lat,
+      NULL AS geometry_wkb_hex
+    FROM _export_remainders r
+    WHERE r.geometry IS NOT NULL
+      AND NOT ST_IsEmpty(r.geometry)
+      AND try_cast(split_part(r.feature_id, '/', 2) AS BIGINT) IS NOT NULL
+    '''
+
+
 def _load_duckdb_extensions(con: duckdb.DuckDBPyConnection, work_dir: Path | None = None) -> None:
     configure_duckdb_connection(con, work_dir)
     for ext in ('spatial',):
@@ -1792,8 +1926,9 @@ def export_rows_duckdb_dual_ndjson(
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con, duckdb_path.parent)
+        _materialize_export_tables(con, import_limit)
         with db_out_path.open(mode, encoding='utf-8') as db_out, geojson_out_path.open(mode, encoding='utf-8') as geojson_out:
-            dual_cursor = con.execute(_build_dual_export_select_sql(import_limit, db_geometry_mode_normalized))
+            dual_cursor = con.execute(_materialized_dual_export_select_sql(db_geometry_mode_normalized))
             while True:
                 chunk = dual_cursor.fetchmany(export_batch_size)
                 if not chunk:
