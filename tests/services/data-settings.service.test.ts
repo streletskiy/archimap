@@ -1215,6 +1215,56 @@ test('recoverInterruptedRuns only abandons stale active runs when staleMs is pro
   assert.equal(staleQueuedRegionState?.lastSyncStatus, 'abandoned');
 });
 
+test('recoverInterruptedRuns preserves a newer successful sync and does not requeue stale runs', async () => {
+  const db = createTestDb();
+  let currentNow = new Date('2026-04-10T11:55:00.000Z');
+  const service = createService({
+    db,
+    now: () => currentNow
+  });
+
+  const region = await service.saveRegion(buildRegionInput({
+    name: 'Recovered Success Region',
+    slug: 'recovered-success-region',
+    extractId: 'recovered-success-region'
+  }), 'tester');
+
+  const staleRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(staleRun.id);
+  db.prepare(`
+    UPDATE data_region_sync_runs
+    SET
+      started_at = '2026-04-10 11:50:00',
+      updated_at = '2026-04-10 11:50:00'
+    WHERE id = ?
+  `).run(staleRun.id);
+
+  currentNow = new Date('2026-04-10T12:05:00.000Z');
+  const successfulRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(successfulRun.id);
+  await service.markRunSucceeded(successfulRun.id, {
+    importedFeatureCount: 1,
+    activeFeatureCount: 1
+  });
+
+  const recovered = await service.recoverInterruptedRuns('Sync interrupted by process restart', {
+    staleMs: 30_000
+  });
+
+  assert.deepEqual(recovered, []);
+
+  const staleSavedRun = await service.getRunById(staleRun.id);
+  assert.equal(staleSavedRun?.status, 'abandoned');
+  assert.equal(staleSavedRun?.error, 'Sync interrupted by process restart');
+
+  const successfulSavedRun = await service.getRunById(successfulRun.id);
+  assert.equal(successfulSavedRun?.status, 'success');
+
+  const regionState = await service.getRegionById(region.id);
+  assert.equal(regionState?.lastSyncStatus, 'idle');
+  assert.equal(regionState?.lastSuccessfulSyncAt, '2026-04-10T12:05:00.000Z');
+});
+
 test('markRunCancelRequested sets cancelling stage and finalization clears transient fields', async () => {
   const db = createTestDb();
   let currentNow = new Date('2026-04-09T11:00:00.000Z');

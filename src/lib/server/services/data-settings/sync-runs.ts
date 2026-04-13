@@ -490,6 +490,15 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       lastSyncStatus: failedStatus,
       lastSyncFinishedAt: finishedAt
     }, finishedAt);
+    const preserveRegionSuccess = Boolean(options.preserveRegionSuccess);
+    const recoveredUpdatedAt = toIsoOrNull(options.recoveredUpdatedAt) || toIsoOrNull(run.updatedAt) || toIsoOrNull(run.startedAt) || toIsoOrNull(run.requestedAt);
+    const regionSuccessfulAt = parseTimestampMs(region.lastSuccessfulSyncAt);
+    const recoveredUpdatedAtMs = parseTimestampMs(recoveredUpdatedAt);
+    const shouldPreserveRegionState = preserveRegionSuccess
+      && Number.isFinite(regionSuccessfulAt)
+      && Number.isFinite(recoveredUpdatedAtMs)
+      && regionSuccessfulAt >= recoveredUpdatedAtMs
+      && !['queued', 'running'].includes(String(region.lastSyncStatus || '').trim().toLowerCase());
 
     await db.prepare(`
       UPDATE data_region_sync_runs
@@ -512,25 +521,32 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       run.id
     );
 
-    await db.prepare(`
-      UPDATE data_sync_regions
-      SET
-        last_sync_status = ?,
-        last_sync_finished_at = ?,
-        last_sync_error = ?,
-        next_sync_at = ?,
-        updated_at = datetime('now')
-      WHERE id = ?
-    `).run(
-      failedStatus,
-      finishedAt,
-      message,
-      nextSyncAt,
-      region.id
-    );
+    if (!shouldPreserveRegionState) {
+      await db.prepare(`
+        UPDATE data_sync_regions
+        SET
+          last_sync_status = ?,
+          last_sync_finished_at = ?,
+          last_sync_error = ?,
+          next_sync_at = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        failedStatus,
+        finishedAt,
+        message,
+        nextSyncAt,
+        region.id
+      );
+    }
 
+    const savedRun = await getRunById(run.id);
+    if (savedRun && shouldPreserveRegionState) {
+      savedRun.requeueSuppressed = true;
+      savedRun.recoveredUpdatedAt = recoveredUpdatedAt;
+    }
     return {
-      run: await getRunById(run.id),
+      run: savedRun,
       region: await getRegionById(region.id)
     };
   }
@@ -547,7 +563,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       : null;
 
     const candidateRuns = await db.prepare(`
-      SELECT id, updated_at
+      SELECT id, region_id, updated_at
       FROM data_region_sync_runs
       WHERE status IN ('queued', 'running')
       ORDER BY id
@@ -564,10 +580,20 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
 
     const recovered = [];
     for (const row of stuckRuns) {
+      const region = await getRegionById(row.region_id);
+      const staleAtTs = parseTimestampMs(row?.updated_at);
+      const lastSuccessfulAtTs = parseTimestampMs(region?.lastSuccessfulSyncAt);
+      const preserveRegionSuccess = Number.isFinite(staleAtTs)
+        && Number.isFinite(lastSuccessfulAtTs)
+        && lastSuccessfulAtTs >= staleAtTs;
       const result = await markRunFailed(row.id, reason, {
-        status: 'abandoned'
+        status: 'abandoned',
+        preserveRegionSuccess,
+        recoveredUpdatedAt: row.updated_at
       });
-      recovered.push(result.run);
+      if (result.run && !result.run.requeueSuppressed) {
+        recovered.push(result.run);
+      }
     }
     return recovered;
   }
