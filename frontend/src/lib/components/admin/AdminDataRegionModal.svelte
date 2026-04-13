@@ -104,8 +104,21 @@
   $: syncBlockedReason = $regionDraft.id ? controller.getRegionSyncBlockedReason(selectedRegion) : '';
   const SYNC_PIPELINE_STAGES = ['download', 'extract', 'export', 'build', 'apply', 'publish', 'followup'];
 
+  // Track which stages have been seen as active/done so we can mark them
+  // correctly regardless of execution order (standard vs low-memory pipeline).
+  let seenStages = new Set();
+  let lastRunId = null;
+
   function computePipelineState(run) {
     if (!run) return { steps: [], overallProgress: 0 };
+
+    // Reset seen stages when the run changes
+    const runId = run.id || run.runId || null;
+    if (runId && runId !== lastRunId) {
+      seenStages = new Set();
+      lastRunId = runId;
+    }
+
     const currentStage = String(run.stage || '').trim().toLowerCase();
     const stageProgress = Number.isFinite(Number(run.stageProgress))
       ? Math.max(0, Math.min(100, Math.round(Number(run.stageProgress))))
@@ -113,25 +126,31 @@
 
     // tile_join is a sub-stage of build
     const effectiveStage = currentStage === 'tile_join' ? 'build' : currentStage;
-    const currentIdx = SYNC_PIPELINE_STAGES.indexOf(effectiveStage);
 
-    const steps = SYNC_PIPELINE_STAGES.map((stage, i) => {
+    // Remember every stage we've visited
+    if (effectiveStage && effectiveStage !== 'done') {
+      seenStages.add(effectiveStage);
+    }
+
+    const steps = SYNC_PIPELINE_STAGES.map((stage) => {
       let state = 'pending';
-      if (currentIdx >= 0) {
-        if (i < currentIdx) state = 'done';
-        else if (i === currentIdx) state = 'active';
-      } else if (currentStage === 'done') {
+      if (currentStage === 'done') {
+        state = 'done';
+      } else if (stage === effectiveStage) {
+        state = 'active';
+      } else if (seenStages.has(stage) && stage !== effectiveStage) {
         state = 'done';
       }
       return { stage, state, label: formatStageLabel(stage) };
     });
 
+    const doneCount = steps.filter(s => s.state === 'done').length;
     const totalStages = SYNC_PIPELINE_STAGES.length;
     let overallProgress = 0;
     if (currentStage === 'done') {
       overallProgress = 100;
-    } else if (currentIdx >= 0) {
-      const completedFraction = currentIdx / totalStages;
+    } else {
+      const completedFraction = doneCount / totalStages;
       const stageFraction = (stageProgress != null ? stageProgress / 100 : 0.5) / totalStages;
       overallProgress = Math.round((completedFraction + stageFraction) * 100);
     }
