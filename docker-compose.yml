@@ -48,6 +48,30 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
+    # Tuned for bulk geo-data imports (large COPY + GiST index rebuilds).
+    # max_wal_size=4GB      – fewer checkpoints during bulk writes
+    # checkpoint_completion_target=0.9 – spread checkpoint I/O
+    # shared_buffers=512MB  – hot data cache (¼ of 2 GB container budget is fine)
+    # work_mem=64MB         – faster sorts/hashes for GiST index build
+    # maintenance_work_mem=512MB – faster CREATE INDEX / ANALYZE
+    # effective_io_concurrency=2 – eMMC/SD random-read parallelism
+    # wal_buffers=16MB      – buffer WAL in memory before flushing
+    command:
+      - postgres
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - effective_io_concurrency=2
+      - -c
+      - wal_buffers=16MB
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
