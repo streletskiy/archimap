@@ -294,6 +294,12 @@ async function upsertPostgresContoursFromStage(client, runMarker) {
       max_lat = excluded.max_lat,
       geom = excluded.geom,
       updated_at = excluded.updated_at
+    WHERE osm.building_contours.tags_json IS DISTINCT FROM excluded.tags_json
+       OR osm.building_contours.geom IS DISTINCT FROM excluded.geom
+       OR osm.building_contours.min_lon IS DISTINCT FROM excluded.min_lon
+       OR osm.building_contours.min_lat IS DISTINCT FROM excluded.min_lat
+       OR osm.building_contours.max_lon IS DISTINCT FROM excluded.max_lon
+       OR osm.building_contours.max_lat IS DISTINCT FROM excluded.max_lat
   `, [runMarker]);
 }
 
