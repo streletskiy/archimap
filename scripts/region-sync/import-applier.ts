@@ -4,8 +4,13 @@ const { pipeline } = require('stream/promises');
 const { Client } = require('pg');
 const { from: copyFrom } = require('pg-copy-streams');
 const { resolveRegionPmtilesPath } = require('../../src/lib/server/services/data-settings.service');
-const { buildPmtilesSwap, readImportRows } = require('./common');
+const {
+  buildPmtilesSwap,
+  readImportRows,
+  readRenderedGeojsonFeatures
+} = require('./common');
 const { openSqliteRegionDb } = require('./region-db');
+const { computeGeometryBounds } = require('./pmtiles-builder');
 
 const DEFAULT_IMPORT_APPLY_BATCH_SIZE = 1000;
 const MAX_IMPORT_APPLY_BATCH_SIZE = 8000;
@@ -17,6 +22,7 @@ const APPLY_STALE_MEMBERSHIPS_PROGRESS = 94;
 const APPLY_ORPHAN_CLEANUP_PROGRESS = 98;
 const APPLY_SUMMARY_REFRESH_PROGRESS = 99;
 const APPLY_COMPLETE_PROGRESS = 100;
+const POSTGRES_RENDER_CACHE_BATCH_SIZE = 250;
 
 function resolveImportApplyBatchSize(env: LooseRecord = process.env) {
   const rawValue = Number(env.REGION_SYNC_IMPORT_APPLY_BATCH_SIZE);
@@ -69,13 +75,146 @@ function normalizeTotalFeatureCount(totalFeatureCount) {
   return numericTotal;
 }
 
+function shouldRefreshPostgresRenderCache(env = process.env) {
+  return String(env.REGION_SYNC_RENDER_CACHE_REFRESH || '')
+    .trim()
+    .toLowerCase() === 'true';
+}
+
+async function refreshPostgresRegionRenderCache(client, {
+  region,
+  renderGeojsonPath
+}) {
+  const normalizedPath = String(renderGeojsonPath || '').trim();
+  const normalizedRegionId = Number(region?.id || 0);
+  if (!normalizedPath || !fs.existsSync(normalizedPath)) {
+    return { refreshed: false, insertedCount: 0 };
+  }
+  if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
+    return { refreshed: false, insertedCount: 0 };
+  }
+
+  let insertedCount = 0;
+  let batch = [];
+
+  async function flushBatch() {
+    if (batch.length === 0) return;
+    const params = [];
+    const valueSql = batch.map((row, index) => {
+      const base = index * 14;
+      params.push(
+        normalizedRegionId,
+        row.osm_type,
+        row.osm_id,
+        row.feature_kind,
+        row.osm_type,
+        row.osm_id,
+        row.geometry_json,
+        row.min_lon,
+        row.min_lat,
+        row.max_lon,
+        row.max_lat,
+        row.render_height_m,
+        row.render_min_height_m,
+        row.render_hide_base_when_parts
+      );
+      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14})`;
+    }).join(', ');
+    await client.query(`
+      INSERT INTO osm.region_render_features (
+        region_id,
+        osm_type,
+        osm_id,
+        feature_kind,
+        source_osm_type,
+        source_osm_id,
+        geom,
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        render_height_m,
+        render_min_height_m,
+        render_hide_base_when_parts,
+        updated_at
+      )
+      SELECT
+        v.region_id,
+        v.osm_type,
+        v.osm_id,
+        v.feature_kind,
+        v.source_osm_type,
+        v.source_osm_id,
+        ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(v.geometry_json), 4326)),
+        v.min_lon,
+        v.min_lat,
+        v.max_lon,
+        v.max_lat,
+        v.render_height_m,
+        v.render_min_height_m,
+        v.render_hide_base_when_parts,
+        NOW()
+      FROM (VALUES ${valueSql}) AS v (
+        region_id,
+        osm_type,
+        osm_id,
+        feature_kind,
+        source_osm_type,
+        source_osm_id,
+        geometry_json,
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        render_height_m,
+        render_min_height_m,
+        render_hide_base_when_parts
+      )
+    `, params);
+    insertedCount += batch.length;
+    batch = [];
+  }
+
+  await client.query('BEGIN');
+  try {
+    await client.query('DELETE FROM osm.region_render_features WHERE region_id = $1', [normalizedRegionId]);
+    for await (const row of readRenderedGeojsonFeatures(normalizedPath)) {
+      const bounds = computeGeometryBounds(row.geometry);
+      if (!bounds) continue;
+      batch.push({
+        ...row,
+        min_lon: bounds.west,
+        min_lat: bounds.south,
+        max_lon: bounds.east,
+        max_lat: bounds.north
+      });
+      if (batch.length >= POSTGRES_RENDER_CACHE_BATCH_SIZE) {
+        await flushBatch();
+      }
+    }
+    await flushBatch();
+    await client.query('COMMIT');
+    return {
+      refreshed: insertedCount > 0,
+      insertedCount
+    };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore rollback failure
+    }
+    throw error;
+  }
+}
+
 function createApplyProgressReporter({ onProgress, totalFeatureCount }) {
   const progressCallback = typeof onProgress === 'function' ? onProgress : null;
   const normalizedTotalFeatureCount = normalizeTotalFeatureCount(totalFeatureCount);
   let lastSignature = '';
   let lastRowsProgress = null;
 
-  async function emit(progressEvent = {}) {
+  async function emit(progressEvent: LooseRecord = {}) {
     if (!progressCallback) return;
 
     const normalizedProgress = normalizeProgress(progressEvent.progress);
@@ -635,6 +774,7 @@ async function applyRegionImportToPostgres({
   builtPmtilesPath,
   databaseUrl,
   dataDir,
+  renderGeojsonPath,
   totalFeatureCount,
   onProgress
 }) {
@@ -746,6 +886,19 @@ async function applyRegionImportToPostgres({
         swap.commit();
       }
 
+      let renderCacheRows = 0;
+      if (shouldRefreshPostgresRenderCache() && renderGeojsonPath) {
+        try {
+          const refreshResult = await refreshPostgresRegionRenderCache(client, {
+            region,
+            renderGeojsonPath
+          });
+          renderCacheRows = Number(refreshResult?.insertedCount || 0);
+        } catch (error) {
+          console.warn(`[region-sync] Postgres render cache refresh skipped: ${String(error?.message || error)}`);
+        }
+      }
+
       const activeFeatureCount = Number((await client.query(`
         SELECT COUNT(*)::bigint AS total
         FROM public.data_region_memberships
@@ -764,6 +917,7 @@ async function applyRegionImportToPostgres({
         importedFeatureCount,
         activeFeatureCount,
         orphanDeletedCount,
+        renderCacheRows,
         pmtilesBytes: finalPmtilesPath ? Number(fs.statSync(finalPmtilesPath).size || 0) : null,
         pmtilesPath: finalPmtilesPath
       };

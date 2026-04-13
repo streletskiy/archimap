@@ -640,7 +640,7 @@ test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or
     assert.equal(disabled.shardCount, 1);
 
     // An explicit REGION_SYNC_SHARD_MIN_FEATURES floor still short-circuits
-    // sharding for small regions even though the default is now 0 (always-shard).
+    // sharding for small regions even though the default is now adaptive.
     const belowFloor = await buildPmtilesFromGeojson({
       region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
       geojsonPath,
@@ -651,6 +651,96 @@ test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or
       env: { ...fakeEnv, REGION_SYNC_SHARD_MIN_FEATURES: '1000' }
     });
     assert.equal(belowFloor.mode, 'single');
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('buildPmtilesFromGeojson reuses cached shard archives on repeated runs', async () => {
+  if (process.platform === 'win32') {
+    // Bash-based fake binary is only reliable on POSIX; the functional path is
+    // covered by the Docker smoke build on CI/Linux.
+    return;
+  }
+
+  const workspace = createWorkspace(2004);
+  const geojsonPath = path.join(workspace, 'region-build.ndjson');
+  const outputPath = path.join(workspace, 'region.pmtiles');
+  const cacheDir = path.join(workspace, 'cache');
+  const fakeTippecanoePath = path.join(workspace, 'fake-tippecanoe.sh');
+  const logPath = path.join(workspace, 'exec.log');
+
+  try {
+    fs.writeFileSync(
+      geojsonPath,
+      [
+        formatGeojsonFeatureLine('way', 910001, '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}').trim(),
+        formatGeojsonFeatureLine('way', 910002, '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}').trim(),
+        formatGeojsonFeatureLine('way', 910003, '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}').trim()
+      ].join('\n'),
+      'utf8'
+    );
+    fs.writeFileSync(
+      fakeTippecanoePath,
+      [
+        '#!/usr/bin/env bash',
+        'set -e',
+        'if [[ "$1" == "--version" ]]; then echo "fake-tippecanoe"; exit 0; fi',
+        'if [[ "$#" -eq 0 ]]; then exit 0; fi',
+        `printf '%s\\n' "$*" >> "${logPath}"`,
+        'out=""',
+        'for ((i=1;i<=$#;i++)); do',
+        '  if [[ "${!i}" == "-o" ]]; then',
+        '    j=$((i+1)); out="${!j}";',
+        '  fi',
+        'done',
+        'if [[ -n "$out" ]]; then : > "$out"; fi',
+        'exit 0',
+        ''
+      ].join('\n'),
+      { mode: 0o755 }
+    );
+
+    const fakeEnv = {
+      ...process.env,
+      TIPPECANOE_BIN: fakeTippecanoePath,
+      TILE_JOIN_BIN: fakeTippecanoePath,
+      REGION_SYNC_SHARD_MIN_FEATURES: '0'
+    };
+
+    const first = await buildPmtilesFromGeojson({
+      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
+      geojsonPath,
+      outputPath,
+      bounds: { west: 14, south: 49, east: 24, north: 55 },
+      featureCount: 3,
+      shardKm: 60,
+      shardCacheDir: cacheDir,
+      env: fakeEnv
+    });
+    const second = await buildPmtilesFromGeojson({
+      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
+      geojsonPath,
+      outputPath,
+      bounds: { west: 14, south: 49, east: 24, north: 55 },
+      featureCount: 3,
+      shardKm: 60,
+      shardCacheDir: cacheDir,
+      env: fakeEnv
+    });
+
+    const logLines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
+    const tippecanoeInvocations = logLines.filter((line) => line.includes('--detect-shared-borders'));
+    const tileJoinInvocations = logLines.filter((line) => line.includes('--no-tile-size-limit'));
+
+    assert.equal(first.mode, 'sharded-cache');
+    assert.equal(first.rebuiltShardCount, first.shardCount);
+    assert.equal(first.reusedShardCount, 0);
+    assert.equal(second.mode, 'sharded-cache');
+    assert.equal(second.rebuiltShardCount, 0);
+    assert.equal(second.reusedShardCount, second.shardCount);
+    assert.equal(tippecanoeInvocations.length, first.shardCount);
+    assert.equal(tileJoinInvocations.length, 2);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

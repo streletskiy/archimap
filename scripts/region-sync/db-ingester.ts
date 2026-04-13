@@ -1,6 +1,7 @@
 const {
   assertRegionSupportsManagedSync,
   exportRegionMembersToGeojsonNdjson,
+  exportRegionRenderFeaturesToGeojsonNdjson,
   exportRegionMembersToNdjson,
   loadRegion
 } = require('./region-db');
@@ -13,6 +14,7 @@ module.exports = {
   applyRegionImport,
   assertRegionSupportsManagedSync,
   exportRegionMembersToGeojsonNdjson,
+  exportRegionRenderFeaturesToGeojsonNdjson,
   exportRegionMembersToNdjson,
   loadRegion,
   publishPmtilesArchive

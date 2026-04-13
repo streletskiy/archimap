@@ -517,10 +517,10 @@ test('managed sync workers heartbeat queued and running runs while using stale-o
     heartbeatCalls.push(Number(runId));
     return baseTouchRunHeartbeat(runId);
   };
-  dataSettingsService.recoverInterruptedRuns = async (reason, options) => {
+  dataSettingsService.recoverInterruptedRuns = (async (reason?: any, options?: any) => {
     recoveryCalls.push({ reason, options });
     return [];
-  };
+  }) as typeof dataSettingsService.recoverInterruptedRuns;
 
   const workers = initSyncWorkersInfra({
     spawn: () => {

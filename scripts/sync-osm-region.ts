@@ -49,7 +49,7 @@ const { exportRegionExtractToNdjson } = require('./region-sync/python-extractor'
 const {
   applyRegionImport,
   assertRegionSupportsManagedSync,
-  exportRegionMembersToGeojsonNdjson,
+  exportRegionRenderFeaturesToGeojsonNdjson,
   loadRegion,
   publishPmtilesArchive
 } = require('./region-sync/db-ingester');
@@ -81,6 +81,17 @@ const TIPPECANOE_PROGRESS_INTERVAL_SEC = Math.max(
 const REGION_SYNC_SHARD_KM_RAW = process.env.REGION_SYNC_SHARD_KM;
 const ROOT_DIR = path.join(__dirname, '..');
 const DEFAULT_PARENT_WATCHDOG_INTERVAL_MS = 5_000;
+
+function resolveRegionPmtilesCacheDir(dataDir, region) {
+  const regionKey = `${Number(region?.id || 0) || 'unknown'}-${String(region?.slug || 'region').trim() || 'region'}`;
+  const safeRegionKey = regionKey.replace(/[^a-z0-9._-]+/gi, '-');
+  return path.join(
+    String(dataDir || path.join(__dirname, '..', 'data')).trim() || path.join(__dirname, '..', 'data'),
+    'regions',
+    '.pmtiles-cache',
+    safeRegionKey
+  );
+}
 
 function parseArgs(argv): LooseRecord {
   const out = {
@@ -307,16 +318,17 @@ function runRuntimeFollowups({
   });
 }
 
-async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}) {
-  await buildPmtilesFromGeojson({
+async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}, dataDir = null) {
+  return buildPmtilesFromGeojson({
     region,
     geojsonPath,
     outputPath,
-    bounds: exportSummary?.bounds || null,
+    bounds: region?.bounds || exportSummary?.bounds || null,
     featureCount: Number.isFinite(exportSummary?.importedFeatureCount)
       ? Number(exportSummary.importedFeatureCount)
       : null,
     shardKm: REGION_SYNC_SHARD_KM_RAW === undefined ? undefined : Number(REGION_SYNC_SHARD_KM_RAW),
+    shardCacheDir: resolveRegionPmtilesCacheDir(dataDir || process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data'), region),
     progressJson: TIPPECANOE_PROGRESS_JSON,
     progressIntervalSec: TIPPECANOE_PROGRESS_INTERVAL_SEC,
     onShardProgress: (stageInfo) => {
@@ -387,7 +399,7 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
 
   try {
     emitStageJson('export', null, 'reading region members');
-    const exported = await exportRegionMembersToGeojsonNdjson({
+    const exported = await exportRegionRenderFeaturesToGeojsonNdjson({
       ...runtimeOptions,
       regionId: region.id,
       outputPath: geojsonPath
@@ -397,7 +409,7 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
     }
 
     emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
+    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
     emitStageJson('publish', null, 'publishing pmtiles archive');
     const finalArchivePath = publishPmtilesArchive({
       dataDir: runtimeOptions.dataDir,
@@ -409,6 +421,12 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
       importedFeatureCount: exported.importedFeatureCount,
       activeFeatureCount: exported.importedFeatureCount,
       orphanDeletedCount: 0,
+      renderCacheRows: 0,
+      pmtilesBuildMode: buildResult?.mode || null,
+      pmtilesShardCount: Number(buildResult?.shardCount || 0) || null,
+      pmtilesShardReusedCount: Number(buildResult?.reusedShardCount || 0),
+      pmtilesShardRebuiltCount: Number(buildResult?.rebuiltShardCount || 0),
+      pmtilesShardCacheDir: buildResult?.cacheDir || null,
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
       bounds: exported.bounds
@@ -453,12 +471,13 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
       ...runtimeOptions,
       region,
       ndjsonPath: importPath,
+      renderGeojsonPath: geojsonPath,
       totalFeatureCount: exported.importedFeatureCount,
       onProgress: createApplyStageProgressEmitter()
     });
 
     emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
+    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
     emitStageJson('publish', null, 'publishing pmtiles archive');
     const finalArchivePath = publishPmtilesArchive({
       dataDir: runtimeOptions.dataDir,
@@ -476,6 +495,8 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
 
     return {
       ...dbResult,
+      ...buildResult,
+      renderCacheRows: Number(dbResult.renderCacheRows || 0),
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
       bounds: exported.bounds
@@ -515,13 +536,14 @@ async function runRegionSync(region, runtimeOptions) {
     }
 
     emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
+    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
     emitStageJson('apply', 0, buildApplyStageDetail(exported.importedFeatureCount));
     const dbResult = await applyRegionImport({
       ...runtimeOptions,
       region,
       ndjsonPath: importPath,
       builtPmtilesPath,
+      renderGeojsonPath: geojsonPath,
       totalFeatureCount: exported.importedFeatureCount,
       onProgress: createApplyStageProgressEmitter()
     });
@@ -535,6 +557,7 @@ async function runRegionSync(region, runtimeOptions) {
 
     return {
       ...dbResult,
+      ...buildResult,
       bounds: exported.bounds
     };
   } finally {
@@ -561,11 +584,7 @@ async function main() {
     console.log(
       `SYNC_RESULT_JSON=${JSON.stringify({
         regionId: region.id,
-        importedFeatureCount: summary.importedFeatureCount,
-        activeFeatureCount: summary.activeFeatureCount,
-        orphanDeletedCount: summary.orphanDeletedCount,
-        pmtilesBytes: summary.pmtilesBytes,
-        pmtilesPath: summary.pmtilesPath,
+        ...summary,
         bounds: summary.bounds || null
       })}`
     );

@@ -43,14 +43,16 @@
 - `npm run sync:city -- --region-id=<id>`: compatibility wrapper around managed region sync.
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id>`: direct managed region sync orchestrator.
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`: rebuild PMTiles from already imported DB rows.
+- `node --import tsx scripts/benchmark-region-sync.ts --region-id=<id>`: run the live region sync pipeline against a real managed region, capture stage timings/peak RSS/shard stats, and write a JSON report under `.benchmarks/`. It auto-seeds the region catalog row from `frontend/static/admin-regions.geojson` when needed, and supports `--passes`, `--pmtiles-only`, `--output`, and `--sample-interval-ms`.
 
 Notes:
 
 - `scripts/sync-osm-region.ts` is intentionally thin; implementation stages live in `scripts/region-sync/python-extractor.ts`, `db-ingester.ts`, `region-db.ts`, `import-applier.ts`, and `pmtiles-builder.ts`.
-- `pmtiles-builder.ts` shards large regions into a km-aligned grid (see `REGION_SYNC_SHARD_KM`, default `60`) and merges per-cell archives with `tile-join`, keeping peak tippecanoe memory bounded for country-sized rebuilds on low-RAM SBCs; `REGION_SYNC_SHARD_KM=0` restores the single-pass build.
+- `pmtiles-builder.ts` shards large regions into a km-aligned grid (see `REGION_SYNC_SHARD_KM`, default `60`) and merges per-cell archives with `tile-join`, keeping peak tippecanoe memory bounded for country-sized rebuilds on low-RAM SBCs; `REGION_SYNC_SHARD_KM=0` restores the single-pass build. When `REGION_SYNC_SHARD_MIN_FEATURES` is unset, the builder uses an adaptive floor so small and medium regions can stay on the single-pass path. The builder also keeps a persistent shard cache under `data/regions/.pmtiles-cache/` and only rebuilds dirty shards.
 - The Python importer/exporter supports low-memory tuning through `REGION_SYNC_EXPORT_BATCH_SIZE`, `REGION_SYNC_EXPORT_PROGRESS_INTERVAL_SEC`, `REGION_SYNC_DUCKDB_MEMORY_LIMIT`, `REGION_SYNC_DUCKDB_THREADS`, and `REGION_SYNC_DUCKDB_TEMP_DIRECTORY`. When `REGION_SYNC_DUCKDB_THREADS` is unset, low-power 4-core ARM boards default to `3` DuckDB threads.
 - PostgreSQL apply now streams `region-import.ndjson` into a temp staging table with `COPY FROM STDIN`; `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` remains relevant for the SQLite apply loop and Postgres progress granularity.
-- `REGION_SYNC_LOW_MEMORY_PIPELINE=true` switches PostgreSQL region syncs to an apply-first path that lowers peak intermediate artifact usage; this mode trades away the default build-first atomicity.
+- `REGION_SYNC_WORKDIR_CLEANUP=warm` keeps reusable download/materialization artifacts between retries by default; switch it to `aggressive` or `off` if you need the old cleanup behavior.
+- `REGION_SYNC_LOW_MEMORY_PIPELINE=true` switches PostgreSQL region syncs to an apply-first path that lowers peak intermediate artifact usage; this mode trades away the default build-first atomicity. The optional `REGION_SYNC_RENDER_CACHE_REFRESH=true` flag can then refresh the derived render cache table for later `--pmtiles-only` rebuilds.
 - `frontend/src/bootstrap/svelte.config.ts` is the source of truth for the frontend SvelteKit config. The generated `frontend/svelte.config.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - `frontend/src/theme-init.ts` is the source of truth for the initial theme bootstrap. The generated `frontend/static/theme-init.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - Docker containers start through `scripts/runtime-start.ts`, which runs `scripts/ensure-admin-regions-pmtiles.ts` before booting `server.sveltekit.ts`.

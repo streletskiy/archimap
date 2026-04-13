@@ -22,6 +22,17 @@ function encodeOsmFeatureId(osmType, osmId) {
   return (Number(osmId) * 2) + typeBit;
 }
 
+function decodeOsmFeatureId(featureId) {
+  const numericFeatureId = Number(featureId);
+  if (!Number.isInteger(numericFeatureId) || numericFeatureId < 0) {
+    return null;
+  }
+  return {
+    osm_type: (numericFeatureId % 2) === 1 ? 'relation' : 'way',
+    osm_id: Math.trunc(numericFeatureId / 2)
+  };
+}
+
 function normalizeFeatureKind(rawFeatureKind) {
   const kind = String(rawFeatureKind || '').trim().toLowerCase();
   if (kind === 'building_remainder') return 'building_remainder';
@@ -160,6 +171,32 @@ function formatGeojsonFeatureLine(
   );
 }
 
+function formatRenderedGeojsonFeatureLine(
+  osmType,
+  osmId,
+  geometryJson,
+  featureKind,
+  renderHeightM = 0,
+  renderMinHeightM = 0,
+  renderHideBaseWhenParts = DEFAULT_RENDER_HIDE_BASE_WHEN_PARTS
+) {
+  const normalizedGeometryJson = String(geometryJson || '').trim();
+  if (!normalizedGeometryJson) {
+    throw new Error(`Missing GeoJSON geometry for ${String(osmType || '').trim()}/${Number(osmId) || 0}`);
+  }
+  const normalizedFeatureKind = normalizeFeatureKind(featureKind);
+  const normalizedRenderHeightM = Number.isFinite(Number(renderHeightM)) ? Number(renderHeightM) : 0;
+  const normalizedRenderMinHeightM = Number.isFinite(Number(renderMinHeightM)) ? Number(renderMinHeightM) : 0;
+  const normalizedHideBaseWhenParts = normalizeBinaryFlag(renderHideBaseWhenParts);
+  return (
+    `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
+    `"properties":{"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
+    `"render_height_m":${normalizedRenderHeightM},` +
+    `"render_min_height_m":${normalizedRenderMinHeightM},` +
+    `"render_hide_base_when_parts":${normalizedHideBaseWhenParts}},"geometry":${normalizedGeometryJson}}\n`
+  );
+}
+
 function normalizeGeometryWkbHex(value) {
   const text = String(value ?? '').trim();
   if (!text) return null;
@@ -213,6 +250,31 @@ function parseRowPayload(line, options: LooseRecord = {}) {
   };
 }
 
+function parseRenderedGeojsonFeaturePayload(line) {
+  const payload = JSON.parse(String(line || '').trim());
+  const decodedFeatureId = decodeOsmFeatureId(payload?.id);
+  const geometry = payload?.geometry;
+  const properties = payload?.properties && typeof payload.properties === 'object' && !Array.isArray(payload.properties)
+    ? payload.properties
+    : {};
+  if (!decodedFeatureId || !geometry || typeof geometry !== 'object') {
+    throw new Error('Importer produced invalid rendered GeoJSON feature');
+  }
+  const featureKind = normalizeFeatureKind(properties?.feature_kind);
+  const renderHeightM = Number(properties?.render_height_m);
+  const renderMinHeightM = Number(properties?.render_min_height_m);
+  return {
+    osm_type: decodedFeatureId.osm_type,
+    osm_id: decodedFeatureId.osm_id,
+    feature_kind: featureKind,
+    geometry_json: JSON.stringify(geometry),
+    geometry,
+    render_height_m: Number.isFinite(renderHeightM) ? renderHeightM : 0,
+    render_min_height_m: Number.isFinite(renderMinHeightM) ? renderMinHeightM : 0,
+    render_hide_base_when_parts: normalizeBinaryFlag(properties?.render_hide_base_when_parts)
+  };
+}
+
 async function* readImportRows(ndjsonPath, options: LooseRecord = {}) {
   const stream = fs.createReadStream(ndjsonPath, {
     encoding: 'utf8',
@@ -238,6 +300,37 @@ async function* readImportRows(ndjsonPath, options: LooseRecord = {}) {
     const trailingLine = bufferedLine.trim();
     if (trailingLine) {
       yield parseRowPayload(trailingLine, options);
+    }
+  } finally {
+    stream.destroy();
+  }
+}
+
+async function* readRenderedGeojsonFeatures(ndjsonPath) {
+  const stream = fs.createReadStream(ndjsonPath, {
+    encoding: 'utf8',
+    highWaterMark: NDJSON_STREAM_HIGH_WATER_MARK
+  });
+  let bufferedLine = '';
+
+  try {
+    for await (const chunk of stream) {
+      bufferedLine += String(chunk || '');
+
+      let newlineIndex = bufferedLine.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = bufferedLine.slice(0, newlineIndex).trim();
+        bufferedLine = bufferedLine.slice(newlineIndex + 1);
+        if (line) {
+          yield parseRenderedGeojsonFeaturePayload(line);
+        }
+        newlineIndex = bufferedLine.indexOf('\n');
+      }
+    }
+
+    const trailingLine = bufferedLine.trim();
+    if (trailingLine) {
+      yield parseRenderedGeojsonFeaturePayload(trailingLine);
     }
   } finally {
     stream.destroy();
@@ -312,6 +405,7 @@ function buildPmtilesSwap(finalPath, newBuiltPath) {
 }
 
 module.exports = {
+  decodeOsmFeatureId,
   buildFeature3dPropertiesFromTags,
   buildFeature3dPropertiesFromTagsJson,
   deriveFeatureKindFromTagsJson,
@@ -321,10 +415,13 @@ module.exports = {
   encodeOsmFeatureId,
   ensureDir,
   formatGeojsonFeatureLine,
+  formatRenderedGeojsonFeatureLine,
   normalizeFeatureKind,
   normalizeGeometryWkbHex,
+  parseRenderedGeojsonFeaturePayload,
   parseRowPayload,
   readImportRows,
+  readRenderedGeojsonFeatures,
   updateBounds,
   writeStreamLine,
   writeRowsToNdjsonFile

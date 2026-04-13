@@ -1,5 +1,6 @@
 import argparse
 import difflib
+import fnmatch
 import json
 import os
 import platform
@@ -35,10 +36,127 @@ DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2
 DEFAULT_BUILDING_EXTRUSION_LEVELS = 1
 DEFAULT_EXPORT_PROGRESS_INTERVAL_SEC = 5.0
 DEFAULT_LOW_POWER_ARM_DUCKDB_THREADS = 3
+DEFAULT_WORK_DIR_CLEANUP_TTL_DAYS = 14
 DOWNLOAD_PROGRESS_CHUNK_BYTES = 1024 * 1024
 DOWNLOAD_PROGRESS_MIN_INTERVAL_SEC = 1.0
 SHOULD_EMIT_STAGE_JSON = str(os.getenv('REGION_SYNC_EMIT_STAGE_JSON', '')).strip().lower() == 'true'
 DEFAULT_PARENT_WATCHDOG_INTERVAL_SEC = 5.0
+DUCKDB_CACHE_MARKER_VERSION = 1
+DUCKDB_CACHE_MARKER_SUFFIX = '.marker'
+WORK_DIR_CACHE_FILE_PATTERNS = (
+    '*.osm.pbf',
+    '*.duckdb',
+    '*.marker',
+    '*.parquet',
+)
+WORK_DIR_TEMP_FILE_PATTERNS = (
+    '*.download',
+    '*.tmp',
+    '*.tmp.osm.pbf',
+    '*.duckdb.wal',
+)
+
+
+def parse_size_limit_bytes(raw_value: Any, default: int = 0) -> int:
+    text = str(raw_value or '').strip().upper().replace(' ', '')
+    if not text:
+        return max(0, int(default or 0))
+
+    multiplier = 1
+    for suffix, factor in (
+        ('TB', 1024 ** 4),
+        ('T', 1024 ** 4),
+        ('GB', 1024 ** 3),
+        ('G', 1024 ** 3),
+        ('MB', 1024 ** 2),
+        ('M', 1024 ** 2),
+        ('KB', 1024),
+        ('K', 1024),
+    ):
+        if text.endswith(suffix):
+            text = text[:-len(suffix)]
+            multiplier = factor
+            break
+
+    try:
+        size_value = float(text)
+    except (TypeError, ValueError):
+        return max(0, int(default or 0))
+
+    if size_value < 0:
+        return max(0, int(default or 0))
+    return int(size_value * multiplier)
+
+
+def parse_positive_int_env(name: str, default: int = 0) -> int:
+    raw_value = str(os.getenv(name, '')).strip()
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 0
+    return parsed if parsed >= 0 else default
+
+
+def normalize_cleanup_mode(raw_mode: str) -> str:
+    mode = str(raw_mode or '').strip().lower()
+    if mode in {'', 'warm', 'soft', 'default', 'keep'}:
+        return 'warm'
+    if mode in {'0', 'false', 'no', 'off', 'disabled', 'none'}:
+        return 'off'
+    if mode in {'1', 'true', 'yes', 'aggressive', 'full', 'all'}:
+        return 'aggressive'
+    return mode
+
+
+def resolve_work_dir_cleanup_policy() -> dict[str, Any]:
+    mode = normalize_cleanup_mode(os.getenv('REGION_SYNC_WORKDIR_CLEANUP_MODE', os.getenv('REGION_SYNC_WORKDIR_CLEANUP', '')))
+    aggressive_flag = str(os.getenv('REGION_SYNC_WORKDIR_CLEANUP_AGGRESSIVE', '')).strip().lower() == 'true'
+    if aggressive_flag:
+        mode = 'aggressive'
+
+    ttl_days_raw = str(os.getenv('REGION_SYNC_WORKDIR_CLEANUP_TTL_DAYS', '')).strip()
+    try:
+        ttl_days = int(ttl_days_raw) if ttl_days_raw else DEFAULT_WORK_DIR_CLEANUP_TTL_DAYS
+    except (TypeError, ValueError):
+        ttl_days = DEFAULT_WORK_DIR_CLEANUP_TTL_DAYS
+    ttl_days = max(0, ttl_days)
+
+    size_limit_raw = os.getenv('REGION_SYNC_WORKDIR_CLEANUP_MAX_BYTES')
+    if size_limit_raw is None or str(size_limit_raw).strip() == '':
+        size_limit_raw = os.getenv('REGION_SYNC_WORKDIR_CLEANUP_SIZE_LIMIT')
+    size_limit_bytes = parse_size_limit_bytes(size_limit_raw, default=0)
+
+    if mode == 'off':
+        ttl_days = 0
+        size_limit_bytes = 0
+    elif mode == 'aggressive':
+        ttl_days = 0
+
+    return {
+        'mode': mode,
+        'aggressive': mode == 'aggressive',
+        'ttl_days': ttl_days,
+        'ttl_seconds': ttl_days * 24 * 60 * 60,
+        'size_limit_bytes': size_limit_bytes,
+    }
+
+
+def path_matches_patterns(file_path: Path, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatch(file_path.name, pattern) for pattern in patterns)
+
+
+def build_duckdb_cache_marker_path(duckdb_path: Path) -> Path:
+  return duckdb_path.with_suffix(f'{duckdb_path.suffix}{DUCKDB_CACHE_MARKER_SUFFIX}')
+
+
+def read_json_marker(marker_path: Path) -> dict[str, Any] | None:
+    try:
+        if not marker_path.exists():
+            return None
+        payload = json.loads(marker_path.read_text())
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
 
 
 def emit_stage_json(stage: str, progress: Any = None, detail: str | None = None) -> None:
@@ -211,40 +329,110 @@ def configure_duckdb_connection(con: duckdb.DuckDBPyConnection, work_dir: Path |
 def cleanup_work_dir(work_dir: Path) -> None:
     """Remove intermediate artifacts from work_dir after sync completes.
 
-    Deletes cached PBF downloads, osmium-filtered PBFs, DuckDB files, QuackOSM
-    intermediate Parquet files, and DuckDB temp spill directory.  The work_dir
-    itself (data/quackosm/) is kept so it can be reused by the next sync.
+    By default this keeps warm caches in place and only removes obvious temp
+    files.  TTL- and size-based pruning is opt-in through env settings, while a
+    fully aggressive cleanup remains available behind a flag for low-disk hosts.
     """
     if not work_dir or not work_dir.is_dir():
         return
+
+    policy = resolve_work_dir_cleanup_policy()
+    if policy['mode'] == 'off':
+        print('[region-sync] Work-dir cleanup disabled; keeping warm caches', flush=True)
+        return
+
     removed_bytes = 0
     removed_count = 0
-    patterns = ('*.osm.pbf', '*.duckdb', '*.duckdb.wal', '*.marker', '*.parquet')
-    for pattern in patterns:
-        for f in work_dir.glob(pattern):
-            try:
-                size = f.stat().st_size
-                f.unlink()
-                removed_bytes += size
-                removed_count += 1
-            except Exception:
-                pass
-    # QuackOSM creates intermediate directories with parquet files.
+
+    def remove_path(target: Path) -> None:
+        nonlocal removed_bytes, removed_count
+        if not target.exists():
+            return
+        try:
+            if target.is_dir():
+                size = sum(f.stat().st_size for f in target.rglob('*') if f.is_file())
+                shutil.rmtree(target, ignore_errors=False)
+            else:
+                size = target.stat().st_size
+                target.unlink()
+            removed_bytes += size
+            removed_count += 1
+        except Exception:
+            pass
+
+    def remove_related_cache_files(target: Path) -> None:
+        if target.name.endswith('.buildings-only.osm.pbf'):
+            remove_path(target.with_name(f'{target.name[:-len(".osm.pbf")]}.marker'))
+        if target.suffix == '.duckdb':
+            remove_path(build_duckdb_cache_marker_path(target))
+
+    temp_paths: list[Path] = []
+    cache_candidates: list[Path] = []
     for child in work_dir.iterdir():
+        if path_matches_patterns(child, WORK_DIR_TEMP_FILE_PATTERNS):
+            temp_paths.append(child)
+            continue
+        if child.is_file() and path_matches_patterns(child, WORK_DIR_CACHE_FILE_PATTERNS):
+            cache_candidates.append(child)
+            continue
         if child.is_dir():
-            try:
-                dir_size = sum(f.stat().st_size for f in child.rglob('*') if f.is_file())
-                shutil.rmtree(child, ignore_errors=True)
-                removed_bytes += dir_size
-                removed_count += 1
-            except Exception:
-                pass
+            if policy['aggressive']:
+                cache_candidates.append(child)
+                continue
+            if child.name in {'duckdb-tmp'} or child.name.endswith('.tmp'):
+                temp_paths.append(child)
+
+    for target in temp_paths:
+        remove_related_cache_files(target)
+        remove_path(target)
+
+    if policy['aggressive']:
+        for target in cache_candidates:
+            remove_related_cache_files(target)
+            remove_path(target)
+    else:
+        ttl_seconds = int(policy['ttl_seconds'] or 0)
+        size_limit_bytes = int(policy['size_limit_bytes'] or 0)
+        if ttl_seconds > 0 or size_limit_bytes > 0:
+            now = time.time()
+            dated_candidates = []
+            for target in cache_candidates:
+                try:
+                    stat = target.stat()
+                except Exception:
+                    continue
+                dated_candidates.append({
+                    'path': target,
+                    'mtime': stat.st_mtime,
+                    'size': sum(f.stat().st_size for f in target.rglob('*') if f.is_file()) if target.is_dir() else stat.st_size,
+                })
+
+            if ttl_seconds > 0:
+                cutoff = now - ttl_seconds
+                for candidate in list(dated_candidates):
+                    if candidate['mtime'] < cutoff:
+                        remove_related_cache_files(candidate['path'])
+                        remove_path(candidate['path'])
+                        dated_candidates.remove(candidate)
+
+            if size_limit_bytes > 0:
+                remaining_size = sum(candidate['size'] for candidate in dated_candidates)
+                if remaining_size > size_limit_bytes:
+                    for candidate in sorted(dated_candidates, key=lambda item: (item['mtime'], str(item['path']))):
+                        if remaining_size <= size_limit_bytes:
+                            break
+                        remove_related_cache_files(candidate['path'])
+                        remove_path(candidate['path'])
+                        remaining_size -= candidate['size']
+
     if removed_count > 0:
         print(
-            f'[region-sync] Cleaned up work_dir: removed {removed_count} items, '
+            f'[region-sync] Cleaned up work_dir (mode={policy["mode"]}): removed {removed_count} items, '
             f'freed {format_bytes_compact(removed_bytes)}',
             flush=True,
         )
+    else:
+        print(f'[region-sync] Work-dir cleanup retained warm cache (mode={policy["mode"]})', flush=True)
 
 
 def truncate_text(value: Any, limit: int = 80) -> str:
@@ -1139,9 +1327,7 @@ def prefilter_pbf_with_osmium(pbf_path: str, work_dir: Path) -> str:
             capture_output=True,
             text=True,
         )
-        if filtered_path.exists():
-            filtered_path.unlink()
-        tmp_out.rename(filtered_path)
+        tmp_out.replace(filtered_path)
 
         # Write marker for cache validation.
         src_stat = src.stat()
@@ -1257,8 +1443,6 @@ def run_quackosm_extract_to_duckdb(
             cached_pbf_path.unlink(missing_ok=True)
 
     if not skip_download:
-        if cached_pbf_path.exists():
-            cached_pbf_path.unlink()
         download_extract_with_progress(
             extract_url,
             cached_pbf_path,
@@ -1268,8 +1452,48 @@ def run_quackosm_extract_to_duckdb(
         )
     filtered_pbf = prefilter_pbf_with_osmium(str(cached_pbf_path), work_dir)
     filtered_size = format_bytes_compact(Path(filtered_pbf).stat().st_size)
+    duckdb_marker_path = build_duckdb_cache_marker_path(duckdb_path)
+    duckdb_cache_valid = False
+    try:
+        if duckdb_path.exists() and duckdb_marker_path.exists():
+            marker = read_json_marker(duckdb_marker_path)
+            filtered_stat = Path(filtered_pbf).stat()
+            duckdb_stat = duckdb_path.stat()
+            duckdb_cache_valid = bool(
+                marker
+                and marker.get('version') == DUCKDB_CACHE_MARKER_VERSION
+                and marker.get('extract_query') == resolved_query
+                and marker.get('input_path') == str(Path(filtered_pbf).resolve())
+                and marker.get('input_size') == filtered_stat.st_size
+                and marker.get('input_mtime') == filtered_stat.st_mtime
+                and duckdb_stat.st_size > 0
+            )
+    except Exception:
+        duckdb_cache_valid = False
+
+    if duckdb_cache_valid:
+        print(
+            f'[region-sync] Reusing cached DuckDB: {duckdb_path.name} '
+            f'({format_bytes_compact(duckdb_path.stat().st_size)})',
+            flush=True,
+        )
+        emit_stage_json('extract', 100, f'{prefix} | using cached DuckDB ({format_bytes_compact(duckdb_path.stat().st_size)})')
+        return duckdb_path
+
     emit_stage_json('extract', 0, f'{prefix} | QuackOSM: parsing {filtered_size} PBF into DuckDB (this may take a while)')
     result = run_quackosm_to_duckdb(filtered_pbf, work_dir, duckdb_path)
+    try:
+        filtered_stat = Path(filtered_pbf).stat()
+        duckdb_marker_path.write_text(json.dumps({
+            'version': DUCKDB_CACHE_MARKER_VERSION,
+            'extract_query': resolved_query,
+            'input_path': str(Path(filtered_pbf).resolve()),
+            'input_size': filtered_stat.st_size,
+            'input_mtime': filtered_stat.st_mtime,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        }))
+    except Exception:
+        pass
     emit_stage_json('extract', 100, f'{prefix} | buildings extracted to DuckDB')
     return result
 

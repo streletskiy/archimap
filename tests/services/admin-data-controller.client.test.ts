@@ -35,17 +35,30 @@ async function loadControllerModule() {
 
 function createStorage(initial = {}) {
   const values = new Map(Object.entries(initial));
-  return {
+  const storage = {
+    length: values.size,
     getItem(key) {
-      return values.has(key) ? values.get(key) : null;
+      if (!values.has(key)) return null;
+      const value = values.get(key);
+      return value == null ? null : String(value);
     },
     setItem(key, value) {
       values.set(key, String(value));
+      storage.length = values.size;
     },
     removeItem(key) {
       values.delete(key);
+      storage.length = values.size;
+    },
+    clear() {
+      values.clear();
+      storage.length = 0;
+    },
+    key(index) {
+      return Array.from(values.keys())[index] || null;
     }
   };
+  return storage;
 }
 
 test('new region save stays pending until the create request resolves and skips the heavy refresh path', async () => {

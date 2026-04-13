@@ -6,6 +6,7 @@ const {
   deriveFeatureKindFromTagsJson,
   ensureDir,
   formatGeojsonFeatureLine,
+  formatRenderedGeojsonFeatureLine,
   updateBounds,
   writeRowsToNdjsonFile,
   writeStreamLine
@@ -249,6 +250,32 @@ function buildPostgresRegionExportQuery({ regionSql = '$1', includeRemainderRows
   `;
 }
 
+function buildPostgresRegionRenderFeatureExportQuery({ regionSql = '$1' } = {}) {
+  return `
+    SELECT
+      rf.osm_type,
+      rf.osm_id,
+      rf.feature_kind,
+      ST_AsGeoJSON(rf.geom)::text AS geometry_json,
+      rf.render_height_m,
+      rf.render_min_height_m,
+      rf.render_hide_base_when_parts,
+      rf.min_lon,
+      rf.min_lat,
+      rf.max_lon,
+      rf.max_lat
+    FROM osm.region_render_features rf
+    WHERE rf.region_id = ${regionSql}
+    ORDER BY
+      rf.osm_type,
+      rf.osm_id,
+      CASE
+        WHEN rf.feature_kind = 'building_remainder' THEN 1
+        ELSE 0
+      END
+  `;
+}
+
 function openSqliteRegionDb(archimapDbPath, osmDbPath) {
   ensureDir(archimapDbPath);
   ensureDir(osmDbPath);
@@ -451,6 +478,122 @@ async function exportRegionMembersToNdjson({
   }
 }
 
+async function exportRegionRenderFeaturesToGeojsonNdjson({
+  dbProvider,
+  databaseUrl,
+  archimapDbPath,
+  osmDbPath,
+  regionId,
+  outputPath
+}) {
+  if (dbProvider !== 'postgres') {
+    return exportRegionMembersToGeojsonNdjson({
+      dbProvider,
+      databaseUrl,
+      archimapDbPath,
+      osmDbPath,
+      regionId,
+      outputPath
+    });
+  }
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+
+  const cacheTableResult = await client.query(`SELECT to_regclass('osm.region_render_features') AS regclass`);
+  if (!cacheTableResult.rows[0]?.regclass) {
+    await client.end();
+    return exportRegionMembersToGeojsonNdjson({
+      dbProvider,
+      databaseUrl,
+      archimapDbPath,
+      osmDbPath,
+      regionId,
+      outputPath
+    });
+  }
+
+  ensureDir(outputPath);
+  const writer = fs.createWriteStream(outputPath, {
+    encoding: 'utf8',
+    highWaterMark: 1024 * 1024
+  });
+  let importedFeatureCount = 0;
+  let bounds = null;
+
+  async function writeRow(row) {
+    await writeStreamLine(
+      writer,
+      formatRenderedGeojsonFeatureLine(
+        row.osm_type,
+        row.osm_id,
+        row.geometry_json,
+        row.feature_kind,
+        row.render_height_m,
+        row.render_min_height_m,
+        row.render_hide_base_when_parts
+      )
+    );
+    importedFeatureCount += 1;
+    bounds = updateBounds(bounds, row);
+  }
+
+  try {
+    try {
+      const normalizedRegionId = Number(regionId);
+      if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
+        throw new Error('Region export requires a positive integer regionId');
+      }
+
+      await client.query('BEGIN READ ONLY');
+      await client.query(`DECLARE region_render_export_cursor NO SCROLL CURSOR FOR ${buildPostgresRegionRenderFeatureExportQuery({
+        regionSql: String(normalizedRegionId)
+      })}`);
+
+      while (true) {
+        const result = await client.query(`
+          FETCH FORWARD ${POSTGRES_REGION_EXPORT_BATCH_SIZE}
+          FROM region_render_export_cursor
+        `);
+        if ((result.rowCount || 0) <= 0) {
+          break;
+        }
+        for (const row of result.rows) {
+          await writeRow(row);
+        }
+      }
+
+      await client.query('CLOSE region_render_export_cursor');
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // ignore rollback failure
+      }
+      throw error;
+    }
+  } finally {
+    await client.end();
+    await closeWriteStream(writer);
+  }
+
+  if (importedFeatureCount > 0) {
+    return {
+      importedFeatureCount,
+      bounds
+    };
+  }
+
+  return exportRegionMembersToGeojsonNdjson({
+    dbProvider,
+    databaseUrl,
+    archimapDbPath,
+    osmDbPath,
+    regionId,
+    outputPath
+  });
+}
+
 async function exportRegionMembersToGeojsonNdjson({
   dbProvider,
   databaseUrl,
@@ -552,6 +695,7 @@ async function exportRegionMembersToGeojsonNdjson({
 module.exports = {
   assertRegionSupportsManagedSync,
   exportRegionMembersToGeojsonNdjson,
+  exportRegionRenderFeaturesToGeojsonNdjson,
   exportRegionMembersToNdjson,
   loadRegion,
   openSqliteRegionDb

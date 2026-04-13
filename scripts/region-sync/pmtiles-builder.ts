@@ -1,6 +1,8 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { moveFileSync } = require('../../src/lib/server/utils/fs');
 const {
   closeWriteStream,
   ensureDir,
@@ -13,11 +15,118 @@ const { expandRowsWithBuildingRemainders } = require('./building-remainder');
 
 const KM_PER_DEGREE_LAT = 111.32;
 const DEFAULT_SHARD_KM = 60;
-// Default 0 means "always shard when the region bbox spans more than one cell".
-// Sharding is safe for building-only pmtiles because every feature is assigned
-// by bbox center, so footprints never straddle two cells.
-const DEFAULT_SHARD_MIN_FEATURES = 0;
+// Default `null` means "use the adaptive floor derived from bbox size and
+// feature count". Setting REGION_SYNC_SHARD_MIN_FEATURES explicitly keeps the
+// old override behavior, including `0` for benchmarking/always-shard runs.
+const DEFAULT_SHARD_MIN_FEATURES = null;
 const MAX_SHARD_CELL_COUNT = 400;
+const SHARD_CACHE_MANIFEST_VERSION = 1;
+
+function replaceFileSync(sourcePath, targetPath) {
+  const backupPath = `${targetPath}.bak`;
+  if (fs.existsSync(backupPath)) {
+    fs.rmSync(backupPath, { force: true });
+  }
+  const hadExistingFile = fs.existsSync(targetPath);
+  if (hadExistingFile) {
+    moveFileSync(targetPath, backupPath);
+  }
+  try {
+    moveFileSync(sourcePath, targetPath);
+  } catch (error) {
+    if (hadExistingFile && fs.existsSync(backupPath)) {
+      try {
+        moveFileSync(backupPath, targetPath);
+      } catch {
+        // ignore restore failure; original error is still thrown below
+      }
+    }
+    throw error;
+  }
+  if (fs.existsSync(backupPath)) {
+    fs.rmSync(backupPath, { force: true });
+  }
+}
+
+function normalizeRegionBounds(bounds) {
+  if (!bounds || typeof bounds !== 'object') return null;
+  const normalized = {
+    west: Number(bounds.west),
+    south: Number(bounds.south),
+    east: Number(bounds.east),
+    north: Number(bounds.north)
+  };
+  if (![normalized.west, normalized.south, normalized.east, normalized.north].every(Number.isFinite)) {
+    return null;
+  }
+  return normalized;
+}
+
+function buildGridSignature({ region, grid, shardKm, cacheSalt = '' }) {
+  const payload = {
+    regionId: Number(region?.id || 0) || null,
+    sourceLayer: String(region?.sourceLayer || 'buildings'),
+    pmtilesMinZoom: Number(region?.pmtilesMinZoom || 13),
+    pmtilesMaxZoom: Number(region?.pmtilesMaxZoom || 16),
+    shardKm: Number(shardKm || 0),
+    grid: grid
+      ? {
+          minLon: Number(grid.minLon),
+          minLat: Number(grid.minLat),
+          latStep: Number(grid.latStep),
+          lonStep: Number(grid.lonStep),
+          rows: Number(grid.rows),
+          cols: Number(grid.cols),
+          cellCount: Number(grid.cellCount)
+        }
+      : null,
+    cacheSalt: String(cacheSalt || '')
+  };
+  return JSON.stringify(payload);
+}
+
+function getAdaptiveShardFeatureFloor(grid, env = process.env) {
+  const explicit = resolveShardMinFeatures(env);
+  if (explicit !== null) {
+    return Math.max(0, Math.trunc(explicit));
+  }
+  const cellCount = Number(grid?.cellCount || 0);
+  if (!Number.isFinite(cellCount) || cellCount <= 1) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(8_000, Math.min(60_000, Math.round(cellCount * 1_500)));
+}
+
+function getShardCacheDir(shardCacheRootDir, gridSignature) {
+  const root = String(shardCacheRootDir || '').trim();
+  if (!root) return null;
+  const signature = String(gridSignature || '').trim();
+  if (!signature) return null;
+  const signatureKey = crypto.createHash('sha256').update(signature).digest('hex').slice(0, 24);
+  return path.join(root, signatureKey);
+}
+
+function loadShardCacheManifest(cacheDir) {
+  const manifestPath = path.join(cacheDir, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (!payload || typeof payload !== 'object') return null;
+    if (Number(payload.version) !== SHARD_CACHE_MANIFEST_VERSION) return null;
+    if (!payload.gridSignature || typeof payload.gridSignature !== 'string') return null;
+    if (!payload.shards || typeof payload.shards !== 'object') return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function writeShardCacheManifest(cacheDir, manifest) {
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.writeFileSync(path.join(cacheDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+}
 
 function runCommand(exe, args, options: LooseRecord = {}) {
   const result = spawnSync(exe, args, {
@@ -296,7 +405,13 @@ async function writeShardNdjsons({ geojsonPath, grid, workspaceDir }) {
       encoding: 'utf8',
       highWaterMark: 1024 * 1024
     });
-    const entry = { key, path: shardPath, writer, count: 0 };
+    const entry = {
+      key,
+      path: shardPath,
+      writer,
+      count: 0,
+      hash: crypto.createHash('sha256')
+    };
     shards.set(key, entry);
     return entry;
   }
@@ -318,7 +433,9 @@ async function writeShardNdjsons({ geojsonPath, grid, workspaceDir }) {
       return;
     }
     const shard = await ensureShardWriter(cell.key);
-    await writeStreamLine(shard.writer, `${trimmed}\n`);
+    const shardLine = `${trimmed}\n`;
+    await writeStreamLine(shard.writer, shardLine);
+    shard.hash.update(shardLine);
     shard.count += 1;
   }
 
@@ -343,7 +460,12 @@ async function writeShardNdjsons({ geojsonPath, grid, workspaceDir }) {
   const shardList = [];
   for (const entry of shards.values()) {
     await closeWriteStream(entry.writer);
-    shardList.push({ key: entry.key, path: entry.path, count: entry.count });
+    shardList.push({
+      key: entry.key,
+      path: entry.path,
+      count: entry.count,
+      hash: entry.hash.digest('hex')
+    });
   }
   shardList.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
@@ -360,6 +482,7 @@ async function buildPmtilesFromGeojson({
   bounds = null,
   featureCount = null,
   shardKm,
+  shardCacheDir = null,
   shardWorkspace = null,
   progressJson = true,
   progressIntervalSec = 5,
@@ -380,11 +503,12 @@ async function buildPmtilesFromGeojson({
   }
 
   const resolvedShardKm = resolveShardKm(shardKm, env);
-  const minShardFeatures = resolveShardMinFeatures(env);
-  const grid = planShardGrid(bounds, resolvedShardKm);
+  const effectiveBounds = normalizeRegionBounds(bounds) || normalizeRegionBounds(region?.bounds) || null;
+  const grid = planShardGrid(effectiveBounds, resolvedShardKm);
   const normalizedFeatureCount = Number.isFinite(featureCount) ? Number(featureCount) : null;
+  const shardFeatureFloor = getAdaptiveShardFeatureFloor(grid, env);
   const meetsShardFeatureFloor = normalizedFeatureCount === null
-    || normalizedFeatureCount >= minShardFeatures;
+    || normalizedFeatureCount >= shardFeatureFloor;
   const shardingEnabled = Boolean(
     grid
     && grid.cellCount > 1
@@ -406,7 +530,14 @@ async function buildPmtilesFromGeojson({
       progressIntervalSec,
       env
     });
-    return { mode: 'single', shardCount: 1 };
+    return {
+      mode: 'single',
+      shardCount: 1,
+      grid,
+      reusedShardCount: 0,
+      rebuiltShardCount: 0,
+      cacheDir: null
+    };
   }
 
   const tileJoinExe = detectTileJoinExecutable(env);
@@ -419,7 +550,28 @@ async function buildPmtilesFromGeojson({
   fs.mkdirSync(workspaceDir, { recursive: true });
 
   const shardPmtilesPaths = [];
+  const temporaryShardOutputs = [];
   let shardPlan: LooseRecord = { shards: [], skippedFeatureCount: 0 };
+  const shardCacheRootDir = String(shardCacheDir || '').trim();
+  const gridSignature = buildGridSignature({
+    region,
+    grid,
+    shardKm: resolvedShardKm,
+    cacheSalt: effectiveBounds
+      ? `${effectiveBounds.west},${effectiveBounds.south},${effectiveBounds.east},${effectiveBounds.north}`
+      : ''
+  });
+  const effectiveShardCacheDir = getShardCacheDir(shardCacheRootDir, gridSignature);
+  const shardCacheEntriesDir = effectiveShardCacheDir ? path.join(effectiveShardCacheDir, 'shards') : null;
+  const shardCacheManifest = effectiveShardCacheDir ? loadShardCacheManifest(effectiveShardCacheDir) : null;
+  const shardCacheManifestByKey = new Map(
+    Object.entries(shardCacheManifest?.shards || {}).map(([key, value]) => [key, value])
+  );
+  if (shardCacheEntriesDir) {
+    fs.mkdirSync(shardCacheEntriesDir, { recursive: true });
+  }
+  let reusedShardCount = 0;
+  let rebuiltShardCount = 0;
 
   try {
     shardPlan = await writeShardNdjsons({ geojsonPath, grid, workspaceDir });
@@ -438,7 +590,14 @@ async function buildPmtilesFromGeojson({
         progressIntervalSec,
         env
       });
-      return { mode: 'single-collapsed', shardCount: 1, grid };
+      return {
+        mode: 'single-collapsed',
+        shardCount: 1,
+        grid,
+        reusedShardCount: 0,
+        rebuiltShardCount: 0,
+        cacheDir: effectiveShardCacheDir
+      };
     }
 
     console.log(
@@ -451,26 +610,49 @@ async function buildPmtilesFromGeojson({
     const shardSharePercent = 100 / totalShards;
     for (let index = 0; index < totalShards; index += 1) {
       const shard = shardPlan.shards[index];
-      const shardOutputPath = path.join(workspaceDir, `shard-${shard.key}.pmtiles`);
+      const finalShardPath = effectiveShardCacheDir
+        ? path.join(shardCacheEntriesDir, `shard-${shard.key}.pmtiles`)
+        : path.join(workspaceDir, `shard-${shard.key}.pmtiles`);
+      const cachedShardMeta = shardCacheManifestByKey.get(shard.key) as LooseRecord | undefined;
+      const cacheHit = Boolean(
+        effectiveShardCacheDir
+        && cachedShardMeta
+        && String(cachedShardMeta.hash || '') === shard.hash
+        && fs.existsSync(finalShardPath)
+      );
       console.log(
         `[region-sync] shard ${index + 1}/${totalShards} `
-          + `key=${shard.key} features=${shard.count}`
+          + `key=${shard.key} features=${shard.count} ${cacheHit ? 'cache-hit' : 'dirty'}`
       );
       reportShardProgress({
         stage: 'build',
         progress: Math.round(index * shardSharePercent),
-        detail: `tippecanoe shard ${index + 1}/${totalShards}`
+        detail: cacheHit
+          ? `cached shard ${index + 1}/${totalShards}`
+          : `tippecanoe shard ${index + 1}/${totalShards}`
       });
-      runTippecanoe({
-        tippecanoeExe,
-        region,
-        inputPath: shard.path,
-        outputPath: shardOutputPath,
-        progressJson,
-        progressIntervalSec,
-        env
-      });
-      shardPmtilesPaths.push(shardOutputPath);
+      if (!cacheHit) {
+        const shardOutputPath = effectiveShardCacheDir
+          ? path.join(workspaceDir, `shard-${shard.key}.pmtiles`)
+          : finalShardPath;
+        runTippecanoe({
+          tippecanoeExe,
+          region,
+          inputPath: shard.path,
+          outputPath: shardOutputPath,
+          progressJson,
+          progressIntervalSec,
+          env
+        });
+        if (effectiveShardCacheDir) {
+          replaceFileSync(shardOutputPath, finalShardPath);
+          temporaryShardOutputs.push(shardOutputPath);
+        }
+        rebuiltShardCount += 1;
+      } else {
+        reusedShardCount += 1;
+      }
+      shardPmtilesPaths.push(finalShardPath);
       try {
         fs.rmSync(shard.path, { force: true });
       } catch {
@@ -481,7 +663,7 @@ async function buildPmtilesFromGeojson({
     reportShardProgress({
       stage: 'tile_join',
       progress: null,
-      detail: `tile-join: merging ${totalShards} shards`
+      detail: `tile-join: merging ${totalShards} shards (${reusedShardCount} cached, ${rebuiltShardCount} rebuilt)`
     });
     runTileJoin({
       tileJoinExe,
@@ -493,17 +675,39 @@ async function buildPmtilesFromGeojson({
     reportShardProgress({
       stage: 'tile_join',
       progress: 100,
-      detail: `tile-join done (${totalShards} shards)`
+      detail: `tile-join done (${totalShards} shards, ${reusedShardCount} cached, ${rebuiltShardCount} rebuilt)`
     });
 
+    if (effectiveShardCacheDir) {
+      writeShardCacheManifest(effectiveShardCacheDir, {
+        version: SHARD_CACHE_MANIFEST_VERSION,
+        gridSignature,
+        regionId: Number(region?.id || 0) || null,
+        shardKm: resolvedShardKm,
+        bounds: effectiveBounds,
+        featureCount: Number.isFinite(normalizedFeatureCount) ? normalizedFeatureCount : null,
+        shardCount: totalShards,
+        skippedFeatureCount: shardPlan.skippedFeatureCount,
+        reusedShardCount,
+        rebuiltShardCount,
+        shards: Object.fromEntries(
+          shardPlan.shards.map((shard) => [shard.key, { hash: shard.hash, count: shard.count }])
+        ),
+        updatedAt: new Date().toISOString()
+      });
+    }
+
     return {
-      mode: 'sharded',
+      mode: effectiveShardCacheDir ? 'sharded-cache' : 'sharded',
       shardCount: shardPlan.shards.length,
       grid,
-      skippedFeatureCount: shardPlan.skippedFeatureCount
+      skippedFeatureCount: shardPlan.skippedFeatureCount,
+      reusedShardCount,
+      rebuiltShardCount,
+      cacheDir: effectiveShardCacheDir
     };
   } finally {
-    for (const shardOutput of shardPmtilesPaths) {
+    for (const shardOutput of temporaryShardOutputs) {
       try {
         fs.rmSync(shardOutput, { force: true });
       } catch {
