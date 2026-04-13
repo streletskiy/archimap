@@ -480,7 +480,7 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
       ...dbResult,
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
-      bounds: pmtilesExport.bounds || exported.bounds
+      bounds: exported.bounds
     };
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
