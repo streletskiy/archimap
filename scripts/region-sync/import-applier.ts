@@ -9,7 +9,11 @@ const { openSqliteRegionDb } = require('./region-db');
 
 const DEFAULT_IMPORT_APPLY_BATCH_SIZE = 1000;
 const MAX_IMPORT_APPLY_BATCH_SIZE = 8000;
-const APPLY_ROWS_PROGRESS_MAX = 90;
+const APPLY_ROWS_PROGRESS_MAX = 70;
+const APPLY_COUNT_NEW_PROGRESS = 72;
+const APPLY_DROP_INDEXES_PROGRESS = 73;
+const APPLY_UPSERT_PROGRESS = 75;
+const APPLY_MEMBERSHIPS_PROGRESS = 90;
 const APPLY_STALE_MEMBERSHIPS_PROGRESS = 94;
 const APPLY_ORPHAN_CLEANUP_PROGRESS = 98;
 const APPLY_SUMMARY_REFRESH_PROGRESS = 99;
@@ -693,9 +697,36 @@ async function applyRegionImportToPostgres({
         },
         progressInterval: importApplyBatchSize
       });
+      await progressReporter.reportStep(
+        'count_new',
+        APPLY_COUNT_NEW_PROGRESS,
+        'counting new contours',
+        { processedFeatureCount: importedFeatureCount }
+      );
       const insertedContourCount = await countPostgresInsertedContours(client);
+
+      await progressReporter.reportStep(
+        'drop_indexes',
+        APPLY_DROP_INDEXES_PROGRESS,
+        'dropping indexes for bulk upsert',
+        { processedFeatureCount: importedFeatureCount }
+      );
       await dropPostgresBulkLoadIndexes(client);
+
+      await progressReporter.reportStep(
+        'upsert',
+        APPLY_UPSERT_PROGRESS,
+        `upserting ${importedFeatureCount} contours`,
+        { processedFeatureCount: importedFeatureCount }
+      );
       await upsertPostgresContoursFromStage(client, runMarker);
+
+      await progressReporter.reportStep(
+        'memberships',
+        APPLY_MEMBERSHIPS_PROGRESS,
+        'upserting region memberships',
+        { processedFeatureCount: importedFeatureCount }
+      );
       await upsertPostgresMembershipsFromStage(client, region.id);
 
       if (finalPmtilesPath) {
