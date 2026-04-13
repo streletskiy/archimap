@@ -430,10 +430,16 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
 
   try {
     emitStageJson('download', null, 'starting OSM extract pipeline');
+    // Generate both DB import NDJSON and GeoJSON NDJSON for PMTiles in a single
+    // DuckDB pass.  The previous approach skipped geojsonOutputPath here and
+    // re-exported from PostgreSQL later, but the building_remainders self-JOIN
+    // in PostgreSQL is O(n*m) and takes hours for large regions (e.g. Poland).
+    // DuckDB handles the same analytical join orders of magnitude faster.
     exportRegionExtractToNdjson({
       importerPath,
       region,
       dbOutputPath: importPath,
+      geojsonOutputPath: geojsonPath,
       summaryOutputPath: summaryPath,
       dbGeometryMode: resolveImporterDbGeometryMode(runtimeOptions),
       env: buildExtractorEnv(process.env)
@@ -453,18 +459,8 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
       onProgress: createApplyStageProgressEmitter()
     });
 
-    emitStageJson('export', null, 'reading imported region members for pmtiles build');
-    const pmtilesExport = await exportRegionMembersToGeojsonNdjson({
-      ...runtimeOptions,
-      regionId: region.id,
-      outputPath: geojsonPath
-    });
-    if (pmtilesExport.importedFeatureCount <= 0) {
-      throw new Error('Imported region has no features, PMTiles build aborted');
-    }
-
-    emitStageJson('build', null, `features=${pmtilesExport.importedFeatureCount}`);
-    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, pmtilesExport);
+    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
+    await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
     emitStageJson('publish', null, 'publishing pmtiles archive');
     const finalArchivePath = publishPmtilesArchive({
       dataDir: runtimeOptions.dataDir,
