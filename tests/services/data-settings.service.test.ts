@@ -1121,6 +1121,100 @@ test('markRunSucceeded stores imported upstream source version on the region', a
   assert.equal(result.region.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
 });
 
+test('markRunSucceeded abandons superseded startup retry runs for the same region', async () => {
+  const db = createTestDb();
+  let currentNow = new Date('2026-04-10T11:55:00.000Z');
+  const service = createService({
+    db,
+    now: () => currentNow
+  });
+
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Superseded Startup Region',
+      slug: 'superseded-startup-region',
+      extractId: 'superseded-startup-region'
+    }),
+    'tester'
+  );
+
+  const primaryRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(primaryRun.id);
+
+  currentNow = new Date('2026-04-10T12:00:00.000Z');
+  const queuedRetry = await service.createQueuedRun(region.id, 'startup', 'system');
+
+  currentNow = new Date('2026-04-10T12:01:00.000Z');
+  const runningRetry = await service.createQueuedRun(region.id, 'startup', 'system');
+  await service.markRunStarted(runningRetry.id);
+
+  currentNow = new Date('2026-04-10T12:05:00.000Z');
+  const result = await service.markRunSucceeded(primaryRun.id, {
+    importedFeatureCount: 10,
+    activeFeatureCount: 10
+  });
+
+  assert.equal(result.run.status, 'success');
+  assert.equal(result.region.lastSyncStatus, 'idle');
+
+  const queuedRetrySaved = await service.getRunById(queuedRetry.id);
+  assert.equal(queuedRetrySaved?.status, 'abandoned');
+  assert.match(String(queuedRetrySaved?.error || ''), /Superseded by successful sync run/);
+
+  const runningRetrySaved = await service.getRunById(runningRetry.id);
+  assert.equal(runningRetrySaved?.status, 'abandoned');
+  assert.match(String(runningRetrySaved?.error || ''), /Superseded by successful sync run/);
+
+  const regionState = await service.getRegionById(region.id);
+  assert.equal(regionState?.lastSyncStatus, 'idle');
+  assert.equal(regionState?.lastSuccessfulSyncAt, '2026-04-10T12:05:00.000Z');
+});
+
+test('superseded startup retry cannot overwrite an earlier successful sync', async () => {
+  const db = createTestDb();
+  let currentNow = new Date('2026-04-10T11:55:00.000Z');
+  const service = createService({
+    db,
+    now: () => currentNow
+  });
+
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Superseded Startup Completion Region',
+      slug: 'superseded-startup-completion-region',
+      extractId: 'superseded-startup-completion-region'
+    }),
+    'tester'
+  );
+
+  const primaryRun = await service.createQueuedRun(region.id, 'manual', 'tester');
+  await service.markRunStarted(primaryRun.id);
+
+  currentNow = new Date('2026-04-10T12:00:00.000Z');
+  const startupRetry = await service.createQueuedRun(region.id, 'startup', 'system');
+  await service.markRunStarted(startupRetry.id);
+
+  currentNow = new Date('2026-04-10T12:05:00.000Z');
+  await service.markRunSucceeded(primaryRun.id, {
+    importedFeatureCount: 10,
+    activeFeatureCount: 10
+  });
+
+  currentNow = new Date('2026-04-10T12:10:00.000Z');
+  const retryResult = await service.markRunSucceeded(startupRetry.id, {
+    importedFeatureCount: 20,
+    activeFeatureCount: 20
+  });
+
+  assert.equal(retryResult.run.status, 'abandoned');
+  assert.match(String(retryResult.run.error || ''), /Superseded by successful sync run/);
+
+  const regionState = await service.getRegionById(region.id);
+  assert.equal(regionState?.lastSyncStatus, 'idle');
+  assert.equal(regionState?.lastSuccessfulSyncAt, '2026-04-10T12:05:00.000Z');
+  assert.equal(regionState?.lastFeatureCount, 10);
+});
+
 test('updateRunStage normalizes progress/detail and only persists for running runs', async () => {
   const db = createTestDb();
   let currentNow = new Date('2026-04-09T10:00:00.000Z');

@@ -41,6 +41,65 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     return 'Region is not ready for sync: canonical extract is not selected';
   }
 
+  function getRunSupersessionReferenceIso(run) {
+    return toIsoOrNull(run?.requestedAt) || toIsoOrNull(run?.startedAt) || toIsoOrNull(run?.updatedAt) || null;
+  }
+
+  function isRunSupersededByRegionSuccess(run, region) {
+    if (!run || !region) return false;
+    if (String(run.triggerReason || '').trim().toLowerCase() !== 'startup') {
+      return false;
+    }
+    if (
+      ['queued', 'running'].includes(
+        String(region.lastSyncStatus || '')
+          .trim()
+          .toLowerCase()
+      )
+    ) {
+      return false;
+    }
+    const regionSuccessfulAt = parseTimestampMs(region.lastSuccessfulSyncAt);
+    const runReferenceAt = parseTimestampMs(getRunSupersessionReferenceIso(run));
+    return Number.isFinite(regionSuccessfulAt) && Number.isFinite(runReferenceAt) && regionSuccessfulAt >= runReferenceAt;
+  }
+
+  async function abandonSupersededStartupRuns(regionId, successfulRunId, successfulAt) {
+    const rows = await db
+      .prepare(
+        `
+      SELECT id, status, trigger_reason, requested_at, started_at, updated_at
+      FROM data_region_sync_runs
+      WHERE region_id = ?
+        AND id <> ?
+        AND status IN ('queued', 'running')
+        AND trigger_reason = 'startup'
+      ORDER BY id
+    `
+      )
+      .all(Number(regionId), Number(successfulRunId));
+
+    const successfulAtTs = parseTimestampMs(successfulAt);
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const run = rowToRun(row);
+      if (!run) continue;
+      const runReferenceIso = getRunSupersessionReferenceIso(run);
+      const runReferenceTs = parseTimestampMs(runReferenceIso);
+      if (
+        Number.isFinite(successfulAtTs) &&
+        Number.isFinite(runReferenceTs) &&
+        runReferenceTs > successfulAtTs
+      ) {
+        continue;
+      }
+      await markRunFailed(run.id, `Superseded by successful sync run #${successfulRunId}`, {
+        status: 'abandoned',
+        preserveRegionSuccess: true,
+        recoveredUpdatedAt: runReferenceIso || successfulAt
+      });
+    }
+  }
+
   async function getRecentRuns(regionId = null, pageOrLimit = 1, limitMaybe = undefined) {
     await ensureBootstrapped();
 
@@ -182,6 +241,18 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const run = await getRunById(runId);
     if (!run) {
       throw new Error('Run not found');
+    }
+    const region = await getRegionById(run.regionId);
+    if (!region) {
+      throw new Error('Region not found');
+    }
+    if (isRunSupersededByRegionSuccess(run, region)) {
+      const superseded = await markRunFailed(run.id, 'Superseded by successful sync run', {
+        status: 'abandoned',
+        preserveRegionSuccess: true,
+        recoveredUpdatedAt: getRunSupersessionReferenceIso(run)
+      });
+      return superseded.run;
     }
     const startedAt = toIsoOrNull(now());
     await db
@@ -412,6 +483,14 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     if (!region) {
       throw new Error('Region not found');
     }
+    if (isRunSupersededByRegionSuccess(run, region)) {
+      const superseded = await markRunFailed(run.id, 'Superseded by successful sync run', {
+        status: 'abandoned',
+        preserveRegionSuccess: true,
+        recoveredUpdatedAt: getRunSupersessionReferenceIso(run)
+      });
+      return superseded;
+    }
 
     const finishedAt = toIsoOrNull(now());
     const bounds = normalizeBounds(summary.bounds || null);
@@ -503,6 +582,8 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         activeFeatureCount ?? importedFeatureCount ?? null,
         region.id
       );
+
+    await abandonSupersededStartupRuns(region.id, run.id, finishedAt);
 
     return {
       run: await getRunById(run.id),

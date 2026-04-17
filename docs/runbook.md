@@ -124,6 +124,7 @@
 - Current managed sync workers keep a heartbeat on every owned `queued`/`running` run, so another runtime instance should no longer archive a live sync immediately.
 - If you still see this after upgrading, look for an actual second app process/container pointing at the same DB or an old release still running without the heartbeat fix.
 - Long-running orphaned extract jobs should now self-stop because both `scripts/sync-osm-region.ts` and `scripts/sync-osm-buildings.py` watch their parent PID.
+- If a stale-recovery `startup` retry was queued before the original run eventually reports `success`, the stale retry is now archived as superseded and cannot keep the region stuck in `queued`/`running` or overwrite the successful result later.
 - Admin cancel now has a stale-state fallback: when the current runtime no longer owns the worker, it can still abandon `queued`/`running` runs whose DB heartbeat is already stale and repair a stuck region row that still says `queued`/`running` even though no active run remains.
 - Region update/delete checks now block only on real active sync runs, not on a stale `last_sync_status` value left behind after an interrupted worker.
 

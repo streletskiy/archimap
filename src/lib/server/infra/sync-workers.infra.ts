@@ -530,6 +530,11 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       queuedRegionIds.delete(next.regionId);
       currentRun = next;
       const run = await dataSettingsService.markRunStarted(next.runId);
+      if (!run || run.status !== 'running') {
+        currentRun = null;
+        void drainQueue();
+        return;
+      }
       const region = await dataSettingsService.getRegionById(next.regionId);
       if (!region) {
         await finalizeRun(run.id, {

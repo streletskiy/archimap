@@ -239,6 +239,74 @@ test('managed sync workers execute region jobs through a single queue', async ()
   assert.deepEqual(spawnCalls[1], ['--import', 'tsx', 'managed.ts', '--region-id=2']);
 });
 
+test('managed sync workers skip child start for runs abandoned during markRunStarted and continue draining', async () => {
+  const children = [];
+  const spawnCalls = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 71,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 72,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseMarkRunStarted = dataSettingsService.markRunStarted;
+  dataSettingsService.markRunStarted = async (runId) => {
+    const started = await baseMarkRunStarted(runId);
+    if (started?.regionId === 71) {
+      await dataSettingsService.markRunFailed(runId, 'Superseded by successful sync run #1', {
+        status: 'abandoned'
+      });
+      return dataSettingsService.getRunById(runId);
+    }
+    return started;
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: (_execPath, args) => {
+      spawnCalls.push(args);
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const first = await workers.requestRegionSync(71, { triggerReason: 'manual', requestedBy: 'tester' });
+  const second = await workers.requestRegionSync(72, { triggerReason: 'manual', requestedBy: 'tester' });
+
+  await waitForMicrotasks();
+
+  const firstRun = await dataSettingsService.getRunById(first.run.id);
+  assert.equal(firstRun?.status, 'abandoned');
+  assert.equal(spawnCalls.length, 1);
+  assert.deepEqual(spawnCalls[0], ['--import', 'tsx', 'managed.ts', '--region-id=72']);
+
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  const secondRun = await dataSettingsService.getRunById(second.run.id);
+  assert.equal(secondRun?.status, 'success');
+});
+
 test('managed sync workers return queued responses without waiting for schedule refresh', async () => {
   const children = [];
   const refreshGate = createDeferredPromise();
