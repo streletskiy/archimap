@@ -493,6 +493,123 @@ async function lockPostgresContourSummary(client) {
   };
 }
 
+function normalizeSourceSnapshotForInsert(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const sha256 = String(snapshot.sha256 || '').trim();
+  if (!sha256) return null;
+  const sizeBytes = Number(snapshot.sizeBytes);
+  return {
+    extractSource: String(snapshot.extractSource || '').trim() || null,
+    extractId: String(snapshot.extractId || '').trim() || null,
+    sha256,
+    sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? Math.trunc(sizeBytes) : 0,
+    sourceMtime: String(snapshot.sourceMtime || '').trim() || null,
+    localPath: String(snapshot.localPath || '').trim() || null
+  };
+}
+
+async function recordPostgresRegionSourceSnapshot(
+  client,
+  { region, sourceSnapshot, importedFeatureCount, pmtilesBytes }
+) {
+  const normalized = normalizeSourceSnapshotForInsert(sourceSnapshot);
+  if (!normalized) return null;
+  const regionId = Number(region?.id || 0);
+  if (!Number.isInteger(regionId) || regionId <= 0) return null;
+
+  // Mark the previously-active row as superseded; we keep the history row for
+  // Phase 2 (osmium derive-changes against the last active snapshot).
+  await client.query(
+    `
+    UPDATE public.data_region_source_snapshots
+    SET is_active = 0,
+        superseded_at = COALESCE(superseded_at, NOW())
+    WHERE region_id = $1 AND is_active = 1
+  `,
+    [regionId]
+  );
+
+  const inserted = await client.query(
+    `
+    INSERT INTO public.data_region_source_snapshots (
+      region_id,
+      extract_source,
+      extract_id,
+      sha256,
+      size_bytes,
+      source_mtime,
+      local_path,
+      imported_feature_count,
+      pmtiles_bytes,
+      is_active
+    )
+    VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::timestamptz, $7, $8::bigint, $9::bigint, 1)
+    RETURNING id
+  `,
+    [
+      regionId,
+      normalized.extractSource,
+      normalized.extractId,
+      normalized.sha256,
+      normalized.sizeBytes,
+      normalized.sourceMtime,
+      normalized.localPath,
+      Number.isFinite(Number(importedFeatureCount)) ? Math.trunc(Number(importedFeatureCount)) : null,
+      Number.isFinite(Number(pmtilesBytes)) ? Math.trunc(Number(pmtilesBytes)) : null
+    ]
+  );
+  return Number(inserted.rows[0]?.id || 0) || null;
+}
+
+function recordSqliteRegionSourceSnapshot(
+  db,
+  { region, sourceSnapshot, importedFeatureCount, pmtilesBytes }
+) {
+  const normalized = normalizeSourceSnapshotForInsert(sourceSnapshot);
+  if (!normalized) return null;
+  const regionId = Number(region?.id || 0);
+  if (!Number.isInteger(regionId) || regionId <= 0) return null;
+
+  db.prepare(
+    `
+    UPDATE data_region_source_snapshots
+    SET is_active = 0,
+        superseded_at = COALESCE(superseded_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    WHERE region_id = ? AND is_active = 1
+  `
+  ).run(regionId);
+
+  const result = db
+    .prepare(
+      `
+      INSERT INTO data_region_source_snapshots (
+        region_id,
+        extract_source,
+        extract_id,
+        sha256,
+        size_bytes,
+        source_mtime,
+        local_path,
+        imported_feature_count,
+        pmtiles_bytes,
+        is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `
+    )
+    .run(
+      regionId,
+      normalized.extractSource,
+      normalized.extractId,
+      normalized.sha256,
+      normalized.sizeBytes,
+      normalized.sourceMtime,
+      normalized.localPath,
+      Number.isFinite(Number(importedFeatureCount)) ? Math.trunc(Number(importedFeatureCount)) : null,
+      Number.isFinite(Number(pmtilesBytes)) ? Math.trunc(Number(pmtilesBytes)) : null
+    );
+  return Number(result?.lastInsertRowid || 0) || null;
+}
+
 async function writePostgresContourSummary(client, total, lastUpdated) {
   await client.query(
     `
@@ -676,6 +793,7 @@ async function applyRegionImportToSqlite({
   osmDbPath,
   dataDir,
   totalFeatureCount,
+  sourceSnapshot = null,
   onProgress
 }) {
   const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
@@ -743,6 +861,20 @@ async function applyRegionImportToSqlite({
           .run()?.changes || 0
       );
 
+      let sourceSnapshotId = null;
+      try {
+        sourceSnapshotId = recordSqliteRegionSourceSnapshot(db, {
+          region,
+          sourceSnapshot,
+          importedFeatureCount,
+          pmtilesBytes: normalizedBuiltPmtilesPath && fs.existsSync(normalizedBuiltPmtilesPath)
+            ? Number(fs.statSync(normalizedBuiltPmtilesPath).size || 0)
+            : null
+        });
+      } catch (error) {
+        console.warn(`[region-sync] sqlite source snapshot record skipped: ${String(error?.message || error)}`);
+      }
+
       db.exec('COMMIT');
       if (swap) {
         swap.commit();
@@ -767,6 +899,7 @@ async function applyRegionImportToSqlite({
         importedFeatureCount,
         activeFeatureCount,
         orphanDeletedCount,
+        sourceSnapshotId,
         pmtilesBytes: finalPmtilesPath ? Number(fs.statSync(finalPmtilesPath).size || 0) : null,
         pmtilesPath: finalPmtilesPath
       };
@@ -794,6 +927,7 @@ async function applyRegionImportToPostgres({
   dataDir,
   renderGeojsonPath,
   totalFeatureCount,
+  sourceSnapshot = null,
   onProgress
 }) {
   const client = new Client({ connectionString: databaseUrl });
@@ -881,6 +1015,20 @@ async function applyRegionImportToPostgres({
       );
       await writePostgresContourSummary(client, nextSummaryTotal, nextSummaryTotal > 0 ? runMarker : null);
 
+      let sourceSnapshotId = null;
+      try {
+        sourceSnapshotId = await recordPostgresRegionSourceSnapshot(client, {
+          region,
+          sourceSnapshot,
+          importedFeatureCount,
+          pmtilesBytes: normalizedBuiltPmtilesPath && fs.existsSync(normalizedBuiltPmtilesPath)
+            ? Number(fs.statSync(normalizedBuiltPmtilesPath).size || 0)
+            : null
+        });
+      } catch (error) {
+        console.warn(`[region-sync] source snapshot record skipped: ${String(error?.message || error)}`);
+      }
+
       await client.query('COMMIT');
       if (swap) {
         swap.commit();
@@ -920,6 +1068,7 @@ async function applyRegionImportToPostgres({
         activeFeatureCount,
         orphanDeletedCount,
         renderCacheRows,
+        sourceSnapshotId,
         pmtilesBytes: finalPmtilesPath ? Number(fs.statSync(finalPmtilesPath).size || 0) : null,
         pmtilesPath: finalPmtilesPath
       };
@@ -958,6 +1107,7 @@ module.exports = {
   buildPostgresCopyTextLine,
   computePostgresContourSummaryTotal,
   escapePostgresCopyTextValue,
+  normalizeSourceSnapshotForInsert,
   publishPmtilesArchive,
   resolveImportApplyBatchSize
 };

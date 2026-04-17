@@ -368,9 +368,25 @@ function readExportSummary(summaryPath) {
       return null;
     }
 
+    const sourceSnapshotRaw = payload?.sourceSnapshot;
+    const sourceSnapshot =
+      sourceSnapshotRaw && typeof sourceSnapshotRaw === 'object' && String(sourceSnapshotRaw.sha256 || '').trim()
+        ? {
+            extractSource: String(sourceSnapshotRaw.extractSource || '').trim() || null,
+            extractId: String(sourceSnapshotRaw.extractId || '').trim() || null,
+            sha256: String(sourceSnapshotRaw.sha256).trim(),
+            sizeBytes: Number.isFinite(Number(sourceSnapshotRaw.sizeBytes))
+              ? Number(sourceSnapshotRaw.sizeBytes)
+              : null,
+            sourceMtime: String(sourceSnapshotRaw.sourceMtime || '').trim() || null,
+            localPath: String(sourceSnapshotRaw.localPath || '').trim() || null
+          }
+        : null;
+
     return {
       importedFeatureCount,
-      bounds
+      bounds,
+      sourceSnapshot
     };
   } catch {
     return null;
@@ -378,7 +394,9 @@ function readExportSummary(summaryPath) {
 }
 
 async function readRegionImportSummary(runtimeOptions, summaryPath, importPath) {
-  return readExportSummary(summaryPath) || summarizeImportRows(importPath, getRegionImportReadOptions(runtimeOptions));
+  const summary = readExportSummary(summaryPath);
+  if (summary) return summary;
+  return summarizeImportRows(importPath, getRegionImportReadOptions(runtimeOptions));
 }
 
 function buildApplyStageDetail(totalFeatureCount) {
@@ -476,6 +494,7 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
       ndjsonPath: importPath,
       renderGeojsonPath: geojsonPath,
       totalFeatureCount: exported.importedFeatureCount,
+      sourceSnapshot: exported.sourceSnapshot || null,
       onProgress: createApplyStageProgressEmitter()
     });
 
@@ -548,6 +567,7 @@ async function runRegionSync(region, runtimeOptions) {
       builtPmtilesPath,
       renderGeojsonPath: geojsonPath,
       totalFeatureCount: exported.importedFeatureCount,
+      sourceSnapshot: exported.sourceSnapshot || null,
       onProgress: createApplyStageProgressEmitter()
     });
     if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {

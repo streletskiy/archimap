@@ -224,7 +224,8 @@ test('readExportSummary returns normalized summary for valid exporter metadata',
         south: 55.5,
         east: 37.7,
         north: 55.7
-      }
+      },
+      sourceSnapshot: null
     });
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });

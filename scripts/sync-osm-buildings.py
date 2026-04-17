@@ -1,6 +1,7 @@
 import argparse
 import difflib
 import fnmatch
+import hashlib
 import json
 import os
 import platform
@@ -147,6 +148,16 @@ def path_matches_patterns(file_path: Path, patterns: tuple[str, ...]) -> bool:
 
 def build_duckdb_cache_marker_path(duckdb_path: Path) -> Path:
   return duckdb_path.with_suffix(f'{duckdb_path.suffix}{DUCKDB_CACHE_MARKER_SUFFIX}')
+
+
+def resolve_quackosm_work_dir() -> Path:
+    # ARCHIMAP_DATA_DIR is the single source of truth for runtime artifact roots.
+    # When it is set (normal runtime + docker), the extract/snapshot cache lives
+    # under <data>/quackosm/ so repeat syncs reuse the PBF and DuckDB files.
+    archimap_data_dir = os.environ.get('ARCHIMAP_DATA_DIR', '').strip()
+    if archimap_data_dir:
+        return (Path(archimap_data_dir).expanduser() / 'quackosm').resolve()
+    return (Path(os.path.dirname(__file__)).resolve().parent / 'data' / 'quackosm').resolve()
 
 
 def read_json_marker(marker_path: Path) -> dict[str, Any] | None:
@@ -762,14 +773,69 @@ def build_geojson_feature_line(
     )
 
 
-def write_export_summary(summary_path: Path, processed: int, imported: int, bounds: dict[str, float] | None) -> None:
+def compute_file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str | None:
+    try:
+        hasher = hashlib.sha256()
+        with path.open('rb') as fh:
+            while True:
+                chunk = fh.read(chunk_size)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
+
+def build_source_snapshot_metadata(
+    *,
+    extract_source: str,
+    extract_id: str,
+    pbf_path: Path | None,
+) -> dict[str, Any] | None:
+    if pbf_path is None:
+        return None
+    try:
+        resolved = pbf_path.expanduser().resolve()
+    except Exception:
+        return None
+    if not resolved.exists() or not resolved.is_file():
+        return None
+    try:
+        stat = resolved.stat()
+    except Exception:
+        return None
+    sha256 = compute_file_sha256(resolved)
+    if not sha256:
+        return None
+    return {
+        'extractSource': str(extract_source or '').strip() or None,
+        'extractId': str(extract_id or '').strip() or None,
+        'sha256': sha256,
+        'sizeBytes': int(stat.st_size),
+        'sourceMtime': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        'localPath': str(resolved),
+    }
+
+
+def write_export_summary(
+    summary_path: Path,
+    processed: int,
+    imported: int,
+    bounds: dict[str, float] | None,
+    *,
+    source_snapshot: dict[str, Any] | None = None,
+) -> None:
     summary_path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        'processed': int(processed),
+        'importedFeatureCount': int(imported),
+        'bounds': bounds,
+    }
+    if source_snapshot:
+        payload['sourceSnapshot'] = source_snapshot
     summary_path.write_text(
-        json.dumps({
-            'processed': int(processed),
-            'importedFeatureCount': int(imported),
-            'bounds': bounds,
-        }, ensure_ascii=False),
+        json.dumps(payload, ensure_ascii=False),
         encoding='utf-8',
     )
 
@@ -1397,7 +1463,7 @@ def run_quackosm_extract_to_duckdb(
     work_dir: Path,
     index: int,
     total: int = 1,
-) -> Path:
+) -> dict[str, Any]:
     resolved_query = str(extract_query or '').strip()
     normalized_source = normalize_extract_source(extract_source)
     prefix = f'[{max(1, int(index or 1))}/{max(1, int(total or 1))}] {truncate_text(resolved_query, 96)}'
@@ -1412,8 +1478,10 @@ def run_quackosm_extract_to_duckdb(
     if not safe_slug:
         safe_slug = 'extract'
     duckdb_path = work_dir / f'quackosm-buildings-{index:02d}-{safe_slug[:50]}.duckdb'
-    if duckdb_path.exists():
-        duckdb_path.unlink()
+    # Previously this code unconditionally deleted duckdb_path before the marker
+    # validity check ran, which made the DuckDB warm-cache reuse branch below
+    # unreachable and forced every repeat sync to re-run QuackOSM from scratch.
+    # Deletion now only happens further down when the marker is stale or missing.
 
     cached_pbf_path = work_dir / f'{resolved_query}.osm.pbf'
 
@@ -1478,7 +1546,19 @@ def run_quackosm_extract_to_duckdb(
             flush=True,
         )
         emit_stage_json('extract', 100, f'{prefix} | using cached DuckDB ({format_bytes_compact(duckdb_path.stat().st_size)})')
-        return duckdb_path
+        return {
+            'duckdb_path': duckdb_path,
+            'pbf_path': cached_pbf_path,
+            'extract_source': normalized_source,
+            'extract_id': resolved_query,
+        }
+
+    # Marker missing/stale/wrong version => rebuild. Drop the file only now so the
+    # warm-cache branch above still has a chance to hit.
+    if duckdb_path.exists():
+        duckdb_path.unlink()
+    if duckdb_marker_path.exists():
+        duckdb_marker_path.unlink()
 
     emit_stage_json('extract', 0, f'{prefix} | QuackOSM: parsing {filtered_size} PBF into DuckDB (this may take a while)')
     result = run_quackosm_to_duckdb(filtered_pbf, work_dir, duckdb_path)
@@ -1495,7 +1575,12 @@ def run_quackosm_extract_to_duckdb(
     except Exception:
         pass
     emit_stage_json('extract', 100, f'{prefix} | buildings extracted to DuckDB')
-    return result
+    return {
+        'duckdb_path': result,
+        'pbf_path': cached_pbf_path,
+        'extract_source': normalized_source,
+        'extract_id': resolved_query,
+    }
 
 
 def _limit_clause_sql(import_limit: int) -> str:
@@ -1668,6 +1753,10 @@ def _build_export_select_sql(
     source_rows_name: str,
     geometry_sql: str,
 ) -> str:
+    # ORDER BY pins row order to (osm_type, osm_id, feature_kind) so the resulting
+    # NDJSON is byte-stable across reruns on the same DuckDB. Without it, DuckDB's
+    # hash-based UNION ALL / JOIN plans are free to emit rows in a non-deterministic
+    # order, which makes the pmtiles shard cache falsely invalidate on no-op syncs.
     return f'''
 {cte_sql}
 SELECT
@@ -1682,7 +1771,11 @@ SELECT
   max_lon,
   max_lat
 FROM {source_rows_name}
-WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL
+ORDER BY
+  split_part(feature_id, '/', 1),
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT),
+  feature_kind;
 '''
 
 
@@ -1707,7 +1800,10 @@ SELECT
   max_lon,
   max_lat
 FROM db_rows
-WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL
+ORDER BY
+  split_part(feature_id, '/', 1),
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT);
 '''
 
 
@@ -1749,7 +1845,11 @@ SELECT
   max_lat,
   {db_geometry_sql}
 FROM export_rows
-WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL;
+WHERE try_cast(split_part(feature_id, '/', 2) AS BIGINT) IS NOT NULL
+ORDER BY
+  split_part(feature_id, '/', 1),
+  try_cast(split_part(feature_id, '/', 2) AS BIGINT),
+  feature_kind;
 '''
 
 
@@ -1887,7 +1987,15 @@ def _materialize_export_tables(con: duckdb.DuckDBPyConnection, import_limit: int
 
 
 def _materialized_dual_export_select_sql(db_geometry_mode: str = 'wkb_hex') -> str:
-    """Build SELECT for dual export using pre-materialized temp tables."""
+    """Build SELECT for dual export using pre-materialized temp tables.
+
+    The trailing ORDER BY over (osm_type, osm_id, feature_kind) pins the emit
+    order for both the DB NDJSON and the GeoJSON build NDJSON so repeat syncs
+    against the same PBF produce byte-identical outputs. Without this, DuckDB's
+    hash-based UNION ALL / LEFT JOIN plans are free to interleave rows from the
+    filtered and remainder branches in a non-deterministic order, which then
+    invalidates the per-cell pmtiles shard cache on no-op reruns.
+    """
     db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
     if db_geometry_mode_normalized == 'wkb_hex':
         db_geometry_sql = (
@@ -1900,40 +2008,43 @@ def _materialized_dual_export_select_sql(db_geometry_mode: str = 'wkb_hex') -> s
         raise ValueError(f'Unsupported DB geometry export mode: {db_geometry_mode}')
 
     return f'''
-    SELECT
-      split_part(f.feature_id, '/', 1) AS osm_type,
-      try_cast(split_part(f.feature_id, '/', 2) AS BIGINT) AS osm_id,
-      f.tags_json,
-      f.feature_kind,
-      CASE WHEN bwp.feature_id IS NULL THEN 0 ELSE 1 END AS render_hide_base_when_parts,
-      ST_AsGeoJSON(f.geometry) AS geometry_json,
-      ST_XMin(f.geometry) AS min_lon,
-      ST_YMin(f.geometry) AS min_lat,
-      ST_XMax(f.geometry) AS max_lon,
-      ST_YMax(f.geometry) AS max_lat,
-      {db_geometry_sql}
-    FROM _export_filtered f
-    LEFT JOIN _export_buildings_with_parts bwp ON bwp.feature_id = f.feature_id
-    WHERE try_cast(split_part(f.feature_id, '/', 2) AS BIGINT) IS NOT NULL
+    SELECT * FROM (
+      SELECT
+        split_part(f.feature_id, '/', 1) AS osm_type,
+        try_cast(split_part(f.feature_id, '/', 2) AS BIGINT) AS osm_id,
+        f.tags_json,
+        f.feature_kind,
+        CASE WHEN bwp.feature_id IS NULL THEN 0 ELSE 1 END AS render_hide_base_when_parts,
+        ST_AsGeoJSON(f.geometry) AS geometry_json,
+        ST_XMin(f.geometry) AS min_lon,
+        ST_YMin(f.geometry) AS min_lat,
+        ST_XMax(f.geometry) AS max_lon,
+        ST_YMax(f.geometry) AS max_lat,
+        {db_geometry_sql}
+      FROM _export_filtered f
+      LEFT JOIN _export_buildings_with_parts bwp ON bwp.feature_id = f.feature_id
+      WHERE try_cast(split_part(f.feature_id, '/', 2) AS BIGINT) IS NOT NULL
 
-    UNION ALL
+      UNION ALL
 
-    SELECT
-      split_part(r.feature_id, '/', 1) AS osm_type,
-      try_cast(split_part(r.feature_id, '/', 2) AS BIGINT) AS osm_id,
-      r.tags_json,
-      r.feature_kind,
-      r.render_hide_base_when_parts,
-      ST_AsGeoJSON(r.geometry) AS geometry_json,
-      ST_XMin(r.geometry) AS min_lon,
-      ST_YMin(r.geometry) AS min_lat,
-      ST_XMax(r.geometry) AS max_lon,
-      ST_YMax(r.geometry) AS max_lat,
-      NULL AS geometry_wkb_hex
-    FROM _export_remainders r
-    WHERE r.geometry IS NOT NULL
-      AND NOT ST_IsEmpty(r.geometry)
-      AND try_cast(split_part(r.feature_id, '/', 2) AS BIGINT) IS NOT NULL
+      SELECT
+        split_part(r.feature_id, '/', 1) AS osm_type,
+        try_cast(split_part(r.feature_id, '/', 2) AS BIGINT) AS osm_id,
+        r.tags_json,
+        r.feature_kind,
+        r.render_hide_base_when_parts,
+        ST_AsGeoJSON(r.geometry) AS geometry_json,
+        ST_XMin(r.geometry) AS min_lon,
+        ST_YMin(r.geometry) AS min_lat,
+        ST_XMax(r.geometry) AS max_lon,
+        ST_YMax(r.geometry) AS max_lat,
+        NULL AS geometry_wkb_hex
+      FROM _export_remainders r
+      WHERE r.geometry IS NOT NULL
+        AND NOT ST_IsEmpty(r.geometry)
+        AND try_cast(split_part(r.feature_id, '/', 2) AS BIGINT) IS NOT NULL
+    ) ordered_dual
+    ORDER BY osm_type, osm_id, feature_kind
     '''
 
 
@@ -2317,7 +2428,7 @@ def main() -> None:
     )
     print('City filter: disabled (removed from importer)', flush=True)
 
-    work_dir = Path(os.path.dirname(__file__)).resolve().parent / 'data' / 'quackosm'
+    work_dir = resolve_quackosm_work_dir()
     work_dir.mkdir(parents=True, exist_ok=True)
 
     processed = 0
@@ -2337,6 +2448,7 @@ def main() -> None:
             if candidate_path.exists():
                 candidate_path.unlink()
 
+    last_source_snapshot: dict[str, Any] | None = None
     if extract_queries:
         print(f'Extract import started (QuackOSM + DuckDB): source={extract_source}, queries={extract_queries}', flush=True)
         for idx, query in enumerate(extract_queries, start=1):
@@ -2344,7 +2456,15 @@ def main() -> None:
                 print(f'IMPORT_LIMIT reached: {import_limit}', flush=True)
                 break
             print(f'[{idx}/{len(extract_queries)}] Loading extract: source={extract_source}, id={query}', flush=True)
-            duckdb_path = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx, len(extract_queries))
+            extract_handle = run_quackosm_extract_to_duckdb(query, extract_source, work_dir, idx, len(extract_queries))
+            duckdb_path = extract_handle['duckdb_path']
+            candidate_snapshot = build_source_snapshot_metadata(
+                extract_source=extract_handle.get('extract_source') or extract_source,
+                extract_id=extract_handle.get('extract_id') or query,
+                pbf_path=extract_handle.get('pbf_path'),
+            )
+            if candidate_snapshot:
+                last_source_snapshot = candidate_snapshot
             export_prefix = f'[{idx}/{len(extract_queries)}] {truncate_text(query, 96)}'
             emit_stage_json('export', 0, f'{export_prefix} | exporting filtered rows')
             per_query_limit = max(0, import_limit - imported) if import_limit > 0 else 0
@@ -2413,6 +2533,11 @@ def main() -> None:
         emit_stage_json('extract', 0, f'{local_pbf_label} | QuackOSM: parsing {filtered_size} PBF into DuckDB (this may take a while)')
         duckdb_path = run_quackosm_to_duckdb(filtered_pbf, work_dir)
         emit_stage_json('extract', 100, f'{local_pbf_label} | buildings extracted to DuckDB')
+        last_source_snapshot = build_source_snapshot_metadata(
+            extract_source=extract_source,
+            extract_id=Path(pbf_path).name,
+            pbf_path=Path(pbf_path),
+        )
         emit_stage_json('export', 0, f'{local_pbf_label} | exporting filtered rows')
         if ndjson_path is not None:
             processed, imported, export_bounds = export_rows_duckdb_ndjson(
@@ -2464,7 +2589,13 @@ def main() -> None:
     try:
         if ndjson_path is not None or db_ndjson_path is not None or geojson_ndjson_path is not None:
             if summary_json_path is not None:
-                write_export_summary(summary_json_path, processed, imported, export_bounds)
+                write_export_summary(
+                    summary_json_path,
+                    processed,
+                    imported,
+                    export_bounds,
+                    source_snapshot=last_source_snapshot,
+                )
             print(
                 'Export done. '
                 f'processed={processed}, exported={imported}, '

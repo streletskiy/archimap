@@ -20,7 +20,27 @@ const DEFAULT_SHARD_KM = 60;
 // old override behavior, including `0` for benchmarking/always-shard runs.
 const DEFAULT_SHARD_MIN_FEATURES = null;
 const MAX_SHARD_CELL_COUNT = 400;
-const SHARD_CACHE_MANIFEST_VERSION = 1;
+// Bumped to 2 when the manifest gained `finalArchive` metadata for the
+// tile-join short-circuit. Older manifests are simply ignored and the final
+// archive gets rebuilt once to populate the new fields.
+const SHARD_CACHE_MANIFEST_VERSION = 2;
+const FINAL_ARCHIVE_CACHE_FILENAME = 'final.pmtiles';
+
+function sha256FileSync(filePath) {
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(1024 * 1024);
+    while (true) {
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
 
 function replaceFileSync(sourcePath, targetPath) {
   const backupPath = `${targetPath}.bak`;
@@ -660,23 +680,81 @@ async function buildPmtilesFromGeojson({
       }
     }
 
-    reportShardProgress({
-      stage: 'tile_join',
-      progress: null,
-      detail: `tile-join: merging ${totalShards} shards (${reusedShardCount} cached, ${rebuiltShardCount} rebuilt)`
-    });
-    runTileJoin({
-      tileJoinExe,
-      region,
-      inputs: shardPmtilesPaths,
-      outputPath,
-      env
-    });
-    reportShardProgress({
-      stage: 'tile_join',
-      progress: 100,
-      detail: `tile-join done (${totalShards} shards, ${reusedShardCount} cached, ${rebuiltShardCount} rebuilt)`
-    });
+    // Full no-op short-circuit: when every shard is a cache hit *and* the
+    // manifest records a previously-published final archive whose sha256
+    // still matches the cached file on disk, we can skip tile-join entirely
+    // and just republish that cached archive. On large regions tile-join of
+    // already-built shards still costs hundreds of seconds, so this is the
+    // dominant win on a true no-op sync.
+    const cachedFinalArchivePath = effectiveShardCacheDir
+      ? path.join(effectiveShardCacheDir, FINAL_ARCHIVE_CACHE_FILENAME)
+      : null;
+    const cachedFinalMeta = shardCacheManifest?.finalArchive || null;
+    const finalArchiveCacheable =
+      effectiveShardCacheDir &&
+      rebuiltShardCount === 0 &&
+      cachedFinalMeta &&
+      typeof cachedFinalMeta.sha256 === 'string' &&
+      cachedFinalMeta.sha256.length > 0 &&
+      fs.existsSync(cachedFinalArchivePath);
+
+    let finalArchiveReused = false;
+    let finalArchiveSha256 = null;
+    let finalArchiveBytes = null;
+
+    if (finalArchiveCacheable) {
+      const observedSha = sha256FileSync(cachedFinalArchivePath);
+      if (observedSha === cachedFinalMeta.sha256) {
+        reportShardProgress({
+          stage: 'tile_join',
+          progress: null,
+          detail: `tile-join skipped (final archive cached, ${totalShards} shards reused)`
+        });
+        ensureDir(outputPath);
+        fs.copyFileSync(cachedFinalArchivePath, outputPath);
+        finalArchiveReused = true;
+        finalArchiveSha256 = observedSha;
+        finalArchiveBytes = fs.statSync(outputPath).size;
+        reportShardProgress({
+          stage: 'tile_join',
+          progress: 100,
+          detail: `tile-join skipped (final archive cached, ${totalShards} shards reused)`
+        });
+      }
+    }
+
+    if (!finalArchiveReused) {
+      reportShardProgress({
+        stage: 'tile_join',
+        progress: null,
+        detail: `tile-join: merging ${totalShards} shards (${reusedShardCount} cached, ${rebuiltShardCount} rebuilt)`
+      });
+      runTileJoin({
+        tileJoinExe,
+        region,
+        inputs: shardPmtilesPaths,
+        outputPath,
+        env
+      });
+      reportShardProgress({
+        stage: 'tile_join',
+        progress: 100,
+        detail: `tile-join done (${totalShards} shards, ${reusedShardCount} cached, ${rebuiltShardCount} rebuilt)`
+      });
+
+      if (effectiveShardCacheDir && fs.existsSync(outputPath)) {
+        finalArchiveSha256 = sha256FileSync(outputPath);
+        finalArchiveBytes = fs.statSync(outputPath).size;
+        try {
+          fs.copyFileSync(outputPath, cachedFinalArchivePath);
+        } catch {
+          // Best-effort: failing to populate the final-archive cache must not
+          // break the publish — the next run will just redo tile-join.
+          finalArchiveSha256 = null;
+          finalArchiveBytes = null;
+        }
+      }
+    }
 
     if (effectiveShardCacheDir) {
       writeShardCacheManifest(effectiveShardCacheDir, {
@@ -693,6 +771,15 @@ async function buildPmtilesFromGeojson({
         shards: Object.fromEntries(
           shardPlan.shards.map((shard) => [shard.key, { hash: shard.hash, count: shard.count }])
         ),
+        finalArchive:
+          finalArchiveSha256 && finalArchiveBytes !== null
+            ? {
+                sha256: finalArchiveSha256,
+                bytes: finalArchiveBytes,
+                filename: FINAL_ARCHIVE_CACHE_FILENAME,
+                reused: finalArchiveReused
+              }
+            : null,
         updatedAt: new Date().toISOString()
       });
     }
@@ -704,6 +791,7 @@ async function buildPmtilesFromGeojson({
       skippedFeatureCount: shardPlan.skippedFeatureCount,
       reusedShardCount,
       rebuiltShardCount,
+      finalArchiveReused,
       cacheDir: effectiveShardCacheDir
     };
   } finally {

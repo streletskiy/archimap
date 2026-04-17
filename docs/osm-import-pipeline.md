@@ -198,6 +198,7 @@ flowchart TD
 
 - Acts as the transformation stage between raw OSM extract data and ArchiMap import rows.
 - Runs spatial SQL to normalize geometry and derive bbox columns.
+- Exports pin row order with a trailing `ORDER BY (osm_type, osm_id, feature_kind)` in the three SQL builders (`_build_export_select_sql`, `_build_db_export_select_sql`, `_build_dual_export_select_sql`). Without that guarantee, DuckDB's hash-based UNION ALL / JOIN plans emit rows in non-deterministic order, which makes `region-build.ndjson` change byte-for-byte between reruns and forces the per-cell PMTiles shard cache to rebuild every shard on a no-op sync.
 - Produces provider-specific handoff artifacts:
   - PostgreSQL full sync: WKB-based NDJSON for DB import, GeoJSON feature NDJSON for PMTiles, and summary metadata in one DuckDB pass
   - SQLite full sync: GeoJSON-based NDJSON for DB import, GeoJSON feature NDJSON for PMTiles, and summary metadata in one DuckDB pass
@@ -269,14 +270,17 @@ flowchart TD
     - SQLite full sync: feature count + bounds emitted directly by the importer
   - `region.pmtiles`
 - Persistent intermediate extraction cache:
-  - `data/quackosm/*.duckdb`
-  - `data/quackosm/*.osm.pbf` downloaded by QuackOSM for canonical extract imports
-  - QuackOSM source indexes under `data/cache/QuackOSM/*.geojson` when the container uses the persisted cache root
+  - `<ARCHIMAP_DATA_DIR|./data>/quackosm/*.duckdb`
+  - `<ARCHIMAP_DATA_DIR|./data>/quackosm/*.osm.pbf` downloaded by QuackOSM for canonical extract imports
+  - QuackOSM source indexes under `<ARCHIMAP_DATA_DIR|./data>/cache/QuackOSM/*.geojson` when the container uses the persisted cache root
+  - The importer honours `ARCHIMAP_DATA_DIR` for its workspace root (`resolve_quackosm_work_dir()`), so the `.duckdb` warm-cache path matches across container restarts that share the same data volume. Unset, it falls back to `<repo>/data/quackosm`.
+  - `.duckdb` files are reused across reruns when the extract id + PBF fingerprint recorded in the sibling `.duckdb.marker` JSON still matches the current input. The DuckDB file is only deleted when that marker check fails; without the marker we re-extract defensively.
 - Persistent runtime outputs:
   - `osm.building_contours`
   - `data_region_memberships`
   - `osm.building_contours_summary` in PostgreSQL
   - `data/regions/buildings-region-<slug>.pmtiles`
+  - `data_region_source_snapshots` rows (migrations 025 / 032): exactly one `is_active=1` row per region records the canonical PBF last applied (sha256, size, source mtime, extract source/id, imported feature count, pmtiles bytes). Previous rows are preserved with `is_active=0` + `superseded_at` so Phase 2 can derive osmium changes against the last successful snapshot.
 
 ## Managed runtime follow-up after successful sync
 
