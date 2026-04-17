@@ -5,14 +5,20 @@ const PROTOMAPS_GLYPHS_PROXY_URL = '/api/basemaps/glyphs/{fontstack}/{range}.pbf
 const PROTOMAPS_SPRITES_LOCAL_BASE_URL = '/basemaps-assets/sprites/v4';
 
 function normalizeBasemapProvider(value) {
-  const text = String(value ?? '').trim().toLowerCase();
+  const text = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (text === 'maptiler') return 'maptiler';
   if (text === 'custom' || text === 'pmtiles' || text === 'protomaps') return 'custom';
   return 'carto';
 }
 
 function normalizeBasemapThemeVariant(value) {
-  return String(value || '').trim().toLowerCase() === 'dark' ? 'dark' : 'light';
+  return String(value || '')
+    .trim()
+    .toLowerCase() === 'dark'
+    ? 'dark'
+    : 'light';
 }
 
 function normalizeCustomBasemapUrl(value, fallback = DEFAULT_CUSTOM_BASEMAP_URL) {

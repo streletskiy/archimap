@@ -1,8 +1,5 @@
 import { derived, writable } from 'svelte/store';
-import {
-  FILTER_LAYER_BASE_COLOR,
-  FILTER_LAYER_COLOR_PALETTE
-} from '$lib/constants/filter-presets';
+import { FILTER_LAYER_BASE_COLOR, FILTER_LAYER_COLOR_PALETTE } from '$lib/constants/filter-presets';
 import {
   createFilterLayerId,
   flattenFilterLayers,
@@ -15,7 +12,9 @@ import {
 const FILTER_RULE_FALLBACK_OP = 'contains';
 
 export const buildingFilterLayers = writable([]);
-export const buildingFilterRules = derived(buildingFilterLayers, ($buildingFilterLayers) => flattenFilterLayers($buildingFilterLayers));
+export const buildingFilterRules = derived(buildingFilterLayers, ($buildingFilterLayers) =>
+  flattenFilterLayers($buildingFilterLayers)
+);
 export const buildingFilterRuntime = writable({
   phase: 'idle',
   statusCode: 'idle',
@@ -76,10 +75,10 @@ export function createBuildingFilterLayersFromPreset(preset) {
   const presetIdentity = String(preset?.key || preset?.id || 'filter');
   const layers = Array.isArray(preset?.layers)
     ? preset.layers.map((layer, index) => ({
-      ...layer,
-      id: createFilterLayerId(`preset-${presetIdentity}`),
-      priority: index
-    }))
+        ...layer,
+        id: createFilterLayerId(`preset-${presetIdentity}`),
+        priority: index
+      }))
     : [];
   return normalizeFilterLayers(layers).layers;
 }
@@ -99,13 +98,15 @@ export function setBuildingFilterRules(rules) {
     buildingFilterLayers.set([]);
     return;
   }
-  setBuildingFilterLayers([{
-    id: createFilterLayerId('compat-filter-layer'),
-    color: FILTER_LAYER_BASE_COLOR,
-    priority: 0,
-    mode: 'and',
-    rules: normalized.rules
-  }]);
+  setBuildingFilterLayers([
+    {
+      id: createFilterLayerId('compat-filter-layer'),
+      color: FILTER_LAYER_BASE_COLOR,
+      priority: 0,
+      mode: 'and',
+      rules: normalized.rules
+    }
+  ]);
 }
 
 export function resetBuildingFilterRules() {
@@ -120,9 +121,10 @@ export function setBuildingFilterRuntimeStatus(status: LooseRecord = {}) {
     count: status.count != null ? Number(status.count || 0) : Number(prev.count || 0),
     elapsedMs: status.elapsedMs != null ? Number(status.elapsedMs || 0) : Number(prev.elapsedMs || 0),
     cacheHit: status.cacheHit != null ? Boolean(status.cacheHit) : Boolean(prev.cacheHit),
-    setPaintPropertyCalls: status.setPaintPropertyCalls != null
-      ? Number(status.setPaintPropertyCalls || 0)
-      : Number(prev.setPaintPropertyCalls || 0),
+    setPaintPropertyCalls:
+      status.setPaintPropertyCalls != null
+        ? Number(status.setPaintPropertyCalls || 0)
+        : Number(prev.setPaintPropertyCalls || 0),
     updatedAt: Number(status.updatedAt || Date.now())
   }));
 }

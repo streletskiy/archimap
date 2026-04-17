@@ -11,16 +11,12 @@ const DEFAULT_FILTER_PRESETS = Object.freeze([
       {
         color: '#86efac',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:levels', op: 'equals', value: '1' }
-        ])
+        rules: Object.freeze([{ key: 'building:levels', op: 'equals', value: '1' }])
       },
       {
         color: '#fde047',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:levels', op: 'equals', value: '2' }
-        ])
+        rules: Object.freeze([{ key: 'building:levels', op: 'equals', value: '2' }])
       },
       {
         color: '#fdba74',
@@ -49,9 +45,7 @@ const DEFAULT_FILTER_PRESETS = Object.freeze([
       {
         color: '#c084fc',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:levels', op: 'greater_or_equals', value: '16' }
-        ])
+        rules: Object.freeze([{ key: 'building:levels', op: 'greater_or_equals', value: '16' }])
       }
     ])
   },
@@ -67,30 +61,22 @@ const DEFAULT_FILTER_PRESETS = Object.freeze([
       {
         color: '#fca5a5',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:material', op: 'equals', value: 'brick' }
-        ])
+        rules: Object.freeze([{ key: 'building:material', op: 'equals', value: 'brick' }])
       },
       {
         color: '#93c5fd',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:material', op: 'equals', value: 'concrete' }
-        ])
+        rules: Object.freeze([{ key: 'building:material', op: 'equals', value: 'concrete' }])
       },
       {
         color: '#86efac',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:material', op: 'equals', value: 'wood' }
-        ])
+        rules: Object.freeze([{ key: 'building:material', op: 'equals', value: 'wood' }])
       },
       {
         color: '#d8b4fe',
         mode: 'layer',
-        rules: Object.freeze([
-          { key: 'building:material', op: 'equals', value: 'panel' }
-        ])
+        rules: Object.freeze([{ key: 'building:material', op: 'equals', value: 'panel' }])
       }
     ])
   }

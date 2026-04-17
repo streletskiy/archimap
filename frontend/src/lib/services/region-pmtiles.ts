@@ -10,18 +10,22 @@ export const REGION_BUILDING_LAYER_MIN_ZOOM = 13;
 
 export function boundsIntersect(left, right) {
   if (!left || !right) return false;
-  return Number(left.west) < Number(right.east)
-    && Number(left.east) > Number(right.west)
-    && Number(left.south) < Number(right.north)
-    && Number(left.north) > Number(right.south);
+  return (
+    Number(left.west) < Number(right.east) &&
+    Number(left.east) > Number(right.west) &&
+    Number(left.south) < Number(right.north) &&
+    Number(left.north) > Number(right.south)
+  );
 }
 
 export function pointInBounds(lon, lat, bounds) {
   if (!bounds) return false;
-  return Number(lon) >= Number(bounds.west)
-    && Number(lon) <= Number(bounds.east)
-    && Number(lat) >= Number(bounds.south)
-    && Number(lat) <= Number(bounds.north);
+  return (
+    Number(lon) >= Number(bounds.west) &&
+    Number(lon) <= Number(bounds.east) &&
+    Number(lat) >= Number(bounds.south) &&
+    Number(lat) <= Number(bounds.north)
+  );
 }
 
 export function normalizeBoundsLike(bounds) {
@@ -85,5 +89,7 @@ export function isViewportCoveredByRegions(regions, viewportBounds, center = nul
   const samplePoints = getViewportCoverageSamplePoints(viewportBounds, center);
   const normalizedRegions = Array.isArray(regions) ? regions : [];
   if (normalizedRegions.length === 0 || samplePoints.length === 0) return false;
-  return samplePoints.every(([lon, lat]) => normalizedRegions.some((region) => pointInBounds(lon, lat, region?.bounds)));
+  return samplePoints.every(([lon, lat]) =>
+    normalizedRegions.some((region) => pointInBounds(lon, lat, region?.bounds))
+  );
 }

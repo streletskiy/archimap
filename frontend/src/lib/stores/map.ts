@@ -269,10 +269,7 @@ export function toggleSelectedBuilding(item) {
   const key = getSelectedBuildingKey(selection);
   const index = current.findIndex((entry) => getSelectedBuildingKey(entry) === key);
   if (index >= 0) {
-    syncSelectedBuildingSelection([
-      ...current.slice(0, index),
-      ...current.slice(index + 1)
-    ]);
+    syncSelectedBuildingSelection([...current.slice(0, index), ...current.slice(index + 1)]);
     return;
   }
   syncSelectedBuildingSelection([...current, selection]);

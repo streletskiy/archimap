@@ -12,17 +12,9 @@ function getPythonCandidates(env = process.env) {
     out.push({ exe: envPython, prefixArgs: [] });
   }
   if (process.platform === 'win32') {
-    out.push(
-      { exe: 'py', prefixArgs: ['-3'] },
-      { exe: 'python', prefixArgs: [] },
-      { exe: 'python3', prefixArgs: [] }
-    );
+    out.push({ exe: 'py', prefixArgs: ['-3'] }, { exe: 'python', prefixArgs: [] }, { exe: 'python3', prefixArgs: [] });
   } else {
-    out.push(
-      { exe: 'python3', prefixArgs: [] },
-      { exe: 'python', prefixArgs: [] },
-      { exe: 'py', prefixArgs: ['-3'] }
-    );
+    out.push({ exe: 'python3', prefixArgs: [] }, { exe: 'python', prefixArgs: [] }, { exe: 'py', prefixArgs: ['-3'] });
   }
   return out;
 }
@@ -66,7 +58,7 @@ function ensurePythonImporterDeps(env = process.env) {
 
   throw new Error(
     'Python modules quackosm/duckdb are not available. ' +
-    'Install them manually, for example: "py -3 -m pip install --user quackosm duckdb".'
+      'Install them manually, for example: "py -3 -m pip install --user quackosm duckdb".'
   );
 }
 
@@ -85,11 +77,7 @@ function parseJsonPayload(raw) {
 }
 
 function runImporterJson(importerPath, args, env = process.env, pythonCandidate = ensurePythonImporterDeps(env)) {
-  const result = spawnSync(pythonCandidate.exe, [
-    ...pythonCandidate.prefixArgs,
-    importerPath,
-    ...args
-  ], {
+  const result = spawnSync(pythonCandidate.exe, [...pythonCandidate.prefixArgs, importerPath, ...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
     env
@@ -107,11 +95,7 @@ function runImporterJson(importerPath, args, env = process.env, pythonCandidate 
 
 function runImporterJsonAsync(importerPath, args, env = process.env, pythonCandidate = ensurePythonImporterDeps(env)) {
   return new Promise((resolve, reject) => {
-    const child = spawn(pythonCandidate.exe, [
-      ...pythonCandidate.prefixArgs,
-      importerPath,
-      ...args
-    ], {
+    const child = spawn(pythonCandidate.exe, [...pythonCandidate.prefixArgs, importerPath, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       env
@@ -171,23 +155,21 @@ function createPythonExtractResolver(options: LooseRecord = {}) {
     async searchExtractCandidates(query, searchOptions: LooseRecord = {}) {
       const limit = Math.max(1, Math.min(50, Number(searchOptions.limit || 12) || 12));
       const source = String(searchOptions.source || 'any').trim() || 'any';
-      return runImporterJsonAsync(importerPath, [
-        '--resolve-extract-query',
-        String(query || ''),
-        '--extract-source',
-        source,
-        '--limit',
-        String(limit)
-      ], env, getPythonCandidate());
+      return runImporterJsonAsync(
+        importerPath,
+        ['--resolve-extract-query', String(query || ''), '--extract-source', source, '--limit', String(limit)],
+        env,
+        getPythonCandidate()
+      );
     },
     async resolveExactExtract(query, resolveOptions: LooseRecord = {}) {
       const source = String(resolveOptions.source || 'any').trim() || 'any';
-      return runImporterJsonAsync(importerPath, [
-        '--resolve-exact-extract',
-        String(query || ''),
-        '--extract-source',
-        source
-      ], env, getPythonCandidate());
+      return runImporterJsonAsync(
+        importerPath,
+        ['--resolve-exact-extract', String(query || ''), '--extract-source', source],
+        env,
+        getPythonCandidate()
+      );
     }
   };
 }
@@ -213,7 +195,9 @@ function exportRegionExtractToNdjson({
   const nextDbOutputPath = String(dbOutputPath || '').trim();
   const nextGeojsonOutputPath = String(geojsonOutputPath || '').trim();
   const nextSummaryOutputPath = String(summaryOutputPath || '').trim();
-  const nextDbGeometryMode = String(dbGeometryMode || '').trim().toLowerCase();
+  const nextDbGeometryMode = String(dbGeometryMode || '')
+    .trim()
+    .toLowerCase();
   if (legacyOutputPath && (nextDbOutputPath || nextGeojsonOutputPath)) {
     throw new Error('Use either outputPath or dbOutputPath/geojsonOutputPath for region extract export');
   }
@@ -221,11 +205,7 @@ function exportRegionExtractToNdjson({
     throw new Error('Region extract export requires at least one output path');
   }
 
-  const args = [
-    importerPath,
-    '--extract-query', extractId,
-    '--extract-source', extractSource
-  ];
+  const args = [importerPath, '--extract-query', extractId, '--extract-source', extractSource];
   if (legacyOutputPath) {
     args.push('--out-ndjson', legacyOutputPath);
   } else {

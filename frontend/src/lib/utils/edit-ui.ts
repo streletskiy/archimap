@@ -6,7 +6,9 @@ export function formatUiDate(value) {
 }
 
 export function resolveUiLocaleTag(locale) {
-  const normalized = String(locale || '').trim().toLowerCase();
+  const normalized = String(locale || '')
+    .trim()
+    .toLowerCase();
   return normalized.startsWith('ru') ? 'ru-RU' : 'en-US';
 }
 
@@ -38,42 +40,52 @@ export function matchesUiDateRange(value, range) {
   if (!start) return true;
 
   const end = range?.end?.toString?.() || start;
-  const isoDate = String(value || '').trim().slice(0, 10);
+  const isoDate = String(value || '')
+    .trim()
+    .slice(0, 10);
   if (!isoDate) return false;
 
   return isoDate >= start && isoDate <= end;
 }
 
 export function getStatusBadgeMeta(status, translate) {
-  const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'accepted') return { text: translate('admin.status.accepted'), cls: 'ui-surface-success ui-text-success' };
-  if (normalized === 'partially_accepted') return { text: translate('admin.status.partially_accepted'), cls: 'ui-surface-emphasis ui-text-emphasis' };
-  if (normalized === 'rejected') return { text: translate('admin.status.rejected'), cls: 'ui-surface-danger ui-text-danger' };
-  if (normalized === 'superseded') return { text: translate('admin.status.superseded'), cls: 'ui-surface-soft ui-text-body' };
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'accepted')
+    return { text: translate('admin.status.accepted'), cls: 'ui-surface-success ui-text-success' };
+  if (normalized === 'partially_accepted')
+    return { text: translate('admin.status.partially_accepted'), cls: 'ui-surface-emphasis ui-text-emphasis' };
+  if (normalized === 'rejected')
+    return { text: translate('admin.status.rejected'), cls: 'ui-surface-danger ui-text-danger' };
+  if (normalized === 'superseded')
+    return { text: translate('admin.status.superseded'), cls: 'ui-surface-soft ui-text-body' };
   return { text: translate('admin.status.pending'), cls: 'ui-surface-warning ui-text-warning' };
 }
 
 export function normalizeSyncStatus(status) {
-  return String(status || 'unsynced').trim().toLowerCase();
+  return String(status || 'unsynced')
+    .trim()
+    .toLowerCase();
 }
 
 export function getSyncBadgeMeta(status, translate, keyPrefix = 'admin.edits') {
   const normalized = normalizeSyncStatus(status);
   const prefix = String(keyPrefix || 'admin.edits').trim() || 'admin.edits';
-  if (normalized === 'synced') return { cls: 'ui-surface-success-soft ui-text-success-soft', text: translate(`${prefix}.syncSynced`) };
-  if (normalized === 'cleaned') return { cls: 'ui-surface-info ui-text-info', text: translate(`${prefix}.syncCleaned`) };
-  if (normalized === 'syncing') return { cls: 'ui-surface-warning ui-text-warning', text: translate(`${prefix}.syncing`) };
-  if (normalized === 'failed') return { cls: 'ui-surface-danger ui-text-danger', text: translate(`${prefix}.syncFailed`) };
+  if (normalized === 'synced')
+    return { cls: 'ui-surface-success-soft ui-text-success-soft', text: translate(`${prefix}.syncSynced`) };
+  if (normalized === 'cleaned')
+    return { cls: 'ui-surface-info ui-text-info', text: translate(`${prefix}.syncCleaned`) };
+  if (normalized === 'syncing')
+    return { cls: 'ui-surface-warning ui-text-warning', text: translate(`${prefix}.syncing`) };
+  if (normalized === 'failed')
+    return { cls: 'ui-surface-danger ui-text-danger', text: translate(`${prefix}.syncFailed`) };
   return { cls: 'ui-surface-soft ui-text-muted', text: translate(`${prefix}.syncUnsynced`) };
 }
 
 export function isOverpassBackedEdit(item) {
   return Boolean(
-    item &&
-      !item?.orphaned &&
-      !item?.osmPresent &&
-      item?.hasSourceSnapshot &&
-      item?.sourceOsmUpdatedAt == null
+    item && !item?.orphaned && !item?.osmPresent && item?.hasSourceSnapshot && item?.sourceOsmUpdatedAt == null
   );
 }
 
@@ -88,17 +100,13 @@ export function getDisplayEditStatusMeta(item, translate, syncKeyPrefix = 'admin
 export function getEditKey(item) {
   const osmType = String(item?.osmType || '').trim();
   const osmId = Number(item?.osmId || 0);
-  return ['way', 'relation'].includes(osmType) && Number.isInteger(osmId) && osmId > 0
-    ? `${osmType}/${osmId}`
-    : null;
+  return ['way', 'relation'].includes(osmType) && Number.isInteger(osmId) && osmId > 0 ? `${osmType}/${osmId}` : null;
 }
 
 export function parseEditKey(key) {
   const [osmType, osmIdRaw] = String(key || '').split('/');
   const osmId = Number(osmIdRaw);
-  return ['way', 'relation'].includes(osmType) && Number.isInteger(osmId) && osmId > 0
-    ? { osmType, osmId }
-    : null;
+  return ['way', 'relation'].includes(osmType) && Number.isInteger(osmId) && osmId > 0 ? { osmType, osmId } : null;
 }
 
 function getAddressFromTags(tags) {

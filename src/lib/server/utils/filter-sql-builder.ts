@@ -12,8 +12,40 @@ const FILTER_RULE_OPS = new Set([
 ]);
 
 const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description', 'design:ref', 'design:year']);
-const ARCHI_RULE_COLUMN_ORDER = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description'];
+const ARCHI_RULE_KEYS = new Set([
+  'name',
+  'style',
+  'design',
+  'design_ref',
+  'design_year',
+  'material',
+  'roof_shape',
+  'colour',
+  'levels',
+  'year_built',
+  'architect',
+  'address',
+  'description',
+  'archimap_description',
+  'design:ref',
+  'design:year'
+]);
+const ARCHI_RULE_COLUMN_ORDER = [
+  'name',
+  'style',
+  'design',
+  'design_ref',
+  'design_year',
+  'material',
+  'roof_shape',
+  'colour',
+  'levels',
+  'year_built',
+  'architect',
+  'address',
+  'description',
+  'archimap_description'
+];
 
 function normalizeArchiRuleKey(ruleKey) {
   const key = String(ruleKey || '').trim();
@@ -118,7 +150,9 @@ function buildPostgresNumericValueSql(valueSql, valueParams = []) {
 }
 
 function parseNumericFilterValue(rawValue) {
-  const text = String(rawValue ?? '').trim().replace(',', '.');
+  const text = String(rawValue ?? '')
+    .trim()
+    .replace(',', '.');
   if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
   const value = Number(text);
   return Number.isFinite(value) ? value : null;

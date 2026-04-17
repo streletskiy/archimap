@@ -26,10 +26,12 @@ async function waitForServer(baseUrl, timeoutMs = 15000) {
 }
 
 async function main() {
-  const prodCsp = serializeCspDirectives(buildCspDirectives({
-    nodeEnv: 'production',
-    extraConnectOrigins: ['https://tiles.basemaps.cartocdn.com']
-  }));
+  const prodCsp = serializeCspDirectives(
+    buildCspDirectives({
+      nodeEnv: 'production',
+      extraConnectOrigins: ['https://tiles.basemaps.cartocdn.com']
+    })
+  );
   if (/\bscript-src\s[^;]*unsafe-inline/.test(prodCsp) || /\bstyle-src\s[^;]*unsafe-inline/.test(prodCsp)) {
     throw new Error('Production CSP must not include unsafe-inline in script-src/style-src');
   }
@@ -60,8 +62,12 @@ async function main() {
   });
 
   let output = '';
-  server.stdout.on('data', (chunk) => { output += chunk.toString(); });
-  server.stderr.on('data', (chunk) => { output += chunk.toString(); });
+  server.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  server.stderr.on('data', (chunk) => {
+    output += chunk.toString();
+  });
 
   try {
     await waitForServer(BASE_URL);

@@ -84,12 +84,12 @@ function replaceSqlitePositionalPlaceholders(sql, replacer) {
 
     if (inSingleQuote) {
       out += source[cursor];
-      if (source[cursor] === '\'' && next === '\'') {
+      if (source[cursor] === "'" && next === "'") {
         out += next;
         cursor += 2;
         continue;
       }
-      if (source[cursor] === '\'') {
+      if (source[cursor] === "'") {
         inSingleQuote = false;
       }
       cursor += 1;
@@ -124,7 +124,7 @@ function replaceSqlitePositionalPlaceholders(sql, replacer) {
       continue;
     }
 
-    if (source[cursor] === '\'') {
+    if (source[cursor] === "'") {
       out += source[cursor];
       cursor += 1;
       inSingleQuote = true;
@@ -199,9 +199,10 @@ function createPostgresCompatDb(pool) {
   async function runQuery(sql, args) {
     const normalizedSql = normalizePostgresSql(sql);
     const normalizedArgs = normalizeStatementArgs(args);
-    const converted = normalizedArgs.type === 'named'
-      ? convertNamedParams(normalizedSql, normalizedArgs.params)
-      : convertPositionalParams(normalizedSql, normalizedArgs.params);
+    const converted =
+      normalizedArgs.type === 'named'
+        ? convertNamedParams(normalizedSql, normalizedArgs.params)
+        : convertPositionalParams(normalizedSql, normalizedArgs.params);
     const result = await getQueryable().query(converted.text, converted.values);
     return result;
   }
@@ -296,14 +297,10 @@ function createSqliteCompatDb(sqliteDb) {
 }
 
 async function createDbRuntime(options: LooseRecord = {}) {
-  const {
-    runtimeEnv,
-    rawEnv = process.env,
-    sqlite = {},
-    postgres = {},
-    logger = console
-  } = options;
-  const provider = String(runtimeEnv?.dbProvider || 'sqlite').trim().toLowerCase();
+  const { runtimeEnv, rawEnv = process.env, sqlite = {}, postgres = {}, logger = console } = options;
+  const provider = String(runtimeEnv?.dbProvider || 'sqlite')
+    .trim()
+    .toLowerCase();
 
   if (provider === 'postgres') {
     const connectionString = resolvePostgresConnectionString(runtimeEnv, rawEnv);
@@ -336,11 +333,7 @@ async function createDbRuntime(options: LooseRecord = {}) {
   }
 
   const Database = require('better-sqlite3');
-  const {
-    db,
-    rtreeState,
-    scheduleBuildingContoursRtreeRebuild
-  } = initDbBootstrapInfra({
+  const { db, rtreeState, scheduleBuildingContoursRtreeRebuild } = initDbBootstrapInfra({
     Database,
     dbPath: sqlite.dbPath,
     osmDbPath: sqlite.osmDbPath,

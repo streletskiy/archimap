@@ -16,10 +16,7 @@ function escapeRegExp(value) {
 }
 
 function getHtmlDetailValue(html, label) {
-  const pattern = new RegExp(
-    `<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`,
-    'i'
-  );
+  const pattern = new RegExp(`<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`, 'i');
   const match = String(html || '').match(pattern);
   return match ? match[1].trim() : null;
 }
@@ -177,14 +174,8 @@ test('smtp test email renders in both locales and includes delivery details', ()
   assert.match(enText, /ArchiMap: mail delivery test/);
   assert.match(enText, /Date: /);
   assert.match(enText, /Secure: No/);
-  assert.equal(
-    getHtmlDetailValue(enHtml, enCopy.smtpTest.detailLabels.parameters),
-    'smtp-relay.example.com:587'
-  );
-  assert.equal(
-    getTextDetailValue(enText, enCopy.smtpTest.detailLabels.parameters),
-    'smtp-relay.example.com:587'
-  );
+  assert.equal(getHtmlDetailValue(enHtml, enCopy.smtpTest.detailLabels.parameters), 'smtp-relay.example.com:587');
+  assert.equal(getTextDetailValue(enText, enCopy.smtpTest.detailLabels.parameters), 'smtp-relay.example.com:587');
 
   assert.match(ruHtml, /background:#fbfaf7/);
   assert.match(ruHtml, /Тест отправки почты/);
@@ -194,12 +185,6 @@ test('smtp test email renders in both locales and includes delivery details', ()
   assert.match(ruText, /ArchiMap: тест отправки почты/);
   assert.match(ruText, /Дата: /);
   assert.match(ruText, /Безопасное соединение: Нет/);
-  assert.equal(
-    getHtmlDetailValue(ruHtml, ruCopy.smtpTest.detailLabels.parameters),
-    'smtp-relay.example.com:587'
-  );
-  assert.equal(
-    getTextDetailValue(ruText, ruCopy.smtpTest.detailLabels.parameters),
-    'smtp-relay.example.com:587'
-  );
+  assert.equal(getHtmlDetailValue(ruHtml, ruCopy.smtpTest.detailLabels.parameters), 'smtp-relay.example.com:587');
+  assert.equal(getTextDetailValue(ruText, ruCopy.smtpTest.detailLabels.parameters), 'smtp-relay.example.com:587');
 });

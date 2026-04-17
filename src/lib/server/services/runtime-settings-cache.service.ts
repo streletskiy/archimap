@@ -3,12 +3,7 @@ function isPlainObject(value) {
 }
 
 function createRuntimeSettingsCache(options: LooseRecord = {}) {
-  const {
-    fallback = {},
-    load,
-    normalize,
-    selectConfig = (value) => value?.config
-  } = options;
+  const { fallback = {}, load, normalize, selectConfig = (value) => value?.config } = options;
 
   if (typeof load !== 'function') {
     throw new Error('createRuntimeSettingsCache: load must be a function');

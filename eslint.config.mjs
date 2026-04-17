@@ -54,7 +54,15 @@ export default [
     }
   },
   {
-    files: ['server.ts', 'server.sveltekit.ts', 'src/**/*.ts', 'scripts/**/*.ts', 'workers/**/*.ts', 'db/**/*.ts', 'tests/**/*.ts'],
+    files: [
+      'server.ts',
+      'server.sveltekit.ts',
+      'src/**/*.ts',
+      'scripts/**/*.ts',
+      'workers/**/*.ts',
+      'db/**/*.ts',
+      'tests/**/*.ts'
+    ],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

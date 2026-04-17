@@ -105,7 +105,10 @@ test('getRuntimeConfig normalizes regional PMTiles payload and viewport helper a
       east: 21,
       north: 12
     });
-    assert.deepEqual(activeRegions.map((item) => item.id), [7]);
+    assert.deepEqual(
+      activeRegions.map((item) => item.id),
+      [7]
+    );
 
     const inactiveRegions = getActiveRegionPmtiles(runtimeConfig.buildingRegionsPmtiles, {
       west: 21.1,
@@ -171,4 +174,3 @@ test('getRuntimeConfig falls back to carto when custom basemap provider is missi
     restoreWindow(originalWindow);
   }
 });
-

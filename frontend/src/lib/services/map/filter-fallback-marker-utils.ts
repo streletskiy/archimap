@@ -1,9 +1,6 @@
 import { parseOsmKey } from './filter-utils.js';
 import { SEARCH_RESULTS_CLUSTER_LAYER_ID } from './map-search-utils.js';
-import type {
-  FilterMapLike,
-  FilterMatchedPoint
-} from './filter-types.js';
+import type { FilterMapLike, FilterMatchedPoint } from './filter-types.js';
 
 export const FILTER_FALLBACK_MARKER_MAX_ZOOM = 13;
 
@@ -112,9 +109,9 @@ export function buildFilterFallbackMarkerGeojson(points: FilterMatchedPoint[] | 
     if (!normalizedPoint) continue;
     const jitter = getPointJitter(normalizedPoint.id, color);
     const metersPerDegreeLat = 111_320;
-    const metersPerDegreeLon = 111_320 * Math.max(0.25, Math.cos(normalizedPoint.lat * Math.PI / 180));
-    const jitterLon = normalizedPoint.lon + (jitter.x / metersPerDegreeLon);
-    const jitterLat = normalizedPoint.lat + (jitter.y / metersPerDegreeLat);
+    const metersPerDegreeLon = 111_320 * Math.max(0.25, Math.cos((normalizedPoint.lat * Math.PI) / 180));
+    const jitterLon = normalizedPoint.lon + jitter.x / metersPerDegreeLon;
+    const jitterLat = normalizedPoint.lat + jitter.y / metersPerDegreeLat;
     const parsed = normalizedPoint.osmKey ? parseOsmKey(normalizedPoint.osmKey) : null;
     features.push({
       type: 'Feature',
@@ -127,10 +124,12 @@ export function buildFilterFallbackMarkerGeojson(points: FilterMatchedPoint[] | 
         filter_feature_id: normalizedPoint.id,
         match_count: Math.max(1, Number(normalizedPoint.count || 1)),
         osm_key: normalizedPoint.osmKey || '',
-        ...(parsed ? {
-          osm_type: parsed.osmType,
-          osm_id: parsed.osmId
-        } : {})
+        ...(parsed
+          ? {
+              osm_type: parsed.osmType,
+              osm_id: parsed.osmId
+            }
+          : {})
       }
     });
   }
@@ -187,52 +186,71 @@ function ensureFilterFallbackMarkerGroup(
   }
 
   if (!map.getLayer?.(clusterLayerId)) {
-    map.addLayer?.({
-      id: clusterLayerId,
-      type: 'circle',
-      source: sourceId,
-      filter: ['has', 'point_count'],
-      paint: {
-        'circle-radius': ['step', ['get', 'match_count'], 16, 12, 19, 30, 22, 60, 26],
-        'circle-color': group.color,
-        'circle-stroke-color': FILTER_FALLBACK_STROKE_COLOR,
-        'circle-stroke-width': 2,
-        'circle-opacity': 0.92
-      }
-    }, beforeId);
+    map.addLayer?.(
+      {
+        id: clusterLayerId,
+        type: 'circle',
+        source: sourceId,
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-radius': ['step', ['get', 'match_count'], 16, 12, 19, 30, 22, 60, 26],
+          'circle-color': group.color,
+          'circle-stroke-color': FILTER_FALLBACK_STROKE_COLOR,
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.92
+        }
+      },
+      beforeId
+    );
   }
 
   if (!map.getLayer?.(clusterCountLayerId)) {
-    map.addLayer?.({
-      id: clusterCountLayerId,
-      type: 'symbol',
-      source: sourceId,
-      filter: ['has', 'point_count'],
-      layout: {
-        'text-field': ['to-string', ['get', 'match_count']],
-        'text-font': ['Open Sans Bold'],
-        'text-size': 12
+    map.addLayer?.(
+      {
+        id: clusterCountLayerId,
+        type: 'symbol',
+        source: sourceId,
+        filter: ['has', 'point_count'],
+        layout: {
+          'text-field': ['to-string', ['get', 'match_count']],
+          'text-font': ['Open Sans Bold'],
+          'text-size': 12
+        },
+        paint: {
+          'text-color': FILTER_FALLBACK_STROKE_COLOR
+        }
       },
-      paint: {
-        'text-color': FILTER_FALLBACK_STROKE_COLOR
-      }
-    }, beforeId);
+      beforeId
+    );
   }
 
   if (!map.getLayer?.(pointLayerId)) {
-    map.addLayer?.({
-      id: pointLayerId,
-      type: 'circle',
-      source: sourceId,
-      filter: ['!', ['has', 'point_count']],
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['get', 'match_count'], 1, FILTER_FALLBACK_POINT_RADIUS_MIN, 5, FILTER_FALLBACK_POINT_RADIUS_MAX, 20, FILTER_FALLBACK_POINT_RADIUS_MAX],
-        'circle-color': group.color,
-        'circle-stroke-color': FILTER_FALLBACK_STROKE_COLOR,
-        'circle-stroke-width': 2,
-        'circle-opacity': 0.9
-      }
-    }, beforeId);
+    map.addLayer?.(
+      {
+        id: pointLayerId,
+        type: 'circle',
+        source: sourceId,
+        filter: ['!', ['has', 'point_count']],
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['get', 'match_count'],
+            1,
+            FILTER_FALLBACK_POINT_RADIUS_MIN,
+            5,
+            FILTER_FALLBACK_POINT_RADIUS_MAX,
+            20,
+            FILTER_FALLBACK_POINT_RADIUS_MAX
+          ],
+          'circle-color': group.color,
+          'circle-stroke-color': FILTER_FALLBACK_STROKE_COLOR,
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.9
+        }
+      },
+      beforeId
+    );
   }
 
   // Re-assert layer order on every apply so marker stacks stay above the map

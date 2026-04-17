@@ -6,7 +6,15 @@ const test = require('node:test');
 let importCounter = 0;
 
 async function loadBuildingRendererMapLibre() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'building-renderer-maplibre.ts');
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'services',
+    'map',
+    'building-renderer-maplibre.ts'
+  );
   return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
@@ -75,9 +83,7 @@ function createMapStub() {
       const layer = layers.get(layerId);
       if (!layer) return;
       const nextLayers = Array.from(layers.entries()).filter(([existingLayerId]) => existingLayerId !== layerId);
-      const beforeIndex = beforeId
-        ? nextLayers.findIndex(([existingLayerId]) => existingLayerId === beforeId)
-        : -1;
+      const beforeIndex = beforeId ? nextLayers.findIndex(([existingLayerId]) => existingLayerId === beforeId) : -1;
       if (beforeIndex >= 0) {
         nextLayers.splice(beforeIndex, 0, [layerId, layer]);
       } else {

@@ -8,7 +8,9 @@ function up(db) {
     db.exec('ALTER TABLE user_edits.building_user_edits ADD COLUMN source_geometry_json TEXT;');
   }
 
-  db.exec('CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_target ON building_user_edits (osm_type, osm_id, updated_at DESC);');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS user_edits.idx_user_building_edits_target ON building_user_edits (osm_type, osm_id, updated_at DESC);'
+  );
 }
 
 module.exports = {

@@ -1,11 +1,13 @@
 const { buildCspDirectives, serializeCspDirectives } = require('./csp.infra');
 
 function applySecurityHeadersMiddleware(app, { nodeEnv, cspConnectOrigins = [], cspScriptHashes = [] }) {
-  const cspHeader = serializeCspDirectives(buildCspDirectives({
-    nodeEnv,
-    extraConnectOrigins: cspConnectOrigins,
-    scriptHashes: cspScriptHashes
-  }));
+  const cspHeader = serializeCspDirectives(
+    buildCspDirectives({
+      nodeEnv,
+      extraConnectOrigins: cspConnectOrigins,
+      scriptHashes: cspScriptHashes
+    })
+  );
 
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

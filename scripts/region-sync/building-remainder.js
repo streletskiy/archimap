@@ -1,9 +1,6 @@
 /* global module, require */
 const polygonClipping = require('polygon-clipping');
-const {
-  deriveFeatureKindFromTagsJson,
-  normalizeFeatureKind
-} = require('./common');
+const { deriveFeatureKindFromTagsJson, normalizeFeatureKind } = require('./common');
 
 function cloneCoordinatePair(pair) {
   if (!Array.isArray(pair) || pair.length < 2) return null;
@@ -101,12 +98,15 @@ function fromPolygonClippingMultiPolygon(multiPolygon) {
   };
 }
 
-function collectGeometryBounds(coords, bounds = {
-  minLon: Number.POSITIVE_INFINITY,
-  minLat: Number.POSITIVE_INFINITY,
-  maxLon: Number.NEGATIVE_INFINITY,
-  maxLat: Number.NEGATIVE_INFINITY
-}) {
+function collectGeometryBounds(
+  coords,
+  bounds = {
+    minLon: Number.POSITIVE_INFINITY,
+    minLat: Number.POSITIVE_INFINITY,
+    maxLon: Number.NEGATIVE_INFINITY,
+    maxLat: Number.NEGATIVE_INFINITY
+  }
+) {
   if (!Array.isArray(coords)) return bounds;
   if (coords.length >= 2 && typeof coords[0] === 'number' && typeof coords[1] === 'number') {
     const lon = Number(coords[0]);
@@ -128,10 +128,10 @@ function collectGeometryBounds(coords, bounds = {
 function getGeometryBounds(geometry) {
   const bounds = collectGeometryBounds(geometry?.coordinates);
   if (
-    !Number.isFinite(bounds.minLon)
-    || !Number.isFinite(bounds.minLat)
-    || !Number.isFinite(bounds.maxLon)
-    || !Number.isFinite(bounds.maxLat)
+    !Number.isFinite(bounds.minLon) ||
+    !Number.isFinite(bounds.minLat) ||
+    !Number.isFinite(bounds.maxLon) ||
+    !Number.isFinite(bounds.maxLat)
   ) {
     return null;
   }
@@ -140,17 +140,17 @@ function getGeometryBounds(geometry) {
 
 function boundsContainBounds(container, inner) {
   if (!container || !inner) return false;
-  return inner.minLon >= container.minLon
-    && inner.maxLon <= container.maxLon
-    && inner.minLat >= container.minLat
-    && inner.maxLat <= container.maxLat;
+  return (
+    inner.minLon >= container.minLon &&
+    inner.maxLon <= container.maxLon &&
+    inner.minLat >= container.minLat &&
+    inner.maxLat <= container.maxLat
+  );
 }
 
 function buildDifferenceGeometry(baseGeometry, subtractGeometries = []) {
   const subject = toPolygonClippingMultiPolygon(baseGeometry);
-  const clipGeometries = subtractGeometries
-    .map((geometry) => toPolygonClippingMultiPolygon(geometry))
-    .filter(Boolean);
+  const clipGeometries = subtractGeometries.map((geometry) => toPolygonClippingMultiPolygon(geometry)).filter(Boolean);
   if (!subject) {
     return { ok: false, geometry: null };
   }
@@ -158,9 +158,7 @@ function buildDifferenceGeometry(baseGeometry, subtractGeometries = []) {
     return { ok: true, geometry: baseGeometry };
   }
   try {
-    const clipMask = clipGeometries.length === 1
-      ? clipGeometries[0]
-      : polygonClipping.union(...clipGeometries);
+    const clipMask = clipGeometries.length === 1 ? clipGeometries[0] : polygonClipping.union(...clipGeometries);
     const difference = clipMask ? polygonClipping.difference(subject, clipMask) : subject;
     return {
       ok: true,

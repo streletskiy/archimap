@@ -29,5 +29,8 @@ test('resolveInitialFilterReplayAction reapplies once paint already happened', a
   const { resolveInitialFilterReplayAction } = await loadFilterInitialReplayModule();
   assert.equal(resolveInitialFilterReplayAction({ hasFilters: false, phase: 'idle', paintCalls: 0 }), 'none');
   assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'optimistic', paintCalls: 3 }), 'reapply');
-  assert.equal(resolveInitialFilterReplayAction({ hasFilters: true, phase: 'authoritative', paintCalls: 0 }), 'reapply');
+  assert.equal(
+    resolveInitialFilterReplayAction({ hasFilters: true, phase: 'authoritative', paintCalls: 0 }),
+    'reapply'
+  );
 });

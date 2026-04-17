@@ -43,17 +43,20 @@ export type FilterMatchedPoint = {
   osmKey?: string;
 };
 
-export type FeatureIdentitySource = {
-  id?: number | string | null;
-  properties?: {
-    osm_key?: string | null;
-    osm_type?: string | null;
-    osm_id?: number | string | null;
-  } | null;
-  geometry?: {
-    type?: string | null;
-  } | null;
-} | null | undefined;
+export type FeatureIdentitySource =
+  | {
+      id?: number | string | null;
+      properties?: {
+        osm_key?: string | null;
+        osm_type?: string | null;
+        osm_id?: number | string | null;
+      } | null;
+      geometry?: {
+        type?: string | null;
+      } | null;
+    }
+  | null
+  | undefined;
 
 export type FilterRuleInput = Record<string, unknown> & {
   key?: unknown;
@@ -114,26 +117,26 @@ export type FilterWorkerPrepareRequest = {
 
 export type FilterWorkerPrepareResponse =
   | {
-    type: 'prepare-rules-result';
-    requestId: string;
-    ok: true;
-    layers?: FilterLayer[];
-    rules?: FilterRule[];
-    rulesHash: string;
-    heavy: boolean;
-    layerResults?: Array<{
-      id: string;
+      type: 'prepare-rules-result';
+      requestId: string;
       ok: true;
-      rules: FilterRule[];
+      layers?: FilterLayer[];
+      rules?: FilterRule[];
+      rulesHash: string;
       heavy: boolean;
-    }>;
-  }
+      layerResults?: Array<{
+        id: string;
+        ok: true;
+        rules: FilterRule[];
+        heavy: boolean;
+      }>;
+    }
   | {
-    type: 'prepare-rules-result';
-    requestId: string;
-    ok: false;
-    invalidReason: string;
-  };
+      type: 'prepare-rules-result';
+      requestId: string;
+      ok: false;
+      invalidReason: string;
+    };
 
 export type FilterWorkerBuildRequestPlanRequest = {
   type: 'build-request-plan';
@@ -144,26 +147,29 @@ export type FilterWorkerBuildRequestPlanRequest = {
 
 export type FilterWorkerBuildRequestPlanResponse =
   | {
-    type: 'build-request-plan-result';
-    requestId: string;
-    ok: true;
-    layers: FilterLayer[];
-    requestSpecs: FilterRequestSpec[];
-    combinedGroup: FilterPreparedGroup | null;
-    hasStandaloneLayers: boolean;
-    rulesHash: string;
-    heavy: boolean;
-  }
+      type: 'build-request-plan-result';
+      requestId: string;
+      ok: true;
+      layers: FilterLayer[];
+      requestSpecs: FilterRequestSpec[];
+      combinedGroup: FilterPreparedGroup | null;
+      hasStandaloneLayers: boolean;
+      rulesHash: string;
+      heavy: boolean;
+    }
   | {
-    type: 'build-request-plan-result';
-    requestId: string;
-    ok: false;
-    invalidReason: string;
-  };
+      type: 'build-request-plan-result';
+      requestId: string;
+      ok: false;
+      invalidReason: string;
+    };
 
 export type FilterWorkerResolvedPayloadInputItem = {
   requestId: string;
-  payload: Pick<FilterMatchPayload, 'matchedKeys' | 'matchedFeatureIds' | 'matchedLocations' | 'matchedCount' | 'meta'> | null;
+  payload: Pick<
+    FilterMatchPayload,
+    'matchedKeys' | 'matchedFeatureIds' | 'matchedLocations' | 'matchedCount' | 'meta'
+  > | null;
 };
 
 export type FilterWorkerBuildResolvedPayloadRequest = {
@@ -176,20 +182,20 @@ export type FilterWorkerBuildResolvedPayloadRequest = {
 
 export type FilterWorkerBuildResolvedPayloadResponse =
   | {
-    type: 'build-resolved-payload-result';
-    requestId: string;
-    ok: true;
-    highlightColorGroups: FilterColorGroup[];
-    matchedFeatureIds: number[];
-    matchedCount: number;
-    meta: FilterMatchMeta;
-  }
+      type: 'build-resolved-payload-result';
+      requestId: string;
+      ok: true;
+      highlightColorGroups: FilterColorGroup[];
+      matchedFeatureIds: number[];
+      matchedCount: number;
+      meta: FilterMatchMeta;
+    }
   | {
-    type: 'build-resolved-payload-result';
-    requestId: string;
-    ok: false;
-    error: string;
-  };
+      type: 'build-resolved-payload-result';
+      requestId: string;
+      ok: false;
+      error: string;
+    };
 
 export type FilterWorkerRequest =
   | FilterWorkerPrepareRequest
@@ -208,14 +214,14 @@ export type FilterBuildingSourceConfig = {
   sourceLayer?: string;
 };
 
-export type FilterMapSourceLike = {
-  getClusterExpansionZoom?: (
-    clusterId: number,
-    callback: (error: unknown, zoom?: number) => void
-  ) => void;
-  setData?: (data: unknown) => void;
-  [key: string]: unknown;
-} | null | undefined;
+export type FilterMapSourceLike =
+  | {
+      getClusterExpansionZoom?: (clusterId: number, callback: (error: unknown, zoom?: number) => void) => void;
+      setData?: (data: unknown) => void;
+      [key: string]: unknown;
+    }
+  | null
+  | undefined;
 
 export type FilterMapLike = {
   getLayer?: (layerId: string) => unknown;

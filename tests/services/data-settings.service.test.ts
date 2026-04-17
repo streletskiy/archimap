@@ -18,6 +18,7 @@ const {
   resolveLegacyRegionPmtilesPath,
   resolveExistingRegionPmtilesPath
 } = require('../../src/lib/server/services/data-settings.service');
+const { createDataSettingsContext } = require('../../src/lib/server/services/data-settings/shared');
 const { DEFAULT_FILTER_TAG_ALLOWLIST } = require('../../src/lib/server/services/filter-tags.service');
 const { DEFAULT_FILTER_PRESETS } = require('../../src/lib/server/services/filter-presets-defaults');
 
@@ -61,10 +62,10 @@ function createMockExtractResolver(fixtures: LooseRecord = {}) {
     const extractId = String(query || '').trim();
     return extractId
       ? {
-        extractSource: extractSource === 'any' ? 'mock' : extractSource,
-        extractId,
-        extractLabel: extractId
-      }
+          extractSource: extractSource === 'any' ? 'mock' : extractSource,
+          extractId,
+          extractLabel: extractId
+        }
       : null;
   }
 
@@ -237,12 +238,10 @@ test('saveFilterTagAllowlist persists normalized DB-backed allowlist', async () 
     }
   });
 
-  const saved = await service.saveFilterTagAllowlist([
-    'roof:shape',
-    'building',
-    'roof:shape',
-    ' building:architecture '
-  ], 'tester@example.com');
+  const saved = await service.saveFilterTagAllowlist(
+    ['roof:shape', 'building', 'roof:shape', ' building:architecture '],
+    'tester@example.com'
+  );
 
   assert.equal(saved.source, 'db');
   assert.deepEqual(saved.allowlist, ['building', 'building:architecture', 'roof:shape']);
@@ -281,25 +280,26 @@ test('filter preset save/update/delete flow keeps stable key and normalized laye
   const db = createTestDb();
   const service = createService({ db });
 
-  const created = await service.saveFilterPreset({
-    key: 'roof-shape',
-    name: 'Roof shape',
-    nameI18n: {
-      en: 'Roof shape',
-      ru: 'Форма крыши'
+  const created = await service.saveFilterPreset(
+    {
+      key: 'roof-shape',
+      name: 'Roof shape',
+      nameI18n: {
+        en: 'Roof shape',
+        ru: 'Форма крыши'
+      },
+      description: 'Highlights roof forms',
+      layers: [
+        {
+          id: 'layer-a',
+          color: '#93c5fd',
+          mode: 'layer',
+          rules: [{ key: 'roof:shape', op: 'equals', value: 'gabled' }]
+        }
+      ]
     },
-    description: 'Highlights roof forms',
-    layers: [
-      {
-        id: 'layer-a',
-        color: '#93c5fd',
-        mode: 'layer',
-        rules: [
-          { key: 'roof:shape', op: 'equals', value: 'gabled' }
-        ]
-      }
-    ]
-  }, 'preset-admin@example.com');
+    'preset-admin@example.com'
+  );
 
   assert.ok(Number(created?.id || 0) > 0);
   assert.equal(created.key, 'roof-shape');
@@ -313,39 +313,36 @@ test('filter preset save/update/delete flow keeps stable key and normalized laye
       color: '#93c5fd',
       priority: 0,
       mode: 'layer',
-      rules: [
-        { key: 'roof:shape', op: 'equals', value: 'gabled' }
-      ]
+      rules: [{ key: 'roof:shape', op: 'equals', value: 'gabled' }]
     }
   ]);
 
-  const updated = await service.saveFilterPreset({
-    id: created.id,
-    key: 'roof-shape',
-    nameI18n: {
-      en: 'Roof shape updated',
-      ru: 'Форма крыши (обновлено)'
-    },
-    description: '',
-    layers: [
-      {
-        id: 'layer-b',
-        color: '#fca5a5',
-        mode: 'layer',
-        rules: [
-          { key: 'roof:shape', op: 'equals', value: 'flat' }
-        ]
+  const updated = await service.saveFilterPreset(
+    {
+      id: created.id,
+      key: 'roof-shape',
+      nameI18n: {
+        en: 'Roof shape updated',
+        ru: 'Форма крыши (обновлено)'
       },
-      {
-        id: 'layer-c',
-        color: '#86efac',
-        mode: 'layer',
-        rules: [
-          { key: 'roof:shape', op: 'equals', value: 'hipped' }
-        ]
-      }
-    ]
-  }, 'preset-admin@example.com');
+      description: '',
+      layers: [
+        {
+          id: 'layer-b',
+          color: '#fca5a5',
+          mode: 'layer',
+          rules: [{ key: 'roof:shape', op: 'equals', value: 'flat' }]
+        },
+        {
+          id: 'layer-c',
+          color: '#86efac',
+          mode: 'layer',
+          rules: [{ key: 'roof:shape', op: 'equals', value: 'hipped' }]
+        }
+      ]
+    },
+    'preset-admin@example.com'
+  );
 
   assert.equal(updated.id, created.id);
   assert.equal(updated.key, 'roof-shape');
@@ -375,23 +372,29 @@ test('saveRegion allows renaming existing region while preserving id', async () 
     }
   });
 
-  const created = await service.saveRegion(buildRegionInput({
-    name: 'Original Region',
-    slug: 'original-region',
-    extractId: 'original-region',
-    autoSyncEnabled: true,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const created = await service.saveRegion(
+    buildRegionInput({
+      name: 'Original Region',
+      slug: 'original-region',
+      extractId: 'original-region',
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
-  const renamed = await service.saveRegion(buildRegionInput({
-    id: created.id,
-    name: 'Renamed Region',
-    slug: 'renamed-region',
-    searchQuery: 'Original Region',
-    extractId: 'original-region',
-    autoSyncEnabled: true,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const renamed = await service.saveRegion(
+    buildRegionInput({
+      id: created.id,
+      name: 'Renamed Region',
+      slug: 'renamed-region',
+      searchQuery: 'Original Region',
+      extractId: 'original-region',
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   assert.equal(renamed.id, created.id);
   assert.equal(renamed.name, 'Renamed Region');
@@ -403,15 +406,18 @@ test('saveRegion rejects free-form region payload without canonical extract', as
   const service = createService({ db });
 
   await assert.rejects(
-    service.saveRegion({
-      name: 'Legacy Query Only',
-      slug: 'legacy-query-only',
-      sourceType: 'extract',
-      searchQuery: 'Moscow City',
-      enabled: true,
-      autoSyncEnabled: true,
-      autoSyncIntervalHours: 24
-    }, 'tester'),
+    service.saveRegion(
+      {
+        name: 'Legacy Query Only',
+        slug: 'legacy-query-only',
+        sourceType: 'extract',
+        searchQuery: 'Moscow City',
+        enabled: true,
+        autoSyncEnabled: true,
+        autoSyncIntervalHours: 24
+      },
+      'tester'
+    ),
     /canonical extract/i
   );
 });
@@ -421,40 +427,46 @@ test('saveRegion rejects legacy sourceValue/sourceType aliases', async () => {
   const service = createService({ db });
 
   await assert.rejects(
-    service.saveRegion({
-      name: 'Legacy Source Value',
-      slug: 'legacy-source-value',
-      sourceType: 'extract',
-      sourceValue: 'Moscow City',
-      extractSource: 'mock',
-      extractId: 'legacy-source-value',
-      extractLabel: 'Legacy Source Value',
-      enabled: true,
-      autoSyncEnabled: true,
-      autoSyncIntervalHours: 24,
-      pmtilesMinZoom: 13,
-      pmtilesMaxZoom: 16,
-      sourceLayer: 'buildings'
-    }, 'tester'),
+    service.saveRegion(
+      {
+        name: 'Legacy Source Value',
+        slug: 'legacy-source-value',
+        sourceType: 'extract',
+        sourceValue: 'Moscow City',
+        extractSource: 'mock',
+        extractId: 'legacy-source-value',
+        extractLabel: 'Legacy Source Value',
+        enabled: true,
+        autoSyncEnabled: true,
+        autoSyncIntervalHours: 24,
+        pmtilesMinZoom: 13,
+        pmtilesMaxZoom: 16,
+        sourceLayer: 'buildings'
+      },
+      'tester'
+    ),
     /sourceValue/i
   );
 
   await assert.rejects(
-    service.saveRegion({
-      name: 'Legacy Source Type',
-      slug: 'legacy-source-type',
-      sourceType: 'extract_query',
-      searchQuery: 'Moscow City',
-      extractSource: 'mock',
-      extractId: 'legacy-source-type',
-      extractLabel: 'Legacy Source Type',
-      enabled: true,
-      autoSyncEnabled: true,
-      autoSyncIntervalHours: 24,
-      pmtilesMinZoom: 13,
-      pmtilesMaxZoom: 16,
-      sourceLayer: 'buildings'
-    }, 'tester'),
+    service.saveRegion(
+      {
+        name: 'Legacy Source Type',
+        slug: 'legacy-source-type',
+        sourceType: 'extract_query',
+        searchQuery: 'Moscow City',
+        extractSource: 'mock',
+        extractId: 'legacy-source-type',
+        extractLabel: 'Legacy Source Type',
+        enabled: true,
+        autoSyncEnabled: true,
+        autoSyncIntervalHours: 24,
+        pmtilesMinZoom: 13,
+        pmtilesMaxZoom: 16,
+        sourceLayer: 'buildings'
+      },
+      'tester'
+    ),
     /extract_query/i
   );
 });
@@ -478,7 +490,8 @@ test('legacy unresolved regions stay unresolved until manual extract selection',
     })
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO data_sync_regions (
       slug,
       name,
@@ -496,7 +509,8 @@ test('legacy unresolved regions stay unresolved until manual extract selection',
       updated_at
     )
     VALUES (?, ?, ?, ?, ?, 1, 1, 24, 13, 16, 'buildings', 'idle', datetime('now'), datetime('now'))
-  `).run('legacy-exact', 'Legacy Exact', 'extract', 'legacy-exact', 'needs_resolution');
+  `
+  ).run('legacy-exact', 'Legacy Exact', 'extract', 'legacy-exact', 'needs_resolution');
 
   const adminSettings = await service.getDataSettingsForAdmin();
   const legacy = adminSettings.regions.find((item) => item.slug === 'legacy-exact');
@@ -506,20 +520,21 @@ test('legacy unresolved regions stay unresolved until manual extract selection',
   assert.equal(legacy.extractId, '');
   assert.equal(legacy.canSync, false);
 
-  const stored = db.prepare(`
+  const stored = db
+    .prepare(
+      `
     SELECT extract_source, extract_id, extract_resolution_status
     FROM data_sync_regions
     WHERE slug = ?
     LIMIT 1
-  `).get('legacy-exact');
+  `
+    )
+    .get('legacy-exact');
   assert.equal(stored.extract_source, null);
   assert.equal(stored.extract_id, null);
   assert.equal(stored.extract_resolution_status, 'needs_resolution');
 
-  await assert.rejects(
-    service.createQueuedRun(legacy.id, 'manual', 'tester'),
-    /manual canonical extract selection/i
-  );
+  await assert.rejects(service.createQueuedRun(legacy.id, 'manual', 'tester'), /manual canonical extract selection/i);
 });
 
 test('saveRegion allows first canonical extract selection for already synced legacy region', async () => {
@@ -541,7 +556,8 @@ test('saveRegion allows first canonical extract selection for already synced leg
     })
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO data_sync_regions (
       slug,
       name,
@@ -561,17 +577,23 @@ test('saveRegion allows first canonical extract selection for already synced leg
       updated_at
     )
     VALUES (?, ?, 'extract', ?, 'needs_resolution', 1, 0, 0, 0, 12, 15, 'buildings', 'idle', datetime('now'), datetime('now'), datetime('now'))
-  `).run('legacy-synced-region', 'Legacy Synced Region', 'Antarctica');
+  `
+  ).run('legacy-synced-region', 'Legacy Synced Region', 'Antarctica');
 
-  const inserted = db.prepare(`
+  const inserted = db
+    .prepare(
+      `
     SELECT id
     FROM data_sync_regions
     WHERE slug = ?
     LIMIT 1
-  `).get('legacy-synced-region');
+  `
+    )
+    .get('legacy-synced-region');
   assert.ok(inserted?.id);
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO data_region_memberships (
       region_id,
       osm_type,
@@ -580,25 +602,29 @@ test('saveRegion allows first canonical extract selection for already synced leg
       updated_at
     )
     VALUES (?, 'way', 101, datetime('now'), datetime('now'))
-  `).run(inserted.id);
+  `
+  ).run(inserted.id);
 
-  const saved = await service.saveRegion({
-    id: inserted.id,
-    name: 'Legacy Synced Region',
-    slug: 'legacy-synced-region',
-    sourceType: 'extract',
-    searchQuery: 'Antarctica',
-    extractSource: 'geofabrik',
-    extractId: 'geofabrik_antarctica',
-    extractLabel: 'antarctica',
-    enabled: true,
-    autoSyncEnabled: false,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 0,
-    pmtilesMinZoom: 12,
-    pmtilesMaxZoom: 15,
-    sourceLayer: 'buildings'
-  }, 'tester');
+  const saved = await service.saveRegion(
+    {
+      id: inserted.id,
+      name: 'Legacy Synced Region',
+      slug: 'legacy-synced-region',
+      sourceType: 'extract',
+      searchQuery: 'Antarctica',
+      extractSource: 'geofabrik',
+      extractId: 'geofabrik_antarctica',
+      extractLabel: 'antarctica',
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0,
+      pmtilesMinZoom: 12,
+      pmtilesMaxZoom: 15,
+      sourceLayer: 'buildings'
+    },
+    'tester'
+  );
 
   assert.equal(saved.extractResolutionStatus, 'resolved');
   assert.equal(saved.extractSource, 'geofabrik');
@@ -624,19 +650,23 @@ test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage byt
   });
 
   try {
-    const region = await service.saveRegion(buildRegionInput({
-      name: 'Storage Region',
-      slug: 'storage-region',
-      extractId: 'storage-region',
-      autoSyncEnabled: true,
-      autoSyncIntervalHours: 24
-    }), 'tester');
+    const region = await service.saveRegion(
+      buildRegionInput({
+        name: 'Storage Region',
+        slug: 'storage-region',
+        extractId: 'storage-region',
+        autoSyncEnabled: true,
+        autoSyncIntervalHours: 24
+      }),
+      'tester'
+    );
 
     const pmtilesPath = resolveRegionPmtilesPath(tempDir, region);
     fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
     fs.writeFileSync(pmtilesPath, Buffer.alloc(1536, 7));
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO osm.building_contours (
         osm_type,
         osm_id,
@@ -649,20 +679,32 @@ test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage byt
         updated_at
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(
+    `
+    ).run(
       'way',
       101,
       JSON.stringify({ building: 'yes', name: 'Storage test' }),
       JSON.stringify({
         type: 'MultiPolygon',
-        coordinates: [[[[37.6, 55.7], [37.61, 55.7], [37.61, 55.71], [37.6, 55.71], [37.6, 55.7]]]]
+        coordinates: [
+          [
+            [
+              [37.6, 55.7],
+              [37.61, 55.7],
+              [37.61, 55.71],
+              [37.6, 55.71],
+              [37.6, 55.7]
+            ]
+          ]
+        ]
       }),
       37.6,
       55.7,
       37.61,
       55.71
     );
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO data_region_memberships (
         region_id,
         osm_type,
@@ -671,7 +713,8 @@ test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage byt
         updated_at
       )
       VALUES (?, ?, ?, datetime('now'), datetime('now'))
-    `).run(region.id, 'way', 101);
+    `
+    ).run(region.id, 'way', 101);
 
     const settings = await service.getDataSettingsForAdmin();
     const saved = settings.regions.find((item) => item.id === region.id);
@@ -713,22 +756,27 @@ test('getDataSettingsForAdmin returns quickly without live upstream checks', asy
     })
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Afghanistan',
-    slug: 'afghanistan',
-    searchQuery: 'Afghanistan',
-    extractSource: 'geofabrik',
-    extractId: 'geofabrik_asia_afghanistan',
-    extractLabel: 'Afghanistan'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Afghanistan',
+      slug: 'afghanistan',
+      searchQuery: 'Afghanistan',
+      extractSource: 'geofabrik',
+      extractId: 'geofabrik_asia_afghanistan',
+      extractLabel: 'Afghanistan'
+    }),
+    'tester'
+  );
 
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_sync_regions
     SET
       last_successful_sync_at = ?,
       source_data_updated_at = ?
     WHERE id = ?
-  `).run('2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', region.id);
+  `
+  ).run('2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', region.id);
 
   const settings = await service.getDataSettingsForAdmin();
   const saved = settings.regions.find((item) => item.id === region.id);
@@ -743,12 +791,13 @@ test('getRegionsUpstreamState marks region when upstream source has a newer vers
   const db = createTestDb();
   const service = createService({
     db,
-    fetchImpl: async () => new Response('', {
-      status: 200,
-      headers: {
-        'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
-      }
-    }),
+    fetchImpl: async () =>
+      new Response('', {
+        status: 200,
+        headers: {
+          'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
+        }
+      }),
     extractResolver: createMockExtractResolver({
       exact: {
         'geofabrik:geofabrik_asia_afghanistan': {
@@ -765,22 +814,27 @@ test('getRegionsUpstreamState marks region when upstream source has a newer vers
     })
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Afghanistan',
-    slug: 'afghanistan',
-    searchQuery: 'Afghanistan',
-    extractSource: 'geofabrik',
-    extractId: 'geofabrik_asia_afghanistan',
-    extractLabel: 'Afghanistan'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Afghanistan',
+      slug: 'afghanistan',
+      searchQuery: 'Afghanistan',
+      extractSource: 'geofabrik',
+      extractId: 'geofabrik_asia_afghanistan',
+      extractLabel: 'Afghanistan'
+    }),
+    'tester'
+  );
 
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_sync_regions
     SET
       last_successful_sync_at = ?,
       source_data_updated_at = ?
     WHERE id = ?
-  `).run('2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', region.id);
+  `
+  ).run('2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z', region.id);
 
   const [saved] = await service.getRegionsUpstreamState([region.id]);
   assert.ok(saved);
@@ -794,12 +848,13 @@ test('getRegionsUpstreamState keeps upstream state unknown when local source ver
   const db = createTestDb();
   const service = createService({
     db,
-    fetchImpl: async () => new Response('', {
-      status: 200,
-      headers: {
-        'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
-      }
-    }),
+    fetchImpl: async () =>
+      new Response('', {
+        status: 200,
+        headers: {
+          'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
+        }
+      }),
     extractResolver: createMockExtractResolver({
       exact: {
         'geofabrik:geofabrik_asia_afghanistan': {
@@ -816,22 +871,27 @@ test('getRegionsUpstreamState keeps upstream state unknown when local source ver
     })
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Afghanistan',
-    slug: 'afghanistan',
-    searchQuery: 'Afghanistan',
-    extractSource: 'geofabrik',
-    extractId: 'geofabrik_asia_afghanistan',
-    extractLabel: 'Afghanistan'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Afghanistan',
+      slug: 'afghanistan',
+      searchQuery: 'Afghanistan',
+      extractSource: 'geofabrik',
+      extractId: 'geofabrik_asia_afghanistan',
+      extractLabel: 'Afghanistan'
+    }),
+    'tester'
+  );
 
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_sync_regions
     SET
       last_successful_sync_at = ?,
       source_data_updated_at = NULL
     WHERE id = ?
-  `).run('2026-04-01T00:00:00.000Z', region.id);
+  `
+  ).run('2026-04-01T00:00:00.000Z', region.id);
 
   const [saved] = await service.getRegionsUpstreamState([region.id]);
   assert.ok(saved);
@@ -855,13 +915,16 @@ test('overlapping enabled region bounds are allowed to complete syncs', async ()
     }
   });
 
-  const first = await service.saveRegion(buildRegionInput({
-    name: 'Region A',
-    slug: 'region-a',
-    extractId: 'region-a',
-    autoSyncEnabled: true,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const first = await service.saveRegion(
+    buildRegionInput({
+      name: 'Region A',
+      slug: 'region-a',
+      extractId: 'region-a',
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   const firstRun = await service.createQueuedRun(first.id, 'manual', 'tester');
   await service.markRunStarted(firstRun.id);
@@ -878,13 +941,16 @@ test('overlapping enabled region bounds are allowed to complete syncs', async ()
     }
   });
 
-  const second = await service.saveRegion(buildRegionInput({
-    name: 'Region B',
-    slug: 'region-b',
-    extractId: 'region-b',
-    autoSyncEnabled: true,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const second = await service.saveRegion(
+    buildRegionInput({
+      name: 'Region B',
+      slug: 'region-b',
+      extractId: 'region-b',
+      autoSyncEnabled: true,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   const secondRun = await service.createQueuedRun(second.id, 'manual', 'tester');
   await service.markRunStarted(secondRun.id);
@@ -907,7 +973,10 @@ test('overlapping enabled region bounds are allowed to complete syncs', async ()
 
   const runtimeRegions = await service.listRuntimePmtilesRegions();
   assert.equal(runtimeRegions.length, 2);
-  assert.deepEqual(runtimeRegions.map((item) => item.id).sort((left, right) => left - right), [first.id, second.id]);
+  assert.deepEqual(
+    runtimeRegions.map((item) => item.id).sort((left, right) => left - right),
+    [first.id, second.id]
+  );
 });
 
 test('listRuntimePmtilesRegions does not require lastSuccessfulSyncAt', async () => {
@@ -928,15 +997,19 @@ test('listRuntimePmtilesRegions does not require lastSuccessfulSyncAt', async ()
   });
 
   try {
-    const region = await service.saveRegion(buildRegionInput({
-      name: 'Runtime Region',
-      slug: 'runtime-region',
-      extractId: 'runtime-region',
-      autoSyncEnabled: true,
-      autoSyncIntervalHours: 24
-    }), 'tester');
+    const region = await service.saveRegion(
+      buildRegionInput({
+        name: 'Runtime Region',
+        slug: 'runtime-region',
+        extractId: 'runtime-region',
+        autoSyncEnabled: true,
+        autoSyncIntervalHours: 24
+      }),
+      'tester'
+    );
 
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE data_sync_regions
       SET
         bounds_west = ?,
@@ -945,7 +1018,8 @@ test('listRuntimePmtilesRegions does not require lastSuccessfulSyncAt', async ()
         bounds_north = ?,
         last_successful_sync_at = NULL
       WHERE id = ?
-    `).run(10, 10, 20, 20, region.id);
+    `
+    ).run(10, 10, 20, 20, region.id);
 
     const pmtilesPath = resolveRegionPmtilesPath(tempDir, region);
     fs.mkdirSync(path.dirname(pmtilesPath), { recursive: true });
@@ -977,14 +1051,17 @@ test('run lifecycle updates region status, history and nextSyncAt', async () => 
     }
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Runtime Region',
-    slug: 'runtime-region',
-    extractId: 'runtime-region',
-    autoSyncEnabled: true,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Runtime Region',
+      slug: 'runtime-region',
+      extractId: 'runtime-region',
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   assert.equal(queuedRun.status, 'queued');
@@ -1024,11 +1101,14 @@ test('markRunSucceeded stores imported upstream source version on the region', a
   const db = createTestDb();
   const service = createService({ db });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Versioned Region',
-    slug: 'versioned-region',
-    extractId: 'versioned-region'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Versioned Region',
+      slug: 'versioned-region',
+      extractId: 'versioned-region'
+    }),
+    'tester'
+  );
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   await service.markRunStarted(queuedRun.id);
@@ -1049,11 +1129,14 @@ test('updateRunStage normalizes progress/detail and only persists for running ru
     now: () => currentNow
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Stage Region',
-    slug: 'stage-region',
-    extractId: 'stage-region'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Stage Region',
+      slug: 'stage-region',
+      extractId: 'stage-region'
+    }),
+    'tester'
+  );
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   const untouchedQueued = await service.updateRunStage(queuedRun.id, 'extract', 12, 'queued should ignore');
@@ -1065,12 +1148,7 @@ test('updateRunStage normalizes progress/detail and only persists for running ru
   assert.equal(runningRun.stageUpdatedAt, '2026-04-09T10:00:00.000Z');
 
   currentNow = new Date('2026-04-09T10:05:00.000Z');
-  const updatedRun = await service.updateRunStage(
-    queuedRun.id,
-    ' build ',
-    142.6,
-    `  ${'x'.repeat(240)}  `
-  );
+  const updatedRun = await service.updateRunStage(queuedRun.id, ' build ', 142.6, `  ${'x'.repeat(240)}  `);
   assert.equal(updatedRun?.stage, 'build');
   assert.equal(updatedRun?.stageProgress, 100);
   assert.equal(updatedRun?.stageDetail, 'x'.repeat(200));
@@ -1081,62 +1159,92 @@ test('touchRunHeartbeat refreshes only queued/running runs', async () => {
   const db = createTestDb();
   const service = createService({ db });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Heartbeat Region',
-    slug: 'heartbeat-region',
-    extractId: 'heartbeat-region'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Heartbeat Region',
+      slug: 'heartbeat-region',
+      extractId: 'heartbeat-region'
+    }),
+    'tester'
+  );
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = '2000-01-01 00:00:00'
     WHERE id = ?
-  `).run(queuedRun.id);
+  `
+  ).run(queuedRun.id);
 
   await service.touchRunHeartbeat(queuedRun.id);
 
-  const touchedQueuedRow = db.prepare(`
+  const touchedQueuedRow = db
+    .prepare(
+      `
     SELECT updated_at
     FROM data_region_sync_runs
     WHERE id = ?
-  `).get(queuedRun.id);
+  `
+    )
+    .get(queuedRun.id);
   assert.notEqual(touchedQueuedRow?.updated_at, '2000-01-01 00:00:00');
 
   await service.markRunStarted(queuedRun.id);
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = '2000-01-01 00:00:00'
     WHERE id = ?
-  `).run(queuedRun.id);
+  `
+  ).run(queuedRun.id);
 
   await service.touchRunHeartbeat(queuedRun.id);
 
-  const touchedRunningRow = db.prepare(`
+  const touchedRunningRow = db
+    .prepare(
+      `
     SELECT updated_at
     FROM data_region_sync_runs
     WHERE id = ?
-  `).get(queuedRun.id);
+  `
+    )
+    .get(queuedRun.id);
   assert.notEqual(touchedRunningRow?.updated_at, '2000-01-01 00:00:00');
 
   await service.markRunSucceeded(queuedRun.id, {
     importedFeatureCount: 1,
     activeFeatureCount: 1
   });
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = '2000-01-01 00:00:00'
     WHERE id = ?
-  `).run(queuedRun.id);
+  `
+  ).run(queuedRun.id);
 
   await service.touchRunHeartbeat(queuedRun.id);
 
-  const untouchedFinishedRow = db.prepare(`
+  const untouchedFinishedRow = db
+    .prepare(
+      `
     SELECT updated_at
     FROM data_region_sync_runs
     WHERE id = ?
-  `).get(queuedRun.id);
+  `
+    )
+    .get(queuedRun.id);
   assert.equal(untouchedFinishedRow?.updated_at, '2000-01-01 00:00:00');
+});
+
+test('toIsoOrNull treats SQLite datetime strings as UTC instead of local timezone', () => {
+  const context = createDataSettingsContext({
+    db: createTestDb()
+  });
+
+  assert.equal(context.toIsoOrNull('2026-04-10 11:50:00'), '2026-04-10T11:50:00.000Z');
+  assert.equal(context.toIsoOrNull('2026-04-10 11:50:00.250'), '2026-04-10T11:50:00.250Z');
 });
 
 test('recoverInterruptedRuns only abandons stale active runs when staleMs is provided', async () => {
@@ -1146,44 +1254,59 @@ test('recoverInterruptedRuns only abandons stale active runs when staleMs is pro
     now: () => new Date('2026-04-10T12:00:00.000Z')
   });
 
-  const recentRegion = await service.saveRegion(buildRegionInput({
-    name: 'Recent Running Region',
-    slug: 'recent-running-region',
-    extractId: 'recent-running-region'
-  }), 'tester');
-  const staleRunningRegion = await service.saveRegion(buildRegionInput({
-    name: 'Stale Running Region',
-    slug: 'stale-running-region',
-    extractId: 'stale-running-region'
-  }), 'tester');
-  const staleQueuedRegion = await service.saveRegion(buildRegionInput({
-    name: 'Stale Queued Region',
-    slug: 'stale-queued-region',
-    extractId: 'stale-queued-region'
-  }), 'tester');
+  const recentRegion = await service.saveRegion(
+    buildRegionInput({
+      name: 'Recent Running Region',
+      slug: 'recent-running-region',
+      extractId: 'recent-running-region'
+    }),
+    'tester'
+  );
+  const staleRunningRegion = await service.saveRegion(
+    buildRegionInput({
+      name: 'Stale Running Region',
+      slug: 'stale-running-region',
+      extractId: 'stale-running-region'
+    }),
+    'tester'
+  );
+  const staleQueuedRegion = await service.saveRegion(
+    buildRegionInput({
+      name: 'Stale Queued Region',
+      slug: 'stale-queued-region',
+      extractId: 'stale-queued-region'
+    }),
+    'tester'
+  );
 
   const recentRun = await service.createQueuedRun(recentRegion.id, 'manual', 'tester');
   await service.markRunStarted(recentRun.id);
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = '2026-04-10 11:59:45'
     WHERE id = ?
-  `).run(recentRun.id);
+  `
+  ).run(recentRun.id);
 
   const staleRunningRun = await service.createQueuedRun(staleRunningRegion.id, 'manual', 'tester');
   await service.markRunStarted(staleRunningRun.id);
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = '2026-04-10 11:58:30'
     WHERE id = ?
-  `).run(staleRunningRun.id);
+  `
+  ).run(staleRunningRun.id);
 
   const staleQueuedRun = await service.createQueuedRun(staleQueuedRegion.id, 'manual', 'tester');
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = '2026-04-10 11:58:00'
     WHERE id = ?
-  `).run(staleQueuedRun.id);
+  `
+  ).run(staleQueuedRun.id);
 
   const recovered = await service.recoverInterruptedRuns('Sync interrupted by process restart', {
     staleMs: 30_000
@@ -1223,21 +1346,26 @@ test('recoverInterruptedRuns preserves a newer successful sync and does not requ
     now: () => currentNow
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Recovered Success Region',
-    slug: 'recovered-success-region',
-    extractId: 'recovered-success-region'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Recovered Success Region',
+      slug: 'recovered-success-region',
+      extractId: 'recovered-success-region'
+    }),
+    'tester'
+  );
 
   const staleRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   await service.markRunStarted(staleRun.id);
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET
       started_at = '2026-04-10 11:50:00',
       updated_at = '2026-04-10 11:50:00'
     WHERE id = ?
-  `).run(staleRun.id);
+  `
+  ).run(staleRun.id);
 
   currentNow = new Date('2026-04-10T12:05:00.000Z');
   const successfulRun = await service.createQueuedRun(region.id, 'manual', 'tester');
@@ -1273,14 +1401,17 @@ test('markRunCancelRequested sets cancelling stage and finalization clears trans
     now: () => currentNow
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Cancel Region',
-    slug: 'cancel-region',
-    extractId: 'cancel-region',
-    autoSyncEnabled: true,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Cancel Region',
+      slug: 'cancel-region',
+      extractId: 'cancel-region',
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   await service.markRunStarted(queuedRun.id);
@@ -1316,22 +1447,27 @@ test('abandonActiveRunsForRegion abandons stale active runs and repairs stuck re
     now: () => currentNow
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Stale Cancel Region',
-    slug: 'stale-cancel-region',
-    extractId: 'stale-cancel-region',
-    autoSyncEnabled: true,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Stale Cancel Region',
+      slug: 'stale-cancel-region',
+      extractId: 'stale-cancel-region',
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   const queuedRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   await service.markRunStarted(queuedRun.id);
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_region_sync_runs
     SET updated_at = ?
     WHERE id = ?
-  `).run('2026-04-09T11:00:00.000Z', queuedRun.id);
+  `
+  ).run('2026-04-09T11:00:00.000Z', queuedRun.id);
 
   currentNow = new Date('2026-04-09T11:03:00.000Z');
   const abandoned = await service.abandonActiveRunsForRegion(region.id, 'Sync cancelled by user', {
@@ -1342,21 +1478,26 @@ test('abandonActiveRunsForRegion abandons stale active runs and repairs stuck re
   assert.equal(abandoned.runs[0].status, 'abandoned');
   assert.equal(abandoned.region?.lastSyncStatus, 'abandoned');
 
-  const staleRegion = await service.saveRegion(buildRegionInput({
-    name: 'Stale Region State',
-    slug: 'stale-region-state',
-    extractId: 'stale-region-state',
-    autoSyncEnabled: false,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 0
-  }), 'tester');
-  db.prepare(`
+  const staleRegion = await service.saveRegion(
+    buildRegionInput({
+      name: 'Stale Region State',
+      slug: 'stale-region-state',
+      extractId: 'stale-region-state',
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0
+    }),
+    'tester'
+  );
+  db.prepare(
+    `
     UPDATE data_sync_regions
     SET
       last_sync_status = 'running',
       last_sync_error = NULL
     WHERE id = ?
-  `).run(staleRegion.id);
+  `
+  ).run(staleRegion.id);
 
   currentNow = new Date('2026-04-09T11:05:00.000Z');
   const repaired = await service.abandonActiveRunsForRegion(staleRegion.id, 'Sync cancelled by user', {
@@ -1382,11 +1523,14 @@ test('createQueuedRun clears stale region sync errors before a retry starts', as
     }
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Recovered Region',
-    slug: 'recovered-region',
-    extractId: 'recovered-region'
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Recovered Region',
+      slug: 'recovered-region',
+      extractId: 'recovered-region'
+    }),
+    'tester'
+  );
 
   const firstRun = await service.createQueuedRun(region.id, 'manual', 'tester');
   await service.markRunStarted(firstRun.id);
@@ -1421,14 +1565,17 @@ test('failed first sync schedules retry after interval instead of immediate reru
     }
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Retry Region',
-    slug: 'retry-region',
-    extractId: 'retry-region',
-    autoSyncEnabled: true,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 24
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Retry Region',
+      slug: 'retry-region',
+      extractId: 'retry-region',
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24
+    }),
+    'tester'
+  );
 
   assert.equal(region.nextSyncAt, '2026-03-07T10:00:00.000Z');
 
@@ -1460,44 +1607,60 @@ test('deleteRegion removes only orphan features and preserves shared data of oth
     }
   });
 
-  const regionA = await service.saveRegion(buildRegionInput({
-    name: 'Region A',
-    slug: 'region-a',
-    extractId: 'region-a',
-    autoSyncEnabled: false,
-    autoSyncIntervalHours: 0
-  }), 'tester');
-  const regionB = await service.saveRegion(buildRegionInput({
-    name: 'Region B',
-    slug: 'region-b',
-    extractId: 'region-b',
-    autoSyncEnabled: false,
-    autoSyncIntervalHours: 0
-  }), 'tester');
+  const regionA = await service.saveRegion(
+    buildRegionInput({
+      name: 'Region A',
+      slug: 'region-a',
+      extractId: 'region-a',
+      autoSyncEnabled: false,
+      autoSyncIntervalHours: 0
+    }),
+    'tester'
+  );
+  const regionB = await service.saveRegion(
+    buildRegionInput({
+      name: 'Region B',
+      slug: 'region-b',
+      extractId: 'region-b',
+      autoSyncEnabled: false,
+      autoSyncIntervalHours: 0
+    }),
+    'tester'
+  );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (
       osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run('way', 101, '{}', '{"type":"Polygon","coordinates":[]}', 1, 1, 2, 2);
-  db.prepare(`
+  `
+  ).run('way', 101, '{}', '{"type":"Polygon","coordinates":[]}', 1, 1, 2, 2);
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (
       osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run('way', 202, '{}', '{"type":"Polygon","coordinates":[]}', 2, 2, 3, 3);
+  `
+  ).run('way', 202, '{}', '{"type":"Polygon","coordinates":[]}', 2, 2, 3, 3);
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
     VALUES (?, ?, ?, datetime('now'), datetime('now'))
-  `).run(regionA.id, 'way', 101);
-  db.prepare(`
+  `
+  ).run(regionA.id, 'way', 101);
+  db.prepare(
+    `
     INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
     VALUES (?, ?, ?, datetime('now'), datetime('now'))
-  `).run(regionA.id, 'way', 202);
-  db.prepare(`
+  `
+  ).run(regionA.id, 'way', 202);
+  db.prepare(
+    `
     INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
     VALUES (?, ?, ?, datetime('now'), datetime('now'))
-  `).run(regionB.id, 'way', 202);
+  `
+  ).run(regionB.id, 'way', 202);
 
   const queuedRun = await service.createQueuedRun(regionA.id, 'manual', 'tester');
   await service.markRunStarted(queuedRun.id);
@@ -1514,23 +1677,27 @@ test('deleteRegion removes only orphan features and preserves shared data of oth
   const remainingRegion = await service.getRegionById(regionB.id);
   assert.equal(remainingRegion.id, regionB.id);
 
-  const memberships = db.prepare(`
+  const memberships = db
+    .prepare(
+      `
     SELECT region_id, osm_type, osm_id
     FROM data_region_memberships
     ORDER BY region_id, osm_type, osm_id
-  `).all();
-  assert.deepEqual(memberships, [
-    { region_id: regionB.id, osm_type: 'way', osm_id: 202 }
-  ]);
+  `
+    )
+    .all();
+  assert.deepEqual(memberships, [{ region_id: regionB.id, osm_type: 'way', osm_id: 202 }]);
 
-  const contours = db.prepare(`
+  const contours = db
+    .prepare(
+      `
     SELECT osm_type, osm_id
     FROM osm.building_contours
     ORDER BY osm_type, osm_id
-  `).all();
-  assert.deepEqual(contours, [
-    { osm_type: 'way', osm_id: 202 }
-  ]);
+  `
+    )
+    .all();
+  assert.deepEqual(contours, [{ osm_type: 'way', osm_id: 202 }]);
 });
 
 test('deleteRegion allows stale queued status when no active runs remain', async () => {
@@ -1548,22 +1715,27 @@ test('deleteRegion allows stale queued status when no active runs remain', async
     }
   });
 
-  const region = await service.saveRegion(buildRegionInput({
-    name: 'Delete Stale Region',
-    slug: 'delete-stale-region',
-    extractId: 'delete-stale-region',
-    autoSyncEnabled: false,
-    autoSyncOnStart: false,
-    autoSyncIntervalHours: 0
-  }), 'tester');
+  const region = await service.saveRegion(
+    buildRegionInput({
+      name: 'Delete Stale Region',
+      slug: 'delete-stale-region',
+      extractId: 'delete-stale-region',
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0
+    }),
+    'tester'
+  );
 
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE data_sync_regions
     SET
       last_sync_status = 'queued',
       last_sync_error = 'stale queued state'
     WHERE id = ?
-  `).run(region.id);
+  `
+  ).run(region.id);
 
   const deleted = await service.deleteRegion(region.id, 'tester');
   assert.equal(deleted.region.id, region.id);

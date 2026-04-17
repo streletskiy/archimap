@@ -40,7 +40,10 @@ function buildPostgresFeatureKindSql(columnName = 'bc.tags_json') {
   `;
 }
 
-function buildSqliteRegionExportQuery({ regionPlaceholder = '?', geometrySql = 'bc.geometry_json AS geometry_json' } = {}) {
+function buildSqliteRegionExportQuery({
+  regionPlaceholder = '?',
+  geometrySql = 'bc.geometry_json AS geometry_json'
+} = {}) {
   const featureKindSql = buildSqliteFeatureKindSql('bc.tags_json');
   return `
     WITH region_rows AS (
@@ -292,9 +295,10 @@ function normalizeRegionRow(row) {
   if (!row) return null;
   const extractSource = String(row.extract_source || '').trim();
   const extractId = String(row.extract_id || '').trim();
-  const extractResolutionStatus = String(
-    row.extract_resolution_status || (extractSource && extractId ? 'resolved' : 'needs_resolution')
-  ).trim().toLowerCase() || 'needs_resolution';
+  const extractResolutionStatus =
+    String(row.extract_resolution_status || (extractSource && extractId ? 'resolved' : 'needs_resolution'))
+      .trim()
+      .toLowerCase() || 'needs_resolution';
   return {
     id: Number(row.id),
     slug: String(row.slug || ''),
@@ -314,12 +318,15 @@ function normalizeRegionRow(row) {
     pmtilesMinZoom: Number(row.pmtiles_min_zoom || 13),
     pmtilesMaxZoom: Number(row.pmtiles_max_zoom || 16),
     sourceLayer: String(row.source_layer || 'buildings'),
-    bounds: row.bounds_west == null ? null : {
-      west: Number(row.bounds_west),
-      south: Number(row.bounds_south),
-      east: Number(row.bounds_east),
-      north: Number(row.bounds_north)
-    }
+    bounds:
+      row.bounds_west == null
+        ? null
+        : {
+            west: Number(row.bounds_west),
+            south: Number(row.bounds_south),
+            east: Number(row.bounds_east),
+            north: Number(row.bounds_north)
+          }
   };
 }
 
@@ -341,7 +348,9 @@ function assertRegionSupportsManagedSync(region) {
 function getRegionFromSqlite({ archimapDbPath, osmDbPath }, regionId) {
   const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
   try {
-    const row = db.prepare(`
+    const row = db
+      .prepare(
+        `
       SELECT
         id,
         slug,
@@ -367,7 +376,9 @@ function getRegionFromSqlite({ archimapDbPath, osmDbPath }, regionId) {
       FROM data_sync_regions
       WHERE id = ?
       LIMIT 1
-    `).get(Number(regionId));
+    `
+      )
+      .get(Number(regionId));
     return normalizeRegionRow(row);
   } finally {
     db.close();
@@ -378,7 +389,8 @@ async function getRegionFromPostgres({ databaseUrl }, regionId) {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const result = await client.query(`
+    const result = await client.query(
+      `
       SELECT
         id,
         slug,
@@ -404,7 +416,9 @@ async function getRegionFromPostgres({ databaseUrl }, regionId) {
       FROM public.data_sync_regions
       WHERE id = $1
       LIMIT 1
-    `, [Number(regionId)]);
+    `,
+      [Number(regionId)]
+    );
     return normalizeRegionRow(result.rows[0]);
   } finally {
     await client.end();
@@ -545,9 +559,11 @@ async function exportRegionRenderFeaturesToGeojsonNdjson({
       }
 
       await client.query('BEGIN READ ONLY');
-      await client.query(`DECLARE region_render_export_cursor NO SCROLL CURSOR FOR ${buildPostgresRegionRenderFeatureExportQuery({
-        regionSql: String(normalizedRegionId)
-      })}`);
+      await client.query(
+        `DECLARE region_render_export_cursor NO SCROLL CURSOR FOR ${buildPostgresRegionRenderFeatureExportQuery({
+          regionSql: String(normalizedRegionId)
+        })}`
+      );
 
       while (true) {
         const result = await client.query(`

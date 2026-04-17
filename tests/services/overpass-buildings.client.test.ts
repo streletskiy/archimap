@@ -7,7 +7,7 @@ let importCounter = 0;
 
 async function loadOverpassBuildings() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'overpass-buildings.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 function toRequestUrl(input: RequestInfo | URL) {
@@ -22,9 +22,7 @@ function toRequestUrl(input: RequestInfo | URL) {
 
 function isExactEndpointMatch(actual: URL, expected: string) {
   const target = new URL(expected);
-  return actual.origin === target.origin
-    && actual.pathname === target.pathname
-    && actual.search === target.search;
+  return actual.origin === target.origin && actual.pathname === target.pathname && actual.search === target.search;
 }
 
 function readStoreValue(store) {
@@ -47,10 +45,7 @@ async function waitFor(predicate, timeoutMs = 2000, intervalMs = 10) {
 }
 
 test('overpass coverage checks stay disabled until zoom 12', async () => {
-  const {
-    OVERPASS_MIN_COVERAGE_CHECK_ZOOM,
-    shouldCheckOverpassViewportCoverage
-  } = await loadOverpassBuildings();
+  const { OVERPASS_MIN_COVERAGE_CHECK_ZOOM, shouldCheckOverpassViewportCoverage } = await loadOverpassBuildings();
 
   assert.equal(OVERPASS_MIN_COVERAGE_CHECK_ZOOM, 12);
   assert.equal(shouldCheckOverpassViewportCoverage(null), false);
@@ -60,10 +55,7 @@ test('overpass coverage checks stay disabled until zoom 12', async () => {
 });
 
 test('coarse zoom viewport refresh does not materialize overpass tile plans', async () => {
-  const {
-    overpassBuildingsState,
-    refreshOverpassViewport
-  } = await loadOverpassBuildings();
+  const { overpassBuildingsState, refreshOverpassViewport } = await loadOverpassBuildings();
 
   await refreshOverpassViewport({
     viewport: {
@@ -102,10 +94,11 @@ test('camera movement does not abort or restart an active Overpass load', async 
 
     fetchCalls.push({ kind: 'tile', input, init });
     tileFetchSignal = init.signal || null;
-    const createTileResponse = () => new Response(JSON.stringify({ elements: [] }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
+    const createTileResponse = () =>
+      new Response(JSON.stringify({ elements: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
     if (releaseTileResponses) {
       return createTileResponse();
     }
@@ -124,7 +117,8 @@ test('camera movement does not abort or restart an active Overpass load', async 
   }
 
   try {
-    const { overpassBuildingsState, requestOverpassViewportLoad, scheduleOverpassViewportRefresh } = await loadOverpassBuildings();
+    const { overpassBuildingsState, requestOverpassViewportLoad, scheduleOverpassViewportRefresh } =
+      await loadOverpassBuildings();
     const initialViewport = {
       west: 37.5,
       south: 55.7,
@@ -207,10 +201,11 @@ test('overpass load keeps multiple tile requests in flight when only one endpoin
     if (isExactEndpointMatch(endpoint, healthyEndpoint)) {
       activeTileRequests += 1;
       maxConcurrentTileRequests = Math.max(maxConcurrentTileRequests, activeTileRequests);
-      const createTileResponse = () => new Response(JSON.stringify({ elements: [] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      });
+      const createTileResponse = () =>
+        new Response(JSON.stringify({ elements: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
       if (releaseTileResponses) {
         activeTileRequests -= 1;
         return createTileResponse();
@@ -309,8 +304,12 @@ test('overpass endpoint cooldown skips repeated 504 failures and ignores mail.ru
       covered: false
     });
 
-    const primaryEndpointCallsBeforeRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, primaryEndpoint)).length;
-    const mailRuCallsBeforeRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, mailRuEndpoint)).length;
+    const primaryEndpointCallsBeforeRefresh = tileEndpoints.filter((endpoint) =>
+      isExactEndpointMatch(endpoint, primaryEndpoint)
+    ).length;
+    const mailRuCallsBeforeRefresh = tileEndpoints.filter((endpoint) =>
+      isExactEndpointMatch(endpoint, mailRuEndpoint)
+    ).length;
 
     assert.ok(primaryEndpointCallsBeforeRefresh > 0);
     assert.equal(mailRuCallsBeforeRefresh, 0);
@@ -321,8 +320,12 @@ test('overpass endpoint cooldown skips repeated 504 failures and ignores mail.ru
       covered: false
     });
 
-    const primaryEndpointCallsAfterRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, primaryEndpoint)).length;
-    const mailRuCallsAfterRefresh = tileEndpoints.filter((endpoint) => isExactEndpointMatch(endpoint, mailRuEndpoint)).length;
+    const primaryEndpointCallsAfterRefresh = tileEndpoints.filter((endpoint) =>
+      isExactEndpointMatch(endpoint, primaryEndpoint)
+    ).length;
+    const mailRuCallsAfterRefresh = tileEndpoints.filter((endpoint) =>
+      isExactEndpointMatch(endpoint, mailRuEndpoint)
+    ).length;
 
     assert.equal(primaryEndpointCallsAfterRefresh, primaryEndpointCallsBeforeRefresh);
     assert.equal(mailRuCallsAfterRefresh, 0);

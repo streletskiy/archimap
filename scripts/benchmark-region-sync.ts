@@ -55,7 +55,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     output: null,
     passes: DEFAULT_PASSES,
     includePmtilesOnly: true,
-    sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS,
+    sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -118,20 +118,22 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   out.passes = Number.isInteger(out.passes) && out.passes > 0 ? out.passes : DEFAULT_PASSES;
-  out.sampleIntervalMs = Number.isFinite(out.sampleIntervalMs) && out.sampleIntervalMs >= 50
-    ? Math.round(out.sampleIntervalMs)
-    : DEFAULT_SAMPLE_INTERVAL_MS;
+  out.sampleIntervalMs =
+    Number.isFinite(out.sampleIntervalMs) && out.sampleIntervalMs >= 50
+      ? Math.round(out.sampleIntervalMs)
+      : DEFAULT_SAMPLE_INTERVAL_MS;
 
   return out;
 }
 
 function slugify(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    || 'region';
+  return (
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'region'
+  );
 }
 
 function collectGeometryBounds(geometry) {
@@ -142,11 +144,7 @@ function collectGeometryBounds(geometry) {
 
   const visit = (node) => {
     if (!Array.isArray(node)) return;
-    if (
-      node.length >= 2
-      && Number.isFinite(Number(node[0]))
-      && Number.isFinite(Number(node[1]))
-    ) {
+    if (node.length >= 2 && Number.isFinite(Number(node[0])) && Number.isFinite(Number(node[1]))) {
       const lon = Number(node[0]);
       const lat = Number(node[1]);
       west = Math.min(west, lon);
@@ -193,7 +191,9 @@ function loadBenchmarkRegionFeature(regionCatalogPath, regionId) {
 }
 
 async function ensureBenchmarkRegion(runtimeOptions, regionId) {
-  const catalogPath = String(process.env.BENCHMARK_REGION_CATALOG_PATH || DEFAULT_REGION_CATALOG_PATH).trim() || DEFAULT_REGION_CATALOG_PATH;
+  const catalogPath =
+    String(process.env.BENCHMARK_REGION_CATALOG_PATH || DEFAULT_REGION_CATALOG_PATH).trim() ||
+    DEFAULT_REGION_CATALOG_PATH;
   const feature = loadBenchmarkRegionFeature(catalogPath, regionId);
   const properties = feature?.properties || {};
   const bounds = collectGeometryBounds(feature?.geometry);
@@ -211,7 +211,8 @@ async function ensureBenchmarkRegion(runtimeOptions, regionId) {
   const client = new Client({ connectionString: runtimeOptions.databaseUrl });
   await client.connect();
   try {
-    await client.query(`
+    await client.query(
+      `
       INSERT INTO public.data_sync_regions (
         id,
         slug,
@@ -293,19 +294,21 @@ async function ensureBenchmarkRegion(runtimeOptions, regionId) {
         bounds_north = EXCLUDED.bounds_north,
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
-    `, [
-      Number(regionId),
-      slug,
-      name,
-      sourceValue,
-      extractSource,
-      extractId,
-      extractLabel,
-      bounds?.west ?? null,
-      bounds?.south ?? null,
-      bounds?.east ?? null,
-      bounds?.north ?? null
-    ]);
+    `,
+      [
+        Number(regionId),
+        slug,
+        name,
+        sourceValue,
+        extractSource,
+        extractId,
+        extractLabel,
+        bounds?.west ?? null,
+        bounds?.south ?? null,
+        bounds?.east ?? null,
+        bounds?.north ?? null
+      ]
+    );
   } finally {
     await client.end();
   }
@@ -391,7 +394,9 @@ function collectProcessTreeRssBytes(rootPid) {
 }
 
 function normalizeStageName(stage) {
-  const normalized = String(stage || '').trim().toLowerCase();
+  const normalized = String(stage || '')
+    .trim()
+    .toLowerCase();
   if (normalized === 'tile_join' || normalized === 'publish') {
     return 'build';
   }
@@ -484,7 +489,9 @@ function summarizePhases(stageTimeline) {
 }
 
 function inferShardStats(resultJson: LooseRecord = {}, stageEvents: BenchmarkStageEvent[] = []) {
-  const shardEvents = stageEvents.filter((item) => item.stage === 'build' && /shard\s+\d+\/\d+/i.test(String(item.detail || '')));
+  const shardEvents = stageEvents.filter(
+    (item) => item.stage === 'build' && /shard\s+\d+\/\d+/i.test(String(item.detail || ''))
+  );
   const shardLineCount = shardEvents.length;
   const reusedLineCount = shardEvents.filter((item) => /cache-hit/i.test(String(item.detail || ''))).length;
   const reusedFromResult = Number(resultJson.pmtilesShardReusedCount);
@@ -503,22 +510,26 @@ function inferShardStats(resultJson: LooseRecord = {}, stageEvents: BenchmarkSta
 
   return {
     pmtilesBuildMode: inferredMode,
-    pmtilesShardCount: Number.isFinite(shardCountFromResult) && shardCountFromResult > 0 ? shardCountFromResult : (shardLineCount > 0 ? shardLineCount : null),
-    pmtilesShardReusedCount: Number.isFinite(reusedFromResult) ? reusedFromResult : (reusedLineCount > 0 ? reusedLineCount : null),
+    pmtilesShardCount:
+      Number.isFinite(shardCountFromResult) && shardCountFromResult > 0
+        ? shardCountFromResult
+        : shardLineCount > 0
+          ? shardLineCount
+          : null,
+    pmtilesShardReusedCount: Number.isFinite(reusedFromResult)
+      ? reusedFromResult
+      : reusedLineCount > 0
+        ? reusedLineCount
+        : null,
     pmtilesShardRebuiltCount: Number.isFinite(rebuiltFromResult)
       ? rebuiltFromResult
-      : (shardLineCount > 0 ? Math.max(0, shardLineCount - (reusedLineCount > 0 ? reusedLineCount : 0)) : null)
+      : shardLineCount > 0
+        ? Math.max(0, shardLineCount - (reusedLineCount > 0 ? reusedLineCount : 0))
+        : null
   };
 }
 
-async function runSyncPass({
-  cwd,
-  regionId,
-  pmtilesOnly = false,
-  dataDir,
-  sampleIntervalMs,
-  env
-}) {
+async function runSyncPass({ cwd, regionId, pmtilesOnly = false, dataDir, sampleIntervalMs, env }) {
   const args = ['--import', 'tsx', path.join('scripts', 'sync-osm-region.ts'), '--region-id', String(regionId)];
   if (pmtilesOnly) {
     args.push('--pmtiles-only');
@@ -528,7 +539,9 @@ async function runSyncPass({
     ...process.env,
     ...env,
     REGION_SYNC_EMIT_STAGE_JSON: 'true',
-    REGION_SYNC_WORKDIR_CLEANUP: String(env?.REGION_SYNC_WORKDIR_CLEANUP || process.env.REGION_SYNC_WORKDIR_CLEANUP || 'warm'),
+    REGION_SYNC_WORKDIR_CLEANUP: String(
+      env?.REGION_SYNC_WORKDIR_CLEANUP || process.env.REGION_SYNC_WORKDIR_CLEANUP || 'warm'
+    ),
     ARCHIMAP_DATA_DIR: dataDir
   };
 
@@ -632,7 +645,9 @@ async function runSyncPass({
   const shardStats = inferShardStats(resultJson || {}, events);
 
   if (exitInfo.error) {
-    const error: BenchmarkError = new Error(`Benchmark child failed to start: ${String((exitInfo.error as Error)?.message || exitInfo.error)}`) as BenchmarkError;
+    const error: BenchmarkError = new Error(
+      `Benchmark child failed to start: ${String((exitInfo.error as Error)?.message || exitInfo.error)}`
+    ) as BenchmarkError;
     error.cause = exitInfo.error;
     error.details = {
       startedAtIso,
@@ -644,7 +659,9 @@ async function runSyncPass({
   }
 
   if ((exitInfo.code ?? 0) !== 0) {
-    const error: BenchmarkError = new Error(`Sync command failed with exit code ${exitInfo.code ?? 1}${exitInfo.signal ? ` (signal ${exitInfo.signal})` : ''}`) as BenchmarkError;
+    const error: BenchmarkError = new Error(
+      `Sync command failed with exit code ${exitInfo.code ?? 1}${exitInfo.signal ? ` (signal ${exitInfo.signal})` : ''}`
+    ) as BenchmarkError;
     error.details = {
       startedAtIso,
       endedAtIso,
@@ -668,7 +685,9 @@ async function runSyncPass({
   }
 
   return {
-    name: pmtilesOnly ? 'pmtiles-only' : `full-sync-pass-${shardStats.pmtilesBuildMode || resultJson?.pmtilesBuildMode || 'unknown'}`,
+    name: pmtilesOnly
+      ? 'pmtiles-only'
+      : `full-sync-pass-${shardStats.pmtilesBuildMode || resultJson?.pmtilesBuildMode || 'unknown'}`,
     mode: pmtilesOnly ? 'pmtiles-only' : 'full-sync',
     startedAt: startedAtIso,
     endedAt: endedAtIso,
@@ -691,7 +710,11 @@ async function main() {
   }
 
   const runtimeOptions = createRuntimeOptions();
-  if (String(runtimeOptions.dbProvider || '').trim().toLowerCase() !== 'postgres') {
+  if (
+    String(runtimeOptions.dbProvider || '')
+      .trim()
+      .toLowerCase() !== 'postgres'
+  ) {
     throw new Error('benchmark-region-sync requires DB_PROVIDER=postgres');
   }
 
@@ -701,7 +724,8 @@ async function main() {
   const label = slugify(args.label || regionSlug);
   const outputPath = path.resolve(
     process.cwd(),
-    args.output || path.join(BENCHMARK_DIR, `region-sync-${label}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+    args.output ||
+      path.join(BENCHMARK_DIR, `region-sync-${label}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
   );
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
@@ -773,12 +797,14 @@ async function main() {
     };
 
     fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-    console.log(JSON.stringify({
-      outputPath,
-      regionId: region.id,
-      label,
-      runs: runs.length
-    }));
+    console.log(
+      JSON.stringify({
+        outputPath,
+        regionId: region.id,
+        label,
+        runs: runs.length
+      })
+    );
   } finally {
     fs.rmSync(benchmarkDataDir, { recursive: true, force: true });
   }

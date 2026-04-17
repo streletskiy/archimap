@@ -29,9 +29,10 @@ const msg = (error, fallback) => String(error?.message || fallback);
 const dataT = (key, params = {}) => translateNow(`${DATA_I18N_PREFIX}.${key}`, params);
 
 function getSessionStorage(): Storage | null {
-  const storage = typeof globalThis !== 'undefined'
-    ? (globalThis as typeof globalThis & { sessionStorage?: Storage }).sessionStorage
-    : null;
+  const storage =
+    typeof globalThis !== 'undefined'
+      ? (globalThis as typeof globalThis & { sessionStorage?: Storage }).sessionStorage
+      : null;
   if (!storage || typeof storage.getItem !== 'function') return null;
   return storage;
 }
@@ -65,10 +66,13 @@ function writePersistedRegionEditorState(regionId: number | null, open: boolean)
       storage.removeItem(REGION_EDITOR_STORAGE_KEY);
       return;
     }
-    storage.setItem(REGION_EDITOR_STORAGE_KEY, JSON.stringify({
-      regionId: normalizedRegionId,
-      open: true
-    }));
+    storage.setItem(
+      REGION_EDITOR_STORAGE_KEY,
+      JSON.stringify({
+        regionId: normalizedRegionId,
+        open: true
+      })
+    );
   } catch {
     // Ignore storage quota/privacy failures and keep the editor state in memory only.
   }
@@ -100,7 +104,9 @@ function createRegionDraft(region: Partial<DataRegion> | null = null): SharedReg
     extractSource: String(region?.extractSource || ''),
     extractId: String(region?.extractId || ''),
     extractLabel: String(region?.extractLabel || ''),
-    extractResolutionStatus: String(region?.extractResolutionStatus || 'needs_resolution') as SharedRegionDraft['extractResolutionStatus'],
+    extractResolutionStatus: String(
+      region?.extractResolutionStatus || 'needs_resolution'
+    ) as SharedRegionDraft['extractResolutionStatus'],
     extractResolutionError: region?.extractResolutionError ? String(region.extractResolutionError) : null,
     enabled: region?.enabled !== false,
     autoSyncEnabled: region?.autoSyncEnabled !== false,
@@ -137,7 +143,9 @@ function normalizeFilterPresetLocale(locale) {
 }
 
 function normalizeFilterPresetName(value) {
-  return String(value || '').trim().slice(0, 160);
+  return String(value || '')
+    .trim()
+    .slice(0, 160);
 }
 
 function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
@@ -159,7 +167,7 @@ function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
 }
 
 function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
-  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n as Record<string, string> : {};
+  const source = nameI18n && typeof nameI18n === 'object' ? (nameI18n as Record<string, string>) : {};
   const defaultName = normalizeFilterPresetName(source?.[DEFAULT_LOCALE]);
   if (defaultName) return defaultName;
 
@@ -176,7 +184,10 @@ function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
   return normalizeFilterPresetName(fallback);
 }
 
-function normalizeFilterPresetRule(rule: Partial<FilterPresetRule> | LooseRecord = {}, options: { preserveId?: boolean } = {}): FilterPresetRule {
+function normalizeFilterPresetRule(
+  rule: Partial<FilterPresetRule> | LooseRecord = {},
+  options: { preserveId?: boolean } = {}
+): FilterPresetRule {
   const normalized: FilterPresetRule = {
     key: String(rule?.key || '').trim(),
     op: String(rule?.op || 'contains').trim() as FilterPresetRule['op'],
@@ -193,22 +204,32 @@ function normalizeFilterPresetRule(rule: Partial<FilterPresetRule> | LooseRecord
   return normalized;
 }
 
-function normalizeFilterPresetLayersForDraft(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []): FilterPresetLayer[] {
+function normalizeFilterPresetLayersForDraft(
+  layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []
+): FilterPresetLayer[] {
   const source = Array.isArray(layers) ? layers : [];
   if (source.length === 0) {
     return [createBuildingFilterLayerDraft()];
   }
-  return source.map((layer, index, list) => createBuildingFilterLayerDraft({
-    ...layer,
-    priority: Number.isFinite(Number(layer?.priority)) ? Number(layer.priority) : index,
-    rules: Array.isArray(layer?.rules) && layer.rules.length > 0
-      ? layer.rules.map((rule) => normalizeFilterPresetRule(rule, { preserveId: true }))
-      : [normalizeFilterPresetRule({}, { preserveId: true })]
-  }, list.slice(0, index)));
+  return source.map((layer, index, list) =>
+    createBuildingFilterLayerDraft(
+      {
+        ...layer,
+        priority: Number.isFinite(Number(layer?.priority)) ? Number(layer.priority) : index,
+        rules:
+          Array.isArray(layer?.rules) && layer.rules.length > 0
+            ? layer.rules.map((rule) => normalizeFilterPresetRule(rule, { preserveId: true }))
+            : [normalizeFilterPresetRule({}, { preserveId: true })]
+      },
+      list.slice(0, index)
+    )
+  );
 }
 
 function normalizeFilterPresetLayersForSave(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []) {
-  const normalized = normalizeFilterLayers(Array.isArray(layers) ? (layers as LooseRecord[]) : [], { preserveEmpty: false });
+  const normalized = normalizeFilterLayers(Array.isArray(layers) ? (layers as LooseRecord[]) : [], {
+    preserveEmpty: false
+  });
   if (normalized.invalidReason) {
     return {
       layers: [],
@@ -233,7 +254,9 @@ function normalizeFilterPresetLayersForSave(layers: Array<Partial<FilterPresetLa
   };
 }
 
-function normalizeFilterPresetItem(preset: ApiFilterPreset | SharedFilterPresetDraft | LooseRecord | null = null): FilterPresetItem {
+function normalizeFilterPresetItem(
+  preset: ApiFilterPreset | SharedFilterPresetDraft | LooseRecord | null = null
+): FilterPresetItem {
   const source = (preset && typeof preset === 'object' ? preset : {}) as Partial<FilterPresetItem> & LooseRecord;
   const id = Number(source?.id || 0);
   const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
@@ -268,7 +291,8 @@ function createEmptyFilterPresetState(): FilterPresetState {
 }
 
 function normalizeDataSettings(nextSettings, fallback): DataSettings {
-  const value = (nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback) as Partial<DataSettings> & LooseRecord;
+  const value = (nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback) as Partial<DataSettings> &
+    LooseRecord;
   return {
     source: String(value?.source || 'db'),
     bootstrap: {
@@ -398,7 +422,9 @@ export function createAdminDataController() {
 
   function hasLiveSyncRegions(regions: any[] = []): boolean {
     return (Array.isArray(regions) ? regions : []).some((region) => {
-      const status = String(region?.lastSyncStatus || '').trim().toLowerCase();
+      const status = String(region?.lastSyncStatus || '')
+        .trim()
+        .toLowerCase();
       return status === 'queued' || status === 'running';
     });
   }
@@ -416,7 +442,7 @@ export function createAdminDataController() {
       syncProgressPollTimer = null;
       syncProgressPollInFlight = true;
       try {
-        const currentRegions = get(dataSettings)?.regions as any[] || [];
+        const currentRegions = (get(dataSettings)?.regions as any[]) || [];
         if (!hasLiveSyncRegions(currentRegions)) return;
         const selectedId = Number(get(selectedDataRegionId) || 0) || null;
         await refreshDataSettingsInBackground({
@@ -425,7 +451,7 @@ export function createAdminDataController() {
         });
       } finally {
         syncProgressPollInFlight = false;
-        const nextRegions = get(dataSettings)?.regions as any[] || [];
+        const nextRegions = (get(dataSettings)?.regions as any[]) || [];
         if (hasLiveSyncRegions(nextRegions)) {
           scheduleSyncProgressPoll();
         }
@@ -435,7 +461,7 @@ export function createAdminDataController() {
   }
 
   function ensureSyncProgressPolling() {
-    const regions = get(dataSettings)?.regions as any[] || [];
+    const regions = (get(dataSettings)?.regions as any[]) || [];
     if (hasLiveSyncRegions(regions)) {
       scheduleSyncProgressPoll();
     } else {
@@ -470,11 +496,10 @@ export function createAdminDataController() {
 
   const selectedFilterPreset = derived(
     [filterPresetItems, selectedFilterPresetId],
-    ([$filterPresetItems, $selectedFilterPresetId]) => (
-      (Array.isArray($filterPresetItems) ? $filterPresetItems : [])
-        .find((item) => Number(item?.id || 0) === Number($selectedFilterPresetId || 0))
-      || null
-    )
+    ([$filterPresetItems, $selectedFilterPresetId]) =>
+      (Array.isArray($filterPresetItems) ? $filterPresetItems : []).find(
+        (item) => Number(item?.id || 0) === Number($selectedFilterPresetId || 0)
+      ) || null
   );
 
   const filterPresetDraftCanonical = derived(filterPresetDraft, ($filterPresetDraft) => {
@@ -494,9 +519,8 @@ export function createAdminDataController() {
     };
   });
 
-  const filterPresetDraftJsonPreview = derived(
-    filterPresetDraftCanonical,
-    ($filterPresetDraftCanonical) => JSON.stringify($filterPresetDraftCanonical, null, 2)
+  const filterPresetDraftJsonPreview = derived(filterPresetDraftCanonical, ($filterPresetDraftCanonical) =>
+    JSON.stringify($filterPresetDraftCanonical, null, 2)
   );
 
   const filterPresetDirty = derived(
@@ -504,26 +528,29 @@ export function createAdminDataController() {
     ([$selectedFilterPreset, $filterPresetDraftCanonical]) => {
       const left = $selectedFilterPreset
         ? {
-          id: Number($selectedFilterPreset.id || 0),
-          key: String($selectedFilterPreset.key || '').trim(),
-          name: normalizeFilterPresetName($selectedFilterPreset.name),
-          nameI18n: normalizeFilterPresetNameI18n($selectedFilterPreset.nameI18n, $selectedFilterPreset.name),
-          description: String($selectedFilterPreset.description || '').trim() || null,
-          layers: normalizeFilterPresetLayersForSave($selectedFilterPreset.layers).layers
-        }
+            id: Number($selectedFilterPreset.id || 0),
+            key: String($selectedFilterPreset.key || '').trim(),
+            name: normalizeFilterPresetName($selectedFilterPreset.name),
+            nameI18n: normalizeFilterPresetNameI18n($selectedFilterPreset.nameI18n, $selectedFilterPreset.name),
+            description: String($selectedFilterPreset.description || '').trim() || null,
+            layers: normalizeFilterPresetLayersForSave($selectedFilterPreset.layers).layers
+          }
         : {
-          id: null,
-          key: '',
-          name: '',
-          nameI18n: {},
-          description: null,
-          layers: []
-        };
+            id: null,
+            key: '',
+            name: '',
+            nameI18n: {},
+            description: null,
+            layers: []
+          };
       const right = {
         id: Number($filterPresetDraftCanonical?.id || 0) || null,
         key: String($filterPresetDraftCanonical?.key || '').trim(),
         name: normalizeFilterPresetName($filterPresetDraftCanonical?.name),
-        nameI18n: normalizeFilterPresetNameI18n($filterPresetDraftCanonical?.nameI18n, $filterPresetDraftCanonical?.name),
+        nameI18n: normalizeFilterPresetNameI18n(
+          $filterPresetDraftCanonical?.nameI18n,
+          $filterPresetDraftCanonical?.name
+        ),
         description: String($filterPresetDraftCanonical?.description || '').trim() || null,
         layers: normalizeFilterPresetLayersForSave($filterPresetDraftCanonical?.layers).layers
       };
@@ -579,7 +606,10 @@ export function createAdminDataController() {
     return filterSettingsController.seedFilterTagAllowlistDraft(filterTags);
   }
 
-  function seedFilterPresetItems(filterPresets: FilterPresetState | null = null, options: { preserveSelection?: boolean; skipDraftSync?: boolean } = {}) {
+  function seedFilterPresetItems(
+    filterPresets: FilterPresetState | null = null,
+    options: { preserveSelection?: boolean; skipDraftSync?: boolean } = {}
+  ) {
     return filterPresetController.seedFilterPresetItems(filterPresets, options);
   }
 
@@ -587,7 +617,10 @@ export function createAdminDataController() {
     return mapRegionController.getMapRegionFeatureMeta(feature);
   }
 
-  function findRegionByMapFeature(feature: { properties?: Record<string, unknown> | null } | null, regions: DataRegion[] | null = null) {
+  function findRegionByMapFeature(
+    feature: { properties?: Record<string, unknown> | null } | null,
+    regions: DataRegion[] | null = null
+  ) {
     return mapRegionController.findRegionByMapFeature(feature, regions);
   }
 
@@ -595,7 +628,10 @@ export function createAdminDataController() {
     return mapRegionController.applyRegionDraftFromMapFeature(feature);
   }
 
-  function applyRegionExtractCandidate(candidate: RegionExtractCandidate | null, options: { setStatus?: boolean } = {}) {
+  function applyRegionExtractCandidate(
+    candidate: RegionExtractCandidate | null,
+    options: { setStatus?: boolean } = {}
+  ) {
     return mapRegionController.applyRegionExtractCandidate(candidate, options);
   }
 
@@ -627,11 +663,14 @@ export function createAdminDataController() {
       extractResolutionError: source?.extractResolutionError ?? base?.extractResolutionError ?? null,
       resolutionRequired:
         String(source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved') !== 'resolved',
-      canSync: source?.canSync ?? base?.canSync ?? Boolean(
-        String(source?.extractSource || base?.extractSource || '').trim()
-        && String(source?.extractId || base?.extractId || '').trim()
-        && String(source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved') === 'resolved'
-      ),
+      canSync:
+        source?.canSync ??
+        base?.canSync ??
+        Boolean(
+          String(source?.extractSource || base?.extractSource || '').trim() &&
+          String(source?.extractId || base?.extractId || '').trim() &&
+          String(source?.extractResolutionStatus || base?.extractResolutionStatus || 'resolved') === 'resolved'
+        ),
       enabled: source?.enabled ?? base?.enabled ?? true,
       autoSyncEnabled: source?.autoSyncEnabled ?? base?.autoSyncEnabled ?? true,
       autoSyncOnStart: source?.autoSyncOnStart ?? base?.autoSyncOnStart ?? false,
@@ -645,7 +684,9 @@ export function createAdminDataController() {
       sourceDataUpdatedAt: source?.sourceDataUpdatedAt ?? base?.sourceDataUpdatedAt ?? null,
       latestSourceDataUpdatedAt: source?.latestSourceDataUpdatedAt ?? base?.latestSourceDataUpdatedAt ?? null,
       upstreamCheckedAt: source?.upstreamCheckedAt ?? base?.upstreamCheckedAt ?? null,
-      upstreamStatus: String(source?.upstreamStatus || base?.upstreamStatus || 'unknown') as DataRegion['upstreamStatus'],
+      upstreamStatus: String(
+        source?.upstreamStatus || base?.upstreamStatus || 'unknown'
+      ) as DataRegion['upstreamStatus'],
       upstreamError: source?.upstreamError ?? base?.upstreamError ?? null,
       updateAvailable: Boolean(source?.updateAvailable ?? base?.updateAvailable),
       lastSyncFinishedAt: source?.lastSyncFinishedAt ?? base?.lastSyncFinishedAt ?? null,
@@ -720,7 +761,10 @@ export function createAdminDataController() {
     return nextRegions.sort(compareRegions);
   }
 
-  function mergeKnownRegionUpstreamState(nextRegions: DataRegion[] = [], previousRegions: DataRegion[] = []): DataRegion[] {
+  function mergeKnownRegionUpstreamState(
+    nextRegions: DataRegion[] = [],
+    previousRegions: DataRegion[] = []
+  ): DataRegion[] {
     const previousById = new Map(
       (Array.isArray(previousRegions) ? previousRegions : [])
         .map((region) => [Number(region?.id || 0), region] as const)
@@ -732,11 +776,11 @@ export function createAdminDataController() {
       if (!previous) return region;
 
       const hasFreshUpstreamPayload = Boolean(
-        region?.latestSourceDataUpdatedAt
-        || region?.upstreamCheckedAt
-        || region?.upstreamError
-        || region?.updateAvailable
-        || String(region?.upstreamStatus || 'unknown') !== 'unknown'
+        region?.latestSourceDataUpdatedAt ||
+        region?.upstreamCheckedAt ||
+        region?.upstreamError ||
+        region?.updateAvailable ||
+        String(region?.upstreamStatus || 'unknown') !== 'unknown'
       );
       if (hasFreshUpstreamPayload) {
         return region;
@@ -760,17 +804,16 @@ export function createAdminDataController() {
 
     let mergedRegion: DataRegion | null = null;
     dataSettings.update((current) => {
-      const regions = Array.isArray(current?.regions) ? current.regions as DataRegion[] : [];
+      const regions = Array.isArray(current?.regions) ? (current.regions as DataRegion[]) : [];
       const existingRegion = regions.find((item) => Number(item?.id || 0) === numericRegionId) || null;
       mergedRegion = {
         ...(existingRegion && typeof existingRegion === 'object' ? existingRegion : {}),
         ...snapshot
       } as DataRegion;
 
-      const nextRegions = [
-        ...regions.filter((item) => Number(item?.id || 0) !== numericRegionId),
-        mergedRegion
-      ].sort(compareRegions);
+      const nextRegions = [...regions.filter((item) => Number(item?.id || 0) !== numericRegionId), mergedRegion].sort(
+        compareRegions
+      );
 
       return {
         ...current,
@@ -865,17 +908,17 @@ export function createAdminDataController() {
     try {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
-      if (
-        requestToken !== dataSettingsFetchRequestToken
-        || expectedMutationVersion !== regionSnapshotMutationVersion
-      ) {
+      if (requestToken !== dataSettingsFetchRequestToken || expectedMutationVersion !== regionSnapshotMutationVersion) {
         if (preserveStatus) {
           dataStatus.set(preservedStatus);
         }
         return true;
       }
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
-      nextSettings.regions = mergeKnownRegionUpstreamState(nextSettings.regions as DataRegion[], currentSettings?.regions as DataRegion[]);
+      nextSettings.regions = mergeKnownRegionUpstreamState(
+        nextSettings.regions as DataRegion[],
+        currentSettings?.regions as DataRegion[]
+      );
       nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
 
       dataSettings.set(nextSettings);
@@ -920,11 +963,13 @@ export function createAdminDataController() {
   }
 
   async function refreshRegionUpstreamStatuses(regionIds: Array<number | string> = [], options: LooseRecord = {}) {
-    const normalizedIds = [...new Set(
-      (Array.isArray(regionIds) ? regionIds : [])
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0)
-    )];
+    const normalizedIds = [
+      ...new Set(
+        (Array.isArray(regionIds) ? regionIds : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      )
+    ];
     if (normalizedIds.length === 0) {
       return [];
     }
@@ -1035,9 +1080,8 @@ export function createAdminDataController() {
       const total = Math.max(0, Number(data?.total || 0));
       const pageSize = Math.max(1, Math.trunc(Number(data?.pageSize || requestedLimit) || requestedLimit));
       const pageCount = Math.max(0, Number(data?.pageCount || 0) || (total > 0 ? Math.ceil(total / pageSize) : 0));
-      const responsePage = Number.isInteger(Number(data?.page)) && Number(data.page) > 0
-        ? Number(data.page)
-        : normalizedPage;
+      const responsePage =
+        Number.isInteger(Number(data?.page)) && Number(data.page) > 0 ? Number(data.page) : normalizedPage;
       const items = Array.isArray(data?.items) ? data.items : [];
 
       regionRuns.set(items);
@@ -1065,11 +1109,17 @@ export function createAdminDataController() {
   }
 
   function setRegionRunsLimit(limit: number | string = REGION_RUNS_PAGE_SIZE) {
-    const normalizedLimit = Math.max(1, Math.min(1000, Math.trunc(Number(limit) || REGION_RUNS_PAGE_SIZE) || REGION_RUNS_PAGE_SIZE));
+    const normalizedLimit = Math.max(
+      1,
+      Math.min(1000, Math.trunc(Number(limit) || REGION_RUNS_PAGE_SIZE) || REGION_RUNS_PAGE_SIZE)
+    );
     regionRunsLimit.set(normalizedLimit);
   }
 
-  async function selectDataRegion(region: DataRegion | null, options: { openEditor?: boolean; resetRuns?: boolean } = {}) {
+  async function selectDataRegion(
+    region: DataRegion | null,
+    options: { openEditor?: boolean; resetRuns?: boolean } = {}
+  ) {
     if (isOptimisticRegion(region)) return;
 
     const shouldOpenEditor = options.openEditor !== false && Boolean(region);
@@ -1133,14 +1183,14 @@ export function createAdminDataController() {
     try {
       const currentSettings = get(dataSettings);
       const data = await apiJson('/api/admin/app-settings/data');
-      if (
-        requestToken !== dataSettingsFetchRequestToken
-        || expectedMutationVersion !== regionSnapshotMutationVersion
-      ) {
+      if (requestToken !== dataSettingsFetchRequestToken || expectedMutationVersion !== regionSnapshotMutationVersion) {
         return true;
       }
       const nextSettings = normalizeDataSettings(data?.item, currentSettings);
-      nextSettings.regions = mergeKnownRegionUpstreamState(nextSettings.regions as DataRegion[], currentSettings?.regions as DataRegion[]);
+      nextSettings.regions = mergeKnownRegionUpstreamState(
+        nextSettings.regions as DataRegion[],
+        currentSettings?.regions as DataRegion[]
+      );
       nextSettings.regions = mergePendingOptimisticRegions(nextSettings.regions as DataRegion[]);
 
       dataSettings.set(nextSettings);
@@ -1157,9 +1207,11 @@ export function createAdminDataController() {
             : 0;
       const hasSelectedRegion = Number.isInteger(nextSelectedRegionId) && nextSelectedRegionId > 0;
       const selectedRegion = hasSelectedRegion
-        ? getRegionById(nextSelectedRegionId)
-          || nextSettings.regions.find((item) => Number(item?.id || 0) === nextSelectedRegionId && !isOptimisticRegion(item))
-          || null
+        ? getRegionById(nextSelectedRegionId) ||
+          nextSettings.regions.find(
+            (item) => Number(item?.id || 0) === nextSelectedRegionId && !isOptimisticRegion(item)
+          ) ||
+          null
         : null;
 
       const shouldResetRuns = selectedRegionId != null ? true : !preserveSelection;
@@ -1308,13 +1360,17 @@ export function createAdminDataController() {
       const savedRegion = data?.item || null;
       const numericRegionId = Number(savedRegion?.id || currentDraft.id || 0);
       const nextRegion = upsertRegionSnapshot(
-        buildRegionSnapshot(savedRegion, currentDraft, isNewRegion
-          ? {
-            lastSyncStatus: 'queued',
-            lastSyncError: null,
-            __optimistic: false
-          }
-          : {})
+        buildRegionSnapshot(
+          savedRegion,
+          currentDraft,
+          isNewRegion
+            ? {
+                lastSyncStatus: 'queued',
+                lastSyncError: null,
+                __optimistic: false
+              }
+            : {}
+        )
       );
 
       if (optimisticRegionId != null) {
@@ -1477,7 +1533,9 @@ export function createAdminDataController() {
     const numericRegionId = Number(regionId || 0);
     if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) return;
     const region = getRegionById(numericRegionId);
-    const lastStatus = String(region?.lastSyncStatus || '').trim().toLowerCase();
+    const lastStatus = String(region?.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
     if (lastStatus !== 'queued' && lastStatus !== 'running') return;
 
     regionSyncCancelBusy.set(true);
@@ -1576,7 +1634,11 @@ export function createAdminDataController() {
     if (!region?.upstreamCheckedAt) {
       return dataT('status.syncSkippedNoUpstream');
     }
-    if (region?.lastSuccessfulSyncAt && lastSyncStatus !== 'failed' && String(region?.upstreamStatus || 'unknown') === 'up_to_date') {
+    if (
+      region?.lastSuccessfulSyncAt &&
+      lastSyncStatus !== 'failed' &&
+      String(region?.upstreamStatus || 'unknown') === 'up_to_date'
+    ) {
       return dataT('status.syncSkippedNoUpdate');
     }
     return '';

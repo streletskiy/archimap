@@ -143,11 +143,15 @@ function canRunLocalTippecanoe(tippecanoeBin) {
 
 function buildPmtilesLocal({ input, output, layer, minZoom, maxZoom, tippecanoeBin }: LooseRecord) {
   run(tippecanoeBin, [
-    '-o', output,
+    '-o',
+    output,
     '-f',
-    '-l', layer,
-    '-Z', String(minZoom),
-    '-z', String(maxZoom),
+    '-l',
+    layer,
+    '-Z',
+    String(minZoom),
+    '-z',
+    String(maxZoom),
     '--read-parallel',
     '--detect-shared-borders',
     '--coalesce-densest-as-needed',
@@ -163,15 +167,21 @@ function buildPmtilesDocker({ image, input, output, layer, minZoom, maxZoom }: L
   run('docker', [
     'run',
     '--rm',
-    '-v', `${REPO_ROOT}:/workspace`,
-    '-w', '/workspace',
+    '-v',
+    `${REPO_ROOT}:/workspace`,
+    '-w',
+    '/workspace',
     image,
     'tippecanoe',
-    '-o', workspaceOutput,
+    '-o',
+    workspaceOutput,
     '-f',
-    '-l', layer,
-    '-Z', String(minZoom),
-    '-z', String(maxZoom),
+    '-l',
+    layer,
+    '-Z',
+    String(minZoom),
+    '-z',
+    String(maxZoom),
     '--read-parallel',
     '--detect-shared-borders',
     '--coalesce-densest-as-needed',
@@ -228,17 +238,19 @@ function main() {
   });
 
   const sizeBytes = Number(fs.statSync(options.output).size || 0);
-  console.log(JSON.stringify({
-    output: toRepoRelative(options.output),
-    metadataOutput: toRepoRelative(options.metadataOutput),
-    sizeBytes,
-    layer: options.layer,
-    minZoom: options.minZoom,
-    maxZoom: options.maxZoom,
-    image: useLocalTippecanoe ? null : options.image,
-    tippecanoeBin: useLocalTippecanoe ? options.tippecanoeBin : null,
-    mode: useLocalTippecanoe ? 'local-tippecanoe' : 'docker-runtime-base'
-  }));
+  console.log(
+    JSON.stringify({
+      output: toRepoRelative(options.output),
+      metadataOutput: toRepoRelative(options.metadataOutput),
+      sizeBytes,
+      layer: options.layer,
+      minZoom: options.minZoom,
+      maxZoom: options.maxZoom,
+      image: useLocalTippecanoe ? null : options.image,
+      tippecanoeBin: useLocalTippecanoe ? options.tippecanoeBin : null,
+      mode: useLocalTippecanoe ? 'local-tippecanoe' : 'docker-runtime-base'
+    })
+  );
 }
 
 try {

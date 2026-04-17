@@ -75,7 +75,9 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     `;
 
   function normalizeSyncMode(sync) {
-    const normalized = String(sync || 'all').trim().toLowerCase();
+    const normalized = String(sync || 'all')
+      .trim()
+      .toLowerCase();
     if (normalized === 'active' || normalized === 'archived' || normalized === 'all') {
       return normalized;
     }
@@ -120,11 +122,15 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
   }
 
   async function readCandidateRows(osmType, osmId) {
-    return await db.prepare(`
+    return await db
+      .prepare(
+        `
       ${CANDIDATE_ROWS_SELECT}
         AND ue.osm_type = ? AND ue.osm_id = ?
       ORDER BY ue.updated_at DESC, ue.id DESC
-    `).all(osmType, osmId);
+    `
+      )
+      .all(osmType, osmId);
   }
 
   function buildCandidateRecord(rows: LooseRecord[]): SyncCandidateSummary {
@@ -137,11 +143,18 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
       source_tags_json: latestRow?.source_tags_json || null
     });
     const explicitFields = [...new Set(rows.flatMap((row) => parseEditedFields(row.edited_fields_json)))];
-    const hasSyncingRow = rows.some((row) => String(row.sync_status || 'unsynced').trim().toLowerCase() === 'syncing');
+    const hasSyncingRow = rows.some(
+      (row) =>
+        String(row.sync_status || 'unsynced')
+          .trim()
+          .toLowerCase() === 'syncing'
+    );
     // Keep a newer accepted/partially accepted edit from being hidden by older synced history rows.
     const latestSyncStatus = hasSyncingRow
       ? 'syncing'
-      : String(latestRow.sync_status || 'unsynced').trim().toLowerCase();
+      : String(latestRow.sync_status || 'unsynced')
+          .trim()
+          .toLowerCase();
     const syncReadOnly = latestSyncStatus === 'synced' || latestSyncStatus === 'cleaned';
     const summary = parseSyncSummary(latestRow?.sync_summary_json);
     const changes = diffStates(contourState, latestLocalState);
@@ -194,14 +207,20 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     const syncWhere = buildSyncModeWhereClause(normalizedSync);
     const ctes = buildCandidateGroupCtes();
 
-    const countRow = await db.prepare(`
+    const countRow = await db
+      .prepare(
+        `
       ${ctes}
       SELECT COUNT(*) AS total
       FROM group_summary
       WHERE ${syncWhere}
-    `).get();
+    `
+      )
+      .get();
 
-    const rows = await db.prepare(`
+    const rows = await db
+      .prepare(
+        `
       ${ctes},
       page_groups AS (
         SELECT
@@ -220,7 +239,9 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
         ON page_groups.osm_type = ranked.osm_type
        AND page_groups.osm_id = ranked.osm_id
       ORDER BY page_groups.latest_updated_at DESC, ranked.updated_at DESC, ranked.id DESC
-    `).all(cap, offset);
+    `
+      )
+      .all(cap, offset);
 
     const grouped = new Map<string, LooseRecord[]>();
     for (const row of rows) {
@@ -266,32 +287,39 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     const desiredBaseTags = liveElement ? liveTagMap : currentContour;
     const { desired, localState, explicitFields } = buildDesiredTagMap(desiredBaseTags, rows);
     const changedFields = diffStates(stateFromContourTags(desiredBaseTags), localState);
-    const sourceFingerprint = JSON.stringify(stableJson(stateFromContourTags(parseTags(rows[0]?.source_tags_json || JSON.stringify(currentContour || {})))));
-    const liveFingerprint = liveElement ? JSON.stringify(stableJson(stateFromContourTags(liveElement.tags || {}))) : null;
+    const sourceFingerprint = JSON.stringify(
+      stableJson(stateFromContourTags(parseTags(rows[0]?.source_tags_json || JSON.stringify(currentContour || {}))))
+    );
+    const liveFingerprint = liveElement
+      ? JSON.stringify(stableJson(stateFromContourTags(liveElement.tags || {})))
+      : null;
     const sourceMatches = liveFingerprint ? liveFingerprint === sourceFingerprint : false;
 
     return {
       ...grouped,
       currentContourUpdatedAt: rows[0]?.contour_updated_at || null,
       currentContourTags: currentContour,
-      liveElement: liveElement ? {
-        type: liveElement.type,
-        attrs: liveElement.attrs,
-        tags: liveElement.tags
-      } : null,
+      liveElement: liveElement
+        ? {
+            type: liveElement.type,
+            attrs: liveElement.attrs,
+            tags: liveElement.tags
+          }
+        : null,
       desiredTags: desired,
       localState,
       explicitFields,
       changedFields,
       sourceMatches,
-      conflict: liveElement && !sourceMatches
-        ? {
-          type: 'upstream_drift',
-          message: 'Live OSM state no longer matches the stored source snapshot',
-          sourceFingerprint,
-          liveFingerprint
-        }
-        : null,
+      conflict:
+        liveElement && !sourceMatches
+          ? {
+              type: 'upstream_drift',
+              message: 'Live OSM state no longer matches the stored source snapshot',
+              sourceFingerprint,
+              liveFingerprint
+            }
+          : null,
       preflightError
     };
   }
@@ -299,7 +327,9 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
   async function updateSyncRows(osmType, osmId, patch: LooseRecord, statuses = ['accepted', 'partially_accepted']) {
     const statusList = Array.isArray(statuses) && statuses.length > 0 ? statuses : ['accepted', 'partially_accepted'];
     const placeholders = statusList.map(() => '?').join(', ');
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE user_edits.building_user_edits
       SET
         sync_status = ?,
@@ -313,21 +343,23 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
       WHERE osm_type = ?
         AND osm_id = ?
         AND status IN (${placeholders})
-    `).run(
-      patch.syncStatus || null,
-      patch.syncSucceededAt || null,
-      patch.syncCleanedAt || null,
-      patch.syncChangesetId || null,
-      patch.syncSummaryJson || null,
-      patch.syncErrorText || null,
-      osmType,
-      osmId,
-      ...statusList
-    );
+    `
+      )
+      .run(
+        patch.syncStatus || null,
+        patch.syncSucceededAt || null,
+        patch.syncCleanedAt || null,
+        patch.syncChangesetId || null,
+        patch.syncSummaryJson || null,
+        patch.syncErrorText || null,
+        osmType,
+        osmId,
+        ...statusList
+      );
   }
 
   async function prepareSyncCandidateSyncData(osmType, osmId, candidate: SyncCandidate | null = null) {
-    const syncCandidate = candidate || await getSyncCandidate(osmType, osmId);
+    const syncCandidate = candidate || (await getSyncCandidate(osmType, osmId));
     if (!syncCandidate) {
       return null;
     }
@@ -519,7 +551,13 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
     try {
       for (const item of actionableItems) {
         const syncedAt = new Date().toISOString();
-        await updateOsmElement(creds.accessToken, creds.apiBaseUrl, item.candidate.liveElement, item.desiredTags, changesetId);
+        await updateOsmElement(
+          creds.accessToken,
+          creds.apiBaseUrl,
+          item.candidate.liveElement,
+          item.desiredTags,
+          changesetId
+        );
         syncedItemKeys.add(`${item.summaryBase.osmType}/${item.summaryBase.osmId}`);
         const summary = {
           ...item.summaryBase,
@@ -628,19 +666,24 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
       }
       if (!candidate.hasLocalState) continue;
 
-      const contourRow = await db.prepare(`
+      const contourRow = await db
+        .prepare(
+          `
         SELECT tags_json, updated_at
         FROM osm.building_contours
         WHERE osm_type = ? AND osm_id = ?
         LIMIT 1
-      `).get(candidate.osmType, candidate.osmId);
+      `
+        )
+        .get(candidate.osmType, candidate.osmId);
       if (!contourRow) continue;
 
       const contourState = stateFromContourTags(parseTags(contourRow.tags_json));
       const localState = candidate.localState;
-      const syncedFields = Array.isArray(candidate.explicitFields) && candidate.explicitFields.length > 0
-        ? candidate.explicitFields
-        : Object.keys(localState).filter((field) => field in localState);
+      const syncedFields =
+        Array.isArray(candidate.explicitFields) && candidate.explicitFields.length > 0
+          ? candidate.explicitFields
+          : Object.keys(localState).filter((field) => field in localState);
       const sameState = syncedFields.every((field) => {
         if (!Object.prototype.hasOwnProperty.call(localState, field)) {
           return true;
@@ -650,12 +693,15 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
       if (!sameState) continue;
 
       const tx = db.transaction(() => {
-        db.prepare(`
+        db.prepare(
+          `
           DELETE FROM local.architectural_info
           WHERE osm_type = ? AND osm_id = ?
-        `).run(candidate.osmType, candidate.osmId);
+        `
+        ).run(candidate.osmType, candidate.osmId);
 
-        db.prepare(`
+        db.prepare(
+          `
           UPDATE user_edits.building_user_edits
           SET
             sync_status = 'cleaned',
@@ -665,7 +711,8 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
             AND osm_id = ?
             AND status IN ('accepted', 'partially_accepted')
             AND sync_status IN ('synced', 'cleaned')
-        `).run(candidate.osmType, candidate.osmId);
+        `
+        ).run(candidate.osmType, candidate.osmId);
       });
 
       try {

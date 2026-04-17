@@ -1,17 +1,9 @@
 import type { FilterPresetInput, FilterPresetState } from './filter-presets';
 import type { OsmElementType } from './common';
 
-export type RegionResolutionStatus =
-  | 'resolved'
-  | 'needs_resolution'
-  | 'resolution_required'
-  | 'resolution_error';
+export type RegionResolutionStatus = 'resolved' | 'needs_resolution' | 'resolution_required' | 'resolution_error';
 
-export type RegionUpstreamStatus =
-  | 'unknown'
-  | 'up_to_date'
-  | 'update_available'
-  | 'error';
+export type RegionUpstreamStatus = 'unknown' | 'up_to_date' | 'update_available' | 'error';
 
 export type RegionSourceType = 'extract';
 

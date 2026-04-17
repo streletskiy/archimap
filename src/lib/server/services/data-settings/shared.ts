@@ -64,7 +64,7 @@ function wrapRawSqliteDb(rawDb) {
         };
 
         const execution = txQueue.then(run, run);
-        txQueue = execution.catch(() => { });
+        txQueue = execution.catch(() => {});
         return execution;
       };
     }
@@ -72,7 +72,12 @@ function wrapRawSqliteDb(rawDb) {
 }
 
 function ensureCompatDb(db) {
-  if (db && typeof db.prepare === 'function' && typeof db.transaction === 'function' && typeof db.provider === 'string') {
+  if (
+    db &&
+    typeof db.prepare === 'function' &&
+    typeof db.transaction === 'function' &&
+    typeof db.provider === 'string'
+  ) {
     return db;
   }
   if (db && typeof db.prepare === 'function' && typeof db.transaction === 'function') {
@@ -85,16 +90,19 @@ function createDataSettingsContext(options: LooseRecord = {}) {
   const db = ensureCompatDb(options.db);
   const dataDir = String(options.dataDir || '');
   const extractResolver = options.extractResolver || null;
-  const fetchImpl = typeof options.fetchImpl === 'function'
-    ? options.fetchImpl
-    : (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null);
-  const now = typeof options.now === 'function'
-    ? options.now
-    : () => new Date();
+  const fetchImpl =
+    typeof options.fetchImpl === 'function'
+      ? options.fetchImpl
+      : typeof globalThis.fetch === 'function'
+        ? globalThis.fetch.bind(globalThis)
+        : null;
+  const now = typeof options.now === 'function' ? options.now : () => new Date();
 
   function normalizeBoolean(value, fallbackValue = false) {
     if (typeof value === 'boolean') return value;
-    const text = String(value ?? '').trim().toLowerCase();
+    const text = String(value ?? '')
+      .trim()
+      .toLowerCase();
     if (text === 'true' || text === '1' || text === 'yes') return true;
     if (text === 'false' || text === '0' || text === 'no') return false;
     return Boolean(fallbackValue);
@@ -128,8 +136,13 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     return safe.slice(0, 64) || 'buildings';
   }
 
-  function normalizeExtractResolutionStatus(value, fallbackValue: RegionResolutionStatus = 'needs_resolution'): RegionResolutionStatus {
-    const raw = String(value || fallbackValue || '').trim().toLowerCase();
+  function normalizeExtractResolutionStatus(
+    value,
+    fallbackValue: RegionResolutionStatus = 'needs_resolution'
+  ): RegionResolutionStatus {
+    const raw = String(value || fallbackValue || '')
+      .trim()
+      .toLowerCase();
     if (['resolved', 'needs_resolution', 'resolution_required', 'resolution_error'].includes(raw)) {
       return raw as RegionResolutionStatus;
     }
@@ -161,21 +174,26 @@ function createDataSettingsContext(options: LooseRecord = {}) {
 
   function boundsOverlap(left, right) {
     if (!left || !right) return false;
-    return left.west < right.east
-      && left.east > right.west
-      && left.south < right.north
-      && left.north > right.south;
+    return left.west < right.east && left.east > right.west && left.south < right.north && left.north > right.south;
   }
 
   function addHours(date, hours) {
     const ts = Date.parse(String(date || ''));
     if (!Number.isFinite(ts)) return null;
-    return new Date(ts + (Math.max(0, Number(hours) || 0) * 60 * 60 * 1000));
+    return new Date(ts + Math.max(0, Number(hours) || 0) * 60 * 60 * 1000);
   }
 
   function toIsoOrNull(value) {
     if (value == null) return null;
-    if (typeof value === 'string' && !value.trim()) return null;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(trimmed)) {
+        const sqliteTs = Date.parse(trimmed.replace(' ', 'T') + 'Z');
+        if (!Number.isFinite(sqliteTs)) return null;
+        return new Date(sqliteTs).toISOString();
+      }
+    }
     const date = value instanceof Date ? value : new Date(value);
     const ts = date.getTime();
     if (!Number.isFinite(ts)) return null;
@@ -217,7 +235,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       return next.toISOString();
     }
 
-    const lastSyncStatus = String(regionLike.lastSyncStatus || '').trim().toLowerCase();
+    const lastSyncStatus = String(regionLike.lastSyncStatus || '')
+      .trim()
+      .toLowerCase();
     const lastSyncFinishedAt = toIsoOrNull(regionLike.lastSyncFinishedAt);
     if (['failed', 'abandoned'].includes(lastSyncStatus) && lastSyncFinishedAt) {
       const retryAt = addHours(lastSyncFinishedAt, intervalHours);
@@ -325,7 +345,10 @@ function createDataSettingsContext(options: LooseRecord = {}) {
 
   async function readAppDataSettingsRow() {
     try {
-      return await db.prepare(`
+      return (
+        (await db
+          .prepare(
+            `
         SELECT
           id,
           env_bootstrap_completed,
@@ -336,7 +359,10 @@ function createDataSettingsContext(options: LooseRecord = {}) {
         FROM app_data_settings
         WHERE id = 1
         LIMIT 1
-      `).get() || null;
+      `
+          )
+          .get()) || null
+      );
     } catch {
       return null;
     }
@@ -344,7 +370,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
 
   async function listRegionRows() {
     try {
-      return await db.prepare(`
+      return await db
+        .prepare(
+          `
         SELECT
           id,
           slug,
@@ -380,7 +408,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
           updated_at
         FROM data_sync_regions
         ORDER BY lower(name), id
-      `).all();
+      `
+        )
+        .all();
     } catch {
       return [];
     }
@@ -389,7 +419,10 @@ function createDataSettingsContext(options: LooseRecord = {}) {
   async function getRegionRowById(regionId) {
     const id = Number(regionId);
     if (!Number.isInteger(id) || id <= 0) return null;
-    return await db.prepare(`
+    return (
+      (await db
+        .prepare(
+          `
       SELECT
         id,
         slug,
@@ -426,30 +459,43 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       FROM data_sync_regions
       WHERE id = ?
       LIMIT 1
-    `).get(id) || null;
+    `
+        )
+        .get(id)) || null
+    );
   }
 
   async function countRegions() {
-    const row = await db.prepare(`
+    const row = await db
+      .prepare(
+        `
       SELECT COUNT(*) AS total
       FROM data_sync_regions
-    `).get();
+    `
+      )
+      .get();
     return Number(row?.total || 0);
   }
 
   async function countRegionMemberships(regionId) {
-    const row = await db.prepare(`
+    const row = await db
+      .prepare(
+        `
       SELECT COUNT(*) AS total
       FROM data_region_memberships
       WHERE region_id = ?
-    `).get(Number(regionId));
+    `
+      )
+      .get(Number(regionId));
     return Number(row?.total || 0);
   }
 
   async function computeRegionDbBytes(regionId) {
     if (db.provider === 'postgres') {
       try {
-        const row = await db.prepare(`
+        const row = await db
+          .prepare(
+            `
           SELECT
             (
               COALESCE(SUM(pg_column_size(bc.*)), 0)
@@ -460,7 +506,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
             ON bc.osm_type = drm.osm_type
            AND bc.osm_id = drm.osm_id
           WHERE drm.region_id = ?
-        `).get(Number(regionId));
+        `
+          )
+          .get(Number(regionId));
         return {
           dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
           dbBytesApproximate: false
@@ -471,7 +519,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     }
 
     try {
-      const row = await db.prepare(`
+      const row = await db
+        .prepare(
+          `
         SELECT
           COALESCE(SUM(
             length(CAST(COALESCE(bc.osm_type, '') AS BLOB))
@@ -491,7 +541,9 @@ function createDataSettingsContext(options: LooseRecord = {}) {
           ON bc.osm_type = drm.osm_type
          AND bc.osm_id = drm.osm_id
         WHERE drm.region_id = ?
-      `).get(Number(regionId));
+      `
+        )
+        .get(Number(regionId));
       return {
         dbBytes: row?.db_bytes == null ? 0 : Number(row.db_bytes),
         dbBytesApproximate: true

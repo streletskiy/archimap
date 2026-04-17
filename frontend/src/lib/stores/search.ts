@@ -88,9 +88,7 @@ export function setSearchLoading({ append = false, background = false }: LooseRe
     loadingMore: Boolean(append),
     mapActive: true,
     error: '',
-    status: append
-      ? buildFoundStatus(state.items.length, state.total)
-      : translateNow('search.searching')
+    status: append ? buildFoundStatus(state.items.length, state.total) : translateNow('search.searching')
   }));
 }
 
@@ -110,7 +108,7 @@ export function applySearchResults({
     const nextItems = append ? state.items.concat(inputItems) : inputItems;
     const nextTotal = Math.max(
       nextItems.length,
-      append ? Math.max(Number(state.total) || 0, Number(total) || 0) : (Number(total) || 0)
+      append ? Math.max(Number(state.total) || 0, Number(total) || 0) : Number(total) || 0
     );
     return {
       ...state,

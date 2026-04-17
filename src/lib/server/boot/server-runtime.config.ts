@@ -12,12 +12,11 @@ function createServerRuntimeConfig(options: LooseRecord = {}) {
   const dataDir = path.join(rootDir, 'data');
   const frontendIndexPath = path.join(rootDir, 'frontend', 'build', 'index.html');
 
-  const sessionCookieSecureRaw = String(rawEnv.SESSION_COOKIE_SECURE || '').trim().toLowerCase();
-  const sessionCookieSecure = sessionCookieSecureRaw === 'true'
-    ? true
-    : (sessionCookieSecureRaw === 'false'
-      ? false
-      : (nodeEnv === 'production'));
+  const sessionCookieSecureRaw = String(rawEnv.SESSION_COOKIE_SECURE || '')
+    .trim()
+    .toLowerCase();
+  const sessionCookieSecure =
+    sessionCookieSecureRaw === 'true' ? true : sessionCookieSecureRaw === 'false' ? false : nodeEnv === 'production';
 
   return {
     rootDir,
@@ -32,9 +31,9 @@ function createServerRuntimeConfig(options: LooseRecord = {}) {
     appBaseUrl: runtimeEnv.appBaseUrl,
     redisUrl: rawEnv.REDIS_URL || 'redis://redis:6379',
     sessionSecret: runtimeEnv.sessionSecret,
-    sessionAllowMemoryFallback: String(
-      rawEnv.SESSION_ALLOW_MEMORY_FALLBACK ?? (nodeEnv === 'production' ? 'false' : 'true')
-    ).toLowerCase() === 'true',
+    sessionAllowMemoryFallback:
+      String(rawEnv.SESSION_ALLOW_MEMORY_FALLBACK ?? (nodeEnv === 'production' ? 'false' : 'true')).toLowerCase() ===
+      'true',
     sessionCookieSecure,
     autoSyncEnabled: String(rawEnv.AUTO_SYNC_ENABLED ?? 'true').toLowerCase() === 'true',
     autoSyncOnStart: String(rawEnv.AUTO_SYNC_ON_START ?? 'true').toLowerCase() === 'true',
@@ -59,28 +58,33 @@ function createServerRuntimeConfig(options: LooseRecord = {}) {
     userEditRequiresPermission: String(rawEnv.USER_EDIT_REQUIRES_PERMISSION ?? 'true').toLowerCase() === 'true',
     registrationEnabled: String(rawEnv.REGISTRATION_ENABLED ?? 'true').toLowerCase() === 'true',
     registrationCodeTtlMinutes: Math.max(2, Math.min(60, Number(rawEnv.REGISTRATION_CODE_TTL_MINUTES || 15))),
-    registrationCodeResendCooldownSec: Math.max(10, Math.min(600, Number(rawEnv.REGISTRATION_CODE_RESEND_COOLDOWN_SEC || 60))),
+    registrationCodeResendCooldownSec: Math.max(
+      10,
+      Math.min(600, Number(rawEnv.REGISTRATION_CODE_RESEND_COOLDOWN_SEC || 60))
+    ),
     registrationCodeMaxAttempts: Math.max(3, Math.min(12, Number(rawEnv.REGISTRATION_CODE_MAX_ATTEMPTS || 6))),
     registrationMinPasswordLength: Math.max(8, Math.min(72, Number(rawEnv.REGISTRATION_MIN_PASSWORD_LENGTH || 8))),
     passwordResetTtlMinutes: Math.max(5, Math.min(180, Number(rawEnv.PASSWORD_RESET_TTL_MINUTES || 60))),
     appDisplayName: String(rawEnv.APP_DISPLAY_NAME || 'archimap').trim() || 'archimap',
-    logLevel: String(rawEnv.LOG_LEVEL || 'info').trim().toLowerCase() || 'info',
+    logLevel:
+      String(rawEnv.LOG_LEVEL || 'info')
+        .trim()
+        .toLowerCase() || 'info',
     metricsEnabled: String(rawEnv.METRICS_ENABLED ?? 'true').toLowerCase() === 'true',
     searchIndexBatchSize: Math.max(200, Math.min(20000, Number(rawEnv.SEARCH_INDEX_BATCH_SIZE || 2500))),
     rtreeRebuildBatchSize: Math.max(500, Math.min(20000, Number(rawEnv.RTREE_REBUILD_BATCH_SIZE || 4000))),
     rtreeRebuildPauseMs: Math.max(0, Math.min(200, Number(rawEnv.RTREE_REBUILD_PAUSE_MS || 8))),
     paths: {
       dataDir,
-      dbPath: String(
-        rawEnv.DATABASE_PATH
-        || rawEnv.ARCHIMAP_DB_PATH
-        || runtimeEnv.sqliteUrl
-        || path.join(dataDir, 'archimap.db')
-      ).trim() || path.join(dataDir, 'archimap.db'),
+      dbPath:
+        String(
+          rawEnv.DATABASE_PATH || rawEnv.ARCHIMAP_DB_PATH || runtimeEnv.sqliteUrl || path.join(dataDir, 'archimap.db')
+        ).trim() || path.join(dataDir, 'archimap.db'),
       osmDbPath: String(rawEnv.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db'),
       localEditsDbPath: rawEnv.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db'),
       userEditsDbPath: rawEnv.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db'),
-      userAuthDbPath: String(rawEnv.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db'),
+      userAuthDbPath:
+        String(rawEnv.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db'),
       frontendIndexPath,
       cspScriptHashes: collectInlineScriptHashesFromFile(frontendIndexPath),
       syncRegionScriptPath: path.join(rootDir, 'scripts', 'sync-osm-region.ts'),

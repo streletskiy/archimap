@@ -1,21 +1,13 @@
-import type {
-  RegionExtractCandidate,
-  RegionExtractSearchResult,
-  RegionExtractValidationResult
-} from '$shared/types';
+import type { RegionExtractCandidate, RegionExtractSearchResult, RegionExtractValidationResult } from '$shared/types';
 
 function createExtractsDomain(context: LooseRecord = {}) {
-  const {
-    ensureBootstrapped,
-    normalizeNullableText,
-    extractResolver
-  } = context;
+  const { ensureBootstrapped, normalizeNullableText, extractResolver } = context;
 
   function requireExtractResolver() {
     if (
-      !extractResolver
-      || typeof extractResolver.searchExtractCandidates !== 'function'
-      || typeof extractResolver.resolveExactExtract !== 'function'
+      !extractResolver ||
+      typeof extractResolver.searchExtractCandidates !== 'function' ||
+      typeof extractResolver.resolveExactExtract !== 'function'
     ) {
       throw new Error('Extract resolver is not configured');
     }
@@ -23,21 +15,13 @@ function createExtractsDomain(context: LooseRecord = {}) {
   }
 
   function normalizeExtractCandidate(candidate: LooseRecord = {}): RegionExtractCandidate | null {
-    const extractSource = normalizeNullableText(
-      candidate.extractSource ?? candidate.source,
-      64
-    );
-    const extractId = normalizeNullableText(
-      candidate.extractId ?? candidate.fileName ?? candidate.id,
-      240
-    );
+    const extractSource = normalizeNullableText(candidate.extractSource ?? candidate.source, 64);
+    const extractId = normalizeNullableText(candidate.extractId ?? candidate.fileName ?? candidate.id, 240);
     if (!extractSource || !extractId) {
       return null;
     }
-    const extractLabel = normalizeNullableText(
-      candidate.extractLabel ?? candidate.label ?? candidate.name ?? extractId,
-      240
-    ) || extractId;
+    const extractLabel =
+      normalizeNullableText(candidate.extractLabel ?? candidate.label ?? candidate.name ?? extractId, 240) || extractId;
     return {
       extractSource,
       extractId,
@@ -48,7 +32,10 @@ function createExtractsDomain(context: LooseRecord = {}) {
     };
   }
 
-  function buildResolutionRequiredMessage(result: { message?: string | null; errorCode?: string | null } = {}, query = '') {
+  function buildResolutionRequiredMessage(
+    result: { message?: string | null; errorCode?: string | null } = {},
+    query = ''
+  ) {
     const base = normalizeNullableText(result.message, 1000);
     if (base) return base;
     const searchQuery = normalizeNullableText(query, 240);
@@ -114,10 +101,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
       input.extractSource ?? input.extract_source ?? previous?.extractSource,
       64
     );
-    const extractId = normalizeNullableText(
-      input.extractId ?? input.extract_id ?? previous?.extractId,
-      240
-    );
+    const extractId = normalizeNullableText(input.extractId ?? input.extract_id ?? previous?.extractId, 240);
     const providedLabel = normalizeNullableText(
       input.extractLabel ?? input.extract_label ?? previous?.extractLabel,
       240

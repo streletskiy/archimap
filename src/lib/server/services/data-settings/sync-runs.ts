@@ -32,7 +32,10 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     if (region.extractResolutionStatus === 'resolution_error') {
       return region.extractResolutionError || 'Failed to confirm canonical extract for the region';
     }
-    if (region.extractResolutionStatus === 'resolution_required' || region.extractResolutionStatus === 'needs_resolution') {
+    if (
+      region.extractResolutionStatus === 'resolution_required' ||
+      region.extractResolutionStatus === 'needs_resolution'
+    ) {
       return region.extractResolutionError || 'Region requires manual canonical extract selection';
     }
     return 'Region is not ready for sync: canonical extract is not selected';
@@ -50,34 +53,44 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const whereSql = hasRegionId ? 'WHERE region_id = ?' : '';
     const queryArgs = hasRegionId ? [numericRegionId] : [];
 
-    const countRow = await db.prepare(`
+    const countRow = await db
+      .prepare(
+        `
       SELECT COUNT(*) AS total
       FROM data_region_sync_runs
       ${whereSql}
-    `).get(...queryArgs);
+    `
+      )
+      .get(...queryArgs);
     const total = Math.max(0, Number(countRow?.total || 0));
     const pageCount = total > 0 ? Math.ceil(total / safeLimit) : 0;
-    const safePage = pageCount > 0
-      ? Math.min(Math.max(1, Math.trunc(Number(rawPage) || 1)), pageCount)
-      : 1;
+    const safePage = pageCount > 0 ? Math.min(Math.max(1, Math.trunc(Number(rawPage) || 1)), pageCount) : 1;
     const offset = (safePage - 1) * safeLimit;
 
     const rows = hasRegionId
-      ? await db.prepare(`
+      ? await db
+          .prepare(
+            `
         SELECT ${RUN_SELECT_FIELDS}
         FROM data_region_sync_runs
         ${whereSql}
         ORDER BY id DESC
         LIMIT ?
         OFFSET ?
-      `).all(...queryArgs, safeLimit, offset)
-      : await db.prepare(`
+      `
+          )
+          .all(...queryArgs, safeLimit, offset)
+      : await db
+          .prepare(
+            `
         SELECT ${RUN_SELECT_FIELDS}
         FROM data_region_sync_runs
         ORDER BY id DESC
         LIMIT ?
         OFFSET ?
-      `).all(safeLimit, offset);
+      `
+          )
+          .all(safeLimit, offset);
 
     const items = rows.map(rowToRun).filter(Boolean);
     return Object.assign(items, {
@@ -90,12 +103,17 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
 
   async function getRunById(runId) {
     await ensureBootstrapped();
-    const row = await db.prepare(`
+    const row =
+      (await db
+        .prepare(
+          `
       SELECT ${RUN_SELECT_FIELDS}
       FROM data_region_sync_runs
       WHERE id = ?
       LIMIT 1
-    `).get(Number(runId)) || null;
+    `
+        )
+        .get(Number(runId))) || null;
     return rowToRun(row);
   }
 
@@ -113,7 +131,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     }
 
     const queuedAt = toIsoOrNull(now());
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO data_region_sync_runs (
         region_id,
         status,
@@ -124,30 +144,35 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         updated_at
       )
       VALUES (?, 'queued', ?, ?, ?, datetime('now'), datetime('now'))
-    `).run(
-      region.id,
-      String(triggerReason || 'manual'),
-      normalizeNullableText(requestedBy, 160),
-      queuedAt
-    );
+    `
+      )
+      .run(region.id, String(triggerReason || 'manual'), normalizeNullableText(requestedBy, 160), queuedAt);
 
-    const row = await db.prepare(`
+    const row = await db
+      .prepare(
+        `
       SELECT id
       FROM data_region_sync_runs
       WHERE region_id = ?
       ORDER BY id DESC
       LIMIT 1
-    `).get(region.id);
+    `
+      )
+      .get(region.id);
     const run = await getRunById(row?.id);
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_sync_regions
       SET
         last_sync_status = 'queued',
         last_sync_error = NULL,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(region.id);
+    `
+      )
+      .run(region.id);
 
     return run;
   }
@@ -159,7 +184,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       throw new Error('Run not found');
     }
     const startedAt = toIsoOrNull(now());
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_region_sync_runs
       SET
         status = 'running',
@@ -170,8 +197,12 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         stage_updated_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(startedAt, startedAt, run.id);
-    await db.prepare(`
+    `
+      )
+      .run(startedAt, startedAt, run.id);
+    await db
+      .prepare(
+        `
       UPDATE data_sync_regions
       SET
         last_sync_status = 'running',
@@ -179,7 +210,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         last_sync_error = NULL,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(startedAt, run.regionId);
+    `
+      )
+      .run(startedAt, run.regionId);
     return getRunById(run.id);
   }
 
@@ -197,7 +230,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       : null;
     const normalizedDetail = normalizeNullableText(detail, 200);
     const updatedAt = toIsoOrNull(now());
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_region_sync_runs
       SET
         stage = ?,
@@ -206,7 +241,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         stage_updated_at = ?,
         updated_at = datetime('now')
       WHERE id = ? AND status = 'running'
-    `).run(normalizedStage, safeProgress, normalizedDetail, updatedAt, numericRunId);
+    `
+      )
+      .run(normalizedStage, safeProgress, normalizedDetail, updatedAt, numericRunId);
     return getRunById(numericRunId);
   }
 
@@ -216,13 +253,17 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     if (!Number.isInteger(numericRunId) || numericRunId <= 0) {
       return null;
     }
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_region_sync_runs
       SET
         updated_at = datetime('now')
       WHERE id = ?
         AND status IN ('queued', 'running')
-    `).run(numericRunId);
+    `
+      )
+      .run(numericRunId);
     return getRunById(numericRunId);
   }
 
@@ -231,7 +272,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const run = await getRunById(runId);
     if (!run) return null;
     const updatedAt = toIsoOrNull(now());
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_region_sync_runs
       SET
         cancel_requested = TRUE,
@@ -239,7 +282,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         stage_updated_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(updatedAt, run.id);
+    `
+      )
+      .run(updatedAt, run.id);
     return getRunById(run.id);
   }
 
@@ -264,29 +309,30 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     }
 
     const requestedStaleMs = Number(options?.staleMs);
-    const staleMs = Number.isFinite(requestedStaleMs)
-      ? Math.max(0, Math.trunc(requestedStaleMs))
-      : null;
+    const staleMs = Number.isFinite(requestedStaleMs) ? Math.max(0, Math.trunc(requestedStaleMs)) : null;
     const nowTs = parseTimestampMs(toIsoOrNull(now()) || now());
-    const staleBeforeTs = staleMs != null && staleMs > 0 && Number.isFinite(nowTs)
-      ? nowTs - staleMs
-      : null;
-    const activeRows = await db.prepare(`
+    const staleBeforeTs = staleMs != null && staleMs > 0 && Number.isFinite(nowTs) ? nowTs - staleMs : null;
+    const activeRows = await db
+      .prepare(
+        `
       SELECT id, updated_at
       FROM data_region_sync_runs
       WHERE region_id = ?
         AND status IN ('queued', 'running')
       ORDER BY id
-    `).all(numericRegionId);
-    const candidateRows = staleBeforeTs == null
-      ? activeRows
-      : activeRows.filter((row) => {
-        const updatedAtTs = parseTimestampMs(row?.updated_at);
-        if (!Number.isFinite(updatedAtTs)) {
-          return true;
-        }
-        return updatedAtTs <= staleBeforeTs;
-      });
+    `
+      )
+      .all(numericRegionId);
+    const candidateRows =
+      staleBeforeTs == null
+        ? activeRows
+        : activeRows.filter((row) => {
+            const updatedAtTs = parseTimestampMs(row?.updated_at);
+            if (!Number.isFinite(updatedAtTs)) {
+              return true;
+            }
+            return updatedAtTs <= staleBeforeTs;
+          });
 
     const abandonedRuns = [];
     for (const row of candidateRows) {
@@ -306,9 +352,14 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       };
     }
 
-    const shouldRepairRegionState = options?.repairRegionState !== false
-      && activeRows.length === 0
-      && ['queued', 'running'].includes(String(region.lastSyncStatus || '').trim().toLowerCase());
+    const shouldRepairRegionState =
+      options?.repairRegionState !== false &&
+      activeRows.length === 0 &&
+      ['queued', 'running'].includes(
+        String(region.lastSyncStatus || '')
+          .trim()
+          .toLowerCase()
+      );
     if (!shouldRepairRegionState) {
       return {
         runs: [],
@@ -320,13 +371,18 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const finishedAt = toIsoOrNull(now());
     const abandonedMessage = normalizeNullableText(errorText, 4000) || 'Sync cancelled by user';
     const abandonedStatus = String(options?.status || 'abandoned');
-    const nextSyncAt = computeNextSyncAt({
-      ...region,
-      lastSyncStatus: abandonedStatus,
-      lastSyncFinishedAt: finishedAt
-    }, finishedAt);
+    const nextSyncAt = computeNextSyncAt(
+      {
+        ...region,
+        lastSyncStatus: abandonedStatus,
+        lastSyncFinishedAt: finishedAt
+      },
+      finishedAt
+    );
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_sync_regions
       SET
         last_sync_status = ?,
@@ -335,13 +391,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         next_sync_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(
-      abandonedStatus,
-      finishedAt,
-      abandonedMessage,
-      nextSyncAt,
-      region.id
-    );
+    `
+      )
+      .run(abandonedStatus, finishedAt, abandonedMessage, nextSyncAt, region.id);
 
     return {
       runs: [],
@@ -369,11 +421,16 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const pmtilesBytes = summary.pmtilesBytes == null ? null : Number(summary.pmtilesBytes);
     const sourceDataUpdatedAt = toIsoOrNull(summary.sourceDataUpdatedAt);
     const { dbBytes, dbBytesApproximate } = await computeRegionDbBytes(region.id);
-    const nextSyncAt = computeNextSyncAt({
-      ...region,
-      lastSuccessfulSyncAt: finishedAt
-    }, finishedAt);
-    await db.prepare(`
+    const nextSyncAt = computeNextSyncAt(
+      {
+        ...region,
+        lastSuccessfulSyncAt: finishedAt
+      },
+      finishedAt
+    );
+    await db
+      .prepare(
+        `
       UPDATE data_region_sync_runs
       SET
         status = 'success',
@@ -396,23 +453,27 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         cancel_requested = FALSE,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(
-      finishedAt,
-      importedFeatureCount,
-      activeFeatureCount,
-      orphanDeletedCount,
-      pmtilesBytes,
-      dbBytes,
-      dbBytesApproximate ? 1 : 0,
-      bounds?.west ?? null,
-      bounds?.south ?? null,
-      bounds?.east ?? null,
-      bounds?.north ?? null,
-      finishedAt,
-      run.id
-    );
+    `
+      )
+      .run(
+        finishedAt,
+        importedFeatureCount,
+        activeFeatureCount,
+        orphanDeletedCount,
+        pmtilesBytes,
+        dbBytes,
+        dbBytesApproximate ? 1 : 0,
+        bounds?.west ?? null,
+        bounds?.south ?? null,
+        bounds?.east ?? null,
+        bounds?.north ?? null,
+        finishedAt,
+        run.id
+      );
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_sync_regions
       SET
         last_sync_status = 'idle',
@@ -428,18 +489,20 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         last_feature_count = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(
-      finishedAt,
-      finishedAt,
-      sourceDataUpdatedAt || region.sourceDataUpdatedAt || null,
-      nextSyncAt,
-      bounds?.west ?? null,
-      bounds?.south ?? null,
-      bounds?.east ?? null,
-      bounds?.north ?? null,
-      activeFeatureCount ?? importedFeatureCount ?? null,
-      region.id
-    );
+    `
+      )
+      .run(
+        finishedAt,
+        finishedAt,
+        sourceDataUpdatedAt || region.sourceDataUpdatedAt || null,
+        nextSyncAt,
+        bounds?.west ?? null,
+        bounds?.south ?? null,
+        bounds?.east ?? null,
+        bounds?.north ?? null,
+        activeFeatureCount ?? importedFeatureCount ?? null,
+        region.id
+      );
 
     return {
       run: await getRunById(run.id),
@@ -455,18 +518,25 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     }
 
     const referenceIso = toIsoOrNull(referenceDate);
-    const nextSyncAt = computeNextSyncAt({
-      ...region,
-      lastSuccessfulSyncAt: referenceIso || region.lastSuccessfulSyncAt
-    }, referenceIso || referenceDate);
+    const nextSyncAt = computeNextSyncAt(
+      {
+        ...region,
+        lastSuccessfulSyncAt: referenceIso || region.lastSuccessfulSyncAt
+      },
+      referenceIso || referenceDate
+    );
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_sync_regions
       SET
         next_sync_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(nextSyncAt, region.id);
+    `
+      )
+      .run(nextSyncAt, region.id);
 
     return getRegionById(region.id);
   }
@@ -485,22 +555,36 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const finishedAt = toIsoOrNull(now());
     const message = normalizeNullableText(errorText, 4000) || 'Sync failed';
     const failedStatus = String(options.status || 'failed');
-    const nextSyncAt = computeNextSyncAt({
-      ...region,
-      lastSyncStatus: failedStatus,
-      lastSyncFinishedAt: finishedAt
-    }, finishedAt);
+    const nextSyncAt = computeNextSyncAt(
+      {
+        ...region,
+        lastSyncStatus: failedStatus,
+        lastSyncFinishedAt: finishedAt
+      },
+      finishedAt
+    );
     const preserveRegionSuccess = Boolean(options.preserveRegionSuccess);
-    const recoveredUpdatedAt = toIsoOrNull(options.recoveredUpdatedAt) || toIsoOrNull(run.updatedAt) || toIsoOrNull(run.startedAt) || toIsoOrNull(run.requestedAt);
+    const recoveredUpdatedAt =
+      toIsoOrNull(options.recoveredUpdatedAt) ||
+      toIsoOrNull(run.updatedAt) ||
+      toIsoOrNull(run.startedAt) ||
+      toIsoOrNull(run.requestedAt);
     const regionSuccessfulAt = parseTimestampMs(region.lastSuccessfulSyncAt);
     const recoveredUpdatedAtMs = parseTimestampMs(recoveredUpdatedAt);
-    const shouldPreserveRegionState = preserveRegionSuccess
-      && Number.isFinite(regionSuccessfulAt)
-      && Number.isFinite(recoveredUpdatedAtMs)
-      && regionSuccessfulAt >= recoveredUpdatedAtMs
-      && !['queued', 'running'].includes(String(region.lastSyncStatus || '').trim().toLowerCase());
+    const shouldPreserveRegionState =
+      preserveRegionSuccess &&
+      Number.isFinite(regionSuccessfulAt) &&
+      Number.isFinite(recoveredUpdatedAtMs) &&
+      regionSuccessfulAt >= recoveredUpdatedAtMs &&
+      !['queued', 'running'].includes(
+        String(region.lastSyncStatus || '')
+          .trim()
+          .toLowerCase()
+      );
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_region_sync_runs
       SET
         status = ?,
@@ -513,16 +597,14 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         cancel_requested = FALSE,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(
-      failedStatus,
-      finishedAt,
-      message,
-      finishedAt,
-      run.id
-    );
+    `
+      )
+      .run(failedStatus, finishedAt, message, finishedAt, run.id);
 
     if (!shouldPreserveRegionState) {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE data_sync_regions
         SET
           last_sync_status = ?,
@@ -531,13 +613,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
           next_sync_at = ?,
           updated_at = datetime('now')
         WHERE id = ?
-      `).run(
-        failedStatus,
-        finishedAt,
-        message,
-        nextSyncAt,
-        region.id
-      );
+      `
+        )
+        .run(failedStatus, finishedAt, message, nextSyncAt, region.id);
     }
 
     const savedRun = await getRunById(run.id);
@@ -554,38 +632,38 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
   async function recoverInterruptedRuns(reason = 'Sync interrupted by process restart', options: LooseRecord = {}) {
     await ensureBootstrapped();
     const requestedStaleMs = Number(options?.staleMs);
-    const staleMs = Number.isFinite(requestedStaleMs)
-      ? Math.max(0, Math.trunc(requestedStaleMs))
-      : 0;
+    const staleMs = Number.isFinite(requestedStaleMs) ? Math.max(0, Math.trunc(requestedStaleMs)) : 0;
     const nowTs = parseTimestampMs(toIsoOrNull(now()) || now());
-    const staleBeforeTs = staleMs > 0 && Number.isFinite(nowTs)
-      ? nowTs - staleMs
-      : null;
+    const staleBeforeTs = staleMs > 0 && Number.isFinite(nowTs) ? nowTs - staleMs : null;
 
-    const candidateRuns = await db.prepare(`
+    const candidateRuns = await db
+      .prepare(
+        `
       SELECT id, region_id, updated_at
       FROM data_region_sync_runs
       WHERE status IN ('queued', 'running')
       ORDER BY id
-    `).all();
-    const stuckRuns = staleBeforeTs == null
-      ? candidateRuns
-      : candidateRuns.filter((row) => {
-        const updatedAtTs = parseTimestampMs(row?.updated_at);
-        if (!Number.isFinite(updatedAtTs)) {
-          return true;
-        }
-        return updatedAtTs <= staleBeforeTs;
-      });
+    `
+      )
+      .all();
+    const stuckRuns =
+      staleBeforeTs == null
+        ? candidateRuns
+        : candidateRuns.filter((row) => {
+            const updatedAtTs = parseTimestampMs(row?.updated_at);
+            if (!Number.isFinite(updatedAtTs)) {
+              return true;
+            }
+            return updatedAtTs <= staleBeforeTs;
+          });
 
     const recovered = [];
     for (const row of stuckRuns) {
       const region = await getRegionById(row.region_id);
       const staleAtTs = parseTimestampMs(row?.updated_at);
       const lastSuccessfulAtTs = parseTimestampMs(region?.lastSuccessfulSyncAt);
-      const preserveRegionSuccess = Number.isFinite(staleAtTs)
-        && Number.isFinite(lastSuccessfulAtTs)
-        && lastSuccessfulAtTs >= staleAtTs;
+      const preserveRegionSuccess =
+        Number.isFinite(staleAtTs) && Number.isFinite(lastSuccessfulAtTs) && lastSuccessfulAtTs >= staleAtTs;
       const result = await markRunFailed(row.id, reason, {
         status: 'abandoned',
         preserveRegionSuccess,
@@ -606,23 +684,31 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       return region;
     }
     if (!region.canSync) {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE data_sync_regions
         SET
           next_sync_at = NULL,
           updated_at = datetime('now')
         WHERE id = ?
-      `).run(region.id);
+      `
+        )
+        .run(region.id);
       return getRegionById(region.id);
     }
     const nextSyncAt = computeNextSyncAt(region, now());
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE data_sync_regions
       SET
         next_sync_at = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(nextSyncAt, region.id);
+    `
+      )
+      .run(nextSyncAt, region.id);
     return getRegionById(region.id);
   }
 

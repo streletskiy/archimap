@@ -1,10 +1,14 @@
 function hasTable(db, tableName) {
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT 1
     FROM sqlite_master
     WHERE type = 'table' AND name = ?
     LIMIT 1
-  `).get(tableName);
+  `
+    )
+    .get(tableName);
   return Boolean(row);
 }
 

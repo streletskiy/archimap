@@ -18,14 +18,15 @@ const FALLBACK_CONFIG = Object.freeze({
 });
 
 function normalizeBounds(value) {
-  const bounds = value && typeof value === 'object'
-    ? {
-      west: Number(value.west),
-      south: Number(value.south),
-      east: Number(value.east),
-      north: Number(value.north)
-    }
-    : null;
+  const bounds =
+    value && typeof value === 'object'
+      ? {
+          west: Number(value.west),
+          south: Number(value.south),
+          east: Number(value.east),
+          north: Number(value.north)
+        }
+      : null;
   if (!bounds) return null;
   if (![bounds.west, bounds.south, bounds.east, bounds.north].every(Number.isFinite)) return null;
   return bounds;
@@ -54,10 +55,7 @@ function normalizeRegionPmtiles(item) {
 function normalizeBasemapConfig(value) {
   const provider = normalizeBasemapProvider(value?.provider);
   const maptilerApiKey = normalizeBasemapApiKey(value?.maptilerApiKey);
-  const customBasemapUrl = normalizeCustomBasemapUrl(
-    value?.customBasemapUrl,
-    FALLBACK_CONFIG.basemap.customBasemapUrl
-  );
+  const customBasemapUrl = normalizeCustomBasemapUrl(value?.customBasemapUrl, FALLBACK_CONFIG.basemap.customBasemapUrl);
   const customBasemapApiKey = normalizeBasemapApiKey(value?.customBasemapApiKey);
   if (provider === 'maptiler' && !maptilerApiKey) {
     return {

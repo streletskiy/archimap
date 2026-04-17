@@ -57,7 +57,10 @@ export function osmAddressFromTags(tags: AddressTagMap = {}): string | null {
   return text ? text : null;
 }
 
-export function resolveDisplayAddressForRow(row: AddressRowLike = {}, mergedInfoRow: { address?: unknown } | null = null): string | null {
+export function resolveDisplayAddressForRow(
+  row: AddressRowLike = {},
+  mergedInfoRow: { address?: unknown } | null = null
+): string | null {
   const mergedAddress = normalizeText(mergedInfoRow?.address);
   if (mergedAddress != null) return mergedAddress;
 

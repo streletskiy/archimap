@@ -1,8 +1,11 @@
 import { getMapStyleSignature, resolveMapStyleForTheme } from './map-theme-utils.js';
 
-type MapStyleTarget = {
-  setStyle?: (style: unknown) => void;
-} | null | undefined;
+type MapStyleTarget =
+  | {
+      setStyle?: (style: unknown) => void;
+    }
+  | null
+  | undefined;
 type RuntimeConfigLike = Parameters<typeof getMapStyleSignature>[1];
 
 type MapStyleSyncControllerOptions = {

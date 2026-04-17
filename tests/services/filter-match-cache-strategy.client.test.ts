@@ -4,7 +4,15 @@ const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
 async function loadFilterMatchCacheStrategy() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'filter-match-cache-strategy.ts');
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'services',
+    'map',
+    'filter-match-cache-strategy.ts'
+  );
   return import(pathToFileURL(modulePath).href);
 }
 
@@ -46,9 +54,8 @@ test('findReusableResolvedPayload rejects cached payloads from a different overp
       fetchFilterMatchesFallback: async () => ({}),
       fetchFilterMatchesBatchPrimary: async () => ({ items: [] })
     },
-    buildFilterRequestCacheKey: (spec, coverageHash, zoomBucket, renderMode, dataVersion = 0) => (
-      `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}:${renderMode || 'contours'}:${Math.max(0, Math.trunc(Number(dataVersion) || 0))}`
-    ),
+    buildFilterRequestCacheKey: (spec, coverageHash, zoomBucket, renderMode, dataVersion = 0) =>
+      `request:${spec.id}:${spec.rulesHash}:${coverageHash}:${zoomBucket}:${renderMode || 'contours'}:${Math.max(0, Math.trunc(Number(dataVersion) || 0))}`,
     buildPrefetchCoverageWindow: (coverageWindow) => coverageWindow,
     resolveMap: () => null,
     getLatestFilterToken: () => 1,

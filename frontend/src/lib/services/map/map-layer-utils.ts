@@ -6,10 +6,7 @@ import {
   buildBuildingExtrusionBaseExpression,
   buildBuildingExtrusionHeightExpression
 } from './map-3d-utils.js';
-import {
-  EMPTY_LAYER_FILTER,
-  buildFilterHighlightExpression
-} from '../../components/map/filter-highlight-utils.js';
+import { EMPTY_LAYER_FILTER, buildFilterHighlightExpression } from '../../components/map/filter-highlight-utils.js';
 import {
   buildSearchMarkersGeojson,
   MAP_PIN_COLOR,
@@ -163,18 +160,18 @@ function buildVisibleBaseBuildingFilter(hideBaseWhenParts = false) {
   if (!hideBaseWhenParts) {
     return buildExactFeatureKindFilter(BUILDING_FEATURE_KIND);
   }
-  return ['any',
+  return [
+    'any',
     buildExactFeatureKindFilter(BUILDING_REMAINDER_FEATURE_KIND),
-    ['all',
+    [
+      'all',
       buildExactFeatureKindFilter(BUILDING_FEATURE_KIND),
       ['!=', ['coalesce', ['to-number', ['get', BUILDING_HIDE_BASE_WHEN_PARTS_PROPERTY]], 0], 1]
     ]
   ];
 }
 
-function buildFeatureKindFilter(featureKind = BUILDING_FEATURE_KIND, {
-  hideBaseWhenParts = false
-} = {}) {
+function buildFeatureKindFilter(featureKind = BUILDING_FEATURE_KIND, { hideBaseWhenParts = false } = {}) {
   if (featureKind === BUILDING_PART_FEATURE_KIND) {
     return buildExactFeatureKindFilter(BUILDING_PART_FEATURE_KIND);
   }
@@ -213,9 +210,7 @@ export function buildRegionBuildingLayerFilterExpression({
   return ['all', ...baseFilters, idFilter];
 }
 
-export function buildVisibleBuildingSelectionScopeExpression({
-  showBuildingParts = true
-} = {}) {
+export function buildVisibleBuildingSelectionScopeExpression({ showBuildingParts = true } = {}) {
   const baseFilter = buildVisibleBaseBuildingFilter(Boolean(showBuildingParts));
   if (!showBuildingParts) {
     return baseFilter;
@@ -223,10 +218,7 @@ export function buildVisibleBuildingSelectionScopeExpression({
   return ['any', baseFilter, buildExactFeatureKindFilter(BUILDING_PART_FEATURE_KIND)];
 }
 
-export function buildRegionBuildingHighlightFilterExpression({
-  featureIds = [],
-  showBuildingParts = true
-} = {}) {
+export function buildRegionBuildingHighlightFilterExpression({ featureIds = [], showBuildingParts = true } = {}) {
   const idFilter = buildFeatureIdFilter(featureIds);
   const scopeFilter = buildVisibleBuildingSelectionScopeExpression({
     showBuildingParts
@@ -252,31 +244,19 @@ export function getRegionLayerIds(activeRegionPmtiles = [], suffix) {
 }
 
 export function getCurrentBuildingsFillLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'fill'),
-    ...getCurrentOverpassBuildingsFillLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'fill'), ...getCurrentOverpassBuildingsFillLayerIds()];
 }
 
 export function getCurrentBuildingsExtrusionLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'extrusion'),
-    ...getCurrentOverpassBuildingsExtrusionLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'extrusion'), ...getCurrentOverpassBuildingsExtrusionLayerIds()];
 }
 
 export function getCurrentBuildingsLineLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'line'),
-    ...getCurrentOverpassBuildingsLineLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'line'), ...getCurrentOverpassBuildingsLineLayerIds()];
 }
 
 export function getCurrentBuildingPartFillLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'part-fill'),
-    ...getCurrentOverpassBuildingPartFillLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'part-fill'), ...getCurrentOverpassBuildingPartFillLayerIds()];
 }
 
 export function getCurrentBuildingPartExtrusionLayerIds(activeRegionPmtiles = []) {
@@ -287,10 +267,7 @@ export function getCurrentBuildingPartExtrusionLayerIds(activeRegionPmtiles = []
 }
 
 export function getCurrentBuildingPartLineLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'part-line'),
-    ...getCurrentOverpassBuildingPartLineLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'part-line'), ...getCurrentOverpassBuildingPartLineLayerIds()];
 }
 
 export function getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles = []) {
@@ -322,17 +299,11 @@ export function getCurrentBuildingHoverExtrusionLayerIds(activeRegionPmtiles = [
 }
 
 export function getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'hover-fill'),
-    ...getCurrentOverpassBuildingHoverFillLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'hover-fill'), ...getCurrentOverpassBuildingHoverFillLayerIds()];
 }
 
 export function getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'hover-line'),
-    ...getCurrentOverpassBuildingHoverLineLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'hover-line'), ...getCurrentOverpassBuildingHoverLineLayerIds()];
 }
 
 export function getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles = []) {
@@ -364,17 +335,11 @@ export function getCurrentSelectedExtrusionLayerIds(activeRegionPmtiles = []) {
 }
 
 export function getCurrentSelectedFillLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'selected-fill'),
-    ...getCurrentOverpassSelectedFillLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'selected-fill'), ...getCurrentOverpassSelectedFillLayerIds()];
 }
 
 export function getCurrentSelectedLineLayerIds(activeRegionPmtiles = []) {
-  return [
-    ...getRegionLayerIds(activeRegionPmtiles, 'selected-line'),
-    ...getCurrentOverpassSelectedLineLayerIds()
-  ];
+  return [...getRegionLayerIds(activeRegionPmtiles, 'selected-line'), ...getCurrentOverpassSelectedLineLayerIds()];
 }
 
 export function applyBuildingThemePaint({
@@ -451,9 +416,7 @@ function buildOverlayExtrusionPaint(color = 'transparent', opacity = 0) {
   };
 }
 
-function applyBaseBuildingLayerFilters(map, layerIds = [], {
-  hideBaseWhenParts = false
-} = {}) {
+function applyBaseBuildingLayerFilters(map, layerIds = [], { hideBaseWhenParts = false } = {}) {
   if (!map?.setFilter) return;
   const filter = buildRegionBuildingLayerFilterExpression({
     hideBaseWhenParts
@@ -464,12 +427,7 @@ function applyBaseBuildingLayerFilters(map, layerIds = [], {
   }
 }
 
-export function bindMapInteractionHandlers({
-  map,
-  onBuildingClick,
-  onSearchClusterClick,
-  onSearchResultClick
-}) {
+export function bindMapInteractionHandlers({ map, onBuildingClick, onSearchClusterClick, onSearchResultClick }) {
   if (!map) return;
   map.off('click', onBuildingClick);
   map.off('click', SEARCH_RESULTS_CLUSTER_LAYER_ID, onSearchClusterClick);
@@ -482,8 +440,12 @@ export function bindMapInteractionHandlers({
 
 export function isBaseLabelLayer(layer) {
   if (!layer || layer.type !== 'symbol') return false;
-  const sourceLayer = String(layer?.['source-layer'] || '').trim().toLowerCase();
-  const layerId = String(layer.id || '').trim().toLowerCase();
+  const sourceLayer = String(layer?.['source-layer'] || '')
+    .trim()
+    .toLowerCase();
+  const layerId = String(layer.id || '')
+    .trim()
+    .toLowerCase();
   if (sourceLayer === 'poi' || sourceLayer === 'pois') return false;
   if (layerId === 'pois' || layerId.startsWith('pois-')) return false;
   if (hasPositiveStyleFilterMatch(layer?.filter, 'class', 'ferry')) return false;
@@ -623,10 +585,14 @@ export function ensureOverpassBuildingSourceAndLayers({
   const partExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partExtrusion);
   const partFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFill);
   const partLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partLine);
-  const filterExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightExtrusion);
+  const filterExtrusionLayerId = buildOverpassBuildingLayerId(
+    OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightExtrusion
+  );
   const filterFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightFill);
   const filterLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.filterHighlightLine);
-  const partFilterExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightExtrusion);
+  const partFilterExtrusionLayerId = buildOverpassBuildingLayerId(
+    OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightExtrusion
+  );
   const partFilterFillLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightFill);
   const partFilterLineLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.partFilterHighlightLine);
   const hoverExtrusionLayerId = buildOverpassBuildingLayerId(OVERPASS_BUILDING_LAYER_SUFFIXES.hoverExtrusion);
@@ -960,15 +926,39 @@ export function ensureOverpassBuildingSourceAndLayers({
   ensureLayerVisibility(map, extrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, fillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, lineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partExtrusionLayerId, visible && buildingPartsVisible && buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFillLayerId, visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partLineLayerId, visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(
+    map,
+    partExtrusionLayerId,
+    visible && buildingPartsVisible && buildings3dEnabled ? 'visible' : 'none'
+  );
+  ensureLayerVisibility(
+    map,
+    partFillLayerId,
+    visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none'
+  );
+  ensureLayerVisibility(
+    map,
+    partLineLayerId,
+    visible && buildingPartsVisible && !buildings3dEnabled ? 'visible' : 'none'
+  );
   ensureLayerVisibility(map, filterExtrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, filterFillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, filterLineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterExtrusionLayerId, visible && buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterFillLayerId, visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterLineLayerId, visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(
+    map,
+    partFilterExtrusionLayerId,
+    visible && buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none'
+  );
+  ensureLayerVisibility(
+    map,
+    partFilterFillLayerId,
+    visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
+  );
+  ensureLayerVisibility(
+    map,
+    partFilterLineLayerId,
+    visible && buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
+  );
   ensureLayerVisibility(map, hoverExtrusionLayerId, visible && buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, hoverFillLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, hoverLineLayerId, visible && !buildings3dEnabled ? 'visible' : 'none');
@@ -1349,9 +1339,21 @@ export function ensureRegionBuildingSourceAndLayers({
   ensureLayerVisibility(map, filterExtrusionLayerId, buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, filterFillLayerId, !buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, filterLineLayerId, !buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterExtrusionLayerId, buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterFillLayerId, buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
-  ensureLayerVisibility(map, partFilterLineLayerId, buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none');
+  ensureLayerVisibility(
+    map,
+    partFilterExtrusionLayerId,
+    buildingPartHighlightVisible && buildings3dEnabled ? 'visible' : 'none'
+  );
+  ensureLayerVisibility(
+    map,
+    partFilterFillLayerId,
+    buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
+  );
+  ensureLayerVisibility(
+    map,
+    partFilterLineLayerId,
+    buildingPartHighlightVisible && !buildings3dEnabled ? 'visible' : 'none'
+  );
   ensureLayerVisibility(map, hoverExtrusionLayerId, buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, hoverFillLayerId, !buildings3dEnabled ? 'visible' : 'none');
   ensureLayerVisibility(map, hoverLineLayerId, !buildings3dEnabled ? 'visible' : 'none');
@@ -1419,11 +1421,7 @@ export function applyBuildingPartsLayerVisibility({
   selectedLineLayerIds = []
 }) {
   if (!map) return;
-  applyBaseBuildingLayerFilters(map, [
-    ...fillLayerIds,
-    ...extrusionLayerIds,
-    ...lineLayerIds
-  ], {
+  applyBaseBuildingLayerFilters(map, [...fillLayerIds, ...extrusionLayerIds, ...lineLayerIds], {
     hideBaseWhenParts: partVisible
   });
   const baseFillVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
@@ -1434,97 +1432,67 @@ export function applyBuildingPartsLayerVisibility({
   const partLineVisibility = sourceVisible && partVisible && !buildings3dEnabled ? 'visible' : 'none';
   const filterHighlightExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
   const filterHighlightFlatVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
-  const partHighlightExtrusionVisibility = sourceVisible && (partVisible || forceHighlightVisible) && buildings3dEnabled ? 'visible' : 'none';
-  const partHighlightFlatVisibility = sourceVisible && (partVisible || forceHighlightVisible) && !buildings3dEnabled ? 'visible' : 'none';
+  const partHighlightExtrusionVisibility =
+    sourceVisible && (partVisible || forceHighlightVisible) && buildings3dEnabled ? 'visible' : 'none';
+  const partHighlightFlatVisibility =
+    sourceVisible && (partVisible || forceHighlightVisible) && !buildings3dEnabled ? 'visible' : 'none';
   const hoverExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
   const hoverFlatVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
   const selectedExtrusionVisibility = sourceVisible && buildings3dEnabled ? 'visible' : 'none';
   const selectedFlatVisibility = sourceVisible && !buildings3dEnabled ? 'visible' : 'none';
-  for (const layerId of [...new Set([
-    ...fillLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...fillLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', baseFillVisibility);
   }
-  for (const layerId of [...new Set([
-    ...extrusionLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...extrusionLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', baseExtrusionVisibility);
   }
-  for (const layerId of [...new Set([
-    ...lineLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...lineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', baseLineVisibility);
   }
-  for (const layerId of [...new Set([
-    ...partFillLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...partFillLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', partLayerVisibility);
   }
-  for (const layerId of [...new Set([
-    ...partExtrusionLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...partExtrusionLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', partExtrusionVisibility);
   }
-  for (const layerId of [...new Set([
-    ...partLineLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...partLineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', partLineVisibility);
   }
-  for (const layerId of [...new Set([
-    ...filterHighlightExtrusionLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...filterHighlightExtrusionLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', filterHighlightExtrusionVisibility);
   }
-  for (const layerId of [...new Set([
-    ...filterHighlightFillLayerIds,
-    ...filterHighlightLineLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...filterHighlightFillLayerIds, ...filterHighlightLineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', filterHighlightFlatVisibility);
   }
-  for (const layerId of [...new Set([
-    ...partFilterHighlightExtrusionLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...partFilterHighlightExtrusionLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', partHighlightExtrusionVisibility);
   }
-  for (const layerId of [...new Set([
-    ...partFilterHighlightFillLayerIds,
-    ...partFilterHighlightLineLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...partFilterHighlightFillLayerIds, ...partFilterHighlightLineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', partHighlightFlatVisibility);
   }
-  for (const layerId of [...new Set([
-    ...hoverExtrusionLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...hoverExtrusionLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', hoverExtrusionVisibility);
   }
-  for (const layerId of [...new Set([
-    ...hoverFillLayerIds,
-    ...hoverLineLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...hoverFillLayerIds, ...hoverLineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', hoverFlatVisibility);
   }
-  for (const layerId of [...new Set([
-    ...selectedExtrusionLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...selectedExtrusionLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', selectedExtrusionVisibility);
   }
-  for (const layerId of [...new Set([
-    ...selectedFillLayerIds,
-    ...selectedLineLayerIds
-  ])]) {
+  for (const layerId of [...new Set([...selectedFillLayerIds, ...selectedLineLayerIds])]) {
     if (!map.getLayer(layerId)) continue;
     map.setLayoutProperty(layerId, 'visibility', selectedFlatVisibility);
   }

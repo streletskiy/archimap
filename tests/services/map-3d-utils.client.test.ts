@@ -64,27 +64,36 @@ test('buildBuilding3dPropertiesFromTags ignores explicit height below the base o
 test('deriveBuildingLevelsText estimates levels from explicit height and base tags', async () => {
   const { deriveBuildingLevelsText } = await loadMap3dUtils();
 
-  assert.equal(deriveBuildingLevelsText({
-    tags: {
-      height: '18.5',
-      min_height: '5.5'
-    }
-  }), '4');
+  assert.equal(
+    deriveBuildingLevelsText({
+      tags: {
+        height: '18.5',
+        min_height: '5.5'
+      }
+    }),
+    '4'
+  );
 });
 
 test('deriveBuildingLevelsText can infer levels from render heights without explicit level tags', async () => {
   const { deriveBuildingLevelsText } = await loadMap3dUtils();
 
-  assert.equal(deriveBuildingLevelsText({
-    tags: {},
-    renderHeightMeters: 18.5,
-    renderMinHeightMeters: 5.5
-  }), '4');
-  assert.equal(deriveBuildingLevelsText({
-    tags: {},
-    renderHeightMeters: 3.2,
-    renderMinHeightMeters: 0
-  }), null);
+  assert.equal(
+    deriveBuildingLevelsText({
+      tags: {},
+      renderHeightMeters: 18.5,
+      renderMinHeightMeters: 5.5
+    }),
+    '4'
+  );
+  assert.equal(
+    deriveBuildingLevelsText({
+      tags: {},
+      renderHeightMeters: 3.2,
+      renderMinHeightMeters: 0
+    }),
+    null
+  );
 });
 
 test('buildBuildingExtrusion expressions read the shared render properties', async () => {
@@ -110,16 +119,25 @@ test('buildBuildingExtrusion expressions read the shared render properties', asy
 test('getEffectiveBuildingPartsVisibility forces building parts on in 3D mode', async () => {
   const { getEffectiveBuildingPartsVisibility } = await loadMap3dUtils();
 
-  assert.equal(getEffectiveBuildingPartsVisibility({
-    buildingPartsVisible: false,
-    buildings3dEnabled: false
-  }), false);
-  assert.equal(getEffectiveBuildingPartsVisibility({
-    buildingPartsVisible: true,
-    buildings3dEnabled: false
-  }), true);
-  assert.equal(getEffectiveBuildingPartsVisibility({
-    buildingPartsVisible: false,
-    buildings3dEnabled: true
-  }), true);
+  assert.equal(
+    getEffectiveBuildingPartsVisibility({
+      buildingPartsVisible: false,
+      buildings3dEnabled: false
+    }),
+    false
+  );
+  assert.equal(
+    getEffectiveBuildingPartsVisibility({
+      buildingPartsVisible: true,
+      buildings3dEnabled: false
+    }),
+    true
+  );
+  assert.equal(
+    getEffectiveBuildingPartsVisibility({
+      buildingPartsVisible: false,
+      buildings3dEnabled: true
+    }),
+    true
+  );
 });

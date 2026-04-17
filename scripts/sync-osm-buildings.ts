@@ -4,7 +4,13 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 function hasRegionIdArg(args) {
-  return args.some((arg) => String(arg || '').trim() === '--region-id' || String(arg || '').trim().startsWith('--region-id='));
+  return args.some(
+    (arg) =>
+      String(arg || '').trim() === '--region-id' ||
+      String(arg || '')
+        .trim()
+        .startsWith('--region-id=')
+  );
 }
 
 function printLegacyModeError() {

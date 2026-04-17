@@ -45,24 +45,50 @@ test('isArchitectureStyleAllowed applies Tanzania-wide restrictions for Zanzibar
 test('isArchitectureStyleAllowed applies allow and deny overrides with specificity', async () => {
   const { isArchitectureStyleAllowed } = await loadArchitectureStyleModule();
 
-  assert.equal(isArchitectureStyleAllowed('omani', ['ru-tatarstan'], [
-    { id: 1, region_pattern: 'ru-*', style_key: 'omani', is_allowed: true }
-  ]), true);
+  assert.equal(
+    isArchitectureStyleAllowed(
+      'omani',
+      ['ru-tatarstan'],
+      [{ id: 1, region_pattern: 'ru-*', style_key: 'omani', is_allowed: true }]
+    ),
+    true
+  );
 
-  assert.equal(isArchitectureStyleAllowed('pseudo-russian', ['ru-kaliningrad'], [
-    { id: 2, region_pattern: 'ru-*', style_key: 'pseudo-russian', is_allowed: true },
-    { id: 3, region_pattern: 'ru-kaliningrad', style_key: 'pseudo-russian', is_allowed: false }
-  ]), false);
+  assert.equal(
+    isArchitectureStyleAllowed(
+      'pseudo-russian',
+      ['ru-kaliningrad'],
+      [
+        { id: 2, region_pattern: 'ru-*', style_key: 'pseudo-russian', is_allowed: true },
+        { id: 3, region_pattern: 'ru-kaliningrad', style_key: 'pseudo-russian', is_allowed: false }
+      ]
+    ),
+    false
+  );
 
-  assert.equal(isArchitectureStyleAllowed('gothic', ['de-berlin'], [
-    { id: 4, region_pattern: '*', style_key: 'gothic', is_allowed: false },
-    { id: 5, region_pattern: 'de-*', style_key: 'gothic', is_allowed: true }
-  ]), true);
+  assert.equal(
+    isArchitectureStyleAllowed(
+      'gothic',
+      ['de-berlin'],
+      [
+        { id: 4, region_pattern: '*', style_key: 'gothic', is_allowed: false },
+        { id: 5, region_pattern: 'de-*', style_key: 'gothic', is_allowed: true }
+      ]
+    ),
+    true
+  );
 
-  assert.equal(isArchitectureStyleAllowed('gothic', ['ru-moscow'], [
-    { id: 4, region_pattern: '*', style_key: 'gothic', is_allowed: false },
-    { id: 5, region_pattern: 'de-*', style_key: 'gothic', is_allowed: true }
-  ]), false);
+  assert.equal(
+    isArchitectureStyleAllowed(
+      'gothic',
+      ['ru-moscow'],
+      [
+        { id: 4, region_pattern: '*', style_key: 'gothic', is_allowed: false },
+        { id: 5, region_pattern: 'de-*', style_key: 'gothic', is_allowed: true }
+      ]
+    ),
+    false
+  );
 });
 
 test('default style maps cover regional styles while leaving other styles global', async () => {
@@ -87,4 +113,3 @@ test('default style maps cover regional styles while leaving other styles global
   assert.equal(Object.keys(STYLE_ALLOWED_REGION_PATTERNS).length, 0);
   assert.equal(Object.prototype.hasOwnProperty.call(STYLE_ALLOWED_REGIONS, 'gothic'), false);
 });
-

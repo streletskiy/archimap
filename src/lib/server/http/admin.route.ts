@@ -301,10 +301,7 @@ function registerAdminRoutes(deps: LooseRecord) {
       async (req, res) => {
         return sendPrivateJson(req, res, {
           ok: true,
-          items: await adminSettingsService.getRegionsUpstreamStatus(
-            req.query?.ids,
-            req.query?.force
-          )
+          items: await adminSettingsService.getRegionsUpstreamStatus(req.query?.ids, req.query?.force)
         });
       },
       {

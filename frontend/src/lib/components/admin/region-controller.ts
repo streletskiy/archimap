@@ -12,12 +12,7 @@ import {
   normalizeLookupValue,
   slugifyLoose
 } from './admin-data.shared';
-import type {
-  AdminDataSettings,
-  Region as DataRegion,
-  RegionDraft,
-  RegionExtractCandidate
-} from '$shared/types';
+import type { AdminDataSettings, Region as DataRegion, RegionDraft, RegionExtractCandidate } from '$shared/types';
 
 type DataTranslator = (key: string, params?: LooseRecord) => string;
 type FeatureLike = { properties?: Record<string, unknown> | null } | null;
@@ -145,7 +140,9 @@ function createMapRegionController({
     });
     regionResolveBusy.set(false);
     regionExtractCandidates.set([]);
-    dataStatus.set(meta.name ? dataT('status.mapRegionSelected', { name: meta.name }) : dataT('status.mapRegionSelectedFallback'));
+    dataStatus.set(
+      meta.name ? dataT('status.mapRegionSelected', { name: meta.name }) : dataT('status.mapRegionSelectedFallback')
+    );
     return true;
   }
 
@@ -168,7 +165,12 @@ function createMapRegionController({
       extractSource,
       extractId,
       extractLabel: extractLabel || extractId,
-      downloadUrl: candidate?.downloadUrl != null ? String(candidate.downloadUrl) : (candidate?.url != null ? String(candidate.url) : null),
+      downloadUrl:
+        candidate?.downloadUrl != null
+          ? String(candidate.downloadUrl)
+          : candidate?.url != null
+            ? String(candidate.url)
+            : null,
       matchKind: candidate?.matchKind != null ? String(candidate.matchKind) : null,
       exact: candidate?.exact === true
     };
@@ -178,7 +180,8 @@ function createMapRegionController({
     candidate: RegionExtractCandidate | null,
     options: { setStatus?: boolean } = {}
   ) {
-    const next = (candidate && typeof candidate === 'object' ? candidate : {}) as Partial<RegionExtractCandidate> & LooseRecord;
+    const next = (candidate && typeof candidate === 'object' ? candidate : {}) as Partial<RegionExtractCandidate> &
+      LooseRecord;
     patchRegionDraft({
       extractSource: String(next.extractSource || '').trim(),
       extractId: String(next.extractId || '').trim(),
@@ -224,7 +227,9 @@ function createMapRegionController({
         body: JSON.stringify({ query })
       });
       const items = Array.isArray(data?.items)
-        ? data.items.map((item) => normalizeRegionExtractCandidate(item)).filter((item): item is RegionExtractCandidate => Boolean(item))
+        ? data.items
+            .map((item) => normalizeRegionExtractCandidate(item))
+            .filter((item): item is RegionExtractCandidate => Boolean(item))
         : [];
       regionExtractCandidates.set(items);
 
@@ -236,7 +241,9 @@ function createMapRegionController({
 
       clearRegionExtractSelection();
       dataStatus.set(
-        items.length > 0 ? dataT('status.extractCandidatesLoaded', { count: items.length }) : dataT('status.resolveExtractNoMatches')
+        items.length > 0
+          ? dataT('status.extractCandidatesLoaded', { count: items.length })
+          : dataT('status.resolveExtractNoMatches')
       );
     } catch (error) {
       regionExtractCandidates.set([]);

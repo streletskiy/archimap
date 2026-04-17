@@ -1,13 +1,6 @@
 function createBootstrapDomain(context: LooseRecord = {}) {
-  const {
-    db,
-    state,
-    countRegions,
-    listRegionRows,
-    rowToRegion,
-    readAppDataSettingsRow,
-    normalizeNullableText
-  } = context;
+  const { db, state, countRegions, listRegionRows, rowToRegion, readAppDataSettingsRow, normalizeNullableText } =
+    context;
 
   async function getBootstrapState() {
     const settingsRow = await readAppDataSettingsRow();
@@ -21,7 +14,9 @@ function createBootstrapDomain(context: LooseRecord = {}) {
 
   async function writeBootstrapState(source, actor = 'system') {
     const updatedBy = normalizeNullableText(actor, 160);
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO app_data_settings (
         id,
         env_bootstrap_completed,
@@ -35,7 +30,9 @@ function createBootstrapDomain(context: LooseRecord = {}) {
         env_bootstrap_source = excluded.env_bootstrap_source,
         updated_by = excluded.updated_by,
         updated_at = datetime('now')
-    `).run(String(source || 'legacy-env'), updatedBy);
+    `
+      )
+      .run(String(source || 'legacy-env'), updatedBy);
   }
 
   async function bootstrapFromEnvIfNeeded(actor = 'system') {

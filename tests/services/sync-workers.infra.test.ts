@@ -43,7 +43,8 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
   let managedEnabled = true;
   const regionMap = new Map(regions.map((region) => [region.id, { ...region }]));
   const runMap = new Map();
-  const defaultRefreshAllNextSyncAt = async () => [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region }));
+  const defaultRefreshAllNextSyncAt = async () =>
+    [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region }));
 
   return {
     setManagedEnabled(value) {
@@ -58,14 +59,12 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
       return item ? { ...item } : null;
     },
     getRegionUpstreamState: async (regionOrId) => {
-      const region = typeof regionOrId === 'object' && regionOrId
-        ? regionOrId
-        : regionMap.get(Number(regionOrId));
+      const region = typeof regionOrId === 'object' && regionOrId ? regionOrId : regionMap.get(Number(regionOrId));
       return region ? { ...region } : null;
     },
     createQueuedRun: async (regionId, triggerReason, requestedBy) => {
       const run = {
-        id: nextRunId += 1,
+        id: (nextRunId += 1),
         regionId: Number(regionId),
         status: 'queued',
         triggerReason,
@@ -226,7 +225,12 @@ test('managed sync workers execute region jobs through a single queue', async ()
   assert.equal(spawnCalls.length, 1);
   assert.deepEqual(spawnCalls[0], ['--import', 'tsx', 'managed.ts', '--region-id=1']);
 
-  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].stdout.emit(
+    'data',
+    Buffer.from(
+      'SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'
+    )
+  );
   children[0].emit('close', 0, null);
 
   await waitForMicrotasks();
@@ -239,22 +243,25 @@ test('managed sync workers return queued responses without waiting for schedule 
   const children = [];
   const refreshGate = createDeferredPromise();
   let refreshStarted = 0;
-  const dataSettingsService = createManagedDataSettingsService([
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 1,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle'
+      }
+    ],
     {
-      id: 1,
-      enabled: true,
-      autoSyncEnabled: false,
-      autoSyncOnStart: false,
-      nextSyncAt: null,
-      lastSyncStatus: 'idle'
+      refreshAllNextSyncAt: async () => {
+        refreshStarted += 1;
+        await refreshGate.promise;
+        return [];
+      }
     }
-  ], {
-    refreshAllNextSyncAt: async () => {
-      refreshStarted += 1;
-      await refreshGate.promise;
-      return [];
-    }
-  });
+  );
 
   const workers = initSyncWorkersInfra({
     spawn: () => {
@@ -286,7 +293,12 @@ test('managed sync workers return queued responses without waiting for schedule 
   assert.equal(queued?.queued, true);
 
   refreshGate.resolve();
-  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].stdout.emit(
+    'data',
+    Buffer.from(
+      'SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'
+    )
+  );
   children[0].emit('close', 0, null);
 
   await waitForMicrotasks();
@@ -580,28 +592,32 @@ test('managed sync workers heartbeat queued and running runs while using stale-o
 
 test('managed sync workers reject manual sync when upstream data is already up to date', async () => {
   let spawnCalls = 0;
-  const dataSettingsService = createManagedDataSettingsService([
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 11,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle',
+        lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+      }
+    ],
     {
-      id: 11,
-      enabled: true,
-      autoSyncEnabled: false,
-      autoSyncOnStart: false,
-      nextSyncAt: null,
-      lastSyncStatus: 'idle',
-      lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+      getRegionUpstreamState: async (regionOrId) => {
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        return {
+          ...region,
+          upstreamStatus: 'up_to_date',
+          latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
+        };
+      }
     }
-  ], {
-    getRegionUpstreamState: async (regionOrId) => {
-      const region = typeof regionOrId === 'object' && regionOrId
-        ? regionOrId
-        : await dataSettingsService.getRegionById(regionOrId);
-      return {
-        ...region,
-        upstreamStatus: 'up_to_date',
-        latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
-      };
-    }
-  });
+  );
 
   const workers = initSyncWorkersInfra({
     spawn: () => {
@@ -628,32 +644,36 @@ test('managed sync workers reject manual sync when upstream data is already up t
 test('managed sync workers skip scheduled sync when upstream data is already up to date', async () => {
   let spawnCalls = 0;
   let rescheduled = 0;
-  const dataSettingsService = createManagedDataSettingsService([
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 12,
+        enabled: true,
+        autoSyncEnabled: true,
+        autoSyncOnStart: false,
+        nextSyncAt: '2026-04-08T00:00:00.000Z',
+        lastSyncStatus: 'idle',
+        lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+      }
+    ],
     {
-      id: 12,
-      enabled: true,
-      autoSyncEnabled: true,
-      autoSyncOnStart: false,
-      nextSyncAt: '2026-04-08T00:00:00.000Z',
-      lastSyncStatus: 'idle',
-      lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+      getRegionUpstreamState: async (regionOrId) => {
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        return {
+          ...region,
+          upstreamStatus: 'up_to_date',
+          latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
+        };
+      },
+      rescheduleRegionAfterSkippedSync: async (regionId) => {
+        rescheduled += 1;
+        return dataSettingsService.getRegionById(regionId);
+      }
     }
-  ], {
-    getRegionUpstreamState: async (regionOrId) => {
-      const region = typeof regionOrId === 'object' && regionOrId
-        ? regionOrId
-        : await dataSettingsService.getRegionById(regionOrId);
-      return {
-        ...region,
-        upstreamStatus: 'up_to_date',
-        latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
-      };
-    },
-    rescheduleRegionAfterSkippedSync: async (regionId) => {
-      rescheduled += 1;
-      return dataSettingsService.getRegionById(regionId);
-    }
-  });
+  );
 
   const workers = initSyncWorkersInfra({
     spawn: () => {
@@ -683,26 +703,30 @@ test('managed sync workers skip scheduled sync when upstream data is already up 
 
 test('managed sync workers pass imported source version marker to successful runs', async () => {
   const children = [];
-  const dataSettingsService = createManagedDataSettingsService([
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 13,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle'
+      }
+    ],
     {
-      id: 13,
-      enabled: true,
-      autoSyncEnabled: false,
-      autoSyncOnStart: false,
-      nextSyncAt: null,
-      lastSyncStatus: 'idle'
+      getRegionUpstreamState: async (regionOrId) => {
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        return {
+          ...region,
+          latestSourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
+        };
+      }
     }
-  ], {
-    getRegionUpstreamState: async (regionOrId) => {
-      const region = typeof regionOrId === 'object' && regionOrId
-        ? regionOrId
-        : await dataSettingsService.getRegionById(regionOrId);
-      return {
-        ...region,
-        latestSourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
-      };
-    }
-  });
+  );
 
   const workers = initSyncWorkersInfra({
     spawn: () => {
@@ -737,23 +761,26 @@ test('managed sync workers pass imported source version marker to successful run
 test('initAutoSync requeues recovered interrupted runs without waiting for upstream refresh', async () => {
   const children = [];
   let upstreamChecks = 0;
-  const dataSettingsService = createManagedDataSettingsService([
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 14,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'abandoned',
+        lastSyncError: 'Sync interrupted by process restart'
+      }
+    ],
     {
-      id: 14,
-      enabled: true,
-      autoSyncEnabled: false,
-      autoSyncOnStart: false,
-      nextSyncAt: null,
-      lastSyncStatus: 'abandoned',
-      lastSyncError: 'Sync interrupted by process restart'
+      recoverInterruptedRuns: async () => [{ id: 91, regionId: 14, status: 'abandoned' }],
+      getRegionUpstreamState: async () => {
+        upstreamChecks += 1;
+        throw new Error('recovery should bypass upstream refresh');
+      }
     }
-  ], {
-    recoverInterruptedRuns: async () => [{ id: 91, regionId: 14, status: 'abandoned' }],
-    getRegionUpstreamState: async () => {
-      upstreamChecks += 1;
-      throw new Error('recovery should bypass upstream refresh');
-    }
-  });
+  );
 
   const workers = initSyncWorkersInfra({
     spawn: () => {
@@ -825,8 +852,16 @@ test('managed sync workers parse SYNC_STAGE_JSON markers and persist stage updat
   children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"extract","detail":"downloading"}\n'));
   // Same stage again within the throttle window — must be ignored
   children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"extract","detail":"downloading"}\n'));
-  children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"build","progress":42,"detail":"shard 1/3"}\n'));
-  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].stdout.emit(
+    'data',
+    Buffer.from('SYNC_STAGE_JSON={"stage":"build","progress":42,"detail":"shard 1/3"}\n')
+  );
+  children[0].stdout.emit(
+    'data',
+    Buffer.from(
+      'SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'
+    )
+  );
   children[0].emit('close', 0, null);
   await waitForMicrotasks();
   // Let pending stage promises settle
@@ -919,12 +954,17 @@ test('signalProcessTree targets the detached POSIX process group', () => {
     throw new Error('child.kill fallback should not be used when group signalling succeeds');
   };
 
-  const result = _test_.signalProcessTree(child, 'SIGTERM', { error() {} }, {
-    platform: 'linux',
-    killRef: (pid, signal) => {
-      killCalls.push({ pid, signal });
+  const result = _test_.signalProcessTree(
+    child,
+    'SIGTERM',
+    { error() {} },
+    {
+      platform: 'linux',
+      killRef: (pid, signal) => {
+        killCalls.push({ pid, signal });
+      }
     }
-  });
+  );
 
   assert.equal(result, true);
   assert.deepEqual(killCalls, [{ pid: -4242, signal: 'SIGTERM' }]);

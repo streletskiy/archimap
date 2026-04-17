@@ -29,7 +29,15 @@ function createDeferred() {
 }
 
 async function loadControllerModule() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'components', 'admin', 'admin-data-controller.ts');
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'components',
+    'admin',
+    'admin-data-controller.ts'
+  );
   return import(pathToFileURL(modulePath).href);
 }
 
@@ -139,10 +147,7 @@ test('new region save stays pending until the create request resolves and skips 
     assert.equal(get(controller.regionSaving), false);
     assert.deepEqual(
       fetchCalls.map((call) => `${call.method} ${call.url}`),
-      [
-        'POST /api/admin/app-settings/data/regions',
-        'POST /api/admin/app-settings/data/regions/101/sync-now'
-      ]
+      ['POST /api/admin/app-settings/data/regions', 'POST /api/admin/app-settings/data/regions/101/sync-now']
     );
   } finally {
     mock.restoreAll();
@@ -190,19 +195,21 @@ test('background region run refresh preserves current history rows without enabl
       }
     ]);
 
-    runsGate.resolve(createJsonResponse({
-      items: [
-        {
-          id: 502,
-          status: 'running',
-          triggerReason: 'manual'
-        }
-      ],
-      total: 1,
-      page: 1,
-      pageSize: 20,
-      pageCount: 1
-    }));
+    runsGate.resolve(
+      createJsonResponse({
+        items: [
+          {
+            id: 502,
+            status: 'running',
+            triggerReason: 'manual'
+          }
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+        pageCount: 1
+      })
+    );
 
     await loadPromise;
 
@@ -385,26 +392,28 @@ test('stale region settings refresh does not restore an old sync error after opt
     assert.equal(region?.lastSyncStatus, 'queued');
     assert.equal(region?.lastSyncError, null);
 
-    staleLoadGate.resolve(createJsonResponse({
-      ok: true,
-      item: {
-        source: 'db',
-        bootstrap: { completed: true, source: null },
-        regions: [staleRegion],
-        filterTags: {
-          source: 'default',
-          allowlist: [],
-          defaultAllowlist: [],
-          availableKeys: [],
-          updatedBy: null,
-          updatedAt: null
-        },
-        filterPresets: {
+    staleLoadGate.resolve(
+      createJsonResponse({
+        ok: true,
+        item: {
           source: 'db',
-          items: []
+          bootstrap: { completed: true, source: null },
+          regions: [staleRegion],
+          filterTags: {
+            source: 'default',
+            allowlist: [],
+            defaultAllowlist: [],
+            availableKeys: [],
+            updatedBy: null,
+            updatedAt: null
+          },
+          filterPresets: {
+            source: 'db',
+            items: []
+          }
         }
-      }
-    }));
+      })
+    );
 
     await staleLoadPromise;
 
@@ -412,12 +421,14 @@ test('stale region settings refresh does not restore an old sync error after opt
     assert.equal(region?.lastSyncStatus, 'queued');
     assert.equal(region?.lastSyncError, null);
 
-    syncGate.resolve(createJsonResponse({
-      ok: true,
-      item: {
-        queued: true
-      }
-    }));
+    syncGate.resolve(
+      createJsonResponse({
+        ok: true,
+        item: {
+          queued: true
+        }
+      })
+    );
 
     await syncPromise;
     await Promise.resolve();
@@ -578,10 +589,12 @@ test('stale upstream status refresh does not clear a live queued sync state', as
     assert.equal(region?.lastSyncStatus, 'queued');
     assert.equal(region?.latestSourceDataUpdatedAt, null);
 
-    upstreamGate.resolve(createJsonResponse({
-      ok: true,
-      items: [staleUpstreamRegion]
-    }));
+    upstreamGate.resolve(
+      createJsonResponse({
+        ok: true,
+        items: [staleUpstreamRegion]
+      })
+    );
 
     await upstreamPromise;
     await Promise.resolve();

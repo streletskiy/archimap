@@ -7,7 +7,7 @@ let importCounter = 0;
 
 async function loadFilterFetcher() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'filter-fetcher.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 test('createFilterFetcher includes building part layers when resolving visible filter keys', async () => {
@@ -21,7 +21,8 @@ test('createFilterFetcher includes building part layers when resolving visible f
       input: String(input),
       body
     });
-      return new Response(JSON.stringify({
+    return new Response(
+      JSON.stringify({
         items: (Array.isArray(body.keys) ? body.keys : []).map((key) => ({
           osmKey: key,
           centerLon: key === 'way/202' ? 37.62 : 37.61,
@@ -30,10 +31,12 @@ test('createFilterFetcher includes building part layers when resolving visible f
             name: key === 'way/202' ? 'Part building' : 'Main building'
           }
         }))
-      }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      }
+    );
   }) as typeof fetch;
 
   try {
@@ -83,12 +86,7 @@ test('createFilterFetcher includes building part layers when resolving visible f
       rules: []
     });
 
-    assert.deepEqual(queriedLayers[0], [
-      'building-fill',
-      'building-line',
-      'part-fill',
-      'part-line'
-    ]);
+    assert.deepEqual(queriedLayers[0], ['building-fill', 'building-line', 'part-fill', 'part-line']);
     assert.deepEqual(requestedBodies[0].body.keys, ['way/101', 'way/202']);
     assert.deepEqual(result.matchedKeys, ['way/101', 'way/202']);
     assert.deepEqual(result.matchedFeatureIds, [202, 404]);
@@ -114,19 +112,22 @@ test('createFilterFetcher ignores missing overpass layers when resolving visible
       input: String(input),
       body
     });
-    return new Response(JSON.stringify({
-      items: (Array.isArray(body.keys) ? body.keys : []).map((key) => ({
-        osmKey: key,
-        centerLon: key === 'way/202' ? 37.62 : 37.61,
-        centerLat: key === 'way/202' ? 55.76 : 55.75,
-        sourceTags: {
-          name: key === 'way/202' ? 'Part building' : 'Main building'
-        }
-      }))
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
+    return new Response(
+      JSON.stringify({
+        items: (Array.isArray(body.keys) ? body.keys : []).map((key) => ({
+          osmKey: key,
+          centerLon: key === 'way/202' ? 37.62 : 37.61,
+          centerLat: key === 'way/202' ? 55.76 : 55.75,
+          sourceTags: {
+            name: key === 'way/202' ? 'Part building' : 'Main building'
+          }
+        }))
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      }
+    );
   }) as typeof fetch;
 
   try {
@@ -177,12 +178,7 @@ test('createFilterFetcher ignores missing overpass layers when resolving visible
       rules: []
     });
 
-    assert.deepEqual(queriedLayers[0], [
-      'building-fill',
-      'building-line',
-      'part-fill',
-      'part-line'
-    ]);
+    assert.deepEqual(queriedLayers[0], ['building-fill', 'building-line', 'part-fill', 'part-line']);
     assert.deepEqual(requestedBodies[0].body.keys, ['way/101', 'way/202']);
     assert.deepEqual(result.matchedKeys, ['way/101', 'way/202']);
   } finally {
@@ -200,21 +196,24 @@ test('createFilterFetcher merges locally loaded overpass buildings into primary 
       input: String(input),
       body
     });
-    return new Response(JSON.stringify({
-      matchedKeys: [],
-      matchedFeatureIds: [],
-      matchedLocations: [],
-      meta: {
-        rulesHash: 'fnv1a-test',
-        bboxHash: 'bbox-test',
-        truncated: false,
-        elapsedMs: 3,
-        cacheHit: false
+    return new Response(
+      JSON.stringify({
+        matchedKeys: [],
+        matchedFeatureIds: [],
+        matchedLocations: [],
+        meta: {
+          rulesHash: 'fnv1a-test',
+          bboxHash: 'bbox-test',
+          truncated: false,
+          elapsedMs: 3,
+          cacheHit: false
+        }
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
       }
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
+    );
   }) as typeof fetch;
 
   try {
@@ -280,9 +279,7 @@ test('createFilterFetcher merges locally loaded overpass buildings into primary 
         buildingPartFillLayerIds: ['part-fill'],
         buildingPartLineLayerIds: ['part-line']
       }),
-      resolveBuildingSourceConfigs: () => [
-        { sourceId: 'overpass-buildings-source' }
-      ],
+      resolveBuildingSourceConfigs: () => [{ sourceId: 'overpass-buildings-source' }],
       getCurrentRulesHash: () => 'fnv1a-test',
       getLastViewportHash: () => 'bbox-test',
       matchDefaultLimit: 25,
@@ -304,9 +301,7 @@ test('createFilterFetcher merges locally loaded overpass buildings into primary 
     assert.equal(requestedBodies[0].body.maxResults, 25);
     assert.deepEqual(result.matchedKeys, ['way/101']);
     assert.deepEqual(result.matchedFeatureIds, [202]);
-    assert.deepEqual(result.matchedLocations, [
-      { id: 202, lon: 37.61, lat: 55.75, count: 1, osmKey: 'way/101' }
-    ]);
+    assert.deepEqual(result.matchedLocations, [{ id: 202, lon: 37.61, lat: 55.75, count: 1, osmKey: 'way/101' }]);
     assert.equal(result.meta.dataVersion, 7);
   } finally {
     global.fetch = previousFetch;
@@ -336,35 +331,41 @@ test('createFilterFetcher derives filterable levels from local pmtiles render he
           return sourceId === 'region-buildings-source' ? { id: sourceId } : null;
         },
         queryRenderedFeatures() {
-          return [{
-            properties: {
-              osm_type: 'relation',
-              osm_id: 203
+          return [
+            {
+              properties: {
+                osm_type: 'relation',
+                osm_id: 203
+              }
             }
-          }];
+          ];
         },
         querySourceFeatures(sourceId) {
           if (sourceId !== 'region-buildings-source') return [];
-          return [{
-            id: 407,
-            geometry: {
-              type: 'Polygon',
-              coordinates: [[
-                [30, 60],
-                [30.01, 60],
-                [30.01, 60.01],
-                [30, 60.01],
-                [30, 60]
-              ]]
-            },
-            properties: {
-              osm_type: 'relation',
-              osm_id: 203,
-              feature_kind: 'building_part',
-              render_height_m: 18.5,
-              render_min_height_m: 5.5
+          return [
+            {
+              id: 407,
+              geometry: {
+                type: 'Polygon',
+                coordinates: [
+                  [
+                    [30, 60],
+                    [30.01, 60],
+                    [30.01, 60.01],
+                    [30, 60.01],
+                    [30, 60]
+                  ]
+                ]
+              },
+              properties: {
+                osm_type: 'relation',
+                osm_id: 203,
+                feature_kind: 'building_part',
+                render_height_m: 18.5,
+                render_min_height_m: 5.5
+              }
             }
-          }];
+          ];
         }
       }),
       resolveLayerIds: () => ({
@@ -373,9 +374,7 @@ test('createFilterFetcher derives filterable levels from local pmtiles render he
         buildingPartFillLayerIds: ['part-fill'],
         buildingPartLineLayerIds: ['part-line']
       }),
-      resolveBuildingSourceConfigs: () => [
-        { sourceId: 'region-buildings-source', sourceLayer: 'buildings' }
-      ],
+      resolveBuildingSourceConfigs: () => [{ sourceId: 'region-buildings-source', sourceLayer: 'buildings' }],
       getCurrentRulesHash: () => 'fnv1a-levels',
       getLastViewportHash: () => 'bbox-levels',
       matchDefaultLimit: 25,
@@ -406,21 +405,24 @@ test('createFilterFetcher forwards per-request maxResults to filter-matches', as
       input: String(input),
       body
     });
-    return new Response(JSON.stringify({
-      matchedKeys: [],
-      matchedFeatureIds: [],
-      matchedLocations: [],
-      meta: {
-        rulesHash: 'fnv1a-test',
-        bboxHash: 'bbox-test',
-        truncated: false,
-        elapsedMs: 4,
-        cacheHit: false
+    return new Response(
+      JSON.stringify({
+        matchedKeys: [],
+        matchedFeatureIds: [],
+        matchedLocations: [],
+        meta: {
+          rulesHash: 'fnv1a-test',
+          bboxHash: 'bbox-test',
+          truncated: false,
+          elapsedMs: 4,
+          cacheHit: false
+        }
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
       }
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
+    );
   }) as typeof fetch;
 
   try {
@@ -457,4 +459,3 @@ test('createFilterFetcher forwards per-request maxResults to filter-matches', as
     global.fetch = previousFetch;
   }
 });
-

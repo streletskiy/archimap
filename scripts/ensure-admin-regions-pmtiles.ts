@@ -7,12 +7,18 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_INPUT = path.join(REPO_ROOT, 'frontend', 'build', 'client', 'admin-regions.geojson');
 const DEFAULT_OUTPUT = path.join(REPO_ROOT, 'frontend', 'build', 'client', 'admin-regions.pmtiles');
 const DEFAULT_METADATA_OUTPUT = `${DEFAULT_OUTPUT}.meta.json`;
-const DEFAULT_MODE = String(process.env.ADMIN_REGIONS_PMTILES_ON_START || 'auto').trim().toLowerCase() || 'auto';
+const DEFAULT_MODE =
+  String(process.env.ADMIN_REGIONS_PMTILES_ON_START || 'auto')
+    .trim()
+    .toLowerCase() || 'auto';
 const DEFAULT_TIPPECANOE_BIN = String(process.env.TIPPECANOE_BIN || 'tippecanoe').trim() || 'tippecanoe';
 const VALID_MODES = new Set(['auto', 'always', 'never']);
 
 function normalizeMode(mode) {
-  const normalized = String(mode || '').trim().toLowerCase() || DEFAULT_MODE;
+  const normalized =
+    String(mode || '')
+      .trim()
+      .toLowerCase() || DEFAULT_MODE;
   if (!VALID_MODES.has(normalized)) {
     throw new Error(`Invalid ADMIN_REGIONS_PMTILES_ON_START mode: ${normalized}`);
   }
@@ -46,7 +52,11 @@ function buildRebuildReason({ mode, outputExists, metadata, inputSha256 }) {
   if (!outputExists) return 'missing_output';
   if (!metadata) return 'missing_metadata';
   if (metadata.invalid) return 'invalid_metadata';
-  if (String(metadata.inputSha256 || '').trim().toLowerCase() !== inputSha256.toLowerCase()) {
+  if (
+    String(metadata.inputSha256 || '')
+      .trim()
+      .toLowerCase() !== inputSha256.toLowerCase()
+  ) {
     return 'geojson_changed';
   }
   return '';
@@ -115,9 +125,7 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
     return { status: 'up_to_date', reason: 'metadata_match' };
   }
 
-  logger.log(
-    `[admin-regions] rebuilding pmtiles on startup (${rebuildReason}): ${toRepoRelative(outputPath)}`
-  );
+  logger.log(`[admin-regions] rebuilding pmtiles on startup (${rebuildReason}): ${toRepoRelative(outputPath)}`);
 
   ensureParentDir(outputPath);
   ensureParentDir(metadataPath);
@@ -145,9 +153,8 @@ module.exports = {
 };
 
 if (require.main === module) {
-  ensureAdminRegionsPmtiles()
-    .catch((error) => {
-      console.error(`[admin-regions] startup refresh failed: ${String(error?.message || error)}`);
-      process.exit(1);
-    });
+  ensureAdminRegionsPmtiles().catch((error) => {
+    console.error(`[admin-regions] startup refresh failed: ${String(error?.message || error)}`);
+    process.exit(1);
+  });
 }

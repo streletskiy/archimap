@@ -66,7 +66,8 @@ export function deriveBuildingLevelsText({
   const minLevel = readFirstNumericTag(normalizedTags, ['building:min_level', 'min_level']);
   const explicitMinHeight = readFirstNumericTag(normalizedTags, ['building:min_height', 'min_height']);
   const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
-  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
+  const normalizedExplicitMinHeight =
+    Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
   const explicitBaseHeight = Math.max(
     normalizedExplicitMinHeight,
     normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS
@@ -78,10 +79,10 @@ export function deriveBuildingLevelsText({
   const normalizedRenderHeight = Number(renderHeightMeters);
   const normalizedRenderMinHeight = Number(renderMinHeightMeters);
   if (
-    Number.isFinite(normalizedRenderHeight)
-    && Number.isFinite(normalizedRenderMinHeight)
-    && normalizedRenderHeight > normalizedRenderMinHeight
-    && (normalizedRenderMinHeight > 0 || normalizedRenderHeight > (DEFAULT_BUILDING_LEVEL_HEIGHT_METERS + 0.01))
+    Number.isFinite(normalizedRenderHeight) &&
+    Number.isFinite(normalizedRenderMinHeight) &&
+    normalizedRenderHeight > normalizedRenderMinHeight &&
+    (normalizedRenderMinHeight > 0 || normalizedRenderHeight > DEFAULT_BUILDING_LEVEL_HEIGHT_METERS + 0.01)
   ) {
     return deriveLevelsFromHeightSpan(normalizedRenderHeight - normalizedRenderMinHeight);
   }
@@ -98,15 +99,15 @@ export function buildBuilding3dPropertiesFromTags(tags: Record<string, unknown> 
   const normalizedLevels = Number.isFinite(levels) && levels > 0 ? levels : DEFAULT_BUILDING_EXTRUSION_LEVELS;
   const normalizedExplicitHeight = Number.isFinite(explicitHeight) && explicitHeight > 0 ? explicitHeight : null;
   const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
-  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0
-    ? explicitMinHeight
-    : 0;
+  const normalizedExplicitMinHeight =
+    Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
   const levelDerivedMinHeight = normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
   const renderMinHeightMeters = Math.max(normalizedExplicitMinHeight, levelDerivedMinHeight);
-  const levelDerivedHeightMeters = renderMinHeightMeters + (normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS);
-  const renderHeightMeters = normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
-    ? normalizedExplicitHeight
-    : levelDerivedHeightMeters;
+  const levelDerivedHeightMeters = renderMinHeightMeters + normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
+  const renderHeightMeters =
+    normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
+      ? normalizedExplicitHeight
+      : levelDerivedHeightMeters;
 
   return {
     [BUILDING_RENDER_HEIGHT_PROPERTY]: roundMeterValue(renderHeightMeters),

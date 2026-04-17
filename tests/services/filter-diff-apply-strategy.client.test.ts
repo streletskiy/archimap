@@ -6,8 +6,16 @@ const test = require('node:test');
 let importCounter = 0;
 
 async function loadFilterDiffApplyStrategy() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'filter-diff-apply-strategy.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'services',
+    'map',
+    'filter-diff-apply-strategy.ts'
+  );
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 function createMapStub() {
@@ -129,9 +137,7 @@ test('createFilterDiffApplyStrategy filters building parts separately and hides 
     highlightMode: 'layer'
   });
 
-  await strategy.applyFilteredFeaturePaintGroups([
-    { color: '#ff0000', ids: [202] }
-  ], 1, {
+  await strategy.applyFilteredFeaturePaintGroups([{ color: '#ff0000', ids: [202] }], 1, {
     matchedFeatureIds: [202],
     buildingPartsVisible: false
   });
@@ -193,18 +199,18 @@ test('createFilterDiffApplyStrategy keeps building remainder geometry in the bas
     highlightMode: 'layer'
   });
 
-  await strategy.applyFilteredFeaturePaintGroups([
-    { color: '#00ff00', ids: [303] }
-  ], 1, {
+  await strategy.applyFilteredFeaturePaintGroups([{ color: '#00ff00', ids: [303] }], 1, {
     matchedFeatureIds: [303],
     buildingPartsVisible: true
   });
 
   assert.deepEqual(map.filters.get('highlight-fill'), [
     'all',
-    ['any',
+    [
+      'any',
       ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
-      ['all',
+      [
+        'all',
         ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
         ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
       ]
@@ -213,9 +219,11 @@ test('createFilterDiffApplyStrategy keeps building remainder geometry in the bas
   ]);
   assert.deepEqual(map.filters.get('highlight-extrusion'), [
     'all',
-    ['any',
+    [
+      'any',
       ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_remainder'],
-      ['all',
+      [
+        'all',
         ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
         ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
       ]
@@ -250,28 +258,32 @@ test('createFilterDiffApplyStrategy renders clustered fallback markers below zoo
     highlightMode: 'layer'
   });
 
-  await strategy.applyFilteredFeaturePaintGroups([
+  await strategy.applyFilteredFeaturePaintGroups(
+    [
+      {
+        color: '#ff0000',
+        ids: [202],
+        points: [{ id: 202, lon: 37.62, lat: 55.76, count: 4, osmKey: 'way/101' }]
+      }
+    ],
+    1,
     {
-      color: '#ff0000',
-      ids: [202],
-      points: [
-        { id: 202, lon: 37.62, lat: 55.76, count: 4, osmKey: 'way/101' }
-      ]
+      matchedFeatureIds: [202],
+      matchedCount: 4,
+      renderMode: 'markers'
     }
-  ], 1, {
-    matchedFeatureIds: [202],
-    matchedCount: 4,
-    renderMode: 'markers'
-  });
+  );
 
   assert.ok(map.sources.has('filter-fallback-points-ff0000'));
-  assert.deepEqual(map.addedLayers.map((entry) => entry.id), [
-    'filter-fallback-points-ff0000-clusters',
-    'filter-fallback-points-ff0000-counts',
-    'filter-fallback-points-ff0000-points'
-  ]);
+  assert.deepEqual(
+    map.addedLayers.map((entry) => entry.id),
+    [
+      'filter-fallback-points-ff0000-clusters',
+      'filter-fallback-points-ff0000-counts',
+      'filter-fallback-points-ff0000-points'
+    ]
+  );
   assert.equal(map.getSource('filter-fallback-points-ff0000').data.features.length, 1);
   assert.equal(map.getSource('filter-fallback-points-ff0000').data.features[0].properties.filter_color, '#ff0000');
   assert.equal(map.getSource('filter-fallback-points-ff0000').data.features[0].properties.match_count, 4);
 });
-

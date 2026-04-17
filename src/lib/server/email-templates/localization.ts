@@ -38,7 +38,9 @@ function buildEmailCopy(raw: LooseRecord = {}) {
 }
 
 function normalizeEmailLocale(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) return EMAIL_DEFAULT_LOCALE;
   const short = text.split('-')[0];
   return EMAIL_SUPPORTED_LOCALES.includes(short) ? short : EMAIL_DEFAULT_LOCALE;
@@ -65,7 +67,10 @@ function parseCookieValue(cookieHeader, name = EMAIL_LOCALE_COOKIE_NAME) {
 function parseAcceptLanguage(headerValue) {
   const parts = String(headerValue || '').split(',');
   for (const part of parts) {
-    const candidate = String(part || '').trim().split(';')[0].trim();
+    const candidate = String(part || '')
+      .trim()
+      .split(';')[0]
+      .trim();
     const normalized = normalizeEmailLocale(candidate);
     if (normalized) return normalized;
   }
@@ -74,13 +79,14 @@ function parseAcceptLanguage(headerValue) {
 
 function resolveEmailLocale(input: LooseRecord = {}) {
   const req = input.req && typeof input.req === 'object' ? input.req : null;
-  const candidate = input.locale
-    || input.bodyLocale
-    || req?.body?.locale
-    || input.queryLocale
-    || req?.query?.lang
-    || parseCookieValue(input.cookie || req?.headers?.cookie || req?.headers?.Cookie)
-    || parseAcceptLanguage(input.acceptLanguage || req?.headers?.['accept-language'] || req?.headers?.['Accept-Language']);
+  const candidate =
+    input.locale ||
+    input.bodyLocale ||
+    req?.body?.locale ||
+    input.queryLocale ||
+    req?.query?.lang ||
+    parseCookieValue(input.cookie || req?.headers?.cookie || req?.headers?.Cookie) ||
+    parseAcceptLanguage(input.acceptLanguage || req?.headers?.['accept-language'] || req?.headers?.['Accept-Language']);
   return normalizeEmailLocale(candidate);
 }
 

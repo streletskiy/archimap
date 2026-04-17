@@ -15,9 +15,11 @@ function createSearchIndexRefreshService(options: LooseRecord = {}) {
   }
 
   const isPostgres = db.provider === 'postgres';
-  const selectRawSearchSourceByBuilding = db.prepare(buildRawSearchSourceQuery({
-    where: 'WHERE bc.osm_type = ? AND bc.osm_id = ?'
-  }));
+  const selectRawSearchSourceByBuilding = db.prepare(
+    buildRawSearchSourceQuery({
+      where: 'WHERE bc.osm_type = ? AND bc.osm_id = ?'
+    })
+  );
   const upsertSearchSource = db.prepare(BUILDING_SEARCH_SOURCE_UPSERT_SQL);
   const deleteSearchSource = db.prepare(BUILDING_SEARCH_SOURCE_DELETE_SQL);
   const deleteSearchFts = !isPostgres ? db.prepare(BUILDING_SEARCH_FTS_DELETE_SQL) : null;

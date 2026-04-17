@@ -7,20 +7,24 @@ const local = pgSchema('local');
 const userEdits = pgSchema('user_edits');
 const auth = pgSchema('auth');
 
-const pgBuildingContours = osm.table('building_contours', {
-  osmType: text('osm_type').notNull(),
-  osmId: bigint('osm_id', { mode: 'number' }).notNull(),
-  tagsJson: text('tags_json'),
-  minLon: doublePrecision('min_lon').notNull(),
-  minLat: doublePrecision('min_lat').notNull(),
-  maxLon: doublePrecision('max_lon').notNull(),
-  maxLat: doublePrecision('max_lat').notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  geom: sql`geometry(MultiPolygon, 4326)`,
-  buildingLevelsNum: doublePrecision('building_levels_num')
-}, (table) => ({
-  pk: sql`PRIMARY KEY (${table.osmType}, ${table.osmId})`
-}));
+const pgBuildingContours = osm.table(
+  'building_contours',
+  {
+    osmType: text('osm_type').notNull(),
+    osmId: bigint('osm_id', { mode: 'number' }).notNull(),
+    tagsJson: text('tags_json'),
+    minLon: doublePrecision('min_lon').notNull(),
+    minLat: doublePrecision('min_lat').notNull(),
+    maxLon: doublePrecision('max_lon').notNull(),
+    maxLat: doublePrecision('max_lat').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    geom: sql`geometry(MultiPolygon, 4326)`,
+    buildingLevelsNum: doublePrecision('building_levels_num')
+  },
+  (table) => ({
+    pk: sql`PRIMARY KEY (${table.osmType}, ${table.osmId})`
+  })
+);
 
 const pgArchitecturalInfo = local.table('architectural_info', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),

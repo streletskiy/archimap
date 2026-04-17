@@ -19,7 +19,7 @@ function createWorkspace(regionId) {
 
 function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 function decodeOsmFeatureId(featureId) {
@@ -28,13 +28,15 @@ function decodeOsmFeatureId(featureId) {
     return null;
   }
   return {
-    osm_type: (numericFeatureId % 2) === 1 ? 'relation' : 'way',
+    osm_type: numericFeatureId % 2 === 1 ? 'relation' : 'way',
     osm_id: Math.trunc(numericFeatureId / 2)
   };
 }
 
 function normalizeFeatureKind(rawFeatureKind) {
-  const kind = String(rawFeatureKind || '').trim().toLowerCase();
+  const kind = String(rawFeatureKind || '')
+    .trim()
+    .toLowerCase();
   if (kind === 'building_remainder') return 'building_remainder';
   return kind === 'building_part' ? 'building_part' : 'building';
 }
@@ -48,7 +50,10 @@ function deriveFeatureKindFromTagsJson(tagsJson) {
     if (Object.prototype.hasOwnProperty.call(tags, 'building')) {
       return 'building';
     }
-    if (Object.prototype.hasOwnProperty.call(tags, 'building:part') || Object.prototype.hasOwnProperty.call(tags, 'building_part')) {
+    if (
+      Object.prototype.hasOwnProperty.call(tags, 'building:part') ||
+      Object.prototype.hasOwnProperty.call(tags, 'building_part')
+    ) {
       return 'building_part';
     }
   } catch {
@@ -108,15 +113,15 @@ function buildFeature3dPropertiesFromTags(tags = {}) {
   const normalizedLevels = Number.isFinite(levels) && levels > 0 ? levels : DEFAULT_BUILDING_EXTRUSION_LEVELS;
   const normalizedExplicitHeight = Number.isFinite(explicitHeight) && explicitHeight > 0 ? explicitHeight : null;
   const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
-  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0
-    ? explicitMinHeight
-    : 0;
+  const normalizedExplicitMinHeight =
+    Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
   const levelDerivedMinHeight = normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
   const renderMinHeightMeters = Math.max(normalizedExplicitMinHeight, levelDerivedMinHeight);
-  const levelDerivedHeightMeters = renderMinHeightMeters + (normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS);
-  const renderHeightMeters = normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
-    ? normalizedExplicitHeight
-    : levelDerivedHeightMeters;
+  const levelDerivedHeightMeters = renderMinHeightMeters + normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
+  const renderHeightMeters =
+    normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
+      ? normalizedExplicitHeight
+      : levelDerivedHeightMeters;
 
   return {
     render_height_m: roundMeterValue(renderHeightMeters),
@@ -200,7 +205,7 @@ function formatRenderedGeojsonFeatureLine(
 function normalizeGeometryWkbHex(value) {
   const text = String(value ?? '').trim();
   if (!text) return null;
-  if ((text.length % 2) !== 0 || !/^[0-9a-fA-F]+$/.test(text)) {
+  if (text.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(text)) {
     return null;
   }
   return text.toUpperCase();
@@ -254,9 +259,10 @@ function parseRenderedGeojsonFeaturePayload(line) {
   const payload = JSON.parse(String(line || '').trim());
   const decodedFeatureId = decodeOsmFeatureId(payload?.id);
   const geometry = payload?.geometry;
-  const properties = payload?.properties && typeof payload.properties === 'object' && !Array.isArray(payload.properties)
-    ? payload.properties
-    : {};
+  const properties =
+    payload?.properties && typeof payload.properties === 'object' && !Array.isArray(payload.properties)
+      ? payload.properties
+      : {};
   if (!decodedFeatureId || !geometry || typeof geometry !== 'object') {
     throw new Error('Importer produced invalid rendered GeoJSON feature');
   }

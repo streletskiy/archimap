@@ -9,7 +9,12 @@ export const SEARCH_INDEX_RELEVANT_FIELDS: readonly string[] = Object.freeze([
 export const SEARCH_INDEX_RELEVANT_FIELD_SET = new Set<string>(SEARCH_INDEX_RELEVANT_FIELDS);
 
 function normalizeSearchIndexFieldKey(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'field')) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.prototype.hasOwnProperty.call(value, 'field')
+  ) {
     return String(value.field ?? '').trim();
   }
   return String(value ?? '').trim();

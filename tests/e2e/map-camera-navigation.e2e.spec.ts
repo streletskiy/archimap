@@ -73,7 +73,11 @@ type MapPreservedOptions = {
   expectedSearchParams?: Array<[string, string]>;
 };
 
-async function assertMapPreservedViaInfo(page, clickTarget, { startUrl, expectedSearchParams = [] }: MapPreservedOptions = {}) {
+async function assertMapPreservedViaInfo(
+  page,
+  clickTarget,
+  { startUrl, expectedSearchParams = [] }: MapPreservedOptions = {}
+) {
   const initialUrl = startUrl || `${BASE_URL}/app?lat=56.325304&lng=44.01357&z=15.1`;
   await page.goto(initialUrl, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });

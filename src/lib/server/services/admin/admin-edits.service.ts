@@ -38,16 +38,24 @@ function createAdminEditsService(options: LooseRecord = {}) {
     to,
     user,
     createdBy
-  }: BuildingEditListQuery = {}): Promise<{ total: number; page: number; pageSize: number; pageCount: number; items: BuildingEdit[]; authors: string[] }> {
+  }: BuildingEditListQuery = {}): Promise<{
+    total: number;
+    page: number;
+    pageSize: number;
+    pageCount: number;
+    items: BuildingEdit[];
+    authors: string[];
+  }> {
     const statusRaw = String(status || '')
       .trim()
       .toLowerCase();
     const normalizedStatus = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const normalizedLimit = parseLimit(limit, 20, 1, 100);
     const normalizedPage = Math.max(1, Math.trunc(Number(page) || 1));
-    const normalizedUser = String(createdBy ?? user ?? '')
-      .trim()
-      .toLowerCase() || null;
+    const normalizedUser =
+      String(createdBy ?? user ?? '')
+        .trim()
+        .toLowerCase() || null;
 
     return getUserEditsPageRaw({
       createdBy: normalizedUser,

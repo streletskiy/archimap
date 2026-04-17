@@ -32,14 +32,7 @@ const CUSTOM_BASEMAP_LIGHT_RAIL_OUTER_COLOR = '#828282';
 const CUSTOM_BASEMAP_LIGHT_RAIL_INNER_COLOR = '#ffffff';
 const CUSTOM_BASEMAP_LIGHT_ROAD_COLOR = '#dbdbdb';
 const CUSTOM_BASEMAP_SOLID_TRANSIT_KIND_VALUES = ['tram', 'funicular'];
-const CUSTOM_BASEMAP_DASHED_KIND_VALUES = [
-  'footway',
-  'path',
-  'cycleway',
-  'sidewalk',
-  'crossing',
-  'steps'
-];
+const CUSTOM_BASEMAP_DASHED_KIND_VALUES = ['footway', 'path', 'cycleway', 'sidewalk', 'crossing', 'steps'];
 const CUSTOM_BASEMAP_DETAILED_KIND_VALUES = [
   ...CUSTOM_BASEMAP_DASHED_KIND_VALUES,
   ...CUSTOM_BASEMAP_SOLID_TRANSIT_KIND_VALUES,
@@ -214,7 +207,12 @@ function buildCustomBasemapRoadDetailLayers(theme) {
       source: 'protomaps',
       'source-layer': 'roads',
       minzoom: 10,
-      filter: ['all', ['==', 'kind', 'rail'], ['!in', 'kind_detail', ...CUSTOM_BASEMAP_SOLID_TRANSIT_KIND_VALUES], ['!=', 'kind_detail', 'subway']],
+      filter: [
+        'all',
+        ['==', 'kind', 'rail'],
+        ['!in', 'kind_detail', ...CUSTOM_BASEMAP_SOLID_TRANSIT_KIND_VALUES],
+        ['!=', 'kind_detail', 'subway']
+      ],
       layout: {
         'line-cap': 'butt',
         'line-join': 'round'
@@ -258,19 +256,7 @@ function buildCustomBasemapRoadDetailLayers(theme) {
       paint: {
         'line-color': CUSTOM_BASEMAP_LIGHT_TRAM_COLOR,
         'line-opacity': 0.95,
-        'line-width': [
-          'interpolate',
-          ['exponential', 1.2],
-          ['zoom'],
-          12,
-          0.8,
-          14,
-          1.2,
-          16,
-          2.2,
-          19,
-          3.8
-        ]
+        'line-width': ['interpolate', ['exponential', 1.2], ['zoom'], 12, 0.8, 14, 1.2, 16, 2.2, 19, 3.8]
       }
     }
   ];
@@ -452,9 +438,16 @@ function buildCustomBasemapFlavor(theme) {
 
 function shouldHideCustomBasemapLayer(layer) {
   if (!layer || typeof layer !== 'object') return false;
-  const id = String(layer.id || '').trim().toLowerCase();
+  const id = String(layer.id || '')
+    .trim()
+    .toLowerCase();
   if (id === 'pois' || id.startsWith('pois-')) return true;
-  if (String(layer?.['source-layer'] || '').trim().toLowerCase() === 'pois') return true;
+  if (
+    String(layer?.['source-layer'] || '')
+      .trim()
+      .toLowerCase() === 'pois'
+  )
+    return true;
   return false;
 }
 
@@ -497,18 +490,16 @@ function transformCustomBasemapStyle(style, theme = 'light') {
         nextLayers.splice(landuseParkIndex + 1, 0, ...extraLanduseLayers);
       }
     }
-    const pedestrianInsertIndex = [
-      'roads_tunnels_other_casing',
-      'roads_other',
-      'roads_runway'
-    ]
+    const pedestrianInsertIndex = ['roads_tunnels_other_casing', 'roads_other', 'roads_runway']
       .map((layerId) => nextLayers.findIndex((layer) => layer?.id === layerId))
       .find((index) => index >= 0);
     const landusePedestrianLayer = nextLayers.find((layer) => layer?.id === 'landuse_pedestrian');
     if (landusePedestrianLayer) {
       landusePedestrianLayer.filter = [
         'all',
-        Array.isArray(landusePedestrianLayer.filter) ? landusePedestrianLayer.filter : ['in', 'kind', 'pedestrian', 'dam'],
+        Array.isArray(landusePedestrianLayer.filter)
+          ? landusePedestrianLayer.filter
+          : ['in', 'kind', 'pedestrian', 'dam'],
         ['!in', 'kind', 'pedestrian']
       ];
       const extraLanduseLayers = buildCustomBasemapPedestrianDetailLayers(normalizedTheme);
@@ -563,27 +554,34 @@ function getCustomBasemapStyleCacheKey(theme, localeCode, sourceUrl) {
 }
 
 function buildCustomBasemapStyle(theme, localeCode = 'en', runtimeConfig = getRuntimeConfig()) {
-  const sourceSignature = buildBasemapSourceUrl(getCustomBasemapUrl(runtimeConfig), getCustomBasemapApiKey(runtimeConfig));
+  const sourceSignature = buildBasemapSourceUrl(
+    getCustomBasemapUrl(runtimeConfig),
+    getCustomBasemapApiKey(runtimeConfig)
+  );
   const cacheKey = getCustomBasemapStyleCacheKey(theme, localeCode, sourceSignature);
   let cachedStyle = CUSTOM_STYLE_CACHE.get(cacheKey);
   if (!cachedStyle) {
     const normalizedTheme = normalizeThemeVariant(theme);
     const normalizedLocale = normalizeMapLabelLocale(localeCode);
-    cachedStyle = transformCustomBasemapStyle({
-      version: 8,
-      sources: {
-        protomaps: {
-          type: 'vector',
-          attribution: '<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://osm.org/copyright">OpenStreetMap</a>',
-          url: resolveSameOriginUrl(CUSTOM_BASEMAP_TILEJSON_PROXY_URL)
-        }
+    cachedStyle = transformCustomBasemapStyle(
+      {
+        version: 8,
+        sources: {
+          protomaps: {
+            type: 'vector',
+            attribution:
+              '<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://osm.org/copyright">OpenStreetMap</a>',
+            url: resolveSameOriginUrl(CUSTOM_BASEMAP_TILEJSON_PROXY_URL)
+          }
+        },
+        layers: layers('protomaps', buildCustomBasemapFlavor(normalizedTheme), {
+          lang: normalizedLocale
+        }),
+        glyphs: resolveSameOriginUrl(PROTOMAPS_GLYPHS_PROXY_URL),
+        sprite: resolveSameOriginUrl(buildProtomapsSpriteProxyUrl(normalizedTheme))
       },
-      layers: layers('protomaps', buildCustomBasemapFlavor(normalizedTheme), {
-        lang: normalizedLocale
-      }),
-      glyphs: resolveSameOriginUrl(PROTOMAPS_GLYPHS_PROXY_URL),
-      sprite: resolveSameOriginUrl(buildProtomapsSpriteProxyUrl(normalizedTheme))
-    }, normalizedTheme);
+      normalizedTheme
+    );
     CUSTOM_STYLE_CACHE.set(cacheKey, cachedStyle);
   }
 
@@ -651,11 +649,7 @@ function localizeTokenTemplate(value, localeCode, { forceDynamicTokens = false }
     if (literalPart) {
       parts.push(literalPart);
     }
-    parts.push(
-      isNameToken(token)
-        ? buildLocalizedNameExpression(localeCode)
-        : ['coalesce', ['get', token], '']
-    );
+    parts.push(isNameToken(token) ? buildLocalizedNameExpression(localeCode) : ['coalesce', ['get', token], '']);
     lastIndex = matchIndex + fullMatch.length;
   }
   const tail = value.slice(lastIndex);
@@ -714,7 +708,9 @@ function shouldHideMapTilerLayer(layer) {
 }
 
 export function normalizeMapLabelLocale(localeCode) {
-  const normalized = String(localeCode || '').trim().toLowerCase();
+  const normalized = String(localeCode || '')
+    .trim()
+    .toLowerCase();
   return normalized.startsWith('ru') ? 'ru' : 'en';
 }
 
@@ -722,10 +718,7 @@ export function getMapStyleForTheme(theme, runtimeConfig = getRuntimeConfig(), l
   const basemapProvider = getBasemapProvider(runtimeConfig);
   const maptilerApiKey = getMapTilerApiKey(runtimeConfig);
   if (basemapProvider === 'maptiler' && maptilerApiKey) {
-    return buildMapTilerStyleUrl(
-      theme === 'dark' ? MAPTILER_DARK_STYLE_ID : MAPTILER_LIGHT_STYLE_ID,
-      maptilerApiKey
-    );
+    return buildMapTilerStyleUrl(theme === 'dark' ? MAPTILER_DARK_STYLE_ID : MAPTILER_LIGHT_STYLE_ID, maptilerApiKey);
   }
   if (basemapProvider === 'custom' && getCustomBasemapUrl(runtimeConfig)) {
     return buildCustomBasemapStyle(theme, localeCode, runtimeConfig);
@@ -802,11 +795,7 @@ async function loadMapTilerStyle(url, localeCode, fetchImpl = globalThis.fetch) 
 
 export async function resolveMapStyleForTheme(
   theme,
-  {
-    runtimeConfig = getRuntimeConfig(),
-    localeCode = 'en',
-    fetchImpl = globalThis.fetch
-  } = {}
+  { runtimeConfig = getRuntimeConfig(), localeCode = 'en', fetchImpl = globalThis.fetch } = {}
 ) {
   const style = getMapStyleForTheme(theme, runtimeConfig, localeCode);
   const basemapProvider = getBasemapProvider(runtimeConfig);

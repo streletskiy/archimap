@@ -5,10 +5,7 @@ const {
   exportRegionMembersToNdjson,
   loadRegion
 } = require('./region-db');
-const {
-  applyRegionImport,
-  publishPmtilesArchive
-} = require('./import-applier');
+const { applyRegionImport, publishPmtilesArchive } = require('./import-applier');
 
 module.exports = {
   applyRegionImport,

@@ -26,7 +26,9 @@ function round(value, precision) {
 }
 
 function parseBooleanFlag(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) return null;
   if (text === '1' || text === 'true' || text === 'yes' || text === 'on') return true;
   if (text === '0' || text === 'false' || text === 'no' || text === 'off') return false;
@@ -78,14 +80,16 @@ function parsePositiveInt(value) {
 function decodeEncodedFeatureId(rawId) {
   const n = parsePositiveInt(rawId);
   if (n == null) return null;
-  const osmType = (n % 2) === 1 ? 'relation' : 'way';
+  const osmType = n % 2 === 1 ? 'relation' : 'way';
   const osmId = Math.floor(n / 2);
   if (!Number.isInteger(osmId) || osmId <= 0) return null;
   return { osmType, osmId };
 }
 
 function parseBuildingParam(raw) {
-  const text = String(raw || '').trim().toLowerCase();
+  const text = String(raw || '')
+    .trim()
+    .toLowerCase();
   if (!text) return null;
   if (text.includes('/')) {
     const [osmType, osmIdRaw] = text.split('/');
@@ -98,8 +102,12 @@ function parseBuildingParam(raw) {
 }
 
 function parseInfoState(params) {
-  const tabRaw = String(params.get('tab') || params.get('info') || '').trim().toLowerCase();
-  const docRaw = String(params.get('doc') || params.get('section') || '').trim().toLowerCase();
+  const tabRaw = String(params.get('tab') || params.get('info') || '')
+    .trim()
+    .toLowerCase();
+  const docRaw = String(params.get('doc') || params.get('section') || '')
+    .trim()
+    .toLowerCase();
   if (tabRaw === 'user-agreement') return { tab: 'legal', doc: 'terms' };
   if (tabRaw === 'privacy-policy') return { tab: 'legal', doc: 'privacy' };
 
@@ -131,7 +139,8 @@ export function parseUrlState(input) {
 }
 
 export function patchUrlState(currentUrl, patch: LooseRecord = {}) {
-  const nextUrl = currentUrl instanceof URL ? new URL(currentUrl.toString()) : new URL(String(currentUrl || ''), 'http://localhost');
+  const nextUrl =
+    currentUrl instanceof URL ? new URL(currentUrl.toString()) : new URL(String(currentUrl || ''), 'http://localhost');
   const params = nextUrl.searchParams;
   params.delete('buildings3d');
   params.delete('b3d');
@@ -185,7 +194,9 @@ export function patchUrlState(currentUrl, patch: LooseRecord = {}) {
 
   if (Object.prototype.hasOwnProperty.call(patch, 'building')) {
     const building = patch.building;
-    const osmType = String(building?.osmType || '').trim().toLowerCase();
+    const osmType = String(building?.osmType || '')
+      .trim()
+      .toLowerCase();
     const osmId = parsePositiveInt(building?.osmId);
     if ((osmType !== 'way' && osmType !== 'relation') || osmId == null) {
       params.delete('building');
@@ -217,13 +228,19 @@ export function patchUrlState(currentUrl, patch: LooseRecord = {}) {
       params.delete('doc');
       params.delete('info');
       params.delete('section');
-    } else if (String(info.tab || '').trim().toLowerCase() === 'about') {
+    } else if (
+      String(info.tab || '')
+        .trim()
+        .toLowerCase() === 'about'
+    ) {
       params.set('tab', 'about');
       params.delete('doc');
       params.delete('info');
       params.delete('section');
     } else {
-      const docRaw = String(info.doc || '').trim().toLowerCase();
+      const docRaw = String(info.doc || '')
+        .trim()
+        .toLowerCase();
       const doc = docRaw === 'privacy' || docRaw === 'cookies' ? docRaw : 'terms';
       params.set('tab', 'legal');
       params.set('doc', doc);

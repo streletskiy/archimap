@@ -2,8 +2,9 @@
 
 const { chromium } = require('@playwright/test');
 
-const TARGET_URL = process.env.BENCHMARK_URL
-  || 'http://127.0.0.1:3252/?lat=55.753115&lng=37.629365&z=13.41&f=AgEPYnVpbGRpbmc6bGV2ZWxzBgKG76wBAAEBMQL94EcBAAEBMgL9unQCAAcBMwAIATUC-5I8AgAHATUACAE5AvhxcQIABwE5AAgCMTYCwIT8AQAHAjE2';
+const TARGET_URL =
+  process.env.BENCHMARK_URL ||
+  'http://127.0.0.1:3252/?lat=55.753115&lng=37.629365&z=13.41&f=AgEPYnVpbGRpbmc6bGV2ZWxzBgKG76wBAAEBMQL94EcBAAEBMgL9unQCAAcBMwAIATUC-5I8AgAHATUACAE5AvhxcQIABwE5AAgCMTYCwIT8AQAHAjE2';
 const VIEWPORT = { width: 1440, height: 900 };
 const SAMPLES = Math.max(1, Number(process.env.BENCHMARK_SAMPLES || 5));
 
@@ -19,26 +20,31 @@ function summarize(values) {
   };
 }
 
-async function waitForAuthoritative(page, previousRequestStarts, {
-  expectRequest = false,
-  allowCacheHit = false
-} = {}) {
-  await page.waitForFunction(({ requestStarts, expectRequestFlag, allowCacheHitFlag }) => {
-    const el = document.querySelector('.map-canvas') as HTMLElement | null;
-    const phase = String(el?.dataset?.filterPhase || '');
-    const count = Number(el?.dataset?.filterLastCount || 0);
-    const starts = Number((window.__MAP_DEBUG__?.filterRequests || {}).start || 0);
-    const cacheHit = String(el?.dataset?.filterCacheHit || '') === 'true';
-    if (phase !== 'authoritative' || count <= 0) return false;
-    if (!expectRequestFlag) return true;
-    return starts > requestStarts || (allowCacheHitFlag && cacheHit);
-  }, {
-    requestStarts: Number(previousRequestStarts || 0),
-    expectRequestFlag: Boolean(expectRequest),
-    allowCacheHitFlag: Boolean(allowCacheHit)
-  }, {
-    timeout: 120000
-  });
+async function waitForAuthoritative(
+  page,
+  previousRequestStarts,
+  { expectRequest = false, allowCacheHit = false } = {}
+) {
+  await page.waitForFunction(
+    ({ requestStarts, expectRequestFlag, allowCacheHitFlag }) => {
+      const el = document.querySelector('.map-canvas') as HTMLElement | null;
+      const phase = String(el?.dataset?.filterPhase || '');
+      const count = Number(el?.dataset?.filterLastCount || 0);
+      const starts = Number((window.__MAP_DEBUG__?.filterRequests || {}).start || 0);
+      const cacheHit = String(el?.dataset?.filterCacheHit || '') === 'true';
+      if (phase !== 'authoritative' || count <= 0) return false;
+      if (!expectRequestFlag) return true;
+      return starts > requestStarts || (allowCacheHitFlag && cacheHit);
+    },
+    {
+      requestStarts: Number(previousRequestStarts || 0),
+      expectRequestFlag: Boolean(expectRequest),
+      allowCacheHitFlag: Boolean(allowCacheHit)
+    },
+    {
+      timeout: 120000
+    }
+  );
   await page.waitForTimeout(900);
 }
 
@@ -53,12 +59,14 @@ async function readSnapshot(page) {
       active: String(el?.dataset?.filterActive || ''),
       count: Number(el?.dataset?.filterLastCount || 0),
       elapsedMs: Number(el?.dataset?.filterLastElapsedMs || 0),
-      applyMs: mode === 'paint-property'
-        ? Number(el?.dataset?.filterLastPaintApplyMs || 0)
-        : Number(el?.dataset?.filterLastApplyDiffMs || 0),
-      applyCalls: mode === 'paint-property'
-        ? Number(el?.dataset?.filterSetPaintPropertyCalls || 0)
-        : Number(el?.dataset?.filterSetFeatureStateCalls || 0),
+      applyMs:
+        mode === 'paint-property'
+          ? Number(el?.dataset?.filterLastPaintApplyMs || 0)
+          : Number(el?.dataset?.filterLastApplyDiffMs || 0),
+      applyCalls:
+        mode === 'paint-property'
+          ? Number(el?.dataset?.filterSetPaintPropertyCalls || 0)
+          : Number(el?.dataset?.filterSetFeatureStateCalls || 0),
       cacheHit: String(el?.dataset?.filterCacheHit || ''),
       mode,
       requestStarts: Number(requests.start || 0),

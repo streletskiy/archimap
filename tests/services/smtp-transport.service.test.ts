@@ -56,19 +56,22 @@ test('sendMailWithFallback retries on connection error and succeeds with fallbac
     nodemailer.createTransport = originalCreateTransport;
   });
 
-  const result = await sendMailWithFallback({
-    host: 'smtp-relay.brevo.com',
-    port: 587,
-    secure: false,
-    user: 'user',
-    pass: 'pass',
-    from: 'archimap <test@example.com>'
-  }, {
-    from: 'archimap <test@example.com>',
-    to: 'test@example.com',
-    subject: 'Test',
-    text: 'Hi'
-  });
+  const result = await sendMailWithFallback(
+    {
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      secure: false,
+      user: 'user',
+      pass: 'pass',
+      from: 'archimap <test@example.com>'
+    },
+    {
+      from: 'archimap <test@example.com>',
+      to: 'test@example.com',
+      subject: 'Test',
+      text: 'Hi'
+    }
+  );
 
   assert.equal(call, 2);
   assert.equal(result.info.messageId, 'ok');
@@ -92,19 +95,23 @@ test('sendMailWithFallback throws when SMTP accepts no recipients', async (t) =>
   });
 
   await assert.rejects(
-    () => sendMailWithFallback({
-      host: 'smtp-relay.brevo.com',
-      port: 2525,
-      secure: false,
-      user: 'user',
-      pass: 'pass',
-      from: 'archimap <test@example.com>'
-    }, {
-      from: 'archimap <test@example.com>',
-      to: 'test@example.com',
-      subject: 'Test',
-      text: 'Hi'
-    }),
+    () =>
+      sendMailWithFallback(
+        {
+          host: 'smtp-relay.brevo.com',
+          port: 2525,
+          secure: false,
+          user: 'user',
+          pass: 'pass',
+          from: 'archimap <test@example.com>'
+        },
+        {
+          from: 'archimap <test@example.com>',
+          to: 'test@example.com',
+          subject: 'Test',
+          text: 'Hi'
+        }
+      ),
     /accepted no recipients/i
   );
 });

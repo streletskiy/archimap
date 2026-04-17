@@ -152,7 +152,8 @@ class ServerRuntime {
 
     this.appSettingsService = createAppSettingsService({
       db: this.db,
-      settingsSecret: String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
+      settingsSecret:
+        String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
       fallbackGeneral: {
         appDisplayName: this.config.appDisplayName,
         appBaseUrl: this.config.appBaseUrl,
@@ -190,31 +191,34 @@ class ServerRuntime {
       db: this.db
     });
 
-    Object.assign(this, createRuntimeSettingsBoot({
-      appSettingsService: this.appSettingsService,
-      dataSettingsService: this.dataSettingsService,
-      defaults: {
-        appDisplayName: this.config.appDisplayName,
-        appBaseUrl: this.config.appBaseUrl,
-        registrationEnabled: this.config.registrationEnabled,
-        userEditRequiresPermission: this.config.userEditRequiresPermission,
-        basemapProvider: 'carto',
-        maptilerApiKey: '',
-        customBasemapUrl: '',
-        customBasemapApiKey: '',
-        smtpUrl: this.config.smtpUrl,
-        smtpHost: this.config.smtpHost,
-        smtpPort: this.config.smtpPort,
-        smtpSecure: this.config.smtpSecure,
-        smtpUser: this.config.smtpUser,
-        smtpPass: this.config.smtpPass,
-        emailFrom: String(this.config.rawEnv.EMAIL_FROM || this.config.smtpUser || '').trim()
-      },
-      filterTags: {
-        defaultAllowlist: DEFAULT_FILTER_TAG_ALLOWLIST,
-        normalizeFilterTagKeyList
-      }
-    }));
+    Object.assign(
+      this,
+      createRuntimeSettingsBoot({
+        appSettingsService: this.appSettingsService,
+        dataSettingsService: this.dataSettingsService,
+        defaults: {
+          appDisplayName: this.config.appDisplayName,
+          appBaseUrl: this.config.appBaseUrl,
+          registrationEnabled: this.config.registrationEnabled,
+          userEditRequiresPermission: this.config.userEditRequiresPermission,
+          basemapProvider: 'carto',
+          maptilerApiKey: '',
+          customBasemapUrl: '',
+          customBasemapApiKey: '',
+          smtpUrl: this.config.smtpUrl,
+          smtpHost: this.config.smtpHost,
+          smtpPort: this.config.smtpPort,
+          smtpSecure: this.config.smtpSecure,
+          smtpUser: this.config.smtpUser,
+          smtpPass: this.config.smtpPass,
+          emailFrom: String(this.config.rawEnv.EMAIL_FROM || this.config.smtpUser || '').trim()
+        },
+        filterTags: {
+          defaultAllowlist: DEFAULT_FILTER_TAG_ALLOWLIST,
+          normalizeFilterTagKeyList
+        }
+      })
+    );
 
     const filterTagKeysBoot = createFilterTagKeysBoot({
       db: this.db,
@@ -276,16 +280,20 @@ class ServerRuntime {
 
     this.osmSyncService = createOsmSyncService({
       db: this.db,
-      settingsSecret: String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
+      settingsSecret:
+        String(this.config.rawEnv.APP_SETTINGS_SECRET || this.config.sessionSecret).trim() || this.config.sessionSecret,
       appSettingsService: this.appSettingsService,
       enqueueSearchIndexRefresh: this.enqueueSearchIndexRefresh,
       refreshDesignRefSuggestionsCache: this.refreshDesignRefSuggestionsCache
     });
 
-    Object.assign(this, createRegionPmtilesBoot({
-      dataDir: this.config.paths.dataDir,
-      logger: this.logger
-    }));
+    Object.assign(
+      this,
+      createRegionPmtilesBoot({
+        dataDir: this.config.paths.dataDir,
+        logger: this.logger
+      })
+    );
 
     const buildingEditsService = createBuildingEditsService({
       db: this.db,
@@ -359,7 +367,8 @@ class ServerRuntime {
       autoSyncOnStart: this.config.autoSyncOnStart,
       autoSyncIntervalHours: this.config.autoSyncIntervalHours,
       isShuttingDown: () => this.shuttingDown,
-      getContoursTotal: async () => Number((await this.db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
+      getContoursTotal: async () =>
+        Number((await this.db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
       onSyncSuccess: async (payload = null) => {
         const managedRegionSync = Boolean(payload?.region);
         try {
@@ -372,7 +381,9 @@ class ServerRuntime {
         await this.rebuildSearchIndex(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
         this.resetFilterTagKeysCache();
         this.scheduleFilterTagKeysCacheRebuild(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
-        await this.refreshDesignRefSuggestionsCache?.(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
+        await this.refreshDesignRefSuggestionsCache?.(
+          managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync'
+        );
       }
     });
   }
@@ -505,11 +516,10 @@ class ServerRuntime {
 
   runAsMain() {
     this.registerSignalHandlers();
-    return this.startHttpServer()
-      .catch((error) => {
-        this.logger.error('server_session_store_init_failed', { error: String(error?.message || error) });
-        this.config.processRef.exit(1);
-      });
+    return this.startHttpServer().catch((error) => {
+      this.logger.error('server_session_store_init_failed', { error: String(error?.message || error) });
+      this.config.processRef.exit(1);
+    });
   }
 
   toRuntimeHandle() {

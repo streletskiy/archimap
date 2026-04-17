@@ -2,19 +2,21 @@ const { sanitizeUrl } = require('../../shared/log-sanitizer');
 
 function initObservabilityInfra(app, options: LooseRecord = {}) {
   const logger = options.logger || console;
-  const requestIdFactory = typeof options.requestIdFactory === 'function'
-    ? options.requestIdFactory
-    : (() => `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const requestIdFactory =
+    typeof options.requestIdFactory === 'function'
+      ? options.requestIdFactory
+      : () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const metricsEnabled = String(options.metricsEnabled ?? 'true').toLowerCase() !== 'false';
-  const getVersionInfo = typeof options.getVersionInfo === 'function'
-    ? options.getVersionInfo
-    : (() => ({
-      version: '0.0.0',
-      git: { describe: 'unknown', commit: 'unknown', dirty: false },
-      buildTime: new Date().toISOString(),
-      runtime: 'node',
-      app: 'archimap'
-    }));
+  const getVersionInfo =
+    typeof options.getVersionInfo === 'function'
+      ? options.getVersionInfo
+      : () => ({
+          version: '0.0.0',
+          git: { describe: 'unknown', commit: 'unknown', dirty: false },
+          buildTime: new Date().toISOString(),
+          runtime: 'node',
+          app: 'archimap'
+        });
 
   const startedAt = Date.now();
   let requestTotal = 0;
@@ -60,9 +62,10 @@ function initObservabilityInfra(app, options: LooseRecord = {}) {
   });
 
   app.get('/readyz', (req, res) => {
-    const checks = typeof options.getReadinessChecks === 'function'
-      ? options.getReadinessChecks()
-      : { sessionStoreReady: true, dbReady: true };
+    const checks =
+      typeof options.getReadinessChecks === 'function'
+        ? options.getReadinessChecks()
+        : { sessionStoreReady: true, dbReady: true };
     const ready = Object.values(checks).every((value) => Boolean(value));
     const payload = {
       ok: ready,

@@ -5,22 +5,25 @@ const UPSTREAM_CACHE_TTL_MS = 15 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15 * 1000;
 
 function createUpstreamDomain(context: LooseRecord = {}) {
-  const {
-    ensureBootstrapped,
-    getRegionById,
-    fetchImpl,
-    now,
-    toIsoOrNull,
-    resolveExactExtractCandidate,
-    state
-  } = context;
+  const { ensureBootstrapped, getRegionById, fetchImpl, now, toIsoOrNull, resolveExactExtractCandidate, state } =
+    context;
 
   function normalizeIsoTimestamp(value) {
     return toIsoOrNull(value);
   }
 
   function createRegionUpstreamState(
-    overrides: Partial<Pick<Region, 'latestSourceDataUpdatedAt' | 'sourceDataUpdatedAt' | 'upstreamCheckedAt' | 'upstreamStatus' | 'upstreamError' | 'updateAvailable'>> = {}
+    overrides: Partial<
+      Pick<
+        Region,
+        | 'latestSourceDataUpdatedAt'
+        | 'sourceDataUpdatedAt'
+        | 'upstreamCheckedAt'
+        | 'upstreamStatus'
+        | 'upstreamError'
+        | 'updateAvailable'
+      >
+    > = {}
   ) {
     return {
       latestSourceDataUpdatedAt: null,
@@ -142,7 +145,10 @@ function createUpstreamDomain(context: LooseRecord = {}) {
     return parseOsmfrStateTimestamp(await response.text());
   }
 
-  async function fetchLatestSourceMetadata(region: Pick<Region, 'extractSource' | 'extractId'>, options: LooseRecord = {}) {
+  async function fetchLatestSourceMetadata(
+    region: Pick<Region, 'extractSource' | 'extractId'>,
+    options: LooseRecord = {}
+  ) {
     const extractSource = String(region?.extractSource || '').trim();
     const extractId = String(region?.extractId || '').trim();
     if (!extractSource || !extractId) {
@@ -239,9 +245,7 @@ function createUpstreamDomain(context: LooseRecord = {}) {
 
   async function getRegionUpstreamState(regionOrId, options: LooseRecord = {}) {
     await ensureBootstrapped();
-    const region = typeof regionOrId === 'object' && regionOrId
-      ? regionOrId
-      : await getRegionById(regionOrId);
+    const region = typeof regionOrId === 'object' && regionOrId ? regionOrId : await getRegionById(regionOrId);
     if (!region) {
       return createRegionUpstreamState();
     }
@@ -254,10 +258,7 @@ function createUpstreamDomain(context: LooseRecord = {}) {
       };
     }
 
-    return mergeRegionWithUpstreamState(
-      region,
-      await fetchLatestSourceMetadata(region, options)
-    );
+    return mergeRegionWithUpstreamState(region, await fetchLatestSourceMetadata(region, options));
   }
 
   async function enrichRegionsWithUpstreamState(regions: Region[] = [], options: LooseRecord = {}) {

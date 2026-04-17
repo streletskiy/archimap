@@ -46,9 +46,7 @@ export function updateSearchMarkers(map, items) {
 
 export function fitMapToSearchResults(map, items) {
   if (!map) return;
-  const points = (Array.isArray(items) ? items : [])
-    .map((item) => getSearchItemPoint(item))
-    .filter(Boolean);
+  const points = (Array.isArray(items) ? items : []).map((item) => getSearchItemPoint(item)).filter(Boolean);
   if (points.length === 0) return;
 
   if (points.length === 1) {
@@ -72,10 +70,16 @@ export function fitMapToSearchResults(map, items) {
     maxLat = Math.max(maxLat, lat);
   }
 
-  map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-    padding: { top: 88, right: 30, bottom: 30, left: 30 },
-    duration: 500,
-    maxZoom: 16.5,
-    essential: true
-  });
+  map.fitBounds(
+    [
+      [minLon, minLat],
+      [maxLon, maxLat]
+    ],
+    {
+      padding: { top: 88, right: 30, bottom: 30, left: 30 },
+      duration: 500,
+      maxZoom: 16.5,
+      essential: true
+    }
+  );
 }

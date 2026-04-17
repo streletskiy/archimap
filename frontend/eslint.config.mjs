@@ -6,7 +6,14 @@ import tseslint from 'typescript-eslint';
 
 export default [
   {
-    ignores: ['.svelte-kit/**', 'build/**', 'dist/**', 'src/lib/components/ui/**', 'svelte.config.js', 'static/theme-init.js']
+    ignores: [
+      '.svelte-kit/**',
+      'build/**',
+      'dist/**',
+      'src/lib/components/ui/**',
+      'svelte.config.js',
+      'static/theme-init.js'
+    ]
   },
   js.configs.recommended,
   ...svelte.configs['flat/recommended'],

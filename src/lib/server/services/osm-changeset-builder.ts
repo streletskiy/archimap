@@ -26,14 +26,18 @@ function buildChangesetComment(syncItems = []) {
     return 'Update architectural info: OSM sync';
   }
 
-  const fieldCount = items.reduce((total, item) => total + Number(item?.fieldCount ?? item?.summaryBase?.fieldCount ?? item?.diffKeys?.size ?? 0), 0);
+  const fieldCount = items.reduce(
+    (total, item) => total + Number(item?.fieldCount ?? item?.summaryBase?.fieldCount ?? item?.diffKeys?.size ?? 0),
+    0
+  );
   const labels = items
     .slice(0, 3)
     .map((item) => {
       const candidate = item?.candidate || {};
-      const label = candidate?.latestLocalName
-        || item?.localState?.name
-        || (candidate?.osmType && candidate?.osmId ? `${candidate.osmType}/${candidate.osmId}` : null);
+      const label =
+        candidate?.latestLocalName ||
+        item?.localState?.name ||
+        (candidate?.osmType && candidate?.osmId ? `${candidate.osmType}/${candidate.osmId}` : null);
       return normalizeText(label, 64);
     })
     .filter(Boolean);
@@ -41,9 +45,10 @@ function buildChangesetComment(syncItems = []) {
   let subject;
   if (items.length === 1) {
     const candidate = items[0]?.candidate || {};
-    subject = labels[0]
-      || (candidate?.osmType && candidate?.osmId ? `${candidate.osmType}/${candidate.osmId}` : null)
-      || 'OSM building';
+    subject =
+      labels[0] ||
+      (candidate?.osmType && candidate?.osmId ? `${candidate.osmType}/${candidate.osmId}` : null) ||
+      'OSM building';
   } else {
     subject = `${items.length} buildings`;
     if (labels.length > 0) {
@@ -51,8 +56,12 @@ function buildChangesetComment(syncItems = []) {
     }
   }
 
-  return normalizeText(`Update architectural info: ${subject} (${fieldCount} ${fieldCount === 1 ? 'field' : 'fields'})`, 255)
-    || 'Update architectural info: OSM sync';
+  return (
+    normalizeText(
+      `Update architectural info: ${subject} (${fieldCount} ${fieldCount === 1 ? 'field' : 'fields'})`,
+      255
+    ) || 'Update architectural info: OSM sync'
+  );
 }
 
 function buildChangesetTags(syncItems = [], _actor = null) {
@@ -61,13 +70,14 @@ function buildChangesetTags(syncItems = [], _actor = null) {
   const source = normalizeText(DEFAULT_CHANGESET_SOURCE, 255) || DEFAULT_CHANGESET_SOURCE;
   const createdBy = normalizeText(DEFAULT_CHANGESET_CREATED_BY, 255) || DEFAULT_CHANGESET_CREATED_BY;
   const comment = buildChangesetComment(items);
-  const sourceLabel = items.length === 1
-    ? (
-        items[0]?.candidate?.latestLocalName
-        || items[0]?.localState?.name
-        || (items[0]?.candidate?.osmType && items[0]?.candidate?.osmId ? `${items[0].candidate.osmType}/${items[0].candidate.osmId}` : null)
-      )
-    : `${items.length} buildings`;
+  const sourceLabel =
+    items.length === 1
+      ? items[0]?.candidate?.latestLocalName ||
+        items[0]?.localState?.name ||
+        (items[0]?.candidate?.osmType && items[0]?.candidate?.osmId
+          ? `${items[0].candidate.osmType}/${items[0].candidate.osmId}`
+          : null)
+      : `${items.length} buildings`;
   const tags = {
     comment,
     source: sourceLabel ? `${source} · ${sourceLabel}` : source,
@@ -113,7 +123,11 @@ async function closeChangeset(accessToken, apiBaseUrl, changesetId) {
 
 function sanitizeElementAttrs(attrs: LooseRecord, elementType, changesetId) {
   const allowedKeys = new Set(['id', 'version', 'changeset', 'visible']);
-  if (String(elementType || '').trim().toLowerCase() === 'node') {
+  if (
+    String(elementType || '')
+      .trim()
+      .toLowerCase() === 'node'
+  ) {
     allowedKeys.add('lat');
     allowedKeys.add('lon');
   }
@@ -132,20 +146,26 @@ function sanitizeElementAttrs(attrs: LooseRecord, elementType, changesetId) {
 async function updateOsmElement(accessToken, apiBaseUrl, currentElement, desiredTags, changesetId) {
   const elementAttrs: LooseRecord = currentElement.attrs || {};
   const attrs = sanitizeElementAttrs(elementAttrs, currentElement.type, changesetId);
-  const bodyXml = buildElementXml({
-    type: currentElement.type,
-    attrs,
-    beforeTags: currentElement.beforeTags
-  }, desiredTags);
-  return fetchText(new URL(`/api/0.6/${encodeURIComponent(currentElement.type)}/${encodeURIComponent(elementAttrs.id)}`, apiBaseUrl), {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'text/xml; charset=utf-8',
-      Accept: 'text/plain, */*;q=0.1'
+  const bodyXml = buildElementXml(
+    {
+      type: currentElement.type,
+      attrs,
+      beforeTags: currentElement.beforeTags
     },
-    body: bodyXml
-  });
+    desiredTags
+  );
+  return fetchText(
+    new URL(`/api/0.6/${encodeURIComponent(currentElement.type)}/${encodeURIComponent(elementAttrs.id)}`, apiBaseUrl),
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'text/xml; charset=utf-8',
+        Accept: 'text/plain, */*;q=0.1'
+      },
+      body: bodyXml
+    }
+  );
 }
 
 export {

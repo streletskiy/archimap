@@ -15,12 +15,7 @@ function walk(dir) {
     if (!/\.(svelte|js|ts)$/.test(entry.name)) continue;
     const text = fs.readFileSync(full, 'utf8');
 
-    const patterns = [
-      /\$t\('([^']+)'/g,
-      /\$t\("([^"]+)"/g,
-      /translateNow\('([^']+)'/g,
-      /translateNow\("([^"]+)"/g
-    ];
+    const patterns = [/\$t\('([^']+)'/g, /\$t\("([^"]+)"/g, /translateNow\('([^']+)'/g, /translateNow\("([^"]+)"/g];
 
     for (const re of patterns) {
       let match;

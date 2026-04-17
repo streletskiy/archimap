@@ -110,8 +110,12 @@ async function main() {
   });
 
   let output = '';
-  server.stdout.on('data', (chunk) => { output += chunk.toString(); });
-  server.stderr.on('data', (chunk) => { output += chunk.toString(); });
+  server.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  server.stderr.on('data', (chunk) => {
+    output += chunk.toString();
+  });
 
   try {
     await waitReady();
@@ -119,7 +123,9 @@ async function main() {
       '/readyz': await benchmark('/readyz'),
       '/api/contours-status': await benchmark('/api/contours-status'),
       '/api/search-buildings?q=test&limit=20': await benchmark('/api/search-buildings?q=test&limit=20'),
-      '/api/buildings/filter-data-bbox?minLon=43.9&minLat=56.2&maxLon=44.1&maxLat=56.4&limit=2000': await benchmark('/api/buildings/filter-data-bbox?minLon=43.9&minLat=56.2&maxLon=44.1&maxLat=56.4&limit=2000')
+      '/api/buildings/filter-data-bbox?minLon=43.9&minLat=56.2&maxLon=44.1&maxLat=56.4&limit=2000': await benchmark(
+        '/api/buildings/filter-data-bbox?minLon=43.9&minLat=56.2&maxLon=44.1&maxLat=56.4&limit=2000'
+      )
     };
 
     const bundle = collectBundleStats();

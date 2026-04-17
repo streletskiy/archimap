@@ -7,12 +7,7 @@ const {
 } = require('../services/basemap-config');
 
 function createRuntimeSettingsBoot(options: LooseRecord = {}) {
-  const {
-    appSettingsService,
-    dataSettingsService,
-    defaults = {},
-    filterTags = {}
-  } = options;
+  const { appSettingsService, dataSettingsService, defaults = {}, filterTags = {} } = options;
 
   if (!appSettingsService || !dataSettingsService) {
     throw new Error('createRuntimeSettingsBoot: appSettingsService and dataSettingsService are required');
@@ -35,10 +30,7 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     smtpPass = '',
     emailFrom = ''
   } = defaults;
-  const {
-    defaultAllowlist = [],
-    normalizeFilterTagKeyList
-  } = filterTags;
+  const { defaultAllowlist = [], normalizeFilterTagKeyList } = filterTags;
 
   const generalConfigFallback = {
     appDisplayName,
@@ -95,9 +87,7 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
       port: Number(config.port || smtpPort),
       secure: Boolean(config.secure),
       user: String(config.user || '').trim(),
-      pass: config.keepPassword === false
-        ? ''
-        : String(config.pass || previous.pass || '').trim(),
+      pass: config.keepPassword === false ? '' : String(config.pass || previous.pass || '').trim(),
       from: String(config.from || '').trim()
     })
   });

@@ -9,13 +9,7 @@ export type BuildingEditKnownStatus =
   | 'withdrawn'
   | (string & {});
 
-export type BuildingEditSyncStatus =
-  | 'unsynced'
-  | 'syncing'
-  | 'synced'
-  | 'cleaned'
-  | 'failed'
-  | (string & {});
+export type BuildingEditSyncStatus = 'unsynced' | 'syncing' | 'synced' | 'cleaned' | 'failed' | (string & {});
 
 export interface BuildingEditFieldChange {
   field: string;

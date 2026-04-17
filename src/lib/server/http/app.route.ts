@@ -18,10 +18,7 @@ const {
   rewriteCustomBasemapTileJson,
   sendProxiedBinaryResponse
 } = require('../services/basemap-proxy.service');
-const {
-  resolveExistingRegionPmtilesPath,
-  resolveRegionPmtilesPath
-} = require('../services/data-settings.service');
+const { resolveExistingRegionPmtilesPath, resolveRegionPmtilesPath } = require('../services/data-settings.service');
 
 function createSvelteNodeHandlerInvoker(rootDir) {
   const handlerPath = path.join(rootDir, 'frontend', 'build', 'handler.js');
@@ -99,12 +96,14 @@ function registerAppRoutes(deps) {
   }
 
   async function getEffectiveBasemapSettings() {
-    const effectiveGeneralSettings = typeof loadEffectiveGeneralConfig === 'function'
-      ? await Promise.resolve(loadEffectiveGeneralConfig()).catch(() => null)
-      : null;
-    const generalConfig = effectiveGeneralSettings?.config && typeof effectiveGeneralSettings.config === 'object'
-      ? effectiveGeneralSettings.config
-      : {};
+    const effectiveGeneralSettings =
+      typeof loadEffectiveGeneralConfig === 'function'
+        ? await Promise.resolve(loadEffectiveGeneralConfig()).catch(() => null)
+        : null;
+    const generalConfig =
+      effectiveGeneralSettings?.config && typeof effectiveGeneralSettings.config === 'object'
+        ? effectiveGeneralSettings.config
+        : {};
     return {
       config: generalConfig,
       customBasemapUrl: normalizeCustomBasemapUrl(generalConfig?.customBasemapUrl, DEFAULT_CUSTOM_BASEMAP_URL),
@@ -113,11 +112,19 @@ function registerAppRoutes(deps) {
   }
 
   function getRequestOrigin(req) {
-    const forwardedProto = String(req.get?.('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase();
-    const protocol = forwardedProto === 'https' || forwardedProto === 'http'
-      ? forwardedProto
-      : String(req.protocol || 'http').trim().toLowerCase() || 'http';
-    const forwardedHost = String(req.get?.('x-forwarded-host') || '').split(',')[0].trim();
+    const forwardedProto = String(req.get?.('x-forwarded-proto') || '')
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+    const protocol =
+      forwardedProto === 'https' || forwardedProto === 'http'
+        ? forwardedProto
+        : String(req.protocol || 'http')
+            .trim()
+            .toLowerCase() || 'http';
+    const forwardedHost = String(req.get?.('x-forwarded-host') || '')
+      .split(',')[0]
+      .trim();
     const host = forwardedHost || String(req.get?.('host') || '').trim();
     if (!host) return '';
     return `${protocol}://${host.replace(/\/+$/, '')}`;
@@ -126,12 +133,14 @@ function registerAppRoutes(deps) {
   async function getAvailableRegionPmtiles() {
     if (!dataSettingsService) return [];
     const regions = await dataSettingsService.listRuntimePmtilesRegions();
-    return regions.filter((region) => {
-      return Boolean(resolveExistingRegionPmtilesPath(dataDir, region));
-    }).map((region) => ({
-      ...region,
-      url: `/api/data/regions/${region.id}/pmtiles`
-    }));
+    return regions
+      .filter((region) => {
+        return Boolean(resolveExistingRegionPmtilesPath(dataDir, region));
+      })
+      .map((region) => ({
+        ...region,
+        url: `/api/data/regions/${region.id}/pmtiles`
+      }));
   }
 
   app.get('/app-config.js', publicApiRateLimiter, async (req, res) => {
@@ -143,13 +152,12 @@ function registerAppRoutes(deps) {
     const mapSelection = {
       debug: String(process.env.MAP_SELECTION_ATOMIC_DEBUG || '').trim() === 'true'
     };
-    const effectiveRegistrationEnabled = typeof generalConfig?.registrationEnabled === 'boolean'
-      ? generalConfig.registrationEnabled
-      : (
-        typeof getRegistrationEnabled === 'function'
+    const effectiveRegistrationEnabled =
+      typeof generalConfig?.registrationEnabled === 'boolean'
+        ? generalConfig.registrationEnabled
+        : typeof getRegistrationEnabled === 'function'
           ? Boolean(getRegistrationEnabled())
-          : Boolean(registrationEnabled)
-      );
+          : Boolean(registrationEnabled);
     const auth = {
       registrationEnabled: effectiveRegistrationEnabled
     };
@@ -209,10 +217,7 @@ function registerAppRoutes(deps) {
           error: 'Invalid custom basemap tile request'
         });
       }
-      const upstreamUrl = upstreamTemplate
-        .replace(/\{z\}/g, z)
-        .replace(/\{x\}/g, x)
-        .replace(/\{y\}/g, y);
+      const upstreamUrl = upstreamTemplate.replace(/\{z\}/g, z).replace(/\{x\}/g, x).replace(/\{y\}/g, y);
       return await sendProxiedBinaryResponse(req, res, upstreamUrl);
     } catch {
       return res.status(500).json({
@@ -223,20 +228,21 @@ function registerAppRoutes(deps) {
   });
 
   app.get('/api/version', publicApiRateLimiter, (req, res) => {
-    const version = typeof getAppVersion === 'function'
-      ? getAppVersion()
-      : {
-        version: String(getBuildInfo?.()?.version || '0.0.0'),
-        git: {
-          describe: 'unknown',
-          commit: String(getBuildInfo?.()?.shortSha || 'unknown'),
-          dirty: false
-        },
-        buildTime: new Date().toISOString(),
-        runtime: 'node',
-        app: 'archimap',
-        isTaggedRelease: false
-      };
+    const version =
+      typeof getAppVersion === 'function'
+        ? getAppVersion()
+        : {
+            version: String(getBuildInfo?.()?.version || '0.0.0'),
+            git: {
+              describe: 'unknown',
+              commit: String(getBuildInfo?.()?.shortSha || 'unknown'),
+              dirty: false
+            },
+            buildTime: new Date().toISOString(),
+            runtime: 'node',
+            app: 'archimap',
+            isTaggedRelease: false
+          };
     return sendCachedJson(req, res, version, {
       cacheControl: 'no-store'
     });
@@ -280,14 +286,11 @@ function registerAppRoutes(deps) {
     if (!Number.isInteger(regionId) || regionId <= 0) {
       return res.status(400).json({ code: 'ERR_INVALID_REGION_ID', error: 'Invalid region id' });
     }
-    const region = dataSettingsService
-      ? await dataSettingsService.getRegionById(regionId)
-      : null;
+    const region = dataSettingsService ? await dataSettingsService.getRegionById(regionId) : null;
     if (!region) {
       return res.status(404).json({ code: 'ERR_REGION_NOT_FOUND', error: 'Region not found' });
     }
-    const pmtilesPath = resolveExistingRegionPmtilesPath(dataDir, region)
-      || resolveRegionPmtilesPath(dataDir, region);
+    const pmtilesPath = resolveExistingRegionPmtilesPath(dataDir, region) || resolveRegionPmtilesPath(dataDir, region);
     return sendPmtiles(req, res, pmtilesPath, {
       cacheControl: 'public, max-age=300, stale-while-revalidate=120'
     });
@@ -295,16 +298,19 @@ function registerAppRoutes(deps) {
 
   app.get('/api/filter-tag-keys', publicApiRateLimiter, async (req, res) => {
     try {
-      const allKeys = typeof getAllFilterTagKeysCached === 'function'
-        ? await getAllFilterTagKeysCached()
-        : [];
+      const allKeys = typeof getAllFilterTagKeysCached === 'function' ? await getAllFilterTagKeysCached() : [];
       const keys = await getFilterTagKeysCached();
-      return sendCachedJson(req, res, {
-        keys,
-        warmingUp: isFilterTagKeysRebuildInProgress() || allKeys.length === 0
-      }, {
-        cacheControl: 'public, max-age=300'
-      });
+      return sendCachedJson(
+        req,
+        res,
+        {
+          keys,
+          warmingUp: isFilterTagKeysRebuildInProgress() || allKeys.length === 0
+        },
+        {
+          cacheControl: 'public, max-age=300'
+        }
+      );
     } catch {
       return res.status(500).json({ code: 'ERR_FILTER_TAG_KEYS_LOAD_FAILED', error: 'Failed to load OSM tag keys' });
     }
@@ -312,14 +318,17 @@ function registerAppRoutes(deps) {
 
   app.get('/api/filter-presets', publicApiRateLimiter, async (req, res) => {
     try {
-      const items = dataSettingsService
-        ? await dataSettingsService.getFilterPresetsForRuntime()
-        : [];
-      return sendCachedJson(req, res, {
-        items: Array.isArray(items) ? items : []
-      }, {
-        cacheControl: 'public, max-age=60'
-      });
+      const items = dataSettingsService ? await dataSettingsService.getFilterPresetsForRuntime() : [];
+      return sendCachedJson(
+        req,
+        res,
+        {
+          items: Array.isArray(items) ? items : []
+        },
+        {
+          cacheControl: 'public, max-age=60'
+        }
+      );
     } catch {
       return res.status(500).json({ code: 'ERR_FILTER_PRESETS_LOAD_FAILED', error: 'Failed to load filter presets' });
     }
@@ -327,17 +336,21 @@ function registerAppRoutes(deps) {
 
   app.get('/api/style-overrides', publicApiRateLimiter, async (req, res) => {
     try {
-      const items = styleRegionOverridesService
-        ? await styleRegionOverridesService.listPublicOverrides()
-        : [];
-      return sendCachedJson(req, res, { items }, {
-        cacheControl: 'public, max-age=60'
-      });
+      const items = styleRegionOverridesService ? await styleRegionOverridesService.listPublicOverrides() : [];
+      return sendCachedJson(
+        req,
+        res,
+        { items },
+        {
+          cacheControl: 'public, max-age=60'
+        }
+      );
     } catch {
-      return res.status(500).json({ code: 'ERR_STYLE_OVERRIDES_LOAD_FAILED', error: 'Failed to load public architecture style overrides' });
+      return res
+        .status(500)
+        .json({ code: 'ERR_STYLE_OVERRIDES_LOAD_FAILED', error: 'Failed to load public architecture style overrides' });
     }
   });
-
 }
 
 module.exports = {

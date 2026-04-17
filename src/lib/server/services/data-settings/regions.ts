@@ -79,7 +79,9 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return Number((await db.prepare(DELETE_REGION_SQL.countActiveRuns).get(Number(regionId)))?.total || 0);
   }
 
-  async function listRegions(options: { includeDisabled?: boolean; includeStorageStats?: boolean } = {}): Promise<Region[]> {
+  async function listRegions(
+    options: { includeDisabled?: boolean; includeStorageStats?: boolean } = {}
+  ): Promise<Region[]> {
     await ensureBootstrapped();
     const includeDisabled = options.includeDisabled !== false;
     const includeStorageStats = options.includeStorageStats === true;
@@ -88,9 +90,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
       .map(rowToRegion)
       .filter((item): item is Region => Boolean(item))
       .filter((item) => includeDisabled || item.enabled);
-    return includeStorageStats
-      ? await context.enrichRegionsWithStorageStats(items)
-      : items;
+    return includeStorageStats ? await context.enrichRegionsWithStorageStats(items) : items;
   }
 
   async function ensureUniqueSlug(baseSlug, excludeRegionId = null) {
@@ -99,12 +99,16 @@ function createRegionsDomain(context: LooseRecord = {}) {
     let suffix = 2;
 
     while (true) {
-      const row = await db.prepare(`
+      const row = await db
+        .prepare(
+          `
         SELECT id
         FROM data_sync_regions
         WHERE slug = ?
         LIMIT 1
-      `).get(candidate);
+      `
+        )
+        .get(candidate);
       if (!row || Number(row.id) === Number(excludeRegionId || 0)) {
         return candidate;
       }
@@ -125,13 +129,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
 
   async function normalizeRegionInput(input: RegionInput = {}, previous: Region | null = null) {
     const previousRegion = previous || null;
-    const hasLegacySourceValueField = Object.prototype.hasOwnProperty.call(input, 'sourceValue')
-      || Object.prototype.hasOwnProperty.call(input, 'source_value');
+    const hasLegacySourceValueField =
+      Object.prototype.hasOwnProperty.call(input, 'sourceValue') ||
+      Object.prototype.hasOwnProperty.call(input, 'source_value');
     const rawSearchQuery = normalizeNullableText(
-      input.searchQuery
-        ?? input.search_query
-        ?? previousRegion?.searchQuery
-        ?? '',
+      input.searchQuery ?? input.search_query ?? previousRegion?.searchQuery ?? '',
       240
     );
     const extractSource = normalizeNullableText(
@@ -146,15 +148,12 @@ function createRegionsDomain(context: LooseRecord = {}) {
       input.extractLabel ?? input.extract_label ?? previousRegion?.extractLabel ?? '',
       240
     );
-    const sourceTypeRaw = String(
-      input.sourceType ?? input.source_type ?? previousRegion?.sourceType ?? 'extract'
-    ).trim().toLowerCase();
+    const sourceTypeRaw = String(input.sourceType ?? input.source_type ?? previousRegion?.sourceType ?? 'extract')
+      .trim()
+      .toLowerCase();
     const sourceType = sourceTypeRaw || 'extract';
     const searchQuery = rawSearchQuery || extractLabel || extractId || '';
-    const name = normalizeNullableText(
-      input.name ?? previousRegion?.name ?? extractLabel ?? searchQuery ?? '',
-      160
-    );
+    const name = normalizeNullableText(input.name ?? previousRegion?.name ?? extractLabel ?? searchQuery ?? '', 160);
     const slugRaw = normalizeNullableText(
       input.slug ?? previousRegion?.slug ?? name ?? extractLabel ?? searchQuery ?? 'region',
       100
@@ -175,11 +174,19 @@ function createRegionsDomain(context: LooseRecord = {}) {
         extractSource,
         extractId,
         extractResolutionStatus: previousRegion?.extractResolutionStatus
-      }) ? 'resolved' : 'needs_resolution',
+      })
+        ? 'resolved'
+        : 'needs_resolution',
       extractResolutionError: null,
       enabled: normalizeBoolean(input.enabled ?? previousRegion?.enabled, true),
-      autoSyncEnabled: normalizeBoolean(input.autoSyncEnabled ?? previousRegion?.autoSyncEnabled, fallback.autoSyncEnabled),
-      autoSyncOnStart: normalizeBoolean(input.autoSyncOnStart ?? previousRegion?.autoSyncOnStart, fallback.autoSyncOnStart),
+      autoSyncEnabled: normalizeBoolean(
+        input.autoSyncEnabled ?? previousRegion?.autoSyncEnabled,
+        fallback.autoSyncEnabled
+      ),
+      autoSyncOnStart: normalizeBoolean(
+        input.autoSyncOnStart ?? previousRegion?.autoSyncOnStart,
+        fallback.autoSyncOnStart
+      ),
       autoSyncIntervalHours: normalizeInteger(
         input.autoSyncIntervalHours ?? previousRegion?.autoSyncIntervalHours,
         fallback.autoSyncIntervalHours,
@@ -198,9 +205,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
         0,
         22
       ),
-      sourceLayer: normalizeSourceLayer(
-        input.sourceLayer ?? previousRegion?.sourceLayer ?? fallback.sourceLayer
-      ),
+      sourceLayer: normalizeSourceLayer(input.sourceLayer ?? previousRegion?.sourceLayer ?? fallback.sourceLayer),
       bounds: previousRegion?.bounds || null,
       lastSyncStartedAt: previousRegion?.lastSyncStartedAt || null,
       lastSyncFinishedAt: previousRegion?.lastSyncFinishedAt || null,
@@ -212,9 +217,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     };
 
     next.pmtilesMaxZoom = Math.max(next.pmtilesMinZoom, next.pmtilesMaxZoom);
-    next.nextSyncAt = hasResolvedExtract(next)
-      ? computeNextSyncAt(next, now())
-      : null;
+    next.nextSyncAt = hasResolvedExtract(next) ? computeNextSyncAt(next, now()) : null;
 
     const errors = [];
     if (hasLegacySourceValueField) {
@@ -251,28 +254,29 @@ function createRegionsDomain(context: LooseRecord = {}) {
     if (regionId > 0 && !existing) {
       throw new Error('Region not found');
     }
-    if (existing && ['queued', 'running'].includes(existing.lastSyncStatus) && await countActiveRuns(existing.id) > 0) {
+    if (
+      existing &&
+      ['queued', 'running'].includes(existing.lastSyncStatus) &&
+      (await countActiveRuns(existing.id)) > 0
+    ) {
       throw new Error('Region cannot be updated while it is queued or actively syncing');
     }
 
     if (existing) {
       const existingExtractSource = normalizeNullableText(existing.extractSource, 64) || '';
       const existingExtractId = normalizeNullableText(existing.extractId, 240) || '';
-      const nextExtractSource = normalizeNullableText(
-        input.extractSource ?? input.extract_source ?? existing.extractSource ?? '',
-        64
-      ) || '';
-      const nextExtractId = normalizeNullableText(
-        input.extractId ?? input.extract_id ?? existing.extractId ?? '',
-        240
-      ) || '';
-      const extractChanged = existingExtractSource !== nextExtractSource
-        || existingExtractId !== nextExtractId;
+      const nextExtractSource =
+        normalizeNullableText(input.extractSource ?? input.extract_source ?? existing.extractSource ?? '', 64) || '';
+      const nextExtractId =
+        normalizeNullableText(input.extractId ?? input.extract_id ?? existing.extractId ?? '', 240) || '';
+      const extractChanged = existingExtractSource !== nextExtractSource || existingExtractId !== nextExtractId;
       const hasSavedCanonicalExtract = Boolean(existingExtractSource && existingExtractId);
       if (extractChanged && hasSavedCanonicalExtract) {
         const membershipCount = await countRegionMemberships(existing.id);
         if (membershipCount > 0 || existing.lastSuccessfulSyncAt) {
-          throw new Error('Changing canonical extract for an already synced region is not supported. Create a new region instead.');
+          throw new Error(
+            'Changing canonical extract for an already synced region is not supported. Create a new region instead.'
+          );
         }
       }
     }
@@ -301,7 +305,9 @@ function createRegionsDomain(context: LooseRecord = {}) {
 
     const updatedBy = normalizeNullableText(actor, 160);
     if (existing) {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE data_sync_regions
         SET
           slug = ?,
@@ -324,26 +330,28 @@ function createRegionsDomain(context: LooseRecord = {}) {
           updated_by = ?,
           updated_at = datetime('now')
         WHERE id = ?
-      `).run(
-        next.slug,
-        next.name,
-        next.sourceType,
-        next.sourceValue,
-        next.extractSource,
-        next.extractId,
-        next.extractLabel,
-        next.extractResolutionStatus,
-        next.enabled ? 1 : 0,
-        next.autoSyncEnabled ? 1 : 0,
-        next.autoSyncOnStart ? 1 : 0,
-        next.autoSyncIntervalHours,
-        next.pmtilesMinZoom,
-        next.pmtilesMaxZoom,
-        next.sourceLayer,
-        next.nextSyncAt,
-        updatedBy,
-        existing.id
-      );
+      `
+        )
+        .run(
+          next.slug,
+          next.name,
+          next.sourceType,
+          next.sourceValue,
+          next.extractSource,
+          next.extractId,
+          next.extractLabel,
+          next.extractResolutionStatus,
+          next.enabled ? 1 : 0,
+          next.autoSyncEnabled ? 1 : 0,
+          next.autoSyncOnStart ? 1 : 0,
+          next.autoSyncIntervalHours,
+          next.pmtilesMinZoom,
+          next.pmtilesMaxZoom,
+          next.sourceLayer,
+          next.nextSyncAt,
+          updatedBy,
+          existing.id
+        );
       const updatedRegion = await getRegionById(existing.id);
       if (!updatedRegion) {
         throw new Error('Failed to load saved region');
@@ -351,7 +359,9 @@ function createRegionsDomain(context: LooseRecord = {}) {
       return updatedRegion;
     }
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO data_sync_regions (
         slug,
         name,
@@ -376,33 +386,39 @@ function createRegionsDomain(context: LooseRecord = {}) {
         updated_at
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, datetime('now'), datetime('now'))
-    `).run(
-      next.slug,
-      next.name,
-      next.sourceType,
-      next.sourceValue,
-      next.extractSource,
-      next.extractId,
-      next.extractLabel,
-      next.extractResolutionStatus,
-      next.enabled ? 1 : 0,
-      next.autoSyncEnabled ? 1 : 0,
-      next.autoSyncOnStart ? 1 : 0,
-      next.autoSyncIntervalHours,
-      next.pmtilesMinZoom,
-      next.pmtilesMaxZoom,
-      next.sourceLayer,
-      next.nextSyncAt,
-      updatedBy
-    );
+    `
+      )
+      .run(
+        next.slug,
+        next.name,
+        next.sourceType,
+        next.sourceValue,
+        next.extractSource,
+        next.extractId,
+        next.extractLabel,
+        next.extractResolutionStatus,
+        next.enabled ? 1 : 0,
+        next.autoSyncEnabled ? 1 : 0,
+        next.autoSyncOnStart ? 1 : 0,
+        next.autoSyncIntervalHours,
+        next.pmtilesMinZoom,
+        next.pmtilesMaxZoom,
+        next.sourceLayer,
+        next.nextSyncAt,
+        updatedBy
+      );
 
-    const row = await db.prepare(`
+    const row = await db
+      .prepare(
+        `
       SELECT id
       FROM data_sync_regions
       WHERE slug = ?
       ORDER BY id DESC
       LIMIT 1
-    `).get(next.slug);
+    `
+      )
+      .get(next.slug);
     const createdRegion = await getRegionById(row?.id);
     if (!createdRegion) {
       throw new Error('Failed to load saved region');
@@ -454,7 +470,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     if (!existing) {
       throw new Error('Region not found');
     }
-    if (['queued', 'running'].includes(existing.lastSyncStatus) && await countActiveRuns(existing.id) > 0) {
+    if (['queued', 'running'].includes(existing.lastSyncStatus) && (await countActiveRuns(existing.id)) > 0) {
       throw new Error('Region cannot be deleted while it is queued or actively syncing');
     }
 
@@ -463,7 +479,14 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return tx();
   }
 
-  async function listRuntimePmtilesRegions(): Promise<Array<Pick<Region, 'id' | 'slug' | 'name' | 'sourceLayer' | 'bounds' | 'pmtilesMinZoom' | 'pmtilesMaxZoom' | 'lastSuccessfulSyncAt'>>> {
+  async function listRuntimePmtilesRegions(): Promise<
+    Array<
+      Pick<
+        Region,
+        'id' | 'slug' | 'name' | 'sourceLayer' | 'bounds' | 'pmtilesMinZoom' | 'pmtilesMaxZoom' | 'lastSuccessfulSyncAt'
+      >
+    >
+  > {
     await ensureBootstrapped();
     return (await listRegions({ includeDisabled: false }))
       .filter((region) => region.enabled && region.bounds)

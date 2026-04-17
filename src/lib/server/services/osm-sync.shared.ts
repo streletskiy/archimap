@@ -61,9 +61,7 @@ function normalizeAuthBaseUrl(value) {
 function normalizeApiBaseUrl(value, authBaseUrl = DEFAULT_AUTH_BASE_URL) {
   const explicit = normalizeBaseUrl(value, '');
   if (explicit) return explicit;
-  return isMasterOsmAuthBaseUrl(authBaseUrl)
-    ? 'https://master.apis.dev.openstreetmap.org'
-    : DEFAULT_API_BASE_URL;
+  return isMasterOsmAuthBaseUrl(authBaseUrl) ? 'https://master.apis.dev.openstreetmap.org' : DEFAULT_API_BASE_URL;
 }
 
 function normalizeRedirectUri(value, baseUrl) {
@@ -264,10 +262,14 @@ function stateFromContourTags(tags: LooseRecord = {}) {
     design_ref: normalizeStateValue(tags['design:ref'] || tags.design_ref),
     design_year: normalizeStateValue(tags['design:year'] || tags.design_year),
     material: normalizeMaterialValue(tags['building:material'] || tags.material),
-    roof_shape: normalizeStateValue(normalizeRoofShapeSelection(tags['roof:shape'] || tags.roof_shape || tags['building:roof:shape'])),
+    roof_shape: normalizeStateValue(
+      normalizeRoofShapeSelection(tags['roof:shape'] || tags.roof_shape || tags['building:roof:shape'])
+    ),
     colour: normalizeStateValue(tags['building:colour'] || tags.colour),
     levels: normalizeStateValue(tags['building:levels'] || tags.levels),
-    year_built: normalizeStateValue(tags['building:year'] || tags.start_date || tags.construction_date || tags.year_built),
+    year_built: normalizeStateValue(
+      tags['building:year'] || tags.start_date || tags.construction_date || tags.year_built
+    ),
     architect: normalizeStateValue(tags.architect || tags.architect_name),
     address: normalizeStateValue(tags['addr:full'] || tags['addr:full:en']),
     description: normalizeStateValue(tags.description)
@@ -276,7 +278,21 @@ function stateFromContourTags(tags: LooseRecord = {}) {
 
 function diffStates(before: LooseRecord = {}, after: LooseRecord = {}) {
   const changed = [];
-  const keys = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'description'];
+  const keys = [
+    'name',
+    'style',
+    'design',
+    'design_ref',
+    'design_year',
+    'material',
+    'roof_shape',
+    'colour',
+    'levels',
+    'year_built',
+    'architect',
+    'address',
+    'description'
+  ];
   for (const key of keys) {
     if (before[key] !== after[key]) {
       changed.push({ key, before: before[key] ?? null, after: after[key] ?? null });
@@ -382,7 +398,7 @@ function applyFieldToTagMap(tags: LooseRecord, field, value, explicitlyEdited = 
       tags['building:levels'] = normalized;
       delete tags.levels;
       return ['levels'];
-        case 'year_built':
+    case 'year_built':
       tags['start_date'] = normalized;
       delete tags['building:year'];
       delete tags.construction_date;
@@ -423,7 +439,7 @@ function buildDesiredTagMap(currentTags: LooseRecord, candidateRows) {
     }
   }
 
-    if (desired['building:year']) {
+  if (desired['building:year']) {
     if (!desired['start_date']) desired['start_date'] = desired['building:year'];
     delete desired['building:year'];
     removedKeys.add('building:year');
@@ -440,13 +456,18 @@ function buildDesiredTagMap(currentTags: LooseRecord, candidateRows) {
     }
   }
 
-  return { desired: desired as LooseRecord, localState: localState as LooseRecord, explicitFields: [...explicitFields] as string[], removedKeys: [...removedKeys] as string[] };
+  return {
+    desired: desired as LooseRecord,
+    localState: localState as LooseRecord,
+    explicitFields: [...explicitFields] as string[],
+    removedKeys: [...removedKeys] as string[]
+  };
 }
 
 function parseOsmElementResponse(xmlText) {
   const xml = String(xmlText || '').trim();
-  const elementMatch = xml.match(/<\s*(node|way|relation)\b[\s\S]*?<\/\s*\1\s*>/i)
-    || xml.match(/<\s*(node|way|relation)\b[^>]*\/>/i);
+  const elementMatch =
+    xml.match(/<\s*(node|way|relation)\b[\s\S]*?<\/\s*\1\s*>/i) || xml.match(/<\s*(node|way|relation)\b[^>]*\/>/i);
   if (!elementMatch) {
     throw new Error('Unexpected OSM element response');
   }

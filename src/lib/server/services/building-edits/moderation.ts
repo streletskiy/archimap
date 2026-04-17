@@ -18,8 +18,27 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     throw new Error('createBuildingEditModerationService: getUserEditDetailsById is required');
   }
 
-  function mergeLocalInfoForReassign(sourceRow: LooseRecord, targetRow: LooseRecord, { force = false }: LooseRecord = {}) {
-    const fields = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'material_concrete', 'roof_shape', 'colour', 'levels', 'year_built', 'architect', 'address', 'archimap_description'];
+  function mergeLocalInfoForReassign(
+    sourceRow: LooseRecord,
+    targetRow: LooseRecord,
+    { force = false }: LooseRecord = {}
+  ) {
+    const fields = [
+      'name',
+      'style',
+      'design',
+      'design_ref',
+      'design_year',
+      'material',
+      'material_concrete',
+      'roof_shape',
+      'colour',
+      'levels',
+      'year_built',
+      'architect',
+      'address',
+      'archimap_description'
+    ];
     const conflicts: string[] = [];
     const merged: LooseRecord = {};
 
@@ -31,7 +50,11 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
         merged[field] = targetValue;
         continue;
       }
-      if (targetValue == null || normalizeComparableForField(field, sourceValue) === normalizeComparableForField(field, targetValue) || force) {
+      if (
+        targetValue == null ||
+        normalizeComparableForField(field, sourceValue) === normalizeComparableForField(field, targetValue) ||
+        force
+      ) {
         merged[field] = sourceValue;
         continue;
       }
@@ -77,7 +100,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
 
     if (item.status === 'pending') {
       const tx = db.transaction(async () => {
-        await db.prepare(`
+        await db
+          .prepare(
+            `
           UPDATE user_edits.building_user_edits
           SET
             osm_type = ?,
@@ -86,7 +111,15 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
             source_osm_updated_at = ?,
             updated_at = datetime('now')
           WHERE id = ?
-        `).run(targetOsmType, targetOsmId, targetContour.tags_json ?? null, toIsoTimestampOrNull(targetContour.updated_at), id);
+        `
+          )
+          .run(
+            targetOsmType,
+            targetOsmId,
+            targetContour.tags_json ?? null,
+            toIsoTimestampOrNull(targetContour.updated_at),
+            id
+          );
 
         await supersedePendingUserEdits(targetOsmType, targetOsmId, item.updatedBy, id);
       });
@@ -106,7 +139,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     }
 
     const tx = db.transaction(async () => {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         INSERT INTO local.architectural_info (
           osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description, updated_by, updated_at
         )
@@ -128,32 +163,40 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
           archimap_description = excluded.archimap_description,
           updated_by = excluded.updated_by,
           updated_at = datetime('now')
-      `).run(
-        targetOsmType,
-        targetOsmId,
-        merged.name ?? null,
-        merged.style ?? null,
-        merged.design ?? null,
-        merged.design_ref ?? null,
-        merged.design_year ?? null,
-        merged.material ?? null,
-        merged.material_concrete ?? null,
-        merged.roof_shape ?? null,
-        merged.colour ?? null,
-        merged.levels ?? null,
-        merged.year_built ?? null,
-        merged.architect ?? null,
-        merged.address ?? null,
-        merged.archimap_description ?? null,
-        actor
-      );
+      `
+        )
+        .run(
+          targetOsmType,
+          targetOsmId,
+          merged.name ?? null,
+          merged.style ?? null,
+          merged.design ?? null,
+          merged.design_ref ?? null,
+          merged.design_year ?? null,
+          merged.material ?? null,
+          merged.material_concrete ?? null,
+          merged.roof_shape ?? null,
+          merged.colour ?? null,
+          merged.levels ?? null,
+          merged.year_built ?? null,
+          merged.architect ?? null,
+          merged.address ?? null,
+          merged.archimap_description ?? null,
+          actor
+        );
 
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         DELETE FROM local.architectural_info
         WHERE osm_type = ? AND osm_id = ?
-      `).run(item.osmType, item.osmId);
+      `
+        )
+        .run(item.osmType, item.osmId);
 
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE user_edits.building_user_edits
         SET
           osm_type = ?,
@@ -162,7 +205,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
         WHERE osm_type = ?
           AND osm_id = ?
           AND status IN ('accepted', 'partially_accepted')
-      `).run(targetOsmType, targetOsmId, item.osmType, item.osmId);
+      `
+        )
+        .run(targetOsmType, targetOsmId, item.osmType, item.osmId);
     });
 
     await tx();
@@ -176,12 +221,16 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     }
 
     const tx = db.transaction(async () => {
-      const row = await db.prepare(`
+      const row = await db
+        .prepare(
+          `
         SELECT id, osm_type, osm_id, status
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
-      `).get(id);
+      `
+        )
+        .get(id);
 
       if (!row) {
         const error = new Error('Edit not found');
@@ -195,21 +244,31 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
       if (deletesMergedLocal) {
         const otherMergedCount = await countMergedEditsForTarget(row.osm_type, row.osm_id, id);
         if (otherMergedCount > 0) {
-          const error = new Error('Cannot fully delete an accepted edit while the building still has other accepted/partially_accepted edits because merged local data is already shared.');
+          const error = new Error(
+            'Cannot fully delete an accepted edit while the building still has other accepted/partially_accepted edits because merged local data is already shared.'
+          );
           error.code = 'EDIT_DELETE_SHARED_MERGED_STATE';
           throw error;
         }
 
-        await db.prepare(`
+        await db
+          .prepare(
+            `
           DELETE FROM local.architectural_info
           WHERE osm_type = ? AND osm_id = ?
-        `).run(row.osm_type, row.osm_id);
+        `
+          )
+          .run(row.osm_type, row.osm_id);
       }
 
-      const result = await db.prepare(`
+      const result = await db
+        .prepare(
+          `
         DELETE FROM user_edits.building_user_edits
         WHERE id = ?
-      `).run(id);
+      `
+        )
+        .run(id);
 
       if (Number(result?.changes || 0) === 0) {
         const error = new Error('Edit not found');
@@ -238,7 +297,9 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
       throw error;
     }
 
-    const owner = String(actor || '').trim().toLowerCase();
+    const owner = String(actor || '')
+      .trim()
+      .toLowerCase();
     if (!owner) {
       const error = new Error('Failed to resolve current user');
       error.status = 400;
@@ -247,12 +308,16 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
     }
 
     const tx = db.transaction(async () => {
-      const row = await db.prepare(`
+      const row = await db
+        .prepare(
+          `
         SELECT id, osm_type, osm_id, created_by, status, sync_status
         FROM user_edits.building_user_edits
         WHERE id = ?
         LIMIT 1
-      `).get(id);
+      `
+        )
+        .get(id);
 
       if (!row) {
         const error = new Error('Edit not found');
@@ -261,7 +326,11 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
         throw error;
       }
 
-      if (String(row.created_by || '').trim().toLowerCase() !== owner) {
+      if (
+        String(row.created_by || '')
+          .trim()
+          .toLowerCase() !== owner
+      ) {
         const error = new Error('You can only cancel your own pending edits');
         error.status = 403;
         error.code = 'EDIT_ACCESS_DENIED';
@@ -278,12 +347,16 @@ function createBuildingEditModerationService(context: LooseRecord, { getUserEdit
 
       assertMutableSyncStatus(row.sync_status);
 
-      const result = await db.prepare(`
+      const result = await db
+        .prepare(
+          `
         DELETE FROM user_edits.building_user_edits
         WHERE id = ?
           AND lower(trim(created_by)) = ?
           AND status = 'pending'
-      `).run(id, owner);
+      `
+        )
+        .run(id, owner);
 
       if (Number(result?.changes || 0) === 0) {
         const error = new Error('Edit not found');

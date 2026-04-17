@@ -7,7 +7,7 @@ let importCounter = 0;
 
 async function loadMapStyleSync() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'map-style-sync.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 function createDeferred() {

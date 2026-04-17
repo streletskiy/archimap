@@ -29,16 +29,16 @@ function buildRender3dPropertiesFromTags(tags = {}) {
   const normalizedLevels = Number.isFinite(levels) && levels > 0 ? levels : 1;
   const normalizedExplicitHeight = Number.isFinite(explicitHeight) && explicitHeight > 0 ? explicitHeight : null;
   const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
-  const normalizedExplicitMinHeight = Number.isFinite(explicitMinHeight) && explicitMinHeight > 0
-    ? explicitMinHeight
-    : 0;
+  const normalizedExplicitMinHeight =
+    Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
   const levelHeightMeters = 3.2;
   const levelDerivedMinHeight = normalizedMinLevel * levelHeightMeters;
   const renderMinHeightMeters = Math.max(normalizedExplicitMinHeight, levelDerivedMinHeight);
-  const levelDerivedHeightMeters = renderMinHeightMeters + (normalizedLevels * levelHeightMeters);
-  const renderHeightMeters = normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
-    ? normalizedExplicitHeight
-    : levelDerivedHeightMeters;
+  const levelDerivedHeightMeters = renderMinHeightMeters + normalizedLevels * levelHeightMeters;
+  const renderHeightMeters =
+    normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
+      ? normalizedExplicitHeight
+      : levelDerivedHeightMeters;
 
   return {
     renderHeightMeters: Math.round(Math.max(0, renderHeightMeters) * 100) / 100,
@@ -47,11 +47,7 @@ function buildRender3dPropertiesFromTags(tags = {}) {
 }
 
 function createFeatureInfoSupport(options: LooseRecord = {}) {
-  const {
-    db,
-    mergePersonalEditsIntoFeatureInfo,
-    buildingsRepository: providedBuildingsRepository
-  } = options;
+  const { db, mergePersonalEditsIntoFeatureInfo, buildingsRepository: providedBuildingsRepository } = options;
 
   if (!db && !providedBuildingsRepository) {
     throw new Error('createFeatureInfoSupport: db is required');
@@ -84,7 +80,8 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
     }
     const render3dProperties = buildRender3dPropertiesFromTags(tags);
     const featureKind = getFeatureKindFromTagsJson(row?.tags_json ?? row?.source_tags_json ?? null);
-    const sourceOsmUpdatedAt = row?.source_osm_updated_at ?? (row?.geometry_json != null ? row?.updated_at ?? null : null);
+    const sourceOsmUpdatedAt =
+      row?.source_osm_updated_at ?? (row?.geometry_json != null ? (row?.updated_at ?? null) : null);
 
     return {
       type: 'Feature',
@@ -107,9 +104,7 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
   }
 
   async function attachInfoToFeatures(features, options: LooseRecord = {}) {
-    const keys = features
-      .map((feature) => String(feature.id || ''))
-      .filter((id) => /^(way|relation)\/\d+$/.test(id));
+    const keys = features.map((feature) => String(feature.id || '')).filter((id) => /^(way|relation)\/\d+$/.test(id));
 
     if (keys.length === 0) return features;
 
@@ -134,7 +129,9 @@ function createFeatureInfoSupport(options: LooseRecord = {}) {
       feature.properties.hasExtraInfo = infoByKey.has(key);
     }
 
-    const actorKey = String(options.actorKey || '').trim().toLowerCase();
+    const actorKey = String(options.actorKey || '')
+      .trim()
+      .toLowerCase();
     if (actorKey && typeof mergePersonalEditsIntoFeatureInfo === 'function') {
       await mergePersonalEditsIntoFeatureInfo(features, actorKey);
     }

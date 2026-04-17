@@ -15,7 +15,9 @@ async function loadFilterUrlStateModule() {
 
 test('parseUrlState reads camera, 3d, building and admin edit params', async () => {
   const { parseUrlState } = await loadUrlStateModule();
-  const state = parseUrlState('http://localhost/app?lat=50.45&lng=30.52&z=15.5&pitch=58.25&bearing=-17.5&3d=1&building=way/123&edit=42');
+  const state = parseUrlState(
+    'http://localhost/app?lat=50.45&lng=30.52&z=15.5&pitch=58.25&bearing=-17.5&3d=1&building=way/123&edit=42'
+  );
   assert.deepEqual(state.camera, {
     lat: 50.45,
     lng: 30.52,
@@ -51,16 +53,12 @@ test('patchUrlState updates camera, 3d and deep-link params deterministically', 
     {
       color: '#f59e0b',
       mode: 'and',
-      rules: [
-        { key: 'building:levels', op: 'greater_or_equals', value: '5' }
-      ]
+      rules: [{ key: 'building:levels', op: 'greater_or_equals', value: '5' }]
     },
     {
       color: '#3b82f6',
       mode: 'layer',
-      rules: [
-        { key: 'building:material', op: 'equals', value: 'brick' }
-      ]
+      rules: [{ key: 'building:material', op: 'equals', value: 'brick' }]
     }
   ];
   const next = patchUrlState(current, {
@@ -122,4 +120,3 @@ test('parseUrlState decodes filter layers from compact query state', async () =>
     }
   ]);
 });
-

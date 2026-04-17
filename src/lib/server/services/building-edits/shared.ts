@@ -1,15 +1,16 @@
-import type {
-  BuildingEdit,
-  BuildingEditFieldChange,
-  BuildingEditMergedInfo
-} from '$shared/types';
+import type { BuildingEdit, BuildingEditFieldChange, BuildingEditMergedInfo } from '$shared/types';
 
 const { sanitizeEditedFields } = require('../edits.service');
-const { osmAddressFromTags: sharedOsmAddressFromTags, resolveDisplayAddressForRow: sharedResolveDisplayAddressForRow } = require('../address-format');
+const {
+  osmAddressFromTags: sharedOsmAddressFromTags,
+  resolveDisplayAddressForRow: sharedResolveDisplayAddressForRow
+} = require('../address-format');
 const READ_ONLY_SYNC_STATUSES = new Set(['synced', 'cleaned']);
 
 function assertMutableSyncStatus(syncStatusRaw) {
-  const syncStatus = String(syncStatusRaw || 'unsynced').trim().toLowerCase();
+  const syncStatus = String(syncStatusRaw || 'unsynced')
+    .trim()
+    .toLowerCase();
   if (syncStatus === 'syncing') {
     const error = new Error('This edit is currently being synchronized and cannot be changed right now.');
     error.status = 409;
@@ -151,7 +152,11 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     { key: 'name', label: 'Название', osmTag: 'name | name:ru | official_name' },
     { key: 'address', label: 'Адрес', osmTag: 'addr:full | addr:* (city/street/housenumber/postcode)' },
     { key: 'levels', label: 'Этажей', osmTag: 'building:levels' },
-    { key: 'year_built', label: 'Год постройки', osmTag: 'building:year | start_date | construction_date | year_built' },
+    {
+      key: 'year_built',
+      label: 'Год постройки',
+      osmTag: 'building:year | start_date | construction_date | year_built'
+    },
     { key: 'architect', label: 'Архитектор', osmTag: 'architect' },
     { key: 'style', label: 'Архитектурный стиль', osmTag: 'building:architecture' },
     { key: 'design', label: 'Типовой проект', osmTag: 'design' },
@@ -181,9 +186,8 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     next.updated_at = row.updated_at ?? next.updated_at ?? null;
     next.review_status = normalizeUserEditStatus(row.status);
     next.admin_comment = row.admin_comment ?? next.admin_comment ?? null;
-    next.user_edit_id = Number.isInteger(Number(row.id)) && Number(row.id) > 0
-      ? Number(row.id)
-      : (next.user_edit_id ?? null);
+    next.user_edit_id =
+      Number.isInteger(Number(row.id)) && Number(row.id) > 0 ? Number(row.id) : (next.user_edit_id ?? null);
 
     for (const field of editedFields) {
       if (field === 'archimap_description') {
@@ -203,16 +207,25 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   }
 
   async function getMergedInfoRow(osmType, osmId) {
-    return await db.prepare(`
+    return (
+      (await db
+        .prepare(
+          `
       SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
       FROM local.architectural_info
       WHERE osm_type = ? AND osm_id = ?
-    `).get(osmType, osmId) || null;
+    `
+        )
+        .get(osmType, osmId)) || null
+    );
   }
 
   async function getOsmContourRow(osmType, osmId) {
-    return await db.prepare(isPostgres
-      ? `
+    return (
+      (await db
+        .prepare(
+          isPostgres
+            ? `
         SELECT
           osm_type,
           osm_id,
@@ -223,45 +236,56 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         WHERE osm_type = ? AND osm_id = ?
         LIMIT 1
       `
-      : `
+            : `
         SELECT osm_type, osm_id, tags_json, geometry_json, updated_at
         FROM osm.building_contours
         WHERE osm_type = ? AND osm_id = ?
         LIMIT 1
       `
-    ).get(osmType, osmId) || null;
+        )
+        .get(osmType, osmId)) || null
+    );
   }
 
   async function countMergedEditsForTarget(osmType, osmId, excludeEditId = null) {
     const excludedId = Number(excludeEditId);
     const hasExcludedId = Number.isInteger(excludedId) && excludedId > 0;
-    const row = await db.prepare(`
+    const row =
+      (await db
+        .prepare(
+          `
       SELECT COUNT(*) AS total
       FROM user_edits.building_user_edits
       WHERE osm_type = ?
         AND osm_id = ?
         AND status IN ('accepted', 'partially_accepted')
         ${hasExcludedId ? 'AND id <> ?' : ''}
-    `).get(...(hasExcludedId ? [osmType, osmId, excludedId] : [osmType, osmId])) || {};
+    `
+        )
+        .get(...(hasExcludedId ? [osmType, osmId, excludedId] : [osmType, osmId]))) || {};
     return Math.max(0, Number(row.total || 0));
   }
 
   async function getLatestUserEditRow(osmType, osmId, createdBy, statuses = null) {
-    const author = String(createdBy || '').trim().toLowerCase();
+    const author = String(createdBy || '')
+      .trim()
+      .toLowerCase();
     if (!author) return null;
 
-    const normalizedStatuses = Array.isArray(statuses)
-      ? statuses.map(normalizeUserEditStatus).filter(Boolean)
-      : null;
+    const normalizedStatuses = Array.isArray(statuses) ? statuses.map(normalizeUserEditStatus).filter(Boolean) : null;
 
-    const statusClause = normalizedStatuses && normalizedStatuses.length > 0
-      ? ` AND status IN (${normalizedStatuses.map(() => '?').join(',')})`
-      : '';
+    const statusClause =
+      normalizedStatuses && normalizedStatuses.length > 0
+        ? ` AND status IN (${normalizedStatuses.map(() => '?').join(',')})`
+        : '';
 
     const params = [osmType, osmId, author];
     if (statusClause) params.push(...normalizedStatuses);
 
-    return await db.prepare(`
+    return (
+      (await db
+        .prepare(
+          `
       SELECT *
       FROM user_edits.building_user_edits
       WHERE osm_type = ?
@@ -270,15 +294,22 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
         ${statusClause}
       ORDER BY id DESC
       LIMIT 1
-    `).get(...params) || null;
+    `
+        )
+        .get(...params)) || null
+    );
   }
 
   async function supersedePendingUserEdits(osmType, osmId, createdBy, keepId = null) {
-    const author = String(createdBy || '').trim().toLowerCase();
+    const author = String(createdBy || '')
+      .trim()
+      .toLowerCase();
     if (!author) return;
 
     if (Number.isInteger(keepId) && keepId > 0) {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE user_edits.building_user_edits
         SET status = 'superseded', updated_at = datetime('now')
         WHERE osm_type = ?
@@ -286,18 +317,24 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
           AND lower(trim(created_by)) = ?
           AND status = 'pending'
           AND id <> ?
-      `).run(osmType, osmId, author, keepId);
+      `
+        )
+        .run(osmType, osmId, author, keepId);
       return;
     }
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       UPDATE user_edits.building_user_edits
       SET status = 'superseded', updated_at = datetime('now')
       WHERE osm_type = ?
         AND osm_id = ?
         AND lower(trim(created_by)) = ?
         AND status = 'pending'
-    `).run(osmType, osmId, author);
+    `
+      )
+      .run(osmType, osmId, author);
   }
 
   function buildChangesFromRows(editRow, tags): BuildingEditFieldChange[] {
@@ -328,9 +365,10 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     const changes = [];
     for (const field of fieldsToCompare) {
       const baselineValue = osmBaseline[field.key] ?? null;
-      const localValue = field.key === 'material'
-        ? normalizeMaterialSelection(editRow.material, editRow.material_concrete)
-        : normalizeInfoForDiff(editRow[field.key]);
+      const localValue =
+        field.key === 'material'
+          ? normalizeMaterialSelection(editRow.material, editRow.material_concrete)
+          : normalizeInfoForDiff(editRow[field.key]);
       const baselineComparable = normalizeComparableForField(field.key, baselineValue);
       const localComparable = normalizeComparableForField(field.key, localValue);
       const differs = baselineComparable !== localComparable;
@@ -375,29 +413,34 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
   }
 
   function getSessionEditActorKey(req) {
-    const email = String(req?.session?.user?.email || '').trim().toLowerCase();
+    const email = String(req?.session?.user?.email || '')
+      .trim()
+      .toLowerCase();
     if (email) return email;
-    const username = String(req?.session?.user?.username || '').trim().toLowerCase();
+    const username = String(req?.session?.user?.username || '')
+      .trim()
+      .toLowerCase();
     return username || null;
   }
 
   function normalizeMergedInfoRow(row): BuildingEditMergedInfo | null {
     if (!row) return null;
-    const hasMergedValue = row.name != null
-      || row.style != null
-      || row.design != null
-      || row.design_ref != null
-      || row.design_year != null
-      || row.material != null
-      || row.material_concrete != null
-      || row.roof_shape != null
-      || row.colour != null
-      || row.levels != null
-      || row.year_built != null
-      || row.architect != null
-      || row.address != null
-      || row.description != null
-      || row.archimap_description != null;
+    const hasMergedValue =
+      row.name != null ||
+      row.style != null ||
+      row.design != null ||
+      row.design_ref != null ||
+      row.design_year != null ||
+      row.material != null ||
+      row.material_concrete != null ||
+      row.roof_shape != null ||
+      row.colour != null ||
+      row.levels != null ||
+      row.year_built != null ||
+      row.architect != null ||
+      row.address != null ||
+      row.description != null ||
+      row.archimap_description != null;
     if (!hasMergedValue) return null;
 
     return {
@@ -445,21 +488,21 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
 
   function buildEditRuntimeState(row, mergedInfoRow = null) {
     const status = normalizeUserEditStatus(row?.status);
-    const syncStatus = String(row?.sync_status || 'unsynced').trim().toLowerCase();
+    const syncStatus = String(row?.sync_status || 'unsynced')
+      .trim()
+      .toLowerCase();
     const syncReadOnly = READ_ONLY_SYNC_STATUSES.has(syncStatus);
     const osmPresent = row?.contour_osm_id != null;
     const hasMergedLocal = Boolean(mergedInfoRow);
     const orphaned = !osmPresent && hasMergedLocal;
     const sourceOsmChanged = Boolean(
-      osmPresent
-      && row?.source_tags_json
-      && normalizeTagsFingerprint(row.source_tags_json) !== normalizeTagsFingerprint(row.tags_json)
+      osmPresent &&
+      row?.source_tags_json &&
+      normalizeTagsFingerprint(row.source_tags_json) !== normalizeTagsFingerprint(row.tags_json)
     );
     const mergedEditsForTarget = Math.max(0, Number(row?.merged_edits_for_target || 0));
     const canHardDelete = !MERGED_EDIT_STATUSES.has(status) || mergedEditsForTarget <= 1;
-    const hardDeleteBlockedReason = canHardDelete
-      ? null
-      : 'merged_with_other_accepted_edits';
+    const hardDeleteBlockedReason = canHardDelete ? null : 'merged_with_other_accepted_edits';
 
     return {
       status,
@@ -483,14 +526,14 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
     const editedFields = getEditedFieldsFromRow(row);
     const mergedFields = row.merged_fields_json
       ? (() => {
-        try {
-          const parsed = JSON.parse(row.merged_fields_json);
-          if (Array.isArray(parsed)) return parsed.map((value) => String(value || '')).filter(Boolean);
-          return null;
-        } catch {
-          return null;
-        }
-      })()
+          try {
+            const parsed = JSON.parse(row.merged_fields_json);
+            if (Array.isArray(parsed)) return parsed.map((value) => String(value || '')).filter(Boolean);
+            return null;
+          } catch {
+            return null;
+          }
+        })()
       : null;
 
     return {
@@ -524,13 +567,15 @@ function createBuildingEditsContext({ db, normalizeUserEditStatus }) {
       syncSucceededAt: row.sync_succeeded_at ?? null,
       syncCleanedAt: row.sync_cleaned_at ?? null,
       syncChangesetId: row.sync_changeset_id ?? null,
-      syncSummary: row.sync_summary_json ? (() => {
-        try {
-          return JSON.parse(row.sync_summary_json);
-        } catch {
-          return null;
-        }
-      })() : null,
+      syncSummary: row.sync_summary_json
+        ? (() => {
+            try {
+              return JSON.parse(row.sync_summary_json);
+            } catch {
+              return null;
+            }
+          })()
+        : null,
       syncError: row.sync_error_text ?? null,
       displayAddress: sharedResolveDisplayAddressForRow(row, mergedInfoRow),
       editedFields,

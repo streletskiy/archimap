@@ -6,11 +6,7 @@ const {
   escapeHtml,
   linkStyle
 } = require('./shell');
-const {
-  appendLocaleParam,
-  getEmailCopy,
-  normalizeEmailLocale
-} = require('./localization');
+const { appendLocaleParam, getEmailCopy, normalizeEmailLocale } = require('./localization');
 
 function passwordResetHtmlTemplate({ resetUrl, expiresInMinutes, appDisplayName, locale }) {
   const currentLocale = normalizeEmailLocale(locale);

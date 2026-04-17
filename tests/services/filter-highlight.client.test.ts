@@ -4,7 +4,15 @@ const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
 async function loadFilterHighlightUtils() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'components', 'map', 'filter-highlight-utils.ts');
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'components',
+    'map',
+    'filter-highlight-utils.ts'
+  );
   return import(pathToFileURL(modulePath).href);
 }
 
@@ -65,28 +73,18 @@ test('buildFilterPaintExpression groups ids by color and falls back to transpare
     { color: '#00ff00', ids: [46, -1] },
     { color: '', ids: [47] }
   ]);
-  assert.deepEqual(colorResult.expr, [
-    'match',
-    ['id'],
-    [44, 45],
-    '#ff0000',
-    [46],
-    '#00ff00',
-    'transparent'
-  ]);
+  assert.deepEqual(colorResult.expr, ['match', ['id'], [44, 45], '#ff0000', [46], '#00ff00', 'transparent']);
   assert.equal(colorResult.count, 3);
 
-  const opacityResult = buildFilterActiveValueExpression([
-    { color: '#ff0000', ids: [44, 45] },
-    { color: '#00ff00', ids: [46] }
-  ], 0.4, 0);
-  assert.deepEqual(opacityResult.expr, [
-    'match',
-    ['id'],
-    [44, 45, 46],
+  const opacityResult = buildFilterActiveValueExpression(
+    [
+      { color: '#ff0000', ids: [44, 45] },
+      { color: '#00ff00', ids: [46] }
+    ],
     0.4,
     0
-  ]);
+  );
+  assert.deepEqual(opacityResult.expr, ['match', ['id'], [44, 45, 46], 0.4, 0]);
 });
 
 test('applyFilterPaintHighlight updates only highlight paint properties and resets to transparent', async () => {
@@ -125,15 +123,7 @@ test('applyFilterPaintHighlight updates only highlight paint properties and rese
     type: 'setPaintProperty',
     layerId: 'buildings-filter-highlight-fill',
     name: 'fill-color',
-    value: [
-      'match',
-      ['id'],
-      [101, 102],
-      '#ff0000',
-      [203],
-      '#00ff00',
-      'transparent'
-    ]
+    value: ['match', ['id'], [101, 102], '#ff0000', [203], '#00ff00', 'transparent']
   });
   assert.deepEqual(calls[2], {
     type: 'setPaintProperty',
@@ -150,15 +140,7 @@ test('applyFilterPaintHighlight updates only highlight paint properties and rese
     type: 'setPaintProperty',
     layerId: 'buildings-filter-highlight-outline',
     name: 'line-color',
-    value: [
-      'match',
-      ['id'],
-      [101, 102],
-      '#ff0000',
-      [203],
-      '#00ff00',
-      'transparent'
-    ]
+    value: ['match', ['id'], [101, 102], '#ff0000', [203], '#00ff00', 'transparent']
   });
   assert.deepEqual(calls[5], {
     type: 'setPaintProperty',
@@ -243,9 +225,7 @@ test('applyFilterPaintHighlight uses constant color for a single normalized colo
 
   const applied = applyFilterPaintHighlight({
     map,
-    normalizedColorGroups: [
-      { color: '#f59e0b', ids: [11, 12, 13] }
-    ],
+    normalizedColorGroups: [{ color: '#f59e0b', ids: [11, 12, 13] }],
     fillLayerIds: ['buildings-filter-highlight-fill'],
     lineLayerIds: ['buildings-filter-highlight-outline']
   });
@@ -316,9 +296,7 @@ test('applyFilterPaintHighlight skips static paint properties when highlight sta
   const applied = applyFilterPaintHighlight({
     map,
     previousActive: true,
-    normalizedColorGroups: [
-      { color: '#f59e0b', ids: [11, 12, 13] }
-    ],
+    normalizedColorGroups: [{ color: '#f59e0b', ids: [11, 12, 13] }],
     fillLayerIds: ['buildings-filter-highlight-fill'],
     lineLayerIds: ['buildings-filter-highlight-outline']
   });
@@ -351,4 +329,3 @@ test('applyFilterPaintHighlight skips static paint properties when highlight sta
     }
   ]);
 });
-

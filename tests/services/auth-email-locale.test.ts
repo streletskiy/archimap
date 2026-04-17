@@ -162,7 +162,8 @@ test('password reset email uses the locale from the request cookie', async (t) =
   const { createAuthService } = require(authServicePath);
   const db = createAuthDb();
   t.after(() => db.close());
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO auth.users (
       email,
       password_hash,
@@ -173,7 +174,8 @@ test('password reset email uses the locale from the request cookie', async (t) =
       is_master_admin
     )
     VALUES (?, ?, ?, ?, 0, 0, 0)
-  `).run('reset@example.test', 'scrypt$salt$hash', 'Reset', 'User');
+  `
+  ).run('reset@example.test', 'scrypt$salt$hash', 'Reset', 'User');
 
   const service = createAuthService({
     db,

@@ -39,7 +39,9 @@ async function runPostgres() {
         ORDER BY lower(tag_key), tag_key
       `);
       await client.query('COMMIT');
-      console.log(`[filter-tags] rebuild completed: ${Number(inserted.rowCount || 0)} keys in ${Date.now() - startedAt}ms`);
+      console.log(
+        `[filter-tags] rebuild completed: ${Number(inserted.rowCount || 0)} keys in ${Date.now() - startedAt}ms`
+      );
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -70,14 +72,20 @@ CREATE TABLE IF NOT EXISTS filter_tag_keys_cache (
 `);
 
     console.log(`[filter-tags] rebuild started (${reason})`);
-    const keys = db.prepare(`
+    const keys = db
+      .prepare(
+        `
       SELECT DISTINCT trim(je.key) AS tag_key
       FROM osm.building_contours bc,
            json_each(CASE WHEN json_valid(bc.tags_json) THEN bc.tags_json ELSE '{}' END) AS je
       WHERE je.key IS NOT NULL
         AND trim(je.key) <> ''
       ORDER BY tag_key COLLATE NOCASE
-    `).all().map((row) => String(row?.tag_key || '').trim()).filter(Boolean);
+    `
+      )
+      .all()
+      .map((row) => String(row?.tag_key || '').trim())
+      .filter(Boolean);
 
     const tx = db.transaction(() => {
       db.exec('DELETE FROM filter_tag_keys_cache;');

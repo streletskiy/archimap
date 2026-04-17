@@ -328,7 +328,10 @@ async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: 
       ? Number(exportSummary.importedFeatureCount)
       : null,
     shardKm: REGION_SYNC_SHARD_KM_RAW === undefined ? undefined : Number(REGION_SYNC_SHARD_KM_RAW),
-    shardCacheDir: resolveRegionPmtilesCacheDir(dataDir || process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data'), region),
+    shardCacheDir: resolveRegionPmtilesCacheDir(
+      dataDir || process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data'),
+      region
+    ),
     progressJson: TIPPECANOE_PROGRESS_JSON,
     progressIntervalSec: TIPPECANOE_PROGRESS_INTERVAL_SEC,
     onShardProgress: (stageInfo) => {

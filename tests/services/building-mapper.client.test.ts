@@ -7,7 +7,7 @@ let importCounter = 0;
 
 async function loadBuildingMapper() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'utils', 'building-mapper.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 test('createEmptyBuildingForm and createEmptyBuildingComparable include design project fields', async () => {
@@ -139,4 +139,3 @@ test('buildBulkBuildingFormState preserves shared values and marks mixed fields'
   assert.equal(state.fieldState.roofShape.isMixed, false);
   assert.deepEqual(state.fieldState.roofShape.sampleValues, ['flat']);
 });
-

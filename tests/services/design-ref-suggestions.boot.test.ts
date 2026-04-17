@@ -42,14 +42,18 @@ function createDb() {
 
 test('design ref suggestions boot caches distinct values from local edits and OSM tags', async () => {
   const db = createDb();
-  db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, design_ref) VALUES (?, ?, ?)`)
-    .run('way', 1, '1-447С-43');
-  db.prepare(`INSERT INTO user_edits.building_user_edits (id, design_ref) VALUES (?, ?)`)
-    .run(1, '1-447С-43');
-  db.prepare(`INSERT INTO user_edits.building_user_edits (id, design_ref) VALUES (?, ?)`)
-    .run(2, ' II-18 ');
-  db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json) VALUES (?, ?, ?)`)
-    .run('way', 2, JSON.stringify({ 'design:ref': '87-0145' }));
+  db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, design_ref) VALUES (?, ?, ?)`).run(
+    'way',
+    1,
+    '1-447С-43'
+  );
+  db.prepare(`INSERT INTO user_edits.building_user_edits (id, design_ref) VALUES (?, ?)`).run(1, '1-447С-43');
+  db.prepare(`INSERT INTO user_edits.building_user_edits (id, design_ref) VALUES (?, ?)`).run(2, ' II-18 ');
+  db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json) VALUES (?, ?, ?)`).run(
+    'way',
+    2,
+    JSON.stringify({ 'design:ref': '87-0145' })
+  );
 
   const boot = createDesignRefSuggestionsBoot({
     db,

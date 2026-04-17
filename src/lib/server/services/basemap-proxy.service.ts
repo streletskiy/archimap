@@ -17,7 +17,9 @@ const LOCAL_BASEMAP_GLYPH_FONTSTACK_ALIASES = Object.freeze({
 const LOCAL_BASEMAP_GLYPH_RANGE_PATTERN = /^\d+-\d+\.pbf$/;
 
 function decodeGlyphPathSegment(value) {
-  let text = String(value || '').trim().replace(/\+/g, ' ');
+  let text = String(value || '')
+    .trim()
+    .replace(/\+/g, ' ');
   for (let index = 0; index < 2; index += 1) {
     try {
       const decoded = decodeURIComponent(text);
@@ -89,9 +91,7 @@ function resolveTemplateUrl(template, baseUrl) {
     return `${base.protocol}//${base.host}${text}`;
   }
 
-  const basePath = base.pathname.endsWith('/')
-    ? base.pathname
-    : base.pathname.replace(/\/[^/]*$/, '/');
+  const basePath = base.pathname.endsWith('/') ? base.pathname : base.pathname.replace(/\/[^/]*$/, '/');
   return `${base.protocol}//${base.host}${basePath}${text}`;
 }
 
@@ -167,7 +167,9 @@ async function fetchWithLocalhostFallback(url, init) {
 
 function buildCustomBasemapTileProxyUrl(templateUrl, baseOrigin = '') {
   const path = `${CUSTOM_BASEMAP_TILE_PROXY_URL}?u=${encodeURIComponent(String(templateUrl || '').trim())}&z={z}&x={x}&y={y}`;
-  const origin = String(baseOrigin || '').trim().replace(/\/+$/, '');
+  const origin = String(baseOrigin || '')
+    .trim()
+    .replace(/\/+$/, '');
   return origin ? `${origin}${path}` : path;
 }
 
@@ -177,9 +179,7 @@ function rewriteCustomBasemapTileJson(tilejson, upstreamTileJsonUrl, apiKey, bas
   if (upstreamTiles.length > 0) {
     next.tiles = upstreamTiles.map((template) => {
       const absoluteTemplate = resolveTemplateUrl(template, upstreamTileJsonUrl);
-      const keyedTemplate = apiKey
-        ? appendQueryParamToTemplateUrl(absoluteTemplate, 'key', apiKey)
-        : absoluteTemplate;
+      const keyedTemplate = apiKey ? appendQueryParamToTemplateUrl(absoluteTemplate, 'key', apiKey) : absoluteTemplate;
       return buildCustomBasemapTileProxyUrl(keyedTemplate, baseOrigin);
     });
   }
@@ -231,7 +231,10 @@ async function sendProxiedBinaryResponse(req, res, upstreamUrl, { accept = '*/*'
   });
 
   if (!response?.ok) {
-    return res.status(Number(response?.status) || 502).type('text/plain').send(`Upstream request failed with status ${Number(response?.status) || 0}`);
+    return res
+      .status(Number(response?.status) || 502)
+      .type('text/plain')
+      .send(`Upstream request failed with status ${Number(response?.status) || 0}`);
   }
 
   copyProxyHeaders(response, res, { skipCacheControl: Boolean(cacheControl) });

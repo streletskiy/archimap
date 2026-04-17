@@ -187,7 +187,9 @@ function applyResponseHelpers(req, res) {
 
   if (typeof res.type !== 'function') {
     res.type = (value) => {
-      const raw = String(value || '').trim().toLowerCase();
+      const raw = String(value || '')
+        .trim()
+        .toLowerCase();
       if (!raw) return res;
       if (raw.includes('/')) {
         res.setHeader('Content-Type', raw.includes('charset=') ? raw : `${raw}; charset=utf-8`);
@@ -278,7 +280,9 @@ function applyResponseHelpers(req, res) {
 function applyRequestHelpers(app, req) {
   if (typeof req.get !== 'function') {
     req.get = (name) => {
-      const key = String(name || '').trim().toLowerCase();
+      const key = String(name || '')
+        .trim()
+        .toLowerCase();
       if (!key) return undefined;
       const value = req.headers[key];
       if (Array.isArray(value)) return value.join(', ');
@@ -349,12 +353,8 @@ function executeHandler(handler, err, req, res) {
     res.once('close', onDone);
 
     try {
-      const value = err
-        ? handler(err, req, res, next)
-        : handler(req, res, next);
-      const awaited = value && typeof value.then === 'function'
-        ? value
-        : Promise.resolve(value);
+      const value = err ? handler(err, req, res, next) : handler(req, res, next);
+      const awaited = value && typeof value.then === 'function' ? value : Promise.resolve(value);
       awaited
         .then(() => {
           if (expectsNext) {
@@ -491,13 +491,12 @@ function createMiniApp() {
 
   app.listen = (port, host, callback) => {
     const server = http.createServer((req, res) => {
-      Promise.resolve(app.handle(req, res))
-        .catch(() => {
-          if (res.headersSent || res.writableEnded) return;
-          res.statusCode = 500;
-          setDefaultContentType(res, 'application/json; charset=utf-8');
-          writePayload(req, res, JSON.stringify(INTERNAL_ERROR_PAYLOAD));
-        });
+      Promise.resolve(app.handle(req, res)).catch(() => {
+        if (res.headersSent || res.writableEnded) return;
+        res.statusCode = 500;
+        setDefaultContentType(res, 'application/json; charset=utf-8');
+        writePayload(req, res, JSON.stringify(INTERNAL_ERROR_PAYLOAD));
+      });
     });
     return server.listen(port, host, callback);
   };
@@ -506,7 +505,7 @@ function createMiniApp() {
 }
 
 function jsonMiddleware(options: LooseRecord = {}) {
-  const limitBytes = Math.max(1024, Number(options.limitBytes || (1024 * 1024)));
+  const limitBytes = Math.max(1024, Number(options.limitBytes || 1024 * 1024));
   return (req, res, next) => {
     const method = String(req.method || 'GET').toUpperCase();
     if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return next();

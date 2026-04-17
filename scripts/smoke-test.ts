@@ -5,7 +5,10 @@ const { spawn } = require('child_process');
 const TEST_PORT = 3322;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const PAGE_CHECKS = ['/', '/account', '/admin', '/info', '/app-config.js', '/api/contours-status'];
-const SMOKE_DB_PROVIDER = String(process.env.DB_PROVIDER || 'sqlite').trim().toLowerCase() || 'sqlite';
+const SMOKE_DB_PROVIDER =
+  String(process.env.DB_PROVIDER || 'sqlite')
+    .trim()
+    .toLowerCase() || 'sqlite';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -61,9 +64,12 @@ class HttpSession {
       headers,
       redirect: 'manual'
     });
-    const setCookie = typeof response.headers.getSetCookie === 'function'
-      ? response.headers.getSetCookie()
-      : (response.headers.get('set-cookie') ? [response.headers.get('set-cookie')] : []);
+    const setCookie =
+      typeof response.headers.getSetCookie === 'function'
+        ? response.headers.getSetCookie()
+        : response.headers.get('set-cookie')
+          ? [response.headers.get('set-cookie')]
+          : [];
     if (setCookie.length > 0) {
       this.cookieHeader = mergeSetCookie(this.cookieHeader, setCookie);
     }
@@ -126,33 +132,41 @@ async function checkAuthFlow(session, userAuthDbPath) {
   const email = `smoke-admin-${Date.now()}@example.test`;
   const password = 'SmokePass12345';
 
-  const createAdmin = spawn(process.execPath, [
-    '--import',
-    'tsx',
-    'scripts/create-master-admin.ts',
-    `--email=${email}`,
-    `--password=${password}`,
-    '--first-name=Smoke',
-    '--last-name=Admin'
-  ], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      DB_PROVIDER: SMOKE_DB_PROVIDER,
-      ...(SMOKE_DB_PROVIDER === 'sqlite' ? { USER_AUTH_DB_PATH: userAuthDbPath } : {})
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
+  const createAdmin = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'scripts/create-master-admin.ts',
+      `--email=${email}`,
+      `--password=${password}`,
+      '--first-name=Smoke',
+      '--last-name=Admin'
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        DB_PROVIDER: SMOKE_DB_PROVIDER,
+        ...(SMOKE_DB_PROVIDER === 'sqlite' ? { USER_AUTH_DB_PATH: userAuthDbPath } : {})
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
 
-    const createAdminOutput = await new Promise<string>((resolve, reject) => {
-      let output = '';
-      createAdmin.stdout.on('data', (chunk) => { output += chunk.toString(); });
-      createAdmin.stderr.on('data', (chunk) => { output += chunk.toString(); });
-      createAdmin.on('error', reject);
-      createAdmin.on('exit', (code: number | null) => {
-        if (code === 0) return resolve(output);
-        return reject(new Error(`create-master-admin failed with code ${code}\n${output}`));
-      });
+  const createAdminOutput = await new Promise<string>((resolve, reject) => {
+    let output = '';
+    createAdmin.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    createAdmin.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    createAdmin.on('error', reject);
+    createAdmin.on('exit', (code: number | null) => {
+      if (code === 0) return resolve(output);
+      return reject(new Error(`create-master-admin failed with code ${code}\n${output}`));
+    });
   });
   if (!/master admin/i.test(createAdminOutput) && !/promoted to master admin/i.test(createAdminOutput)) {
     throw new Error('create-master-admin returned unexpected output');
@@ -214,12 +228,12 @@ async function main() {
       DATA_DIR: smokeDataDir,
       ...(SMOKE_DB_PROVIDER === 'sqlite'
         ? {
-          ARCHIMAP_DB_PATH: path.join(smokeDataDir, 'archimap.db'),
-          OSM_DB_PATH: path.join(smokeDataDir, 'osm.db'),
-          LOCAL_EDITS_DB_PATH: path.join(smokeDataDir, 'local-edits.db'),
-          USER_EDITS_DB_PATH: path.join(smokeDataDir, 'user-edits.db'),
-          USER_AUTH_DB_PATH: userAuthDbPath
-        }
+            ARCHIMAP_DB_PATH: path.join(smokeDataDir, 'archimap.db'),
+            OSM_DB_PATH: path.join(smokeDataDir, 'osm.db'),
+            LOCAL_EDITS_DB_PATH: path.join(smokeDataDir, 'local-edits.db'),
+            USER_EDITS_DB_PATH: path.join(smokeDataDir, 'user-edits.db'),
+            USER_AUTH_DB_PATH: userAuthDbPath
+          }
         : {}),
       AUTO_SYNC_ENABLED: 'false',
       AUTO_SYNC_ON_START: 'false',

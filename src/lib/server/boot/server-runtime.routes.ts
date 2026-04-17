@@ -85,7 +85,9 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     smtpTestHtmlTemplate,
     smtpTestTextTemplate,
     appSettingsService: runtime.appSettingsService,
-    settingsSecret: String(runtime.config.rawEnv.APP_SETTINGS_SECRET || runtime.config.sessionSecret).trim() || runtime.config.sessionSecret,
+    settingsSecret:
+      String(runtime.config.rawEnv.APP_SETTINGS_SECRET || runtime.config.sessionSecret).trim() ||
+      runtime.config.sessionSecret,
     dataSettingsService: runtime.dataSettingsService,
     getAllFilterTagKeysCached: runtime.getAllFilterTagKeysCached,
     applyFilterTagAllowlistSnapshot: runtime.applyFilterTagAllowlistSnapshot,

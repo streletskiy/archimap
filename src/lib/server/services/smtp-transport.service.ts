@@ -24,15 +24,17 @@ function buildSmtpDeliveryCandidates(raw: LooseRecord = {}) {
     return [{ type: 'url', url: smtpConfig.url, label: 'smtp_url' }];
   }
 
-  const out = [{
-    type: 'host',
-    host: smtpConfig.host,
-    port: smtpConfig.port,
-    secure: smtpConfig.secure,
-    user: smtpConfig.user,
-    pass: smtpConfig.pass,
-    label: `host:${smtpConfig.host}:${smtpConfig.port}`
-  }];
+  const out = [
+    {
+      type: 'host',
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      user: smtpConfig.user,
+      pass: smtpConfig.pass,
+      label: `host:${smtpConfig.host}:${smtpConfig.port}`
+    }
+  ];
 
   // Some providers/networks intermittently drop 587. Retry submission on 2525.
   if (!smtpConfig.secure && Number(smtpConfig.port) === 587) {
@@ -51,8 +53,12 @@ function buildSmtpDeliveryCandidates(raw: LooseRecord = {}) {
 }
 
 function isConnectionStageError(error) {
-  const code = String(error?.code || '').trim().toUpperCase();
-  const command = String(error?.command || '').trim().toUpperCase();
+  const code = String(error?.code || '')
+    .trim()
+    .toUpperCase();
+  const command = String(error?.command || '')
+    .trim()
+    .toUpperCase();
   const message = String(error?.message || '').toLowerCase();
 
   if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH'].includes(code)) {
@@ -123,7 +129,7 @@ async function sendMailWithFallback(rawSmtpConfig, mailOptions: LooseRecord = {}
       return { info, candidate };
     } catch (error) {
       lastError = error as LooseSmtpError;
-      const canRetry = index < (candidates.length - 1) && isConnectionStageError(error);
+      const canRetry = index < candidates.length - 1 && isConnectionStageError(error);
       logger.warn('smtp_delivery_attempt_failed', {
         ...logContext,
         candidate: candidate.label,

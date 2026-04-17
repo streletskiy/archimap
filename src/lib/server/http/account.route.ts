@@ -30,7 +30,9 @@ function registerAccountRoutes({
     if (!actorKey) {
       return res.status(400).json({ code: 'ERR_CURRENT_USER_UNRESOLVED', error: 'Failed to resolve current user' });
     }
-    const statusRaw = String(req.query?.status || '').trim().toLowerCase();
+    const statusRaw = String(req.query?.status || '')
+      .trim()
+      .toLowerCase();
     const status = statusRaw === 'all' || !statusRaw ? null : normalizeUserEditStatus(statusRaw);
     const query = String(req.query?.q || '').trim();
     const createdFrom = String(req.query?.from || '').trim();
@@ -38,27 +40,33 @@ function registerAccountRoutes({
     const page = parsePage(req.query?.page, 1, 1, 1000);
     const limit = parseLimit(req.query?.limit, 20, 1, 100);
     const offset = (page - 1) * limit;
-    const pageData = typeof getUserEditsPage === 'function'
-      ? await getUserEditsPage({
-        createdBy: actorKey,
-        status,
-        q: query,
-        createdFrom,
-        createdTo,
-        limit,
-        offset
-      })
-      : { total: 0, items: [] };
+    const pageData =
+      typeof getUserEditsPage === 'function'
+        ? await getUserEditsPage({
+            createdBy: actorKey,
+            status,
+            q: query,
+            createdFrom,
+            createdTo,
+            limit,
+            offset
+          })
+        : { total: 0, items: [] };
     const pageCount = pageData.total > 0 ? Math.ceil(pageData.total / limit) : 0;
-    return sendCachedJson(req, res, {
-      total: pageData.total,
-      page,
-      pageSize: limit,
-      pageCount,
-      items: pageData.items
-    }, {
-      cacheControl: 'private, no-cache'
-    });
+    return sendCachedJson(
+      req,
+      res,
+      {
+        total: pageData.total,
+        page,
+        pageSize: limit,
+        pageCount,
+        items: pageData.items
+      },
+      {
+        cacheControl: 'private, no-cache'
+      }
+    );
   });
 
   app.get('/api/account/edits/:editId', accountReadRateLimiter, requireAuth, async (req, res) => {
@@ -74,13 +82,22 @@ function registerAccountRoutes({
     if (!item) {
       return res.status(404).json({ code: 'ERR_EDIT_NOT_FOUND', error: 'Edit not found' });
     }
-    if (String(item.updatedBy || '').trim().toLowerCase() !== actorKey) {
+    if (
+      String(item.updatedBy || '')
+        .trim()
+        .toLowerCase() !== actorKey
+    ) {
       return res.status(403).json({ code: 'ERR_ACCESS_DENIED', error: 'Access denied' });
     }
-    return sendCachedJson(req, res, { item }, {
-      cacheControl: 'private, no-cache',
-      lastModified: item.updatedAt || undefined
-    });
+    return sendCachedJson(
+      req,
+      res,
+      { item },
+      {
+        cacheControl: 'private, no-cache',
+        lastModified: item.updatedAt || undefined
+      }
+    );
   });
 
   app.delete('/api/account/edits/:editId', requireCsrfSession, requireAuth, async (req, res) => {

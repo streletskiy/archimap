@@ -12,13 +12,8 @@ type OsmSyncServiceDeps = {
 };
 
 function createOsmSyncService(options: OsmSyncServiceDeps = {}) {
-  const {
-    db,
-    settingsSecret,
-    appSettingsService,
-    enqueueSearchIndexRefresh,
-    refreshDesignRefSuggestionsCache
-  } = options;
+  const { db, settingsSecret, appSettingsService, enqueueSearchIndexRefresh, refreshDesignRefSuggestionsCache } =
+    options;
 
   const oauth = createOsmOauthController({
     db,

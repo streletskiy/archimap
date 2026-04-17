@@ -11,7 +11,9 @@ const dictionaries = Object.freeze({ en, ru });
 export const locale = writable(DEFAULT_LOCALE);
 
 function pickFromObject(input, dottedKey) {
-  const parts = String(dottedKey || '').split('.').filter(Boolean);
+  const parts = String(dottedKey || '')
+    .split('.')
+    .filter(Boolean);
   let current = input;
   for (const part of parts) {
     if (!current || typeof current !== 'object' || !(part in current)) {
@@ -41,7 +43,9 @@ function parseCookieValue(cookieString, name) {
 }
 
 export function normalizeLocale(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) return null;
   if (isSupportedLocale(text)) return text;
   const short = text.split('-')[0];
@@ -61,7 +65,10 @@ export function resolveLocale({
   acceptLanguage?: string;
   navigatorLanguages?: readonly string[];
 } = {}) {
-  const pathPart = String(pathname || '').split('/').filter(Boolean)[0] || '';
+  const pathPart =
+    String(pathname || '')
+      .split('/')
+      .filter(Boolean)[0] || '';
   const fromPath = normalizeLocale(pathPart);
   if (fromPath) return fromPath;
 
@@ -130,7 +137,8 @@ export function translateNow(key, params: LooseRecord = {}) {
 }
 
 export const t = derived(locale, () => {
-  return /** @type {(key: I18nKey | string, params?: I18nParams) => string} */ ((key, params = {}) => translateNow(key, params));
+  return /** @type {(key: I18nKey | string, params?: I18nParams) => string} */ (key, params = {}) =>
+    translateNow(key, params);
 });
 
 export const availableLocales = SUPPORTED_LOCALES;

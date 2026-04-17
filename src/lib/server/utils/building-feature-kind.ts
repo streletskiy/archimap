@@ -2,7 +2,9 @@ const FEATURE_KIND_BUILDING = 'building';
 const FEATURE_KIND_BUILDING_PART = 'building_part';
 
 function normalizeFeatureKind(value) {
-  const kind = String(value || '').trim().toLowerCase();
+  const kind = String(value || '')
+    .trim()
+    .toLowerCase();
   return kind === FEATURE_KIND_BUILDING_PART ? FEATURE_KIND_BUILDING_PART : FEATURE_KIND_BUILDING;
 }
 
@@ -19,14 +21,20 @@ function parseTagsJson(rawTagsJson) {
 }
 
 function getFeatureKindFromTags(tags: LooseRecord = {}) {
-  if (tags && typeof tags === 'object' && !Array.isArray(tags) && Object.prototype.hasOwnProperty.call(tags, 'building')) {
+  if (
+    tags &&
+    typeof tags === 'object' &&
+    !Array.isArray(tags) &&
+    Object.prototype.hasOwnProperty.call(tags, 'building')
+  ) {
     return FEATURE_KIND_BUILDING;
   }
-  const hasBuildingPartTag = tags
-    && typeof tags === 'object'
-    && !Array.isArray(tags)
-    && (Object.prototype.hasOwnProperty.call(tags, 'building:part')
-      || Object.prototype.hasOwnProperty.call(tags, 'building_part'));
+  const hasBuildingPartTag =
+    tags &&
+    typeof tags === 'object' &&
+    !Array.isArray(tags) &&
+    (Object.prototype.hasOwnProperty.call(tags, 'building:part') ||
+      Object.prototype.hasOwnProperty.call(tags, 'building_part'));
   if (hasBuildingPartTag) {
     return FEATURE_KIND_BUILDING_PART;
   }

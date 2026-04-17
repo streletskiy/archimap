@@ -20,21 +20,27 @@ const {
 
 test('shouldRunRuntimeFollowup skips pmtiles-only and managed runtime env', () => {
   assert.equal(shouldRunRuntimeFollowup({ pmtilesOnly: true, env: {} }), false);
-  assert.equal(shouldRunRuntimeFollowup({
-    pmtilesOnly: false,
-    env: { REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true' }
-  }), false);
+  assert.equal(
+    shouldRunRuntimeFollowup({
+      pmtilesOnly: false,
+      env: { REGION_SYNC_SKIP_RUNTIME_FOLLOWUP: 'true' }
+    }),
+    false
+  );
   assert.equal(shouldRunRuntimeFollowup({ pmtilesOnly: false, env: {} }), true);
 });
 
 test('buildRuntimeFollowupEnv carries explicit runtime DB paths and provider config', () => {
-  const env = buildRuntimeFollowupEnv({
-    dbProvider: 'sqlite',
-    databaseUrl: '',
-    archimapDbPath: '/tmp/archimap.db',
-    osmDbPath: '/tmp/osm.db',
-    localEditsDbPath: '/tmp/local-edits.db'
-  }, {});
+  const env = buildRuntimeFollowupEnv(
+    {
+      dbProvider: 'sqlite',
+      databaseUrl: '',
+      archimapDbPath: '/tmp/archimap.db',
+      osmDbPath: '/tmp/osm.db',
+      localEditsDbPath: '/tmp/local-edits.db'
+    },
+    {}
+  );
 
   assert.equal(env.DB_PROVIDER, 'sqlite');
   assert.equal(env.ARCHIMAP_DB_PATH, '/tmp/archimap.db');
@@ -65,16 +71,28 @@ test('buildApplyStageDetail includes feature totals when known', () => {
 
 test('shouldUseLowMemoryPipeline only enables apply-first mode for postgres', () => {
   assert.equal(shouldUseLowMemoryPipeline({ dbProvider: 'postgres' }, {}), false);
-  assert.equal(shouldUseLowMemoryPipeline({
-    dbProvider: 'postgres'
-  }, {
-    REGION_SYNC_LOW_MEMORY_PIPELINE: 'true'
-  }), true);
-  assert.equal(shouldUseLowMemoryPipeline({
-    dbProvider: 'sqlite'
-  }, {
-    REGION_SYNC_LOW_MEMORY_PIPELINE: 'true'
-  }), false);
+  assert.equal(
+    shouldUseLowMemoryPipeline(
+      {
+        dbProvider: 'postgres'
+      },
+      {
+        REGION_SYNC_LOW_MEMORY_PIPELINE: 'true'
+      }
+    ),
+    true
+  );
+  assert.equal(
+    shouldUseLowMemoryPipeline(
+      {
+        dbProvider: 'sqlite'
+      },
+      {
+        REGION_SYNC_LOW_MEMORY_PIPELINE: 'true'
+      }
+    ),
+    false
+  );
 });
 
 test('resolveParentWatchdogPid reads valid external parent pid only', () => {
@@ -84,17 +102,26 @@ test('resolveParentWatchdogPid reads valid external parent pid only', () => {
 });
 
 test('isProcessAlive interprets ESRCH and EPERM correctly', () => {
-  assert.equal(isProcessAlive(123, () => {}), true);
-  assert.equal(isProcessAlive(123, () => {
-    const error = new Error('missing');
-    error.code = 'ESRCH';
-    throw error;
-  }), false);
-  assert.equal(isProcessAlive(123, () => {
-    const error = new Error('forbidden');
-    error.code = 'EPERM';
-    throw error;
-  }), true);
+  assert.equal(
+    isProcessAlive(123, () => {}),
+    true
+  );
+  assert.equal(
+    isProcessAlive(123, () => {
+      const error = new Error('missing');
+      error.code = 'ESRCH';
+      throw error;
+    }),
+    false
+  );
+  assert.equal(
+    isProcessAlive(123, () => {
+      const error = new Error('forbidden');
+      error.code = 'EPERM';
+      throw error;
+    }),
+    true
+  );
 });
 
 test('startParentWatchdog exits when the configured parent disappears', () => {
@@ -177,15 +204,18 @@ test('readExportSummary returns normalized summary for valid exporter metadata',
   const summaryPath = path.join(workspace, 'region-export-summary.json');
 
   try {
-    fs.writeFileSync(summaryPath, JSON.stringify({
-      importedFeatureCount: 123,
-      bounds: {
-        west: 37.5,
-        south: 55.5,
-        east: 37.7,
-        north: 55.7
-      }
-    }));
+    fs.writeFileSync(
+      summaryPath,
+      JSON.stringify({
+        importedFeatureCount: 123,
+        bounds: {
+          west: 37.5,
+          south: 55.5,
+          east: 37.7,
+          north: 55.7
+        }
+      })
+    );
 
     assert.deepEqual(readExportSummary(summaryPath), {
       importedFeatureCount: 123,
@@ -207,15 +237,18 @@ test('readExportSummary returns null for missing or malformed exporter metadata'
   const invalidPath = path.join(workspace, 'invalid.json');
 
   try {
-    fs.writeFileSync(invalidPath, JSON.stringify({
-      importedFeatureCount: 'NaN',
-      bounds: {
-        west: 37.5,
-        south: 55.5,
-        east: 'bad',
-        north: 55.7
-      }
-    }));
+    fs.writeFileSync(
+      invalidPath,
+      JSON.stringify({
+        importedFeatureCount: 'NaN',
+        bounds: {
+          west: 37.5,
+          south: 55.5,
+          east: 'bad',
+          north: 55.7
+        }
+      })
+    );
 
     assert.equal(readExportSummary(missingPath), null);
     assert.equal(readExportSummary(invalidPath), null);

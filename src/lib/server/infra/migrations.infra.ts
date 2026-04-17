@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 function listMigrationFiles(migrationsDir) {
   if (!fs.existsSync(migrationsDir)) return [];
-  return fs.readdirSync(migrationsDir)
+  return fs
+    .readdirSync(migrationsDir)
     .filter((name) => /^\d+.*\.migration\.ts$/.test(name))
     .sort((a, b) => a.localeCompare(b));
 }
@@ -20,7 +21,10 @@ function listMigrationFiles(migrationsDir) {
 function runPendingMigrations({ db, migrationsDir, logger = console }) {
   ensureMigrationsTable(db);
   const applied = new Set(
-    db.prepare('SELECT id FROM schema_migrations ORDER BY id').all().map((row) => String(row?.id || ''))
+    db
+      .prepare('SELECT id FROM schema_migrations ORDER BY id')
+      .all()
+      .map((row) => String(row?.id || ''))
   );
   const files = listMigrationFiles(migrationsDir);
 
@@ -37,7 +41,7 @@ function runPendingMigrations({ db, migrationsDir, logger = console }) {
 
     const tx = db.transaction(() => {
       migration.up(db);
-      db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, datetime(\'now\'))').run(id);
+      db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, datetime('now'))").run(id);
     });
 
     tx();

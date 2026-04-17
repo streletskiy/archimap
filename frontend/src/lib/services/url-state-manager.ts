@@ -1,11 +1,7 @@
 import { resolve } from '$app/paths';
 import { getFilterLayersUrlSignature } from '$lib/client/filterUrlState';
 import { parseUrlState, patchUrlState } from '$lib/client/urlState';
-import {
-  normalizeOptionalMapZoom,
-  requestMapFocus,
-  setMapBuildings3dEnabled
-} from '$lib/stores/map';
+import { normalizeOptionalMapZoom, requestMapFocus, setMapBuildings3dEnabled } from '$lib/stores/map';
 
 function toBuildingUrlParam(selection) {
   const osmType = String(selection?.osmType || '').trim();
@@ -22,13 +18,7 @@ function normalizeOptionalNumber(value) {
 }
 
 function getUrlCameraKey(camera) {
-  return [
-    camera?.lat ?? '',
-    camera?.lng ?? '',
-    camera?.z ?? '',
-    camera?.pitch ?? '',
-    camera?.bearing ?? ''
-  ].join(':');
+  return [camera?.lat ?? '', camera?.lng ?? '', camera?.z ?? '', camera?.pitch ?? '', camera?.bearing ?? ''].join(':');
 }
 
 function getUrlBuildings3dKey(state) {
@@ -46,9 +36,7 @@ function getUrlStateSignature(state) {
 }
 
 function getUrlBuildingKey(state) {
-  return state.building
-    ? `${state.building.osmType}/${state.building.osmId}`
-    : '';
+  return state.building ? `${state.building.osmType}/${state.building.osmId}` : '';
 }
 
 function getUrlFilterKey(state) {
@@ -108,7 +96,10 @@ export function createUrlStateManager({
     }
   }
 
-  async function applyBuildingFromUrl(building: LooseRecord, { buildingModalOpen, selectedBuilding }: LooseRecord = {}) {
+  async function applyBuildingFromUrl(
+    building: LooseRecord,
+    { buildingModalOpen, selectedBuilding }: LooseRecord = {}
+  ) {
     const osmType = String(building?.osmType || '').trim();
     const osmId = Number(building?.osmId);
     if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) return;
@@ -147,7 +138,12 @@ export function createUrlStateManager({
     }
   }
 
-  async function applyUrlStateToUi({ mapReady, buildingModalOpen, selectedBuilding, currentFilters }: LooseRecord = {}) {
+  async function applyUrlStateToUi({
+    mapReady,
+    buildingModalOpen,
+    selectedBuilding,
+    currentFilters
+  }: LooseRecord = {}) {
     if (typeof window === 'undefined') return;
     if (urlUpdateInFlight) return;
 
@@ -156,10 +152,7 @@ export function createUrlStateManager({
     const hasCamera = Boolean(state.camera);
     const cameraDeferred = Boolean(hasCamera && !mapReady);
     const replayDeferredFilters = Boolean(
-      state.filters
-      && pendingUrlSignature
-      && pendingUrlSignature === signature
-      && !cameraDeferred
+      state.filters && pendingUrlSignature && pendingUrlSignature === signature && !cameraDeferred
     );
     if (signature === handledUrlSignature && !cameraDeferred) return;
     if (buildingCloseInFlight) return;
@@ -185,8 +178,8 @@ export function createUrlStateManager({
           lon: state.camera.lng,
           lat: state.camera.lat,
           zoom: normalizeOptionalMapZoom(state.camera.z) ?? undefined,
-          pitch: allowCameraOrientation ? state.camera.pitch ?? undefined : undefined,
-          bearing: allowCameraOrientation ? state.camera.bearing ?? undefined : undefined,
+          pitch: allowCameraOrientation ? (state.camera.pitch ?? undefined) : undefined,
+          bearing: allowCameraOrientation ? (state.camera.bearing ?? undefined) : undefined,
           duration: 0
         });
         lastAppliedCameraKey = cameraKey;
@@ -201,12 +194,7 @@ export function createUrlStateManager({
       // before the map is ready. Re-emit the same filters once the deferred camera
       // has been applied so the map pipeline rebuilds against the final viewport.
       applyFiltersFromUrl(state.filters, currentFilters, { force: replayDeferredFilters });
-    } else if (
-      hadUrlFilterKey
-      && !filterApplyInFlight
-      && Array.isArray(currentFilters)
-      && currentFilters.length > 0
-    ) {
+    } else if (hadUrlFilterKey && !filterApplyInFlight && Array.isArray(currentFilters) && currentFilters.length > 0) {
       filterApplyInFlight = true;
       try {
         onClearFilters?.();
@@ -237,10 +225,7 @@ export function createUrlStateManager({
   function syncBuildingSelection({ mapReady, buildingModalOpen, selectedBuilding }: LooseRecord = {}) {
     if (!mapReady || !buildingModalOpen || !selectedBuilding || buildingApplyInFlight) return;
     const building = toBuildingUrlParam(selectedBuilding);
-    updateUrlState(
-      { building },
-      { replaceState: Boolean(lastUrlBuildingKey) }
-    );
+    updateUrlState({ building }, { replaceState: Boolean(lastUrlBuildingKey) });
   }
 
   function syncCamera({ mapReady, mapCenter, mapZoom, mapPitch, mapBearing, buildings3dEnabled }: LooseRecord = {}) {

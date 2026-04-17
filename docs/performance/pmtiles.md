@@ -26,7 +26,7 @@
 
 ## Sharded builds for large regions
 
-- `scripts/region-sync/pmtiles-builder.ts` splits every multi-cell region into a square km-grid before running `tippecanoe`, then merges the per-cell archives with `tile-join`. Each tippecanoe invocation processes only one cell, so peak RSS scales with the *densest* cell instead of the whole region.
+- `scripts/region-sync/pmtiles-builder.ts` splits every multi-cell region into a square km-grid before running `tippecanoe`, then merges the per-cell archives with `tile-join`. Each tippecanoe invocation processes only one cell, so peak RSS scales with the _densest_ cell instead of the whole region.
 - Cell size is controlled by `REGION_SYNC_SHARD_KM` (default `60`). The grid is planned from the region bbox using a cosine-adjusted longitude step so cells stay roughly square on the ground at the region's latitude. Set `REGION_SYNC_SHARD_KM=0` to force the legacy single-pass path for the whole deployment.
 - Single-cell regions (bbox smaller than one shard cell) automatically collapse to a direct tippecanoe call, so small cities still take the fast path. `REGION_SYNC_SHARD_MIN_FEATURES` now defaults to an adaptive floor when unset, which keeps small and medium regions on the single-pass path without hard-coding one universal threshold. Set it explicitly if you need reproducible benchmarking behavior.
 - Each feature is assigned to a cell by the bbox center of its geometry, so building footprints and `building:part` geometry never straddle two shards. Invalid or geometry-less lines are counted as `skippedFeatureCount` and reported at the start of the sharded build.

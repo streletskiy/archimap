@@ -59,9 +59,7 @@ function createFeatureFromRow(row) {
   } catch {
     tags = {};
   }
-  const featureKind = Object.prototype.hasOwnProperty.call(tags, 'building:part')
-    ? 'building_part'
-    : 'building';
+  const featureKind = Object.prototype.hasOwnProperty.call(tags, 'building:part') ? 'building_part' : 'building';
   return {
     type: 'Feature',
     id: `${row.osm_type}/${row.osm_id}`,
@@ -93,7 +91,15 @@ function createRouteApp(options: LooseRecord = {}) {
   const defaultContour = {
     geometry_json: JSON.stringify({
       type: 'Polygon',
-      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+      coordinates: [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 1],
+          [0, 0]
+        ]
+      ]
     }),
     tags_json: JSON.stringify({ building: 'yes' }),
     updated_at: '2026-03-25T00:00:00Z'
@@ -308,7 +314,15 @@ test('building-info save accepts overpass snapshot when contour row is missing',
 
   const sourceGeometryJson = JSON.stringify({
     type: 'Polygon',
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+    coordinates: [
+      [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+        [0, 0]
+      ]
+    ]
   });
   const sourceTagsJson = JSON.stringify({
     building: 'yes',
@@ -343,7 +357,15 @@ test('building-info save normalizes source timestamp from contour Date values', 
     currentContour: {
       geometry_json: JSON.stringify({
         type: 'Polygon',
-        coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+        coordinates: [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 1],
+            [0, 0]
+          ]
+        ]
       }),
       tags_json: JSON.stringify({ building: 'yes' }),
       updated_at: contourUpdatedAt
@@ -379,7 +401,15 @@ test('building-info save normalizes source timestamp from contour Date values', 
 test('building route falls back to the latest stored snapshot when contour row is missing', async (t) => {
   const snapshotGeometry = JSON.stringify({
     type: 'Polygon',
-    coordinates: [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]
+    coordinates: [
+      [
+        [10, 10],
+        [11, 10],
+        [11, 11],
+        [10, 11],
+        [10, 10]
+      ]
+    ]
   });
   const snapshotTags = JSON.stringify({
     building: 'yes',

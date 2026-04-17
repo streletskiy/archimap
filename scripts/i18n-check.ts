@@ -23,7 +23,9 @@ function hasLetters(text) {
 }
 
 function isMeaningful(text) {
-  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  const raw = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!raw) return false;
   if (!hasLetters(raw)) return false;
   if (/^[\d\W_]+$/.test(raw)) return false;

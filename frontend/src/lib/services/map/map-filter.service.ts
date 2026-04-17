@@ -1,8 +1,4 @@
-import type {
-  FilterWorkerFactory,
-  FilterWorkerRequest,
-  FilterWorkerResponse
-} from './filter-types.js';
+import type { FilterWorkerFactory, FilterWorkerRequest, FilterWorkerResponse } from './filter-types.js';
 
 const DEFAULT_WORKER_ERROR = 'Filter worker crashed';
 
@@ -10,20 +6,22 @@ export class MapFilterService {
   workerFactory: FilterWorkerFactory;
   worker: Worker | null;
   requestSeq: number;
-  pending: Map<string, {
-    resolve: (value: FilterWorkerResponse) => void;
-    reject: (error: unknown) => void;
-  }>;
+  pending: Map<
+    string,
+    {
+      resolve: (value: FilterWorkerResponse) => void;
+      reject: (error: unknown) => void;
+    }
+  >;
 
   constructor({
     workerFactory = null
   }: {
     workerFactory?: FilterWorkerFactory | null;
   } = {}) {
-    this.workerFactory = workerFactory || (() => new Worker(
-      new URL('../../workers/building-filter.worker.ts', import.meta.url),
-      { type: 'module' }
-    ));
+    this.workerFactory =
+      workerFactory ||
+      (() => new Worker(new URL('../../workers/building-filter.worker.ts', import.meta.url), { type: 'module' }));
     this.worker = null;
     this.requestSeq = 0;
     this.pending = new Map();
@@ -48,10 +46,7 @@ export class MapFilterService {
     return this.worker;
   }
 
-  request(
-    type: FilterWorkerRequest['type'],
-    payload: Omit<FilterWorkerRequest, 'type' | 'requestId'> = {}
-  ) {
+  request(type: FilterWorkerRequest['type'], payload: Omit<FilterWorkerRequest, 'type' | 'requestId'> = {}) {
     this.ensureWorker();
     if (!this.worker) {
       return Promise.reject(new Error('Filter worker is unavailable'));

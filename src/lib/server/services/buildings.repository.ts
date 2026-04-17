@@ -30,8 +30,9 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
   }
 
   const isPostgres = db.provider === 'postgres';
-  const selectBuildingById = db.prepare(isPostgres
-    ? `
+  const selectBuildingById = db.prepare(
+    isPostgres
+      ? `
       SELECT
         osm_type,
         osm_id,
@@ -40,11 +41,12 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
       FROM osm.building_contours
       WHERE osm_type = ? AND osm_id = ?
     `
-    : `
+      : `
       SELECT osm_type, osm_id, tags_json, geometry_json
       FROM osm.building_contours
       WHERE osm_type = ? AND osm_id = ?
-    `);
+    `
+  );
 
   const selectBuildingRegionSlugsById = db.prepare(`
     SELECT region.slug
@@ -153,20 +155,26 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
   async function getBuildingById(osmType, osmId) {
     const normalized = normalizeOsmTypeId(osmType, osmId);
     if (!normalized) return null;
-    return await selectBuildingById.get(normalized.osmType, normalized.osmId) || null;
+    return (await selectBuildingById.get(normalized.osmType, normalized.osmId)) || null;
   }
 
   async function getLatestUserEditSnapshotById(osmType, osmId) {
     const normalized = normalizeOsmTypeId(osmType, osmId);
     if (!normalized) return null;
-    return await db.prepare(`
+    return (
+      (await db
+        .prepare(
+          `
       SELECT *
       FROM user_edits.building_user_edits
       WHERE osm_type = ?
         AND osm_id = ?
       ORDER BY updated_at DESC, id DESC
       LIMIT 1
-    `).get(normalized.osmType, normalized.osmId) || null;
+    `
+        )
+        .get(normalized.osmType, normalized.osmId)) || null
+    );
   }
 
   async function getBuildingRegionSlugsById(osmType, osmId) {
@@ -195,11 +203,15 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
       for (const key of chunk) {
         params.push(key.osmType, key.osmId);
       }
-      const chunkRows = await db.prepare(`
+      const chunkRows = await db
+        .prepare(
+          `
         SELECT osm_type, osm_id, name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
         FROM local.architectural_info
         WHERE ${clauses}
-      `).all(...params);
+      `
+        )
+        .all(...params);
       rows.push(...chunkRows);
     }
 
@@ -221,9 +233,7 @@ function createBuildingsRepository({ db }: LooseRecord = {}) {
   async function insertPendingUserEdit(values = {}) {
     const preparedValues = buildPendingUserEditParams(values);
     const statement = db.prepare(insertPendingUserEditSql);
-    const result = isPostgres
-      ? await statement.get(preparedValues)
-      : await statement.run(preparedValues);
+    const result = isPostgres ? await statement.get(preparedValues) : await statement.run(preparedValues);
     return Number(result?.id || result?.lastInsertRowid || 0);
   }
 

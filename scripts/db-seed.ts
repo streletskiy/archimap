@@ -41,10 +41,13 @@ async function seedPostgres() {
       return;
     }
 
-    await client.query(`
+    await client.query(
+      `
       INSERT INTO auth.users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin)
       VALUES ($1, $2, $3, $4, 1, 1, 1)
-    `, [seedEmail, hashPassword('DemoAdmin12345'), 'Demo', 'Admin']);
+    `,
+      [seedEmail, hashPassword('DemoAdmin12345'), 'Demo', 'Admin']
+    );
     console.log(`Seed user created: ${seedEmail} / DemoAdmin12345`);
   } finally {
     await client.end();
@@ -53,9 +56,7 @@ async function seedPostgres() {
 
 function seedSqlite() {
   const Database = require('better-sqlite3');
-  const userAuthDbPath = String(
-    process.env.USER_AUTH_DB_PATH || path.join(process.cwd(), 'data', 'users.db')
-  ).trim();
+  const userAuthDbPath = String(process.env.USER_AUTH_DB_PATH || path.join(process.cwd(), 'data', 'users.db')).trim();
 
   const db = new Database(userAuthDbPath);
   db.pragma('journal_mode = WAL');
@@ -82,16 +83,20 @@ function seedSqlite() {
     return;
   }
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin)
     VALUES (?, ?, ?, ?, 1, 1, 1)
-  `).run(seedEmail, hashPassword('DemoAdmin12345'), 'Demo', 'Admin');
+  `
+  ).run(seedEmail, hashPassword('DemoAdmin12345'), 'Demo', 'Admin');
   db.close();
   console.log(`Seed user created: ${seedEmail} / DemoAdmin12345`);
 }
 
 async function main() {
-  const explicitDbProvider = String(process.env.DB_PROVIDER || '').trim().toLowerCase();
+  const explicitDbProvider = String(process.env.DB_PROVIDER || '')
+    .trim()
+    .toLowerCase();
   const explicitUserAuthPath = String(process.env.USER_AUTH_DB_PATH || '').trim();
   const provider = explicitDbProvider || (explicitUserAuthPath ? 'sqlite' : getDbProvider(process.env));
   if (provider === 'postgres') {

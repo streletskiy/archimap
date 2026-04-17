@@ -2,9 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 function normalizeOrigins(input) {
-  const values = Array.isArray(input)
-    ? input
-    : String(input || '').split(',');
+  const values = Array.isArray(input) ? input : String(input || '').split(',');
   const out = [];
   for (const raw of values) {
     const origin = String(raw || '').trim();
@@ -38,9 +36,7 @@ function buildCspDirectives({
     'style-src-attr': ["'unsafe-inline'"],
     'img-src': imgSrc,
     'font-src': fontSrc,
-    'connect-src': isProd
-      ? connectSrc
-      : [...connectSrc, 'ws:', 'wss:'],
+    'connect-src': isProd ? connectSrc : [...connectSrc, 'ws:', 'wss:'],
     'worker-src': ["'self'", 'blob:'],
     'object-src': ["'none'"],
     'base-uri': ["'self'"],

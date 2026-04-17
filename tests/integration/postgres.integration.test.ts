@@ -11,8 +11,12 @@ function runCommand(args, env = {}) {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     let output = '';
-    proc.stdout.on('data', (chunk) => { output += chunk.toString(); });
-    proc.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    proc.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
     proc.on('error', reject);
     proc.on('exit', (code) => {
       if (code === 0) return resolve(output);

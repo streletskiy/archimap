@@ -1,7 +1,4 @@
-const {
-  DEFAULT_FILTER_TAG_ALLOWLIST,
-  normalizeFilterTagKeyList
-} = require('./filter-tags.service');
+const { DEFAULT_FILTER_TAG_ALLOWLIST, normalizeFilterTagKeyList } = require('./filter-tags.service');
 const path = require('path');
 const { createDataSettingsContext } = require('./data-settings/shared');
 const { createBootstrapDomain } = require('./data-settings/bootstrap');
@@ -14,9 +11,7 @@ const { createPythonExtractResolver } = require('../../../../scripts/region-sync
 import type { AdminDataSettings, Region } from '$shared/types';
 
 function normalizeRegionPmtilesSlug(regionOrSlug) {
-  const raw = typeof regionOrSlug === 'object' && regionOrSlug
-    ? regionOrSlug.slug
-    : regionOrSlug;
+  const raw = typeof regionOrSlug === 'object' && regionOrSlug ? regionOrSlug.slug : regionOrSlug;
   const slug = String(raw || '')
     .trim()
     .toLowerCase()
@@ -69,17 +64,13 @@ function resolveExistingRegionPmtilesPath(dataDir, region) {
 function createDataSettingsService(options: LooseRecord = {}) {
   const context = createDataSettingsContext({
     ...options,
-    extractResolver: options.extractResolver || createPythonExtractResolver({
-      importerPath: path.resolve(__dirname, '../../../../scripts/sync-osm-buildings.py')
-    })
+    extractResolver:
+      options.extractResolver ||
+      createPythonExtractResolver({
+        importerPath: path.resolve(__dirname, '../../../../scripts/sync-osm-buildings.py')
+      })
   });
-  const {
-    db,
-    dataDir,
-    readAppDataSettingsRow,
-    normalizeNullableText,
-    computeRegionDbBytes
-  } = context;
+  const { db, dataDir, readAppDataSettingsRow, normalizeNullableText, computeRegionDbBytes } = context;
 
   const bootstrapDomain = createBootstrapDomain(context);
   Object.assign(context, bootstrapDomain);
@@ -120,7 +111,9 @@ function createDataSettingsService(options: LooseRecord = {}) {
     const settingsRow = await readAppDataSettingsRow();
     const updatedBy = normalizeNullableText(actor, 160);
     const normalizedAllowlist = normalizeFilterTagKeyList(input);
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO app_data_settings (
         id,
         env_bootstrap_completed,
@@ -134,19 +127,23 @@ function createDataSettingsService(options: LooseRecord = {}) {
         filter_tag_allowlist_json = excluded.filter_tag_allowlist_json,
         updated_by = excluded.updated_by,
         updated_at = datetime('now')
-    `).run(
-      Number(settingsRow?.env_bootstrap_completed || 0) > 0 ? 1 : 0,
-      settingsRow?.env_bootstrap_source ? String(settingsRow.env_bootstrap_source) : null,
-      JSON.stringify(normalizedAllowlist),
-      updatedBy
-    );
+    `
+      )
+      .run(
+        Number(settingsRow?.env_bootstrap_completed || 0) > 0 ? 1 : 0,
+        settingsRow?.env_bootstrap_source ? String(settingsRow.env_bootstrap_source) : null,
+        JSON.stringify(normalizedAllowlist),
+        updatedBy
+      );
     return getFilterTagAllowlistForAdmin();
   }
 
   async function getLatestStorageStatsByRegionId() {
     let rows: LooseRecord[];
     try {
-      rows = await db.prepare(`
+      rows = await db
+        .prepare(
+          `
         SELECT runs.region_id, runs.pmtiles_bytes, runs.db_bytes, runs.db_bytes_approximate
         FROM data_region_sync_runs runs
         INNER JOIN (
@@ -155,7 +152,9 @@ function createDataSettingsService(options: LooseRecord = {}) {
           GROUP BY region_id
         ) latest
           ON latest.latest_id = runs.id
-      `).all();
+      `
+        )
+        .all();
     } catch {
       rows = [];
     }
@@ -195,18 +194,14 @@ function createDataSettingsService(options: LooseRecord = {}) {
     const computedStorageStatsByRegionId = new Map(
       await Promise.all(
         items.map(async (region) => {
-          const value = storageStatsByRegionId.has(region.id)
-            ? null
-            : await computeRegionDbBytes(region.id);
+          const value = storageStatsByRegionId.has(region.id) ? null : await computeRegionDbBytes(region.id);
           return [region.id, value] as const;
         })
       )
     );
 
     return items.map((region) => {
-      const stats = storageStatsByRegionId.get(region.id)
-        || computedStorageStatsByRegionId.get(region.id)
-        || {};
+      const stats = storageStatsByRegionId.get(region.id) || computedStorageStatsByRegionId.get(region.id) || {};
       return {
         ...region,
         pmtilesBytes: resolveStoredPmtilesBytes(region, stats.pmtilesBytes ?? null),
@@ -267,11 +262,13 @@ function createDataSettingsService(options: LooseRecord = {}) {
 
   async function getRegionsUpstreamState(regionIds = [], options: LooseRecord = {}): Promise<Region[]> {
     await bootstrapDomain.ensureBootstrapped();
-    const normalizedIds = [...new Set(
-      (Array.isArray(regionIds) ? regionIds : [])
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0)
-    )];
+    const normalizedIds = [
+      ...new Set(
+        (Array.isArray(regionIds) ? regionIds : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      )
+    ];
     if (normalizedIds.length === 0) {
       return [];
     }

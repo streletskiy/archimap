@@ -27,16 +27,19 @@ const {
 const { exportRegionMembersToGeojsonNdjson } = require('../../scripts/region-sync/region-db');
 
 test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () => {
-  const row = parseRowPayload(JSON.stringify({
-    osm_type: 'way',
-    osm_id: 123,
-    tags_json: '{"building":"yes"}',
-    geometry_wkb_hex: '0a0b0c0d',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6
-  }), { requireGeometryWkbHex: true });
+  const row = parseRowPayload(
+    JSON.stringify({
+      osm_type: 'way',
+      osm_id: 123,
+      tags_json: '{"building":"yes"}',
+      geometry_wkb_hex: '0a0b0c0d',
+      min_lon: 37.5,
+      min_lat: 55.5,
+      max_lon: 37.6,
+      max_lat: 55.6
+    }),
+    { requireGeometryWkbHex: true }
+  );
 
   assert.equal(row.geometry_json, null);
   assert.equal(row.geometry_wkb_hex, '0A0B0C0D');
@@ -44,27 +47,41 @@ test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () =>
 });
 
 test('parseRowPayload rejects missing GeoJSON when GeoJSON is required', () => {
-  assert.throws(() => parseRowPayload(JSON.stringify({
-    osm_type: 'way',
-    osm_id: 123,
-    geometry_wkb_hex: '0A0B',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6
-  }), { requireGeometryJson: true }), /empty GeoJSON geometry/i);
+  assert.throws(
+    () =>
+      parseRowPayload(
+        JSON.stringify({
+          osm_type: 'way',
+          osm_id: 123,
+          geometry_wkb_hex: '0A0B',
+          min_lon: 37.5,
+          min_lat: 55.5,
+          max_lon: 37.6,
+          max_lat: 55.6
+        }),
+        { requireGeometryJson: true }
+      ),
+    /empty GeoJSON geometry/i
+  );
 });
 
 test('parseRowPayload rejects invalid WKB when WKB is required', () => {
-  assert.throws(() => parseRowPayload(JSON.stringify({
-    osm_type: 'relation',
-    osm_id: 456,
-    geometry_wkb_hex: 'XYZ',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6
-  }), { requireGeometryWkbHex: true }), /empty WKB geometry/i);
+  assert.throws(
+    () =>
+      parseRowPayload(
+        JSON.stringify({
+          osm_type: 'relation',
+          osm_id: 456,
+          geometry_wkb_hex: 'XYZ',
+          min_lon: 37.5,
+          min_lat: 55.5,
+          max_lon: 37.6,
+          max_lat: 55.6
+        }),
+        { requireGeometryWkbHex: true }
+      ),
+    /empty WKB geometry/i
+  );
 });
 
 test('summarizeImportRows counts WKB-only import rows and computes bounds', async () => {
@@ -229,7 +246,9 @@ test('buildFeature3dPropertiesFromTagsJson falls back to one level when levels a
 });
 
 test('buildFeature3dPropertiesFromTagsJson uses explicit height when present', () => {
-  const properties = buildFeature3dPropertiesFromTagsJson('{"building:levels":"4","building:height":"18.5","min_height":"5.5"}');
+  const properties = buildFeature3dPropertiesFromTagsJson(
+    '{"building:levels":"4","building:height":"18.5","min_height":"5.5"}'
+  );
 
   assert.deepEqual(properties, {
     render_height_m: 18.5,
@@ -247,63 +266,75 @@ test('buildFeature3dPropertiesFromTagsJson ignores explicit height below the bas
 });
 
 test('parseRowPayload derives building_part feature kind from tags json', () => {
-  const row = parseRowPayload(JSON.stringify({
-    osm_type: 'relation',
-    osm_id: 456,
-    tags_json: '{"building:part":"apartments"}',
-    geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6
-  }), { requireGeometryJson: true });
+  const row = parseRowPayload(
+    JSON.stringify({
+      osm_type: 'relation',
+      osm_id: 456,
+      tags_json: '{"building:part":"apartments"}',
+      geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
+      min_lon: 37.5,
+      min_lat: 55.5,
+      max_lon: 37.6,
+      max_lat: 55.6
+    }),
+    { requireGeometryJson: true }
+  );
 
   assert.equal(row.feature_kind, 'building_part');
 });
 
 test('parseRowPayload treats mixed building tags as building', () => {
-  const row = parseRowPayload(JSON.stringify({
-    osm_type: 'way',
-    osm_id: 457,
-    tags_json: '{"building":"yes","building:part":"apartments"}',
-    geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6
-  }), { requireGeometryJson: true });
+  const row = parseRowPayload(
+    JSON.stringify({
+      osm_type: 'way',
+      osm_id: 457,
+      tags_json: '{"building":"yes","building:part":"apartments"}',
+      geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
+      min_lon: 37.5,
+      min_lat: 55.5,
+      max_lon: 37.6,
+      max_lat: 55.6
+    }),
+    { requireGeometryJson: true }
+  );
 
   assert.equal(row.feature_kind, 'building');
 });
 
 test('parseRowPayload preserves hide-base-when-parts render flags', () => {
-  const row = parseRowPayload(JSON.stringify({
-    osm_type: 'way',
-    osm_id: 458,
-    tags_json: '{"building":"yes"}',
-    geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6,
-    render_hide_base_when_parts: 1
-  }), { requireGeometryJson: true });
+  const row = parseRowPayload(
+    JSON.stringify({
+      osm_type: 'way',
+      osm_id: 458,
+      tags_json: '{"building":"yes"}',
+      geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
+      min_lon: 37.5,
+      min_lat: 55.5,
+      max_lon: 37.6,
+      max_lat: 55.6,
+      render_hide_base_when_parts: 1
+    }),
+    { requireGeometryJson: true }
+  );
 
   assert.equal(row.render_hide_base_when_parts, 1);
 });
 
 test('parseRowPayload preserves building_remainder feature kind', () => {
-  const row = parseRowPayload(JSON.stringify({
-    osm_type: 'way',
-    osm_id: 459,
-    tags_json: '{"building":"yes"}',
-    feature_kind: 'building_remainder',
-    geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
-    min_lon: 37.5,
-    min_lat: 55.5,
-    max_lon: 37.6,
-    max_lat: 55.6
-  }), { requireGeometryJson: true });
+  const row = parseRowPayload(
+    JSON.stringify({
+      osm_type: 'way',
+      osm_id: 459,
+      tags_json: '{"building":"yes"}',
+      feature_kind: 'building_remainder',
+      geometry_json: '{"type":"Point","coordinates":[37.6,55.7]}',
+      min_lon: 37.5,
+      min_lat: 55.5,
+      max_lon: 37.6,
+      max_lat: 55.6
+    }),
+    { requireGeometryJson: true }
+  );
 
   assert.equal(row.feature_kind, 'building_remainder');
 });
@@ -366,7 +397,8 @@ test('exportImportRowsToGeojson adds building_remainder features for partially c
         osm_id: 12325639,
         tags_json: '{"building":"yes"}',
         feature_kind: 'building',
-        geometry_json: '{"type":"Polygon","coordinates":[[[44.0,56.0],[44.01,56.0],[44.01,56.01],[44.0,56.01],[44.0,56.0]]]}',
+        geometry_json:
+          '{"type":"Polygon","coordinates":[[[44.0,56.0],[44.01,56.0],[44.01,56.01],[44.0,56.01],[44.0,56.0]]]}',
         min_lon: 44.0,
         min_lat: 56.0,
         max_lon: 44.01,
@@ -377,7 +409,8 @@ test('exportImportRowsToGeojson adds building_remainder features for partially c
         osm_id: 12325634,
         tags_json: '{"building:part":"yes"}',
         feature_kind: 'building_part',
-        geometry_json: '{"type":"Polygon","coordinates":[[[44.005,56.0],[44.01,56.0],[44.01,56.01],[44.005,56.01],[44.005,56.0]]]}',
+        geometry_json:
+          '{"type":"Polygon","coordinates":[[[44.005,56.0],[44.01,56.0],[44.01,56.01],[44.005,56.01],[44.005,56.0]]]}',
         min_lon: 44.005,
         min_lat: 56.0,
         max_lon: 44.01,
@@ -386,7 +419,11 @@ test('exportImportRowsToGeojson adds building_remainder features for partially c
     ]);
 
     const summary = await exportImportRowsToGeojson(importPath, geojsonPath);
-    const lines = fs.readFileSync(geojsonPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const lines = fs
+      .readFileSync(geojsonPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
     const remainder = lines.find((feature) => feature?.properties?.feature_kind === 'building_remainder');
     const baseBuilding = lines.find((feature) => feature?.properties?.feature_kind === 'building');
 
@@ -400,13 +437,15 @@ test('exportImportRowsToGeojson adds building_remainder features for partially c
     assert.ok(remainder);
     assert.deepEqual(remainder.geometry, {
       type: 'Polygon',
-      coordinates: [[
-        [44.0, 56.0],
-        [44.005, 56.0],
-        [44.005, 56.01],
-        [44.0, 56.01],
-        [44.0, 56.0]
-      ]]
+      coordinates: [
+        [
+          [44.0, 56.0],
+          [44.005, 56.0],
+          [44.005, 56.01],
+          [44.0, 56.01],
+          [44.0, 56.0]
+        ]
+      ]
     });
     assert.equal(baseBuilding.properties.render_hide_base_when_parts, 1);
   } finally {
@@ -439,11 +478,11 @@ test('planShardGrid returns null for disabled sharding or invalid bounds', () =>
 
 test('planShardGrid divides a Poland-sized bbox into roughly km-sized cells', () => {
   // Poland bbox ~ (14.12, 49.00, 24.15, 54.84)
-  const grid = planShardGrid({ west: 14.12, south: 49.00, east: 24.15, north: 54.84 }, 60);
+  const grid = planShardGrid({ west: 14.12, south: 49.0, east: 24.15, north: 54.84 }, 60);
 
   assert.ok(grid);
   assert.equal(grid.minLon, 14.12);
-  assert.equal(grid.minLat, 49.00);
+  assert.equal(grid.minLat, 49.0);
   assert.equal(grid.shardKm, 60);
   // 5.84° lat / (60/111.32)° per cell ≈ 10.84 → 11 rows
   assert.equal(grid.rows, 11);
@@ -455,7 +494,7 @@ test('planShardGrid divides a Poland-sized bbox into roughly km-sized cells', ()
 });
 
 test('planShardGrid collapses tiny regions into a single cell', () => {
-  const grid = planShardGrid({ west: 14.42, south: 50.07, east: 14.46, north: 50.10 }, 60);
+  const grid = planShardGrid({ west: 14.42, south: 50.07, east: 14.46, north: 50.1 }, 60);
   assert.ok(grid);
   assert.equal(grid.rows, 1);
   assert.equal(grid.cols, 1);
@@ -463,7 +502,7 @@ test('planShardGrid collapses tiny regions into a single cell', () => {
 });
 
 test('assignCellIndex maps feature bbox centers into the right cell and clamps outliers', () => {
-  const grid = planShardGrid({ west: 14.00, south: 49.00, east: 24.00, north: 55.00 }, 60);
+  const grid = planShardGrid({ west: 14.0, south: 49.0, east: 24.0, north: 55.0 }, 60);
 
   const swCorner = assignCellIndex({ west: 14.05, south: 49.05, east: 14.06, north: 49.06 }, grid);
   const neCorner = assignCellIndex({ west: 23.95, south: 54.95, east: 23.96, north: 54.96 }, grid);
@@ -486,7 +525,15 @@ test('computeGeometryBounds handles Point, Polygon, MultiPolygon and GeometryCol
   assert.deepEqual(
     computeGeometryBounds({
       type: 'Polygon',
-      coordinates: [[[14.0, 49.0], [15.5, 49.0], [15.5, 50.5], [14.0, 50.5], [14.0, 49.0]]]
+      coordinates: [
+        [
+          [14.0, 49.0],
+          [15.5, 49.0],
+          [15.5, 50.5],
+          [14.0, 50.5],
+          [14.0, 49.0]
+        ]
+      ]
     }),
     { west: 14.0, south: 49.0, east: 15.5, north: 50.5 }
   );
@@ -494,8 +541,24 @@ test('computeGeometryBounds handles Point, Polygon, MultiPolygon and GeometryCol
     computeGeometryBounds({
       type: 'MultiPolygon',
       coordinates: [
-        [[[14.0, 49.0], [14.5, 49.0], [14.5, 49.5], [14.0, 49.5], [14.0, 49.0]]],
-        [[[23.0, 54.0], [23.5, 54.0], [23.5, 54.5], [23.0, 54.5], [23.0, 54.0]]]
+        [
+          [
+            [14.0, 49.0],
+            [14.5, 49.0],
+            [14.5, 49.5],
+            [14.0, 49.5],
+            [14.0, 49.0]
+          ]
+        ],
+        [
+          [
+            [23.0, 54.0],
+            [23.5, 54.0],
+            [23.5, 54.5],
+            [23.0, 54.5],
+            [23.0, 54.0]
+          ]
+        ]
       ]
     }),
     { west: 14.0, south: 49.0, east: 23.5, north: 54.5 }
@@ -522,21 +585,24 @@ test('writeShardNdjsons splits GeoJSON NDJSON into per-cell files', async () => 
   try {
     const lines = [
       formatGeojsonFeatureLine(
-        'way', 900001,
+        'way',
+        900001,
         '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}'
       ),
       formatGeojsonFeatureLine(
-        'way', 900002,
+        'way',
+        900002,
         '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}'
       ),
       formatGeojsonFeatureLine(
-        'way', 900003,
+        'way',
+        900003,
         '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}'
       )
     ];
     fs.writeFileSync(geojsonPath, lines.join(''), 'utf8');
 
-    const grid = planShardGrid({ west: 14.00, south: 49.00, east: 24.00, north: 55.00 }, 60);
+    const grid = planShardGrid({ west: 14.0, south: 49.0, east: 24.0, north: 55.0 }, 60);
     const result = await writeShardNdjsons({ geojsonPath, grid, workspaceDir: shardDir });
 
     assert.equal(result.skippedFeatureCount, 0);
@@ -567,10 +633,7 @@ test('writeShardNdjsons skips unparseable lines and features without geometry', 
       [
         'not json at all',
         JSON.stringify({ type: 'Feature', properties: {}, geometry: null }),
-        formatGeojsonFeatureLine(
-          'way', 900010,
-          '{"type":"Point","coordinates":[14.1,49.1]}'
-        ).trim()
+        formatGeojsonFeatureLine('way', 900010, '{"type":"Point","coordinates":[14.1,49.1]}').trim()
       ].join('\n'),
       'utf8'
     );
@@ -674,9 +737,21 @@ test('buildPmtilesFromGeojson reuses cached shard archives on repeated runs', as
     fs.writeFileSync(
       geojsonPath,
       [
-        formatGeojsonFeatureLine('way', 910001, '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}').trim(),
-        formatGeojsonFeatureLine('way', 910002, '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}').trim(),
-        formatGeojsonFeatureLine('way', 910003, '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}').trim()
+        formatGeojsonFeatureLine(
+          'way',
+          910001,
+          '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}'
+        ).trim(),
+        formatGeojsonFeatureLine(
+          'way',
+          910002,
+          '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}'
+        ).trim(),
+        formatGeojsonFeatureLine(
+          'way',
+          910003,
+          '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}'
+        ).trim()
       ].join('\n'),
       'utf8'
     );
@@ -860,7 +935,11 @@ test('exportRegionMembersToGeojsonNdjson adds building_remainder rows for sqlite
       regionId: 11,
       outputPath
     });
-    const lines = fs.readFileSync(outputPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const lines = fs
+      .readFileSync(outputPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
     const remainder = lines.find((feature) => feature?.properties?.feature_kind === 'building_remainder');
     const baseBuilding = lines.find((feature) => feature?.properties?.feature_kind === 'building');
 
@@ -868,13 +947,15 @@ test('exportRegionMembersToGeojsonNdjson adds building_remainder rows for sqlite
     assert.ok(remainder);
     assert.deepEqual(remainder.geometry, {
       type: 'Polygon',
-      coordinates: [[
-        [44.0, 56.0],
-        [44.005, 56.0],
-        [44.005, 56.01],
-        [44.0, 56.01],
-        [44.0, 56.0]
-      ]]
+      coordinates: [
+        [
+          [44.0, 56.0],
+          [44.005, 56.0],
+          [44.005, 56.01],
+          [44.0, 56.01],
+          [44.0, 56.0]
+        ]
+      ]
     });
     assert.equal(baseBuilding.properties.render_hide_base_when_parts, 1);
   } finally {

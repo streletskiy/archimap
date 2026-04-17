@@ -32,24 +32,27 @@ const OP_TO_BYTE = Object.freeze({
   less_or_equals: 9
 });
 
-const BYTE_TO_OP = Object.freeze(Object.fromEntries(
-  Object.entries(OP_TO_BYTE).map(([op, byte]) => [String(byte), op])
-));
+const BYTE_TO_OP = Object.freeze(
+  Object.fromEntries(Object.entries(OP_TO_BYTE).map(([op, byte]) => [String(byte), op]))
+);
 
 function toBase64Url(base64) {
-  return String(base64 || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return String(base64 || '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function fromBase64Url(text) {
-  const normalized = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+  const normalized = String(text || '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
   const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
   return `${normalized}${padding}`;
 }
 
 function getBufferCtor() {
-  return typeof globalThis !== 'undefined' && globalThis.Buffer
-    ? globalThis.Buffer
-    : null;
+  return typeof globalThis !== 'undefined' && globalThis.Buffer ? globalThis.Buffer : null;
 }
 
 function encodeBase64UrlBytes(bytes) {
@@ -126,7 +129,7 @@ function readVarint(bytes, startOffset) {
   let shift = 0;
   while (offset < bytes.length) {
     const byte = bytes[offset++];
-    value += (byte & 0x7f) * (2 ** shift);
+    value += (byte & 0x7f) * 2 ** shift;
     if ((byte & 0x80) === 0) {
       return {
         value,
@@ -235,7 +238,7 @@ function decodeFilterLayersBinary(rawValue) {
     offset = layerCountState.nextOffset;
     const decodedLayers = [];
     for (let priority = 0; priority < layerCountState.value; priority += 1) {
-      if ((offset + 4) > bytes.length) return null;
+      if (offset + 4 > bytes.length) return null;
       const mode = BYTE_TO_MODE[String(bytes[offset++])];
       const color = colorFromBytes(bytes[offset++], bytes[offset++], bytes[offset++]);
       const ruleCountState = readVarint(bytes, offset);

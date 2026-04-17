@@ -31,9 +31,11 @@ function normalizePoints(values) {
     const count = Number(point?.count);
     const normalizedCount = Number.isFinite(count) && count > 0 ? Math.max(1, Math.trunc(count)) : null;
     const osmKey = String(point?.osmKey || '').trim();
-    points.push(osmKey
-      ? { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}), osmKey }
-      : { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}) });
+    points.push(
+      osmKey
+        ? { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}), osmKey }
+        : { id, lon, lat, ...(normalizedCount ? { count: normalizedCount } : {}) }
+    );
   }
   return points.sort((left, right) => left.id - right.id);
 }
@@ -189,10 +191,7 @@ export function applyFilterPaintHighlight({
     ? normalizedColorGroups
     : normalizeFilterPaintColorGroups(colorGroups);
   const { expr: filterExpression, count } = buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups);
-  const combinedFilterExpression = combineFilterExpressions([
-    additionalFilterExpression,
-    filterExpression
-  ]);
+  const combinedFilterExpression = combineFilterExpressions([additionalFilterExpression, filterExpression]);
   const active = count > 0;
   const colorExpression = !active
     ? FILTER_TRANSPARENT_COLOR
@@ -291,13 +290,7 @@ export function buildFilterHighlightExpression(matched) {
   return { expr: ['any', ...clauses], count: Math.max(encodedIds.length, osmIds.length) };
 }
 
-export function applyFilterHighlight({
-  map,
-  matched,
-  fillLayerId,
-  lineLayerId,
-  onLayerFilterApplied
-}) {
+export function applyFilterHighlight({ map, matched, fillLayerId, lineLayerId, onLayerFilterApplied }) {
   if (!map) return { active: false, expr: EMPTY_LAYER_FILTER, count: 0 };
   const { expr, count } = buildFilterHighlightExpression(matched);
   const active = count > 0;

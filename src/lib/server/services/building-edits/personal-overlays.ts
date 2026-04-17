@@ -1,13 +1,10 @@
 function createBuildingEditPersonalOverlaysService(context) {
-  const {
-    applyUserEditRowToInfo,
-    db,
-    isPostgres,
-    normalizeUserEditStatus
-  } = context;
+  const { applyUserEditRowToInfo, db, isPostgres, normalizeUserEditStatus } = context;
 
   async function getUserPersonalEditsByKeys(actorKey, keys, statuses = ['pending', 'rejected']) {
-    const actor = String(actorKey || '').trim().toLowerCase();
+    const actor = String(actorKey || '')
+      .trim()
+      .toLowerCase();
     if (!actor || !Array.isArray(keys) || keys.length === 0) return new Map();
 
     const normalizedStatuses: string[] = statuses
@@ -35,14 +32,16 @@ function createBuildingEditPersonalOverlaysService(context) {
 
       const rows: LooseRecord[] = isPostgres
         ? await (() => {
-          const valuesSql = pairs.map(() => '(?::text, ?::bigint)').join(', ');
-          const params: Array<string | number> = [];
-          for (const pair of pairs) {
-            params.push(pair.osmType, pair.osmId);
-          }
-          params.push(actor, ...normalizedStatuses);
+            const valuesSql = pairs.map(() => '(?::text, ?::bigint)').join(', ');
+            const params: Array<string | number> = [];
+            for (const pair of pairs) {
+              params.push(pair.osmType, pair.osmId);
+            }
+            params.push(actor, ...normalizedStatuses);
 
-          return db.prepare(`
+            return db
+              .prepare(
+                `
             WITH requested(osm_type, osm_id) AS (
               VALUES ${valuesSql}
             ),
@@ -59,17 +58,21 @@ function createBuildingEditPersonalOverlaysService(context) {
             FROM user_edits.building_user_edits ue
             JOIN latest
               ON latest.max_id = ue.id
-          `).all(...params);
-        })()
+          `
+              )
+              .all(...params);
+          })()
         : await (() => {
-          const clauses = pairs.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
-          const params: Array<string | number> = [actor];
-          for (const pair of pairs) {
-            params.push(pair.osmType, pair.osmId);
-          }
-          params.push(...normalizedStatuses);
+            const clauses = pairs.map(() => '(osm_type = ? AND osm_id = ?)').join(' OR ');
+            const params: Array<string | number> = [actor];
+            for (const pair of pairs) {
+              params.push(pair.osmType, pair.osmId);
+            }
+            params.push(...normalizedStatuses);
 
-          return db.prepare(`
+            return db
+              .prepare(
+                `
             SELECT ue.*
             FROM user_edits.building_user_edits ue
             JOIN (
@@ -81,8 +84,10 @@ function createBuildingEditPersonalOverlaysService(context) {
               GROUP BY osm_type, osm_id
             ) latest
               ON latest.max_id = ue.id
-          `).all(...params);
-        })();
+          `
+              )
+              .all(...params);
+          })();
 
       for (const row of rows) {
         out.set(`${row.osm_type}/${row.osm_id}`, row);
@@ -113,7 +118,9 @@ function createBuildingEditPersonalOverlaysService(context) {
   }
 
   async function applyPersonalEditsToFilterItems(items, actorKey) {
-    const actor = String(actorKey || '').trim().toLowerCase();
+    const actor = String(actorKey || '')
+      .trim()
+      .toLowerCase();
     if (!actor || !Array.isArray(items) || items.length === 0) return items;
 
     const keys = items.map((item) => String(item?.osmKey || '')).filter((id) => /^(way|relation)\/\d+$/.test(id));

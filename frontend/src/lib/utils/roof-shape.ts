@@ -135,11 +135,7 @@ const ROOF_SHAPE_VALUES = Object.freeze([
   }
 ]);
 
-const ROOF_SHAPE_SELECT_EXCLUDED_VALUES = new Set([
-  'gabled_height_moved',
-  'bellcast_gable',
-  'many'
-]);
+const ROOF_SHAPE_SELECT_EXCLUDED_VALUES = new Set(['gabled_height_moved', 'bellcast_gable', 'many']);
 
 const ROOF_SHAPE_SELECT_VALUES = Object.freeze(
   ROOF_SHAPE_VALUES.filter((item) => !ROOF_SHAPE_SELECT_EXCLUDED_VALUES.has(item.value))

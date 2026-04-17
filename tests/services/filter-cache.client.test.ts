@@ -35,4 +35,3 @@ test('findCachedFilterMatches returns the newest matching cached payload', async
   const result = cache.findCachedFilterMatches((payload) => Number(payload?.matchedCount || 0) > 10);
   assert.equal(result?.matchedCount, 11);
 });
-

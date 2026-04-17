@@ -217,16 +217,21 @@ async function summarizeImportRows(importPath, options: LooseRecord = {}) {
 
 function tippecanoeArgsForRegion({ region, inputPath, outputPath, progressJson, progressIntervalSec }) {
   const args = [
-    '-o', outputPath,
+    '-o',
+    outputPath,
     '-f',
-    '-l', String(region.sourceLayer || 'buildings'),
-    '-Z', String(region.pmtilesMinZoom),
-    '-z', String(region.pmtilesMaxZoom),
+    '-l',
+    String(region.sourceLayer || 'buildings'),
+    '-Z',
+    String(region.pmtilesMinZoom),
+    '-z',
+    String(region.pmtilesMaxZoom),
     '--read-parallel',
     '--detect-shared-borders',
     '--coalesce-densest-as-needed',
     '--extend-zooms-if-still-dropping',
-    '--progress-interval', String(progressIntervalSec)
+    '--progress-interval',
+    String(progressIntervalSec)
   ];
   if (progressJson) {
     args.push('--json-progress');
@@ -261,9 +266,11 @@ function runTippecanoe({
 function runTileJoin({ tileJoinExe, region, inputs, outputPath, env }: LooseRecord) {
   ensureDir(outputPath);
   const args = [
-    '-o', outputPath,
+    '-o',
+    outputPath,
     '-f',
-    '-n', String(region.sourceLayer || 'buildings'),
+    '-n',
+    String(region.sourceLayer || 'buildings'),
     '--no-tile-size-limit',
     ...inputs
   ];
@@ -395,8 +402,8 @@ async function writeShardNdjsons({ geojsonPath, grid, workspaceDir }) {
     if (shards.has(key)) return shards.get(key);
     if (shards.size >= MAX_SHARD_CELL_COUNT) {
       throw new Error(
-        `Shard grid exceeded hard cap of ${MAX_SHARD_CELL_COUNT} non-empty cells; `
-          + 'increase REGION_SYNC_SHARD_KM or disable sharding by setting it to 0'
+        `Shard grid exceeded hard cap of ${MAX_SHARD_CELL_COUNT} non-empty cells; ` +
+          'increase REGION_SYNC_SHARD_KM or disable sharding by setting it to 0'
       );
     }
     const shardPath = path.join(workspaceDir, `shard-${key}.ndjson`);
@@ -507,14 +514,8 @@ async function buildPmtilesFromGeojson({
   const grid = planShardGrid(effectiveBounds, resolvedShardKm);
   const normalizedFeatureCount = Number.isFinite(featureCount) ? Number(featureCount) : null;
   const shardFeatureFloor = getAdaptiveShardFeatureFloor(grid, env);
-  const meetsShardFeatureFloor = normalizedFeatureCount === null
-    || normalizedFeatureCount >= shardFeatureFloor;
-  const shardingEnabled = Boolean(
-    grid
-    && grid.cellCount > 1
-    && resolvedShardKm > 0
-    && meetsShardFeatureFloor
-  );
+  const meetsShardFeatureFloor = normalizedFeatureCount === null || normalizedFeatureCount >= shardFeatureFloor;
+  const shardingEnabled = Boolean(grid && grid.cellCount > 1 && resolvedShardKm > 0 && meetsShardFeatureFloor);
 
   if (!shardingEnabled) {
     reportShardProgress({
@@ -545,8 +546,9 @@ async function buildPmtilesFromGeojson({
     throw new Error('tile-join is not available. Install tippecanoe (which ships tile-join) or set TILE_JOIN_BIN.');
   }
 
-  const workspaceDir = String(shardWorkspace || '').trim()
-    || path.join(path.dirname(outputPath), `shards-${path.basename(outputPath, '.pmtiles')}`);
+  const workspaceDir =
+    String(shardWorkspace || '').trim() ||
+    path.join(path.dirname(outputPath), `shards-${path.basename(outputPath, '.pmtiles')}`);
   fs.mkdirSync(workspaceDir, { recursive: true });
 
   const shardPmtilesPaths = [];
@@ -601,9 +603,9 @@ async function buildPmtilesFromGeojson({
     }
 
     console.log(
-      `[region-sync] sharded pmtiles build: ${shardPlan.shards.length} cells, `
-        + `${resolvedShardKm}km grid (${grid.rows}x${grid.cols}), `
-        + `${shardPlan.skippedFeatureCount} skipped features`
+      `[region-sync] sharded pmtiles build: ${shardPlan.shards.length} cells, ` +
+        `${resolvedShardKm}km grid (${grid.rows}x${grid.cols}), ` +
+        `${shardPlan.skippedFeatureCount} skipped features`
     );
 
     const totalShards = shardPlan.shards.length;
@@ -615,21 +617,19 @@ async function buildPmtilesFromGeojson({
         : path.join(workspaceDir, `shard-${shard.key}.pmtiles`);
       const cachedShardMeta = shardCacheManifestByKey.get(shard.key) as LooseRecord | undefined;
       const cacheHit = Boolean(
-        effectiveShardCacheDir
-        && cachedShardMeta
-        && String(cachedShardMeta.hash || '') === shard.hash
-        && fs.existsSync(finalShardPath)
+        effectiveShardCacheDir &&
+        cachedShardMeta &&
+        String(cachedShardMeta.hash || '') === shard.hash &&
+        fs.existsSync(finalShardPath)
       );
       console.log(
-        `[region-sync] shard ${index + 1}/${totalShards} `
-          + `key=${shard.key} features=${shard.count} ${cacheHit ? 'cache-hit' : 'dirty'}`
+        `[region-sync] shard ${index + 1}/${totalShards} ` +
+          `key=${shard.key} features=${shard.count} ${cacheHit ? 'cache-hit' : 'dirty'}`
       );
       reportShardProgress({
         stage: 'build',
         progress: Math.round(index * shardSharePercent),
-        detail: cacheHit
-          ? `cached shard ${index + 1}/${totalShards}`
-          : `tippecanoe shard ${index + 1}/${totalShards}`
+        detail: cacheHit ? `cached shard ${index + 1}/${totalShards}` : `tippecanoe shard ${index + 1}/${totalShards}`
       });
       if (!cacheHit) {
         const shardOutputPath = effectiveShardCacheDir

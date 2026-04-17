@@ -1,7 +1,4 @@
-import type {
-  FeatureIdentitySource,
-  LayerIdsSnapshot
-} from './filter-types.js';
+import type { FeatureIdentitySource, LayerIdsSnapshot } from './filter-types.js';
 
 export function parseOsmKey(raw) {
   const text = String(raw || '').trim();
@@ -16,13 +13,11 @@ export function parseOsmKey(raw) {
 
 export function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 export function getNow() {
-  return typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
 }
 
 export function nextAnimationFrame() {
@@ -32,23 +27,37 @@ export function nextAnimationFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-export function normalizeLayerIdsSnapshot(layerIds: Partial<LayerIdsSnapshot> | null | undefined = {}): LayerIdsSnapshot {
+export function normalizeLayerIdsSnapshot(
+  layerIds: Partial<LayerIdsSnapshot> | null | undefined = {}
+): LayerIdsSnapshot {
   const source = layerIds && typeof layerIds === 'object' ? layerIds : {};
   return {
     buildingFillLayerIds: Array.isArray(source.buildingFillLayerIds) ? source.buildingFillLayerIds : [],
     buildingExtrusionLayerIds: Array.isArray(source.buildingExtrusionLayerIds) ? source.buildingExtrusionLayerIds : [],
     buildingLineLayerIds: Array.isArray(source.buildingLineLayerIds) ? source.buildingLineLayerIds : [],
     buildingPartFillLayerIds: Array.isArray(source.buildingPartFillLayerIds) ? source.buildingPartFillLayerIds : [],
-    buildingPartExtrusionLayerIds: Array.isArray(source.buildingPartExtrusionLayerIds) ? source.buildingPartExtrusionLayerIds : [],
+    buildingPartExtrusionLayerIds: Array.isArray(source.buildingPartExtrusionLayerIds)
+      ? source.buildingPartExtrusionLayerIds
+      : [],
     buildingPartLineLayerIds: Array.isArray(source.buildingPartLineLayerIds) ? source.buildingPartLineLayerIds : [],
-    filterHighlightExtrusionLayerIds: Array.isArray(source.filterHighlightExtrusionLayerIds) ? source.filterHighlightExtrusionLayerIds : [],
-    filterHighlightFillLayerIds: Array.isArray(source.filterHighlightFillLayerIds) ? source.filterHighlightFillLayerIds : [],
-    filterHighlightLineLayerIds: Array.isArray(source.filterHighlightLineLayerIds) ? source.filterHighlightLineLayerIds : [],
+    filterHighlightExtrusionLayerIds: Array.isArray(source.filterHighlightExtrusionLayerIds)
+      ? source.filterHighlightExtrusionLayerIds
+      : [],
+    filterHighlightFillLayerIds: Array.isArray(source.filterHighlightFillLayerIds)
+      ? source.filterHighlightFillLayerIds
+      : [],
+    filterHighlightLineLayerIds: Array.isArray(source.filterHighlightLineLayerIds)
+      ? source.filterHighlightLineLayerIds
+      : [],
     buildingPartFilterHighlightExtrusionLayerIds: Array.isArray(source.buildingPartFilterHighlightExtrusionLayerIds)
       ? source.buildingPartFilterHighlightExtrusionLayerIds
       : [],
-    buildingPartFilterHighlightFillLayerIds: Array.isArray(source.buildingPartFilterHighlightFillLayerIds) ? source.buildingPartFilterHighlightFillLayerIds : [],
-    buildingPartFilterHighlightLineLayerIds: Array.isArray(source.buildingPartFilterHighlightLineLayerIds) ? source.buildingPartFilterHighlightLineLayerIds : [],
+    buildingPartFilterHighlightFillLayerIds: Array.isArray(source.buildingPartFilterHighlightFillLayerIds)
+      ? source.buildingPartFilterHighlightFillLayerIds
+      : [],
+    buildingPartFilterHighlightLineLayerIds: Array.isArray(source.buildingPartFilterHighlightLineLayerIds)
+      ? source.buildingPartFilterHighlightLineLayerIds
+      : [],
     hoverExtrusionLayerIds: Array.isArray(source.hoverExtrusionLayerIds) ? source.hoverExtrusionLayerIds : [],
     hoverFillLayerIds: Array.isArray(source.hoverFillLayerIds) ? source.hoverFillLayerIds : [],
     hoverLineLayerIds: Array.isArray(source.hoverLineLayerIds) ? source.hoverLineLayerIds : [],
@@ -72,7 +81,7 @@ export function resolveFeatureIdentity(feature: FeatureIdentitySource) {
   }
   const encodedId = Number(feature?.id);
   if (!Number.isFinite(encodedId) || !Number.isInteger(encodedId) || encodedId < 0) return null;
-  const encodedType = (encodedId % 2) === 1 ? 'relation' : 'way';
+  const encodedType = encodedId % 2 === 1 ? 'relation' : 'way';
   const encodedOsmId = Math.floor(encodedId / 2);
   if (!Number.isInteger(encodedOsmId) || encodedOsmId <= 0) return null;
   return { osmType: encodedType, osmId: encodedOsmId };

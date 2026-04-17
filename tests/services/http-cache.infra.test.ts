@@ -14,13 +14,25 @@ test('createWeakEtag returns deterministic weak etag', () => {
 
 test('isResourceNotModified supports If-None-Match and If-Modified-Since', () => {
   const lastModified = toHttpDate(new Date('2026-03-03T00:00:00.000Z'));
-  assert.equal(isResourceNotModified({
-    headers: { 'if-none-match': 'W/"abc", W/"def"' }
-  }, { etag: 'W/"def"', lastModified }), true);
+  assert.equal(
+    isResourceNotModified(
+      {
+        headers: { 'if-none-match': 'W/"abc", W/"def"' }
+      },
+      { etag: 'W/"def"', lastModified }
+    ),
+    true
+  );
 
-  assert.equal(isResourceNotModified({
-    headers: { 'if-modified-since': 'Tue, 03 Mar 2026 00:00:00 GMT' }
-  }, { etag: null, lastModified }), true);
+  assert.equal(
+    isResourceNotModified(
+      {
+        headers: { 'if-modified-since': 'Tue, 03 Mar 2026 00:00:00 GMT' }
+      },
+      { etag: null, lastModified }
+    ),
+    true
+  );
 });
 
 test('parseRangeHeader parses valid byte ranges and rejects invalid values', () => {

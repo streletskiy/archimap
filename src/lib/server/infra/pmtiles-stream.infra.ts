@@ -42,13 +42,20 @@ function sendPmtiles(req, res, pmtilesPath, options: LooseRecord = {}) {
     stat = fs.statSync(pmtilesPath);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      return res.status(404).json({ code: 'ERR_PMTILES_NOT_FOUND', error: 'PMTiles file was not found. Run sync to generate the tileset.' });
+      return res
+        .status(404)
+        .json({
+          code: 'ERR_PMTILES_NOT_FOUND',
+          error: 'PMTiles file was not found. Run sync to generate the tileset.'
+        });
     }
     return res.status(500).json({ code: 'ERR_PMTILES_READ_FAILED', error: 'Failed to read PMTiles file' });
   }
 
   if (!stat.isFile()) {
-    return res.status(404).json({ code: 'ERR_PMTILES_NOT_FOUND', error: 'PMTiles file was not found. Run sync to generate the tileset.' });
+    return res
+      .status(404)
+      .json({ code: 'ERR_PMTILES_NOT_FOUND', error: 'PMTiles file was not found. Run sync to generate the tileset.' });
   }
 
   const cacheControl = String(options.cacheControl || 'public, max-age=300').trim();
@@ -75,7 +82,7 @@ function sendPmtiles(req, res, pmtilesPath, options: LooseRecord = {}) {
 
   const start = parsedRange ? parsedRange.start : 0;
   const end = parsedRange ? parsedRange.end : Math.max(0, total - 1);
-  const contentLength = parsedRange ? (end - start + 1) : total;
+  const contentLength = parsedRange ? end - start + 1 : total;
   if (parsedRange) {
     res.status(206);
     res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);

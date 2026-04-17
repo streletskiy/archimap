@@ -42,8 +42,7 @@ function isPointInRing(point, ring) {
 
     const [xi, yi] = start;
     const [xj, yj] = end;
-    const intersects = ((yi > y) !== (yj > y))
-      && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
 
     if (intersects) inside = !inside;
   }
@@ -87,7 +86,10 @@ test('israel-and-palestine admin region uses Natural Earth union coverage', () =
   assert.ok(feature, 'israel-and-palestine feature should exist');
   assert.equal(feature.properties.ExtractSource, 'geofabrik');
   assert.equal(feature.properties.GeometrySource, 'natural-earth');
-  assert.ok(geometryContainsPoint(feature.geometry, JERUSALEM_POINT), 'israel-and-palestine contour should include Jerusalem');
+  assert.ok(
+    geometryContainsPoint(feature.geometry, JERUSALEM_POINT),
+    'israel-and-palestine contour should include Jerusalem'
+  );
   assert.ok(geometryContainsPoint(feature.geometry, GAZA_POINT), 'israel-and-palestine contour should include Gaza');
 });
 
@@ -107,8 +109,14 @@ test('crimean-fed-district admin region uses one combined Natural Earth Admin 1 
   assert.ok(feature, 'crimean-fed-district feature should exist');
   assert.equal(feature.properties.ExtractSource, 'geofabrik');
   assert.equal(feature.properties.GeometrySource, 'natural-earth-admin1-union');
-  assert.ok(geometryContainsPoint(feature.geometry, CRIMEA_INTERIOR_POINT), 'crimean-fed-district contour should include Crimea');
-  assert.ok(geometryContainsPoint(feature.geometry, SEVASTOPOL_INTERIOR_POINT), 'crimean-fed-district contour should include Sevastopol');
+  assert.ok(
+    geometryContainsPoint(feature.geometry, CRIMEA_INTERIOR_POINT),
+    'crimean-fed-district contour should include Crimea'
+  );
+  assert.ok(
+    geometryContainsPoint(feature.geometry, SEVASTOPOL_INTERIOR_POINT),
+    'crimean-fed-district contour should include Sevastopol'
+  );
   assert.equal(getFeatureByExtractId('russia/southern_federal_district/crimea_republic'), null);
   assert.equal(getFeatureByExtractId('russia/southern_federal_district/sevastopol'), null);
 });

@@ -11,7 +11,7 @@ let mapStoreImportCounter = 0;
 
 async function loadMapStoreModule() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'stores', 'map.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${mapStoreImportCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(mapStoreImportCounter += 1)}`);
 }
 
 function createStorage(initial = {}) {
@@ -39,10 +39,7 @@ test('getInitialLastMapCamera migrates legacy session storage camera into local 
   const camera = getInitialLastMapCamera({ localStorage, sessionStorage });
 
   assert.deepEqual(camera, { lat: 50.45, lng: 30.52, z: 15.5 });
-  assert.equal(
-    localStorage.getItem(LAST_MAP_CAMERA_STORAGE_KEY),
-    JSON.stringify({ lat: 50.45, lng: 30.52, z: 15.5 })
-  );
+  assert.equal(localStorage.getItem(LAST_MAP_CAMERA_STORAGE_KEY), JSON.stringify({ lat: 50.45, lng: 30.52, z: 15.5 }));
 });
 
 test('resolveInitialMapCamera prefers URL camera over persisted camera', async () => {
@@ -318,4 +315,3 @@ test('mapBuildingPartsVisible defaults to false during SSR when window is unavai
     }
   }
 });
-

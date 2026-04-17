@@ -94,12 +94,14 @@ function createTestDb() {
 test('feature-info support attaches local info through the repository', async () => {
   const db = createTestDb();
   try {
-    db.prepare(`
+    db.prepare(
+      `
     INSERT INTO local.architectural_info (
         osm_type, osm_id, name, style, roof_shape, updated_by, updated_at
       )
       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run('way', 101, 'Alpha House', 'constructivism', 'gabled', 'editor@example.test');
+    `
+    ).run('way', 101, 'Alpha House', 'constructivism', 'gabled', 'editor@example.test');
 
     const support = createFeatureInfoSupport({
       db,
@@ -143,13 +145,15 @@ test('feature-info rowToFeature preserves render heights from contour tags', asy
       }),
       geometry_json: JSON.stringify({
         type: 'Polygon',
-        coordinates: [[
-          [37.6, 55.75],
-          [37.62, 55.75],
-          [37.62, 55.77],
-          [37.6, 55.77],
-          [37.6, 55.75]
-        ]]
+        coordinates: [
+          [
+            [37.6, 55.75],
+            [37.62, 55.75],
+            [37.62, 55.77],
+            [37.6, 55.77],
+            [37.6, 55.75]
+          ]
+        ]
       }),
       min_lon: 37.6,
       min_lat: 55.75,

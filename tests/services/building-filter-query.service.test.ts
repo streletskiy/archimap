@@ -20,17 +20,20 @@ test('server filter rows derive levels from explicit height tags for level filte
     info_osm_id: null
   });
 
-  const results = buildFilterMatchBatchResults([item], [
-    {
-      id: 'levels-4-plus',
-      rulesHash: 'hash-levels',
-      maxResults: 100,
-      rules: [
-        { key: 'levels', op: 'greater_or_equals', value: '4', valueNormalized: '4', numericValue: 4 },
-        { key: 'levels', op: 'less_than', value: '5', valueNormalized: '5', numericValue: 5 }
-      ]
-    }
-  ]);
+  const results = buildFilterMatchBatchResults(
+    [item],
+    [
+      {
+        id: 'levels-4-plus',
+        rulesHash: 'hash-levels',
+        maxResults: 100,
+        rules: [
+          { key: 'levels', op: 'greater_or_equals', value: '4', valueNormalized: '4', numericValue: 4 },
+          { key: 'levels', op: 'less_than', value: '5', valueNormalized: '5', numericValue: 5 }
+        ]
+      }
+    ]
+  );
 
   assert.equal(item.levels, '4');
   assert.equal(item.renderHeightMeters, 18.5);

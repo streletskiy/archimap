@@ -22,7 +22,7 @@ async function loadMapStoreModule() {
 
 async function loadSearchManagerModule() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'search-manager.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${managerImportCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(managerImportCounter += 1)}`);
 }
 
 function readStore(store) {

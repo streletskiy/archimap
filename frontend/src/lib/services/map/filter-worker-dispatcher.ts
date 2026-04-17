@@ -1,15 +1,11 @@
 import { MapFilterService } from './map-filter.service.js';
 
-export function createFilterWorkerDispatcher({
-  serviceFactory = null
-} = {}) {
+export function createFilterWorkerDispatcher({ serviceFactory = null } = {}) {
   let workerService = null;
 
   function ensureWorkerService() {
     if (!workerService) {
-      workerService = typeof serviceFactory === 'function'
-        ? serviceFactory()
-        : new MapFilterService();
+      workerService = typeof serviceFactory === 'function' ? serviceFactory() : new MapFilterService();
     }
     return workerService;
   }

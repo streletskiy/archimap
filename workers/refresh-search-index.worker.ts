@@ -7,14 +7,19 @@ const { createSearchIndexRefreshService } = require('../src/lib/server/services/
 
 const DB_PROVIDER = getDbProvider(process.env);
 const DATABASE_URL = getPostgresConnectionString(process.env);
-const ARCHIMAP_DB_PATH = String(
-  process.env.DATABASE_PATH
-  || process.env.ARCHIMAP_DB_PATH
-  || process.env.SQLITE_URL
-  || path.join(__dirname, '..', 'data', 'archimap.db')
-).trim() || path.join(__dirname, '..', 'data', 'archimap.db');
-const OSM_DB_PATH = String(process.env.OSM_DB_PATH || path.join(__dirname, '..', 'data', 'osm.db')).trim() || path.join(__dirname, '..', 'data', 'osm.db');
-const LOCAL_EDITS_DB_PATH = String(process.env.LOCAL_EDITS_DB_PATH || path.join(__dirname, '..', 'data', 'local-edits.db')).trim() || path.join(__dirname, '..', 'data', 'local-edits.db');
+const ARCHIMAP_DB_PATH =
+  String(
+    process.env.DATABASE_PATH ||
+      process.env.ARCHIMAP_DB_PATH ||
+      process.env.SQLITE_URL ||
+      path.join(__dirname, '..', 'data', 'archimap.db')
+  ).trim() || path.join(__dirname, '..', 'data', 'archimap.db');
+const OSM_DB_PATH =
+  String(process.env.OSM_DB_PATH || path.join(__dirname, '..', 'data', 'osm.db')).trim() ||
+  path.join(__dirname, '..', 'data', 'osm.db');
+const LOCAL_EDITS_DB_PATH =
+  String(process.env.LOCAL_EDITS_DB_PATH || path.join(__dirname, '..', 'data', 'local-edits.db')).trim() ||
+  path.join(__dirname, '..', 'data', 'local-edits.db');
 
 const queue = [];
 let draining = false;

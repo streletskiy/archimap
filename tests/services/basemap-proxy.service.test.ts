@@ -64,7 +64,10 @@ test('fetchRemoteJson retries localhost on loopback fallback', async () => {
 test('resolveLocalBasemapGlyphPath falls back to local Noto glyphs for Open Sans aliases', () => {
   const result = resolveLocalBasemapGlyphPath(process.cwd(), 'Open Sans Bold', '0-255.pbf');
 
-  assert.match(result, /frontend[\\\/](?:build[\\\/]client|static)[\\\/]basemaps-assets[\\\/]fonts[\\\/]Noto Sans Medium[\\\/]0-255\.pbf$/);
+  assert.match(
+    result,
+    /frontend[\\\/](?:build[\\\/]client|static)[\\\/]basemaps-assets[\\\/]fonts[\\\/]Noto Sans Medium[\\\/]0-255\.pbf$/
+  );
 });
 
 test('resolveLocalBasemapGlyphPath prefers built client assets when they exist', () => {
@@ -106,7 +109,10 @@ test('resolveLocalBasemapGlyphPath prefers built client assets when they exist',
 test('resolveLocalBasemapGlyphPath decodes encoded fontstack segments before lookup', () => {
   const result = resolveLocalBasemapGlyphPath(process.cwd(), 'Noto%20Sans%20Regular', '0-255.pbf');
 
-  assert.match(result, /frontend[\\\/](?:build[\\\/]client|static)[\\\/]basemaps-assets[\\\/]fonts[\\\/]Noto Sans Regular[\\\/]0-255\.pbf$/);
+  assert.match(
+    result,
+    /frontend[\\\/](?:build[\\\/]client|static)[\\\/]basemaps-assets[\\\/]fonts[\\\/]Noto Sans Regular[\\\/]0-255\.pbf$/
+  );
 });
 
 test('resolveLocalBasemapGlyphPath rejects traversal-like input', () => {

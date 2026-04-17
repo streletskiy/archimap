@@ -46,7 +46,10 @@ function getSearchItemKey(item) {
 function mergeSearchItems(primaryItems, secondaryItems) {
   const merged = [];
   const seen = new Set();
-  for (const item of [...(Array.isArray(primaryItems) ? primaryItems : []), ...(Array.isArray(secondaryItems) ? secondaryItems : [])]) {
+  for (const item of [
+    ...(Array.isArray(primaryItems) ? primaryItems : []),
+    ...(Array.isArray(secondaryItems) ? secondaryItems : [])
+  ]) {
     const key = getSearchItemKey(item);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -142,13 +145,13 @@ export function createSearchManager() {
     const viewport = normalizeSearchViewport(viewportValue);
     const viewportHash = buildSearchViewportHash(viewport);
     const shouldRefreshViewportSearch = Boolean(
-      viewport
-      && viewportHash
-      && searchEnabled
-      && String(currentSearch.bboxHash || '')
-      && viewportHash !== String(currentSearch.bboxHash || '')
-      && !currentSearch.loading
-      && !currentSearch.loadingMore
+      viewport &&
+      viewportHash &&
+      searchEnabled &&
+      String(currentSearch.bboxHash || '') &&
+      viewportHash !== String(currentSearch.bboxHash || '') &&
+      !currentSearch.loading &&
+      !currentSearch.loadingMore
     );
 
     if (shouldRefreshViewportSearch) {
@@ -168,12 +171,12 @@ export function createSearchManager() {
     }
 
     const shouldRefreshMapSearch = Boolean(
-      viewport
-      && viewportHash
-      && searchEnabled
-      && String(currentMapSearch.bboxHash || '')
-      && viewportHash !== String(currentMapSearch.bboxHash || '')
-      && !currentMapSearch.loading
+      viewport &&
+      viewportHash &&
+      searchEnabled &&
+      String(currentMapSearch.bboxHash || '') &&
+      viewportHash !== String(currentMapSearch.bboxHash || '') &&
+      !currentMapSearch.loading
     );
 
     if (shouldRefreshMapSearch) {
@@ -232,27 +235,26 @@ export function createSearchManager() {
       setSearchLoading({ append: false, background });
       try {
         const keysToQuery = styleSearchKeys.slice(0, 5);
-        const chunks = await Promise.all(keysToQuery.map(async (key) => {
-          const params = buildSearchRequestParams({
-            query: String(key || ''),
-            center,
-            viewport: useViewportScope ? viewport : null,
-            limit: SEARCH_PAGE_SIZE
-          });
-          const url = `/api/search-buildings?${params.toString()}`;
-          const data = await apiJsonCached(url, {
-            ttlMs: 10_000,
-            signal
-          });
-          return Array.isArray(data?.items) ? data.items : [];
-        }));
+        const chunks = await Promise.all(
+          keysToQuery.map(async (key) => {
+            const params = buildSearchRequestParams({
+              query: String(key || ''),
+              center,
+              viewport: useViewportScope ? viewport : null,
+              limit: SEARCH_PAGE_SIZE
+            });
+            const url = `/api/search-buildings?${params.toString()}`;
+            const data = await apiJsonCached(url, {
+              ttlMs: 10_000,
+              signal
+            });
+            return Array.isArray(data?.items) ? data.items : [];
+          })
+        );
         if (token !== activeSearchRequestToken) return;
         const merged = mergeChunkedSearchResults(chunks);
         const localOverpassItems = searchOverpassBuildings(text).filter(Boolean);
-        const filtered = filterSearchItemsByStyleKeys(
-          mergeSearchItems(merged, localOverpassItems),
-          styleSearchKeys
-        );
+        const filtered = filterSearchItemsByStyleKeys(mergeSearchItems(merged, localOverpassItems), styleSearchKeys);
         applySearchResults({
           query: text,
           items: filtered.slice(0, SEARCH_PAGE_SIZE),
@@ -292,10 +294,7 @@ export function createSearchManager() {
       if (token !== activeSearchRequestToken) return;
       const itemsRaw = Array.isArray(data?.items) ? data.items : [];
       const localOverpassItems = append ? [] : searchOverpassBuildings(text);
-      const items = filterSearchItemsByStyleKey(
-        mergeSearchItems(itemsRaw, localOverpassItems),
-        styleSearchKey
-      );
+      const items = filterSearchItemsByStyleKey(mergeSearchItems(itemsRaw, localOverpassItems), styleSearchKey);
       applySearchResults({
         query: text,
         items,
@@ -359,22 +358,24 @@ export function createSearchManager() {
     try {
       if (styleSearchKeys.length > 0) {
         const keysToQuery = styleSearchKeys.slice(0, 5);
-        const chunks = await Promise.all(keysToQuery.map(async (key) => {
-          const params = buildSearchRequestParams({
-            query: String(key || ''),
-            center,
-            viewport,
-            limit: SEARCH_MAP_RESULTS_LIMIT
-          });
-          const data = await apiJsonCached(`/api/search-buildings-map?${params.toString()}`, {
-            ttlMs: 10_000,
-            signal
-          });
-          return {
-            items: Array.isArray(data?.items) ? data.items : [],
-            truncated: Boolean(data?.truncated)
-          };
-        }));
+        const chunks = await Promise.all(
+          keysToQuery.map(async (key) => {
+            const params = buildSearchRequestParams({
+              query: String(key || ''),
+              center,
+              viewport,
+              limit: SEARCH_MAP_RESULTS_LIMIT
+            });
+            const data = await apiJsonCached(`/api/search-buildings-map?${params.toString()}`, {
+              ttlMs: 10_000,
+              signal
+            });
+            return {
+              items: Array.isArray(data?.items) ? data.items : [],
+              truncated: Boolean(data?.truncated)
+            };
+          })
+        );
         if (token !== activeSearchMapRequestToken) return;
         const merged = mergeChunkedSearchResults(chunks);
 
@@ -406,16 +407,13 @@ export function createSearchManager() {
         viewport,
         limit: SEARCH_MAP_RESULTS_LIMIT
       });
-      const items = filterSearchItemsByStyleKey(
-        mergeSearchItems(itemsRaw, localOverpassItems),
-        styleSearchKey
-      );
+      const items = filterSearchItemsByStyleKey(mergeSearchItems(itemsRaw, localOverpassItems), styleSearchKey);
       applySearchMapResults({
         query: text,
         bboxHash: viewportHash,
         items,
         total: data?.total,
-        truncated: Boolean(data?.truncated) || (Number(data?.total || 0) > items.length)
+        truncated: Boolean(data?.truncated) || Number(data?.total || 0) > items.length
       });
     } catch (error) {
       if (isAbortError(error)) return;

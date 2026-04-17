@@ -41,9 +41,9 @@ function createFilterTagKeysBoot(options: LooseRecord = {}) {
         FILTER_TAG_KEYS_REBUILD_REASON: reason,
         ...(dbProvider === 'sqlite'
           ? {
-            ARCHIMAP_DB_PATH: sqlite.dbPath,
-            OSM_DB_PATH: sqlite.osmDbPath
-          }
+              ARCHIMAP_DB_PATH: sqlite.dbPath,
+              OSM_DB_PATH: sqlite.osmDbPath
+            }
           : {})
       },
       stdio: 'inherit'
@@ -85,7 +85,7 @@ function createFilterTagKeysBoot(options: LooseRecord = {}) {
   async function getAllFilterTagKeysCached() {
     const now = Date.now();
     const ttlMs = 5 * 60 * 1000;
-    if (Array.isArray(filterTagKeysCache.keys) && (now - filterTagKeysCache.loadedAt) < ttlMs) {
+    if (Array.isArray(filterTagKeysCache.keys) && now - filterTagKeysCache.loadedAt < ttlMs) {
       return filterTagKeysCache.keys;
     }
     const cachedKeys = (await selectFilterTagKeysFromCache.all())

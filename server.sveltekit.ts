@@ -9,11 +9,7 @@ if (!process.env.TRUST_PROXY) {
   process.env.TRUST_PROXY = 'true';
 }
 
-const {
-  app: internalApp,
-  prepareRuntime,
-  stopRuntime
-} = require('./server');
+const { app: internalApp, prepareRuntime, stopRuntime } = require('./server');
 
 const runtimeEnv = parseRuntimeEnv(process.env);
 const PORT = runtimeEnv.port;
@@ -54,13 +50,12 @@ function shouldDispatchInternal(pathname) {
 async function getSvelteHandler() {
   if (!svelteHandlerPromise) {
     const handlerPath = buildSvelteHandlerPath();
-    svelteHandlerPromise = import(pathToFileURL(handlerPath).href)
-      .then((module) => {
-        if (typeof module?.handler !== 'function') {
-          throw new Error(`Invalid Svelte handler export in ${handlerPath}`);
-        }
-        return module.handler;
-      });
+    svelteHandlerPromise = import(pathToFileURL(handlerPath).href).then((module) => {
+      if (typeof module?.handler !== 'function') {
+        throw new Error(`Invalid Svelte handler export in ${handlerPath}`);
+      }
+      return module.handler;
+    });
   }
   return svelteHandlerPromise;
 }
@@ -94,12 +89,11 @@ async function shutdown(signal = 'manual') {
 async function start() {
   await prepareRuntime();
   httpServer = http.createServer((req, res) => {
-    Promise.resolve(requestHandler(req, res))
-      .catch(() => {
-        res.statusCode = 500;
-        res.setHeader('content-type', 'application/json; charset=utf-8');
-        res.end(INTERNAL_ERROR_PAYLOAD);
-      });
+    Promise.resolve(requestHandler(req, res)).catch(() => {
+      res.statusCode = 500;
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      res.end(INTERNAL_ERROR_PAYLOAD);
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -121,8 +115,7 @@ process.on('SIGINT', () => {
     .catch(() => process.exit(1));
 });
 
-start()
-  .catch((error) => {
-    console.error('[sveltekit-runtime] startup failed:', String(error?.message || error));
-    process.exit(1);
-  });
+start().catch((error) => {
+  console.error('[sveltekit-runtime] startup failed:', String(error?.message || error));
+  process.exit(1);
+});

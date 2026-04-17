@@ -7,24 +7,27 @@ let importCounter = 0;
 
 async function loadOverpassDataUtils() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'overpass-data-utils.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 test('buildOverpassFeaturePayload normalizes feature tags and geometry center', async () => {
-  const { buildOverpassFeaturePayload, buildOverpassSearchItem, buildOverpassBuildingDetails } = await loadOverpassDataUtils();
+  const { buildOverpassFeaturePayload, buildOverpassSearchItem, buildOverpassBuildingDetails } =
+    await loadOverpassDataUtils();
 
   const feature = {
     type: 'Feature',
     id: 101,
     geometry: {
       type: 'Polygon',
-      coordinates: [[
-        [37.6, 55.75],
-        [37.62, 55.75],
-        [37.62, 55.77],
-        [37.6, 55.77],
-        [37.6, 55.75]
-      ]]
+      coordinates: [
+        [
+          [37.6, 55.75],
+          [37.62, 55.75],
+          [37.62, 55.77],
+          [37.6, 55.77],
+          [37.6, 55.75]
+        ]
+      ]
     },
     properties: {
       type: 'way',
@@ -34,7 +37,7 @@ test('buildOverpassFeaturePayload normalizes feature tags and geometry center', 
         'building:style': 'constructivism',
         'design:year': '1931',
         'building:levels': '7',
-        'year_built': '1932',
+        year_built: '1932',
         architect: 'Ivan',
         'building:material': 'brick',
         'building:colour': 'red'
@@ -79,13 +82,15 @@ test('buildOverpassFeaturePayload preserves render heights derived from explicit
     id: 102,
     geometry: {
       type: 'Polygon',
-      coordinates: [[
-        [37.6, 55.75],
-        [37.62, 55.75],
-        [37.62, 55.77],
-        [37.6, 55.77],
-        [37.6, 55.75]
-      ]]
+      coordinates: [
+        [
+          [37.6, 55.75],
+          [37.62, 55.75],
+          [37.62, 55.77],
+          [37.6, 55.77],
+          [37.6, 55.75]
+        ]
+      ]
     },
     properties: {
       type: 'way',
@@ -119,13 +124,15 @@ test('buildOverpassFeaturePayload marks building parts and encodes stable ids', 
     id: 202,
     geometry: {
       type: 'Polygon',
-      coordinates: [[
-        [30, 60],
-        [30.01, 60],
-        [30.01, 60.01],
-        [30, 60.01],
-        [30, 60]
-      ]]
+      coordinates: [
+        [
+          [30, 60],
+          [30.01, 60],
+          [30.01, 60.01],
+          [30, 60.01],
+          [30, 60]
+        ]
+      ]
     },
     properties: {
       type: 'relation',
@@ -152,13 +159,15 @@ test('buildOverpassFeaturePayload derives levels from explicit height tags when 
     id: 203,
     geometry: {
       type: 'Polygon',
-      coordinates: [[
-        [30, 60],
-        [30.01, 60],
-        [30.01, 60.01],
-        [30, 60.01],
-        [30, 60]
-      ]]
+      coordinates: [
+        [
+          [30, 60],
+          [30.01, 60],
+          [30.01, 60.01],
+          [30, 60.01],
+          [30, 60]
+        ]
+      ]
     },
     properties: {
       type: 'way',
@@ -188,13 +197,15 @@ test('applyBuildingPartBaseSuppression marks parent buildings that contain build
       type: 'Feature',
       geometry: {
         type: 'Polygon',
-        coordinates: [[
-          [44.0, 56.0],
-          [44.01, 56.0],
-          [44.01, 56.01],
-          [44.0, 56.01],
-          [44.0, 56.0]
-        ]]
+        coordinates: [
+          [
+            [44.0, 56.0],
+            [44.01, 56.0],
+            [44.01, 56.01],
+            [44.0, 56.01],
+            [44.0, 56.0]
+          ]
+        ]
       },
       properties: {
         osm_key: 'relation/12325639',
@@ -205,13 +216,15 @@ test('applyBuildingPartBaseSuppression marks parent buildings that contain build
       type: 'Feature',
       geometry: {
         type: 'Polygon',
-        coordinates: [[
-          [44.002, 56.002],
-          [44.004, 56.002],
-          [44.004, 56.004],
-          [44.002, 56.004],
-          [44.002, 56.002]
-        ]]
+        coordinates: [
+          [
+            [44.002, 56.002],
+            [44.004, 56.002],
+            [44.004, 56.004],
+            [44.002, 56.004],
+            [44.002, 56.002]
+          ]
+        ]
       },
       properties: {
         osm_key: 'relation/12325634',
@@ -240,13 +253,15 @@ test('applyBuildingPartBaseSuppression emits synthetic building_remainder geomet
       id: 247,
       geometry: {
         type: 'Polygon',
-        coordinates: [[
-          [44.0, 56.0],
-          [44.01, 56.0],
-          [44.01, 56.01],
-          [44.0, 56.01],
-          [44.0, 56.0]
-        ]]
+        coordinates: [
+          [
+            [44.0, 56.0],
+            [44.01, 56.0],
+            [44.01, 56.01],
+            [44.0, 56.01],
+            [44.0, 56.0]
+          ]
+        ]
       },
       properties: {
         osm_key: 'relation/12325639',
@@ -260,13 +275,15 @@ test('applyBuildingPartBaseSuppression emits synthetic building_remainder geomet
       id: 248,
       geometry: {
         type: 'Polygon',
-        coordinates: [[
-          [44.005, 56.0],
-          [44.01, 56.0],
-          [44.01, 56.01],
-          [44.005, 56.01],
-          [44.005, 56.0]
-        ]]
+        coordinates: [
+          [
+            [44.005, 56.0],
+            [44.01, 56.0],
+            [44.01, 56.01],
+            [44.005, 56.01],
+            [44.005, 56.0]
+          ]
+        ]
       },
       properties: {
         osm_key: 'relation/12325634',
@@ -287,12 +304,14 @@ test('applyBuildingPartBaseSuppression emits synthetic building_remainder geomet
   assert.equal(remainder.properties.render_hide_base_when_parts, 0);
   assert.deepEqual(remainder.geometry, {
     type: 'Polygon',
-    coordinates: [[
-      [44.0, 56.0],
-      [44.005, 56.0],
-      [44.005, 56.01],
-      [44.0, 56.01],
-      [44.0, 56.0]
-    ]]
+    coordinates: [
+      [
+        [44.0, 56.0],
+        [44.005, 56.0],
+        [44.005, 56.01],
+        [44.0, 56.01],
+        [44.0, 56.0]
+      ]
+    ]
   });
 });

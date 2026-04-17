@@ -30,7 +30,11 @@ function isResourceNotModified(req, { etag, lastModified }: LooseRecord) {
     if (ifModifiedSinceRaw) {
       const ifModifiedSinceTs = Date.parse(ifModifiedSinceRaw);
       const lastModifiedTs = Date.parse(lastModified);
-      if (Number.isFinite(ifModifiedSinceTs) && Number.isFinite(lastModifiedTs) && ifModifiedSinceTs >= lastModifiedTs) {
+      if (
+        Number.isFinite(ifModifiedSinceTs) &&
+        Number.isFinite(lastModifiedTs) &&
+        ifModifiedSinceTs >= lastModifiedTs
+      ) {
         return true;
       }
     }

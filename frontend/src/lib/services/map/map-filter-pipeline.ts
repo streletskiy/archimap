@@ -107,9 +107,9 @@ export function shouldSkipViewportAuthoritativeRequest({
   reason?: string | null | undefined;
 } = {}) {
   return (
-    String(reason || '') === 'viewport'
-    && String(requestKey || '') !== ''
-    && String(requestKey || '') === String(lastCompletedRequestKey || '')
+    String(reason || '') === 'viewport' &&
+    String(requestKey || '') !== '' &&
+    String(requestKey || '') === String(lastCompletedRequestKey || '')
   );
 }
 
@@ -131,22 +131,22 @@ export function createFilterPipeline({
   translateInvalidMessage?: (message?: string) => string;
 } = {}) {
   const resolveMap: () => FilterMapLike | null | undefined = typeof map === 'function' ? map : () => map;
-  const resolveLayerIds = typeof getLayerIds === 'function'
-    ? () => normalizeLayerIdsSnapshot(getLayerIds())
-    : () => normalizeLayerIdsSnapshot();
-  const resolveBuildingSourceConfigs = typeof getBuildingSourceConfigs === 'function'
-    ? () => {
-      const configs = getBuildingSourceConfigs();
-      return Array.isArray(configs) ? configs : [];
-    }
-    : () => [];
-  const resolveSourceDataVersion = typeof getSourceDataVersion === 'function'
-    ? () => Number(getSourceDataVersion() || 0) || 0
-    : () => 0;
+  const resolveLayerIds =
+    typeof getLayerIds === 'function'
+      ? () => normalizeLayerIdsSnapshot(getLayerIds())
+      : () => normalizeLayerIdsSnapshot();
+  const resolveBuildingSourceConfigs =
+    typeof getBuildingSourceConfigs === 'function'
+      ? () => {
+          const configs = getBuildingSourceConfigs();
+          return Array.isArray(configs) ? configs : [];
+        }
+      : () => [];
+  const resolveSourceDataVersion =
+    typeof getSourceDataVersion === 'function' ? () => Number(getSourceDataVersion() || 0) || 0 : () => 0;
   const handleStatusChange = typeof onStatusChange === 'function' ? onStatusChange : () => {};
-  const resolveInvalidMessage = typeof translateInvalidMessage === 'function'
-    ? translateInvalidMessage
-    : () => 'Invalid filter rules';
+  const resolveInvalidMessage =
+    typeof translateInvalidMessage === 'function' ? translateInvalidMessage : () => 'Invalid filter rules';
 
   let currentState = createInitialState(mapDebug);
   const state = writable(currentState);
@@ -161,11 +161,13 @@ export function createFilterPipeline({
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
   let lastCompletedAuthoritativeRequestKey = '';
-  let activeFilterCoverageWindow: (FilterCoverageContext['coverageWindow'] & {
-    rulesHash?: string;
-    zoomBucket?: number;
-    dataVersion?: number;
-  }) | null = null;
+  let activeFilterCoverageWindow:
+    | (FilterCoverageContext['coverageWindow'] & {
+        rulesHash?: string;
+        zoomBucket?: number;
+        dataVersion?: number;
+      })
+    | null = null;
   let activeFilterCoverageKey = '';
   let activeFilterRenderMode: 'contours' | 'markers' = 'contours';
   let filterLastMoveEndAt = 0;
@@ -215,15 +217,10 @@ export function createFilterPipeline({
   }
 
   function updateFilterRuntimeStatus(status: FilterRuntimeStatus = {}) {
-    const nextPhase = status.phase != null
-      ? String(status.phase)
-      : String(currentState.phase || 'idle');
-    const nextStatusCode = status.statusCode != null
-      ? String(status.statusCode)
-      : String(currentState.statusCode || 'idle');
-    const nextMessage = status.message != null
-      ? String(status.message)
-      : String(currentState.statusMessage || '');
+    const nextPhase = status.phase != null ? String(status.phase) : String(currentState.phase || 'idle');
+    const nextStatusCode =
+      status.statusCode != null ? String(status.statusCode) : String(currentState.statusCode || 'idle');
+    const nextMessage = status.message != null ? String(status.message) : String(currentState.statusMessage || '');
     const nextState = patchState({
       phase: nextPhase,
       statusCode: nextStatusCode,
@@ -231,7 +228,8 @@ export function createFilterPipeline({
       lastCount: Number(status.count ?? currentState.lastCount ?? 0) || 0,
       lastElapsedMs: Number(status.elapsedMs ?? currentState.lastElapsedMs ?? 0) || 0,
       lastCacheHit: Boolean(status.cacheHit ?? currentState.lastCacheHit),
-      setPaintPropertyCallsLast: Number(status.setPaintPropertyCalls ?? currentState.setPaintPropertyCallsLast ?? 0) || 0
+      setPaintPropertyCallsLast:
+        Number(status.setPaintPropertyCalls ?? currentState.setPaintPropertyCallsLast ?? 0) || 0
     });
     handleStatusChange({
       phase: nextState.phase,
@@ -298,7 +296,8 @@ export function createFilterPipeline({
     filterCache,
     filterFetcher,
     buildFilterRequestCacheKey,
-    buildPrefetchCoverageWindow: (coverageWindow) => buildPrefetchCoverageWindowSnapshot(coverageWindow, filterLastMoveVector),
+    buildPrefetchCoverageWindow: (coverageWindow) =>
+      buildPrefetchCoverageWindowSnapshot(coverageWindow, filterLastMoveVector),
     resolveMap,
     getLatestFilterToken: () => latestFilterToken,
     recordFilterRequestDebugEvent,
@@ -348,9 +347,7 @@ export function createFilterPipeline({
 
   async function prepareRulesForFiltering(input) {
     try {
-      const requestPayload = isLayerInput(input)
-        ? { layers: input }
-        : { rules: input };
+      const requestPayload = isLayerInput(input) ? { layers: input } : { rules: input };
       const workerResult = await filterWorkerDispatcher.request('build-request-plan', requestPayload);
       if (workerResult?.ok) {
         return {
@@ -393,176 +390,196 @@ export function createFilterPipeline({
       filterAuthoritativeTimer = null;
     }
     filterMatchCacheStrategy.cancelPrefetch();
-    filterAuthoritativeTimer = setTimeout(async () => {
-      filterAuthoritativeTimer = null;
-      if (token !== latestFilterToken || !resolveMap()) return;
-      const renderMode = String(context?.renderMode || 'contours') === 'markers' ? 'markers' : 'contours';
-      const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}:${renderMode}:${Number(context?.dataVersion || 0)}`;
-      const matchLimit = Number.isFinite(Number(context?.matchLimit))
-        ? Number(context.matchLimit)
-        : (renderMode === 'markers' ? getMarkerMatchLimit(context.zoomBucket) : FILTER_MATCH_DEFAULT_LIMIT);
-      if (shouldSkipViewportAuthoritativeRequest({
-        requestKey,
-        lastCompletedRequestKey: lastCompletedAuthoritativeRequestKey,
-        reason: context.reason
-      })) {
-        return;
-      }
-      filterMatchCacheStrategy.cancelPrefetch();
-      if (activeFilterAbortController) {
-        debugFilterLog('filter request abort', { requestKey });
-        recordFilterRequestDebugEvent('abort');
-        recordFilterTelemetry('request_abort', { requestKey });
-        activeFilterAbortController.abort();
-      }
-      activeFilterAbortController = new AbortController();
-      const signal = activeFilterAbortController.signal;
-      debugFilterLog('filter request start', {
-        requestKey,
-        phase: 'authoritative',
-        heavy: context.heavy,
-        coverageHash: context.coverageHash
-      });
-      recordFilterRequestDebugEvent('start');
-      recordFilterTelemetry('request_start', {
-        requestKey,
-        delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
-      });
-      updateFilterRuntimeStatus({
-        statusCode: 'refining'
-      });
-      let requestResults: FilterRequestResolution[];
-      try {
-        const cachedResults: FilterRequestResolution[] = [];
-        const missingSpecs: FilterRequestSpec[] = [];
-        for (const spec of context.requestSpecs) {
-          const cachedResult = filterMatchCacheStrategy.getCachedRequestSpecResult(spec, context);
-          if (cachedResult) {
-            cachedResults.push(cachedResult);
-          } else {
-            missingSpecs.push(spec);
+    filterAuthoritativeTimer = setTimeout(
+      async () => {
+        filterAuthoritativeTimer = null;
+        if (token !== latestFilterToken || !resolveMap()) return;
+        const renderMode = String(context?.renderMode || 'contours') === 'markers' ? 'markers' : 'contours';
+        const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}:${renderMode}:${Number(context?.dataVersion || 0)}`;
+        const matchLimit = Number.isFinite(Number(context?.matchLimit))
+          ? Number(context.matchLimit)
+          : renderMode === 'markers'
+            ? getMarkerMatchLimit(context.zoomBucket)
+            : FILTER_MATCH_DEFAULT_LIMIT;
+        if (
+          shouldSkipViewportAuthoritativeRequest({
+            requestKey,
+            lastCompletedRequestKey: lastCompletedAuthoritativeRequestKey,
+            reason: context.reason
+          })
+        ) {
+          return;
+        }
+        filterMatchCacheStrategy.cancelPrefetch();
+        if (activeFilterAbortController) {
+          debugFilterLog('filter request abort', { requestKey });
+          recordFilterRequestDebugEvent('abort');
+          recordFilterTelemetry('request_abort', { requestKey });
+          activeFilterAbortController.abort();
+        }
+        activeFilterAbortController = new AbortController();
+        const signal = activeFilterAbortController.signal;
+        debugFilterLog('filter request start', {
+          requestKey,
+          phase: 'authoritative',
+          heavy: context.heavy,
+          coverageHash: context.coverageHash
+        });
+        recordFilterRequestDebugEvent('start');
+        recordFilterTelemetry('request_start', {
+          requestKey,
+          delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
+        });
+        updateFilterRuntimeStatus({
+          statusCode: 'refining'
+        });
+        let requestResults: FilterRequestResolution[];
+        try {
+          const cachedResults: FilterRequestResolution[] = [];
+          const missingSpecs: FilterRequestSpec[] = [];
+          for (const spec of context.requestSpecs) {
+            const cachedResult = filterMatchCacheStrategy.getCachedRequestSpecResult(spec, context);
+            if (cachedResult) {
+              cachedResults.push(cachedResult);
+            } else {
+              missingSpecs.push(spec);
+            }
+          }
+
+          requestResults = [...cachedResults];
+          if (missingSpecs.length > 0) {
+            const fetchedResults =
+              missingSpecs.length > 1
+                ? await (() =>
+                    filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(
+                      missingSpecs,
+                      {
+                        ...context,
+                        matchLimit
+                      },
+                      signal
+                    ))().catch(async (error) => {
+                    if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
+                    return Promise.all(
+                      missingSpecs.map(async (spec) => {
+                        const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(
+                          spec,
+                          {
+                            ...context,
+                            matchLimit
+                          },
+                          signal
+                        );
+                        return {
+                          spec,
+                          ...result
+                        };
+                      })
+                    );
+                  })
+                : await Promise.all(
+                    missingSpecs.map(async (spec) => {
+                      const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(
+                        spec,
+                        {
+                          ...context,
+                          matchLimit
+                        },
+                        signal
+                      );
+                      return {
+                        spec,
+                        ...result
+                      };
+                    })
+                  );
+            requestResults.push(...fetchedResults);
+          }
+        } catch (error) {
+          if (String(error?.name || '').toLowerCase() === 'aborterror') return;
+          return;
+        } finally {
+          if (activeFilterAbortController?.signal === signal) {
+            activeFilterAbortController = null;
           }
         }
+        if (token !== latestFilterToken) return;
 
-        requestResults = [...cachedResults];
-        if (missingSpecs.length > 0) {
-          const fetchedResults = missingSpecs.length > 1
-            ? await (() => filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(missingSpecs, {
-              ...context,
-              matchLimit
-            }, signal))()
-                .catch(async (error) => {
-                  if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
-                  return Promise.all(missingSpecs.map(async (spec) => {
-                    const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, {
-                      ...context,
-                      matchLimit
-                    }, signal);
-                    return {
-                      spec,
-                      ...result
-                    };
-                  }));
-                })
-            : await Promise.all(missingSpecs.map(async (spec) => {
-                const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(spec, {
-                  ...context,
-                  matchLimit
-                }, signal);
-                return {
-                  spec,
-                  ...result
-                };
-              }));
-          requestResults.push(...fetchedResults);
+        const usedFallback = requestResults.some((result) => result.usedFallback);
+        const cacheHit = requestResults.length > 0 && requestResults.every((result) => result.cacheHit);
+        const requestPayloads = requestResults.map((result) => ({
+          requestId: result.spec.id,
+          payload: result.payload
+        }));
+        let resolvedPayload: FilterResolvedLayerPayload | null = null;
+        try {
+          const workerResult = await filterWorkerDispatcher.request('build-resolved-payload', {
+            prepared: context,
+            payloads: requestPayloads,
+            cacheHit
+          });
+          if (workerResult?.ok) {
+            resolvedPayload = {
+              highlightColorGroups: Array.isArray(workerResult.highlightColorGroups)
+                ? workerResult.highlightColorGroups
+                : [],
+              matchedFeatureIds: Array.isArray(workerResult.matchedFeatureIds) ? workerResult.matchedFeatureIds : [],
+              matchedCount: Number(workerResult.matchedCount || 0),
+              meta: {
+                ...(workerResult.meta || {}),
+                bboxHash: context.bboxHash,
+                coverageHash: context.coverageHash,
+                coverageWindow: context.coverageWindow,
+                rulesHash: context.rulesHash,
+                zoomBucket: context.zoomBucket,
+                dataVersion: context.dataVersion,
+                renderMode,
+                truncated: Boolean(workerResult.meta?.truncated),
+                elapsedMs: Number(workerResult.meta?.elapsedMs || 0),
+                cacheHit: Boolean(workerResult.meta?.cacheHit)
+              }
+            };
+          }
+        } catch {
+          resolvedPayload = null;
         }
-      } catch (error) {
-        if (String(error?.name || '').toLowerCase() === 'aborterror') return;
-        return;
-      } finally {
-        if (activeFilterAbortController?.signal === signal) {
-          activeFilterAbortController = null;
-        }
-      }
-      if (token !== latestFilterToken) return;
-
-      const usedFallback = requestResults.some((result) => result.usedFallback);
-      const cacheHit = requestResults.length > 0 && requestResults.every((result) => result.cacheHit);
-      const requestPayloads = requestResults.map((result) => ({
-        requestId: result.spec.id,
-        payload: result.payload
-      }));
-      let resolvedPayload: FilterResolvedLayerPayload | null = null;
-      try {
-        const workerResult = await filterWorkerDispatcher.request('build-resolved-payload', {
-          prepared: context,
-          payloads: requestPayloads,
-          cacheHit
-        });
-        if (workerResult?.ok) {
-          resolvedPayload = {
-            highlightColorGroups: Array.isArray(workerResult.highlightColorGroups)
-              ? workerResult.highlightColorGroups
-              : [],
-            matchedFeatureIds: Array.isArray(workerResult.matchedFeatureIds)
-              ? workerResult.matchedFeatureIds
-              : [],
-            matchedCount: Number(workerResult.matchedCount || 0),
-            meta: {
-              ...(workerResult.meta || {}),
-              bboxHash: context.bboxHash,
-              coverageHash: context.coverageHash,
-              coverageWindow: context.coverageWindow,
-              rulesHash: context.rulesHash,
-              zoomBucket: context.zoomBucket,
-              dataVersion: context.dataVersion,
-              renderMode,
-              truncated: Boolean(workerResult.meta?.truncated),
-              elapsedMs: Number(workerResult.meta?.elapsedMs || 0),
-              cacheHit: Boolean(workerResult.meta?.cacheHit)
-            }
+        if (!resolvedPayload) {
+          const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
+            requestResults.map((result) => [result.spec.id, result.payload])
+          );
+          resolvedPayload = buildResolvedLayerPayload({
+            prepared: context,
+            payloadsByRequestId,
+            cacheHit
+          });
+          resolvedPayload.meta = {
+            ...(resolvedPayload.meta || {}),
+            bboxHash: context.bboxHash,
+            coverageHash: context.coverageHash,
+            coverageWindow: context.coverageWindow,
+            rulesHash: context.rulesHash,
+            zoomBucket: context.zoomBucket,
+            dataVersion: context.dataVersion,
+            renderMode,
+            truncated: Boolean(resolvedPayload.meta?.truncated),
+            elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
+            cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
           };
         }
-      } catch {
-        resolvedPayload = null;
-      }
-      if (!resolvedPayload) {
-        const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
-          requestResults.map((result) => [result.spec.id, result.payload])
-        );
-        resolvedPayload = buildResolvedLayerPayload({
-          prepared: context,
-          payloadsByRequestId,
-          cacheHit
-        });
-        resolvedPayload.meta = {
-          ...(resolvedPayload.meta || {}),
-          bboxHash: context.bboxHash,
-          coverageHash: context.coverageHash,
-          coverageWindow: context.coverageWindow,
-          rulesHash: context.rulesHash,
-          zoomBucket: context.zoomBucket,
-          dataVersion: context.dataVersion,
-          renderMode,
-          truncated: Boolean(resolvedPayload.meta?.truncated),
-          elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
-          cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
-        };
-      }
-      const matchedSize = Number(resolvedPayload?.matchedCount || 0);
-      if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT && renderMode !== 'markers') {
-        updateFilterRuntimeStatus({
-          statusCode: 'too_many_matches',
-          count: matchedSize
-        });
-        lastCompletedAuthoritativeRequestKey = requestKey;
-        setFilterPhase('authoritative');
-        recordFilterTelemetry('request_degraded', {
-          requestKey,
-          count: matchedSize
-        });
-        return;
-      }
+        const matchedSize = Number(resolvedPayload?.matchedCount || 0);
+        if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT && renderMode !== 'markers') {
+          updateFilterRuntimeStatus({
+            statusCode: 'too_many_matches',
+            count: matchedSize
+          });
+          lastCompletedAuthoritativeRequestKey = requestKey;
+          setFilterPhase('authoritative');
+          recordFilterTelemetry('request_degraded', {
+            requestKey,
+            count: matchedSize
+          });
+          return;
+        }
 
         await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
           resolvedPayload.highlightColorGroups || [],
@@ -576,60 +593,62 @@ export function createFilterPipeline({
               : []
           }
         );
-      if (token !== latestFilterToken) return;
-      filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
-      activeFilterCoverageWindow = {
-        ...context.coverageWindow,
-        rulesHash: context.rulesHash,
-        zoomBucket: context.zoomBucket,
-        dataVersion: context.dataVersion
-      };
-      activeFilterRenderMode = renderMode;
-      activeFilterCoverageKey = context.coverageHash;
+        if (token !== latestFilterToken) return;
+        filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
+        activeFilterCoverageWindow = {
+          ...context.coverageWindow,
+          rulesHash: context.rulesHash,
+          zoomBucket: context.zoomBucket,
+          dataVersion: context.dataVersion
+        };
+        activeFilterRenderMode = renderMode;
+        activeFilterCoverageKey = context.coverageHash;
 
-      patchState({
-        errorMessage: '',
-        lastElapsedMs: Number(resolvedPayload?.meta?.elapsedMs || 0),
-        lastCacheHit: Boolean(resolvedPayload?.meta?.cacheHit),
-        lastCount: matchedSize
-      });
-      lastCompletedAuthoritativeRequestKey = requestKey;
-      setFilterPhase('authoritative');
-      debugFilterLog('filter request finish', {
-        requestKey,
-        count: matchedSize,
-        elapsedMs: currentState.lastElapsedMs,
-        cacheHit: currentState.lastCacheHit,
-        truncated: Boolean(resolvedPayload?.meta?.truncated),
-        fallback: usedFallback
-      });
-      recordFilterRequestDebugEvent('finish');
-      recordFilterTelemetry('request_finish', {
-        requestKey,
-        count: matchedSize,
-        elapsedMs: currentState.lastElapsedMs,
-        applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
-        setPaintPropertyCalls: currentState.setPaintPropertyCallsLast,
-        highlightedCount: filterDiffApplyStrategy.getFilteredFeatureCount()
-      });
-      updateFilterRuntimeStatus({
-        statusCode: getFilterStatusCodeForRenderMode(renderMode, Boolean(resolvedPayload?.meta?.truncated)),
-        count: currentState.lastCount,
-        elapsedMs: currentState.lastElapsedMs,
-        cacheHit: currentState.lastCacheHit,
-        setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
-      });
-      updateFilterDebugHook({
-        active: matchedSize > 0,
-        expr: ['literal', context.rulesHash],
-        mode: FILTER_HIGHLIGHT_MODE,
-        phase: currentState.phase,
-        lastElapsedMs: currentState.lastElapsedMs,
-        lastCount: currentState.lastCount,
-        cacheHit: currentState.lastCacheHit
-      });
-      filterMatchCacheStrategy.schedulePrefetch(context, token);
-    }, Math.max(0, Number(debounceMs) || 0));
+        patchState({
+          errorMessage: '',
+          lastElapsedMs: Number(resolvedPayload?.meta?.elapsedMs || 0),
+          lastCacheHit: Boolean(resolvedPayload?.meta?.cacheHit),
+          lastCount: matchedSize
+        });
+        lastCompletedAuthoritativeRequestKey = requestKey;
+        setFilterPhase('authoritative');
+        debugFilterLog('filter request finish', {
+          requestKey,
+          count: matchedSize,
+          elapsedMs: currentState.lastElapsedMs,
+          cacheHit: currentState.lastCacheHit,
+          truncated: Boolean(resolvedPayload?.meta?.truncated),
+          fallback: usedFallback
+        });
+        recordFilterRequestDebugEvent('finish');
+        recordFilterTelemetry('request_finish', {
+          requestKey,
+          count: matchedSize,
+          elapsedMs: currentState.lastElapsedMs,
+          applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
+          setPaintPropertyCalls: currentState.setPaintPropertyCallsLast,
+          highlightedCount: filterDiffApplyStrategy.getFilteredFeatureCount()
+        });
+        updateFilterRuntimeStatus({
+          statusCode: getFilterStatusCodeForRenderMode(renderMode, Boolean(resolvedPayload?.meta?.truncated)),
+          count: currentState.lastCount,
+          elapsedMs: currentState.lastElapsedMs,
+          cacheHit: currentState.lastCacheHit,
+          setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
+        });
+        updateFilterDebugHook({
+          active: matchedSize > 0,
+          expr: ['literal', context.rulesHash],
+          mode: FILTER_HIGHLIGHT_MODE,
+          phase: currentState.phase,
+          lastElapsedMs: currentState.lastElapsedMs,
+          lastCount: currentState.lastCount,
+          cacheHit: currentState.lastCacheHit
+        });
+        filterMatchCacheStrategy.schedulePrefetch(context, token);
+      },
+      Math.max(0, Number(debounceMs) || 0)
+    );
   }
 
   function clearFilterHighlight() {
@@ -717,18 +736,17 @@ export function createFilterPipeline({
     }
     const currentSearch = get(searchState);
     if (
-      Boolean(currentSearch?.mapActive)
-      || Boolean(currentSearch?.loading)
-      || Boolean(currentSearch?.loadingMore)
-      || (Array.isArray(currentSearch?.items) && currentSearch.items.length > 0)
+      Boolean(currentSearch?.mapActive) ||
+      Boolean(currentSearch?.loading) ||
+      Boolean(currentSearch?.loadingMore) ||
+      (Array.isArray(currentSearch?.items) && currentSearch.items.length > 0)
     ) {
       resetSearchState();
     }
     const currentMap = resolveMap();
     const currentZoom = Number(currentMap?.getZoom?.());
-    const renderMode = Number.isFinite(currentZoom) && currentZoom < FILTER_FALLBACK_MARKER_MAX_ZOOM
-      ? 'markers'
-      : 'contours';
+    const renderMode =
+      Number.isFinite(currentZoom) && currentZoom < FILTER_FALLBACK_MARKER_MAX_ZOOM ? 'markers' : 'contours';
     const bboxHash = buildBboxHash(bbox, 4);
     const zoomBucket = Math.round(Number(currentMap?.getZoom?.() || 0) * 2) / 2;
     const coverageWindow = getCoverageWindowForViewport(bbox) || bbox;
@@ -744,14 +762,16 @@ export function createFilterPipeline({
     });
     setFilterPhase('optimistic');
 
-    if (canReuseActiveCoverageWindow({
-      viewportBbox: bbox,
-      rulesHash: prepared.rulesHash,
-      zoomBucket,
-      renderMode,
-      dataVersion,
-      reason
-    })) {
+    if (
+      canReuseActiveCoverageWindow({
+        viewportBbox: bbox,
+        rulesHash: prepared.rulesHash,
+        zoomBucket,
+        renderMode,
+        dataVersion,
+        reason
+      })
+    ) {
       setFilterPhase('authoritative');
       recordFilterTelemetry('coverage_window_hit', {
         bboxHash,
@@ -780,9 +800,7 @@ export function createFilterPipeline({
           phase: 'optimistic',
           renderMode,
           matchedCount: Number(cachedPayload?.matchedCount || 0),
-          matchedFeatureIds: Array.isArray(cachedPayload?.matchedFeatureIds)
-            ? cachedPayload.matchedFeatureIds
-            : []
+          matchedFeatureIds: Array.isArray(cachedPayload?.matchedFeatureIds) ? cachedPayload.matchedFeatureIds : []
         }
       );
       if (token !== latestFilterToken) return;
@@ -845,9 +863,7 @@ export function createFilterPipeline({
           phase: 'optimistic',
           renderMode,
           matchedCount: Number(reusedPayload?.matchedCount || 0),
-          matchedFeatureIds: Array.isArray(reusedPayload?.matchedFeatureIds)
-            ? reusedPayload.matchedFeatureIds
-            : []
+          matchedFeatureIds: Array.isArray(reusedPayload?.matchedFeatureIds) ? reusedPayload.matchedFeatureIds : []
         }
       );
       if (token !== latestFilterToken) return;
@@ -893,24 +909,30 @@ export function createFilterPipeline({
     });
     const debounceMs = prepared.heavy
       ? FILTER_HEAVY_RULE_DEBOUNCE_MS
-      : (reason === 'rules' ? FILTER_RULE_CHANGE_DEBOUNCE_MS : FILTER_REQUEST_DEBOUNCE_MS);
+      : reason === 'rules'
+        ? FILTER_RULE_CHANGE_DEBOUNCE_MS
+        : FILTER_REQUEST_DEBOUNCE_MS;
 
-    scheduleAuthoritativeRequest({
-      reason,
-      heavy: prepared.heavy,
-      layers: activeLayers,
-      requestSpecs: prepared.requestSpecs,
-      combinedGroup: prepared.combinedGroup,
-      rulesHash: prepared.rulesHash,
-      coverageWindow,
-      coverageHash,
-      bboxHash,
-      zoomBucket,
-      renderMode,
-      dataVersion,
-      matchLimit,
-      cacheKey
-    }, token, debounceMs);
+    scheduleAuthoritativeRequest(
+      {
+        reason,
+        heavy: prepared.heavy,
+        layers: activeLayers,
+        requestSpecs: prepared.requestSpecs,
+        combinedGroup: prepared.combinedGroup,
+        rulesHash: prepared.rulesHash,
+        coverageWindow,
+        coverageHash,
+        bboxHash,
+        zoomBucket,
+        renderMode,
+        dataVersion,
+        matchLimit,
+        cacheKey
+      },
+      token,
+      debounceMs
+    );
   }
 
   function scheduleFilterRefresh(input: unknown, { reason = 'viewport' } = {}) {

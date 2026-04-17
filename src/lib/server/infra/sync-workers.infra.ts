@@ -7,18 +7,14 @@ const DEFAULT_RECOVERY_SWEEP_INTERVAL_MS = 10_000;
 
 function signalProcessTree(child, signal = 'SIGTERM', log = console, options: LooseRecord = {}) {
   const platform = String(options.platform || process.platform);
-  const killRef = typeof options.killRef === 'function'
-    ? options.killRef
-    : process.kill.bind(process);
+  const killRef = typeof options.killRef === 'function' ? options.killRef : process.kill.bind(process);
 
   if (!child || typeof child !== 'object' || child.killed) {
     return false;
   }
   if (platform === 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
     try {
-      const spawnRef = typeof options.spawnRef === 'function'
-        ? options.spawnRef
-        : require('child_process').spawn;
+      const spawnRef = typeof options.spawnRef === 'function' ? options.spawnRef : require('child_process').spawn;
       const killer = spawnRef('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
         stdio: 'ignore',
         shell: false
@@ -214,7 +210,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         triggerReason: 'scheduled',
         requestedBy: 'system'
       }).catch((error) => {
-        log.error(`[region-sync] failed to enqueue scheduled sync for region ${region.id}: ${String(error?.message || error)}`);
+        log.error(
+          `[region-sync] failed to enqueue scheduled sync for region ${region.id}: ${String(error?.message || error)}`
+        );
       });
       return;
     }
@@ -228,7 +226,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
           triggerReason: 'scheduled',
           requestedBy: 'system'
         }).catch((error) => {
-          log.error(`[region-sync] failed to enqueue scheduled sync for region ${region.id}: ${String(error?.message || error)}`);
+          log.error(
+            `[region-sync] failed to enqueue scheduled sync for region ${region.id}: ${String(error?.message || error)}`
+          );
         });
         return;
       }
@@ -293,9 +293,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       .trim()
       .toLowerCase();
     return Boolean(
-      region?.lastSuccessfulSyncAt
-      && lastSyncStatus !== 'failed'
-      && region?.upstreamStatus === 'up_to_date'
+      region?.lastSuccessfulSyncAt && lastSyncStatus !== 'failed' && region?.upstreamStatus === 'up_to_date'
     );
   }
 
@@ -382,7 +380,12 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       const isStageTransition = previousStage !== stage;
       // Throttle only repeat progress/detail updates within the same stage;
       // always let a transition to a new stage through so the UI stays snappy.
-      if (!force && !isTerminalStage && !isStageTransition && nowMs - lastStagePersistTs < STAGE_UPDATE_MIN_INTERVAL_MS) {
+      if (
+        !force &&
+        !isTerminalStage &&
+        !isStageTransition &&
+        nowMs - lastStagePersistTs < STAGE_UPDATE_MIN_INTERVAL_MS
+      ) {
         return;
       }
       lastStagePersistTs = nowMs;
@@ -414,9 +417,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
             const payload = JSON.parse(trimmed.slice('SYNC_STAGE_JSON='.length));
             const stageName = String(payload?.stage || '').trim();
             if (!stageName) continue;
-            const progressValue = Number.isFinite(Number(payload?.progress))
-              ? Number(payload.progress)
-              : null;
+            const progressValue = Number.isFinite(Number(payload?.progress)) ? Number(payload.progress) : null;
             const detailText = typeof payload?.detail === 'string' ? payload.detail : null;
             persistStage(stageName, progressValue, detailText);
           } catch {
@@ -458,16 +459,18 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       const wasCancelled = currentSyncCancelRequested;
       currentSyncCancelRequested = false;
       clearForceKillTimer();
-      const finalization = waitForPendingStage().then(() => finalizeRun(run.id, {
-        success: false,
-        status: wasCancelled ? 'abandoned' : 'failed',
-        error: wasCancelled
-          ? 'Sync cancelled by user'
-          : buildFailureMessage({
-            outputTail: `${stdoutBuffer}\n${stderrBuffer}`,
-            error
-          })
-      }));
+      const finalization = waitForPendingStage().then(() =>
+        finalizeRun(run.id, {
+          success: false,
+          status: wasCancelled ? 'abandoned' : 'failed',
+          error: wasCancelled
+            ? 'Sync cancelled by user'
+            : buildFailureMessage({
+                outputTail: `${stdoutBuffer}\n${stderrBuffer}`,
+                error
+              })
+        })
+      );
       finalization.catch(() => {});
     });
 
@@ -593,9 +596,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       let upstreamRegion = region;
       if (!skipUpstreamCheck && typeof dataSettingsService.getRegionUpstreamState === 'function') {
         try {
-          upstreamRegion = await dataSettingsService.getRegionUpstreamState(region, {
-            forceRefresh: true
-          }) || region;
+          upstreamRegion =
+            (await dataSettingsService.getRegionUpstreamState(region, {
+              forceRefresh: true
+            })) || region;
         } catch {
           upstreamRegion = region;
         }
@@ -653,7 +657,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
 
     for (const region of regions) {
       if (!region.enabled) continue;
-      const dueNow = Boolean(region.autoSyncEnabled && region.nextSyncAt && Date.parse(String(region.nextSyncAt || '')) <= Date.now());
+      const dueNow = Boolean(
+        region.autoSyncEnabled && region.nextSyncAt && Date.parse(String(region.nextSyncAt || '')) <= Date.now()
+      );
       const shouldRunOnStart = Boolean(region.autoSyncOnStart);
       if (!dueNow && !shouldRunOnStart) continue;
       await requestRegionSync(region.id, {
@@ -751,7 +757,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
           };
         }
       } catch (error) {
-        log.error(`[region-sync] failed to abandon stale run for region ${numericRegionId}: ${String(error?.message || error)}`);
+        log.error(
+          `[region-sync] failed to abandon stale run for region ${numericRegionId}: ${String(error?.message || error)}`
+        );
       }
     }
 
@@ -783,10 +791,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
 }
 
 function initSyncWorkersInfra(options: LooseRecord = {}) {
-  const {
-    dataSettingsService,
-    syncRegionScriptPath
-  } = options;
+  const { dataSettingsService, syncRegionScriptPath } = options;
 
   if (!dataSettingsService || !syncRegionScriptPath) {
     return {

@@ -23,10 +23,7 @@ function sendJsonResult(res, result: LooseRecord, fallback: LooseRecord = {}) {
 }
 
 function registerAuthRoutes(options: LooseRecord = {}) {
-  const {
-    app,
-    createSimpleRateLimiter
-  } = options;
+  const { app, createSimpleRateLimiter } = options;
 
   const authService = createAuthService(options);
   const userProfileService = createUserProfileService({
@@ -115,9 +112,14 @@ function registerAuthRoutes(options: LooseRecord = {}) {
     return sendJsonResult(res, await userProfileService.updateCurrentProfile(req));
   });
 
-  app.post('/api/admin/users/edit-permission', requireCsrfSession, authService.requireAdminSession, async (req, res) => {
-    return sendJsonResult(res, await userProfileService.updateUserEditPermission(req.body || {}));
-  });
+  app.post(
+    '/api/admin/users/edit-permission',
+    requireCsrfSession,
+    authService.requireAdminSession,
+    async (req, res) => {
+      return sendJsonResult(res, await userProfileService.updateUserEditPermission(req.body || {}));
+    }
+  );
 
   app.get('/api/admin/users', authService.requireAdminSession, async (req, res) => {
     const result = await userProfileService.listUsers(req.query || {});

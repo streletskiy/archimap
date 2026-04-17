@@ -10,10 +10,7 @@ function escapeRegExp(value) {
 }
 
 function getHtmlDetailValue(html, label) {
-  const pattern = new RegExp(
-    `<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`,
-    'i'
-  );
+  const pattern = new RegExp(`<td[^>]*>\\s*${escapeRegExp(label)}\\s*</td>\\s*<td[^>]*>\\s*([^<]+)\\s*</td>`, 'i');
   const match = String(html || '').match(pattern);
   return match ? match[1].trim() : null;
 }

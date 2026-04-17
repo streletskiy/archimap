@@ -12,12 +12,7 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
     refreshSearchIndexForBuildingFallback
   } = options;
 
-  const canSpawnWorker = Boolean(
-    spawn
-    && processExecPath
-    && rootDir
-    && searchRefreshWorkerScriptPath
-  );
+  const canSpawnWorker = Boolean(spawn && processExecPath && rootDir && searchRefreshWorkerScriptPath);
   let currentWorker = null;
   let currentWorkerReady = false;
   let isStopping = false;
@@ -66,10 +61,10 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
           DB_PROVIDER: String(db?.provider || env.DB_PROVIDER || 'sqlite').trim() || 'sqlite',
           ...(db?.provider === 'sqlite'
             ? {
-              ARCHIMAP_DB_PATH: sqlite.dbPath,
-              OSM_DB_PATH: sqlite.osmDbPath,
-              LOCAL_EDITS_DB_PATH: sqlite.localEditsDbPath
-            }
+                ARCHIMAP_DB_PATH: sqlite.dbPath,
+                OSM_DB_PATH: sqlite.osmDbPath,
+                LOCAL_EDITS_DB_PATH: sqlite.localEditsDbPath
+              }
             : {})
         },
         stdio: ['ignore', 'inherit', 'inherit', 'ipc']

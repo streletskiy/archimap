@@ -7,7 +7,7 @@ let importCounter = 0;
 
 async function loadMapThemeUtils() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'map-theme-utils.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 function createMapTilerStyleFixture() {
@@ -194,10 +194,7 @@ test('getMapStyleSignature tracks locale only for MapTiler styles', async () => 
     getMapStyleSignature('light', mapTilerConfig, 'ru'),
     getMapStyleSignature('light', mapTilerConfig, 'en')
   );
-  assert.equal(
-    getMapStyleSignature('light', cartoConfig, 'ru'),
-    getMapStyleSignature('light', cartoConfig, 'en')
-  );
+  assert.equal(getMapStyleSignature('light', cartoConfig, 'ru'), getMapStyleSignature('light', cartoConfig, 'en'));
 });
 
 test('getMapStyleSignature tracks custom basemap url and api key', async () => {
@@ -225,10 +222,7 @@ test('getMapStyleSignature tracks custom basemap url and api key', async () => {
     }
   };
 
-  assert.notEqual(
-    getMapStyleSignature('light', baseConfig, 'en'),
-    getMapStyleSignature('dark', baseConfig, 'en')
-  );
+  assert.notEqual(getMapStyleSignature('light', baseConfig, 'en'), getMapStyleSignature('dark', baseConfig, 'en'));
   assert.notEqual(
     getMapStyleSignature('light', baseConfig, 'en'),
     getMapStyleSignature('light', changedUrlConfig, 'en')
@@ -273,7 +267,9 @@ test('getMapStyleForTheme returns a high-contrast monochrome Protomaps style for
     const lightGrassLayer = lightStyle.layers.find((layer) => layer.id === 'custom-landuse-grass') as any;
     const lightWoodLayer = lightStyle.layers.find((layer) => layer.id === 'custom-landuse-wood') as any;
     const lightScrubLayer = lightStyle.layers.find((layer) => layer.id === 'custom-landuse-scrub') as any;
-    const lightPedestrianOverlayLayer = lightStyle.layers.find((layer) => layer.id === 'custom-landuse-pedestrian') as any;
+    const lightPedestrianOverlayLayer = lightStyle.layers.find(
+      (layer) => layer.id === 'custom-landuse-pedestrian'
+    ) as any;
     const lightLandusePedestrianLayer = lightStyle.layers.find((layer) => layer.id === 'landuse_pedestrian') as any;
     const lightLandcoverLayer = lightStyle.layers.find((layer) => layer.id === 'landcover') as any;
     const lightRoadsOtherLayer = lightStyle.layers.find((layer) => layer.id === 'roads_other') as any;
@@ -284,7 +280,9 @@ test('getMapStyleForTheme returns a high-contrast monochrome Protomaps style for
     const lightRoadsSubwayLayer = lightStyle.layers.find((layer) => layer.id === 'custom-roads-subway') as any;
     const lightPedestrianLayer = lightStyle.layers.find((layer) => layer.id === 'custom-roads-pedestrian') as any;
     const lightTramLayer = lightStyle.layers.find((layer) => layer.id === 'custom-roads-tram') as any;
-    const lightRoadsTunnelsOtherCasingLayer = lightStyle.layers.find((layer) => layer.id === 'roads_tunnels_other_casing') as any;
+    const lightRoadsTunnelsOtherCasingLayer = lightStyle.layers.find(
+      (layer) => layer.id === 'roads_tunnels_other_casing'
+    ) as any;
     assert.equal(typeof darkStyle, 'object');
     assert.equal(darkStyle.sources?.protomaps?.url, 'https://app.example.com/api/basemaps/custom/current.json');
     assert.equal(darkStyle.glyphs, 'https://app.example.com/api/basemaps/glyphs/{fontstack}/{range}.pbf');
@@ -317,7 +315,11 @@ test('getMapStyleForTheme returns a high-contrast monochrome Protomaps style for
     assert.deepEqual(lightPedestrianOverlayLayer.filter, ['==', 'kind', 'pedestrian']);
     assert.equal(lightPedestrianOverlayLayer.paint['fill-color'], '#ffffff');
     assert.equal(lightPedestrianOverlayLayer.paint['fill-opacity'], 0.5);
-    assert.deepEqual(lightLandusePedestrianLayer.filter, ['all', ['in', 'kind', 'pedestrian', 'dam'], ['!in', 'kind', 'pedestrian']]);
+    assert.deepEqual(lightLandusePedestrianLayer.filter, [
+      'all',
+      ['in', 'kind', 'pedestrian', 'dam'],
+      ['!in', 'kind', 'pedestrian']
+    ]);
     assert.equal(lightLandcoverLayer.paint['fill-color'].includes('rgba(247, 247, 247, 1)'), true);
     assert.equal(lightRoadsOtherLayer.paint['line-color'], '#dbdbdb');
     assert.deepEqual(lightRoadsOtherLayer.filter[lightRoadsOtherLayer.filter.length - 1], [
@@ -418,43 +420,106 @@ test('getMapStyleForTheme returns a high-contrast monochrome Protomaps style for
     assert.deepEqual(lightTramLayer.filter, ['in', 'kind_detail', 'tram', 'funicular']);
     assert.equal(lightTramLayer.paint['line-dasharray'], undefined);
     assert.equal(lightTramLayer.layout['line-cap'], 'round');
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'pois'), false);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-landuse-grass'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-landuse-park'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-landuse-wood'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-landuse-scrub'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-landuse-pedestrian'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-roads-subway'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-roads-pedestrian'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-roads-rail-dash'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-roads-tram'), true);
-    assert.equal(lightStyle.layers.some((layer) => layer.id === 'custom-roads-steps'), false);
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'pois'),
+      false
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-landuse-grass'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-landuse-park'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-landuse-wood'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-landuse-scrub'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-landuse-pedestrian'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-roads-subway'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-roads-pedestrian'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-roads-rail-dash'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-roads-tram'),
+      true
+    );
+    assert.equal(
+      lightStyle.layers.some((layer) => layer.id === 'custom-roads-steps'),
+      false
+    );
     assert.ok(
       lightStyle.layers.findIndex((layer) => layer.id === 'landuse_park') <
         lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-park') &&
-      lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-park') <
-        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-grass') &&
-      lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-grass') <
-        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-wood') &&
-      lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-wood') <
-        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-scrub') &&
-      lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-scrub') <
-        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-pedestrian') &&
-      lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-pedestrian') >
-        lightStyle.layers.findIndex((layer) => layer.id === 'water') &&
-      lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-pedestrian') <
-        lightStyle.layers.findIndex((layer) => layer.id === lightRoadsTunnelsOtherCasingLayer.id)
+        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-park') <
+          lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-grass') &&
+        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-grass') <
+          lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-wood') &&
+        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-wood') <
+          lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-scrub') &&
+        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-scrub') <
+          lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-pedestrian') &&
+        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-pedestrian') >
+          lightStyle.layers.findIndex((layer) => layer.id === 'water') &&
+        lightStyle.layers.findIndex((layer) => layer.id === 'custom-landuse-pedestrian') <
+          lightStyle.layers.findIndex((layer) => layer.id === lightRoadsTunnelsOtherCasingLayer.id)
     );
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-landuse-park'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-landuse-grass'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-landuse-wood'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-landuse-scrub'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-landuse-pedestrian'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-roads-subway'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-roads-pedestrian'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-roads-rail-dash'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-roads-tram'), false);
-    assert.equal(darkStyle.layers.some((layer) => layer.id === 'custom-roads-steps'), false);
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-landuse-park'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-landuse-grass'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-landuse-wood'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-landuse-scrub'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-landuse-pedestrian'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-roads-subway'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-roads-pedestrian'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-roads-rail-dash'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-roads-tram'),
+      false
+    );
+    assert.equal(
+      darkStyle.layers.some((layer) => layer.id === 'custom-roads-steps'),
+      false
+    );
 
     let fetchCalls = 0;
     const resolvedStyle = await resolveMapStyleForTheme('dark', {

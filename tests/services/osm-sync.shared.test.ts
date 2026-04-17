@@ -7,7 +7,7 @@ let importCounter = 0;
 
 async function loadModule() {
   const modulePath = path.join(process.cwd(), 'src', 'lib', 'server', 'services', 'osm-sync.shared.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${importCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
 test('buildDesiredTagMap writes building:levels and removes legacy levels', async () => {
