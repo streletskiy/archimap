@@ -1587,8 +1587,17 @@ def _limit_clause_sql(import_limit: int) -> str:
     return f'LIMIT {int(import_limit)}' if import_limit > 0 else ''
 
 
-def _src_raw_cte_sql() -> str:
-    return '''
+def _osm_id_filter_predicate_sql(use_osm_id_filter: bool) -> str:
+    # Incremental-sync mode narrows the export to a whitelist of OSM feature_ids
+    # registered as the `_osm_id_filter` temp table. The predicate is a no-op
+    # when the table is absent (full sync).
+    if not use_osm_id_filter:
+        return ''
+    return '    AND feature_id IN (SELECT feature_id FROM _osm_id_filter)\n'
+
+
+def _src_raw_cte_sql(use_osm_id_filter: bool = False) -> str:
+    return f'''
 WITH src_raw AS (
   SELECT
     feature_id,
@@ -1602,13 +1611,13 @@ WITH src_raw AS (
   WHERE geometry IS NOT NULL
     AND split_part(feature_id, '/', 1) IN ('way', 'relation')
     AND ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON')
-)
+{_osm_id_filter_predicate_sql(use_osm_id_filter)})
 '''
 
 
-def _db_rows_cte_sql(import_limit: int) -> str:
+def _db_rows_cte_sql(import_limit: int, use_osm_id_filter: bool = False) -> str:
     return f'''
-{_src_raw_cte_sql()}
+{_src_raw_cte_sql(use_osm_id_filter)}
 , db_rows AS (
   SELECT
     feature_id,
@@ -1624,9 +1633,9 @@ def _db_rows_cte_sql(import_limit: int) -> str:
 '''
 
 
-def _filtered_rows_cte_sql(import_limit: int) -> str:
+def _filtered_rows_cte_sql(import_limit: int, use_osm_id_filter: bool = False) -> str:
     return f'''
-{_src_raw_cte_sql()}
+{_src_raw_cte_sql(use_osm_id_filter)}
 , src AS (
   SELECT
     feature_id,
@@ -1678,9 +1687,9 @@ def _filtered_rows_cte_sql(import_limit: int) -> str:
 '''
 
 
-def _remainder_rows_cte_sql(import_limit: int) -> str:
+def _remainder_rows_cte_sql(import_limit: int, use_osm_id_filter: bool = False) -> str:
     return f'''
-{_filtered_rows_cte_sql(import_limit)}
+{_filtered_rows_cte_sql(import_limit, use_osm_id_filter)}
 , building_remainders AS (
   SELECT
     building.feature_id,
@@ -1779,7 +1788,11 @@ ORDER BY
 '''
 
 
-def _build_db_export_select_sql(import_limit: int, geometry_mode: str = 'geojson') -> str:
+def _build_db_export_select_sql(
+    import_limit: int,
+    geometry_mode: str = 'geojson',
+    use_osm_id_filter: bool = False,
+) -> str:
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
     if geometry_mode_normalized == 'wkb_hex':
         geometry_sql = 'ST_AsHEXWKB(geometry) AS geometry_wkb_hex'
@@ -1789,7 +1802,7 @@ def _build_db_export_select_sql(import_limit: int, geometry_mode: str = 'geojson
         raise ValueError(f'Unsupported DB geometry export mode: {geometry_mode}')
 
     return f'''
-{_db_rows_cte_sql(import_limit)}
+{_db_rows_cte_sql(import_limit, use_osm_id_filter)}
 SELECT
   split_part(feature_id, '/', 1) AS osm_type,
   try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
@@ -1807,18 +1820,30 @@ ORDER BY
 '''
 
 
-def _export_select_sql(import_limit: int, geometry_mode: str = 'geojson_feature') -> str:
+def _export_select_sql(
+    import_limit: int,
+    geometry_mode: str = 'geojson_feature',
+    use_osm_id_filter: bool = False,
+) -> str:
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
     if geometry_mode_normalized in ('geojson', 'geojson_feature'):
         geometry_sql = 'ST_AsGeoJSON(geometry) AS geometry_json'
         source_rows_name = 'export_rows' if geometry_mode_normalized == 'geojson_feature' else 'enriched'
-        cte_sql = _remainder_rows_cte_sql(import_limit) if geometry_mode_normalized == 'geojson_feature' else _filtered_rows_cte_sql(import_limit)
+        cte_sql = (
+            _remainder_rows_cte_sql(import_limit, use_osm_id_filter)
+            if geometry_mode_normalized == 'geojson_feature'
+            else _filtered_rows_cte_sql(import_limit, use_osm_id_filter)
+        )
         return _build_export_select_sql(cte_sql, source_rows_name, geometry_sql)
     else:
         raise ValueError(f'Unsupported geometry export mode: {geometry_mode}')
 
 
-def _build_dual_export_select_sql(import_limit: int, db_geometry_mode: str = 'wkb_hex') -> str:
+def _build_dual_export_select_sql(
+    import_limit: int,
+    db_geometry_mode: str = 'wkb_hex',
+    use_osm_id_filter: bool = False,
+) -> str:
     db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
     if db_geometry_mode_normalized == 'wkb_hex':
         db_geometry_sql = (
@@ -1831,7 +1856,7 @@ def _build_dual_export_select_sql(import_limit: int, db_geometry_mode: str = 'wk
         raise ValueError(f'Unsupported DB geometry export mode: {db_geometry_mode}')
 
     return f'''
-{_remainder_rows_cte_sql(import_limit)}
+{_remainder_rows_cte_sql(import_limit, use_osm_id_filter)}
 SELECT
   split_part(feature_id, '/', 1) AS osm_type,
   try_cast(split_part(feature_id, '/', 2) AS BIGINT) AS osm_id,
@@ -1903,14 +1928,28 @@ def build_export_progress_detail(prefix: str, stats: dict[str, Any]) -> str:
     )
 
 
-def _materialize_export_tables(con: duckdb.DuckDBPyConnection, import_limit: int) -> None:
+def _materialize_export_tables(
+    con: duckdb.DuckDBPyConnection,
+    import_limit: int,
+    use_osm_id_filter: bool = False,
+) -> None:
     """Materialize intermediate tables for building export.
 
     The CTE chain (filtered → buildings_with_parts → building_remainders → export_rows)
     references `filtered` 6+ times causing DuckDB to potentially re-evaluate it.
     Materializing into temp tables lets DuckDB build each only once and use hash joins
     for the self-JOINs.
+
+    When `use_osm_id_filter=True`, the caller has already populated the
+    `_osm_id_filter(feature_id VARCHAR)` temp table, and we narrow the export
+    to that whitelist. Incremental sync relies on this to re-export only the
+    buildings affected by the latest PBF diff.
     """
+    filter_predicate = (
+        '  AND feature_id IN (SELECT feature_id FROM _osm_id_filter)'
+        if use_osm_id_filter
+        else ''
+    )
     con.execute(f'''
         CREATE OR REPLACE TEMP TABLE _export_filtered AS
         SELECT
@@ -1936,6 +1975,7 @@ def _materialize_export_tables(con: duckdb.DuckDBPyConnection, import_limit: int
             WHERE geometry IS NOT NULL
               AND split_part(feature_id, '/', 1) IN ('way', 'relation')
               AND ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON')
+            {filter_predicate}
         ) raw
         {_limit_clause_sql(import_limit)}
     ''')
@@ -2146,6 +2186,32 @@ FROM _import_rows_tmp;
         return processed, imported
 
 
+def _load_osm_id_filter_into_duckdb(con: duckdb.DuckDBPyConnection, filter_file: Path) -> int:
+    """Load feature_ids (one per line) from a text file into a DuckDB temp table.
+
+    Accepts lines of the form 'way/123' or 'relation/456'. Blank lines and
+    comments (#) are ignored. Returns the loaded row count.
+    """
+    ids: list[str] = []
+    with filter_file.open('r', encoding='utf-8') as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split('/')
+            if len(parts) != 2:
+                continue
+            osm_type = parts[0].lower()
+            osm_id = parts[1]
+            if osm_type not in ('way', 'relation') or not osm_id.isdigit():
+                continue
+            ids.append(f'{osm_type}/{osm_id}')
+    con.execute('CREATE OR REPLACE TEMP TABLE _osm_id_filter(feature_id VARCHAR PRIMARY KEY)')
+    if ids:
+        con.executemany('INSERT OR IGNORE INTO _osm_id_filter VALUES (?)', [(fid,) for fid in ids])
+    return len(ids)
+
+
 def export_rows_duckdb_ndjson(
     duckdb_path: Path,
     out_path: Path,
@@ -2153,14 +2219,16 @@ def export_rows_duckdb_ndjson(
     geometry_mode: str = 'geojson',
     append: bool = False,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
+    osm_id_filter_file: Path | None = None,
 ) -> Tuple[int, int, dict[str, float] | None]:
     geometry_mode_normalized = str(geometry_mode or 'geojson').strip().lower() or 'geojson'
     export_batch_size = resolve_export_batch_size()
     export_progress_interval_sec = resolve_export_progress_interval_sec()
+    use_osm_id_filter = osm_id_filter_file is not None
     if geometry_mode_normalized in ('wkb_hex', 'geojson'):
-        select_sql = _build_db_export_select_sql(import_limit, geometry_mode_normalized)
+        select_sql = _build_db_export_select_sql(import_limit, geometry_mode_normalized, use_osm_id_filter)
     else:
-        select_sql = _export_select_sql(import_limit, geometry_mode_normalized)
+        select_sql = _export_select_sql(import_limit, geometry_mode_normalized, use_osm_id_filter)
     mode = 'a' if append else 'w'
     processed = 0
     imported = 0
@@ -2170,6 +2238,8 @@ def export_rows_duckdb_ndjson(
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con, duckdb_path.parent)
+        if use_osm_id_filter:
+            _load_osm_id_filter_into_duckdb(con, osm_id_filter_file)
         cursor = con.execute(select_sql)
         with out_path.open(mode, encoding='utf-8') as out:
             while True:
@@ -2247,10 +2317,12 @@ def export_rows_duckdb_dual_ndjson(
     db_geometry_mode: str = 'wkb_hex',
     append: bool = False,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
+    osm_id_filter_file: Path | None = None,
 ) -> Tuple[int, int, dict[str, float] | None]:
     db_geometry_mode_normalized = str(db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
     export_batch_size = resolve_export_batch_size()
     export_progress_interval_sec = resolve_export_progress_interval_sec()
+    use_osm_id_filter = osm_id_filter_file is not None
     mode = 'a' if append else 'w'
     processed = 0
     imported = 0
@@ -2261,7 +2333,9 @@ def export_rows_duckdb_dual_ndjson(
 
     with duckdb.connect(str(duckdb_path)) as con:
         _load_duckdb_extensions(con, duckdb_path.parent)
-        _materialize_export_tables(con, import_limit)
+        if use_osm_id_filter:
+            _load_osm_id_filter_into_duckdb(con, osm_id_filter_file)
+        _materialize_export_tables(con, import_limit, use_osm_id_filter=use_osm_id_filter)
         with db_out_path.open(mode, encoding='utf-8') as db_out, geojson_out_path.open(mode, encoding='utf-8') as geojson_out:
             dual_cursor = con.execute(_materialized_dual_export_select_sql(db_geometry_mode_normalized))
             while True:
@@ -2360,6 +2434,15 @@ def main() -> None:
     parser.add_argument('--out-summary-json', required=False)
     parser.add_argument('--db-geometry-mode', required=False, default='wkb_hex')
     parser.add_argument('--limit', type=int, default=12)
+    parser.add_argument(
+        '--osm-id-filter-file',
+        required=False,
+        help=(
+            'Path to a text file with OSM feature ids (one per line, e.g. '
+            '"way/12345", "relation/67890"). When provided, only features with '
+            'matching ids are exported — used by incremental region sync.'
+        ),
+    )
     args = parser.parse_args()
 
     if args.resolve_extract_query is not None:
@@ -2406,6 +2489,12 @@ def main() -> None:
     out_geojson_ndjson = str(args.out_geojson_ndjson or '').strip()
     out_summary_json = str(args.out_summary_json or '').strip()
     db_geometry_mode = str(args.db_geometry_mode or 'wkb_hex').strip().lower() or 'wkb_hex'
+    osm_id_filter_raw = str(args.osm_id_filter_file or '').strip()
+    osm_id_filter_file = (
+        Path(osm_id_filter_raw).expanduser().resolve() if osm_id_filter_raw else None
+    )
+    if osm_id_filter_file is not None and not osm_id_filter_file.exists():
+        raise FileNotFoundError(f'--osm-id-filter-file does not exist: {osm_id_filter_file}')
     if out_ndjson and (out_db_ndjson or out_geojson_ndjson):
         raise ValueError('Use either --out-ndjson or --out-db-ndjson/--out-geojson-ndjson')
     if out_db_ndjson and out_geojson_ndjson:
@@ -2476,6 +2565,7 @@ def main() -> None:
                     geometry_mode='geojson',
                     append=(idx > 1),
                     on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
+                    osm_id_filter_file=osm_id_filter_file,
                 )
             elif db_ndjson_path is not None or geojson_ndjson_path is not None:
                 if db_ndjson_path is not None and geojson_ndjson_path is not None:
@@ -2487,6 +2577,7 @@ def main() -> None:
                         db_geometry_mode=db_geometry_mode,
                         append=(idx > 1),
                         on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
+                        osm_id_filter_file=osm_id_filter_file,
                     )
                 elif db_ndjson_path is not None:
                     p, i, bounds = export_rows_duckdb_ndjson(
@@ -2496,6 +2587,7 @@ def main() -> None:
                         geometry_mode=db_geometry_mode,
                         append=(idx > 1),
                         on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
+                        osm_id_filter_file=osm_id_filter_file,
                     )
                 else:
                     p, i, bounds = export_rows_duckdb_ndjson(
@@ -2505,6 +2597,7 @@ def main() -> None:
                         geometry_mode='geojson_feature',
                         append=(idx > 1),
                         on_progress=lambda stats, prefix=export_prefix: emit_export_progress(prefix, stats),
+                        osm_id_filter_file=osm_id_filter_file,
                     )
             else:
                 p, i = import_rows_direct_duckdb_sqlite(
@@ -2547,6 +2640,7 @@ def main() -> None:
                 geometry_mode='geojson',
                 append=False,
                 on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
+                osm_id_filter_file=osm_id_filter_file,
             )
         elif db_ndjson_path is not None or geojson_ndjson_path is not None:
             if db_ndjson_path is not None and geojson_ndjson_path is not None:
@@ -2558,6 +2652,7 @@ def main() -> None:
                     db_geometry_mode=db_geometry_mode,
                     append=False,
                     on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
+                    osm_id_filter_file=osm_id_filter_file,
                 )
             elif db_ndjson_path is not None:
                 processed, imported, export_bounds = export_rows_duckdb_ndjson(
@@ -2567,6 +2662,7 @@ def main() -> None:
                     geometry_mode=db_geometry_mode,
                     append=False,
                     on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
+                    osm_id_filter_file=osm_id_filter_file,
                 )
             else:
                 processed, imported, export_bounds = export_rows_duckdb_ndjson(
@@ -2576,6 +2672,7 @@ def main() -> None:
                     geometry_mode='geojson_feature',
                     append=False,
                     on_progress=lambda stats, prefix=local_pbf_label: emit_export_progress(prefix, stats),
+                    osm_id_filter_file=osm_id_filter_file,
                 )
         else:
             processed, imported = import_rows_direct_duckdb_sqlite(
