@@ -47,7 +47,11 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
 
   function isRunSupersededByRegionSuccess(run, region) {
     if (!run || !region) return false;
-    if (String(run.triggerReason || '').trim().toLowerCase() !== 'startup') {
+    if (
+      String(run.triggerReason || '')
+        .trim()
+        .toLowerCase() !== 'startup'
+    ) {
       return false;
     }
     if (
@@ -61,7 +65,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     }
     const regionSuccessfulAt = parseTimestampMs(region.lastSuccessfulSyncAt);
     const runReferenceAt = parseTimestampMs(getRunSupersessionReferenceIso(run));
-    return Number.isFinite(regionSuccessfulAt) && Number.isFinite(runReferenceAt) && regionSuccessfulAt >= runReferenceAt;
+    return (
+      Number.isFinite(regionSuccessfulAt) && Number.isFinite(runReferenceAt) && regionSuccessfulAt >= runReferenceAt
+    );
   }
 
   async function abandonSupersededStartupRuns(regionId, successfulRunId, successfulAt) {
@@ -85,11 +91,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       if (!run) continue;
       const runReferenceIso = getRunSupersessionReferenceIso(run);
       const runReferenceTs = parseTimestampMs(runReferenceIso);
-      if (
-        Number.isFinite(successfulAtTs) &&
-        Number.isFinite(runReferenceTs) &&
-        runReferenceTs > successfulAtTs
-      ) {
+      if (Number.isFinite(successfulAtTs) && Number.isFinite(runReferenceTs) && runReferenceTs > successfulAtTs) {
         continue;
       }
       await markRunFailed(run.id, `Superseded by successful sync run #${successfulRunId}`, {
@@ -287,7 +289,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     return getRunById(run.id);
   }
 
-  async function updateRunStage(runId, stage, progress = null, detail = null) {
+  async function updateRunStage(runId, stage, progress = null, detail = null, subregionInfo = null) {
     await ensureBootstrapped();
     const numericRunId = Number(runId);
     if (!Number.isInteger(numericRunId) || numericRunId <= 0) {
@@ -301,6 +303,21 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       : null;
     const normalizedDetail = normalizeNullableText(detail, 200);
     const updatedAt = toIsoOrNull(now());
+
+    const subIndex =
+      subregionInfo && Number.isFinite(Number(subregionInfo.subregionIndex))
+        ? Math.trunc(Number(subregionInfo.subregionIndex))
+        : null;
+    const subTotal =
+      subregionInfo && Number.isFinite(Number(subregionInfo.subregionTotal))
+        ? Math.trunc(Number(subregionInfo.subregionTotal))
+        : null;
+    const subId =
+      subregionInfo && Number.isFinite(Number(subregionInfo.subregionId))
+        ? Math.trunc(Number(subregionInfo.subregionId))
+        : null;
+    const subName = subregionInfo ? normalizeNullableText(subregionInfo.subregionName, 200) : null;
+
     await db
       .prepare(
         `
@@ -310,11 +327,25 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         stage_progress = ?,
         stage_detail = ?,
         stage_updated_at = ?,
+        subregion_index = COALESCE(?, subregion_index),
+        subregion_total = COALESCE(?, subregion_total),
+        current_subregion_id = COALESCE(?, current_subregion_id),
+        current_subregion_name = COALESCE(?, current_subregion_name),
         updated_at = datetime('now')
       WHERE id = ? AND status = 'running'
     `
       )
-      .run(normalizedStage, safeProgress, normalizedDetail, updatedAt, numericRunId);
+      .run(
+        normalizedStage,
+        safeProgress,
+        normalizedDetail,
+        updatedAt,
+        subIndex,
+        subTotal,
+        subId,
+        subName,
+        numericRunId
+      );
     return getRunById(numericRunId);
   }
 

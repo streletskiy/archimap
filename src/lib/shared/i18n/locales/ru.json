@@ -789,6 +789,9 @@
       "title": "Данные",
       "subtitle": "Добавляйте регионы синхронизации с карты, следите за PMTiles и историей запусков.",
       "newRegion": "Новый регион",
+      "addCountry": "Добавить страну",
+      "selectCountry": "Выберите страну",
+      "creatingCountry": "Создание агрегированного региона страны...",
       "confirmDelete": "Удалить регион \"{label}\"? Это удалит его PMTiles, membership и orphan-данные, которые больше не принадлежат другим регионам.",
       "summary": {
         "sourceLabel": "Источник",
@@ -848,6 +851,7 @@
         "disabled": "выключен",
         "manualOnly": "только вручную",
         "everyHours": "каждые {hours} ч",
+        "subregions": "Субрегионы",
         "pageInfo": "Страница {page} из {pages}"
       },
       "form": {
@@ -966,6 +970,8 @@
         "regionSaved": "Регион сохранён",
         "regionSavedQueued": "Регион сохранён и поставлен в очередь начальной синхронизации",
         "regionSavedQueueFailed": "Регион сохранён, но поставить начальную синхронизацию в очередь не удалось",
+        "countryCatalogLoadFailed": "Не удалось загрузить список стран",
+        "countryAggregateFailed": "Не удалось создать агрегированный регион страны",
         "saveRegionFailed": "Не удалось сохранить регион",
         "deletingRegion": "Удаляем регион...",
         "regionDeleted": "Регион удалён",

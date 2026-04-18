@@ -407,6 +407,10 @@ export function createAdminDataController() {
   const regionRunsTotal: Writable<number> = writable(0);
   const regionRunsLimit: Writable<number> = writable(REGION_RUNS_PAGE_SIZE);
   const regionEditorOpen: Writable<boolean> = writable(false);
+  const countryCatalog: Writable<LooseRecord[]> = writable([]);
+  const countryCatalogLoading: Writable<boolean> = writable(false);
+  const countryCatalogLoaded: Writable<boolean> = writable(false);
+  const countryAggregateBusy: Writable<boolean> = writable(false);
   const initialized: Writable<boolean> = writable(false);
   let pendingInitialRegionEditorOpen = persistedRegionEditorState.open && persistedRegionEditorState.regionId != null;
   let nextOptimisticRegionId = -1;
@@ -1272,6 +1276,61 @@ export function createAdminDataController() {
     return filterPresetController.deleteFilterPreset(id);
   }
 
+  async function loadCountryCatalog({ force = false } = {}) {
+    if (!force && get(countryCatalogLoaded)) return get(countryCatalog);
+    if (get(countryCatalogLoading)) return get(countryCatalog);
+    countryCatalogLoading.set(true);
+    try {
+      const data = await apiJson('/api/admin/app-settings/data/regions/country-catalog');
+      const items = Array.isArray(data?.items) ? (data.items as LooseRecord[]) : [];
+      countryCatalog.set(items);
+      countryCatalogLoaded.set(true);
+      return items;
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.countryCatalogLoadFailed')));
+      return [];
+    } finally {
+      countryCatalogLoading.set(false);
+    }
+  }
+
+  async function addCountryAggregate(countryId: string) {
+    const trimmed = String(countryId || '')
+      .trim()
+      .toLowerCase();
+    if (!trimmed) return null;
+    if (get(countryAggregateBusy)) return null;
+    countryAggregateBusy.set(true);
+    try {
+      const data = await apiJson('/api/admin/app-settings/data/regions/country-aggregate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ countryId: trimmed })
+      });
+      const saved = data?.item || null;
+      await loadDataSettings({ preserveSelection: false });
+      const numericRegionId = Number(saved?.id || 0);
+      if (Number.isInteger(numericRegionId) && numericRegionId > 0) {
+        try {
+          await apiJson(`/api/admin/app-settings/data/regions/${numericRegionId}/sync-now`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          dataStatus.set(dataT('status.regionSavedQueued'));
+        } catch (error) {
+          dataStatus.set(msg(error, dataT('status.regionSavedQueueFailed')));
+        }
+      }
+      return saved;
+    } catch (error) {
+      dataStatus.set(msg(error, dataT('status.countryAggregateFailed')));
+      return null;
+    } finally {
+      countryAggregateBusy.set(false);
+    }
+  }
+
   function startNewRegionDraft() {
     if (!ensureFilterTagChangesDiscarded()) return false;
 
@@ -1802,6 +1861,12 @@ export function createAdminDataController() {
     setFilterPresetDraftLayers,
     startNewFilterPresetDraft,
     startNewRegionDraft,
+    loadCountryCatalog,
+    addCountryAggregate,
+    countryCatalog,
+    countryCatalogLoading,
+    countryCatalogLoaded,
+    countryAggregateBusy,
     closeRegionEditor,
     syncRegionNow,
     cancelRegionSync,

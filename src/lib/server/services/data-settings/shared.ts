@@ -26,7 +26,12 @@ const RUN_SELECT_FIELDS = `
   stage_updated_at,
   cancel_requested,
   created_at,
-  updated_at
+  updated_at,
+  parent_run_id,
+  subregion_index,
+  subregion_total,
+  current_subregion_id,
+  current_subregion_name
 `;
 
 function wrapRawSqliteDb(rawDb) {
@@ -310,7 +315,14 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       dbBytesApproximate: Boolean(row.db_bytes_approximate),
       updatedBy: row.updated_by ? String(row.updated_by) : null,
       createdAt: row.created_at ? String(row.created_at) : null,
-      updatedAt: row.updated_at ? String(row.updated_at) : null
+      updatedAt: row.updated_at ? String(row.updated_at) : null,
+      regionKind: (['standalone', 'country_aggregate', 'subregion'].includes(String(row.region_kind || '').trim())
+        ? String(row.region_kind).trim()
+        : 'standalone') as Region['regionKind'],
+      parentRegionId: row.parent_region_id == null ? null : Number(row.parent_region_id) || null,
+      orderInParent: row.order_in_parent == null ? null : Number(row.order_in_parent),
+      visibleInAdmin: row.visible_in_admin == null ? true : Number(row.visible_in_admin) > 0,
+      countryCode: row.country_code ? String(row.country_code) : null
     };
   }
 
@@ -339,7 +351,12 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       stageUpdatedAt: row.stage_updated_at ? String(row.stage_updated_at) : null,
       cancelRequested: Boolean(row.cancel_requested),
       createdAt: row.created_at ? String(row.created_at) : null,
-      updatedAt: row.updated_at ? String(row.updated_at) : null
+      updatedAt: row.updated_at ? String(row.updated_at) : null,
+      parentRunId: row.parent_run_id == null ? null : Number(row.parent_run_id) || null,
+      subregionIndex: row.subregion_index == null ? null : Number(row.subregion_index),
+      subregionTotal: row.subregion_total == null ? null : Number(row.subregion_total),
+      currentSubregionId: row.current_subregion_id == null ? null : Number(row.current_subregion_id) || null,
+      currentSubregionName: row.current_subregion_name ? String(row.current_subregion_name) : null
     };
   }
 
@@ -405,7 +422,12 @@ function createDataSettingsContext(options: LooseRecord = {}) {
           last_feature_count,
           updated_by,
           created_at,
-          updated_at
+          updated_at,
+          parent_region_id,
+          region_kind,
+          order_in_parent,
+          visible_in_admin,
+          country_code
         FROM data_sync_regions
         ORDER BY lower(name), id
       `
@@ -455,7 +477,12 @@ function createDataSettingsContext(options: LooseRecord = {}) {
         last_feature_count,
         updated_by,
         created_at,
-        updated_at
+        updated_at,
+        parent_region_id,
+        region_kind,
+        order_in_parent,
+        visible_in_admin,
+        country_code
       FROM data_sync_regions
       WHERE id = ?
       LIMIT 1

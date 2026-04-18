@@ -187,6 +187,11 @@
               {$t('admin.data.list.dbSize')}: {region.dbBytesApproximate ? '~' : ''}{controller.formatStorageBytes(region.dbBytes)}
             </span>
             <span class="rounded-full ui-surface-soft px-2 py-1">{controller.getRegionEnabledLabel(region.enabled)}</span>
+            {#if region.regionKind === 'country_aggregate' && Number(region.subregionCount || 0) > 0}
+              <span class="rounded-full ui-surface-soft px-2 py-1">
+                {$t('admin.data.list.subregions')}: {Number(region.subregionCompletedCount || 0)} / {Number(region.subregionCount || 0)}
+              </span>
+            {/if}
           </div>
 
           {#if showSyncError}

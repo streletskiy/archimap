@@ -366,11 +366,14 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     currentSyncChild = child;
     currentSyncCancelRequested = false;
 
-    function persistStage(stage, progress, detail, { force = false } = {}) {
+    function persistStage(stage, progress, detail, subregionInfo: LooseRecord | null = null, { force = false } = {}) {
       if (typeof dataSettingsService.updateRunStage !== 'function') {
         return;
       }
-      const signature = `${stage}|${progress ?? ''}|${detail ?? ''}`;
+      const subregionSignature = subregionInfo
+        ? `${subregionInfo.subregionIndex ?? ''}|${subregionInfo.subregionTotal ?? ''}|${subregionInfo.subregionId ?? ''}|${subregionInfo.subregionName ?? ''}`
+        : '';
+      const signature = `${stage}|${progress ?? ''}|${detail ?? ''}|${subregionSignature}`;
       if (!force && signature === lastStageSignature) {
         return;
       }
@@ -378,8 +381,6 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       const isTerminalStage = stage === 'done' || stage === 'cancelling' || stage === 'cancelled';
       const previousStage = lastStageSignature ? String(lastStageSignature).split('|')[0] : '';
       const isStageTransition = previousStage !== stage;
-      // Throttle only repeat progress/detail updates within the same stage;
-      // always let a transition to a new stage through so the UI stays snappy.
       if (
         !force &&
         !isTerminalStage &&
@@ -391,7 +392,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       lastStagePersistTs = nowMs;
       lastStageSignature = signature;
       pendingStagePromise = pendingStagePromise
-        .then(() => dataSettingsService.updateRunStage(run.id, stage, progress, detail))
+        .then(() => dataSettingsService.updateRunStage(run.id, stage, progress, detail, subregionInfo))
         .catch((error) => {
           log.error(`[region-sync:${region.id}] failed to persist stage: ${String(error?.message || error)}`);
         });
@@ -419,7 +420,24 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
             if (!stageName) continue;
             const progressValue = Number.isFinite(Number(payload?.progress)) ? Number(payload.progress) : null;
             const detailText = typeof payload?.detail === 'string' ? payload.detail : null;
-            persistStage(stageName, progressValue, detailText);
+            const subregionInfo =
+              payload &&
+              (payload.subregionIndex != null || payload.subregionTotal != null || payload.subregionId != null)
+                ? {
+                    subregionIndex: Number.isFinite(Number(payload.subregionIndex))
+                      ? Number(payload.subregionIndex)
+                      : null,
+                    subregionTotal: Number.isFinite(Number(payload.subregionTotal))
+                      ? Number(payload.subregionTotal)
+                      : null,
+                    subregionId: Number.isFinite(Number(payload.subregionId)) ? Number(payload.subregionId) : null,
+                    subregionName:
+                      typeof payload.subregionName === 'string' && payload.subregionName.trim()
+                        ? payload.subregionName.trim()
+                        : null
+                  }
+                : null;
+            persistStage(stageName, progressValue, detailText, subregionInfo);
           } catch {
             // ignore malformed stage line
           }

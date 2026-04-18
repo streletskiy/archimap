@@ -326,13 +326,25 @@ function normalizeRegionRow(row) {
             south: Number(row.bounds_south),
             east: Number(row.bounds_east),
             north: Number(row.bounds_north)
-          }
+          },
+    regionKind: (() => {
+      const raw = String(row.region_kind || '')
+        .trim()
+        .toLowerCase();
+      return ['standalone', 'country_aggregate', 'subregion'].includes(raw) ? raw : 'standalone';
+    })(),
+    parentRegionId: row.parent_region_id == null ? null : Number(row.parent_region_id) || null,
+    orderInParent: row.order_in_parent == null ? null : Number(row.order_in_parent)
   };
 }
 
 function assertRegionSupportsManagedSync(region) {
   if (!region) {
     throw new Error('Region not found');
+  }
+  if (region.regionKind === 'country_aggregate') {
+    // Aggregate regions dispatch to their subregions; no own extract download.
+    return;
   }
   if (region.sourceType !== 'extract') {
     throw new Error('Only sourceType=extract is supported by managed region sync');
@@ -372,7 +384,10 @@ function getRegionFromSqlite({ archimapDbPath, osmDbPath }, regionId) {
         bounds_west,
         bounds_south,
         bounds_east,
-        bounds_north
+        bounds_north,
+        region_kind,
+        parent_region_id,
+        order_in_parent
       FROM data_sync_regions
       WHERE id = ?
       LIMIT 1
@@ -422,6 +437,123 @@ async function getRegionFromPostgres({ databaseUrl }, regionId) {
     return normalizeRegionRow(result.rows[0]);
   } finally {
     await client.end();
+  }
+}
+
+async function loadSubregions(options, parentRegionId) {
+  const parentId = Number(parentRegionId);
+  if (!Number.isInteger(parentId) || parentId <= 0) return [];
+
+  const sql = `
+    SELECT
+      id, slug, name, source_type, source_value, extract_source, extract_id,
+      extract_label, extract_resolution_status, extract_resolution_error,
+      enabled, auto_sync_enabled, auto_sync_on_start, auto_sync_interval_hours,
+      pmtiles_min_zoom, pmtiles_max_zoom, source_layer,
+      bounds_west, bounds_south, bounds_east, bounds_north,
+      region_kind, parent_region_id, order_in_parent
+    FROM data_sync_regions
+    WHERE parent_region_id = ?
+    ORDER BY COALESCE(order_in_parent, 0), id
+  `;
+  const sqlPg = sql.replace(/\?/g, '$1').replace('data_sync_regions', 'public.data_sync_regions');
+
+  if (options.dbProvider === 'postgres') {
+    const client = new Client({ connectionString: options.databaseUrl });
+    await client.connect();
+    try {
+      const result = await client.query(sqlPg, [parentId]);
+      return (result.rows || []).map(normalizeRegionRow).filter(Boolean);
+    } finally {
+      await client.end();
+    }
+  }
+
+  const db = openSqliteRegionDb(options.archimapDbPath, options.osmDbPath);
+  try {
+    const rows = db.prepare(sql).all(parentId);
+    return (rows || []).map(normalizeRegionRow).filter(Boolean);
+  } finally {
+    db.close();
+  }
+}
+
+async function updateRegionPostSync(options, regionId, summary) {
+  const id = Number(regionId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const nowIso = new Date().toISOString();
+  const bounds = summary?.bounds || null;
+  const featureCount = Number.isFinite(Number(summary?.activeFeatureCount))
+    ? Number(summary.activeFeatureCount)
+    : Number.isFinite(Number(summary?.importedFeatureCount))
+      ? Number(summary.importedFeatureCount)
+      : null;
+  if (options.dbProvider === 'postgres') {
+    const client = new Client({ connectionString: options.databaseUrl });
+    await client.connect();
+    try {
+      await client.query(
+        `
+        UPDATE public.data_sync_regions
+        SET
+          last_sync_status = 'idle',
+          last_sync_finished_at = $2,
+          last_sync_error = NULL,
+          last_successful_sync_at = $2,
+          bounds_west = $3,
+          bounds_south = $4,
+          bounds_east = $5,
+          bounds_north = $6,
+          last_feature_count = $7,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+        [
+          id,
+          nowIso,
+          bounds?.west ?? null,
+          bounds?.south ?? null,
+          bounds?.east ?? null,
+          bounds?.north ?? null,
+          featureCount
+        ]
+      );
+    } finally {
+      await client.end();
+    }
+    return;
+  }
+
+  const db = openSqliteRegionDb(options.archimapDbPath, options.osmDbPath);
+  try {
+    db.prepare(
+      `
+      UPDATE data_sync_regions
+      SET
+        last_sync_status = 'idle',
+        last_sync_finished_at = ?,
+        last_sync_error = NULL,
+        last_successful_sync_at = ?,
+        bounds_west = ?,
+        bounds_south = ?,
+        bounds_east = ?,
+        bounds_north = ?,
+        last_feature_count = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `
+    ).run(
+      nowIso,
+      nowIso,
+      bounds?.west ?? null,
+      bounds?.south ?? null,
+      bounds?.east ?? null,
+      bounds?.north ?? null,
+      featureCount,
+      id
+    );
+  } finally {
+    db.close();
   }
 }
 
@@ -714,5 +846,7 @@ module.exports = {
   exportRegionRenderFeaturesToGeojsonNdjson,
   exportRegionMembersToNdjson,
   loadRegion,
+  loadSubregions,
+  updateRegionPostSync,
   openSqliteRegionDb
 };

@@ -62,6 +62,13 @@ function resolveExistingRegionPmtilesPath(dataDir, region) {
 }
 
 function createDataSettingsService(options: LooseRecord = {}) {
+  const { createCountrySubregionsCatalog } = require('./data-settings/country-subregions');
+  const countrySubregionsCatalog =
+    options.countrySubregionsCatalog ||
+    createCountrySubregionsCatalog({
+      dataDir: options.dataDir,
+      fetchImpl: options.fetchImpl
+    });
   const context = createDataSettingsContext({
     ...options,
     extractResolver:
@@ -70,6 +77,7 @@ function createDataSettingsService(options: LooseRecord = {}) {
         importerPath: path.resolve(__dirname, '../../../../scripts/sync-osm-buildings.py')
       })
   });
+  context.countrySubregionsCatalog = countrySubregionsCatalog;
   const { db, dataDir, readAppDataSettingsRow, normalizeNullableText, computeRegionDbBytes } = context;
 
   const bootstrapDomain = createBootstrapDomain(context);
@@ -288,9 +296,13 @@ function createDataSettingsService(options: LooseRecord = {}) {
     getBootstrapState: bootstrapDomain.getBootstrapState,
     bootstrapFromEnvIfNeeded: bootstrapDomain.bootstrapFromEnvIfNeeded,
     listRegions: regionsDomain.listRegions,
+    listRegionTree: regionsDomain.listRegionTree,
+    listSubregions: regionsDomain.listSubregions,
     getRegionById: regionsDomain.getRegionById,
     searchExtractCandidates: extractsDomain.searchExtractCandidates,
     saveRegion: regionsDomain.saveRegion,
+    createCountryAggregate: regionsDomain.createCountryAggregate,
+    listCountryCatalog: async () => countrySubregionsCatalog.getCountries(),
     deleteRegion: regionsDomain.deleteRegion,
     getDataSettingsForAdmin,
     getRegionsUpstreamState,

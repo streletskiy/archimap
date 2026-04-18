@@ -106,6 +106,8 @@
                 <UiTableBody>
                   {#each regionRuns as run (`region-run-${run.id}`)}
                     {@const runStatusMeta = controller.getRegionStatusMeta(run.status, run)}
+                    {@const subTotal = Number(run.subregionTotal || 0)}
+                    {@const subIndex = Number(run.subregionIndex || 0)}
                     <UiTableRow>
                       <UiTableCell className="font-medium ui-text-strong">#{run.id}</UiTableCell>
                       <UiTableCell className="ui-text-muted">{controller.formatRunTriggerReason(run.triggerReason)}</UiTableCell>
@@ -114,6 +116,11 @@
                           class="badge-pill data-status-pill rounded-full px-2.5 py-1 text-xs font-semibold"
                           data-tone={runStatusMeta.tone}>{runStatusMeta.text}</span
                         >
+                        {#if subTotal > 0}
+                          <span class="ml-2 text-xs ui-text-subtle">
+                            {subIndex} / {subTotal}{run.currentSubregionName ? ` · ${run.currentSubregionName}` : ''}
+                          </span>
+                        {/if}
                       </UiTableCell>
                       <UiTableCell className="ui-text-muted">{formatUiDate(run.requestedAt || run.startedAt) || '---'}</UiTableCell>
                       <UiTableCell className="ui-text-muted">{formatUiDate(run.finishedAt) || '---'}</UiTableCell>

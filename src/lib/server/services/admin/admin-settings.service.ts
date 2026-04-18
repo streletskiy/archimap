@@ -328,6 +328,48 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     });
   }
 
+  async function listRegionTree(includeDisabledRaw) {
+    const includeDisabled =
+      String(includeDisabledRaw ?? 'true')
+        .trim()
+        .toLowerCase() !== 'false';
+    return ensureDataSettingsService().listRegionTree({
+      includeDisabled,
+      includeSubregions: true
+    });
+  }
+
+  async function listCountryCatalog() {
+    try {
+      return await ensureDataSettingsService().listCountryCatalog();
+    } catch (error) {
+      throw createAdminError(502, String(error?.message || error || 'Failed to load country catalog'));
+    }
+  }
+
+  async function createCountryAggregate(body, actor) {
+    const service = ensureDataSettingsService();
+    const countryId = String(body?.countryId || '').trim();
+    if (!countryId) {
+      throw createAdminError(400, 'countryId is required');
+    }
+    try {
+      const saved = await service.createCountryAggregate({ countryId, actor });
+      if (typeof onDataRegionsSaved === 'function') {
+        await Promise.resolve(
+          onDataRegionsSaved({
+            action: 'save',
+            saved
+          })
+        );
+      }
+      return saved;
+    } catch (error) {
+      if (error?.status) throw error;
+      throw createAdminError(400, String(error?.message || error || 'Failed to create country aggregate'));
+    }
+  }
+
   async function getRegionsUpstreamStatus(regionIdsRaw, forceRefreshRaw = false) {
     const regionIds = normalizeRegionIdList(regionIdsRaw);
     if (regionIds.length === 0) {
@@ -482,6 +524,9 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     saveFilterPreset,
     deleteFilterPreset,
     listRegions,
+    listRegionTree,
+    listCountryCatalog,
+    createCountryAggregate,
     getRegionsUpstreamStatus,
     resolveExtractCandidates,
     getRegionRuns,

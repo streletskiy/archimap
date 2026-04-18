@@ -9,7 +9,13 @@ const SHOULD_EMIT_STAGE_JSON =
     .trim()
     .toLowerCase() === 'true';
 
-function emitStageJson(stage, progress = null, detail = null) {
+let aggregateStageContext: LooseRecord | null = null;
+
+function setAggregateStageContext(context: LooseRecord | null) {
+  aggregateStageContext = context;
+}
+
+function emitStageJson(stage, progress = null, detail = null, extras: LooseRecord | null = null) {
   if (!SHOULD_EMIT_STAGE_JSON) return;
   const payload: LooseRecord = { stage: String(stage || '').trim() };
   if (!payload.stage) return;
@@ -18,6 +24,18 @@ function emitStageJson(stage, progress = null, detail = null) {
   }
   if (detail != null && String(detail).trim()) {
     payload.detail = String(detail).trim().slice(0, 200);
+  }
+  if (aggregateStageContext) {
+    payload.subregionIndex = aggregateStageContext.subregionIndex ?? null;
+    payload.subregionTotal = aggregateStageContext.subregionTotal ?? null;
+    payload.subregionId = aggregateStageContext.subregionId ?? null;
+    payload.subregionName = aggregateStageContext.subregionName ?? null;
+  }
+  if (extras && typeof extras === 'object') {
+    for (const [key, value] of Object.entries(extras)) {
+      if (value == null) continue;
+      payload[key] = value;
+    }
   }
   try {
     process.stdout.write(`SYNC_STAGE_JSON=${JSON.stringify(payload)}\n`);
@@ -51,6 +69,8 @@ const {
   assertRegionSupportsManagedSync,
   exportRegionRenderFeaturesToGeojsonNdjson,
   loadRegion,
+  loadSubregions,
+  updateRegionPostSync,
   publishPmtilesArchive
 } = require('./region-sync/db-ingester');
 const { buildPmtilesFromGeojson, summarizeImportRows } = require('./region-sync/pmtiles-builder');
@@ -709,6 +729,98 @@ async function runRegionSync(region, runtimeOptions) {
   }
 }
 
+async function runCountryAggregateSync(region, runtimeOptions) {
+  const subregions = await loadSubregions(runtimeOptions, region.id);
+  if (!Array.isArray(subregions) || subregions.length === 0) {
+    throw new Error(`Country aggregate region ${region.id} has no subregions to sync`);
+  }
+
+  const enabledSubregions = subregions.filter((sub) => sub && sub.enabled);
+  if (enabledSubregions.length === 0) {
+    throw new Error(`Country aggregate region ${region.id} has no enabled subregions`);
+  }
+
+  const total = enabledSubregions.length;
+  let aggregateFeatureCount = 0;
+  let aggregatePmtilesBytes = 0;
+  let aggregateBounds: LooseRecord | null = null;
+  const subregionResults: LooseRecord[] = [];
+  const failures: LooseRecord[] = [];
+
+  emitStageJson('aggregate_start', 0, `subregions=${total}`, { subregionTotal: total });
+
+  for (let index = 0; index < enabledSubregions.length; index += 1) {
+    const sub = enabledSubregions[index];
+    const oneIndexed = index + 1;
+    setAggregateStageContext({
+      subregionIndex: oneIndexed,
+      subregionTotal: total,
+      subregionId: sub.id,
+      subregionName: sub.name
+    });
+    try {
+      assertRegionSupportsManagedSync(sub);
+      emitStageJson('subregion_start', 0, `${oneIndexed}/${total} ${sub.name}`);
+      const summary = await runRegionSync(sub, runtimeOptions);
+      await updateRegionPostSync(runtimeOptions, sub.id, summary);
+      const fc = Number(summary?.activeFeatureCount ?? summary?.importedFeatureCount ?? 0) || 0;
+      const pmbytes = Number(summary?.pmtilesBytes ?? 0) || 0;
+      aggregateFeatureCount += fc;
+      aggregatePmtilesBytes += pmbytes;
+      if (summary?.bounds) {
+        if (!aggregateBounds) {
+          aggregateBounds = { ...summary.bounds };
+        } else {
+          aggregateBounds.west = Math.min(aggregateBounds.west, summary.bounds.west);
+          aggregateBounds.south = Math.min(aggregateBounds.south, summary.bounds.south);
+          aggregateBounds.east = Math.max(aggregateBounds.east, summary.bounds.east);
+          aggregateBounds.north = Math.max(aggregateBounds.north, summary.bounds.north);
+        }
+      }
+      subregionResults.push({
+        regionId: sub.id,
+        slug: sub.slug,
+        name: sub.name,
+        featureCount: fc,
+        pmtilesBytes: pmbytes,
+        status: 'success'
+      });
+      const progress = Math.round((oneIndexed / total) * 100);
+      emitStageJson('subregion_done', progress, `${oneIndexed}/${total} ${sub.name} OK`);
+    } catch (error) {
+      const message = String(error?.message || error || 'Unknown subregion sync error');
+      console.error(`[region-sync] subregion ${sub?.slug || sub?.id} failed: ${message}`);
+      failures.push({ regionId: sub.id, slug: sub.slug, name: sub.name, error: message });
+      subregionResults.push({
+        regionId: sub.id,
+        slug: sub.slug,
+        name: sub.name,
+        status: 'failed',
+        error: message
+      });
+      emitStageJson('subregion_failed', null, `${oneIndexed}/${total} ${sub.name}: ${message}`);
+    }
+  }
+  setAggregateStageContext(null);
+
+  if (failures.length > 0 && subregionResults.filter((r) => r.status === 'success').length === 0) {
+    throw new Error(`All ${total} subregions failed; first error: ${failures[0]?.error}`);
+  }
+
+  return {
+    importedFeatureCount: aggregateFeatureCount,
+    activeFeatureCount: aggregateFeatureCount,
+    orphanDeletedCount: 0,
+    pmtilesBytes: aggregatePmtilesBytes,
+    pmtilesPath: null,
+    bounds: aggregateBounds,
+    subregionResults,
+    subregionFailures: failures,
+    subregionTotal: total,
+    subregionSucceeded: total - failures.length
+  };
+}
+
 async function main() {
   const stopParentWatchdog = startParentWatchdog();
   try {
@@ -721,9 +833,17 @@ async function main() {
     const region = await loadRegion(runtimeOptions, args.regionId);
     assertRegionSupportsManagedSync(region);
 
-    const summary = args.pmtilesOnly
-      ? await buildRegionPmtilesOnly(region, runtimeOptions)
-      : await runRegionSync(region, runtimeOptions);
+    let summary;
+    if (region.regionKind === 'country_aggregate') {
+      if (args.pmtilesOnly) {
+        throw new Error('--pmtiles-only is not supported for country_aggregate regions');
+      }
+      summary = await runCountryAggregateSync(region, runtimeOptions);
+    } else {
+      summary = args.pmtilesOnly
+        ? await buildRegionPmtilesOnly(region, runtimeOptions)
+        : await runRegionSync(region, runtimeOptions);
+    }
 
     console.log(
       `SYNC_RESULT_JSON=${JSON.stringify({

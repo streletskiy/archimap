@@ -789,6 +789,9 @@
       "title": "Data",
       "subtitle": "Add sync regions from the map, track PMTiles, and inspect run history.",
       "newRegion": "New region",
+      "addCountry": "Add country",
+      "selectCountry": "Select a country",
+      "creatingCountry": "Creating country aggregate...",
       "confirmDelete": "Delete region \"{label}\"? This will remove its PMTiles, membership, and orphan data that no longer belongs to other regions.",
       "summary": {
         "sourceLabel": "Source",
@@ -848,6 +851,7 @@
         "disabled": "disabled",
         "manualOnly": "manual only",
         "everyHours": "every {hours}h",
+        "subregions": "Subregions",
         "pageInfo": "Page {page} of {pages}"
       },
       "form": {
@@ -966,6 +970,8 @@
         "regionSaved": "Region saved",
         "regionSavedQueued": "Region saved and initial sync queued",
         "regionSavedQueueFailed": "Region saved, but the initial sync could not be queued",
+        "countryCatalogLoadFailed": "Failed to load country catalog",
+        "countryAggregateFailed": "Failed to create country aggregate",
         "saveRegionFailed": "Failed to save region",
         "deletingRegion": "Deleting region...",
         "regionDeleted": "Region deleted",

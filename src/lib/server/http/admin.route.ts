@@ -293,6 +293,64 @@ function registerAdminRoutes(deps: LooseRecord) {
   );
 
   app.get(
+    '/api/admin/app-settings/data/regions/tree',
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return sendPrivateJson(req, res, {
+          ok: true,
+          items: await adminSettingsService.listRegionTree(req.query?.includeDisabled)
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
+  app.get(
+    '/api/admin/app-settings/data/regions/country-catalog',
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return sendPrivateJson(req, res, {
+          ok: true,
+          items: await adminSettingsService.listCountryCatalog()
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
+  app.post(
+    '/api/admin/app-settings/data/regions/country-aggregate',
+    requireCsrfSession,
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return res.json({
+          ok: true,
+          item: await adminSettingsService.createCountryAggregate(req.body, getSessionEditActorKey(req) || 'admin')
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
+  app.get(
     '/api/admin/app-settings/data/regions/upstream-status',
     requireAuth,
     requireAdmin,

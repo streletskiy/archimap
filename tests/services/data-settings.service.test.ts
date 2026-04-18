@@ -11,6 +11,7 @@ const filterPresetsMigration = require('../../db/migrations/011_filter_presets.m
 const filterPresetNameI18nMigration = require('../../db/migrations/012_filter_preset_name_i18n.migration.ts');
 const regionSourceDataUpdatedAtMigration = require('../../db/migrations/023_region_source_data_updated_at.migration.ts');
 const syncRunStageMigration = require('../../db/migrations/024_sync_run_stage.migration.ts');
+const regionHierarchyMigration = require('../../db/migrations/026_region_hierarchy.migration.ts');
 const {
   createDataSettingsService,
   buildRegionPmtilesFileName,
@@ -30,6 +31,7 @@ function createTestDb() {
   filterPresetNameI18nMigration.up(db);
   regionSourceDataUpdatedAtMigration.up(db);
   syncRunStageMigration.up(db);
+  regionHierarchyMigration.up(db);
   return db;
 }
 

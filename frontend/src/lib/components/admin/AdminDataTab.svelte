@@ -27,7 +27,29 @@
   const regionRunsPageCount = controller.regionRunsPageCount;
   const regionRunsTotal = controller.regionRunsTotal;
   const regionEditorOpen = controller.regionEditorOpen;
+  const countryCatalog = controller.countryCatalog;
+  const countryCatalogLoading = controller.countryCatalogLoading;
+  const countryAggregateBusy = controller.countryAggregateBusy;
   const initialized = controller.initialized;
+
+  let countryPickerOpen = false;
+  let selectedCountryId = '';
+
+  async function toggleCountryPicker() {
+    countryPickerOpen = !countryPickerOpen;
+    if (countryPickerOpen) {
+      await controller.loadCountryCatalog();
+    }
+  }
+
+  async function submitCountryAggregate() {
+    if (!selectedCountryId) return;
+    const saved = await controller.addCountryAggregate(selectedCountryId);
+    if (saved) {
+      countryPickerOpen = false;
+      selectedCountryId = '';
+    }
+  }
 
   let regions;
   let selectedRegion;
@@ -73,8 +95,46 @@
         >
           {$t('admin.data.newRegion')}
         </UiButton>
+        <UiButton
+          type="button"
+          variant="secondary"
+          size="xs"
+          onclick={toggleCountryPicker}
+          disabled={$regionSaving || $regionDeleting || $regionSyncBusy || $countryAggregateBusy}
+        >
+          {$t('admin.data.addCountry')}
+        </UiButton>
       </div>
     </div>
+
+    {#if countryPickerOpen}
+      <div class="flex flex-wrap items-center gap-2 rounded-xl border ui-border ui-surface-soft p-3">
+        <select
+          class="min-w-[14rem] flex-1 rounded-md border ui-border px-2 py-1 text-sm"
+          bind:value={selectedCountryId}
+          disabled={$countryCatalogLoading || $countryAggregateBusy}
+        >
+          <option value="">{$t('admin.data.selectCountry')}</option>
+          {#each $countryCatalog as country (country.countryId)}
+            <option value={country.countryId}>
+              {country.name}{country.subregions?.length ? ` (${country.subregions.length})` : ''}
+            </option>
+          {/each}
+        </select>
+        <UiButton
+          type="button"
+          variant="primary"
+          size="xs"
+          onclick={submitCountryAggregate}
+          disabled={!selectedCountryId || $countryAggregateBusy || $countryCatalogLoading}
+        >
+          {$countryAggregateBusy ? $t('admin.data.creatingCountry') : $t('admin.data.addCountry')}
+        </UiButton>
+        <UiButton type="button" variant="secondary" size="xs" onclick={() => (countryPickerOpen = false)}>
+          {$t('common.cancel')}
+        </UiButton>
+      </div>
+    {/if}
 
     <div class="grid gap-3">
       <article class="data-summary-card rounded-xl p-3 text-sm ui-text-body">

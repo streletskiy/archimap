@@ -67,7 +67,8 @@ function createRegionsDomain(context: LooseRecord = {}) {
     hasResolvedExtract,
     fallback,
     now,
-    validateSelectedExtract
+    validateSelectedExtract,
+    countrySubregionsCatalog
   } = context;
 
   async function getRegionById(regionId): Promise<Region | null> {
@@ -80,16 +81,40 @@ function createRegionsDomain(context: LooseRecord = {}) {
   }
 
   async function listRegions(
-    options: { includeDisabled?: boolean; includeStorageStats?: boolean } = {}
+    options: {
+      includeDisabled?: boolean;
+      includeStorageStats?: boolean;
+      includeHiddenSubregions?: boolean;
+    } = {}
   ): Promise<Region[]> {
     await ensureBootstrapped();
     const includeDisabled = options.includeDisabled !== false;
     const includeStorageStats = options.includeStorageStats === true;
+    const includeHiddenSubregions = options.includeHiddenSubregions === true;
     const rows = await listRegionRows();
-    const items = rows
-      .map(rowToRegion)
-      .filter((item): item is Region => Boolean(item))
-      .filter((item) => includeDisabled || item.enabled);
+    const all = rows.map(rowToRegion).filter((item): item is Region => Boolean(item));
+
+    const subregionStats = new Map<number, { count: number; done: number }>();
+    for (const region of all) {
+      if (region.parentRegionId == null) continue;
+      const stats = subregionStats.get(region.parentRegionId) || { count: 0, done: 0 };
+      stats.count += 1;
+      if (region.lastSuccessfulSyncAt) stats.done += 1;
+      subregionStats.set(region.parentRegionId, stats);
+    }
+
+    const items = all
+      .filter((item) => includeDisabled || item.enabled)
+      .filter((item) => includeHiddenSubregions || item.visibleInAdmin)
+      .map((item) => {
+        const stats = subregionStats.get(item.id);
+        if (!stats) return item;
+        return {
+          ...item,
+          subregionCount: stats.count,
+          subregionCompletedCount: stats.done
+        };
+      });
     return includeStorageStats ? await context.enrichRegionsWithStorageStats(items) : items;
   }
 
@@ -206,6 +231,30 @@ function createRegionsDomain(context: LooseRecord = {}) {
         22
       ),
       sourceLayer: normalizeSourceLayer(input.sourceLayer ?? previousRegion?.sourceLayer ?? fallback.sourceLayer),
+      regionKind: (() => {
+        const raw = String(input.regionKind ?? input.region_kind ?? previousRegion?.regionKind ?? 'standalone')
+          .trim()
+          .toLowerCase();
+        return ['standalone', 'country_aggregate', 'subregion'].includes(raw) ? raw : 'standalone';
+      })(),
+      parentRegionId: (() => {
+        const raw = input.parentRegionId ?? input.parent_region_id ?? previousRegion?.parentRegionId ?? null;
+        const numeric = Number(raw);
+        return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+      })(),
+      orderInParent: (() => {
+        const raw = input.orderInParent ?? input.order_in_parent ?? previousRegion?.orderInParent ?? null;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
+      })(),
+      visibleInAdmin: normalizeBoolean(
+        input.visibleInAdmin ?? input.visible_in_admin ?? previousRegion?.visibleInAdmin,
+        true
+      ),
+      countryCode: normalizeNullableText(
+        input.countryCode ?? input.country_code ?? previousRegion?.countryCode ?? '',
+        8
+      ),
       bounds: previousRegion?.bounds || null,
       lastSyncStartedAt: previousRegion?.lastSyncStartedAt || null,
       lastSyncFinishedAt: previousRegion?.lastSyncFinishedAt || null,
@@ -327,6 +376,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
           pmtiles_max_zoom = ?,
           source_layer = ?,
           next_sync_at = ?,
+          region_kind = ?,
+          parent_region_id = ?,
+          order_in_parent = ?,
+          visible_in_admin = ?,
+          country_code = ?,
           updated_by = ?,
           updated_at = datetime('now')
         WHERE id = ?
@@ -349,6 +403,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
           next.pmtilesMaxZoom,
           next.sourceLayer,
           next.nextSyncAt,
+          next.regionKind,
+          next.parentRegionId,
+          next.orderInParent,
+          next.visibleInAdmin ? 1 : 0,
+          next.countryCode,
           updatedBy,
           existing.id
         );
@@ -381,11 +440,16 @@ function createRegionsDomain(context: LooseRecord = {}) {
         source_layer,
         last_sync_status,
         next_sync_at,
+        region_kind,
+        parent_region_id,
+        order_in_parent,
+        visible_in_admin,
+        country_code,
         updated_by,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `
       )
       .run(
@@ -405,6 +469,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
         next.pmtilesMaxZoom,
         next.sourceLayer,
         next.nextSyncAt,
+        next.regionKind,
+        next.parentRegionId,
+        next.orderInParent,
+        next.visibleInAdmin ? 1 : 0,
+        next.countryCode,
         updatedBy
       );
 
@@ -479,6 +548,145 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return tx();
   }
 
+  async function listSubregions(parentId: number): Promise<Region[]> {
+    const numericId = Number(parentId);
+    if (!Number.isInteger(numericId) || numericId <= 0) return [];
+    const rows = await db
+      .prepare(
+        `
+      SELECT
+        id, slug, name, source_type, source_value, extract_source, extract_id, extract_label,
+        extract_resolution_status, extract_resolution_error, enabled, auto_sync_enabled,
+        auto_sync_on_start, auto_sync_interval_hours, pmtiles_min_zoom, pmtiles_max_zoom,
+        source_layer, last_sync_started_at, last_sync_finished_at, last_sync_status,
+        last_sync_error, last_successful_sync_at, source_data_updated_at, next_sync_at,
+        bounds_west, bounds_south, bounds_east, bounds_north, last_feature_count, updated_by,
+        created_at, updated_at, parent_region_id, region_kind, order_in_parent,
+        visible_in_admin, country_code
+      FROM data_sync_regions
+      WHERE parent_region_id = ?
+      ORDER BY COALESCE(order_in_parent, 0), lower(name), id
+    `
+      )
+      .all(numericId);
+    return (Array.isArray(rows) ? rows : []).map(rowToRegion).filter((item): item is Region => Boolean(item));
+  }
+
+  async function listRegionTree(
+    options: { includeDisabled?: boolean; includeSubregions?: boolean } = {}
+  ): Promise<Region[]> {
+    await ensureBootstrapped();
+    const includeDisabled = options.includeDisabled !== false;
+    const includeSubregions = options.includeSubregions !== false;
+    const rows = await listRegionRows();
+    const items = rows
+      .map(rowToRegion)
+      .filter((item): item is Region => Boolean(item))
+      .filter((item) => includeDisabled || item.enabled);
+    const byId = new Map<number, Region>();
+    for (const region of items) byId.set(region.id, region);
+
+    const visible = items.filter((region) => region.visibleInAdmin && region.parentRegionId == null);
+    if (!includeSubregions) return visible;
+
+    const childrenByParent = new Map<number, Region[]>();
+    for (const region of items) {
+      if (region.parentRegionId == null) continue;
+      const arr = childrenByParent.get(region.parentRegionId) || [];
+      arr.push(region);
+      childrenByParent.set(region.parentRegionId, arr);
+    }
+    for (const arr of childrenByParent.values()) {
+      arr.sort((a, b) => {
+        const ao = a.orderInParent ?? Number.MAX_SAFE_INTEGER;
+        const bo = b.orderInParent ?? Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a.name).localeCompare(String(b.name));
+      });
+    }
+
+    const out: Region[] = [];
+    for (const region of visible) {
+      const subs = childrenByParent.get(region.id) || [];
+      const successful = subs.filter((sub) => Boolean(sub.lastSuccessfulSyncAt));
+      out.push({
+        ...region,
+        subregions: subs,
+        subregionCount: subs.length,
+        subregionCompletedCount: successful.length
+      });
+    }
+    return out;
+  }
+
+  async function createCountryAggregate(options: LooseRecord = {}): Promise<Region> {
+    await ensureBootstrapped();
+    if (!countrySubregionsCatalog || typeof countrySubregionsCatalog.getCountry !== 'function') {
+      throw new Error('Country-subregions catalog is not configured');
+    }
+    const countryId = String(options?.countryId || '')
+      .trim()
+      .toLowerCase();
+    if (!countryId) {
+      throw new Error('countryId is required');
+    }
+    const country = await countrySubregionsCatalog.getCountry(countryId);
+    if (!country) {
+      throw new Error(`Country not found in Geofabrik catalog: ${countryId}`);
+    }
+    const actor = normalizeNullableText(options?.actor, 160);
+    const hasSubregions = Array.isArray(country.subregions) && country.subregions.length > 0;
+
+    const parentRegion = await saveRegion(
+      {
+        name: country.name,
+        slug: slugify(country.countryId),
+        extractSource: 'geofabrik',
+        extractId: country.countryId,
+        extractLabel: country.name,
+        searchQuery: country.name,
+        regionKind: hasSubregions ? 'country_aggregate' : 'standalone',
+        visibleInAdmin: true,
+        countryCode: country.iso
+      },
+      actor
+    );
+
+    if (!hasSubregions) return parentRegion;
+
+    const subs: Region[] = [];
+    let orderIndex = 0;
+    for (const sub of country.subregions) {
+      const subSlug = slugify(`${country.countryId}-${sub.extractId.replace(/\//g, '-')}`);
+      const saved = await saveRegion(
+        {
+          name: `${country.name} · ${sub.name}`,
+          slug: subSlug,
+          extractSource: 'geofabrik',
+          extractId: sub.extractId,
+          extractLabel: sub.name,
+          searchQuery: sub.name,
+          regionKind: 'subregion',
+          parentRegionId: parentRegion.id,
+          orderInParent: orderIndex,
+          visibleInAdmin: false,
+          countryCode: sub.iso || country.iso,
+          autoSyncOnStart: false
+        },
+        actor
+      );
+      subs.push(saved);
+      orderIndex += 1;
+    }
+
+    return {
+      ...parentRegion,
+      subregions: subs,
+      subregionCount: subs.length,
+      subregionCompletedCount: 0
+    };
+  }
+
   async function listRuntimePmtilesRegions(): Promise<
     Array<
       Pick<
@@ -488,8 +696,8 @@ function createRegionsDomain(context: LooseRecord = {}) {
     >
   > {
     await ensureBootstrapped();
-    return (await listRegions({ includeDisabled: false }))
-      .filter((region) => region.enabled && region.bounds)
+    return (await listRegions({ includeDisabled: false, includeHiddenSubregions: true }))
+      .filter((region) => region.enabled && region.bounds && region.regionKind !== 'country_aggregate')
       .map((region) => ({
         id: region.id,
         slug: region.slug,
@@ -505,8 +713,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
   return {
     getRegionById,
     listRegions,
+    listRegionTree,
+    listSubregions,
     normalizeRegionInput,
     saveRegion,
+    createCountryAggregate,
     deleteRegion,
     listRuntimePmtilesRegions,
     validateOverlap
