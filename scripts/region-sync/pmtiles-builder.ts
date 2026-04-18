@@ -334,12 +334,33 @@ function planShardGrid(bounds, shardKm) {
 
   const centerLat = (north + south) / 2;
   const lonPerKm = KM_PER_DEGREE_LAT * Math.max(0.05, Math.cos((centerLat * Math.PI) / 180));
-  const latStep = shardKm / KM_PER_DEGREE_LAT;
-  const lonStep = shardKm / lonPerKm;
 
-  const rows = Math.max(1, Math.ceil((north - south) / latStep));
-  const cols = Math.max(1, Math.ceil((east - west) / lonStep));
-  const cellCount = rows * cols;
+  const requestedShardKm = shardKm;
+  let effectiveShardKm = shardKm;
+  let latStep = effectiveShardKm / KM_PER_DEGREE_LAT;
+  let lonStep = effectiveShardKm / lonPerKm;
+  let rows = Math.max(1, Math.ceil((north - south) / latStep));
+  let cols = Math.max(1, Math.ceil((east - west) / lonStep));
+  let cellCount = rows * cols;
+
+  if (cellCount > MAX_SHARD_CELL_COUNT) {
+    const scale = Math.sqrt(cellCount / MAX_SHARD_CELL_COUNT);
+    effectiveShardKm = Math.ceil(effectiveShardKm * scale);
+    while (true) {
+      latStep = effectiveShardKm / KM_PER_DEGREE_LAT;
+      lonStep = effectiveShardKm / lonPerKm;
+      rows = Math.max(1, Math.ceil((north - south) / latStep));
+      cols = Math.max(1, Math.ceil((east - west) / lonStep));
+      cellCount = rows * cols;
+      if (cellCount <= MAX_SHARD_CELL_COUNT) break;
+      effectiveShardKm += Math.max(1, Math.ceil(effectiveShardKm * 0.1));
+    }
+    console.warn(
+      `[region-sync] Shard grid too large at ${requestedShardKm} km ` +
+        `(would produce >${MAX_SHARD_CELL_COUNT} cells); scaled up to ${effectiveShardKm} km ` +
+        `(${rows}x${cols}=${cellCount} cells). Set REGION_SYNC_SHARD_KM to override.`
+    );
+  }
 
   return {
     minLon: west,
@@ -349,7 +370,8 @@ function planShardGrid(bounds, shardKm) {
     rows,
     cols,
     cellCount,
-    shardKm
+    shardKm: effectiveShardKm,
+    requestedShardKm
   };
 }
 

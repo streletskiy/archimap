@@ -493,6 +493,22 @@ test('planShardGrid divides a Poland-sized bbox into roughly km-sized cells', ()
   assert.ok(grid.lonStep > grid.latStep); // lon degrees are smaller at mid-latitudes
 });
 
+test('planShardGrid scales up shardKm for very large regions to stay under the cell cap', () => {
+  // Sakha Republic approx bbox: ~58° lon x ~22° lat at ~66°N — at 60 km this would
+  // produce ~1800 cells and blow the MAX_SHARD_CELL_COUNT safety cap.
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const grid = planShardGrid({ west: 105, south: 55, east: 163, north: 77 }, 60);
+    assert.ok(grid);
+    assert.ok(grid.cellCount <= 400, `expected cellCount <= 400, got ${grid.cellCount}`);
+    assert.ok(grid.shardKm > 60, `expected shardKm scaled above 60, got ${grid.shardKm}`);
+    assert.equal(grid.requestedShardKm, 60);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test('planShardGrid collapses tiny regions into a single cell', () => {
   const grid = planShardGrid({ west: 14.42, south: 50.07, east: 14.46, north: 50.1 }, 60);
   assert.ok(grid);
