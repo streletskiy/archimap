@@ -54,6 +54,12 @@ const {
   publishPmtilesArchive
 } = require('./region-sync/db-ingester');
 const { buildPmtilesFromGeojson, summarizeImportRows } = require('./region-sync/pmtiles-builder');
+const {
+  runIncrementalRegionSync,
+  commitIncrementalSuccess,
+  isIncrementalEnabled,
+  resolveIncrementalNewPbf
+} = require('./region-sync/incremental-orchestrator');
 
 const DB_PROVIDER = getDbProvider(process.env);
 const DATABASE_URL = getPostgresConnectionString(process.env);
@@ -528,7 +534,101 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
   }
 }
 
+async function runRegionSyncIncrementalBranch(region, runtimeOptions, newPbf) {
+  const workspace = createWorkspace(region.id);
+  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
+  const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
+
+  try {
+    emitStageJson('diff', null, 'deriving changes from prev snapshot');
+    const incremental = await runIncrementalRegionSync({
+      region,
+      runtimeOptions,
+      newPbf,
+      workspace,
+      importerPath,
+      dbGeometryMode: resolveImporterDbGeometryMode(runtimeOptions),
+      env: buildExtractorEnv(process.env),
+      onStage: (stage, detail) => emitStageJson(stage, null, detail || null)
+    });
+    if (!incremental.ok) {
+      emitStageJson('diff', null, `incremental skipped: ${incremental.reason}`);
+      return null;
+    }
+
+    const featureCount = Number(incremental.mergeBuildStats?.total || 0);
+    if (featureCount <= 0) {
+      throw new Error('Incremental merge produced 0 features; refusing to publish empty region');
+    }
+
+    const exportedForBuild = {
+      importedFeatureCount: featureCount,
+      bounds: region?.bounds || null,
+      sourceSnapshot: incremental.sourceSnapshot
+    };
+
+    emitStageJson('build', null, `features=${featureCount}`);
+    const buildResult = await buildPmtilesStep(
+      region,
+      incremental.mergedBuildPath,
+      builtPmtilesPath,
+      exportedForBuild,
+      runtimeOptions.dataDir
+    );
+    emitStageJson('apply', 0, buildApplyStageDetail(featureCount));
+    const dbResult = await applyRegionImport({
+      ...runtimeOptions,
+      region,
+      ndjsonPath: incremental.mergedImportPath,
+      builtPmtilesPath,
+      renderGeojsonPath: incremental.mergedBuildPath,
+      totalFeatureCount: featureCount,
+      sourceSnapshot: incremental.sourceSnapshot,
+      onProgress: createApplyStageProgressEmitter()
+    });
+
+    emitStageJson('snapshot', null, 'committing incremental snapshot');
+    await commitIncrementalSuccess({
+      runtimeOptions,
+      region,
+      newPbf,
+      mergedBuildPath: incremental.mergedBuildPath,
+      mergedImportPath: incremental.mergedImportPath
+    });
+
+    if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
+      emitStageJson('followup', null, 'rebuilding search indexes');
+      runRuntimeFollowups({ region, runtimeOptions });
+    }
+
+    return {
+      ...dbResult,
+      ...buildResult,
+      incremental: {
+        affectedObjectIds: incremental.affectedObjectIds,
+        touchedNodeIds: incremental.touchedNodeIds,
+        spatiallyExpandedIds: incremental.spatiallyExpandedIds,
+        deletedIds: incremental.deletedIds,
+        importerDurationMs: incremental.importerDurationMs,
+        mergeBuildStats: incremental.mergeBuildStats,
+        mergeImportStats: incremental.mergeImportStats
+      },
+      bounds: region?.bounds || null
+    };
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+}
+
 async function runRegionSync(region, runtimeOptions) {
+  if (isIncrementalEnabled(process.env)) {
+    const newPbf = resolveIncrementalNewPbf(process.env);
+    if (newPbf) {
+      const result = await runRegionSyncIncrementalBranch(region, runtimeOptions, newPbf);
+      if (result) return result;
+    }
+  }
+
   if (shouldUseLowMemoryPipeline(runtimeOptions, process.env)) {
     return runRegionSyncLowMemory(region, runtimeOptions);
   }
@@ -576,6 +676,27 @@ async function runRegionSync(region, runtimeOptions) {
         region,
         runtimeOptions
       });
+    }
+
+    if (isIncrementalEnabled(process.env)) {
+      const localPbf = String(exported?.sourceSnapshot?.localPath || '').trim();
+      if (localPbf && fs.existsSync(localPbf)) {
+        try {
+          emitStageJson('snapshot', null, 'seeding incremental cache');
+          await commitIncrementalSuccess({
+            runtimeOptions,
+            region,
+            newPbf: localPbf,
+            mergedBuildPath: geojsonPath,
+            mergedImportPath: importPath,
+            summaryJsonSource: summaryPath
+          });
+        } catch (error) {
+          // Snapshot seeding is opportunistic — a failure here must not
+          // abort a sync that has already applied to the DB.
+          console.warn(`[region-sync] incremental snapshot seed failed: ${String(error?.message || error)}`);
+        }
+      }
     }
 
     return {

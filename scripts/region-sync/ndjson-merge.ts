@@ -24,6 +24,8 @@ type MergeStats = {
 
 const FEATURE_ID_RE = /"id"\s*:\s*(\d+)/;
 const FEATURE_KIND_RE = /"feature_kind"\s*:\s*"([^"]+)"/;
+const DB_OSM_TYPE_RE = /"osm_type"\s*:\s*"([^"]+)"/;
+const DB_OSM_ID_RE = /"osm_id"\s*:\s*(\d+)/;
 
 function decodeEncodedFeatureId(encoded: number): { osmType: string; osmId: number } {
   const typeBit = encoded % 2;
@@ -42,20 +44,46 @@ function decodeEncodedFeatureId(encoded: number): { osmType: string; osmId: numb
 function parseNdjsonLineKey(line: string): { featureKey: FeatureKey; objectKey: ObjectKey; osmType: string; osmId: number; featureKind: string } | null {
   const trimmed = line.trim();
   if (!trimmed || !trimmed.startsWith('{')) return null;
+
+  // GeoJSON Feature shape (region-build.ndjson): encoded id carries osm_type bit,
+  // feature_kind is in properties.
   const idMatch = FEATURE_ID_RE.exec(trimmed);
-  if (!idMatch) return null;
-  const encoded = Number(idMatch[1]);
-  if (!Number.isFinite(encoded) || encoded < 0) return null;
-  const decoded = decodeEncodedFeatureId(encoded);
-  const kindMatch = FEATURE_KIND_RE.exec(trimmed);
-  const featureKind = (kindMatch && kindMatch[1]) || 'building';
-  return {
-    featureKey: `${decoded.osmType}/${decoded.osmId}/${featureKind}`,
-    objectKey: `${decoded.osmType}/${decoded.osmId}`,
-    osmType: decoded.osmType,
-    osmId: decoded.osmId,
-    featureKind
-  };
+  if (idMatch) {
+    const encoded = Number(idMatch[1]);
+    if (Number.isFinite(encoded) && encoded >= 0) {
+      const decoded = decodeEncodedFeatureId(encoded);
+      const kindMatch = FEATURE_KIND_RE.exec(trimmed);
+      const featureKind = (kindMatch && kindMatch[1]) || 'building';
+      return {
+        featureKey: `${decoded.osmType}/${decoded.osmId}/${featureKind}`,
+        objectKey: `${decoded.osmType}/${decoded.osmId}`,
+        osmType: decoded.osmType,
+        osmId: decoded.osmId,
+        featureKind
+      };
+    }
+  }
+
+  // DB import row shape (region-import.ndjson): top-level osm_type + osm_id,
+  // no feature_kind. There's exactly one row per (osm_type, osm_id).
+  const osmTypeMatch = DB_OSM_TYPE_RE.exec(trimmed);
+  const osmIdMatch = DB_OSM_ID_RE.exec(trimmed);
+  if (osmTypeMatch && osmIdMatch) {
+    const osmType = osmTypeMatch[1];
+    const osmId = Number(osmIdMatch[1]);
+    if ((osmType === 'way' || osmType === 'relation') && Number.isFinite(osmId) && osmId >= 0) {
+      const featureKind = 'building';
+      return {
+        featureKey: `${osmType}/${osmId}/${featureKind}`,
+        objectKey: `${osmType}/${osmId}`,
+        osmType,
+        osmId,
+        featureKind
+      };
+    }
+  }
+
+  return null;
 }
 
 function compareFeatureKeys(a: { osmType: string; osmId: number; featureKind: string }, b: { osmType: string; osmId: number; featureKind: string }): number {
