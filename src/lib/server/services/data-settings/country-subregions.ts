@@ -3,6 +3,7 @@ const path = require('path');
 
 const GEOFABRIK_INDEX_URL = 'https://download.geofabrik.de/index-v1.json';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_VERSION = 2;
 
 // Countries that already have a dedicated fine-grained hierarchy handled
 // elsewhere — skip our generic Geofabrik-subregion expansion for them.
@@ -26,6 +27,7 @@ interface GeofabrikBBox {
 
 export interface SubregionCatalogEntry {
   extractId: string;
+  canonicalExtractId?: string | null;
   name: string;
   iso: string | null;
   bounds: GeofabrikBBox | null;
@@ -34,11 +36,44 @@ export interface SubregionCatalogEntry {
 
 export interface CountryCatalogEntry {
   countryId: string;
+  canonicalExtractId?: string | null;
   name: string;
   iso: string | null;
   bounds: GeofabrikBBox | null;
   pbfUrl: string | null;
   subregions: SubregionCatalogEntry[];
+}
+
+function trimPbfSuffix(value: string): string {
+  const text = String(value || '').trim();
+  for (const suffix of ['-latest.osm.pbf', '.osm.pbf', '-latest.pbf', '.pbf']) {
+    if (text.toLowerCase().endsWith(suffix)) {
+      return text.slice(0, -suffix.length);
+    }
+  }
+  return text;
+}
+
+function normalizePathAlias(value: string): string {
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+    .toLowerCase();
+}
+
+function buildGeofabrikCanonicalExtractId(pbfUrl: string | null): string | null {
+  const urlText = String(pbfUrl || '').trim();
+  if (!urlText) return null;
+  try {
+    const parsed = new URL(urlText);
+    const normalizedPath = normalizePathAlias(trimPbfSuffix(parsed.pathname));
+    if (!normalizedPath) return null;
+    return `geofabrik_${normalizedPath.replace(/\//g, '_')}`;
+  } catch {
+    return null;
+  }
 }
 
 function computeBBoxFromGeometry(geometry): GeofabrikBBox | null {
@@ -82,31 +117,29 @@ function parseIndex(raw): CountryCatalogEntry[] {
     byId.set(id, { feature, props });
   }
 
-  const countries: CountryCatalogEntry[] = [];
+  const countriesById = new Map<string, CountryCatalogEntry>();
   const subregionsByParent = new Map<string, SubregionCatalogEntry[]>();
 
   for (const [id, entry] of byId.entries()) {
     const props = entry.props as GeofabrikFeatureProps;
     const parent = String(props?.parent || '').trim();
     const name = String(props?.name || id);
+    const isCountry = Array.isArray(props?.['iso3166-1:alpha2']) && props['iso3166-1:alpha2'].length > 0;
     const iso =
-      Array.isArray(props?.['iso3166-1:alpha2']) && props['iso3166-1:alpha2'].length > 0
+      isCountry
         ? String(props['iso3166-1:alpha2'][0])
         : Array.isArray(props?.['iso3166-2']) && props['iso3166-2'].length > 0
           ? String(props['iso3166-2'][0])
           : null;
     const bounds = computeBBoxFromGeometry(entry.feature?.geometry);
     const pbfUrl = String(props?.urls?.pbf || '').trim() || null;
+    const canonicalExtractId = buildGeofabrikCanonicalExtractId(pbfUrl);
 
-    if (!parent) {
-      // Continent or root-level country — we keep only leaves that are countries
-      // (heuristic: have iso3166-1:alpha2 set). Continents without alpha2 are skipped.
-      if (!Array.isArray(props?.['iso3166-1:alpha2']) || props['iso3166-1:alpha2'].length === 0) {
-        continue;
-      }
+    if (isCountry) {
       if (SKIP_COUNTRY_IDS.has(id)) continue;
-      countries.push({
+      countriesById.set(id, {
         countryId: id,
+        canonicalExtractId,
         name,
         iso,
         bounds,
@@ -116,10 +149,12 @@ function parseIndex(raw): CountryCatalogEntry[] {
       continue;
     }
 
+    if (!parent) continue;
     subregionsByParent.set(
       parent,
       (subregionsByParent.get(parent) || []).concat({
         extractId: id,
+        canonicalExtractId,
         name,
         iso,
         bounds,
@@ -128,6 +163,7 @@ function parseIndex(raw): CountryCatalogEntry[] {
     );
   }
 
+  const countries = [...countriesById.values()];
   for (const country of countries) {
     const subs = subregionsByParent.get(country.countryId) || [];
     country.subregions = subs.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -153,6 +189,8 @@ function createCountrySubregionsCatalog(options: LooseRecord = {}) {
       const stat = fs.statSync(cachePath);
       if (!stat.isFile()) return null;
       const payload = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+      const version = Number(payload?.version || 0);
+      if (version !== CACHE_VERSION) return null;
       const loadedAt = Number(payload?.loadedAt || stat.mtimeMs || 0);
       const countries = Array.isArray(payload?.countries) ? payload.countries : [];
       if (countries.length === 0) return null;
@@ -165,7 +203,7 @@ function createCountrySubregionsCatalog(options: LooseRecord = {}) {
   function writeDiskCache(countries: CountryCatalogEntry[]) {
     try {
       fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-      fs.writeFileSync(cachePath, JSON.stringify({ loadedAt: Date.now(), countries }, null, 2), 'utf8');
+      fs.writeFileSync(cachePath, JSON.stringify({ version: CACHE_VERSION, loadedAt: Date.now(), countries }, null, 2), 'utf8');
     } catch (error) {
       console.warn(`[country-subregions] failed to write cache: ${String(error?.message || error)}`);
     }
@@ -229,8 +267,17 @@ function createCountrySubregionsCatalog(options: LooseRecord = {}) {
     if (!id) return null;
     const all = await getCountries();
     for (const country of all) {
-      if (country.countryId.toLowerCase() === id) return { country, subregion: null };
-      const sub = country.subregions.find((item) => item.extractId.toLowerCase() === id);
+      if (
+        country.countryId.toLowerCase() === id ||
+        String(country.canonicalExtractId || '').trim().toLowerCase() === id
+      ) {
+        return { country, subregion: null };
+      }
+      const sub = country.subregions.find(
+        (item) =>
+          item.extractId.toLowerCase() === id ||
+          String(item.canonicalExtractId || '').trim().toLowerCase() === id
+      );
       if (sub) return { country, subregion: sub };
     }
     return null;

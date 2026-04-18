@@ -165,6 +165,9 @@ When a new control is needed:
 - If the upstream extract is already up to date, the manual sync action stays disabled; failed or never-synced regions remain actionable.
 - Region list loading should stay fast even with many regions: load the base region list first, then lazily refresh upstream status only for the visible page and the currently selected region.
 - Opening a region modal must stay responsive: upstream checks and sync-history loading run independently in the background and must not block the modal shell from rendering.
+- Creating a new country-level `geofabrik` region through the standard `Create region` action must automatically create a country aggregate plus hidden subregions, and aggregate syncs must process those subregions sequentially.
+- Re-saving an existing standalone country-level `geofabrik` region should upgrade it in place to the same aggregate/subregion model as long as no standalone country import data has already been persisted for that record.
+- Manual `Sync now` for a legacy standalone country-level `geofabrik` region should attempt the same in-place aggregate upgrade before queueing the run, so old records do not require a separate save step first.
 - On narrow screens, region editor modals use one vertical scroll surface for the body content; avoid nested vertical scroll panes for the form and sync history there.
 - On desktop, the sync-history pane may stay pinned beside the editor as a full-height card with its own internal scroll, while the form keeps the remaining column.
 - Desktop sync history stays paginated with a fixed 20-row page size; on narrow screens the same modal may expand history into the main scroll surface and request the full available run list instead of showing page controls.

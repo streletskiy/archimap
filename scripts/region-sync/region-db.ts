@@ -427,7 +427,10 @@ async function getRegionFromPostgres({ databaseUrl }, regionId) {
         bounds_west,
         bounds_south,
         bounds_east,
-        bounds_north
+        bounds_north,
+        region_kind,
+        parent_region_id,
+        order_in_parent
       FROM public.data_sync_regions
       WHERE id = $1
       LIMIT 1

@@ -296,8 +296,110 @@ function createRegionsDomain(context: LooseRecord = {}) {
     };
   }
 
-  async function saveRegion(input: RegionInput = {}, actor = null): Promise<Region> {
+  function buildCountryAggregateRegionInput(input: LooseRecord = {}): RegionInput {
+    const source = input && typeof input === 'object' ? input : {};
+    const next: RegionInput = {};
+
+    const regionId = Number(source?.id || 0);
+    if (Number.isInteger(regionId) && regionId > 0) {
+      next.id = regionId;
+    }
+
+    const name = normalizeNullableText(source?.name, 160);
+    if (name) next.name = name;
+
+    const slug = normalizeNullableText(source?.slug, 100);
+    if (slug) next.slug = slug;
+
+    const searchQuery = normalizeNullableText(source?.searchQuery ?? source?.search_query, 240);
+    if (searchQuery) next.searchQuery = searchQuery;
+
+    const extractLabel = normalizeNullableText(source?.extractLabel ?? source?.extract_label, 240);
+    if (extractLabel) next.extractLabel = extractLabel;
+
+    if (Object.prototype.hasOwnProperty.call(source, 'enabled')) {
+      next.enabled = source.enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'autoSyncEnabled')) {
+      next.autoSyncEnabled = source.autoSyncEnabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'autoSyncOnStart')) {
+      next.autoSyncOnStart = source.autoSyncOnStart;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'autoSyncIntervalHours')) {
+      next.autoSyncIntervalHours = source.autoSyncIntervalHours;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'pmtilesMinZoom')) {
+      next.pmtilesMinZoom = source.pmtilesMinZoom;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'pmtilesMaxZoom')) {
+      next.pmtilesMaxZoom = source.pmtilesMaxZoom;
+    }
+
+    const sourceLayer = normalizeNullableText(source?.sourceLayer, 120);
+    if (sourceLayer) next.sourceLayer = sourceLayer;
+
+    return next;
+  }
+
+  function buildRegionExtractKey(extractSource = '', extractId = '') {
+    const normalizedSource = normalizeNullableText(extractSource, 64);
+    const normalizedExtractId = normalizeNullableText(extractId, 240);
+    if (!normalizedExtractId) return '';
+    return `${String(normalizedSource || '').trim().toLowerCase()}:${String(normalizedExtractId).trim().toLowerCase()}`;
+  }
+
+  async function assertCountryAggregateUpgradeAllowed(existing: Region | null = null) {
+    if (!existing) return;
+    if (existing.regionKind === 'subregion') {
+      throw new Error('Subregion records cannot be converted into country aggregates');
+    }
+    if (existing.regionKind === 'country_aggregate') {
+      return;
+    }
+
+    const membershipCount = await countRegionMemberships(existing.id);
+    if (membershipCount > 0 || existing.lastSuccessfulSyncAt || existing.bounds) {
+      throw new Error(
+        'This country region already contains synced standalone data. Delete it and recreate it to switch to sequential subregions.'
+      );
+    }
+  }
+
+  async function findCountryAggregateMatch(region: LooseRecord = {}) {
+    if (!countrySubregionsCatalog || typeof countrySubregionsCatalog.findByExtractId !== 'function') {
+      return null;
+    }
+
+    const extractSource = normalizeNullableText(region?.extractSource ?? region?.extract_source ?? '', 64);
+    if (String(extractSource || '').trim().toLowerCase() !== 'geofabrik') {
+      return null;
+    }
+
+    const extractId = normalizeNullableText(region?.extractId ?? region?.extract_id ?? '', 240);
+    if (!extractId) {
+      return null;
+    }
+    if (!/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i.test(extractId)) {
+      return null;
+    }
+
+    const match = await countrySubregionsCatalog.findByExtractId(extractId);
+    if (!match || match.subregion) {
+      return null;
+    }
+
+    const country = match.country;
+    return Array.isArray(country?.subregions) && country.subregions.length > 0 ? country : null;
+  }
+
+  async function saveRegionInternal(
+    input: RegionInput = {},
+    actor = null,
+    options: LooseRecord = {}
+  ): Promise<Region> {
     await ensureBootstrapped();
+    const allowCountryAggregateExpansion = options.allowCountryAggregateExpansion !== false;
     const regionId = Number(input?.id || 0);
     const existing = regionId > 0 ? await getRegionById(regionId) : null;
     if (regionId > 0 && !existing) {
@@ -333,6 +435,17 @@ function createRegionsDomain(context: LooseRecord = {}) {
     const normalized = await normalizeRegionInput(input, existing);
     if (normalized.errors.length > 0) {
       throw new Error(normalized.errors.join(' '));
+    }
+
+    if (allowCountryAggregateExpansion) {
+      const country = await findCountryAggregateMatch(normalized.value);
+      if (country) {
+        return createCountryAggregate({
+          countryId: country.countryId,
+          actor,
+          region: buildCountryAggregateRegionInput(normalized.value)
+        });
+      }
     }
 
     const extractValidation = await validateSelectedExtract(normalized.value, existing);
@@ -495,6 +608,12 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return createdRegion;
   }
 
+  async function saveRegion(input: RegionInput = {}, actor = null): Promise<Region> {
+    return saveRegionInternal(input, actor, {
+      allowCountryAggregateExpansion: true
+    });
+  }
+
   function buildDeleteResult(existing, deletedBy, membershipCount, runCount, orphanDeletedCount) {
     return {
       region: {
@@ -635,32 +754,57 @@ function createRegionsDomain(context: LooseRecord = {}) {
       throw new Error(`Country not found in Geofabrik catalog: ${countryId}`);
     }
     const actor = normalizeNullableText(options?.actor, 160);
+    const regionInput = buildCountryAggregateRegionInput(options?.region);
+    const requestedParentId = Number(regionInput.id || 0);
+    const existingParent = requestedParentId > 0 ? await getRegionById(requestedParentId) : null;
+    if (requestedParentId > 0 && !existingParent) {
+      throw new Error('Region not found');
+    }
+    await assertCountryAggregateUpgradeAllowed(existingParent);
     const hasSubregions = Array.isArray(country.subregions) && country.subregions.length > 0;
+    const parentName = regionInput.name || country.name;
+    const parentSlug = regionInput.slug || slugify(country.countryId);
+    const parentSearchQuery = regionInput.searchQuery || country.name;
+    const parentExtractLabel = regionInput.extractLabel || country.name;
 
-    const parentRegion = await saveRegion(
+    const parentRegion = await saveRegionInternal(
       {
-        name: country.name,
-        slug: slugify(country.countryId),
+        ...regionInput,
+        name: parentName,
+        slug: parentSlug,
         extractSource: 'geofabrik',
         extractId: country.countryId,
-        extractLabel: country.name,
-        searchQuery: country.name,
+        extractLabel: parentExtractLabel,
+        searchQuery: parentSearchQuery,
         regionKind: hasSubregions ? 'country_aggregate' : 'standalone',
         visibleInAdmin: true,
         countryCode: country.iso
       },
-      actor
+      actor,
+      {
+        allowCountryAggregateExpansion: false
+      }
     );
 
     if (!hasSubregions) return parentRegion;
+
+    const existingSubregions = await listSubregions(parentRegion.id);
+    const existingSubregionByExtractKey = new Map<string, Region>();
+    for (const item of existingSubregions) {
+      const extractKey = buildRegionExtractKey(item.extractSource, item.extractId);
+      if (!extractKey || existingSubregionByExtractKey.has(extractKey)) continue;
+      existingSubregionByExtractKey.set(extractKey, item);
+    }
 
     const subs: Region[] = [];
     let orderIndex = 0;
     for (const sub of country.subregions) {
       const subSlug = slugify(`${country.countryId}-${sub.extractId.replace(/\//g, '-')}`);
-      const saved = await saveRegion(
+      const existingSubregion = existingSubregionByExtractKey.get(buildRegionExtractKey('geofabrik', sub.extractId));
+      const saved = await saveRegionInternal(
         {
-          name: `${country.name} · ${sub.name}`,
+          ...(existingSubregion?.id ? { id: existingSubregion.id } : {}),
+          name: `${parentRegion.name} · ${sub.name}`,
           slug: subSlug,
           extractSource: 'geofabrik',
           extractId: sub.extractId,
@@ -671,9 +815,17 @@ function createRegionsDomain(context: LooseRecord = {}) {
           orderInParent: orderIndex,
           visibleInAdmin: false,
           countryCode: sub.iso || country.iso,
-          autoSyncOnStart: false
+          autoSyncEnabled: false,
+          autoSyncOnStart: false,
+          autoSyncIntervalHours: parentRegion.autoSyncIntervalHours,
+          pmtilesMinZoom: parentRegion.pmtilesMinZoom,
+          pmtilesMaxZoom: parentRegion.pmtilesMaxZoom,
+          sourceLayer: parentRegion.sourceLayer
         },
-        actor
+        actor,
+        {
+          allowCountryAggregateExpansion: false
+        }
       );
       subs.push(saved);
       orderIndex += 1;
@@ -685,6 +837,43 @@ function createRegionsDomain(context: LooseRecord = {}) {
       subregionCount: subs.length,
       subregionCompletedCount: 0
     };
+  }
+
+  async function prepareRegionForSync(
+    regionId,
+    options: { requestedBy?: string | null; triggerReason?: string | null } = {}
+  ): Promise<Region | null> {
+    await ensureBootstrapped();
+    const numericRegionId = Number(regionId);
+    if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+      return null;
+    }
+
+    const existing = await getRegionById(numericRegionId);
+    if (!existing) {
+      return null;
+    }
+
+    const triggerReason = String(options?.triggerReason || '')
+      .trim()
+      .toLowerCase();
+    if (triggerReason !== 'manual') {
+      return existing;
+    }
+    if (existing.regionKind !== 'standalone') {
+      return existing;
+    }
+
+    const country = await findCountryAggregateMatch(existing);
+    if (!country) {
+      return existing;
+    }
+
+    return createCountryAggregate({
+      countryId: country.countryId,
+      actor: options?.requestedBy || null,
+      region: buildCountryAggregateRegionInput(existing)
+    });
   }
 
   async function listRuntimePmtilesRegions(): Promise<
@@ -717,6 +906,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     listSubregions,
     normalizeRegionInput,
     saveRegion,
+    prepareRegionForSync,
     createCountryAggregate,
     deleteRegion,
     listRuntimePmtilesRegions,

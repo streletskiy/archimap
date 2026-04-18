@@ -113,6 +113,7 @@ function createService(options: LooseRecord = {}) {
     dataDir: options.dataDir,
     now: options.now,
     fetchImpl: options.fetchImpl,
+    countrySubregionsCatalog: options.countrySubregionsCatalog,
     extractResolver: options.extractResolver || createMockExtractResolver(),
     fallbackData: options.fallbackData || {
       autoSyncEnabled: true,
@@ -632,6 +633,446 @@ test('saveRegion allows first canonical extract selection for already synced leg
   assert.equal(saved.extractSource, 'geofabrik');
   assert.equal(saved.extractId, 'geofabrik_antarctica');
   assert.equal(saved.lastSuccessfulSyncAt !== null, true);
+});
+
+test('saveRegion expands a new geofabrik country into an aggregate with hidden subregions', async () => {
+  const db = createTestDb();
+  const country = {
+    countryId: 'poland',
+    name: 'Poland',
+    iso: 'PL',
+    bounds: null,
+    pbfUrl: 'https://download.geofabrik.de/europe/poland-latest.osm.pbf',
+    subregions: [
+      {
+        extractId: 'poland/dolnoslaskie',
+        name: 'Dolnoslaskie',
+        iso: 'PL-02',
+        bounds: null,
+        pbfUrl: 'https://download.geofabrik.de/europe/poland/dolnoslaskie-latest.osm.pbf'
+      },
+      {
+        extractId: 'poland/mazowieckie',
+        name: 'Mazowieckie',
+        iso: 'PL-14',
+        bounds: null,
+        pbfUrl: 'https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf'
+      }
+    ]
+  };
+  const service = createService({
+    db,
+    countrySubregionsCatalog: {
+      async getCountry(countryId) {
+        return String(countryId || '').trim().toLowerCase() === 'poland' ? country : null;
+      },
+      async findByExtractId(extractId) {
+        return String(extractId || '').trim().toLowerCase() === 'poland'
+          ? { country, subregion: null }
+          : null;
+      }
+    },
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'geofabrik:poland': {
+          candidate: {
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_europe_poland',
+            extractLabel: 'Poland'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    }),
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const saved = await service.saveRegion(
+    buildRegionInput({
+      name: 'PL Poland',
+      slug: 'pl-poland',
+      searchQuery: 'PL Poland',
+      extractSource: 'geofabrik',
+      extractId: 'poland',
+      extractLabel: 'PL Poland',
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0,
+      pmtilesMinZoom: 10,
+      pmtilesMaxZoom: 14,
+      sourceLayer: 'custom-buildings'
+    }),
+    'tester'
+  );
+
+  assert.equal(saved.regionKind, 'country_aggregate');
+  assert.equal(saved.name, 'PL Poland');
+  assert.equal(saved.slug, 'pl-poland');
+  assert.equal(saved.extractSource, 'geofabrik');
+  assert.equal(saved.extractId, 'geofabrik_europe_poland');
+  assert.equal(saved.subregionCount, 2);
+  assert.equal(saved.subregionCompletedCount, 0);
+
+  const listed = await service.listRegions();
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, saved.id);
+  assert.equal(listed[0].regionKind, 'country_aggregate');
+  assert.equal(listed[0].subregionCount, 2);
+
+  const tree = await service.listRegionTree();
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].id, saved.id);
+  assert.equal(tree[0].subregions?.length, 2);
+
+  const subregions = tree[0].subregions || [];
+  assert.deepEqual(
+    subregions.map((item) => ({
+      regionKind: item.regionKind,
+      parentRegionId: item.parentRegionId,
+      visibleInAdmin: item.visibleInAdmin,
+      autoSyncEnabled: item.autoSyncEnabled,
+      autoSyncOnStart: item.autoSyncOnStart,
+      pmtilesMinZoom: item.pmtilesMinZoom,
+      pmtilesMaxZoom: item.pmtilesMaxZoom,
+      sourceLayer: item.sourceLayer
+    })),
+    [
+      {
+        regionKind: 'subregion',
+        parentRegionId: saved.id,
+        visibleInAdmin: false,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        pmtilesMinZoom: 10,
+        pmtilesMaxZoom: 14,
+        sourceLayer: 'custom-buildings'
+      },
+      {
+        regionKind: 'subregion',
+        parentRegionId: saved.id,
+        visibleInAdmin: false,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        pmtilesMinZoom: 10,
+        pmtilesMaxZoom: 14,
+        sourceLayer: 'custom-buildings'
+      }
+    ]
+  );
+  assert.deepEqual(
+    subregions.map((item) => item.name),
+    ['PL Poland · Dolnoslaskie', 'PL Poland · Mazowieckie']
+  );
+});
+
+test('saveRegion upgrades an existing standalone geofabrik country into an aggregate when resaved', async () => {
+  const db = createTestDb();
+  const country = {
+    countryId: 'poland',
+    name: 'Poland',
+    iso: 'PL',
+    bounds: null,
+    pbfUrl: 'https://download.geofabrik.de/europe/poland-latest.osm.pbf',
+    subregions: [
+      {
+        extractId: 'poland/dolnoslaskie',
+        name: 'Dolnoslaskie',
+        iso: 'PL-02',
+        bounds: null,
+        pbfUrl: 'https://download.geofabrik.de/europe/poland/dolnoslaskie-latest.osm.pbf'
+      },
+      {
+        extractId: 'poland/mazowieckie',
+        name: 'Mazowieckie',
+        iso: 'PL-14',
+        bounds: null,
+        pbfUrl: 'https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf'
+      }
+    ]
+  };
+
+  db.prepare(
+    `
+      INSERT INTO data_sync_regions (
+        slug,
+        name,
+        source_type,
+        source_value,
+        extract_source,
+        extract_id,
+        extract_label,
+        extract_resolution_status,
+        enabled,
+        auto_sync_enabled,
+        auto_sync_on_start,
+        auto_sync_interval_hours,
+        pmtiles_min_zoom,
+        pmtiles_max_zoom,
+        source_layer,
+        region_kind,
+        visible_in_admin,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, 'extract', ?, ?, ?, ?, 'resolved', 1, 0, 0, 0, 10, 14, 'custom-buildings', 'standalone', 1, datetime('now'), datetime('now'))
+    `
+  ).run(
+    'pl-poland',
+    'PL Poland',
+    'PL Poland',
+    'geofabrik',
+    'geofabrik_europe_poland',
+    'PL Poland'
+  );
+
+  const inserted = db
+    .prepare(
+      `
+        SELECT id
+        FROM data_sync_regions
+        WHERE slug = ?
+        LIMIT 1
+      `
+    )
+    .get('pl-poland');
+  assert.ok(inserted?.id);
+
+  db.prepare(
+    `
+      UPDATE data_sync_regions
+      SET last_sync_status = 'failed', last_sync_error = 'download aborted'
+      WHERE id = ?
+    `
+  ).run(inserted.id);
+
+  const service = createService({
+    db,
+    countrySubregionsCatalog: {
+      async getCountry(countryId) {
+        return String(countryId || '').trim().toLowerCase() === 'poland' ? country : null;
+      },
+      async findByExtractId(extractId) {
+        const normalized = String(extractId || '').trim().toLowerCase();
+        if (normalized === 'poland' || normalized === 'geofabrik_europe_poland') {
+          return { country, subregion: null };
+        }
+        return null;
+      }
+    },
+    extractResolver: createMockExtractResolver({
+      exact: {
+        'geofabrik:poland': {
+          candidate: {
+            extractSource: 'geofabrik',
+            extractId: 'geofabrik_europe_poland',
+            extractLabel: 'Poland'
+          },
+          errorCode: null,
+          message: null
+        }
+      }
+    }),
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const upgraded = await service.saveRegion(
+    buildRegionInput({
+      id: inserted.id,
+      name: 'PL Poland',
+      slug: 'pl-poland',
+      searchQuery: 'PL Poland',
+      extractSource: 'geofabrik',
+      extractId: 'geofabrik_europe_poland',
+      extractLabel: 'PL Poland',
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0,
+      pmtilesMinZoom: 10,
+      pmtilesMaxZoom: 14,
+      sourceLayer: 'custom-buildings'
+    }),
+    'tester'
+  );
+
+  assert.equal(upgraded.id, inserted.id);
+  assert.equal(upgraded.regionKind, 'country_aggregate');
+  assert.equal(upgraded.extractId, 'geofabrik_europe_poland');
+
+  const resaved = await service.saveRegion(
+    buildRegionInput({
+      id: inserted.id,
+      name: 'PL Poland Aggregate',
+      slug: 'pl-poland',
+      searchQuery: 'PL Poland Aggregate',
+      extractSource: 'geofabrik',
+      extractId: 'geofabrik_europe_poland',
+      extractLabel: 'PL Poland Aggregate',
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 0,
+      pmtilesMinZoom: 10,
+      pmtilesMaxZoom: 14,
+      sourceLayer: 'custom-buildings'
+    }),
+    'tester'
+  );
+
+  assert.equal(resaved.id, inserted.id);
+  assert.equal(resaved.regionKind, 'country_aggregate');
+
+  const tree = await service.listRegionTree();
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].id, inserted.id);
+  assert.equal(tree[0].subregions?.length, 2);
+  assert.deepEqual(
+    (tree[0].subregions || []).map((item) => item.name),
+    ['PL Poland Aggregate · Dolnoslaskie', 'PL Poland Aggregate · Mazowieckie']
+  );
+});
+
+test('createQueuedRun upgrades an existing standalone geofabrik country into an aggregate before queueing', async () => {
+  const db = createTestDb();
+  const country = {
+    countryId: 'poland',
+    name: 'Poland',
+    iso: 'PL',
+    bounds: null,
+    pbfUrl: 'https://download.geofabrik.de/europe/poland-latest.osm.pbf',
+    subregions: [
+      {
+        extractId: 'poland/dolnoslaskie',
+        name: 'Dolnoslaskie',
+        iso: 'PL-02',
+        bounds: null,
+        pbfUrl: 'https://download.geofabrik.de/europe/poland/dolnoslaskie-latest.osm.pbf'
+      },
+      {
+        extractId: 'poland/mazowieckie',
+        name: 'Mazowieckie',
+        iso: 'PL-14',
+        bounds: null,
+        pbfUrl: 'https://download.geofabrik.de/europe/poland/mazowieckie-latest.osm.pbf'
+      }
+    ]
+  };
+
+  db.prepare(
+    `
+      INSERT INTO data_sync_regions (
+        slug,
+        name,
+        source_type,
+        source_value,
+        extract_source,
+        extract_id,
+        extract_label,
+        extract_resolution_status,
+        enabled,
+        auto_sync_enabled,
+        auto_sync_on_start,
+        auto_sync_interval_hours,
+        pmtiles_min_zoom,
+        pmtiles_max_zoom,
+        source_layer,
+        region_kind,
+        visible_in_admin,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, 'extract', ?, ?, ?, ?, 'resolved', 1, 0, 0, 0, 10, 14, 'custom-buildings', 'standalone', 1, datetime('now'), datetime('now'))
+    `
+  ).run(
+    'pl-poland',
+    'PL Poland',
+    'PL Poland',
+    'geofabrik',
+    'geofabrik_europe_poland',
+    'PL Poland'
+  );
+
+  const inserted = db
+    .prepare(
+      `
+        SELECT id
+        FROM data_sync_regions
+        WHERE slug = ?
+        LIMIT 1
+      `
+    )
+    .get('pl-poland');
+  assert.ok(inserted?.id);
+
+  const service = createService({
+    db,
+    countrySubregionsCatalog: {
+      async getCountry(countryId) {
+        return String(countryId || '').trim().toLowerCase() === 'poland' ? country : null;
+      },
+      async findByExtractId(extractId) {
+        const normalized = String(extractId || '').trim().toLowerCase();
+        if (normalized === 'poland' || normalized === 'geofabrik_europe_poland') {
+          return { country, subregion: null };
+        }
+        return null;
+      }
+    },
+    fallbackData: {
+      autoSyncEnabled: true,
+      autoSyncOnStart: false,
+      autoSyncIntervalHours: 24,
+      pmtilesMinZoom: 13,
+      pmtilesMaxZoom: 16,
+      sourceLayer: 'buildings'
+    }
+  });
+
+  const run = await service.createQueuedRun(inserted.id, 'manual', 'tester');
+  assert.ok(run);
+  assert.equal(run.regionId, inserted.id);
+  assert.equal(run.status, 'queued');
+
+  const upgraded = await service.getRegionById(inserted.id);
+  assert.ok(upgraded);
+  assert.equal(upgraded.regionKind, 'country_aggregate');
+  assert.equal(upgraded.lastSyncStatus, 'queued');
+
+  const tree = await service.listRegionTree();
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].subregions?.length, 2);
+  assert.deepEqual(
+    (tree[0].subregions || []).map((item) => ({
+      extractId: item.extractId,
+      regionKind: item.regionKind,
+      parentRegionId: item.parentRegionId
+    })),
+    [
+      {
+        extractId: 'poland/dolnoslaskie',
+        regionKind: 'subregion',
+        parentRegionId: inserted.id
+      },
+      {
+        extractId: 'poland/mazowieckie',
+        regionKind: 'subregion',
+        parentRegionId: inserted.id
+      }
+    ]
+  );
 });
 
 test('getDataSettingsForAdmin includes PMTiles size from disk and DB storage bytes for region', async () => {

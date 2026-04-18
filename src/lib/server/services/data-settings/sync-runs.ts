@@ -6,6 +6,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     ensureBootstrapped,
     rowToRun,
     getRegionById,
+    prepareRegionForSync,
     listRegions,
     normalizeBounds,
     normalizeNullableText,
@@ -180,7 +181,13 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
 
   async function createQueuedRun(regionId, triggerReason = 'manual', requestedBy = null) {
     await ensureBootstrapped();
-    const region = await getRegionById(regionId);
+    const region =
+      (typeof prepareRegionForSync === 'function'
+        ? await prepareRegionForSync(regionId, {
+            triggerReason,
+            requestedBy
+          })
+        : null) || (await getRegionById(regionId));
     if (!region) {
       throw new Error('Region not found');
     }
