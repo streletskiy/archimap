@@ -14,28 +14,32 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 - Builds `tippecanoe` and `tile-join` once from pinned ref.
 
-2. `deps`
+2. `planetiler-dist`
+
+- Pulls the pinned upstream `ghcr.io/onthegomap/planetiler` image and reuses its Java runtime + application classpath in our `runtime-base`.
+
+3. `deps`
 
 - Installs backend production dependencies from `package-lock.json`.
 - Changes only when backend dependency manifests change.
 
-3. `frontend-deps`
+4. `frontend-deps`
 
 - Installs frontend dependencies from `frontend/package-lock.json`.
 - Isolated from backend source changes.
 
-4. `frontend-runtime-deps`
+5. `frontend-runtime-deps`
 
 - Starts from `frontend-deps` and prunes dev dependencies with `npm prune --omit=dev`.
 - Keeps the runtime image free of frontend dev dependencies.
 
-5. `frontend-build`
+6. `frontend-build`
 
 - Generates version metadata and builds frontend bundle from committed frontend assets.
 - Installs the backend production dependency tree in the build-platform stage so `scripts/generate-version.ts` uses a matching native `esbuild` binary.
 - Does not reuse the runtime `deps` layer.
 
-6. `runtime`
+7. `runtime`
 
 - Uses pinned `node:24-bookworm-slim`.
 - Contains only runtime assets:
@@ -43,7 +47,8 @@ Reference: [`Dockerfile`](../../Dockerfile)
   - `frontend/build`
   - production `node_modules`
   - python venv with `quackosm`/`duckdb`
-  - `tippecanoe` binaries
+  - `planetiler` wrapper + Java runtime
+  - `tippecanoe` / `tile-join` fallback binaries
   - QuackOSM's cache root is mapped to `/app/data/cache`, so precalculated extract indexes survive container restarts when the default `./data:/app/data` volume is present.
 
 ## Cache Stability Rules

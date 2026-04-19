@@ -12,9 +12,17 @@ const {
   writeStreamLine
 } = require('./common');
 const { expandRowsWithBuildingRemainders } = require('./building-remainder');
+const { resolvePmtilesBuildEngine, runPlanetilerBuild } = require('./planetiler');
 
 const KM_PER_DEGREE_LAT = 111.32;
 const DEFAULT_SHARD_KM = 60;
+const REGION_PMTILES_ATTRIBUTE_KEYS = Object.freeze([
+  'feature_kind',
+  'osm_id',
+  'render_height_m',
+  'render_hide_base_when_parts',
+  'render_min_height_m'
+]);
 // Default `null` means "use the adaptive floor derived from bbox size and
 // feature count". Setting REGION_SYNC_SHARD_MIN_FEATURES explicitly keeps the
 // old override behavior, including `0` for benchmarking/always-shard runs.
@@ -300,6 +308,20 @@ function runTileJoin({ tileJoinExe, region, inputs, outputPath, env }: LooseReco
   }
 }
 
+function runPlanetilerForRegion({ region, inputPath, outputPath, env }: LooseRecord) {
+  return runPlanetilerBuild({
+    inputPath,
+    outputPath,
+    schemaName: `ArchiMap ${String(region?.slug || region?.name || 'region').trim() || 'region'} PMTiles`,
+    layer: String(region?.sourceLayer || 'buildings'),
+    minZoom: Number(region?.pmtilesMinZoom || 13),
+    maxZoom: Number(region?.pmtilesMaxZoom || 16),
+    attributeKeys: REGION_PMTILES_ATTRIBUTE_KEYS,
+    includeFeatureId: true,
+    env
+  });
+}
+
 function resolveShardKm(shardKm, env = process.env) {
   const explicit = Number.isFinite(shardKm) ? Number(shardKm) : NaN;
   if (Number.isFinite(explicit)) {
@@ -546,6 +568,29 @@ async function buildPmtilesFromGeojson({
       // progress reporting must never break the build
     }
   };
+  const buildEngine = resolvePmtilesBuildEngine(env);
+  if (buildEngine === 'planetiler') {
+    reportShardProgress({
+      progress: null,
+      detail: 'planetiler (single pass)'
+    });
+    runPlanetilerForRegion({
+      region,
+      inputPath: geojsonPath,
+      outputPath,
+      env
+    });
+    return {
+      engine: buildEngine,
+      mode: 'single',
+      shardCount: 1,
+      grid: null,
+      reusedShardCount: 0,
+      rebuiltShardCount: 0,
+      cacheDir: null
+    };
+  }
+
   const tippecanoeExe = detectTippecanoeExecutable(env);
   if (!tippecanoeExe) {
     throw new Error('tippecanoe is not available. Install tippecanoe or set TIPPECANOE_BIN.');
@@ -574,6 +619,7 @@ async function buildPmtilesFromGeojson({
       env
     });
     return {
+      engine: buildEngine,
       mode: 'single',
       shardCount: 1,
       grid,
@@ -635,6 +681,7 @@ async function buildPmtilesFromGeojson({
         env
       });
       return {
+        engine: buildEngine,
         mode: 'single-collapsed',
         shardCount: 1,
         grid,
@@ -807,6 +854,7 @@ async function buildPmtilesFromGeojson({
     }
 
     return {
+      engine: buildEngine,
       mode: effectiveShardCacheDir ? 'sharded-cache' : 'sharded',
       shardCount: shardPlan.shards.length,
       grid,

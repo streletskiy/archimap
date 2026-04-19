@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG TIPPECANOE_REF=2.79.0
+ARG PLANETILER_VERSION=0.10.2
 ARG QUACKOSM_VERSION=0.17.0
 ARG DUCKDB_VERSION=1.4.4
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
@@ -27,6 +28,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN git clone --depth 1 --branch "${TIPPECANOE_REF}" https://github.com/felt/tippecanoe.git . \
   && make -j"$(nproc)" \
   && strip tippecanoe tile-join
+
+FROM ghcr.io/onthegomap/planetiler:${PLANETILER_VERSION} AS planetiler-dist
 
 FROM ${NODE_IMAGE} AS deps
 
@@ -74,6 +77,7 @@ FROM ${NODE_IMAGE} AS runtime-base
 ARG QUACKOSM_VERSION
 ARG DUCKDB_VERSION
 ARG PIP_VERSION
+ARG PLANETILER_VERSION
 
 WORKDIR /app
 
@@ -92,6 +96,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 COPY --from=tippecanoe-builder /tmp/tippecanoe/tippecanoe /usr/local/bin/tippecanoe
 COPY --from=tippecanoe-builder /tmp/tippecanoe/tile-join /usr/local/bin/tile-join
+COPY --from=planetiler-dist /opt/java/openjdk /opt/java/openjdk
+COPY --from=planetiler-dist /app /opt/planetiler
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
   python3 -m venv /opt/pyosm \
@@ -125,8 +131,26 @@ PYEOF
 
 RUN mkdir -p /app/data/cache /app/data/quackosm
 
+RUN <<'EOF'
+set -eu
+cat > /usr/local/bin/planetiler <<'INNER'
+#!/bin/sh
+set -eu
+exec "${JAVA_HOME:-/opt/java/openjdk}/bin/java" \
+  -cp "/opt/planetiler/resources:/opt/planetiler/classes:/opt/planetiler/libs/*" \
+  com.onthegomap.planetiler.Main \
+  "$@"
+INNER
+chmod +x /usr/local/bin/planetiler
+EOF
+
 ENV PYTHON_BIN=/opt/pyosm/bin/python
 ENV XDG_CACHE_HOME=/app/data/cache
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH=/opt/java/openjdk/bin:${PATH}
+ENV PLANETILER_BIN=/usr/local/bin/planetiler
+ENV PLANETILER_HOME=/opt/planetiler
+ENV PLANETILER_VERSION=${PLANETILER_VERSION}
 
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
 

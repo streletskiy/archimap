@@ -14,6 +14,8 @@ param(
 
   [string]$TippecanoeRef = "2.79.0",
 
+  [string]$PlanetilerVersion = "0.10.2",
+
   [string]$QuackosmVersion = "0.17.0",
 
   [string]$DuckdbVersion = "1.4.4",
@@ -52,7 +54,7 @@ if ([string]::IsNullOrWhiteSpace($CacheRef)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($RuntimeBaseTag)) {
-  $rawRuntimeBaseTag = "runtime-base-t$TippecanoeRef-q$QuackosmVersion-d$DuckdbVersion-p$PipVersion"
+  $rawRuntimeBaseTag = "runtime-base-t$TippecanoeRef-pl$PlanetilerVersion-q$QuackosmVersion-d$DuckdbVersion-p$PipVersion"
   $RuntimeBaseTag = ($rawRuntimeBaseTag -replace '[^A-Za-z0-9._-]', '-')
 }
 $RuntimeBaseImage = "${Image}:$RuntimeBaseTag"
@@ -285,6 +287,7 @@ $args = @(
   "--builder", $Builder,
   "--platform", $Platforms,
   "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
+  "--build-arg", "PLANETILER_VERSION=$PlanetilerVersion",
   "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
   "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
   "--build-arg", "PIP_VERSION=$PipVersion",
@@ -314,6 +317,7 @@ if (-not $SkipRuntimeBase) {
       "--platform", $Platforms,
       "--target", "runtime-base",
       "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
+      "--build-arg", "PLANETILER_VERSION=$PlanetilerVersion",
       "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
       "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
       "--build-arg", "PIP_VERSION=$PipVersion",
@@ -359,6 +363,7 @@ Write-Host "Publish latest tag: $(if ($publishLatest) { 'yes' } else { 'no' })" 
 Write-Host "Runtime base image: $RuntimeBaseImage" -ForegroundColor Gray
 Write-Host "Platforms: $Platforms" -ForegroundColor Gray
 Write-Host "Tippecanoe ref: $TippecanoeRef" -ForegroundColor Gray
+Write-Host "Planetiler version: $PlanetilerVersion" -ForegroundColor Gray
 Write-Host "QuackOSM version: $QuackosmVersion" -ForegroundColor Gray
 Write-Host "DuckDB version: $DuckdbVersion" -ForegroundColor Gray
 Write-Host "pip version: $PipVersion" -ForegroundColor Gray

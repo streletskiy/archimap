@@ -24,7 +24,7 @@
 
 ## Docker release script behavior
 
-- Runtime base tag is derived from dependency versions (`tippecanoe`, `quackosm`, `duckdb`, `pip`).
+- Runtime base tag is derived from dependency versions (`tippecanoe`, `planetiler`, `quackosm`, `duckdb`, `pip`).
 - `scripts/release-docker.sh` and `scripts/release-docker.ps1` skip rebuilding `runtime-base` if that tag already exists in registry.
 - Force rebuild only when needed:
   - Bash: `--force-runtime-base`
@@ -117,7 +117,9 @@
 
 - Check `PYTHON_BIN` or system Python availability.
 - Verify Python packages `quackosm` and `duckdb` are installed for the interpreter used by the app.
-- If the failure is later in PMTiles build, verify `tippecanoe` or `TIPPECANOE_BIN`.
+- If the failure is later in PMTiles build, verify the selected engine:
+  - default path: `planetiler` / `PLANETILER_BIN`
+  - fallback path: `tippecanoe` / `TIPPECANOE_BIN` when `PMTILES_BUILD_ENGINE=tippecanoe`
 
 ### Region shows `Sync interrupted by process restart` while a sync is still alive
 

@@ -94,10 +94,12 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `DATABASE_URL`, `DATABASE_PATH`, `ARCHIMAP_DB_PATH`, `OSM_DB_PATH`
 - `LOCAL_EDITS_DB_PATH`, `USER_EDITS_DB_PATH`, `USER_AUTH_DB_PATH`
 - `PYTHON_BIN`
+- `PMTILES_BUILD_ENGINE` - `planetiler` (default) or `tippecanoe`. The default runtime path builds regional PMTiles with planetiler in a single pass. Switch to `tippecanoe` only when you explicitly want the sharded/cached fallback path or need to compare engines.
+- `PLANETILER_BIN` - optional absolute path to the `planetiler` wrapper/command. The Docker runtime image ships `/usr/local/bin/planetiler` out of the box.
 - `TIPPECANOE_BIN`
-- `TILE_JOIN_BIN` - optional absolute path to the `tile-join` binary shipped with tippecanoe; auto-discovered from `PATH` when omitted. Required only if sharded PMTiles builds are enabled.
-- `REGION_SYNC_SHARD_KM` - cell size (in kilometers) for sharded PMTiles builds; `60` by default. Every region whose bbox spans more than one cell is built in sharded mode: each cell runs tippecanoe independently and the archives are merged with `tile-join`. This keeps peak tippecanoe memory bounded by the densest cell and is enabled by default on all hardware. Set to `0` to disable sharding and fall back to a single tippecanoe pass.
-- `REGION_SYNC_SHARD_MIN_FEATURES` - optional feature-count floor for sharding. When unset, the builder uses an adaptive threshold based on the planned grid size so small and medium regions can stay on the single-pass path. Set it to `0` to force sharding for every multi-cell region, or to a positive value to bias more regions toward the single-pass path.
+- `TILE_JOIN_BIN` - optional absolute path to the `tile-join` binary shipped with tippecanoe; auto-discovered from `PATH` when omitted. Required only when `PMTILES_BUILD_ENGINE=tippecanoe` and sharded PMTiles builds are enabled.
+- `REGION_SYNC_SHARD_KM` - cell size (in kilometers) for the tippecanoe-only sharded PMTiles fallback path; `60` by default. When `PMTILES_BUILD_ENGINE=tippecanoe`, every region whose bbox spans more than one cell is built in sharded mode: each cell runs tippecanoe independently and the archives are merged with `tile-join`. This keeps peak tippecanoe memory bounded by the densest cell. Set to `0` to disable sharding and fall back to a single tippecanoe pass.
+- `REGION_SYNC_SHARD_MIN_FEATURES` - optional feature-count floor for tippecanoe sharding. When unset, the builder uses an adaptive threshold based on the planned grid size so small and medium regions can stay on the single-pass path. Set it to `0` to force sharding for every multi-cell region, or to a positive value to bias more regions toward the single-pass path.
 - `REGION_SYNC_EXPORT_BATCH_SIZE` - Python DuckDB export fetch size for region sync artifacts; `2000` by default. Lower values reduce peak RSS during WKB/GeoJSON serialization on weak devices at the cost of more Python/IPC overhead.
 - `REGION_SYNC_EXPORT_PROGRESS_INTERVAL_SEC` - export-stage progress emit interval for the Python DuckDB exporter; `5` seconds by default. The exporter reports row counts and current throughput without adding an expensive pre-count pass.
 - `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` - SQLite DB apply-stage batch size for `region-import.ndjson`; `1000` by default and clamped to `8000`. Higher values reduce roundtrips and temp-table churn in the Node-side SQLite apply loop. PostgreSQL full sync uses a temp staging table loaded through `COPY FROM STDIN`, so this setting only affects its progress granularity there.
@@ -131,7 +133,7 @@ These values are used as fallback camera only when neither URL nor the saved cli
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails before extract starts:
   verify `PYTHON_BIN` or install Python modules `quackosm` and `duckdb`.
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails during PMTiles build:
-  install `tippecanoe` or set `TIPPECANOE_BIN`.
+  verify the selected engine: install `planetiler` or set `PLANETILER_BIN` for the default path, or install `tippecanoe` / set `TIPPECANOE_BIN` when `PMTILES_BUILD_ENGINE=tippecanoe`.
 - Newly created regions do not appear on the map:
   verify the region has a successful sync, non-empty bounds, and a PMTiles file under `data/regions/`.
 

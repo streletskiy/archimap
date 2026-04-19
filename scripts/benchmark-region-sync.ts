@@ -494,6 +494,7 @@ function inferShardStats(resultJson: LooseRecord = {}, stageEvents: BenchmarkSta
   );
   const shardLineCount = shardEvents.length;
   const reusedLineCount = shardEvents.filter((item) => /cache-hit/i.test(String(item.detail || ''))).length;
+  const engineFromResult = String(resultJson.pmtilesBuildEngine || '').trim() || null;
   const reusedFromResult = Number(resultJson.pmtilesShardReusedCount);
   const rebuiltFromResult = Number(resultJson.pmtilesShardRebuiltCount);
   const shardCountFromResult = Number(resultJson.pmtilesShardCount);
@@ -509,6 +510,7 @@ function inferShardStats(resultJson: LooseRecord = {}, stageEvents: BenchmarkSta
   }
 
   return {
+    pmtilesBuildEngine: engineFromResult,
     pmtilesBuildMode: inferredMode,
     pmtilesShardCount:
       Number.isFinite(shardCountFromResult) && shardCountFromResult > 0
@@ -686,8 +688,12 @@ async function runSyncPass({ cwd, regionId, pmtilesOnly = false, dataDir, sample
 
   return {
     name: pmtilesOnly
-      ? 'pmtiles-only'
-      : `full-sync-pass-${shardStats.pmtilesBuildMode || resultJson?.pmtilesBuildMode || 'unknown'}`,
+      ? `pmtiles-only-${shardStats.pmtilesBuildEngine || resultJson?.pmtilesBuildEngine || 'unknown'}-${
+          shardStats.pmtilesBuildMode || resultJson?.pmtilesBuildMode || 'unknown'
+        }`
+      : `full-sync-pass-${shardStats.pmtilesBuildEngine || resultJson?.pmtilesBuildEngine || 'unknown'}-${
+          shardStats.pmtilesBuildMode || resultJson?.pmtilesBuildMode || 'unknown'
+        }`,
     mode: pmtilesOnly ? 'pmtiles-only' : 'full-sync',
     startedAt: startedAtIso,
     endedAt: endedAtIso,
@@ -782,6 +788,7 @@ async function main() {
         dataDir: benchmarkDataDir,
         dbProvider: runtimeOptions.dbProvider,
         env: {
+          PMTILES_BUILD_ENGINE: process.env.PMTILES_BUILD_ENGINE || null,
           REGION_SYNC_SHARD_KM: process.env.REGION_SYNC_SHARD_KM || null,
           REGION_SYNC_SHARD_MIN_FEATURES: process.env.REGION_SYNC_SHARD_MIN_FEATURES || null,
           REGION_SYNC_WORKDIR_CLEANUP: process.env.REGION_SYNC_WORKDIR_CLEANUP || 'warm',

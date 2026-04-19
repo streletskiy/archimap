@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const { resolvePmtilesBuildEngine } = require('./region-sync/planetiler');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_INPUT = path.join(REPO_ROOT, 'frontend', 'build', 'client', 'admin-regions.geojson');
@@ -11,7 +12,9 @@ const DEFAULT_MODE =
   String(process.env.ADMIN_REGIONS_PMTILES_ON_START || 'auto')
     .trim()
     .toLowerCase() || 'auto';
+const DEFAULT_ENGINE = resolvePmtilesBuildEngine(process.env);
 const DEFAULT_TIPPECANOE_BIN = String(process.env.TIPPECANOE_BIN || 'tippecanoe').trim() || 'tippecanoe';
+const DEFAULT_PLANETILER_BIN = String(process.env.PLANETILER_BIN || 'planetiler').trim() || 'planetiler';
 const VALID_MODES = new Set(['auto', 'always', 'never']);
 
 function normalizeMode(mode) {
@@ -62,13 +65,17 @@ function buildRebuildReason({ mode, outputExists, metadata, inputSha256 }) {
   return '';
 }
 
-function runPmtilesBuild({ inputPath, outputPath, metadataPath, tippecanoeBin }: LooseRecord) {
+function runPmtilesBuild({ inputPath, outputPath, metadataPath, engine, tippecanoeBin, planetilerBin }: LooseRecord) {
   const args = [
     '--import',
     'tsx',
     'scripts/build-admin-regions-pmtiles.ts',
+    '--engine',
+    engine,
     '--tippecanoe-bin',
     tippecanoeBin,
+    '--planetiler-bin',
+    planetilerBin,
     '--input',
     inputPath,
     '--output',
@@ -98,7 +105,9 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
   const inputPath = path.resolve(REPO_ROOT, String(options.inputPath || DEFAULT_INPUT));
   const outputPath = path.resolve(REPO_ROOT, String(options.outputPath || DEFAULT_OUTPUT));
   const metadataPath = path.resolve(REPO_ROOT, String(options.metadataPath || DEFAULT_METADATA_OUTPUT));
+  const engine = resolvePmtilesBuildEngine({ PMTILES_BUILD_ENGINE: options.engine || DEFAULT_ENGINE });
   const tippecanoeBin = String(options.tippecanoeBin || DEFAULT_TIPPECANOE_BIN).trim() || DEFAULT_TIPPECANOE_BIN;
+  const planetilerBin = String(options.planetilerBin || DEFAULT_PLANETILER_BIN).trim() || DEFAULT_PLANETILER_BIN;
 
   if (mode === 'never') {
     logger.log('[admin-regions] pmtiles startup refresh disabled');
@@ -135,7 +144,9 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
       inputPath,
       outputPath,
       metadataPath,
-      tippecanoeBin
+      engine,
+      tippecanoeBin,
+      planetilerBin
     });
     return { status: outputExists ? 'rebuilt' : 'created', reason: rebuildReason };
   } catch (error) {

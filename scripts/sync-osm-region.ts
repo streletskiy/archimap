@@ -368,6 +368,17 @@ async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: 
   });
 }
 
+function summarizePmtilesBuildResult(buildResult: LooseRecord = {}) {
+  return {
+    pmtilesBuildEngine: buildResult?.engine || null,
+    pmtilesBuildMode: buildResult?.mode || null,
+    pmtilesShardCount: Number(buildResult?.shardCount || 0) || null,
+    pmtilesShardReusedCount: Number(buildResult?.reusedShardCount || 0),
+    pmtilesShardRebuiltCount: Number(buildResult?.rebuiltShardCount || 0),
+    pmtilesShardCacheDir: buildResult?.cacheDir || null
+  };
+}
+
 function readExportSummary(summaryPath) {
   const normalizedPath = String(summaryPath || '').trim();
   if (!normalizedPath || !fs.existsSync(normalizedPath)) {
@@ -469,11 +480,7 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
       activeFeatureCount: exported.importedFeatureCount,
       orphanDeletedCount: 0,
       renderCacheRows: 0,
-      pmtilesBuildMode: buildResult?.mode || null,
-      pmtilesShardCount: Number(buildResult?.shardCount || 0) || null,
-      pmtilesShardReusedCount: Number(buildResult?.reusedShardCount || 0),
-      pmtilesShardRebuiltCount: Number(buildResult?.rebuiltShardCount || 0),
-      pmtilesShardCacheDir: buildResult?.cacheDir || null,
+      ...summarizePmtilesBuildResult(buildResult),
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
       bounds: exported.bounds
@@ -543,7 +550,7 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
 
     return {
       ...dbResult,
-      ...buildResult,
+      ...summarizePmtilesBuildResult(buildResult),
       renderCacheRows: Number(dbResult.renderCacheRows || 0),
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
@@ -623,7 +630,7 @@ async function runRegionSyncIncrementalBranch(region, runtimeOptions, newPbf) {
 
     return {
       ...dbResult,
-      ...buildResult,
+      ...summarizePmtilesBuildResult(buildResult),
       incremental: {
         affectedObjectIds: incremental.affectedObjectIds,
         touchedNodeIds: incremental.touchedNodeIds,
@@ -721,7 +728,7 @@ async function runRegionSync(region, runtimeOptions) {
 
     return {
       ...dbResult,
-      ...buildResult,
+      ...summarizePmtilesBuildResult(buildResult),
       bounds: exported.bounds
     };
   } finally {

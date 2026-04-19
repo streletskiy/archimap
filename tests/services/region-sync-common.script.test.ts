@@ -704,7 +704,12 @@ test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or
       { mode: 0o755 }
     );
 
-    const fakeEnv = { ...process.env, TIPPECANOE_BIN: fakeTippecanoePath, TILE_JOIN_BIN: fakeTippecanoePath };
+    const fakeEnv = {
+      ...process.env,
+      PMTILES_BUILD_ENGINE: 'tippecanoe',
+      TIPPECANOE_BIN: fakeTippecanoePath,
+      TILE_JOIN_BIN: fakeTippecanoePath
+    };
 
     const disabled = await buildPmtilesFromGeojson({
       region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
@@ -794,6 +799,7 @@ test('buildPmtilesFromGeojson reuses cached shard archives on repeated runs', as
 
     const fakeEnv = {
       ...process.env,
+      PMTILES_BUILD_ENGINE: 'tippecanoe',
       TIPPECANOE_BIN: fakeTippecanoePath,
       TILE_JOIN_BIN: fakeTippecanoePath,
       REGION_SYNC_SHARD_MIN_FEATURES: '0'
