@@ -11,6 +11,54 @@ function normalizeIds(values) {
     : [];
 }
 
+function decodeOsmFeatureId(featureId) {
+  const numericFeatureId = Number(featureId);
+  if (!Number.isInteger(numericFeatureId) || numericFeatureId < 0) {
+    return null;
+  }
+  return {
+    osmType: numericFeatureId % 2 === 1 ? 'relation' : 'way',
+    osmId: Math.trunc(numericFeatureId / 2)
+  };
+}
+
+function normalizeOsmKey(raw) {
+  const text = String(raw || '').trim();
+  if (!text || !text.includes('/')) return null;
+  const [osmType, osmIdRaw] = text.split('/');
+  const osmId = Number(osmIdRaw);
+  if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
+    return null;
+  }
+  return `${osmType}/${osmId}`;
+}
+
+function normalizeOsmKeys(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const key = normalizeOsmKey(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+function deriveOsmKeysFromIds(values) {
+  const out = [];
+  const seen = new Set();
+  for (const id of normalizeIds(values)) {
+    const decoded = decodeOsmFeatureId(id);
+    if (!decoded) continue;
+    const key = `${decoded.osmType}/${decoded.osmId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
 function normalizeColor(rawColor, fallbackColor = FILTER_TRANSPARENT_COLOR) {
   const color = String(rawColor || '').trim();
   return color || fallbackColor;
@@ -80,6 +128,28 @@ function buildFilterPaintExpressionFromNormalizedGroups(normalizedGroups, fallba
     };
   }
 
+  const keyGroups = normalizedGroups.map((group) => deriveOsmKeysFromIds(group.ids));
+  const canUseKeyExpression =
+    keyGroups.some((keys) => keys.length > 0) &&
+    keyGroups.every((keys, index) => keys.length > 0 || (Array.isArray(normalizedGroups[index]?.ids) ? normalizedGroups[index].ids : []).length === 0);
+
+  if (canUseKeyExpression) {
+    const expr = ['match', ['get', 'osm_key']];
+    let count = 0;
+    for (let index = 0; index < normalizedGroups.length; index += 1) {
+      const group = normalizedGroups[index];
+      const keys = keyGroups[index];
+      if (keys.length === 0) continue;
+      expr.push(keys, group.color);
+      count += keys.length;
+    }
+    expr.push(fallbackColor);
+    return {
+      expr,
+      count
+    };
+  }
+
   const expr = ['match', ['id']];
   let count = 0;
   for (const group of normalizedGroups) {
@@ -102,11 +172,22 @@ export function buildFilterPaintExpression(colorGroups, fallbackColor = FILTER_T
 export function buildFilterActiveValueExpression(colorGroups, activeValue, inactiveValue = 0) {
   const normalizedGroups = normalizeFilterPaintColorGroups(colorGroups);
   const activeIds = normalizedGroups.flatMap((group) => group.ids);
+  const activeKeys = normalizedGroups.flatMap((group) => deriveOsmKeysFromIds(group.ids));
+  const useKeyExpression =
+    activeKeys.length > 0 &&
+    normalizedGroups.every((group) => deriveOsmKeysFromIds(group.ids).length > 0 || group.ids.length === 0);
 
   if (activeIds.length === 0) {
     return {
       expr: inactiveValue,
       count: 0
+    };
+  }
+
+  if (useKeyExpression) {
+    return {
+      expr: ['match', ['get', 'osm_key'], activeKeys, activeValue, inactiveValue],
+      count: activeKeys.length
     };
   }
 
@@ -121,6 +202,27 @@ function buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups) {
     return {
       expr: EMPTY_LAYER_FILTER,
       count: 0
+    };
+  }
+
+  const activeKeys = [];
+  let keyCount = 0;
+  let canUseKeyExpression = true;
+  for (const group of normalizedGroups) {
+    const keys = deriveOsmKeysFromIds(group.ids);
+    if (keys.length === 0 && group.ids.length > 0) {
+      canUseKeyExpression = false;
+      break;
+    }
+    if (keys.length === 0) continue;
+    activeKeys.push(...keys);
+    keyCount += keys.length;
+  }
+
+  if (canUseKeyExpression && activeKeys.length > 0) {
+    return {
+      expr: ['in', ['get', 'osm_key'], ['literal', activeKeys]],
+      count: keyCount
     };
   }
 
@@ -274,9 +376,14 @@ export function applyFilterPaintHighlight({
 export function buildFilterHighlightExpression(matched) {
   const encodedIds = normalizeIds(Array.isArray(matched) ? matched : matched?.encodedIds);
   const osmIds = normalizeIds(Array.isArray(matched) ? [] : matched?.osmIds);
+  const matchedKeys = normalizeOsmKeys(Array.isArray(matched) ? [] : matched?.matchedKeys || matched?.osmKeys);
+  const derivedKeys = matchedKeys.length > 0 ? matchedKeys : deriveOsmKeysFromIds(encodedIds);
+  const matchedCount = Math.max(derivedKeys.length, encodedIds.length, osmIds.length);
   const clauses = [];
 
-  if (encodedIds.length > 0) {
+  if (derivedKeys.length > 0) {
+    clauses.push(['in', ['get', 'osm_key'], ['literal', derivedKeys]]);
+  } else if (encodedIds.length > 0) {
     clauses.push(['in', ['id'], ['literal', encodedIds]]);
   }
   if (osmIds.length > 0) {
@@ -285,9 +392,9 @@ export function buildFilterHighlightExpression(matched) {
 
   if (clauses.length === 0) return { expr: EMPTY_LAYER_FILTER, count: 0 };
   if (clauses.length === 1) {
-    return { expr: clauses[0], count: Math.max(encodedIds.length, osmIds.length) };
+    return { expr: clauses[0], count: matchedCount };
   }
-  return { expr: ['any', ...clauses], count: Math.max(encodedIds.length, osmIds.length) };
+  return { expr: ['any', ...clauses], count: matchedCount };
 }
 
 export function applyFilterHighlight({ map, matched, fillLayerId, lineLayerId, onLayerFilterApplied }) {

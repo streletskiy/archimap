@@ -33,7 +33,7 @@ System notes:
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`.
   - The runtime reuses the persisted `filter_tag_keys_cache` after restarts and only cold-starts a rebuild when the cache is empty.
-  - `warmingUp` stays true while the cache is empty or a background rebuild is running.
+  - `warmingUp` stays true while a background rebuild is running, and turns false once the cache has been successfully rebuilt even if the resulting key list is empty.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
 - `GET /api/filter-presets`
   - Returns runtime map filter presets from DB-backed admin settings storage.

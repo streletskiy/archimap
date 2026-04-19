@@ -26,12 +26,18 @@ export function encodeOsmFeatureId(osmType, osmId) {
 }
 
 function normalizeSelectionIdentity(selection) {
+  const fromKey = parseOsmKey(selection?.osmKey ?? selection?.osm_key);
+  if (fromKey) return fromKey;
   const osmType = String(selection?.osmType ?? selection?.osm_type ?? '').trim();
   const osmId = Number(selection?.osmId ?? selection?.osm_id);
   if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
     return null;
   }
   return { osmType, osmId };
+}
+
+function buildOsmKey(osmType, osmId) {
+  return `${osmType}/${osmId}`;
 }
 
 export function getFeatureIdentity(feature) {
@@ -90,18 +96,23 @@ export function getSelectionFilter(feature, identity) {
     return buildSelectionFilterFromIdentities(feature, identity);
   }
 
+  const fromFeatureKey = parseOsmKey(feature?.properties?.osm_key);
+  if (fromFeatureKey) {
+    return ['==', ['get', 'osm_key'], buildOsmKey(fromFeatureKey.osmType, fromFeatureKey.osmId)];
+  }
+
   const normalizedIdentity = normalizeSelectionIdentity(identity);
   if (normalizedIdentity?.osmType && Number.isInteger(normalizedIdentity?.osmId)) {
-    const encodedId = encodeOsmFeatureId(normalizedIdentity.osmType, normalizedIdentity.osmId);
-    if (Number.isInteger(encodedId) && encodedId > 0) {
-      return ['==', ['id'], encodedId];
+    const osmKey = buildOsmKey(normalizedIdentity.osmType, normalizedIdentity.osmId);
+    if (osmKey) {
+      return ['==', ['get', 'osm_key'], osmKey];
     }
   }
 
   if (identity?.osmType && Number.isInteger(identity?.osmId)) {
-    const encodedId = encodeOsmFeatureId(identity.osmType, identity.osmId);
-    if (Number.isInteger(encodedId) && encodedId > 0) {
-      return ['==', ['id'], encodedId];
+    const osmKey = buildOsmKey(identity.osmType, identity.osmId);
+    if (osmKey) {
+      return ['==', ['get', 'osm_key'], osmKey];
     }
   }
   const byFeatureId = feature?.id;

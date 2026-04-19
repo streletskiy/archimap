@@ -5,6 +5,10 @@
   import { formatUiDate } from '$lib/utils/edit-ui';
   import { UiButton } from '$lib/components/base';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
+  import {
+    REGION_SYNC_PIPELINE_STAGES,
+    normalizeRegionSyncStage
+  } from '$shared/region-sync-pipeline';
 
   import AdminDataForm from './AdminDataForm.svelte';
   import AdminDataHistorySection from './AdminDataHistorySection.svelte';
@@ -32,7 +36,7 @@
   const DESKTOP_REGION_RUNS_LIMIT = 20;
   const MOBILE_REGION_RUNS_LIMIT = 1000;
   const MOBILE_HISTORY_MEDIA_QUERY = '(max-width: 767px)';
-  const SYNC_PIPELINE_STAGES = ['download', 'extract', 'export', 'build', 'apply', 'publish', 'followup'];
+  const SYNC_PIPELINE_STAGES = REGION_SYNC_PIPELINE_STAGES;
   const SYNC_PIPELINE_STORAGE_PREFIX = 'archimap-admin-region-pipeline-v1:';
 
   let modalEl = null;
@@ -126,11 +130,7 @@
   }
 
   function normalizePipelineStage(stage) {
-    const code = String(stage || '').trim().toLowerCase();
-    if (!code) return '';
-    if (code === 'tile_join') return 'build';
-    if (SYNC_PIPELINE_STAGES.includes(code)) return code;
-    return '';
+    return normalizeRegionSyncStage(stage);
   }
 
   function inferSeenStages(currentStage) {
@@ -307,8 +307,8 @@
     if (currentStage === 'done') {
       nextSeenStages = new Set(SYNC_PIPELINE_STAGES);
     } else if (effectiveStage) {
-      if (nextSeenStages.size === 0) {
-        nextSeenStages = new Set(inferSeenStages(effectiveStage));
+      for (const stage of inferSeenStages(effectiveStage)) {
+        nextSeenStages.add(stage);
       }
       nextSeenStages.add(effectiveStage);
     }

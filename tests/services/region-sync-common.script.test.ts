@@ -7,6 +7,7 @@ const {
   buildFeature3dPropertiesFromTagsJson,
   createWorkspace,
   formatGeojsonFeatureLine,
+  formatRenderedGeojsonFeatureLine,
   parseRowPayload,
   writeRowsToNdjsonFile
 } = require('../../scripts/region-sync/common');
@@ -155,7 +156,7 @@ test('formatGeojsonFeatureLine preserves geometry json and encoded OSM feature i
 
   assert.equal(
     line,
-    '{"type":"Feature","id":247,"properties":{"osm_id":123,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":247,"properties":{"osm_type":"relation","osm_key":"relation/123","osm_id":123,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -169,7 +170,7 @@ test('formatGeojsonFeatureLine derives building_part feature kind from tags json
 
   assert.equal(
     line,
-    '{"type":"Feature","id":248,"properties":{"osm_id":124,"feature_kind":"building_part","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":248,"properties":{"osm_type":"way","osm_key":"way/124","osm_id":124,"feature_kind":"building_part","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -183,7 +184,7 @@ test('formatGeojsonFeatureLine treats mixed building tags as building', () => {
 
   assert.equal(
     line,
-    '{"type":"Feature","id":250,"properties":{"osm_id":125,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":250,"properties":{"osm_type":"way","osm_key":"way/125","osm_id":125,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -199,7 +200,7 @@ test('formatGeojsonFeatureLine preserves the hide-base-when-parts render flag', 
 
   assert.equal(
     line,
-    '{"type":"Feature","id":253,"properties":{"osm_id":126,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":253,"properties":{"osm_type":"relation","osm_key":"relation/126","osm_id":126,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -214,7 +215,24 @@ test('formatGeojsonFeatureLine preserves building_remainder feature kind', () =>
 
   assert.equal(
     line,
-    '{"type":"Feature","id":254,"properties":{"osm_id":127,"feature_kind":"building_remainder","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":254,"properties":{"osm_type":"way","osm_key":"way/127","osm_id":127,"feature_kind":"building_remainder","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+  );
+});
+
+test('formatRenderedGeojsonFeatureLine preserves stable osm_key properties', () => {
+  const line = formatRenderedGeojsonFeatureLine(
+    'relation',
+    321,
+    '{"type":"Point","coordinates":[37.6,55.7]}',
+    'building_part',
+    12.5,
+    3.5,
+    1
+  );
+
+  assert.equal(
+    line,
+    '{"type":"Feature","id":643,"properties":{"osm_type":"relation","osm_key":"relation/321","osm_id":321,"feature_kind":"building_part","render_height_m":12.5,"render_min_height_m":3.5,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -567,6 +585,8 @@ test('buildPmtilesFromGeojson shells out to planetiler only', async () => {
     const schema = fs.readFileSync(schemaPath, 'utf8');
     assert.match(schema, /schema_name: "ArchiMap test-region PMTiles"/);
     assert.match(schema, /- key: "feature_kind"/);
+    assert.match(schema, /- key: "osm_key"/);
+    assert.match(schema, /- key: "osm_type"/);
     assert.match(schema, /- key: "render_hide_base_when_parts"/);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });

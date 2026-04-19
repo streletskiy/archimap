@@ -496,8 +496,32 @@ async function upsertPostgresMembershipsFromNamedStage(client, stageSchema, stag
   );
 }
 
-async function deletePostgresStaleMembershipsFromNamedStage(client, stageSchema, stageTable, regionId) {
+async function hasPostgresRegionMemberships(client, regionId) {
+  const result = await client.query(
+    `
+    SELECT 1
+    FROM public.data_region_memberships
+    WHERE region_id = $1
+    LIMIT 1
+  `,
+    [regionId]
+  );
+  return (result.rowCount || 0) > 0;
+}
+
+async function deletePostgresStaleMembershipsFromNamedStage(
+  client,
+  stageSchema,
+  stageTable,
+  regionId,
+  { hasExistingMemberships = null } = {}
+) {
   const stageRef = buildStageTableRef(stageSchema, stageTable);
+  const shouldCleanup =
+    typeof hasExistingMemberships === 'boolean' ? hasExistingMemberships : await hasPostgresRegionMemberships(client, regionId);
+  if (!shouldCleanup) {
+    return false;
+  }
   await client.query('TRUNCATE region_orphan_candidates_tmp');
   await client.query(
     `
@@ -524,6 +548,7 @@ async function deletePostgresStaleMembershipsFromNamedStage(client, stageSchema,
   `,
     [regionId]
   );
+  return true;
 }
 
 async function upsertPostgresContoursFromStage(client, runMarker) {
@@ -590,7 +615,12 @@ async function upsertPostgresMembershipsFromStage(client, regionId) {
   );
 }
 
-async function deletePostgresStaleMemberships(client, regionId) {
+async function deletePostgresStaleMemberships(client, regionId, { hasExistingMemberships = null } = {}) {
+  const shouldCleanup =
+    typeof hasExistingMemberships === 'boolean' ? hasExistingMemberships : await hasPostgresRegionMemberships(client, regionId);
+  if (!shouldCleanup) {
+    return false;
+  }
   await client.query('TRUNCATE region_orphan_candidates_tmp');
   await client.query(
     `
@@ -617,6 +647,7 @@ async function deletePostgresStaleMemberships(client, regionId) {
   `,
     [regionId]
   );
+  return true;
 }
 
 async function lockPostgresContourSummary(client) {
@@ -785,6 +816,7 @@ async function applyRegionImportToPostgres({
       await progressReporter.reportStep('memberships', APPLY_MEMBERSHIPS_PROGRESS, 'upserting region memberships', {
         processedFeatureCount: importedFeatureCount
       });
+      const hasExistingMemberships = await hasPostgresRegionMemberships(client, region.id);
       await upsertPostgresMembershipsFromStage(client, region.id);
 
       if (finalPmtilesPath) {
@@ -794,30 +826,36 @@ async function applyRegionImportToPostgres({
       await progressReporter.reportStep(
         'stale_memberships',
         APPLY_STALE_MEMBERSHIPS_PROGRESS,
-        'removing stale region memberships',
+        hasExistingMemberships
+          ? 'removing stale region memberships'
+          : 'skipping stale region memberships on first sync',
         { processedFeatureCount: importedFeatureCount }
       );
-      await deletePostgresStaleMemberships(client, region.id);
-
-      await progressReporter.reportStep('orphan_cleanup', APPLY_ORPHAN_CLEANUP_PROGRESS, 'removing orphan contours', {
-        processedFeatureCount: importedFeatureCount
+      const staleMembershipCleanupRan = await deletePostgresStaleMemberships(client, region.id, {
+        hasExistingMemberships
       });
-      const orphanDeleted = await client.query(`
-        DELETE FROM osm.building_contours bc
-        WHERE EXISTS (
-          SELECT 1
-          FROM region_orphan_candidates_tmp candidates
-          WHERE candidates.osm_type = bc.osm_type
-            AND candidates.osm_id = bc.osm_id
-        )
-          AND NOT EXISTS (
-          SELECT 1
-          FROM public.data_region_memberships drm
-          WHERE drm.osm_type = bc.osm_type
-            AND drm.osm_id = bc.osm_id
-        )
-      `);
-      const orphanDeletedCount = Number(orphanDeleted.rowCount || 0);
+      let orphanDeletedCount = 0;
+      if (staleMembershipCleanupRan) {
+        await progressReporter.reportStep('orphan_cleanup', APPLY_ORPHAN_CLEANUP_PROGRESS, 'removing orphan contours', {
+          processedFeatureCount: importedFeatureCount
+        });
+        const orphanDeleted = await client.query(`
+          DELETE FROM osm.building_contours bc
+          WHERE EXISTS (
+            SELECT 1
+            FROM region_orphan_candidates_tmp candidates
+            WHERE candidates.osm_type = bc.osm_type
+              AND candidates.osm_id = bc.osm_id
+          )
+            AND NOT EXISTS (
+            SELECT 1
+            FROM public.data_region_memberships drm
+            WHERE drm.osm_type = bc.osm_type
+              AND drm.osm_id = bc.osm_id
+          )
+        `);
+        orphanDeletedCount = Number(orphanDeleted.rowCount || 0);
+      }
 
       await progressReporter.reportStep(
         'summary_refresh',
@@ -944,35 +982,46 @@ async function applyRegionImportFromPostgresStage({
       await progressReporter.reportStep('memberships', APPLY_MEMBERSHIPS_PROGRESS, 'upserting region memberships', {
         processedFeatureCount: importedFeatureCount
       });
+      const hasExistingMemberships = await hasPostgresRegionMemberships(client, region.id);
       await upsertPostgresMembershipsFromNamedStage(client, stageSchema, stageTable, region.id);
 
       await progressReporter.reportStep(
         'stale_memberships',
         APPLY_STALE_MEMBERSHIPS_PROGRESS,
-        'removing stale region memberships',
+        hasExistingMemberships
+          ? 'removing stale region memberships'
+          : 'skipping stale region memberships on first sync',
         { processedFeatureCount: importedFeatureCount }
       );
-      await deletePostgresStaleMembershipsFromNamedStage(client, stageSchema, stageTable, region.id);
-
-      await progressReporter.reportStep('orphan_cleanup', APPLY_ORPHAN_CLEANUP_PROGRESS, 'removing orphan contours', {
-        processedFeatureCount: importedFeatureCount
-      });
-      const orphanDeleted = await client.query(`
-        DELETE FROM osm.building_contours bc
-        WHERE EXISTS (
-          SELECT 1
-          FROM region_orphan_candidates_tmp candidates
-          WHERE candidates.osm_type = bc.osm_type
-            AND candidates.osm_id = bc.osm_id
-        )
-          AND NOT EXISTS (
-          SELECT 1
-          FROM public.data_region_memberships drm
-          WHERE drm.osm_type = bc.osm_type
-            AND drm.osm_id = bc.osm_id
-        )
-      `);
-      const orphanDeletedCount = Number(orphanDeleted.rowCount || 0);
+      const staleMembershipCleanupRan = await deletePostgresStaleMembershipsFromNamedStage(
+        client,
+        stageSchema,
+        stageTable,
+        region.id,
+        { hasExistingMemberships }
+      );
+      let orphanDeletedCount = 0;
+      if (staleMembershipCleanupRan) {
+        await progressReporter.reportStep('orphan_cleanup', APPLY_ORPHAN_CLEANUP_PROGRESS, 'removing orphan contours', {
+          processedFeatureCount: importedFeatureCount
+        });
+        const orphanDeleted = await client.query(`
+          DELETE FROM osm.building_contours bc
+          WHERE EXISTS (
+            SELECT 1
+            FROM region_orphan_candidates_tmp candidates
+            WHERE candidates.osm_type = bc.osm_type
+              AND candidates.osm_id = bc.osm_id
+          )
+            AND NOT EXISTS (
+            SELECT 1
+            FROM public.data_region_memberships drm
+            WHERE drm.osm_type = bc.osm_type
+              AND drm.osm_id = bc.osm_id
+          )
+        `);
+        orphanDeletedCount = Number(orphanDeleted.rowCount || 0);
+      }
 
       await progressReporter.reportStep(
         'summary_refresh',
@@ -1051,6 +1100,9 @@ module.exports = {
   buildPostgresCopyTextLine,
   computePostgresContourSummaryTotal,
   escapePostgresCopyTextValue,
+  deletePostgresStaleMemberships,
+  deletePostgresStaleMembershipsFromNamedStage,
+  hasPostgresRegionMemberships,
   normalizeSourceSnapshotForInsert,
   publishPmtilesArchive,
   resolveImportApplyBatchSize

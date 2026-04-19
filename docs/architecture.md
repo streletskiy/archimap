@@ -158,7 +158,7 @@
   - `filter-diff-apply-strategy.js`: chunked highlight diff/apply over MapLibre paint properties
   - supporting utilities remain split into `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js`
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
-- Matched buildings are marked with `setFeatureState({ isFiltered: true, filterColor: '#rrggbb' })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- Matched buildings are marked by stable OSM identity keys (`osm_key`) embedded in the region and Overpass feature properties, so selection and highlight layers do not depend on Planetiler-assigned vector-tile feature ids.
 - When one building matches multiple layers, the highest-priority layer wins and provides the visible `filterColor`.
 - Feature-state updates are diff-based (`toEnable` / `toDisable`) via worker apply-plan and are chunked per frame for smoothness.
 - Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.

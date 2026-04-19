@@ -15,6 +15,9 @@ function createFilterTagKeysBoot(options: LooseRecord = {}) {
   } = options;
 
   let filterTagKeysCache = { keys: null, loadedAt: 0 };
+  // Once a rebuild finishes successfully, an empty cache should count as "loaded"
+  // so later reads do not keep scheduling cold-start rebuilds forever.
+  let filterTagKeysRebuildCompletedAt = 0;
   let filterTagKeysRebuildInProgress = false;
   let queuedFilterTagKeysRebuildReason = null;
   let currentFilterTagKeysRebuildChild = null;
@@ -69,6 +72,7 @@ function createFilterTagKeysBoot(options: LooseRecord = {}) {
         return;
       }
       if (code === 0) {
+        filterTagKeysRebuildCompletedAt = Date.now();
         filterTagKeysCache = { keys: null, loadedAt: 0 };
         logger.info('filter_tags_rebuild_finished', { reason });
       } else {
@@ -97,10 +101,9 @@ function createFilterTagKeysBoot(options: LooseRecord = {}) {
       return cachedKeys;
     }
 
-    if (!filterTagKeysRebuildInProgress) {
+    if (filterTagKeysRebuildCompletedAt <= 0 && !filterTagKeysRebuildInProgress) {
       scheduleFilterTagKeysCacheRebuild('cold-start');
     }
-    filterTagKeysCache = { keys: [], loadedAt: now };
     return [];
   }
 
@@ -118,6 +121,7 @@ function createFilterTagKeysBoot(options: LooseRecord = {}) {
 
   function resetFilterTagKeysCache() {
     filterTagKeysCache = { keys: null, loadedAt: 0 };
+    filterTagKeysRebuildCompletedAt = 0;
   }
 
   function stop() {

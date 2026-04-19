@@ -22,6 +22,12 @@ function encodeOsmFeatureId(osmType, osmId) {
   return Number(osmId) * 2 + typeBit;
 }
 
+function formatOsmKey(osmType, osmId) {
+  const normalizedType = String(osmType || '').trim();
+  const normalizedId = Number(osmId);
+  return `${normalizedType}/${Number.isFinite(normalizedId) ? Math.trunc(normalizedId) : 0}`;
+}
+
 function decodeOsmFeatureId(featureId) {
   const numericFeatureId = Number(featureId);
   if (!Number.isInteger(numericFeatureId) || numericFeatureId < 0) {
@@ -166,9 +172,12 @@ function formatGeojsonFeatureLine(
   const normalizedFeatureKind = normalizeFeatureKind(featureKind || deriveFeatureKindFromTagsJson(tagsJson));
   const feature3dProperties = buildFeature3dPropertiesFromTagsJson(tagsJson);
   const normalizedHideBaseWhenParts = normalizeBinaryFlag(renderHideBaseWhenParts);
+  const normalizedOsmType = String(osmType || '').trim();
+  const normalizedOsmKey = formatOsmKey(normalizedOsmType, osmId);
   return (
     `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
-    `"properties":{"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
+    `"properties":{"osm_type":${JSON.stringify(normalizedOsmType)},"osm_key":${JSON.stringify(normalizedOsmKey)},` +
+    `"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
     `"render_height_m":${feature3dProperties.render_height_m},` +
     `"render_min_height_m":${feature3dProperties.render_min_height_m},` +
     `"render_hide_base_when_parts":${normalizedHideBaseWhenParts}},` +
@@ -193,9 +202,12 @@ function formatRenderedGeojsonFeatureLine(
   const normalizedRenderHeightM = Number.isFinite(Number(renderHeightM)) ? Number(renderHeightM) : 0;
   const normalizedRenderMinHeightM = Number.isFinite(Number(renderMinHeightM)) ? Number(renderMinHeightM) : 0;
   const normalizedHideBaseWhenParts = normalizeBinaryFlag(renderHideBaseWhenParts);
+  const normalizedOsmType = String(osmType || '').trim();
+  const normalizedOsmKey = formatOsmKey(normalizedOsmType, osmId);
   return (
     `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
-    `"properties":{"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
+    `"properties":{"osm_type":${JSON.stringify(normalizedOsmType)},"osm_key":${JSON.stringify(normalizedOsmKey)},` +
+    `"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
     `"render_height_m":${normalizedRenderHeightM},` +
     `"render_min_height_m":${normalizedRenderMinHeightM},` +
     `"render_hide_base_when_parts":${normalizedHideBaseWhenParts}},"geometry":${normalizedGeometryJson}}\n`

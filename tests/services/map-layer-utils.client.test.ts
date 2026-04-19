@@ -307,7 +307,11 @@ test('buildRegionBuildingHighlightFilterExpression excludes building parts when 
       featureIds: [11],
       showBuildingParts: false
     }),
-    ['all', ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'], ['in', ['id'], ['literal', [11]]]]
+    [
+      'all',
+      ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
+      ['in', ['get', 'osm_key'], ['literal', ['relation/5']]]
+    ]
   );
 });
 
@@ -334,7 +338,7 @@ test('buildRegionBuildingHighlightFilterExpression keeps visible remainders when
         ],
         ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
       ],
-      ['in', ['id'], ['literal', [11]]]
+      ['in', ['get', 'osm_key'], ['literal', ['relation/5']]]
     ]
   );
 });

@@ -56,6 +56,7 @@ services:
     # maintenance_work_mem=512MB – faster CREATE INDEX / ANALYZE
     # effective_io_concurrency=2 – eMMC/SD random-read parallelism
     # wal_buffers=16MB      – buffer WAL in memory before flushing
+    # log_autovacuum_min_duration=-1 – keep autovacuum skip noise out of the container log
     command:
       - postgres
       - -c
@@ -72,6 +73,8 @@ services:
       - effective_io_concurrency=2
       - -c
       - wal_buffers=16MB
+      - -c
+      - log_autovacuum_min_duration=-1
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

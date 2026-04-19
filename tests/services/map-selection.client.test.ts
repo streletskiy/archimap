@@ -27,6 +27,10 @@ async function loadMapSelectionController() {
   return import(`${pathToFileURL(modulePath).href}?v=${(controllerImportCounter += 1)}`);
 }
 
+function osmKey(osmType, osmId) {
+  return `${osmType}/${osmId}`;
+}
+
 test('getFeatureIdentity resolves osm_key first', async () => {
   const { getFeatureIdentity } = await loadSelectionUtils();
   const identity = getFeatureIdentity({
@@ -74,7 +78,7 @@ test('getSelectionFilter is deterministic for same building and switches for dif
 });
 
 test('getSelectionFilter supports multiple selected buildings', async () => {
-  const { getSelectionFilter, encodeOsmFeatureId } = await loadSelectionUtils();
+  const { getSelectionFilter } = await loadSelectionUtils();
 
   const filter = getSelectionFilter(null, [
     { osmType: 'way', osmId: 10 },
@@ -83,13 +87,13 @@ test('getSelectionFilter supports multiple selected buildings', async () => {
 
   assert.deepEqual(filter, [
     'any',
-    ['==', ['id'], encodeOsmFeatureId('way', 10)],
-    ['==', ['id'], encodeOsmFeatureId('relation', 11)]
+    ['==', ['get', 'osm_key'], osmKey('way', 10)],
+    ['==', ['get', 'osm_key'], osmKey('relation', 11)]
   ]);
 });
 
 test('getVisibleSelectionFilter respects visible base and part geometry when building parts are shown', async () => {
-  const { getVisibleSelectionFilter, encodeOsmFeatureId } = await loadSelectionUtils();
+  const { getVisibleSelectionFilter } = await loadSelectionUtils();
 
   assert.deepEqual(
     getVisibleSelectionFilter(
@@ -114,7 +118,7 @@ test('getVisibleSelectionFilter respects visible base and part geometry when bui
         ],
         ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
       ],
-      ['==', ['id'], encodeOsmFeatureId('way', 10)]
+      ['==', ['get', 'osm_key'], osmKey('way', 10)]
     ]
   );
 });
@@ -232,6 +236,7 @@ test('createMapSelectionController applies hover filters and cursor for buffered
     recordDebugSetFilter: () => {},
     debugSelectionLog: () => {}
   });
+  const hitKey = osmKey('way', 42);
 
   controller.handleMapPointerMove({
     point: { x: 30, y: 40 }
@@ -247,27 +252,27 @@ test('createMapSelectionController applies hover filters and cursor for buffered
   assert.deepEqual(filters, [
     {
       layerId: 'region-buildings-7-hover-extrusion',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'overpass-buildings-source-hover-extrusion',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'region-buildings-7-hover-fill',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'overpass-buildings-source-hover-fill',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'region-buildings-7-hover-line',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'overpass-buildings-source-hover-line',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     }
   ]);
 
@@ -278,27 +283,27 @@ test('createMapSelectionController applies hover filters and cursor for buffered
   assert.deepEqual(filters, [
     {
       layerId: 'region-buildings-7-hover-extrusion',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'overpass-buildings-source-hover-extrusion',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'region-buildings-7-hover-fill',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'overpass-buildings-source-hover-fill',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'region-buildings-7-hover-line',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     },
     {
       layerId: 'overpass-buildings-source-hover-line',
-      filter: ['==', ['id'], 84]
+      filter: ['==', ['get', 'osm_key'], hitKey]
     }
   ]);
 });
@@ -410,6 +415,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
     recordDebugSetFilter: () => {},
     debugSelectionLog: () => {}
   });
+  const hitKey = osmKey('way', 42);
 
   controller.handleMapPointerMove({
     point: { x: 30, y: 40 }
@@ -434,7 +440,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
           ],
           ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
         ],
-        ['==', ['id'], 84]
+        ['==', ['get', 'osm_key'], hitKey]
       ]
     },
     {
@@ -454,7 +460,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
           ],
           ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
         ],
-        ['==', ['id'], 84]
+        ['==', ['get', 'osm_key'], hitKey]
       ]
     },
     {
@@ -474,7 +480,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
           ],
           ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
         ],
-        ['==', ['id'], 84]
+        ['==', ['get', 'osm_key'], hitKey]
       ]
     },
     {
@@ -494,7 +500,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
           ],
           ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
         ],
-        ['==', ['id'], 84]
+        ['==', ['get', 'osm_key'], hitKey]
       ]
     },
     {
@@ -514,7 +520,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
           ],
           ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
         ],
-        ['==', ['id'], 84]
+        ['==', ['get', 'osm_key'], hitKey]
       ]
     },
     {
@@ -534,7 +540,7 @@ test('createMapSelectionController keeps hidden parent contours out of hover fil
           ],
           ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part']
         ],
-        ['==', ['id'], 84]
+        ['==', ['get', 'osm_key'], hitKey]
       ]
     }
   ]);
@@ -698,5 +704,9 @@ test('createMapSelectionController applies selection filters for multi-selection
   ]);
 
   assert.ok(filters.length > 0);
-  assert.deepEqual(filters[0].filter, ['any', ['==', ['id'], 20], ['==', ['id'], 23]]);
+  assert.deepEqual(filters[0].filter, [
+    'any',
+    ['==', ['get', 'osm_key'], osmKey('way', 10)],
+    ['==', ['get', 'osm_key'], osmKey('relation', 11)]
+  ]);
 });

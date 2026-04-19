@@ -5,6 +5,10 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { Client } = require('pg');
+const {
+  REGION_SYNC_PHASE_ORDER,
+  normalizeRegionSyncPhase
+} = require('../src/lib/shared/region-sync-pipeline.ts');
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { loadRegion } = require('./region-sync/db-ingester');
 
@@ -398,13 +402,7 @@ function collectProcessTreeRssBytes(rootPid) {
 }
 
 function normalizeStageName(stage) {
-  const normalized = String(stage || '')
-    .trim()
-    .toLowerCase();
-  if (normalized === 'publish') {
-    return 'build';
-  }
-  return normalized;
+  return normalizeRegionSyncPhase(stage);
 }
 
 function summarizeStageTimeline(events, endAtMs) {
@@ -456,7 +454,7 @@ function summarizeStageTimeline(events, endAtMs) {
 }
 
 function summarizePhases(stageTimeline) {
-  const phaseOrder = ['download', 'extract', 'export', 'build', 'apply', 'followup'];
+  const phaseOrder = REGION_SYNC_PHASE_ORDER;
   const phaseMap = new Map();
 
   for (const span of stageTimeline) {

@@ -18,6 +18,12 @@ async function loadFilterDiffApplyStrategy() {
   return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
 
+function osmKeyFromEncodedId(featureId) {
+  const numericFeatureId = Number(featureId);
+  if (!Number.isInteger(numericFeatureId) || numericFeatureId < 0) return '';
+  return `${numericFeatureId % 2 === 1 ? 'relation' : 'way'}/${Math.trunc(numericFeatureId / 2)}`;
+}
+
 function createMapStub() {
   const filters = new Map();
   const paintCalls = [];
@@ -147,27 +153,27 @@ test('createFilterDiffApplyStrategy filters building parts separately and hides 
   assert.deepEqual(map.filters.get('part-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['id'], ['literal', [202]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
   ]);
   assert.deepEqual(map.filters.get('highlight-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
-    ['in', ['id'], ['literal', [202]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
   ]);
   assert.deepEqual(map.filters.get('highlight-extrusion'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
-    ['in', ['id'], ['literal', [202]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
   ]);
   assert.deepEqual(map.filters.get('part-highlight-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['id'], ['literal', [202]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
   ]);
   assert.deepEqual(map.filters.get('part-highlight-extrusion'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['id'], ['literal', [202]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
   ]);
 });
 
@@ -215,7 +221,7 @@ test('createFilterDiffApplyStrategy keeps building remainder geometry in the bas
         ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
       ]
     ],
-    ['in', ['id'], ['literal', [303]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(303)]]]
   ]);
   assert.deepEqual(map.filters.get('highlight-extrusion'), [
     'all',
@@ -228,7 +234,7 @@ test('createFilterDiffApplyStrategy keeps building remainder geometry in the bas
         ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
       ]
     ],
-    ['in', ['id'], ['literal', [303]]]
+    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(303)]]]
   ]);
 });
 

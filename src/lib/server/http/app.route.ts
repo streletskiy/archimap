@@ -298,14 +298,16 @@ function registerAppRoutes(deps) {
 
   app.get('/api/filter-tag-keys', publicApiRateLimiter, async (req, res) => {
     try {
-      const allKeys = typeof getAllFilterTagKeysCached === 'function' ? await getAllFilterTagKeysCached() : [];
+      if (typeof getAllFilterTagKeysCached === 'function') {
+        await getAllFilterTagKeysCached();
+      }
       const keys = await getFilterTagKeysCached();
       return sendCachedJson(
         req,
         res,
         {
           keys,
-          warmingUp: isFilterTagKeysRebuildInProgress() || allKeys.length === 0
+          warmingUp: isFilterTagKeysRebuildInProgress()
         },
         {
           cacheControl: 'public, max-age=300'

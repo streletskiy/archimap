@@ -89,11 +89,12 @@ The Docker runtime image contains these dependencies.
    - upserts `data_region_memberships`
    - removes memberships that disappeared from the import for the target region
    - deletes true orphans only for ids that actually became deletion candidates during this run
+   - skips stale membership/orphan cleanup on the first sync for a region that has no prior memberships yet
    - builds a key index on the named stage table and applies rows in OSM key order so the large contour upsert stays as cache-friendly as possible
 10. The overlap-safety model is preserved through `data_region_memberships`, so overlapping regions do not delete each other's objects.
 11. The sync then exports the target region's active canonical rows from PostgreSQL into region NDJSON for PMTiles generation.
 12. Derived render-only output such as synthetic `building_remainder` features stays in the export/build phase instead of being written into canonical contour tables. The current managed path materializes `building:part` rows into a temporary indexed PostgreSQL table and then streams separate base and remainder passes, so the Node process never buffers the full region in memory and PostgreSQL can use an indexed part lookup instead of a monolithic self-join.
-13. [`scripts/region-sync/pmtiles-builder.ts`](../scripts/region-sync/pmtiles-builder.ts) runs `planetiler` to build `<workspace>/region.pmtiles`.
+13. [`scripts/region-sync/pmtiles-builder.ts`](../scripts/region-sync/pmtiles-builder.ts) runs `planetiler` to build `<workspace>/region.pmtiles`. The exported building GeoJSON preserves `osm_key` so runtime selection and highlight logic stay tied to stable OSM identity instead of Planetiler feature ids.
 14. [`scripts/region-sync/import-applier.ts`](../scripts/region-sync/import-applier.ts) performs the protected PMTiles publish/swap into `data/regions/buildings-region-<slug>.pmtiles`.
 15. On successful commit/publish, runtime follow-up jobs rebuild:
 
@@ -108,9 +109,9 @@ Managed sync emits these high-level stages:
 
 - `download`: direct PBF download from curated upstream URL
 - `extract`: `osm2pgsql` flex import into PostgreSQL staging
+- `apply`: controlled merge/apply into canonical tables
 - `export`: export region members from PostgreSQL for PMTiles input
 - `build`: `planetiler` PMTiles build
-- `apply`: controlled merge/apply into canonical tables
 - `publish`: protected PMTiles swap/publish
 - `followup`: search/filter maintenance
 
@@ -159,6 +160,7 @@ Managed sync emits these high-level stages:
 
 - Consumes exported region NDJSON.
 - Keeps derived render features such as `building_remainder` in the export/build phase and avoids writing them into canonical contour tables.
+- Writes `osm_key`/`osm_type` on exported building features before invoking `planetiler`, so the PMTiles contract for map selection/highlight stays stable across tile-engine changes.
 - Runs `planetiler` only.
 
 ### `src/lib/server/services/data-settings/upstream.ts`

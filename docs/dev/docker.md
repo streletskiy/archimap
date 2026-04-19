@@ -135,6 +135,7 @@ docker compose up -d
 ```
 
 The Compose service sets `shm_size: 512m` for `db-postgres` because Docker's default 64MB `/dev/shm` is often too small for PostGIS parallel workers and bbox filter queries.
+It also sets `log_autovacuum_min_duration=-1` to suppress noisy autovacuum skip messages from the long-lived `region_import_stage` table during managed syncs.
 
 Pending PostgreSQL migrations are applied automatically on app startup. Manual migrations/smoke remain available in the compose network for recovery or verification:
 

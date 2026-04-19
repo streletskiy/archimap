@@ -13,6 +13,8 @@ const { runPlanetilerBuild } = require('./planetiler');
 const REGION_PMTILES_ATTRIBUTE_KEYS = Object.freeze([
   'feature_kind',
   'osm_id',
+  'osm_key',
+  'osm_type',
   'render_height_m',
   'render_hide_base_when_parts',
   'render_min_height_m'
