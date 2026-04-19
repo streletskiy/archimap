@@ -8,7 +8,7 @@
   "minZoom": 0,
   "maxZoom": 7,
   "image": "archimap-runtime-base:admin-regions",
-  "tippecanoeBin": null,
-  "mode": "docker-runtime-base",
+  "planetilerBin": null,
+  "mode": "docker-runtime-base-planetiler",
   "generatedAt": "2026-03-12T07:42:57.026Z"
 }

@@ -94,6 +94,7 @@ function ensureCompatDb(db) {
 function createDataSettingsContext(options: LooseRecord = {}) {
   const db = ensureCompatDb(options.db);
   const dataDir = String(options.dataDir || '');
+  const regionCatalog = options.regionCatalog || null;
   const extractResolver = options.extractResolver || null;
   const fetchImpl =
     typeof options.fetchImpl === 'function'
@@ -599,6 +600,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     hasResolvedExtract,
     rowToRegion,
     rowToRun,
+    regionCatalog,
     extractResolver,
     fetchImpl,
     readAppDataSettingsRow,

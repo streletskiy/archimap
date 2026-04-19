@@ -51,7 +51,6 @@ function createRegionDraft(region: Partial<Region> | null = null): RegionDraft {
     id: Number(region?.id || 0) || null,
     name: String(region?.name || ''),
     slug: String(region?.slug || ''),
-    searchQuery: String(region?.searchQuery || ''),
     extractSource: String(region?.extractSource || ''),
     extractId: String(region?.extractId || ''),
     extractLabel: String(region?.extractLabel || ''),

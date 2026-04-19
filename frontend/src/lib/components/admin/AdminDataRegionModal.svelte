@@ -13,12 +13,10 @@
   export let open = false;
   export let regionDraft = null;
   export let selectedRegion = null;
-  export let regionExtractCandidates = [];
   export let regionSaving = false;
   export let regionDeleting = false;
   export let regionSyncBusy = false;
   export let regionSyncCancelBusy = false;
-  export let regionResolveBusy = false;
   export let selectedDataRegionId = null;
   export let regionRuns = [];
   export let regionRunsLoading = false;
@@ -597,10 +595,6 @@
               {controller}
               formId={REGION_FORM_ID}
               regionDraft={regionDraft}
-              regionExtractCandidates={regionExtractCandidates}
-              regionSaving={regionSaving}
-              regionDeleting={regionDeleting}
-              regionResolveBusy={regionResolveBusy}
             />
           </div>
 

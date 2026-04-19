@@ -389,21 +389,6 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     }
   }
 
-  async function resolveExtractCandidates({ query, source }: LooseRecord = {}) {
-    try {
-      const resolved = await ensureDataSettingsService().searchExtractCandidates(String(query || '').trim(), {
-        source: String(source || 'any').trim() || 'any',
-        limit: 12
-      });
-      return {
-        query: resolved.query,
-        items: resolved.items
-      };
-    } catch (error) {
-      throw createAdminError(400, String(error?.message || error || 'Failed to resolve extract candidates'));
-    }
-  }
-
   async function getRegionRuns(regionIdRaw, pageRaw, limitRaw) {
     const service = ensureDataSettingsService();
     const regionId = parseRegionId(regionIdRaw);
@@ -528,7 +513,6 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     listCountryCatalog,
     createCountryAggregate,
     getRegionsUpstreamStatus,
-    resolveExtractCandidates,
     getRegionRuns,
     saveRegion,
     deleteRegion,

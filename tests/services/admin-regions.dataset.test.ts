@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const adminRegionsPath = path.resolve(__dirname, '..', '..', 'frontend', 'static', 'admin-regions.geojson');
+const regionCatalogPath = path.resolve(__dirname, '..', '..', 'src', 'lib', 'server', 'data', 'region-catalog.json');
 const adminRegions = JSON.parse(fs.readFileSync(adminRegionsPath, 'utf8'));
+const regionCatalog = JSON.parse(fs.readFileSync(regionCatalogPath, 'utf8'));
 
 const BERBERA_POINT = [45.0143, 10.4396];
 const HARGEISA_POINT = [44.0581, 9.5624];
@@ -119,4 +121,38 @@ test('crimean-fed-district admin region uses one combined Natural Earth Admin 1 
   );
   assert.equal(getFeatureByExtractId('russia/southern_federal_district/crimea_republic'), null);
   assert.equal(getFeatureByExtractId('russia/southern_federal_district/sevastopol'), null);
+});
+
+test('admin regions dataset carries direct download metadata for curated runtime sync', () => {
+  const nizhny = getFeatureByExtractId('russia/volga_federal_district/nizhny_novgorod_oblast');
+  const california = getFeatureByExtractId('us/california');
+  const kuwait = getFeatureByExtractId('osmfr_asia_kuwait');
+
+  assert.equal(
+    nizhny?.properties?.DownloadUrl,
+    'https://download.openstreetmap.fr/extracts/russia/volga_federal_district/nizhny_novgorod_oblast.osm.pbf'
+  );
+  assert.equal(
+    nizhny?.properties?.StateUrl,
+    'https://download.openstreetmap.fr/extracts/russia/volga_federal_district/nizhny_novgorod_oblast.state.txt'
+  );
+  assert.equal(california?.properties?.DownloadUrl, 'https://download.geofabrik.de/north-america/us/california-latest.osm.pbf');
+  assert.equal(kuwait?.properties?.DownloadUrl, 'https://download.openstreetmap.fr/extracts/asia/kuwait.osm.pbf');
+  assert.equal(kuwait?.properties?.StateUrl, 'https://download.openstreetmap.fr/extracts/asia/kuwait.state.txt');
+});
+
+test('local region catalog includes hidden geofabrik subregions for country aggregates', () => {
+  const germany = regionCatalog.entries.find(
+    (entry) => entry?.extractSource === 'geofabrik' && entry?.extractId === 'germany'
+  );
+  const bayern = regionCatalog.entries.find(
+    (entry) => entry?.extractSource === 'geofabrik' && entry?.extractId === 'bayern'
+  );
+
+  assert.ok(germany, 'germany country aggregate entry should exist');
+  assert.equal(germany.countryAggregateEligible, true);
+  assert.ok(bayern, 'bayern hidden subregion entry should exist');
+  assert.equal(bayern.visibleInAdmin, false);
+  assert.equal(bayern.countryAggregateParentId, 'germany');
+  assert.equal(bayern.downloadUrl, 'https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf');
 });

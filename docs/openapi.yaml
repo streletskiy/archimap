@@ -1081,36 +1081,6 @@ paths:
           description: Master admin required
         '404':
           description: Filter preset not found
-  /api/admin/app-settings/data/regions/resolve-extract:
-    post:
-      summary: Resolve extract candidates for a managed region
-      parameters:
-        - in: header
-          name: x-csrf-token
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [query]
-              properties:
-                query:
-                  type: string
-                source:
-                  type: string
-      responses:
-        '200':
-          description: Extract resolution result
-        '400':
-          description: Validation failed
-        '401':
-          description: Unauthorized
-        '403':
-          description: Master admin required
   /api/admin/app-settings/osm:
     get:
       summary: Get OSM sync settings

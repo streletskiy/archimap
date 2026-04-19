@@ -43,7 +43,6 @@
     "admin:create-master": "node --import tsx scripts/create-master-admin.ts",
     "tiles:build": "node --import tsx scripts/tiles-build.ts",
     "admin:regions:pmtiles": "node --import tsx scripts/build-admin-regions-pmtiles.ts",
-    "sync:city": "node --import tsx scripts/sync-osm-buildings.ts",
     "migrate": "node --import tsx scripts/migrate.ts",
     "db:pg:migrate": "node --import tsx scripts/postgres-migrate.ts",
     "db:pg:smoke": "node --import tsx scripts/postgres-smoke.ts",

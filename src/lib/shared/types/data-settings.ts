@@ -71,7 +71,6 @@ export interface RegionDraft {
   id: number | null;
   name: string;
   slug: string;
-  searchQuery: string;
   extractSource: string;
   extractId: string;
   extractLabel: string;

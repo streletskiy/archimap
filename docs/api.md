@@ -112,7 +112,7 @@ System notes:
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
   - Also returns filter presets config for admin (`filterPresets.source`, `filterPresets.items[]`).
-  - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`), storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`), and the last locally known source-version fields (`sourceDataUpdatedAt`, `latestSourceDataUpdatedAt`, `upstreamCheckedAt`, `upstreamStatus`, `upstreamError`, `updateAvailable`).
+  - Region items include curated extract metadata (`extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`), storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`), and the last locally known source-version fields (`sourceDataUpdatedAt`, `latestSourceDataUpdatedAt`, `upstreamCheckedAt`, `upstreamStatus`, `upstreamError`, `updateAvailable`).
   - The endpoint intentionally avoids live upstream checks for every region so the admin list can load quickly even with many regions.
   - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
   - `filterPresets.items[]` includes `id`, `key`, `name`, `nameI18n`, `description`, `layers[]`, `createdAt`, `updatedAt`, `updatedBy`.
@@ -139,16 +139,13 @@ System notes:
   - Master-admin only.
   - Query: `ids=1,2,3` and optional `force=true`.
   - Returns live upstream status only for the requested region ids, so the admin UI can lazily refresh the visible page and the selected region without blocking the initial list load.
-- `POST /api/admin/app-settings/data/regions/resolve-extract`
-  - Master-admin only.
-  - Body: `{ query: "Moscow", source?: "any|..." }`.
-  - Returns `{ ok, query, items[] }`, where each candidate contains `extractSource`, `extractId`, `extractLabel`, and may also include `downloadUrl`, `matchKind`, `exact`.
 - `POST /api/admin/app-settings/data/regions`
   - Creates or updates a region.
   - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
   - Supported source type: `sourceType=extract`.
-  - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`).
-  - On save, server re-validates the selected canonical extract via exact resolver lookup. Ambiguous or missing canonical extract selection returns `400` with a manual-resolution message; managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
+  - Request body uses curated extract fields (`extractSource`, `extractId`, `extractLabel`) plus sync settings.
+  - Standard create flow is driven by the curated admin region catalog; there is no runtime extract-search/resolve endpoint in the normal UI flow.
+  - On save, server validates the selected curated extract against the repository manifest. Managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
 - `DELETE /api/admin/app-settings/data/regions/:regionId`
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
   - Regions in `queued` or `running` state cannot be deleted.

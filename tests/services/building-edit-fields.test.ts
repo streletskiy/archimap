@@ -17,6 +17,7 @@ test('getBuildingEditableFields returns the full set for a single building', asy
     'designRef',
     'designYear',
     'material',
+    'roofShape',
     'colour',
     'levels',
     'yearBuilt',
@@ -34,6 +35,7 @@ test('getBuildingEditableFields removes address fields in bulk mode', async () =
     'designRef',
     'designYear',
     'material',
+    'roofShape',
     'colour',
     'levels',
     'yearBuilt',
@@ -49,7 +51,7 @@ test('getBuildingEditableFields narrows bulk edits to part-safe fields when need
       isBulkSelection: true,
       hasBuildingPartSelection: true
     }),
-    ['levels', 'colour', 'style', 'material', 'yearBuilt']
+    ['levels', 'colour', 'style', 'material', 'roofShape', 'yearBuilt']
   );
 
   assert.deepEqual(

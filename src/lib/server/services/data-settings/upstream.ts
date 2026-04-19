@@ -1,11 +1,10 @@
 import type { Region, RegionUpstreamStatus } from '$shared/types';
 
-const EXTRACT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const UPSTREAM_CACHE_TTL_MS = 15 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15 * 1000;
 
 function createUpstreamDomain(context: LooseRecord = {}) {
-  const { ensureBootstrapped, getRegionById, fetchImpl, now, toIsoOrNull, resolveExactExtractCandidate, state } =
+  const { ensureBootstrapped, getRegionById, fetchImpl, now, toIsoOrNull, regionCatalog, extractResolver, state } =
     context;
 
   function normalizeIsoTimestamp(value) {
@@ -54,52 +53,6 @@ function createUpstreamDomain(context: LooseRecord = {}) {
     return promise;
   }
 
-  async function resolveExactExtract(region: Pick<Region, 'extractSource' | 'extractId'>, options: LooseRecord = {}) {
-    const extractSource = String(region?.extractSource || '').trim();
-    const extractId = String(region?.extractId || '').trim();
-    if (!extractSource || !extractId || typeof resolveExactExtractCandidate !== 'function') {
-      return null;
-    }
-
-    const cacheKey = `${extractSource}:${extractId}`;
-    const cacheMap = state?.resolvedExtractsByKey;
-    if (cacheMap instanceof Map) {
-      const cached = getCachedValue(cacheMap, cacheKey, options.forceRefresh === true);
-      if (cached) {
-        return await cached;
-      }
-    }
-
-    const task = (async () => {
-      try {
-        const result = await resolveExactExtractCandidate(extractId, {
-          source: extractSource
-        });
-        return result?.candidate || null;
-      } catch {
-        return null;
-      }
-    })();
-
-    if (cacheMap instanceof Map) {
-      setCachedPromise(cacheMap, cacheKey, EXTRACT_CACHE_TTL_MS, task);
-    }
-
-    return await task;
-  }
-
-  function buildOsmfrStateUrl(downloadUrl) {
-    const url = String(downloadUrl || '').trim();
-    if (!url) return '';
-    if (url.endsWith('-latest.osm.pbf')) {
-      return `${url.slice(0, -'-latest.osm.pbf'.length)}.state.txt`;
-    }
-    if (url.endsWith('.osm.pbf')) {
-      return `${url.slice(0, -'.osm.pbf'.length)}.state.txt`;
-    }
-    return '';
-  }
-
   function parseOsmfrStateTimestamp(text) {
     const raw = String(text || '');
     const match = raw.match(/^\s*timestamp=(.+?)\s*$/m);
@@ -135,10 +88,11 @@ function createUpstreamDomain(context: LooseRecord = {}) {
     return normalizeIsoTimestamp(response.headers?.get?.('last-modified'));
   }
 
-  async function fetchOsmfrStateTimestamp(downloadUrl) {
-    const stateUrl = buildOsmfrStateUrl(downloadUrl);
+  async function fetchOsmfrStateTimestamp(stateUrl) {
+    const normalizedStateUrl = String(stateUrl || '').trim();
+    if (!normalizedStateUrl) return null;
     if (!stateUrl) return null;
-    const response = await fetchWithTimeout(stateUrl);
+    const response = await fetchWithTimeout(normalizedStateUrl);
     if (!response?.ok) {
       throw new Error(`HTTP ${Number(response?.status || 0) || 0}`);
     }
@@ -166,20 +120,30 @@ function createUpstreamDomain(context: LooseRecord = {}) {
 
     const task = (async () => {
       const checkedAt = normalizeIsoTimestamp(now()) || new Date().toISOString();
-      const candidate = await resolveExactExtract(region, options);
+      let candidate = regionCatalog?.findEntry?.(extractSource, extractId) || null;
+      if (!candidate && extractResolver && typeof extractResolver.resolveExactExtract === 'function') {
+        try {
+          const resolved = await extractResolver.resolveExactExtract(extractId, {
+            source: extractSource
+          });
+          candidate = resolved?.candidate || null;
+        } catch {
+          candidate = null;
+        }
+      }
       const downloadUrl = String(candidate?.downloadUrl || '').trim();
       if (!downloadUrl) {
         return createRegionUpstreamState({
           upstreamCheckedAt: checkedAt,
           upstreamStatus: 'error',
-          upstreamError: 'Canonical extract download URL is unavailable'
+          upstreamError: 'Curated extract download URL is unavailable'
         });
       }
 
       try {
         let latestSourceDataUpdatedAt = null;
         if (extractSource === 'osmfr') {
-          latestSourceDataUpdatedAt = await fetchOsmfrStateTimestamp(downloadUrl);
+          latestSourceDataUpdatedAt = await fetchOsmfrStateTimestamp(candidate?.stateUrl);
         }
         if (!latestSourceDataUpdatedAt) {
           latestSourceDataUpdatedAt = await fetchHeadTimestamp(downloadUrl);

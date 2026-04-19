@@ -16,19 +16,15 @@
 - `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`, plus tab-local subcomponents for list/filter/detail panes (`EditListFilters`, `EditDetailPane`, `SyncCandidateCard`, `SyncCandidateDetailPane`, `AdminDataForm`, `AdminDataRegionList`, `AdminDataHistorySection`, `AdminFilterTagsSection`, `AdminFilterPresetsSection`, `StyleOverridesDialog`, `StyleDefaultsSection`).
 - `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre, including the 2D/3D building mode toggle, URL-synced 3D camera state, automatic `building:part` activation for 3D building rendering, extrusion-based hover/selection/filter overlays in 3D mode, pitch changes, Overpass fallback synchronization, and the public `building-3d-stack.ts` facade for 3D building orchestration.
 - `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers, plus the public `building-3d-stack.ts` facade and the active `building-renderer-maplibre.ts` backend contract for building/3D rendering helpers).
-- `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
+- `scripts/region-sync/**`: modular managed region-sync pipeline (curated extract catalog lookup, direct PBF download, `osm2pgsql` staging import, PostgreSQL merge/apply, PMTiles build).
 - PostgreSQL runtime storage:
   - `osm.building_contours`: PostGIS `geom` + bbox/tags metadata; GeoJSON is rendered on demand for API/PMTiles export.
-  - `osm.region_render_features`: optional region-scoped derived render cache for PMTiles rebuilds; it stores PMTiles-ready geometry plus `feature_kind`, source ids, bbox, `render_height_m`, `render_min_height_m`, and `render_hide_base_when_parts`.
+  - region-scoped staging schemas created by managed sync runs for `osm2pgsql` flex import before controlled merge into canonical tables.
   - `public.building_search_source`: searchable subset with generated `search_tsv`.
 - SQLite:
-  - `data/archimap.db` (main app DB)
-  - `data/osm.db` (OSM contours/search source)
-  - `data/local-edits.db` (accepted local edits)
-  - `data/user-edits.db` (moderation queue + stored source geometry/tags snapshots for contour-less Overpass edits)
-  - `data/users.db` (auth/users)
+  - legacy/local-dev app storage only; managed region sync and the runtime building data path no longer target SQLite.
 - Redis (optional): session store backend.
-- PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`; region exports now carry derived `render_height_m` / `render_min_height_m` properties plus `render_hide_base_when_parts`, and all PMTiles export paths can emit synthetic `building_remainder` features (`base - union(parts)`) so client-side `fill-extrusion` layers can render building and `building:part` volumes without a second metadata request, suppress the parent footprint when detailed parts are present, and still extrude any uncovered remainder of the base contour. The default runtime path builds these archives with `planetiler`; when `PMTILES_BUILD_ENGINE=tippecanoe`, the older sharded fallback path reuses a persistent cache under `data/regions/.pmtiles-cache/`, so unchanged shards can skip `tippecanoe` and only dirty cells are rebuilt before `tile-join` merges the archive.
+- PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`; region exports carry derived `render_height_m` / `render_min_height_m` properties plus `render_hide_base_when_parts`, and the managed export path first materializes a temporary indexed PostgreSQL table of `building:part` rows before streaming separate base/remainder passes so client-side `fill-extrusion` layers can render building and `building:part` volumes without a second metadata request, suppress the parent footprint when detailed parts are present, and still extrude any uncovered remainder of the base contour. Managed sync/runtime builds these archives with `planetiler` only.
 - Browser-local map fallback cache: Overpass-loaded building tiles are stored in IndexedDB from `frontend/src/lib/services/map/overpass-buildings.ts` so uncovered viewports can be revisited without re-downloading the same area in one session. When the user saves an edit for one of those buildings, the app also persists a server-side snapshot of the source geometry/tags in `user_edits.building_user_edits`, so later account/admin views do not depend on the browser cache. The same client-side module also tracks the last sync timestamp, exposes explicit load/refresh/clear controls, and uses a small concurrent worker pool that prefers the last working public endpoint for each tile while cooling down `403/504/5xx` hosts.
 
 ## Execution boundaries
@@ -83,7 +79,7 @@
   - `frontend/src/lib/services/map/map-3d-utils.ts`: shared 3D height/base derivation rules, parent-footprint suppression property names, and MapLibre extrusion expressions for PMTiles and Overpass buildings
   - `frontend/src/lib/services/map/map-theme-utils.ts`: basemap style resolution for CARTO/MapTiler/custom proxied basemaps, local Protomaps sprite/glyph asset wiring, a custom high-contrast monochrome Protomaps flavor for custom basemaps, MapTiler POI/ferry/3D-building suppression, and locale-aware label transformation before styles reach MapLibre
   - `frontend/src/lib/services/map/map-style-sync.ts`: shared theme/locale-driven basemap style synchronization used by secondary map widgets outside the main canvas
-- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`, `region-catalog`) composed by `data-settings.service.ts`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.
 - Shared utilities: `src/lib/shared/**`, including `src/lib/shared/types/**` for cross-cutting domain contracts shared by backend and frontend (`Region`, `FilterPreset`, `BuildingEdit`, `SyncCandidate`, and related admin payloads).
 - Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.ts`, `frontend/src/lib/client/filterUrlState.ts`, `frontend/src/lib/client/section-routes.ts`. The map deep-link contract includes camera center/zoom plus optional `pitch`, `bearing`, and `3d` state.
@@ -193,7 +189,8 @@ SvelteKit Node runtime (server.sveltekit.ts)
       |- cached JSON + PMTiles streaming
       |- sync hooks + PMTiles/search/filter maintenance jobs
   |
-  +--> SQLite (main + osm + local/user edits + auth)
+  +--> PostgreSQL + PostGIS (managed sync + runtime building data)
+  +--> SQLite (legacy/local-dev app storage only)
   +--> Redis session store (optional, prod)
   +--> workers/scripts (region-sync pipeline, search index rebuild, search index refresh, tag cache rebuild)
 ```

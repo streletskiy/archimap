@@ -8,11 +8,12 @@ const { Client } = require('pg');
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { loadRegion } = require('./region-sync/db-ingester');
 
-const DEFAULT_PASSES = 2;
+const DEFAULT_PASSES = 1;
 const DEFAULT_STAGE_LOG_TAIL = 200;
 const DEFAULT_SAMPLE_INTERVAL_MS = 250;
 const BENCHMARK_DIR = path.join(process.cwd(), '.benchmarks');
 const DEFAULT_REGION_CATALOG_PATH = path.join(process.cwd(), 'frontend', 'static', 'admin-regions.geojson');
+const FALLBACK_REGION_CATALOG_PATH = path.join(process.cwd(), 'frontend', 'build', 'client', 'admin-regions.geojson');
 type BenchmarkStageEvent = {
   stage: string;
   progress: number | null;
@@ -54,7 +55,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     label: null,
     output: null,
     passes: DEFAULT_PASSES,
-    includePmtilesOnly: true,
+    includePmtilesOnly: false,
     sampleIntervalMs: DEFAULT_SAMPLE_INTERVAL_MS
   };
 
@@ -173,18 +174,21 @@ function collectGeometryBounds(geometry) {
 }
 
 function loadBenchmarkRegionFeature(regionCatalogPath, regionId) {
-  const absolutePath = path.resolve(String(regionCatalogPath || DEFAULT_REGION_CATALOG_PATH));
-  if (!fs.existsSync(absolutePath)) {
+  const configuredPath = String(regionCatalogPath || DEFAULT_REGION_CATALOG_PATH).trim();
+  const absolutePath = path.resolve(configuredPath);
+  const fallbackPath = path.resolve(FALLBACK_REGION_CATALOG_PATH);
+  const effectivePath = fs.existsSync(absolutePath) ? absolutePath : fallbackPath;
+  if (!fs.existsSync(effectivePath)) {
     throw new Error(`Benchmark region catalog not found: ${absolutePath}`);
   }
 
-  const catalog = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+  const catalog = JSON.parse(fs.readFileSync(effectivePath, 'utf8'));
   const feature = Array.isArray(catalog?.features)
     ? catalog.features.find((item) => Number(item?.properties?.Id) === Number(regionId))
     : null;
 
   if (!feature) {
-    throw new Error(`Benchmark region ${regionId} was not found in ${absolutePath}`);
+    throw new Error(`Benchmark region ${regionId} was not found in ${effectivePath}`);
   }
 
   return feature;
@@ -397,7 +401,7 @@ function normalizeStageName(stage) {
   const normalized = String(stage || '')
     .trim()
     .toLowerCase();
-  if (normalized === 'tile_join' || normalized === 'publish') {
+  if (normalized === 'publish') {
     return 'build';
   }
   return normalized;
@@ -488,46 +492,19 @@ function summarizePhases(stageTimeline) {
     });
 }
 
-function inferShardStats(resultJson: LooseRecord = {}, stageEvents: BenchmarkStageEvent[] = []) {
-  const shardEvents = stageEvents.filter(
-    (item) => item.stage === 'build' && /shard\s+\d+\/\d+/i.test(String(item.detail || ''))
-  );
-  const shardLineCount = shardEvents.length;
-  const reusedLineCount = shardEvents.filter((item) => /cache-hit/i.test(String(item.detail || ''))).length;
+function inferShardStats(resultJson: LooseRecord = {}) {
   const engineFromResult = String(resultJson.pmtilesBuildEngine || '').trim() || null;
   const reusedFromResult = Number(resultJson.pmtilesShardReusedCount);
   const rebuiltFromResult = Number(resultJson.pmtilesShardRebuiltCount);
   const shardCountFromResult = Number(resultJson.pmtilesShardCount);
   const modeFromResult = String(resultJson.pmtilesBuildMode || '').trim() || null;
 
-  let inferredMode = modeFromResult;
-  if (!inferredMode) {
-    if (shardCountFromResult > 1 || shardLineCount > 1) {
-      inferredMode = 'sharded';
-    } else if (resultJson.pmtilesBytes != null) {
-      inferredMode = 'single';
-    }
-  }
-
   return {
     pmtilesBuildEngine: engineFromResult,
-    pmtilesBuildMode: inferredMode,
-    pmtilesShardCount:
-      Number.isFinite(shardCountFromResult) && shardCountFromResult > 0
-        ? shardCountFromResult
-        : shardLineCount > 0
-          ? shardLineCount
-          : null,
-    pmtilesShardReusedCount: Number.isFinite(reusedFromResult)
-      ? reusedFromResult
-      : reusedLineCount > 0
-        ? reusedLineCount
-        : null,
-    pmtilesShardRebuiltCount: Number.isFinite(rebuiltFromResult)
-      ? rebuiltFromResult
-      : shardLineCount > 0
-        ? Math.max(0, shardLineCount - (reusedLineCount > 0 ? reusedLineCount : 0))
-        : null
+    pmtilesBuildMode: modeFromResult,
+    pmtilesShardCount: Number.isFinite(shardCountFromResult) && shardCountFromResult > 0 ? shardCountFromResult : null,
+    pmtilesShardReusedCount: Number.isFinite(reusedFromResult) ? reusedFromResult : null,
+    pmtilesShardRebuiltCount: Number.isFinite(rebuiltFromResult) ? rebuiltFromResult : null
   };
 }
 
@@ -644,7 +621,7 @@ async function runSyncPass({ cwd, regionId, pmtilesOnly = false, dataDir, sample
   const wallClockMs = Number(endedAtHr - startedAtHr) / 1e6;
   const stageTimeline = summarizeStageTimeline(events, Number(wallClockMs.toFixed(2)));
   const phaseDurations = summarizePhases(stageTimeline);
-  const shardStats = inferShardStats(resultJson || {}, events);
+  const shardStats = inferShardStats(resultJson || {});
 
   if (exitInfo.error) {
     const error: BenchmarkError = new Error(
@@ -788,16 +765,15 @@ async function main() {
         dataDir: benchmarkDataDir,
         dbProvider: runtimeOptions.dbProvider,
         env: {
-          PMTILES_BUILD_ENGINE: process.env.PMTILES_BUILD_ENGINE || null,
-          REGION_SYNC_SHARD_KM: process.env.REGION_SYNC_SHARD_KM || null,
-          REGION_SYNC_SHARD_MIN_FEATURES: process.env.REGION_SYNC_SHARD_MIN_FEATURES || null,
+          PLANETILER_BIN: process.env.PLANETILER_BIN || null,
+          PMTILES_PROGRESS_JSON: process.env.PMTILES_PROGRESS_JSON || 'true',
+          PMTILES_PROGRESS_INTERVAL_SEC: process.env.PMTILES_PROGRESS_INTERVAL_SEC || '5',
           REGION_SYNC_WORKDIR_CLEANUP: process.env.REGION_SYNC_WORKDIR_CLEANUP || 'warm',
           REGION_SYNC_WORKDIR_CLEANUP_TTL_DAYS: process.env.REGION_SYNC_WORKDIR_CLEANUP_TTL_DAYS || '14',
           REGION_SYNC_WORKDIR_CLEANUP_MAX_BYTES: process.env.REGION_SYNC_WORKDIR_CLEANUP_MAX_BYTES || null,
           REGION_SYNC_EXPORT_BATCH_SIZE: process.env.REGION_SYNC_EXPORT_BATCH_SIZE || null,
           REGION_SYNC_IMPORT_APPLY_BATCH_SIZE: process.env.REGION_SYNC_IMPORT_APPLY_BATCH_SIZE || null,
-          REGION_SYNC_RENDER_CACHE_REFRESH: process.env.REGION_SYNC_RENDER_CACHE_REFRESH || 'false',
-          REGION_SYNC_LOW_MEMORY_PIPELINE: process.env.REGION_SYNC_LOW_MEMORY_PIPELINE || null
+          REGION_SYNC_RENDER_CACHE_REFRESH: process.env.REGION_SYNC_RENDER_CACHE_REFRESH || 'false'
         }
       },
       runs

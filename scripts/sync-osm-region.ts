@@ -23,7 +23,7 @@ function emitStageJson(stage, progress = null, detail = null, extras: LooseRecor
     payload.progress = Math.max(0, Math.min(100, Math.round(Number(progress))));
   }
   if (detail != null && String(detail).trim()) {
-    payload.detail = String(detail).trim().slice(0, 200);
+    payload.detail = String(detail).trim().slice(0, 240);
   }
   if (aggregateStageContext) {
     payload.subregionIndex = aggregateStageContext.subregionIndex ?? null;
@@ -40,16 +40,12 @@ function emitStageJson(stage, progress = null, detail = null, extras: LooseRecor
   try {
     process.stdout.write(`SYNC_STAGE_JSON=${JSON.stringify(payload)}\n`);
   } catch {
-    // ignore stdout write failures (e.g. closed pipe during cancellation)
+    // ignore stdout write failures during cancellation
   }
 }
 
 function handleCancellationSignal(signal) {
   emitStageJson('cancelling', null, `signal=${signal}`);
-  // Allow any current spawnSync child to finish its exit so we can shut down
-  // cleanly; the Node exit handler below will propagate the cancellation
-  // code. On Windows, the parent sync-workers manager uses taskkill /T /F
-  // so the whole tree (including tippecanoe / python) is already going down.
   setTimeout(() => {
     try {
       process.exit(130);
@@ -63,23 +59,17 @@ process.on('SIGINT', () => handleCancellationSignal('SIGINT'));
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { createWorkspace } = require('./region-sync/common');
-const { exportRegionExtractToNdjson } = require('./region-sync/python-extractor');
+const { downloadManagedRegionExtract } = require('./region-sync/extract-download');
+const { applyRegionImportFromPostgresStage, publishPmtilesArchive } = require('./region-sync/import-applier');
+const { buildPmtilesFromGeojson } = require('./region-sync/pmtiles-builder');
+const { dropStageSchema, importPbfToPostgresStage } = require('./region-sync/osm2pgsql-import');
 const {
-  applyRegionImport,
   assertRegionSupportsManagedSync,
-  exportRegionRenderFeaturesToGeojsonNdjson,
+  exportRegionMembersToGeojsonNdjson,
   loadRegion,
   loadSubregions,
-  updateRegionPostSync,
-  publishPmtilesArchive
+  updateRegionPostSync
 } = require('./region-sync/db-ingester');
-const { buildPmtilesFromGeojson, summarizeImportRows } = require('./region-sync/pmtiles-builder');
-const {
-  runIncrementalRegionSync,
-  commitIncrementalSuccess,
-  isIncrementalEnabled,
-  resolveIncrementalNewPbf
-} = require('./region-sync/incremental-orchestrator');
 
 const DB_PROVIDER = getDbProvider(process.env);
 const DATABASE_URL = getPostgresConnectionString(process.env);
@@ -99,24 +89,24 @@ const LOCAL_EDITS_DB_PATH =
 const DATA_DIR =
   String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() ||
   path.join(__dirname, '..', 'data');
-const TIPPECANOE_PROGRESS_JSON = String(process.env.TIPPECANOE_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
-const TIPPECANOE_PROGRESS_INTERVAL_SEC = Math.max(
+const PMTILES_PROGRESS_JSON = String(process.env.PMTILES_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
+const PMTILES_PROGRESS_INTERVAL_SEC = Math.max(
   1,
-  Math.min(300, Number(process.env.TIPPECANOE_PROGRESS_INTERVAL_SEC || 5))
+  Math.min(300, Number(process.env.PMTILES_PROGRESS_INTERVAL_SEC || 5))
 );
-const REGION_SYNC_SHARD_KM_RAW = process.env.REGION_SYNC_SHARD_KM;
 const ROOT_DIR = path.join(__dirname, '..');
 const DEFAULT_PARENT_WATCHDOG_INTERVAL_MS = 5_000;
 
-function resolveRegionPmtilesCacheDir(dataDir, region) {
-  const regionKey = `${Number(region?.id || 0) || 'unknown'}-${String(region?.slug || 'region').trim() || 'region'}`;
-  const safeRegionKey = regionKey.replace(/[^a-z0-9._-]+/gi, '-');
-  return path.join(
-    String(dataDir || path.join(__dirname, '..', 'data')).trim() || path.join(__dirname, '..', 'data'),
-    'regions',
-    '.pmtiles-cache',
-    safeRegionKey
-  );
+function assertManagedRegionSyncPostgres(runtimeOptions: LooseRecord = {}) {
+  const provider = String(runtimeOptions.dbProvider || DB_PROVIDER)
+    .trim()
+    .toLowerCase();
+  if (provider !== 'postgres') {
+    throw new Error('Managed region sync only supports DB_PROVIDER=postgres');
+  }
+  if (!String(runtimeOptions.databaseUrl || DATABASE_URL).trim()) {
+    throw new Error('DATABASE_URL is required for managed region sync');
+  }
 }
 
 function parseArgs(argv): LooseRecord {
@@ -229,36 +219,8 @@ function buildExtractorEnv(env: LooseRecord = process.env) {
 }
 
 function resolveImporterDbGeometryMode(runtimeOptions: LooseRecord = {}) {
-  return String(runtimeOptions.dbProvider || DB_PROVIDER)
-    .trim()
-    .toLowerCase() === 'postgres'
-    ? 'wkb_hex'
-    : 'geojson';
-}
-
-function getRegionImportReadOptions(runtimeOptions: LooseRecord = {}) {
-  return String(runtimeOptions.dbProvider || DB_PROVIDER)
-    .trim()
-    .toLowerCase() === 'postgres'
-    ? { requireGeometryWkbHex: true }
-    : { requireGeometryJson: true };
-}
-
-function shouldUseLowMemoryPipeline(runtimeOptions: LooseRecord = {}, env: LooseRecord = process.env) {
-  const enabled =
-    String(env.REGION_SYNC_LOW_MEMORY_PIPELINE || '')
-      .trim()
-      .toLowerCase() === 'true';
-  if (!enabled) return false;
-
-  // SQLite still materializes the full region during remainder expansion when
-  // exporting region members back out for PMTiles rebuilds, so apply-first mode
-  // would not actually lower peak memory there yet.
-  return (
-    String(runtimeOptions.dbProvider || DB_PROVIDER)
-      .trim()
-      .toLowerCase() === 'postgres'
-  );
+  assertManagedRegionSyncPostgres(runtimeOptions);
+  return 'postgres_stage';
 }
 
 function shouldRunRuntimeFollowup(options: LooseRecord = {}) {
@@ -273,7 +235,7 @@ function shouldRunRuntimeFollowup(options: LooseRecord = {}) {
 function buildRuntimeFollowupEnv(runtimeOptions: LooseRecord = {}, env: LooseRecord = process.env) {
   return {
     ...env,
-    DB_PROVIDER: String(runtimeOptions.dbProvider || env.DB_PROVIDER || DB_PROVIDER).trim() || DB_PROVIDER,
+    DB_PROVIDER: 'postgres',
     DATABASE_URL: String(runtimeOptions.databaseUrl || env.DATABASE_URL || DATABASE_URL).trim() || DATABASE_URL,
     ARCHIMAP_DB_PATH:
       String(runtimeOptions.archimapDbPath || env.ARCHIMAP_DB_PATH || ARCHIMAP_DB_PATH).trim() || ARCHIMAP_DB_PATH,
@@ -353,13 +315,8 @@ async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: 
     featureCount: Number.isFinite(exportSummary?.importedFeatureCount)
       ? Number(exportSummary.importedFeatureCount)
       : null,
-    shardKm: REGION_SYNC_SHARD_KM_RAW === undefined ? undefined : Number(REGION_SYNC_SHARD_KM_RAW),
-    shardCacheDir: resolveRegionPmtilesCacheDir(
-      dataDir || process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data'),
-      region
-    ),
-    progressJson: TIPPECANOE_PROGRESS_JSON,
-    progressIntervalSec: TIPPECANOE_PROGRESS_INTERVAL_SEC,
+    progressJson: PMTILES_PROGRESS_JSON,
+    progressIntervalSec: PMTILES_PROGRESS_INTERVAL_SEC,
     onShardProgress: (stageInfo) => {
       const stage = String(stageInfo?.stage || 'build').trim() || 'build';
       emitStageJson(stage, stageInfo?.progress ?? null, stageInfo?.detail || null);
@@ -430,18 +387,12 @@ function readExportSummary(summaryPath) {
   }
 }
 
-async function readRegionImportSummary(runtimeOptions, summaryPath, importPath) {
-  const summary = readExportSummary(summaryPath);
-  if (summary) return summary;
-  return summarizeImportRows(importPath, getRegionImportReadOptions(runtimeOptions));
-}
-
 function buildApplyStageDetail(totalFeatureCount) {
   const normalizedTotalFeatureCount = Number(totalFeatureCount);
   if (!Number.isInteger(normalizedTotalFeatureCount) || normalizedTotalFeatureCount <= 0) {
-    return 'applying region import to database';
+    return 'merging staging rows into canonical tables';
   }
-  return `importing ${normalizedTotalFeatureCount} features into database`;
+  return `merging ${normalizedTotalFeatureCount} staging rows into canonical tables`;
 }
 
 function createApplyStageProgressEmitter() {
@@ -451,13 +402,14 @@ function createApplyStageProgressEmitter() {
 }
 
 async function buildRegionPmtilesOnly(region, runtimeOptions) {
+  assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = createWorkspace(region.id);
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
   try {
-    emitStageJson('export', null, 'reading region members');
-    const exported = await exportRegionRenderFeaturesToGeojsonNdjson({
+    emitStageJson('export', null, 'reading region members from PostgreSQL');
+    const exported = await exportRegionMembersToGeojsonNdjson({
       ...runtimeOptions,
       regionId: region.id,
       outputPath: geojsonPath
@@ -490,46 +442,49 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
   }
 }
 
-async function runRegionSyncLowMemory(region, runtimeOptions) {
+async function runRegionSync(region, runtimeOptions) {
+  assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = createWorkspace(region.id);
-  const importPath = path.join(workspace, 'region-import.ndjson');
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const summaryPath = path.join(workspace, 'region-export-summary.json');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
-  const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
+  let stageSchema = null;
 
   try {
-    emitStageJson('download', null, 'starting OSM extract pipeline');
-    // Generate both DB import NDJSON and GeoJSON NDJSON for PMTiles in a single
-    // DuckDB pass.  The previous approach skipped geojsonOutputPath here and
-    // re-exported from PostgreSQL later, but the building_remainders self-JOIN
-    // in PostgreSQL is O(n*m) and takes hours for large regions (e.g. Poland).
-    // DuckDB handles the same analytical join orders of magnitude faster.
-    exportRegionExtractToNdjson({
-      importerPath,
+    const downloaded = await downloadManagedRegionExtract({
       region,
-      dbOutputPath: importPath,
-      geojsonOutputPath: geojsonPath,
-      summaryOutputPath: summaryPath,
-      dbGeometryMode: resolveImporterDbGeometryMode(runtimeOptions),
-      env: buildExtractorEnv(process.env)
+      workspace,
+      onStage: async (stage, detail) => emitStageJson(stage, null, detail)
     });
 
-    const exported = await readRegionImportSummary(runtimeOptions, summaryPath, importPath);
-    if (exported.importedFeatureCount <= 0) {
-      throw new Error('Sync returned 0 features; keeping previous PMTiles and current data untouched');
-    }
-
-    emitStageJson('apply', 0, buildApplyStageDetail(exported.importedFeatureCount));
-    const dbResult = await applyRegionImport({
-      ...runtimeOptions,
+    const stageImport = await importPbfToPostgresStage({
       region,
-      ndjsonPath: importPath,
-      renderGeojsonPath: geojsonPath,
-      totalFeatureCount: exported.importedFeatureCount,
-      sourceSnapshot: exported.sourceSnapshot || null,
+      databaseUrl: runtimeOptions.databaseUrl,
+      pbfPath: downloaded.pbfPath,
+      env: buildExtractorEnv(process.env),
+      onStage: async (stage, detail) => emitStageJson(stage, null, detail)
+    });
+    stageSchema = stageImport.stageSchema;
+
+    emitStageJson('apply', 0, buildApplyStageDetail(null));
+    const dbResult = await applyRegionImportFromPostgresStage({
+      region,
+      databaseUrl: runtimeOptions.databaseUrl,
+      stageSchema: stageImport.stageSchema,
+      stageTable: stageImport.stageTable,
+      totalFeatureCount: null,
+      sourceSnapshot: downloaded.sourceSnapshot,
       onProgress: createApplyStageProgressEmitter()
     });
+
+    emitStageJson('export', null, 'exporting region members from PostgreSQL');
+    const exported = await exportRegionMembersToGeojsonNdjson({
+      ...runtimeOptions,
+      regionId: region.id,
+      outputPath: geojsonPath
+    });
+    if (exported.importedFeatureCount <= 0) {
+      throw new Error('Sync produced 0 PMTiles features; keeping previous region archive untouched');
+    }
 
     emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
     const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
@@ -551,187 +506,18 @@ async function runRegionSyncLowMemory(region, runtimeOptions) {
     return {
       ...dbResult,
       ...summarizePmtilesBuildResult(buildResult),
-      renderCacheRows: Number(dbResult.renderCacheRows || 0),
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
       bounds: exported.bounds
     };
   } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-}
-
-async function runRegionSyncIncrementalBranch(region, runtimeOptions, newPbf) {
-  const workspace = createWorkspace(region.id);
-  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
-  const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
-
-  try {
-    emitStageJson('diff', null, 'deriving changes from prev snapshot');
-    const incremental = await runIncrementalRegionSync({
-      region,
-      runtimeOptions,
-      newPbf,
-      workspace,
-      importerPath,
-      dbGeometryMode: resolveImporterDbGeometryMode(runtimeOptions),
-      env: buildExtractorEnv(process.env),
-      onStage: (stage, detail) => emitStageJson(stage, null, detail || null)
-    });
-    if (!incremental.ok) {
-      emitStageJson('diff', null, `incremental skipped: ${incremental.reason}`);
-      return null;
-    }
-
-    const featureCount = Number(incremental.mergeBuildStats?.total || 0);
-    if (featureCount <= 0) {
-      throw new Error('Incremental merge produced 0 features; refusing to publish empty region');
-    }
-
-    const exportedForBuild = {
-      importedFeatureCount: featureCount,
-      bounds: region?.bounds || null,
-      sourceSnapshot: incremental.sourceSnapshot
-    };
-
-    emitStageJson('build', null, `features=${featureCount}`);
-    const buildResult = await buildPmtilesStep(
-      region,
-      incremental.mergedBuildPath,
-      builtPmtilesPath,
-      exportedForBuild,
-      runtimeOptions.dataDir
-    );
-    emitStageJson('apply', 0, buildApplyStageDetail(featureCount));
-    const dbResult = await applyRegionImport({
-      ...runtimeOptions,
-      region,
-      ndjsonPath: incremental.mergedImportPath,
-      builtPmtilesPath,
-      renderGeojsonPath: incremental.mergedBuildPath,
-      totalFeatureCount: featureCount,
-      sourceSnapshot: incremental.sourceSnapshot,
-      onProgress: createApplyStageProgressEmitter()
-    });
-
-    emitStageJson('snapshot', null, 'committing incremental snapshot');
-    await commitIncrementalSuccess({
-      runtimeOptions,
-      region,
-      newPbf,
-      mergedBuildPath: incremental.mergedBuildPath,
-      mergedImportPath: incremental.mergedImportPath
-    });
-
-    if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
-      emitStageJson('followup', null, 'rebuilding search indexes');
-      runRuntimeFollowups({ region, runtimeOptions });
-    }
-
-    return {
-      ...dbResult,
-      ...summarizePmtilesBuildResult(buildResult),
-      incremental: {
-        affectedObjectIds: incremental.affectedObjectIds,
-        touchedNodeIds: incremental.touchedNodeIds,
-        spatiallyExpandedIds: incremental.spatiallyExpandedIds,
-        deletedIds: incremental.deletedIds,
-        importerDurationMs: incremental.importerDurationMs,
-        mergeBuildStats: incremental.mergeBuildStats,
-        mergeImportStats: incremental.mergeImportStats
-      },
-      bounds: region?.bounds || null
-    };
-  } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-}
-
-async function runRegionSync(region, runtimeOptions) {
-  if (isIncrementalEnabled(process.env)) {
-    const newPbf = resolveIncrementalNewPbf(process.env);
-    if (newPbf) {
-      const result = await runRegionSyncIncrementalBranch(region, runtimeOptions, newPbf);
-      if (result) return result;
-    }
-  }
-
-  if (shouldUseLowMemoryPipeline(runtimeOptions, process.env)) {
-    return runRegionSyncLowMemory(region, runtimeOptions);
-  }
-
-  const workspace = createWorkspace(region.id);
-  const importPath = path.join(workspace, 'region-import.ndjson');
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const summaryPath = path.join(workspace, 'region-export-summary.json');
-  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
-  const importerPath = path.join(__dirname, 'sync-osm-buildings.py');
-
-  try {
-    emitStageJson('download', null, 'starting OSM extract pipeline');
-    exportRegionExtractToNdjson({
-      importerPath,
-      region,
-      dbOutputPath: importPath,
-      geojsonOutputPath: geojsonPath,
-      summaryOutputPath: summaryPath,
-      dbGeometryMode: resolveImporterDbGeometryMode(runtimeOptions),
-      env: buildExtractorEnv(process.env)
-    });
-    const exported = await readRegionImportSummary(runtimeOptions, summaryPath, importPath);
-
-    if (exported.importedFeatureCount <= 0) {
-      throw new Error('Sync returned 0 features; keeping previous PMTiles and current data untouched');
-    }
-
-    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported);
-    emitStageJson('apply', 0, buildApplyStageDetail(exported.importedFeatureCount));
-    const dbResult = await applyRegionImport({
-      ...runtimeOptions,
-      region,
-      ndjsonPath: importPath,
-      builtPmtilesPath,
-      renderGeojsonPath: geojsonPath,
-      totalFeatureCount: exported.importedFeatureCount,
-      sourceSnapshot: exported.sourceSnapshot || null,
-      onProgress: createApplyStageProgressEmitter()
-    });
-    if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
-      emitStageJson('followup', null, 'rebuilding search indexes');
-      runRuntimeFollowups({
-        region,
-        runtimeOptions
-      });
-    }
-
-    if (isIncrementalEnabled(process.env)) {
-      const localPbf = String(exported?.sourceSnapshot?.localPath || '').trim();
-      if (localPbf && fs.existsSync(localPbf)) {
-        try {
-          emitStageJson('snapshot', null, 'seeding incremental cache');
-          await commitIncrementalSuccess({
-            runtimeOptions,
-            region,
-            newPbf: localPbf,
-            mergedBuildPath: geojsonPath,
-            mergedImportPath: importPath,
-            summaryJsonSource: summaryPath
-          });
-        } catch (error) {
-          // Snapshot seeding is opportunistic — a failure here must not
-          // abort a sync that has already applied to the DB.
-          console.warn(`[region-sync] incremental snapshot seed failed: ${String(error?.message || error)}`);
-        }
+    if (stageSchema) {
+      try {
+        await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
+      } catch (error) {
+        console.warn(`[region-sync] staging schema cleanup failed: ${String(error?.message || error)}`);
       }
     }
-
-    return {
-      ...dbResult,
-      ...summarizePmtilesBuildResult(buildResult),
-      bounds: exported.bounds
-    };
-  } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 }
@@ -837,6 +623,7 @@ async function main() {
     }
 
     const runtimeOptions = createRuntimeOptions();
+    assertManagedRegionSyncPostgres(runtimeOptions);
     const region = await loadRegion(runtimeOptions, args.regionId);
     assertRegionSupportsManagedSync(region);
 
@@ -873,22 +660,19 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildApplyStageDetail,
+  buildExtractorEnv,
   buildRuntimeFollowupEnv,
   buildRegionPmtilesOnly,
   createRuntimeOptions,
+  isProcessAlive,
   main,
   parseArgs,
-  buildApplyStageDetail,
-  buildExtractorEnv,
-  readExportSummary,
-  isProcessAlive,
-  resolveParentWatchdogPid,
-  readRegionImportSummary,
   resolveImporterDbGeometryMode,
-  runRuntimeFollowups,
+  resolveParentWatchdogPid,
+  readExportSummary,
   runRegionSync,
-  runRegionSyncLowMemory,
-  startParentWatchdog,
+  runRuntimeFollowups,
   shouldRunRuntimeFollowup,
-  shouldUseLowMemoryPipeline
+  startParentWatchdog
 };

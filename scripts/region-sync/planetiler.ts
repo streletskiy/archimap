@@ -3,20 +3,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { ensureDir } = require('./common');
 
-const DEFAULT_PMTILES_BUILD_ENGINE = 'planetiler';
-const VALID_PMTILES_BUILD_ENGINES = new Set(['planetiler', 'tippecanoe']);
 const DEFAULT_PLANETILER_BIN = String(process.env.PLANETILER_BIN || 'planetiler').trim() || 'planetiler';
-
-function resolvePmtilesBuildEngine(env: LooseRecord = process.env, fallback = DEFAULT_PMTILES_BUILD_ENGINE) {
-  const raw = String(env.PMTILES_BUILD_ENGINE || fallback || DEFAULT_PMTILES_BUILD_ENGINE)
-    .trim()
-    .toLowerCase();
-  if (!raw) return DEFAULT_PMTILES_BUILD_ENGINE;
-  if (VALID_PMTILES_BUILD_ENGINES.has(raw)) {
-    return raw;
-  }
-  throw new Error(`Invalid PMTiles build engine: ${raw}. Expected one of: planetiler, tippecanoe`);
-}
 
 function runCommand(exe, args, options: LooseRecord = {}) {
   const result = spawnSync(exe, args, {
@@ -143,10 +130,8 @@ function runPlanetilerBuild({
 }
 
 module.exports = {
-  DEFAULT_PMTILES_BUILD_ENGINE,
   detectPlanetilerExecutable,
   normalizeAttributeKeys,
-  resolvePmtilesBuildEngine,
   runPlanetilerBuild,
   writePlanetilerSchema
 };

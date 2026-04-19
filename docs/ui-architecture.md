@@ -157,6 +157,7 @@ When a new control is needed:
 ### Region Editor Modals
 
 - Admin data region create/edit flows open in a shared full-screen modal instead of an inline page form.
+- New region creation is driven by the curated admin region map/catalog only; the standard modal flow no longer exposes extract search, candidate lists, or manual runtime extract resolution.
 - The modal uses a stacked layout with the current-status summary spanning the full modal width and the editable form below it, so the form keeps usable space on large screens.
 - The current-status card keeps itself compact by rendering its fields as a responsive grid instead of a tall vertical list.
 - Save, sync, and delete actions live on the right side of the bounds row inside the current-status card instead of floating outside the status block.

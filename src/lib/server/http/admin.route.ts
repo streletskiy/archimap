@@ -369,31 +369,6 @@ function registerAdminRoutes(deps: LooseRecord) {
     )
   );
 
-  app.post(
-    '/api/admin/app-settings/data/regions/resolve-extract',
-    requireCsrfSession,
-    requireAuth,
-    requireAdmin,
-    requireMasterAdmin,
-    withAdminError(
-      async (req, res) => {
-        const resolved = await adminSettingsService.resolveExtractCandidates({
-          query: req.body?.query,
-          source: req.body?.source
-        });
-        return res.json({
-          ok: true,
-          query: resolved.query,
-          items: resolved.items
-        });
-      },
-      {
-        status: 500,
-        message: 'Data settings service is unavailable'
-      }
-    )
-  );
-
   app.get(
     '/api/admin/app-settings/data/regions/:regionId/runs',
     requireAuth,

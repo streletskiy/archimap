@@ -31,7 +31,7 @@ function signalProcessTree(child, signal = 'SIGTERM', log = console, options: Lo
     try {
       // The managed sync child is spawned detached on POSIX, making it the
       // leader of its own process group. Signalling `-pid` stops the whole
-      // group, including the Python importer / tippecanoe grandchildren.
+      // group, including `osm2pgsql`, `planetiler`, and any other sync subprocesses.
       killRef(-child.pid, signal);
       return true;
     } catch {

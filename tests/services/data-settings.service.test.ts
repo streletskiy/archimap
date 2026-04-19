@@ -717,7 +717,7 @@ test('saveRegion expands a new geofabrik country into an aggregate with hidden s
   assert.equal(saved.name, 'PL Poland');
   assert.equal(saved.slug, 'pl-poland');
   assert.equal(saved.extractSource, 'geofabrik');
-  assert.equal(saved.extractId, 'geofabrik_europe_poland');
+  assert.equal(saved.extractId, 'poland');
   assert.equal(saved.subregionCount, 2);
   assert.equal(saved.subregionCompletedCount, 0);
 
@@ -911,7 +911,7 @@ test('saveRegion upgrades an existing standalone geofabrik country into an aggre
 
   assert.equal(upgraded.id, inserted.id);
   assert.equal(upgraded.regionKind, 'country_aggregate');
-  assert.equal(upgraded.extractId, 'geofabrik_europe_poland');
+  assert.equal(upgraded.extractId, 'poland');
 
   const resaved = await service.saveRegion(
     buildRegionInput({

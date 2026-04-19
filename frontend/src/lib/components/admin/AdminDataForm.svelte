@@ -1,34 +1,10 @@
 <script>
   import { t } from '$lib/i18n/index';
-  import { UiButton, UiCheckbox, UiInput, UiRadioGroup, UiRadioGroupItem } from '$lib/components/base';
+  import { UiCheckbox, UiInput } from '$lib/components/base';
 
   export let controller = null;
   export let formId = 'admin-data-region-form';
   export let regionDraft = null;
-  export let regionExtractCandidates = [];
-  export let regionSaving = false;
-  export let regionDeleting = false;
-  export let regionResolveBusy = false;
-
-  function getExtractCandidateValue(candidate) {
-    return `${String(candidate?.extractSource || '').trim()}::${String(candidate?.extractId || '').trim()}`;
-  }
-
-  function handleExtractCandidateChange(event) {
-    const nextValue = String(event.detail?.value || '').trim();
-    if (!nextValue) return;
-    const candidate = $regionExtractCandidates.find((item) => getExtractCandidateValue(item) === nextValue);
-    if (candidate) {
-      controller.applyRegionExtractCandidate(candidate);
-    }
-  }
-
-  $: selectedExtractCandidateValue = $regionDraft.extractSource && $regionDraft.extractId
-    ? getExtractCandidateValue({
-      extractSource: $regionDraft.extractSource,
-      extractId: $regionDraft.extractId
-    })
-    : '';
 </script>
 
 <form id={formId} class="data-form-card space-y-3 rounded-2xl p-3 min-w-0" on:submit={controller.saveDataRegion}>
@@ -93,53 +69,12 @@
       </summary>
 
       <div class="mt-3 space-y-3">
-        <div class="space-y-2 text-sm ui-text-body">
-          <label class="space-y-1 block">
-            <span>{$t('admin.data.form.searchQuery')}</span>
-            <div class="flex flex-col gap-2 sm:flex-row">
-              <UiInput
-                className="flex-1"
-                value={$regionDraft.searchQuery}
-                on:input={controller.handleRegionSearchQueryInput}
-                placeholder={$t('admin.data.form.searchQueryPlaceholder')}
-              />
-              <UiButton
-                type="button"
-                variant="secondary"
-                onclick={controller.resolveRegionExtractCandidates}
-                disabled={regionResolveBusy || regionSaving || regionDeleting}
-              >
-                {regionResolveBusy ? $t('admin.data.form.resolvingExtract') : $t('admin.data.form.resolveExtract')}
-              </UiButton>
-            </div>
-          </label>
+        <p class="text-sm ui-text-body">
+          {$t('admin.data.form.mapHint')}
+        </p>
 
-          {#if $regionDraft.extractResolutionStatus !== 'resolved' && $regionDraft.extractResolutionError}
-            <p class="text-xs ui-text-danger break-words">{$regionDraft.extractResolutionError}</p>
-          {/if}
-        </div>
-
-        {#if $regionExtractCandidates.length > 0}
-          <div class="space-y-2 rounded-xl border ui-border px-3 py-2.5">
-            <p class="text-xs font-semibold uppercase tracking-wide ui-text-muted">{$t('admin.data.form.extractCandidates')}</p>
-            <UiRadioGroup
-              value={selectedExtractCandidateValue}
-              onchange={handleExtractCandidateChange}
-              className="space-y-2"
-            >
-              {#each $regionExtractCandidates as candidate (`extract-candidate-${candidate.extractSource}-${candidate.extractId}`)}
-                <label class="block cursor-pointer rounded-lg border ui-border px-3 py-2">
-                  <div class="flex items-start gap-3">
-                    <UiRadioGroupItem value={getExtractCandidateValue(candidate)} name="region-extract-candidate" />
-                    <div class="min-w-0">
-                      <p class="font-medium ui-text-strong break-words">{candidate.extractLabel}</p>
-                      <p class="text-xs ui-text-subtle break-all">{candidate.extractSource} · {candidate.extractId}</p>
-                    </div>
-                  </div>
-                </label>
-              {/each}
-            </UiRadioGroup>
-          </div>
+        {#if $regionDraft.extractResolutionStatus !== 'resolved' && $regionDraft.extractResolutionError}
+          <p class="text-xs ui-text-danger break-words">{$regionDraft.extractResolutionError}</p>
         {/if}
 
         <div class="grid gap-3 md:grid-cols-2">

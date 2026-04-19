@@ -5,7 +5,6 @@ const { spawnSync } = require('child_process');
 const {
   detectPlanetilerExecutable,
   normalizeAttributeKeys,
-  resolvePmtilesBuildEngine,
   runPlanetilerBuild,
   writePlanetilerSchema
 } = require('./region-sync/planetiler');
@@ -16,8 +15,6 @@ const DEFAULT_OUTPUT = path.join(REPO_ROOT, 'frontend', 'static', 'admin-regions
 const DEFAULT_METADATA_OUTPUT = `${DEFAULT_OUTPUT}.meta.json`;
 const DEFAULT_IMAGE = 'archimap-runtime-base:admin-regions';
 const DEFAULT_LAYER = 'regions';
-const DEFAULT_ENGINE = resolvePmtilesBuildEngine(process.env);
-const DEFAULT_TIPPECANOE_BIN = String(process.env.TIPPECANOE_BIN || 'tippecanoe').trim() || 'tippecanoe';
 const DEFAULT_PLANETILER_BIN = String(process.env.PLANETILER_BIN || 'planetiler').trim() || 'planetiler';
 
 function parseArgs(argv = process.argv.slice(2)): LooseRecord {
@@ -30,8 +27,6 @@ function parseArgs(argv = process.argv.slice(2)): LooseRecord {
     maxZoom: 7,
     skipImageBuild: false,
     local: false,
-    engine: DEFAULT_ENGINE,
-    tippecanoeBin: DEFAULT_TIPPECANOE_BIN,
     planetilerBin: DEFAULT_PLANETILER_BIN,
     metadataOutput: DEFAULT_METADATA_OUTPUT
   };
@@ -64,11 +59,6 @@ function parseArgs(argv = process.argv.slice(2)): LooseRecord {
       index += 1;
       continue;
     }
-    if (arg === '--engine') {
-      options.engine = resolvePmtilesBuildEngine({ PMTILES_BUILD_ENGINE: argv[index + 1] });
-      index += 1;
-      continue;
-    }
     if (arg === '--min-zoom') {
       options.minZoom = Number(argv[index + 1] || 0);
       index += 1;
@@ -85,11 +75,6 @@ function parseArgs(argv = process.argv.slice(2)): LooseRecord {
     }
     if (arg === '--local') {
       options.local = true;
-      continue;
-    }
-    if (arg === '--tippecanoe-bin') {
-      options.tippecanoeBin = String(argv[index + 1] || '').trim() || DEFAULT_TIPPECANOE_BIN;
-      index += 1;
       continue;
     }
     if (arg === '--planetiler-bin') {
@@ -152,16 +137,6 @@ function buildRuntimeBaseImage(image) {
   run('docker', ['build', '--target', 'runtime-base', '-t', image, '.']);
 }
 
-function canRunLocalTippecanoe(tippecanoeBin) {
-  const result = spawnSync(tippecanoeBin, ['--version'], {
-    cwd: REPO_ROOT,
-    stdio: 'ignore',
-    shell: false,
-    env: process.env
-  });
-  return result.status === 0;
-}
-
 function canRunLocalPlanetiler(planetilerBin) {
   const result = spawnSync(planetilerBin, ['--version'], {
     cwd: REPO_ROOT,
@@ -194,48 +169,26 @@ function buildPmtilesLocal({
   layer,
   minZoom,
   maxZoom,
-  engine,
-  tippecanoeBin,
   planetilerBin
 }: LooseRecord) {
-  if (engine === 'planetiler') {
-    const schemaPath = `${output}.planetiler.yml`;
-    try {
-      runPlanetilerBuild({
-        planetilerExe: planetilerBin,
-        inputPath: input,
-        outputPath: output,
-        schemaPath,
-        schemaName: 'ArchiMap Admin Regions',
-        layer,
-        minZoom,
-        maxZoom,
-        attributeKeys: collectAdminRegionAttributeKeys(input),
-        includeFeatureId: false,
-        env: process.env
-      });
-    } finally {
-      fs.rmSync(schemaPath, { force: true });
-    }
-    return;
+  const schemaPath = `${output}.planetiler.yml`;
+  try {
+    runPlanetilerBuild({
+      planetilerExe: planetilerBin,
+      inputPath: input,
+      outputPath: output,
+      schemaPath,
+      schemaName: 'ArchiMap Admin Regions',
+      layer,
+      minZoom,
+      maxZoom,
+      attributeKeys: collectAdminRegionAttributeKeys(input),
+      includeFeatureId: false,
+      env: process.env
+    });
+  } finally {
+    fs.rmSync(schemaPath, { force: true });
   }
-
-  run(tippecanoeBin, [
-    '-o',
-    output,
-    '-f',
-    '-l',
-    layer,
-    '-Z',
-    String(minZoom),
-    '-z',
-    String(maxZoom),
-    '--read-parallel',
-    '--detect-shared-borders',
-    '--coalesce-densest-as-needed',
-    '--extend-zooms-if-still-dropping',
-    input
-  ]);
 }
 
 function buildPmtilesDocker({
@@ -244,67 +197,38 @@ function buildPmtilesDocker({
   output,
   layer,
   minZoom,
-  maxZoom,
-  engine
+  maxZoom
 }: LooseRecord) {
   const workspaceInput = `/workspace/${path.relative(REPO_ROOT, input).replace(/\\/g, '/')}`;
   const workspaceOutput = `/workspace/${path.relative(REPO_ROOT, output).replace(/\\/g, '/')}`;
-  if (engine === 'planetiler') {
-    const schemaHostPath = `${output}.planetiler.yml`;
-    const schemaWorkspacePath = `/workspace/${path.relative(REPO_ROOT, schemaHostPath).replace(/\\/g, '/')}`;
-    writePlanetilerSchema(schemaHostPath, {
-      schemaName: 'ArchiMap Admin Regions',
-      inputPath: workspaceInput,
-      layer,
-      attributeKeys: collectAdminRegionAttributeKeys(input),
-      includeFeatureId: false
-    });
-    try {
-      run('docker', [
-        'run',
-        '--rm',
-        '-v',
-        `${REPO_ROOT}:/workspace`,
-        '-w',
-        '/workspace',
-        image,
-        'planetiler',
-        schemaWorkspacePath,
-        `--output=${workspaceOutput}`,
-        '--force',
-        `--minzoom=${String(minZoom)}`,
-        `--maxzoom=${String(maxZoom)}`
-      ]);
-    } finally {
-      fs.rmSync(schemaHostPath, { force: true });
-    }
-    return;
-  }
-
-  run('docker', [
-    'run',
-    '--rm',
-    '-v',
-    `${REPO_ROOT}:/workspace`,
-    '-w',
-    '/workspace',
-    image,
-    'tippecanoe',
-    '-o',
-    workspaceOutput,
-    '-f',
-    '-l',
+  const schemaHostPath = `${output}.planetiler.yml`;
+  const schemaWorkspacePath = `/workspace/${path.relative(REPO_ROOT, schemaHostPath).replace(/\\/g, '/')}`;
+  writePlanetilerSchema(schemaHostPath, {
+    schemaName: 'ArchiMap Admin Regions',
+    inputPath: workspaceInput,
     layer,
-    '-Z',
-    String(minZoom),
-    '-z',
-    String(maxZoom),
-    '--read-parallel',
-    '--detect-shared-borders',
-    '--coalesce-densest-as-needed',
-    '--extend-zooms-if-still-dropping',
-    workspaceInput
-  ]);
+    attributeKeys: collectAdminRegionAttributeKeys(input),
+    includeFeatureId: false
+  });
+  try {
+    run('docker', [
+      'run',
+      '--rm',
+      '-v',
+      `${REPO_ROOT}:/workspace`,
+      '-w',
+      '/workspace',
+      image,
+      'planetiler',
+      schemaWorkspacePath,
+      `--output=${workspaceOutput}`,
+      '--force',
+      `--minzoom=${String(minZoom)}`,
+      `--maxzoom=${String(maxZoom)}`
+    ]);
+  } finally {
+    fs.rmSync(schemaHostPath, { force: true });
+  }
 }
 
 function writeMetadata({
@@ -315,8 +239,6 @@ function writeMetadata({
   minZoom,
   maxZoom,
   image,
-  engine,
-  tippecanoeBin,
   planetilerBin,
   mode
 }) {
@@ -330,8 +252,6 @@ function writeMetadata({
     minZoom,
     maxZoom,
     image,
-    engine,
-    tippecanoeBin,
     planetilerBin,
     mode,
     generatedAt: new Date().toISOString()
@@ -346,12 +266,9 @@ function main() {
   ensureParentDir(options.output);
   ensureParentDir(options.metadataOutput);
 
-  const engine = resolvePmtilesBuildEngine({ PMTILES_BUILD_ENGINE: options.engine });
   const useLocalBuild =
     options.local ||
-    (engine === 'planetiler'
-      ? canRunLocalPlanetiler(options.planetilerBin || detectPlanetilerExecutable(process.env) || DEFAULT_PLANETILER_BIN)
-      : canRunLocalTippecanoe(options.tippecanoeBin));
+    canRunLocalPlanetiler(options.planetilerBin || detectPlanetilerExecutable(process.env) || DEFAULT_PLANETILER_BIN);
   if (useLocalBuild) {
     buildPmtilesLocal(options);
   } else {
@@ -369,10 +286,8 @@ function main() {
     minZoom: options.minZoom,
     maxZoom: options.maxZoom,
     image: useLocalBuild ? null : options.image,
-    engine,
-    tippecanoeBin: engine === 'tippecanoe' && useLocalBuild ? options.tippecanoeBin : null,
-    planetilerBin: engine === 'planetiler' && useLocalBuild ? options.planetilerBin : null,
-    mode: useLocalBuild ? `local-${engine}` : `docker-runtime-base-${engine}`
+    planetilerBin: useLocalBuild ? options.planetilerBin : null,
+    mode: useLocalBuild ? 'local-planetiler' : 'docker-runtime-base-planetiler'
   });
 
   const sizeBytes = Number(fs.statSync(options.output).size || 0);
@@ -381,14 +296,12 @@ function main() {
       output: toRepoRelative(options.output),
       metadataOutput: toRepoRelative(options.metadataOutput),
       sizeBytes,
-      engine,
       layer: options.layer,
       minZoom: options.minZoom,
       maxZoom: options.maxZoom,
       image: useLocalBuild ? null : options.image,
-      tippecanoeBin: engine === 'tippecanoe' && useLocalBuild ? options.tippecanoeBin : null,
-      planetilerBin: engine === 'planetiler' && useLocalBuild ? options.planetilerBin : null,
-      mode: useLocalBuild ? `local-${engine}` : `docker-runtime-base-${engine}`
+      planetilerBin: useLocalBuild ? options.planetilerBin : null,
+      mode: useLocalBuild ? 'local-planetiler' : 'docker-runtime-base-planetiler'
     })
   );
 }

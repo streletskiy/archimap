@@ -1,32 +1,29 @@
 const fs = require('fs');
-const Database = require('better-sqlite3');
 const { Client } = require('pg');
 const {
   closeWriteStream,
-  deriveFeatureKindFromTagsJson,
   ensureDir,
   formatGeojsonFeatureLine,
   formatRenderedGeojsonFeatureLine,
   updateBounds,
-  writeRowsToNdjsonFile,
   writeStreamLine
 } = require('./common');
-const { expandRowsWithBuildingRemainders } = require('./building-remainder');
 
 const POSTGRES_REGION_EXPORT_BATCH_SIZE = 20000;
+const POSTGRES_REGION_EXPORT_PARTS_TABLE = 'region_export_parts_tmp';
+const POSTGRES_REGION_EXPORT_PARTS_TABLE_REF = `pg_temp.${POSTGRES_REGION_EXPORT_PARTS_TABLE}`;
+const POSTGRES_REGION_EXPORT_PARTS_GIST_INDEX = 'region_export_parts_geom_gist';
 const BUILDING_JSON_KEY_SQL = '"building"';
 const BUILDING_PART_JSON_KEY_SQL = '"building:part"';
 const BUILDING_PART_ALT_JSON_KEY_SQL = '"building_part"';
 
-function buildSqliteFeatureKindSql(columnName = 'bc.tags_json') {
-  return `
-    CASE
-      WHEN instr(COALESCE(${columnName}, ''), '${BUILDING_JSON_KEY_SQL}') > 0 THEN 'building'
-      WHEN instr(COALESCE(${columnName}, ''), '${BUILDING_PART_JSON_KEY_SQL}') > 0
-        OR instr(COALESCE(${columnName}, ''), '${BUILDING_PART_ALT_JSON_KEY_SQL}') > 0 THEN 'building_part'
-      ELSE 'building'
-    END
-  `;
+function assertPostgresRegionSyncOptions(options: LooseRecord = {}) {
+  if (String(options.dbProvider || '').trim().toLowerCase() !== 'postgres') {
+    throw new Error('Managed region sync only supports DB_PROVIDER=postgres');
+  }
+  if (!String(options.databaseUrl || '').trim()) {
+    throw new Error('DATABASE_URL is required for DB_PROVIDER=postgres');
+  }
 }
 
 function buildPostgresFeatureKindSql(columnName = 'bc.tags_json') {
@@ -40,168 +37,127 @@ function buildPostgresFeatureKindSql(columnName = 'bc.tags_json') {
   `;
 }
 
-function buildSqliteRegionExportQuery({
-  regionPlaceholder = '?',
-  geometrySql = 'bc.geometry_json AS geometry_json'
-} = {}) {
-  const featureKindSql = buildSqliteFeatureKindSql('bc.tags_json');
+async function preparePostgresRegionExportPartsTable(client, regionId) {
+  const normalizedRegionId = Number(regionId);
+  if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
+    throw new Error('Region export requires a positive integer regionId');
+  }
+
+  await client.query(`DROP TABLE IF EXISTS ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
+  await client.query(`
+    CREATE TEMP TABLE ${POSTGRES_REGION_EXPORT_PARTS_TABLE} AS
+    SELECT
+      bc.osm_type,
+      bc.osm_id,
+      ST_Multi(bc.geom) AS geom,
+      bc.min_lon,
+      bc.min_lat,
+      bc.max_lon,
+      bc.max_lat
+    FROM public.data_region_memberships drm
+    JOIN osm.building_contours bc
+      ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+    WHERE drm.region_id = $1
+      AND ${buildPostgresFeatureKindSql('bc.tags_json')} = 'building_part'
+  `, [normalizedRegionId]);
+  await client.query(`CREATE INDEX ${POSTGRES_REGION_EXPORT_PARTS_GIST_INDEX} ON ${POSTGRES_REGION_EXPORT_PARTS_TABLE} USING GIST (geom)`);
+  await client.query(`ANALYZE ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
+}
+
+function buildPostgresRegionExportQuery({ regionSql = '$1' } = {}) {
+  const featureKindSql = buildPostgresFeatureKindSql('bc.tags_json');
   return `
-    WITH region_rows AS (
+    SELECT
+      bc.osm_type,
+      bc.osm_id,
+      bc.tags_json,
+      ${featureKindSql} AS feature_kind,
+      ST_AsGeoJSON(bc.geom)::text AS geometry_json,
+      bc.min_lon,
+      bc.min_lat,
+      bc.max_lon,
+      bc.max_lat,
+      0 AS render_hide_base_when_parts
+    FROM public.data_region_memberships drm
+    JOIN osm.building_contours bc
+      ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+    WHERE drm.region_id = ${regionSql}
+    ORDER BY bc.osm_type, bc.osm_id
+  `;
+}
+
+function buildPostgresRegionBaseGeojsonExportQuery({
+  regionSql = '$1',
+  partsTableRef = POSTGRES_REGION_EXPORT_PARTS_TABLE_REF,
+  orderBy = true
+} = {}) {
+  const featureKindSql = buildPostgresFeatureKindSql('bc.tags_json');
+  return `
+    SELECT
+      rm.osm_type,
+      rm.osm_id,
+      rm.tags_json,
+      rm.feature_kind,
+      rm.geometry_json,
+      rm.min_lon,
+      rm.min_lat,
+      rm.max_lon,
+      rm.max_lat,
+      CASE
+        WHEN rm.feature_kind = 'building'
+         AND EXISTS (
+           SELECT 1
+           FROM ${partsTableRef} part
+           WHERE part.geom && rm.geom
+             AND part.min_lon >= rm.min_lon
+             AND part.max_lon <= rm.max_lon
+             AND part.min_lat >= rm.min_lat
+             AND part.max_lat <= rm.max_lat
+         )
+        THEN 1
+        ELSE 0
+      END AS render_hide_base_when_parts
+    FROM (
       SELECT
         bc.osm_type,
         bc.osm_id,
         bc.tags_json,
         ${featureKindSql} AS feature_kind,
-        ${geometrySql},
+        bc.geom,
+        ST_AsGeoJSON(bc.geom)::text AS geometry_json,
         bc.min_lon,
         bc.min_lat,
         bc.max_lon,
         bc.max_lat
-      FROM data_region_memberships drm
+      FROM public.data_region_memberships drm
       JOIN osm.building_contours bc
         ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-      WHERE drm.region_id = ${regionPlaceholder}
-    ),
-    buildings_with_parts AS (
-      SELECT DISTINCT building.osm_type, building.osm_id
-      FROM region_rows building
-      JOIN region_rows part
-        ON building.feature_kind = 'building'
-       AND part.feature_kind = 'building_part'
-       AND (part.osm_type <> building.osm_type OR part.osm_id <> building.osm_id)
-       AND part.min_lon >= building.min_lon
-       AND part.max_lon <= building.max_lon
-       AND part.min_lat >= building.min_lat
-       AND part.max_lat <= building.max_lat
-    )
-    SELECT
-      region_rows.osm_type,
-      region_rows.osm_id,
-      region_rows.tags_json,
-      region_rows.feature_kind,
-      region_rows.geometry_json,
-      region_rows.min_lon,
-      region_rows.min_lat,
-      region_rows.max_lon,
-      region_rows.max_lat,
-      CASE
-        WHEN buildings_with_parts.osm_id IS NULL THEN 0
-        ELSE 1
-      END AS render_hide_base_when_parts
-    FROM region_rows
-    LEFT JOIN buildings_with_parts
-      ON buildings_with_parts.osm_type = region_rows.osm_type
-     AND buildings_with_parts.osm_id = region_rows.osm_id
-    ORDER BY region_rows.osm_type, region_rows.osm_id
+      WHERE drm.region_id = ${regionSql}
+    ) rm
+    WHERE rm.feature_kind IN ('building', 'building_part')
+    ${orderBy ? 'ORDER BY rm.osm_type, rm.osm_id' : ''}
   `;
 }
 
-function buildPostgresRegionExportQuery({ regionSql = '$1', includeRemainderRows = false } = {}) {
+function buildPostgresRegionRemainderGeojsonExportQuery({
+  regionSql = '$1',
+  partsTableRef = POSTGRES_REGION_EXPORT_PARTS_TABLE_REF,
+  orderBy = true
+} = {}) {
   const featureKindSql = buildPostgresFeatureKindSql('bc.tags_json');
-  const remainderCtesSql = includeRemainderRows
-    ? `,
-    building_remainders AS (
-      SELECT
-        building.osm_type,
-        building.osm_id,
-        building.tags_json,
-        ST_Multi(
-          ST_CollectionExtract(
-            ST_Difference(
-              ST_MakeValid(building.geom),
-              ST_UnaryUnion(ST_Collect(ST_MakeValid(part.geom)))
-            ),
-            3
-          )
-        ) AS geom
-      FROM region_rows building
-      JOIN region_rows part
-        ON building.feature_kind = 'building'
-       AND part.feature_kind = 'building_part'
-       AND (part.osm_type <> building.osm_type OR part.osm_id <> building.osm_id)
-       AND part.min_lon >= building.min_lon
-       AND part.max_lon <= building.max_lon
-       AND part.min_lat >= building.min_lat
-       AND part.max_lat <= building.max_lat
-      GROUP BY building.osm_type, building.osm_id, building.tags_json, building.geom
-    ),
-    remainder_rows AS (
-      SELECT
-        building_remainders.osm_type,
-        building_remainders.osm_id,
-        building_remainders.tags_json,
-        'building_remainder' AS feature_kind,
-        building_remainders.geom,
-        ST_XMin(building_remainders.geom) AS min_lon,
-        ST_YMin(building_remainders.geom) AS min_lat,
-        ST_XMax(building_remainders.geom) AS max_lon,
-        ST_YMax(building_remainders.geom) AS max_lat,
-        0 AS render_hide_base_when_parts
-      FROM building_remainders
-      WHERE building_remainders.geom IS NOT NULL
-        AND NOT ST_IsEmpty(building_remainders.geom)
-    )`
-    : '';
-  const exportRowsSql = includeRemainderRows
-    ? `
-    export_rows AS (
-      SELECT
-        region_rows.osm_type,
-        region_rows.osm_id,
-        region_rows.tags_json,
-        region_rows.feature_kind,
-        region_rows.geom,
-        region_rows.min_lon,
-        region_rows.min_lat,
-        region_rows.max_lon,
-        region_rows.max_lat,
-        CASE
-          WHEN buildings_with_parts.osm_id IS NULL THEN 0
-          ELSE 1
-        END AS render_hide_base_when_parts
-      FROM region_rows
-      LEFT JOIN buildings_with_parts
-        ON buildings_with_parts.osm_type = region_rows.osm_type
-       AND buildings_with_parts.osm_id = region_rows.osm_id
-
-      UNION ALL
-
-      SELECT
-        remainder_rows.osm_type,
-        remainder_rows.osm_id,
-        remainder_rows.tags_json,
-        remainder_rows.feature_kind,
-        remainder_rows.geom,
-        remainder_rows.min_lon,
-        remainder_rows.min_lat,
-        remainder_rows.max_lon,
-        remainder_rows.max_lat,
-        remainder_rows.render_hide_base_when_parts
-      FROM remainder_rows
-    )`
-    : `
-    export_rows AS (
-      SELECT
-        region_rows.osm_type,
-        region_rows.osm_id,
-        region_rows.tags_json,
-        region_rows.feature_kind,
-        region_rows.geom,
-        region_rows.min_lon,
-        region_rows.min_lat,
-        region_rows.max_lon,
-        region_rows.max_lat,
-        CASE
-          WHEN buildings_with_parts.osm_id IS NULL THEN 0
-          ELSE 1
-        END AS render_hide_base_when_parts
-      FROM region_rows
-      LEFT JOIN buildings_with_parts
-        ON buildings_with_parts.osm_type = region_rows.osm_type
-       AND buildings_with_parts.osm_id = region_rows.osm_id
-    )`;
   return `
-    WITH region_rows AS (
+    SELECT
+      b.osm_type,
+      b.osm_id,
+      b.tags_json,
+      'building_remainder'::text AS feature_kind,
+      ST_AsGeoJSON(derived.remainder_geom)::text AS geometry_json,
+      derived.min_lon,
+      derived.min_lat,
+      derived.max_lon,
+      derived.max_lat,
+      0 AS render_hide_base_when_parts
+    FROM (
       SELECT
         bc.osm_type,
         bc.osm_id,
@@ -216,40 +172,43 @@ function buildPostgresRegionExportQuery({ regionSql = '$1', includeRemainderRows
       JOIN osm.building_contours bc
         ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
       WHERE drm.region_id = ${regionSql}
-    ),
-    buildings_with_parts AS (
-      SELECT DISTINCT building.osm_type, building.osm_id
-      FROM region_rows building
-      JOIN region_rows part
-        ON building.feature_kind = 'building'
-       AND part.feature_kind = 'building_part'
-       AND (part.osm_type <> building.osm_type OR part.osm_id <> building.osm_id)
-       AND part.min_lon >= building.min_lon
-       AND part.max_lon <= building.max_lon
-       AND part.min_lat >= building.min_lat
-       AND part.max_lat <= building.max_lat
-    )
-    ${remainderCtesSql},
-    ${exportRowsSql}
-    SELECT
-      export_rows.osm_type,
-      export_rows.osm_id,
-      export_rows.tags_json,
-      export_rows.feature_kind,
-      ST_AsGeoJSON(export_rows.geom)::text AS geometry_json,
-      export_rows.min_lon,
-      export_rows.min_lat,
-      export_rows.max_lon,
-      export_rows.max_lat,
-      export_rows.render_hide_base_when_parts
-    FROM export_rows
-    ORDER BY
-      export_rows.osm_type,
-      export_rows.osm_id,
-      CASE
-        WHEN export_rows.feature_kind = 'building_remainder' THEN 1
-        ELSE 0
-      END
+    ) b
+    JOIN LATERAL (
+      SELECT
+        remainder_geom,
+        ST_XMin(remainder_geom) AS min_lon,
+        ST_YMin(remainder_geom) AS min_lat,
+        ST_XMax(remainder_geom) AS max_lon,
+        ST_YMax(remainder_geom) AS max_lat
+      FROM (
+        SELECT ST_Multi(ST_CollectionExtract(ST_Difference(b.geom, part_union.geom), 3)) AS remainder_geom
+        FROM (
+          SELECT ST_UnaryUnion(ST_Collect(part.geom)) AS geom
+          FROM ${partsTableRef} part
+          WHERE part.geom && b.geom
+            AND part.min_lon >= b.min_lon
+            AND part.max_lon <= b.max_lon
+            AND part.min_lat >= b.min_lat
+            AND part.max_lat <= b.max_lat
+        ) part_union
+        WHERE part_union.geom IS NOT NULL
+      ) remainder
+      WHERE remainder.remainder_geom IS NOT NULL
+        AND NOT ST_IsEmpty(remainder.remainder_geom)
+    ) derived ON TRUE
+    WHERE b.feature_kind = 'building'
+    ${orderBy ? 'ORDER BY b.osm_type, b.osm_id' : ''}
+  `;
+}
+
+function buildPostgresRegionGeojsonExportQuery({
+  regionSql = '$1',
+  partsTableRef = POSTGRES_REGION_EXPORT_PARTS_TABLE_REF
+} = {}) {
+  return `
+    ${buildPostgresRegionBaseGeojsonExportQuery({ regionSql, partsTableRef, orderBy: false })}
+    UNION ALL
+    ${buildPostgresRegionRemainderGeojsonExportQuery({ regionSql, partsTableRef, orderBy: false })}
   `;
 }
 
@@ -277,18 +236,6 @@ function buildPostgresRegionRenderFeatureExportQuery({ regionSql = '$1' } = {}) 
         ELSE 0
       END
   `;
-}
-
-function openSqliteRegionDb(archimapDbPath, osmDbPath) {
-  ensureDir(archimapDbPath);
-  ensureDir(osmDbPath);
-  const db = new Database(archimapDbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('busy_timeout = 5000');
-  db.prepare('ATTACH DATABASE ? AS osm').run(osmDbPath);
-  db.exec('PRAGMA osm.journal_mode = WAL;');
-  db.exec('PRAGMA osm.synchronous = NORMAL;');
-  return db;
 }
 
 function normalizeRegionRow(row) {
@@ -343,7 +290,6 @@ function assertRegionSupportsManagedSync(region) {
     throw new Error('Region not found');
   }
   if (region.regionKind === 'country_aggregate') {
-    // Aggregate regions dispatch to their subregions; no own extract download.
     return;
   }
   if (region.sourceType !== 'extract') {
@@ -357,53 +303,18 @@ function assertRegionSupportsManagedSync(region) {
   }
 }
 
-function getRegionFromSqlite({ archimapDbPath, osmDbPath }, regionId) {
-  const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
+async function withPostgresClient(databaseUrl, work) {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
   try {
-    const row = db
-      .prepare(
-        `
-      SELECT
-        id,
-        slug,
-        name,
-        source_type,
-        source_value,
-        extract_source,
-        extract_id,
-        extract_label,
-        extract_resolution_status,
-        extract_resolution_error,
-        enabled,
-        auto_sync_enabled,
-        auto_sync_on_start,
-        auto_sync_interval_hours,
-        pmtiles_min_zoom,
-        pmtiles_max_zoom,
-        source_layer,
-        bounds_west,
-        bounds_south,
-        bounds_east,
-        bounds_north,
-        region_kind,
-        parent_region_id,
-        order_in_parent
-      FROM data_sync_regions
-      WHERE id = ?
-      LIMIT 1
-    `
-      )
-      .get(Number(regionId));
-    return normalizeRegionRow(row);
+    return await work(client);
   } finally {
-    db.close();
+    await client.end();
   }
 }
 
 async function getRegionFromPostgres({ databaseUrl }, regionId) {
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  try {
+  return withPostgresClient(databaseUrl, async (client) => {
     const result = await client.query(
       `
       SELECT
@@ -438,50 +349,36 @@ async function getRegionFromPostgres({ databaseUrl }, regionId) {
       [Number(regionId)]
     );
     return normalizeRegionRow(result.rows[0]);
-  } finally {
-    await client.end();
-  }
+  });
 }
 
 async function loadSubregions(options, parentRegionId) {
+  assertPostgresRegionSyncOptions(options);
   const parentId = Number(parentRegionId);
   if (!Number.isInteger(parentId) || parentId <= 0) return [];
 
-  const sql = `
-    SELECT
-      id, slug, name, source_type, source_value, extract_source, extract_id,
-      extract_label, extract_resolution_status, extract_resolution_error,
-      enabled, auto_sync_enabled, auto_sync_on_start, auto_sync_interval_hours,
-      pmtiles_min_zoom, pmtiles_max_zoom, source_layer,
-      bounds_west, bounds_south, bounds_east, bounds_north,
-      region_kind, parent_region_id, order_in_parent
-    FROM data_sync_regions
-    WHERE parent_region_id = ?
-    ORDER BY COALESCE(order_in_parent, 0), id
-  `;
-  const sqlPg = sql.replace(/\?/g, '$1').replace('data_sync_regions', 'public.data_sync_regions');
-
-  if (options.dbProvider === 'postgres') {
-    const client = new Client({ connectionString: options.databaseUrl });
-    await client.connect();
-    try {
-      const result = await client.query(sqlPg, [parentId]);
-      return (result.rows || []).map(normalizeRegionRow).filter(Boolean);
-    } finally {
-      await client.end();
-    }
-  }
-
-  const db = openSqliteRegionDb(options.archimapDbPath, options.osmDbPath);
-  try {
-    const rows = db.prepare(sql).all(parentId);
-    return (rows || []).map(normalizeRegionRow).filter(Boolean);
-  } finally {
-    db.close();
-  }
+  return withPostgresClient(options.databaseUrl, async (client) => {
+    const result = await client.query(
+      `
+      SELECT
+        id, slug, name, source_type, source_value, extract_source, extract_id,
+        extract_label, extract_resolution_status, extract_resolution_error,
+        enabled, auto_sync_enabled, auto_sync_on_start, auto_sync_interval_hours,
+        pmtiles_min_zoom, pmtiles_max_zoom, source_layer,
+        bounds_west, bounds_south, bounds_east, bounds_north,
+        region_kind, parent_region_id, order_in_parent
+      FROM public.data_sync_regions
+      WHERE parent_region_id = $1
+      ORDER BY COALESCE(order_in_parent, 0), id
+    `,
+      [parentId]
+    );
+    return (result.rows || []).map(normalizeRegionRow).filter(Boolean);
+  });
 }
 
 async function updateRegionPostSync(options, regionId, summary) {
+  assertPostgresRegionSyncOptions(options);
   const id = Number(regionId);
   if (!Number.isInteger(id) || id <= 0) return;
   const nowIso = new Date().toISOString();
@@ -491,268 +388,117 @@ async function updateRegionPostSync(options, regionId, summary) {
     : Number.isFinite(Number(summary?.importedFeatureCount))
       ? Number(summary.importedFeatureCount)
       : null;
-  if (options.dbProvider === 'postgres') {
-    const client = new Client({ connectionString: options.databaseUrl });
-    await client.connect();
-    try {
-      await client.query(
-        `
-        UPDATE public.data_sync_regions
-        SET
-          last_sync_status = 'idle',
-          last_sync_finished_at = $2,
-          last_sync_error = NULL,
-          last_successful_sync_at = $2,
-          bounds_west = $3,
-          bounds_south = $4,
-          bounds_east = $5,
-          bounds_north = $6,
-          last_feature_count = $7,
-          updated_at = NOW()
-        WHERE id = $1
-      `,
-        [
-          id,
-          nowIso,
-          bounds?.west ?? null,
-          bounds?.south ?? null,
-          bounds?.east ?? null,
-          bounds?.north ?? null,
-          featureCount
-        ]
-      );
-    } finally {
-      await client.end();
-    }
-    return;
-  }
 
-  const db = openSqliteRegionDb(options.archimapDbPath, options.osmDbPath);
-  try {
-    db.prepare(
+  await withPostgresClient(options.databaseUrl, async (client) => {
+    await client.query(
       `
-      UPDATE data_sync_regions
+      UPDATE public.data_sync_regions
       SET
         last_sync_status = 'idle',
-        last_sync_finished_at = ?,
+        last_sync_finished_at = $2,
         last_sync_error = NULL,
-        last_successful_sync_at = ?,
-        bounds_west = ?,
-        bounds_south = ?,
-        bounds_east = ?,
-        bounds_north = ?,
-        last_feature_count = ?,
-        updated_at = datetime('now')
-      WHERE id = ?
-    `
-    ).run(
-      nowIso,
-      nowIso,
-      bounds?.west ?? null,
-      bounds?.south ?? null,
-      bounds?.east ?? null,
-      bounds?.north ?? null,
-      featureCount,
-      id
+        last_successful_sync_at = $2,
+        bounds_west = $3,
+        bounds_south = $4,
+        bounds_east = $5,
+        bounds_north = $6,
+        last_feature_count = $7,
+        updated_at = NOW()
+      WHERE id = $1
+    `,
+      [id, nowIso, bounds?.west ?? null, bounds?.south ?? null, bounds?.east ?? null, bounds?.north ?? null, featureCount]
     );
-  } finally {
-    db.close();
-  }
+  });
 }
 
 async function loadRegion(options, regionId) {
-  if (options.dbProvider === 'postgres') {
-    if (!options.databaseUrl) {
-      throw new Error('DATABASE_URL is required for DB_PROVIDER=postgres');
-    }
-    return getRegionFromPostgres(options, regionId);
-  }
-  return getRegionFromSqlite(options, regionId);
+  assertPostgresRegionSyncOptions(options);
+  return getRegionFromPostgres(options, regionId);
 }
 
-async function exportRegionMembersToNdjson({
-  dbProvider,
-  databaseUrl,
-  archimapDbPath,
-  osmDbPath,
-  regionId,
-  outputPath
+async function streamPostgresCursorRows({
+  client,
+  query,
+  params = [],
+  cursorName,
+  batchSize = POSTGRES_REGION_EXPORT_BATCH_SIZE,
+  onRows
 }) {
-  if (dbProvider === 'postgres') {
-    const client = new Client({ connectionString: databaseUrl });
-    await client.connect();
-    try {
-      const rows = await client.query(buildPostgresRegionExportQuery(), [regionId]);
-      await writeRowsToNdjsonFile(
-        outputPath,
-        rows.rows.map((row) => ({
-          osm_type: row.osm_type,
-          osm_id: row.osm_id,
-          tags_json: row.tags_json,
-          feature_kind: row.feature_kind || deriveFeatureKindFromTagsJson(row.tags_json),
-          geometry_json: row.geometry_json,
-          min_lon: row.min_lon,
-          min_lat: row.min_lat,
-          max_lon: row.max_lon,
-          max_lat: row.max_lat,
-          render_hide_base_when_parts: Number(row.render_hide_base_when_parts || 0)
-        }))
-      );
-    } finally {
-      await client.end();
-    }
-    return;
+  const normalizedBatchSize = Math.max(1, Math.trunc(Number(batchSize) || POSTGRES_REGION_EXPORT_BATCH_SIZE));
+  const normalizedCursorName = String(cursorName || '').trim();
+  if (!normalizedCursorName) {
+    throw new Error('Cursor name is required for streaming PostgreSQL query rows');
+  }
+  if (typeof onRows !== 'function') {
+    throw new Error('onRows callback is required for streaming PostgreSQL query rows');
   }
 
-  const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
+  await client.query('BEGIN READ ONLY');
   try {
-    const rows = expandRowsWithBuildingRemainders(db.prepare(buildSqliteRegionExportQuery()).all(regionId));
-    await writeRowsToNdjsonFile(
-      outputPath,
-      rows.map((row) => ({
-        osm_type: row.osm_type,
-        osm_id: row.osm_id,
-        tags_json: row.tags_json,
-        feature_kind: row.feature_kind || deriveFeatureKindFromTagsJson(row.tags_json),
-        geometry_json: row.geometry_json,
-        min_lon: row.min_lon,
-        min_lat: row.min_lat,
-        max_lon: row.max_lon,
-        max_lat: row.max_lat,
-        render_hide_base_when_parts: Number(row.render_hide_base_when_parts || 0)
-      }))
-    );
-  } finally {
-    db.close();
+    await client.query(`DECLARE ${normalizedCursorName} NO SCROLL CURSOR FOR ${query}`, params);
+    while (true) {
+      const result = await client.query(`
+        FETCH FORWARD ${normalizedBatchSize}
+        FROM ${normalizedCursorName}
+      `);
+      if ((result.rowCount || 0) <= 0) {
+        break;
+      }
+      await onRows(result.rows || []);
+    }
+    await client.query(`CLOSE ${normalizedCursorName}`);
+    await client.query('COMMIT');
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore rollback failure
+    }
+    throw error;
   }
 }
 
-async function exportRegionRenderFeaturesToGeojsonNdjson({
-  dbProvider,
-  databaseUrl,
-  archimapDbPath,
-  osmDbPath,
-  regionId,
-  outputPath
-}) {
-  if (dbProvider !== 'postgres') {
-    return exportRegionMembersToGeojsonNdjson({
-      dbProvider,
-      databaseUrl,
-      archimapDbPath,
-      osmDbPath,
-      regionId,
-      outputPath
-    });
-  }
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-
-  const cacheTableResult = await client.query(`SELECT to_regclass('osm.region_render_features') AS regclass`);
-  if (!cacheTableResult.rows[0]?.regclass) {
-    await client.end();
-    return exportRegionMembersToGeojsonNdjson({
-      dbProvider,
-      databaseUrl,
-      archimapDbPath,
-      osmDbPath,
-      regionId,
-      outputPath
-    });
-  }
-
+async function exportRegionMembersToNdjson({ dbProvider, databaseUrl, regionId, outputPath }) {
+  assertPostgresRegionSyncOptions({ dbProvider, databaseUrl });
   ensureDir(outputPath);
   const writer = fs.createWriteStream(outputPath, {
     encoding: 'utf8',
     highWaterMark: 1024 * 1024
   });
-  let importedFeatureCount = 0;
-  let bounds = null;
-
-  async function writeRow(row) {
-    await writeStreamLine(
-      writer,
-      formatRenderedGeojsonFeatureLine(
-        row.osm_type,
-        row.osm_id,
-        row.geometry_json,
-        row.feature_kind,
-        row.render_height_m,
-        row.render_min_height_m,
-        row.render_hide_base_when_parts
-      )
-    );
-    importedFeatureCount += 1;
-    bounds = updateBounds(bounds, row);
-  }
-
   try {
-    try {
+    await withPostgresClient(databaseUrl, async (client) => {
       const normalizedRegionId = Number(regionId);
       if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
         throw new Error('Region export requires a positive integer regionId');
       }
-
-      await client.query('BEGIN READ ONLY');
-      await client.query(
-        `DECLARE region_render_export_cursor NO SCROLL CURSOR FOR ${buildPostgresRegionRenderFeatureExportQuery({
-          regionSql: String(normalizedRegionId)
-        })}`
-      );
-
-      while (true) {
-        const result = await client.query(`
-          FETCH FORWARD ${POSTGRES_REGION_EXPORT_BATCH_SIZE}
-          FROM region_render_export_cursor
-        `);
-        if ((result.rowCount || 0) <= 0) {
-          break;
-        }
-        for (const row of result.rows) {
-          await writeRow(row);
-        }
-      }
-
-      await client.query('CLOSE region_render_export_cursor');
-      await client.query('COMMIT');
-    } catch (error) {
+      await preparePostgresRegionExportPartsTable(client, normalizedRegionId);
       try {
-        await client.query('ROLLBACK');
-      } catch {
-        // ignore rollback failure
+        await streamPostgresCursorRows({
+          client,
+          query: buildPostgresRegionGeojsonExportQuery({ regionSql: String(normalizedRegionId) }),
+          params: [],
+          cursorName: 'region_members_ndjson_export_cursor',
+          onRows: async (rows) => {
+            for (const row of rows) {
+              await writeStreamLine(writer, `${JSON.stringify(row)}\n`);
+            }
+          }
+        });
+      } finally {
+        try {
+          await client.query(`DROP TABLE IF EXISTS ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
+        } catch {
+          // ignore temp table cleanup failures
+        }
       }
-      throw error;
-    }
+    });
   } finally {
-    await client.end();
     await closeWriteStream(writer);
   }
-
-  if (importedFeatureCount > 0) {
-    return {
-      importedFeatureCount,
-      bounds
-    };
-  }
-
-  return exportRegionMembersToGeojsonNdjson({
-    dbProvider,
-    databaseUrl,
-    archimapDbPath,
-    osmDbPath,
-    regionId,
-    outputPath
-  });
 }
 
-async function exportRegionMembersToGeojsonNdjson({
-  dbProvider,
-  databaseUrl,
-  archimapDbPath,
-  osmDbPath,
-  regionId,
-  outputPath
-}) {
+async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, regionId, outputPath }) {
+  assertPostgresRegionSyncOptions({ dbProvider, databaseUrl });
   ensureDir(outputPath);
   const writer = fs.createWriteStream(outputPath, {
     encoding: 'utf8',
@@ -778,61 +524,43 @@ async function exportRegionMembersToGeojsonNdjson({
   }
 
   try {
-    if (dbProvider === 'postgres') {
+    await withPostgresClient(databaseUrl, async (client) => {
       const normalizedRegionId = Number(regionId);
       if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
         throw new Error('Region export requires a positive integer regionId');
       }
-
-      const client = new Client({ connectionString: databaseUrl });
-      await client.connect();
+      await preparePostgresRegionExportPartsTable(client, normalizedRegionId);
       try {
-        await client.query('BEGIN READ ONLY');
-        await client.query(`
-          DECLARE region_pmtiles_export_cursor NO SCROLL CURSOR FOR
-          ${buildPostgresRegionExportQuery({
-            regionSql: String(normalizedRegionId),
-            includeRemainderRows: true
-          })}
-        `);
-
-        while (true) {
-          const result = await client.query(`
-            FETCH FORWARD ${POSTGRES_REGION_EXPORT_BATCH_SIZE}
-            FROM region_pmtiles_export_cursor
-          `);
-          if ((result.rowCount || 0) <= 0) {
-            break;
+        await streamPostgresCursorRows({
+          client,
+          query: buildPostgresRegionBaseGeojsonExportQuery({ regionSql: String(normalizedRegionId) }),
+          params: [],
+          cursorName: 'region_members_base_geojson_export_cursor',
+          onRows: async (rows) => {
+            for (const row of rows) {
+              await writeRow(row);
+            }
           }
-          for (const row of result.rows) {
-            await writeRow(row);
+        });
+        await streamPostgresCursorRows({
+          client,
+          query: buildPostgresRegionRemainderGeojsonExportQuery({ regionSql: String(normalizedRegionId) }),
+          params: [],
+          cursorName: 'region_members_remainder_geojson_export_cursor',
+          onRows: async (rows) => {
+            for (const row of rows) {
+              await writeRow(row);
+            }
           }
-        }
-
-        await client.query('CLOSE region_pmtiles_export_cursor');
-        await client.query('COMMIT');
-      } catch (error) {
+        });
+      } finally {
         try {
-          await client.query('ROLLBACK');
+          await client.query(`DROP TABLE IF EXISTS ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
         } catch {
-          // ignore rollback failure
+          // ignore temp table cleanup failures
         }
-        throw error;
-      } finally {
-        await client.end();
       }
-    } else {
-      const db = openSqliteRegionDb(archimapDbPath, osmDbPath);
-      try {
-        const rows = expandRowsWithBuildingRemainders(db.prepare(buildSqliteRegionExportQuery()).all(regionId));
-
-        for (const row of rows) {
-          await writeRow(row);
-        }
-      } finally {
-        db.close();
-      }
-    }
+    });
   } finally {
     await closeWriteStream(writer);
   }
@@ -843,13 +571,95 @@ async function exportRegionMembersToGeojsonNdjson({
   };
 }
 
+async function exportRegionRenderFeaturesToGeojsonNdjson({ dbProvider, databaseUrl, regionId, outputPath }) {
+  assertPostgresRegionSyncOptions({ dbProvider, databaseUrl });
+
+  return withPostgresClient(databaseUrl, async (client) => {
+    const cacheTableResult = await client.query(`SELECT to_regclass('osm.region_render_features') AS regclass`);
+    if (!cacheTableResult.rows[0]?.regclass) {
+      return exportRegionMembersToGeojsonNdjson({
+        dbProvider,
+        databaseUrl,
+        regionId,
+        outputPath
+      });
+    }
+
+    ensureDir(outputPath);
+    const writer = fs.createWriteStream(outputPath, {
+      encoding: 'utf8',
+      highWaterMark: 1024 * 1024
+    });
+    let importedFeatureCount = 0;
+    let bounds = null;
+
+    async function writeRow(row) {
+      await writeStreamLine(
+        writer,
+        formatRenderedGeojsonFeatureLine(
+          row.osm_type,
+          row.osm_id,
+          row.geometry_json,
+          row.feature_kind,
+          row.render_height_m,
+          row.render_min_height_m,
+          row.render_hide_base_when_parts
+        )
+      );
+      importedFeatureCount += 1;
+      bounds = updateBounds(bounds, row);
+    }
+
+    try {
+      const normalizedRegionId = Number(regionId);
+      if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
+        throw new Error('Region export requires a positive integer regionId');
+      }
+      await streamPostgresCursorRows({
+        client,
+        query: buildPostgresRegionRenderFeatureExportQuery({
+          regionSql: String(normalizedRegionId)
+        }),
+        params: [],
+        cursorName: 'region_render_export_cursor',
+        onRows: async (rows) => {
+          for (const row of rows) {
+            await writeRow(row);
+          }
+        }
+      });
+    } catch (error) {
+      throw error;
+    } finally {
+      await closeWriteStream(writer);
+    }
+
+    if (importedFeatureCount > 0) {
+      return {
+        importedFeatureCount,
+        bounds
+      };
+    }
+
+    return exportRegionMembersToGeojsonNdjson({
+      dbProvider,
+      databaseUrl,
+      regionId,
+      outputPath
+    });
+  });
+}
+
 module.exports = {
   assertRegionSupportsManagedSync,
+  buildPostgresRegionExportQuery,
+  buildPostgresRegionBaseGeojsonExportQuery,
+  buildPostgresRegionGeojsonExportQuery,
+  buildPostgresRegionRemainderGeojsonExportQuery,
   exportRegionMembersToGeojsonNdjson,
   exportRegionRenderFeaturesToGeojsonNdjson,
   exportRegionMembersToNdjson,
   loadRegion,
   loadSubregions,
-  updateRegionPostSync,
-  openSqliteRegionDb
+  updateRegionPostSync
 };

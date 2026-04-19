@@ -18,7 +18,8 @@ Archimap is a self-hosted platform for architectural mapping and building analys
 
 - Frontend and public runtime: SvelteKit
 - Map rendering: MapLibre + PMTiles
-- Data storage: PostgreSQL + PostGIS or SQLite
+- Managed region sync + runtime data path: PostgreSQL + PostGIS
+- PMTiles build chain: `planetiler`
 - Sessions: Redis optional
 - UI layer: Tailwind CSS v4 + shadcn-svelte + Bits UI
 
@@ -48,7 +49,15 @@ npm run start
 docker compose up --build
 ```
 
-`docker-compose.yml` defaults to PostgreSQL + PostGIS. SQLite is still available for local development or explicit env override.
+`docker-compose.yml` defaults to PostgreSQL + PostGIS and is the supported setup for managed region syncs.
+
+Managed region sync architecture in this repository is:
+
+- PostgreSQL-only for managed imports and runtime building data.
+- Curated extract catalog from repository-managed manifest/admin map data.
+- Direct PBF download from known upstream URLs.
+- `osm2pgsql` flex import into PostgreSQL staging, then controlled merge into canonical tables.
+- `planetiler` as the only PMTiles build engine.
 
 ### Basemap provider
 

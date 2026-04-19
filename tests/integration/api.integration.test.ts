@@ -5,19 +5,7 @@ const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
-const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
 const { pickIntegrationPort } = require('./test-ports');
-
-let pythonExtractorDepsSkipReason = null;
-try {
-  ensurePythonImporterDeps();
-} catch (error) {
-  pythonExtractorDepsSkipReason = String(error?.message || error || 'Python extractor dependencies are unavailable');
-}
-
-const pythonExtractorIntegrationTestOptions = pythonExtractorDepsSkipReason
-  ? { skip: `python extractor deps unavailable: ${pythonExtractorDepsSkipReason}` }
-  : {};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -884,31 +872,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.deepEqual(publicOverridesAfterDeleteBody?.items, []);
     });
 
-    await t.test(
-      'admin data settings endpoints support create/rename/delete flow for regions',
-      pythonExtractorIntegrationTestOptions,
-      async () => {
+    await t.test('admin data settings endpoints support create/rename/delete flow for regions', async () => {
         const dataSettings = await callApi('/api/admin/app-settings/data');
         assert.equal(dataSettings.status, 200);
         const dataSettingsBody = await dataSettings.json();
         assert.equal(dataSettingsBody?.ok, true);
         assert.ok(Array.isArray(dataSettingsBody?.item?.regions));
-
-        const resolveExtract = await callApi('/api/admin/app-settings/data/regions/resolve-extract', {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-csrf-token': csrfToken
-          },
-          body: JSON.stringify({
-            query: 'Antarctica'
-          })
-        });
-        assert.equal(resolveExtract.status, 200);
-        const resolveExtractBody = await resolveExtract.json();
-        assert.equal(resolveExtractBody?.ok, true);
-        assert.ok(Array.isArray(resolveExtractBody?.items));
-        assert.ok(resolveExtractBody.items.some((item) => String(item?.extractId || '') === 'geofabrik_antarctica'));
 
         const rejectLegacyPayload = await callApi('/api/admin/app-settings/data/regions', {
           method: 'POST',
@@ -921,10 +890,10 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
               name: 'Legacy Payload',
               slug: 'legacy-payload',
               sourceType: 'extract',
-              sourceValue: 'Antarctica',
+              sourceValue: 'Afghanistan',
               extractSource: 'geofabrik',
-              extractId: 'geofabrik_antarctica',
-              extractLabel: 'antarctica',
+              extractId: 'afghanistan',
+              extractLabel: 'Afghanistan',
               enabled: true,
               autoSyncEnabled: false,
               autoSyncOnStart: false,
@@ -950,10 +919,9 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
               name: 'Test Region',
               slug: 'test-region',
               sourceType: 'extract',
-              searchQuery: 'Antarctica',
               extractSource: 'geofabrik',
-              extractId: 'geofabrik_antarctica',
-              extractLabel: 'antarctica',
+              extractId: 'afghanistan',
+              extractLabel: 'Afghanistan',
               enabled: true,
               autoSyncEnabled: false,
               autoSyncOnStart: false,
@@ -996,10 +964,9 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
               name: 'Renamed Test Region',
               slug: 'renamed-test-region',
               sourceType: 'extract',
-              searchQuery: 'Antarctica',
               extractSource: 'geofabrik',
-              extractId: 'geofabrik_antarctica',
-              extractLabel: 'antarctica',
+              extractId: 'afghanistan',
+              extractLabel: 'Afghanistan',
               enabled: true,
               autoSyncEnabled: false,
               autoSyncOnStart: false,
@@ -1071,8 +1038,7 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           regionsAfterDeleteBody.items.some((item) => Number(item?.id || 0) === Number(region.id)),
           false
         );
-      }
-    );
+      });
 
     await t.test('filter preset admin/runtime endpoints support create/update/delete flow', async () => {
       const runtimeDefaults = await callApi('/api/filter-presets');

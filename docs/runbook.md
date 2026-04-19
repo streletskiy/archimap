@@ -24,7 +24,7 @@
 
 ## Docker release script behavior
 
-- Runtime base tag is derived from dependency versions (`tippecanoe`, `planetiler`, `quackosm`, `duckdb`, `pip`).
+- Runtime base tag is derived from dependency versions for the managed sync toolchain (`planetiler`, `osm2pgsql`, Java/runtime deps).
 - `scripts/release-docker.sh` and `scripts/release-docker.ps1` skip rebuilding `runtime-base` if that tag already exists in registry.
 - Force rebuild only when needed:
   - Bash: `--force-runtime-base`
@@ -115,17 +115,16 @@
 
 ### Region sync CLI fails immediately
 
-- Check `PYTHON_BIN` or system Python availability.
-- Verify Python packages `quackosm` and `duckdb` are installed for the interpreter used by the app.
-- If the failure is later in PMTiles build, verify the selected engine:
-  - default path: `planetiler` / `PLANETILER_BIN`
-  - fallback path: `tippecanoe` / `TIPPECANOE_BIN` when `PMTILES_BUILD_ENGINE=tippecanoe`
+- Check PostgreSQL/PostGIS connectivity (`DATABASE_URL`, `DB_PROVIDER=postgres`).
+- Verify `osm2pgsql` is available in the container/runtime image.
+- If the failure is in the archive build stage, verify `planetiler` / `PLANETILER_BIN`.
+- Managed region sync no longer depends on Python importer tooling, QuackOSM, DuckDB, `osmium`, or `tippecanoe`.
 
 ### Region shows `Sync interrupted by process restart` while a sync is still alive
 
 - Current managed sync workers keep a heartbeat on every owned `queued`/`running` run, so another runtime instance should no longer archive a live sync immediately.
 - If you still see this after upgrading, look for an actual second app process/container pointing at the same DB or an old release still running without the heartbeat fix.
-- Long-running orphaned extract jobs should now self-stop because both `scripts/sync-osm-region.ts` and `scripts/sync-osm-buildings.py` watch their parent PID.
+- Long-running orphaned sync jobs should now self-stop because the managed sync process watches its parent PID and the importer stage runs inside the same controlled process tree.
 - If a stale-recovery `startup` retry was queued before the original run eventually reports `success`, the stale retry is now archived as superseded and cannot keep the region stuck in `queued`/`running` or overwrite the successful result later.
 - Admin cancel now has a stale-state fallback: when the current runtime no longer owns the worker, it can still abandon `queued`/`running` runs whose DB heartbeat is already stale and repair a stuck region row that still says `queued`/`running` even though no active run remains.
 - Region update/delete checks now block only on real active sync runs, not on a stale `last_sync_status` value left behind after an interrupted worker.

@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
@@ -12,19 +11,11 @@ const {
   writeRowsToNdjsonFile
 } = require('../../scripts/region-sync/common');
 const {
-  assignCellIndex,
   buildPmtilesFromGeojson,
   computeGeometryBounds,
-  DEFAULT_SHARD_KM,
-  DEFAULT_SHARD_MIN_FEATURES,
   exportImportRowsToGeojson,
-  planShardGrid,
-  resolveShardKm,
-  resolveShardMinFeatures,
-  summarizeImportRows,
-  writeShardNdjsons
+  summarizeImportRows
 } = require('../../scripts/region-sync/pmtiles-builder');
-const { exportRegionMembersToGeojsonNdjson } = require('../../scripts/region-sync/region-db');
 
 test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () => {
   const row = parseRowPayload(
@@ -385,7 +376,7 @@ test('exportImportRowsToGeojson writes feature NDJSON and computes bounds', asyn
   }
 });
 
-test('exportImportRowsToGeojson adds building_remainder features for partially covered sqlite import rows', async () => {
+test('exportImportRowsToGeojson adds building_remainder features for partially covered import rows', async () => {
   const workspace = createWorkspace(1003);
   const importPath = path.join(workspace, 'region-import.ndjson');
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
@@ -453,84 +444,6 @@ test('exportImportRowsToGeojson adds building_remainder features for partially c
   }
 });
 
-test('resolveShardKm honors explicit argument, env fallback, and default', () => {
-  assert.equal(resolveShardKm(120, {}), 120);
-  assert.equal(resolveShardKm(0, {}), 0);
-  assert.equal(resolveShardKm(undefined, { REGION_SYNC_SHARD_KM: '45' }), 45);
-  assert.equal(resolveShardKm(undefined, { REGION_SYNC_SHARD_KM: 'not-a-number' }), DEFAULT_SHARD_KM);
-  assert.equal(resolveShardKm(undefined, {}), DEFAULT_SHARD_KM);
-  assert.equal(resolveShardKm(-25, {}), 0);
-});
-
-test('resolveShardMinFeatures honors env override and clamps invalid values', () => {
-  assert.equal(resolveShardMinFeatures({}), DEFAULT_SHARD_MIN_FEATURES);
-  assert.equal(resolveShardMinFeatures({ REGION_SYNC_SHARD_MIN_FEATURES: '25000' }), 25000);
-  assert.equal(resolveShardMinFeatures({ REGION_SYNC_SHARD_MIN_FEATURES: '-10' }), DEFAULT_SHARD_MIN_FEATURES);
-  assert.equal(resolveShardMinFeatures({ REGION_SYNC_SHARD_MIN_FEATURES: 'foo' }), DEFAULT_SHARD_MIN_FEATURES);
-});
-
-test('planShardGrid returns null for disabled sharding or invalid bounds', () => {
-  assert.equal(planShardGrid(null, 60), null);
-  assert.equal(planShardGrid({ west: 0, south: 0, east: 1, north: 1 }, 0), null);
-  assert.equal(planShardGrid({ west: 1, south: 1, east: 1, north: 1 }, 60), null);
-  assert.equal(planShardGrid({ west: 0, south: 0, east: NaN, north: 1 }, 60), null);
-});
-
-test('planShardGrid divides a Poland-sized bbox into roughly km-sized cells', () => {
-  // Poland bbox ~ (14.12, 49.00, 24.15, 54.84)
-  const grid = planShardGrid({ west: 14.12, south: 49.0, east: 24.15, north: 54.84 }, 60);
-
-  assert.ok(grid);
-  assert.equal(grid.minLon, 14.12);
-  assert.equal(grid.minLat, 49.0);
-  assert.equal(grid.shardKm, 60);
-  // 5.84° lat / (60/111.32)° per cell ≈ 10.84 → 11 rows
-  assert.equal(grid.rows, 11);
-  // ~10° lon / cell step at ~52° lat ≈ 0.875° → 12 cols
-  assert.equal(grid.cols, 12);
-  assert.equal(grid.cellCount, grid.rows * grid.cols);
-  assert.ok(grid.latStep > 0);
-  assert.ok(grid.lonStep > grid.latStep); // lon degrees are smaller at mid-latitudes
-});
-
-test('planShardGrid scales up shardKm for very large regions to stay under the cell cap', () => {
-  // Sakha Republic approx bbox: ~58° lon x ~22° lat at ~66°N — at 60 km this would
-  // produce ~1800 cells and blow the MAX_SHARD_CELL_COUNT safety cap.
-  const originalWarn = console.warn;
-  console.warn = () => {};
-  try {
-    const grid = planShardGrid({ west: 105, south: 55, east: 163, north: 77 }, 60);
-    assert.ok(grid);
-    assert.ok(grid.cellCount <= 400, `expected cellCount <= 400, got ${grid.cellCount}`);
-    assert.ok(grid.shardKm > 60, `expected shardKm scaled above 60, got ${grid.shardKm}`);
-    assert.equal(grid.requestedShardKm, 60);
-  } finally {
-    console.warn = originalWarn;
-  }
-});
-
-test('planShardGrid collapses tiny regions into a single cell', () => {
-  const grid = planShardGrid({ west: 14.42, south: 50.07, east: 14.46, north: 50.1 }, 60);
-  assert.ok(grid);
-  assert.equal(grid.rows, 1);
-  assert.equal(grid.cols, 1);
-  assert.equal(grid.cellCount, 1);
-});
-
-test('assignCellIndex maps feature bbox centers into the right cell and clamps outliers', () => {
-  const grid = planShardGrid({ west: 14.0, south: 49.0, east: 24.0, north: 55.0 }, 60);
-
-  const swCorner = assignCellIndex({ west: 14.05, south: 49.05, east: 14.06, north: 49.06 }, grid);
-  const neCorner = assignCellIndex({ west: 23.95, south: 54.95, east: 23.96, north: 54.96 }, grid);
-  const outside = assignCellIndex({ west: 30.0, south: 60.0, east: 30.1, north: 60.1 }, grid);
-
-  assert.deepEqual(swCorner, { row: 0, col: 0, key: '0-0' });
-  assert.equal(neCorner.row, grid.rows - 1);
-  assert.equal(neCorner.col, grid.cols - 1);
-  assert.equal(outside.row, grid.rows - 1);
-  assert.equal(outside.col, grid.cols - 1);
-});
-
 test('computeGeometryBounds handles Point, Polygon, MultiPolygon and GeometryCollection', () => {
   assert.deepEqual(computeGeometryBounds({ type: 'Point', coordinates: [37.6, 55.7] }), {
     west: 37.6,
@@ -593,89 +506,17 @@ test('computeGeometryBounds handles Point, Polygon, MultiPolygon and GeometryCol
   assert.equal(computeGeometryBounds({ type: 'Point', coordinates: [] }), null);
 });
 
-test('writeShardNdjsons splits GeoJSON NDJSON into per-cell files', async () => {
-  const workspace = createWorkspace(2001);
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const shardDir = path.join(workspace, 'shards');
-
-  try {
-    const lines = [
-      formatGeojsonFeatureLine(
-        'way',
-        900001,
-        '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}'
-      ),
-      formatGeojsonFeatureLine(
-        'way',
-        900002,
-        '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}'
-      ),
-      formatGeojsonFeatureLine(
-        'way',
-        900003,
-        '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}'
-      )
-    ];
-    fs.writeFileSync(geojsonPath, lines.join(''), 'utf8');
-
-    const grid = planShardGrid({ west: 14.0, south: 49.0, east: 24.0, north: 55.0 }, 60);
-    const result = await writeShardNdjsons({ geojsonPath, grid, workspaceDir: shardDir });
-
-    assert.equal(result.skippedFeatureCount, 0);
-    assert.equal(result.shards.length, 2);
-    const counts = result.shards.map((shard) => shard.count).sort((a, b) => a - b);
-    assert.deepEqual(counts, [1, 2]);
-    for (const shard of result.shards) {
-      const shardLines = fs.readFileSync(shard.path, 'utf8').trim().split('\n');
-      assert.equal(shardLines.length, shard.count);
-      for (const line of shardLines) {
-        const parsed = JSON.parse(line);
-        assert.equal(parsed.type, 'Feature');
-      }
-    }
-  } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('writeShardNdjsons skips unparseable lines and features without geometry', async () => {
-  const workspace = createWorkspace(2002);
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const shardDir = path.join(workspace, 'shards');
-
-  try {
-    fs.writeFileSync(
-      geojsonPath,
-      [
-        'not json at all',
-        JSON.stringify({ type: 'Feature', properties: {}, geometry: null }),
-        formatGeojsonFeatureLine('way', 900010, '{"type":"Point","coordinates":[14.1,49.1]}').trim()
-      ].join('\n'),
-      'utf8'
-    );
-
-    const grid = planShardGrid({ west: 14.0, south: 49.0, east: 24.0, north: 55.0 }, 60);
-    const result = await writeShardNdjsons({ geojsonPath, grid, workspaceDir: shardDir });
-
-    assert.equal(result.skippedFeatureCount, 2);
-    assert.equal(result.shards.length, 1);
-    assert.equal(result.shards[0].count, 1);
-  } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or under floor', async () => {
+test('buildPmtilesFromGeojson shells out to planetiler only', async () => {
   if (process.platform === 'win32') {
-    // Bash-based fake binary is only reliable on POSIX; the functional path is
-    // covered by the Docker smoke build on CI/Linux.
+    // Bash-based fake binary is only reliable on POSIX; Docker/runtime coverage
+    // exercises the real path elsewhere.
     return;
   }
 
   const workspace = createWorkspace(2003);
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const outputPath = path.join(workspace, 'region.pmtiles');
-  const fakeTippecanoePath = path.join(workspace, 'fake-tippecanoe.sh');
+  const fakePlanetilerPath = path.join(workspace, 'fake-planetiler.sh');
   const logPath = path.join(workspace, 'exec.log');
 
   try {
@@ -685,18 +526,16 @@ test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or
       'utf8'
     );
     fs.writeFileSync(
-      fakeTippecanoePath,
+      fakePlanetilerPath,
       [
         '#!/usr/bin/env bash',
         'set -e',
+        'if [[ "$1" == "--version" ]]; then echo "fake-planetiler"; exit 0; fi',
         `printf '%s\\n' "$@" >> "${logPath}"`,
         'out=""',
-        'for ((i=1;i<=$#;i++)); do',
-        '  if [[ "${!i}" == "-o" ]]; then',
-        '    j=$((i+1)); out="${!j}";',
-        '  fi',
+        'for arg in "$@"; do',
+        '  if [[ "$arg" == --output=* ]]; then out="${arg#--output=}"; fi',
         'done',
-        'if [[ "$1" == "--version" ]]; then echo "fake-tippecanoe"; exit 0; fi',
         'if [[ -n "$out" ]]; then : > "$out"; fi',
         'exit 0',
         ''
@@ -704,282 +543,67 @@ test('buildPmtilesFromGeojson uses single-pass path when sharding is disabled or
       { mode: 0o755 }
     );
 
-    const fakeEnv = {
-      ...process.env,
-      PMTILES_BUILD_ENGINE: 'tippecanoe',
-      TIPPECANOE_BIN: fakeTippecanoePath,
-      TILE_JOIN_BIN: fakeTippecanoePath
-    };
-
-    const disabled = await buildPmtilesFromGeojson({
-      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
+    const result = await buildPmtilesFromGeojson({
+      region: { slug: 'test-region', pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
       geojsonPath,
       outputPath,
-      bounds: { west: 14, south: 49, east: 24, north: 55 },
-      featureCount: 500_000,
-      shardKm: 0,
-      env: fakeEnv
+      env: {
+        ...process.env,
+        PLANETILER_BIN: fakePlanetilerPath
+      }
     });
-    assert.equal(disabled.mode, 'single');
-    assert.equal(disabled.shardCount, 1);
+    const log = fs.readFileSync(logPath, 'utf8');
+    const schemaPath = `${outputPath.replace(/\.pmtiles$/i, '')}.planetiler.yml`;
 
-    // An explicit REGION_SYNC_SHARD_MIN_FEATURES floor still short-circuits
-    // sharding for small regions even though the default is now adaptive.
-    const belowFloor = await buildPmtilesFromGeojson({
-      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
-      geojsonPath,
-      outputPath,
-      bounds: { west: 14, south: 49, east: 24, north: 55 },
-      featureCount: 100,
-      shardKm: 60,
-      env: { ...fakeEnv, REGION_SYNC_SHARD_MIN_FEATURES: '1000' }
-    });
-    assert.equal(belowFloor.mode, 'single');
+    assert.equal(result.engine, 'planetiler');
+    assert.equal(result.mode, 'single');
+    assert.equal(result.shardCount, 1);
+    assert.match(log, /--output=/);
+    assert.match(log, /--minzoom=13/);
+    assert.match(log, /--maxzoom=16/);
+    assert.ok(fs.existsSync(outputPath));
+    assert.ok(fs.existsSync(schemaPath));
+
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+    assert.match(schema, /schema_name: "ArchiMap test-region PMTiles"/);
+    assert.match(schema, /- key: "feature_kind"/);
+    assert.match(schema, /- key: "render_hide_base_when_parts"/);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
 
-test('buildPmtilesFromGeojson reuses cached shard archives on repeated runs', async () => {
-  if (process.platform === 'win32') {
-    // Bash-based fake binary is only reliable on POSIX; the functional path is
-    // covered by the Docker smoke build on CI/Linux.
-    return;
-  }
-
+test('buildPmtilesFromGeojson reports a single build stage to progress listeners', async () => {
   const workspace = createWorkspace(2004);
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const outputPath = path.join(workspace, 'region.pmtiles');
-  const cacheDir = path.join(workspace, 'cache');
-  const fakeTippecanoePath = path.join(workspace, 'fake-tippecanoe.sh');
-  const logPath = path.join(workspace, 'exec.log');
+  const progressEvents = [];
 
   try {
     fs.writeFileSync(
       geojsonPath,
-      [
-        formatGeojsonFeatureLine(
-          'way',
-          910001,
-          '{"type":"Polygon","coordinates":[[[14.05,49.05],[14.06,49.05],[14.06,49.06],[14.05,49.06],[14.05,49.05]]]}'
-        ).trim(),
-        formatGeojsonFeatureLine(
-          'way',
-          910002,
-          '{"type":"Polygon","coordinates":[[[23.90,54.80],[23.91,54.80],[23.91,54.81],[23.90,54.81],[23.90,54.80]]]}'
-        ).trim(),
-        formatGeojsonFeatureLine(
-          'way',
-          910003,
-          '{"type":"Polygon","coordinates":[[[14.10,49.10],[14.11,49.10],[14.11,49.11],[14.10,49.11],[14.10,49.10]]]}'
-        ).trim()
-      ].join('\n'),
+      `${formatGeojsonFeatureLine('way', 900100, '{"type":"Point","coordinates":[14.1,49.1]}').trim()}\n`,
       'utf8'
     );
-    fs.writeFileSync(
-      fakeTippecanoePath,
-      [
-        '#!/usr/bin/env bash',
-        'set -e',
-        'if [[ "$1" == "--version" ]]; then echo "fake-tippecanoe"; exit 0; fi',
-        'if [[ "$#" -eq 0 ]]; then exit 0; fi',
-        `printf '%s\\n' "$*" >> "${logPath}"`,
-        'out=""',
-        'for ((i=1;i<=$#;i++)); do',
-        '  if [[ "${!i}" == "-o" ]]; then',
-        '    j=$((i+1)); out="${!j}";',
-        '  fi',
-        'done',
-        'if [[ -n "$out" ]]; then : > "$out"; fi',
-        'exit 0',
-        ''
-      ].join('\n'),
-      { mode: 0o755 }
-    );
 
-    const fakeEnv = {
-      ...process.env,
-      PMTILES_BUILD_ENGINE: 'tippecanoe',
-      TIPPECANOE_BIN: fakeTippecanoePath,
-      TILE_JOIN_BIN: fakeTippecanoePath,
-      REGION_SYNC_SHARD_MIN_FEATURES: '0'
-    };
-
-    const first = await buildPmtilesFromGeojson({
-      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
+    await buildPmtilesFromGeojson({
+      region: { slug: 'progress-region' },
       geojsonPath,
       outputPath,
-      bounds: { west: 14, south: 49, east: 24, north: 55 },
-      featureCount: 3,
-      shardKm: 60,
-      shardCacheDir: cacheDir,
-      env: fakeEnv
-    });
-    const second = await buildPmtilesFromGeojson({
-      region: { pmtilesMinZoom: 13, pmtilesMaxZoom: 16 },
-      geojsonPath,
-      outputPath,
-      bounds: { west: 14, south: 49, east: 24, north: 55 },
-      featureCount: 3,
-      shardKm: 60,
-      shardCacheDir: cacheDir,
-      env: fakeEnv
+      onShardProgress(event) {
+        progressEvents.push(event);
+      },
+      env: {
+        ...process.env,
+        PLANETILER_BIN: process.execPath
+      }
+    }).catch((error) => {
+      assert.match(String(error.message || error), /failed with exit code|Cannot find module|Unknown option/);
     });
 
-    const logLines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
-    const tippecanoeInvocations = logLines.filter((line) => line.includes('--detect-shared-borders'));
-    const tileJoinInvocations = logLines.filter((line) => line.includes('--no-tile-size-limit'));
-
-    assert.equal(first.mode, 'sharded-cache');
-    assert.equal(first.rebuiltShardCount, first.shardCount);
-    assert.equal(first.reusedShardCount, 0);
-    assert.equal(second.mode, 'sharded-cache');
-    assert.equal(second.rebuiltShardCount, 0);
-    assert.equal(second.reusedShardCount, second.shardCount);
-    assert.equal(tippecanoeInvocations.length, first.shardCount);
-    assert.equal(tileJoinInvocations.length, 2);
-  } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('exportRegionMembersToGeojsonNdjson streams sqlite region members directly to feature NDJSON', async () => {
-  const workspace = createWorkspace(1002);
-  const archimapDbPath = path.join(workspace, 'archimap.db');
-  const osmDbPath = path.join(workspace, 'osm.db');
-  const outputPath = path.join(workspace, 'region-build.ndjson');
-
-  try {
-    const archimapDb = new Database(archimapDbPath);
-    archimapDb.exec(`
-      CREATE TABLE data_region_memberships (
-        region_id INTEGER NOT NULL,
-        osm_type TEXT NOT NULL,
-        osm_id INTEGER NOT NULL
-      );
-      INSERT INTO data_region_memberships (region_id, osm_type, osm_id)
-      VALUES
-        (7, 'way', 21),
-        (7, 'relation', 22),
-        (8, 'way', 99);
-    `);
-    archimapDb.close();
-
-    const osmDb = new Database(osmDbPath);
-    osmDb.exec(`
-      CREATE TABLE building_contours (
-        osm_type TEXT NOT NULL,
-        osm_id INTEGER NOT NULL,
-        tags_json TEXT,
-        geometry_json TEXT NOT NULL,
-        min_lon REAL NOT NULL,
-        min_lat REAL NOT NULL,
-        max_lon REAL NOT NULL,
-        max_lat REAL NOT NULL
-      );
-      INSERT INTO building_contours (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat)
-      VALUES
-        ('way', 21, '{"building":"yes"}', '{"type":"Point","coordinates":[30.0,60.0]}', 30.0, 60.0, 30.0, 60.0),
-        ('relation', 22, '{"building":"yes"}', '{"type":"Point","coordinates":[31.5,61.2]}', 31.5, 61.2, 31.5, 61.2),
-        ('way', 99, '{"building":"yes"}', '{"type":"Point","coordinates":[99.0,99.0]}', 99.0, 99.0, 99.0, 99.0);
-    `);
-    osmDb.close();
-
-    const summary = await exportRegionMembersToGeojsonNdjson({
-      dbProvider: 'sqlite',
-      archimapDbPath,
-      osmDbPath,
-      regionId: 7,
-      outputPath
-    });
-    const lines = fs.readFileSync(outputPath, 'utf8').trim().split('\n');
-
-    assert.equal(summary.importedFeatureCount, 2);
-    assert.deepEqual(summary.bounds, {
-      west: 30.0,
-      south: 60.0,
-      east: 31.5,
-      north: 61.2
-    });
-    assert.deepEqual(lines, [
-      formatGeojsonFeatureLine('relation', 22, '{"type":"Point","coordinates":[31.5,61.2]}').trim(),
-      formatGeojsonFeatureLine('way', 21, '{"type":"Point","coordinates":[30.0,60.0]}').trim()
-    ]);
-  } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('exportRegionMembersToGeojsonNdjson adds building_remainder rows for sqlite pmtiles-only rebuilds', async () => {
-  const workspace = createWorkspace(1004);
-  const archimapDbPath = path.join(workspace, 'archimap.db');
-  const osmDbPath = path.join(workspace, 'osm.db');
-  const outputPath = path.join(workspace, 'region-build.ndjson');
-
-  try {
-    const archimapDb = new Database(archimapDbPath);
-    archimapDb.exec(`
-      CREATE TABLE data_region_memberships (
-        region_id INTEGER NOT NULL,
-        osm_type TEXT NOT NULL,
-        osm_id INTEGER NOT NULL
-      );
-      INSERT INTO data_region_memberships (region_id, osm_type, osm_id)
-      VALUES
-        (11, 'relation', 12325639),
-        (11, 'relation', 12325634);
-    `);
-    archimapDb.close();
-
-    const osmDb = new Database(osmDbPath);
-    osmDb.exec(`
-      CREATE TABLE building_contours (
-        osm_type TEXT NOT NULL,
-        osm_id INTEGER NOT NULL,
-        tags_json TEXT,
-        geometry_json TEXT NOT NULL,
-        min_lon REAL NOT NULL,
-        min_lat REAL NOT NULL,
-        max_lon REAL NOT NULL,
-        max_lat REAL NOT NULL
-      );
-      INSERT INTO building_contours (osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat)
-      VALUES
-        ('relation', 12325639, '{"building":"yes"}', '{"type":"Polygon","coordinates":[[[44.0,56.0],[44.01,56.0],[44.01,56.01],[44.0,56.01],[44.0,56.0]]]}', 44.0, 56.0, 44.01, 56.01),
-        ('relation', 12325634, '{"building:part":"yes"}', '{"type":"Polygon","coordinates":[[[44.005,56.0],[44.01,56.0],[44.01,56.01],[44.005,56.01],[44.005,56.0]]]}', 44.005, 56.0, 44.01, 56.01);
-    `);
-    osmDb.close();
-
-    const summary = await exportRegionMembersToGeojsonNdjson({
-      dbProvider: 'sqlite',
-      archimapDbPath,
-      osmDbPath,
-      regionId: 11,
-      outputPath
-    });
-    const lines = fs
-      .readFileSync(outputPath, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    const remainder = lines.find((feature) => feature?.properties?.feature_kind === 'building_remainder');
-    const baseBuilding = lines.find((feature) => feature?.properties?.feature_kind === 'building');
-
-    assert.equal(summary.importedFeatureCount, 3);
-    assert.ok(remainder);
-    assert.deepEqual(remainder.geometry, {
-      type: 'Polygon',
-      coordinates: [
-        [
-          [44.0, 56.0],
-          [44.005, 56.0],
-          [44.005, 56.01],
-          [44.0, 56.01],
-          [44.0, 56.0]
-        ]
-      ]
-    });
-    assert.equal(baseBuilding.properties.render_hide_base_when_parts, 1);
+    assert.equal(progressEvents.length, 1);
+    assert.equal(progressEvents[0].stage, 'build');
+    assert.equal(progressEvents[0].detail, 'planetiler (single pass)');
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

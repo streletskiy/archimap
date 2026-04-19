@@ -1,13 +1,12 @@
 const { DEFAULT_FILTER_TAG_ALLOWLIST, normalizeFilterTagKeyList } = require('./filter-tags.service');
-const path = require('path');
 const { createDataSettingsContext } = require('./data-settings/shared');
 const { createBootstrapDomain } = require('./data-settings/bootstrap');
 const { createExtractsDomain } = require('./data-settings/extracts');
+const { createRegionCatalog } = require('./data-settings/region-catalog');
 const { createRegionsDomain } = require('./data-settings/regions');
 const { createSyncRunsDomain } = require('./data-settings/sync-runs');
 const { createUpstreamDomain } = require('./data-settings/upstream');
 const { createPresetsDomain } = require('./data-settings/presets');
-const { createPythonExtractResolver } = require('../../../../scripts/region-sync/python-extractor');
 import type { AdminDataSettings, Region } from '$shared/types';
 
 function normalizeRegionPmtilesSlug(regionOrSlug) {
@@ -63,19 +62,17 @@ function resolveExistingRegionPmtilesPath(dataDir, region) {
 
 function createDataSettingsService(options: LooseRecord = {}) {
   const { createCountrySubregionsCatalog } = require('./data-settings/country-subregions');
+  const regionCatalog = options.regionCatalog || createRegionCatalog(options);
   const countrySubregionsCatalog =
     options.countrySubregionsCatalog ||
     createCountrySubregionsCatalog({
-      dataDir: options.dataDir,
-      fetchImpl: options.fetchImpl
+      ...options,
+      regionCatalog
     });
   const context = createDataSettingsContext({
     ...options,
-    extractResolver:
-      options.extractResolver ||
-      createPythonExtractResolver({
-        importerPath: path.resolve(__dirname, '../../../../scripts/sync-osm-buildings.py')
-      })
+    regionCatalog,
+    extractResolver: options.extractResolver || null
   });
   context.countrySubregionsCatalog = countrySubregionsCatalog;
   const { db, dataDir, readAppDataSettingsRow, normalizeNullableText, computeRegionDbBytes } = context;

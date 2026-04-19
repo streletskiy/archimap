@@ -278,7 +278,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
       errors.push('Only sourceType=extract is supported in v2');
     }
     if (!next.extractSource || !next.extractId) {
-      errors.push('Select a canonical extract before saving the region');
+      errors.push('Select a curated extract before saving the region (canonical extract selection is required)');
     }
     if (!next.name) {
       errors.push('Region name is required');
@@ -426,7 +426,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
         const membershipCount = await countRegionMemberships(existing.id);
         if (membershipCount > 0 || existing.lastSuccessfulSyncAt) {
           throw new Error(
-            'Changing canonical extract for an already synced region is not supported. Create a new region instead.'
+            'Changing the curated extract for an already synced region is not supported. Create a new region instead.'
           );
         }
       }
@@ -450,7 +450,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
 
     const extractValidation = await validateSelectedExtract(normalized.value, existing);
     if (extractValidation.error || !extractValidation.candidate) {
-      throw new Error(extractValidation.error || 'Failed to validate canonical extract');
+      throw new Error(extractValidation.error || 'Failed to validate curated extract');
     }
 
     const next = {

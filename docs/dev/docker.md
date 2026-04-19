@@ -10,46 +10,42 @@
 
 Reference: [`Dockerfile`](../../Dockerfile)
 
-1. `tippecanoe-builder`
-
-- Builds `tippecanoe` and `tile-join` once from pinned ref.
-
-2. `planetiler-dist`
+1. `planetiler-dist`
 
 - Pulls the pinned upstream `ghcr.io/onthegomap/planetiler` image and reuses its Java runtime + application classpath in our `runtime-base`.
 
-3. `deps`
+2. `deps`
 
 - Installs backend production dependencies from `package-lock.json`.
 - Changes only when backend dependency manifests change.
 
-4. `frontend-deps`
+3. `frontend-deps`
 
 - Installs frontend dependencies from `frontend/package-lock.json`.
 - Isolated from backend source changes.
 
-5. `frontend-runtime-deps`
+4. `frontend-runtime-deps`
 
 - Starts from `frontend-deps` and prunes dev dependencies with `npm prune --omit=dev`.
 - Keeps the runtime image free of frontend dev dependencies.
 
-6. `frontend-build`
+5. `frontend-build`
 
 - Generates version metadata and builds frontend bundle from committed frontend assets.
 - Installs the backend production dependency tree in the build-platform stage so `scripts/generate-version.ts` uses a matching native `esbuild` binary.
 - Does not reuse the runtime `deps` layer.
 
-7. `runtime`
+6. `runtime`
 
 - Uses pinned `node:24-bookworm-slim`.
 - Contains only runtime assets:
   - backend runtime code (`server.sveltekit.ts`, `server.ts`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`
+  - `frontend/static`
   - production `node_modules`
-  - python venv with `quackosm`/`duckdb`
+  - `osm2pgsql`
   - `planetiler` wrapper + Java runtime
-  - `tippecanoe` / `tile-join` fallback binaries
-  - QuackOSM's cache root is mapped to `/app/data/cache`, so precalculated extract indexes survive container restarts when the default `./data:/app/data` volume is present.
+  - no QuackOSM / DuckDB / Python importer / `tippecanoe` runtime dependency for managed region sync
 
 ## Cache Stability Rules
 
@@ -58,7 +54,6 @@ Reference: [`Dockerfile`](../../Dockerfile)
 - BuildKit cache mounts are used for:
   - npm (`/root/.npm`)
   - apt (`/var/cache/apt`, `/var/lib/apt/lists`)
-  - pip (`/root/.cache/pip`)
 
 ## Build Context
 
@@ -129,7 +124,7 @@ The `archimap` service also sets `pull_policy: never`. Compose therefore does no
 - for local source changes, rebuild explicitly with `docker compose up -d --build archimap`
 - for published releases, pull the image first (`docker pull streletskiy/archimap:<version>`) and then run `docker compose up -d`
 
-`admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` only when the archive is missing or out of date.
+`admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` with `planetiler` only when the archive is missing or out of date.
 
 ## PostgreSQL + PostGIS (default in Compose)
 

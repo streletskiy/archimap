@@ -16,8 +16,7 @@ import type {
   FilterPresetRule,
   FilterPresetState,
   Region as DataRegion,
-  RegionDraft as SharedRegionDraft,
-  RegionExtractCandidate
+  RegionDraft as SharedRegionDraft
 } from '$shared/types';
 
 const DATA_I18N_PREFIX = 'admin.data';
@@ -100,7 +99,6 @@ function createRegionDraft(region: Partial<DataRegion> | null = null): SharedReg
     id: Number(region?.id || 0) || null,
     name: String(region?.name || ''),
     slug: String(region?.slug || ''),
-    searchQuery: String(region?.searchQuery || ''),
     extractSource: String(region?.extractSource || ''),
     extractId: String(region?.extractId || ''),
     extractLabel: String(region?.extractLabel || ''),
@@ -395,8 +393,6 @@ export function createAdminDataController() {
   const regionDeleting: Writable<boolean> = writable(false);
   const regionSyncBusy: Writable<boolean> = writable(false);
   const regionSyncCancelBusy: Writable<boolean> = writable(false);
-  const regionResolveBusy: Writable<boolean> = writable(false);
-  const regionExtractCandidates: Writable<RegionExtractCandidate[]> = writable([]);
   const selectedDataRegionId: Writable<number | null> = writable(persistedRegionEditorState.regionId);
   const regionRuns: Writable<LooseRecord[]> = writable([]);
   const regionRunsLoading: Writable<boolean> = writable(false);
@@ -600,8 +596,6 @@ export function createAdminDataController() {
     dataSettings,
     dataStatus,
     regionDraft,
-    regionResolveBusy,
-    regionExtractCandidates,
     patchRegionDraft,
     dataT
   });
@@ -630,13 +624,6 @@ export function createAdminDataController() {
 
   function applyRegionDraftFromMapFeature(feature: { properties?: Record<string, unknown> | null } | null) {
     return mapRegionController.applyRegionDraftFromMapFeature(feature);
-  }
-
-  function applyRegionExtractCandidate(
-    candidate: RegionExtractCandidate | null,
-    options: { setStatus?: boolean } = {}
-  ) {
-    return mapRegionController.applyRegionExtractCandidate(candidate, options);
   }
 
   function getRegionById(regionId: number | string): DataRegion | null {
@@ -883,8 +870,6 @@ export function createAdminDataController() {
 
     selectedDataRegionId.set(nextSelectedRegionId);
     regionDraft.set(createRegionDraft(nextRegion));
-    regionResolveBusy.set(false);
-    regionExtractCandidates.set([]);
 
     if (get(regionEditorOpen) && nextSelectedRegionId) {
       writePersistedRegionEditorState(nextSelectedRegionId, true);
@@ -1133,8 +1118,6 @@ export function createAdminDataController() {
 
     selectedDataRegionId.set(nextSelectedRegionId);
     regionDraft.set(createRegionDraft(region || null));
-    regionResolveBusy.set(false);
-    regionExtractCandidates.set([]);
     regionEditorOpen.set(shouldOpenEditor);
     writePersistedRegionEditorState(nextSelectedRegionId, shouldOpenEditor);
 
@@ -1336,8 +1319,6 @@ export function createAdminDataController() {
 
     selectedDataRegionId.set(null);
     regionDraft.set(createRegionDraft());
-    regionResolveBusy.set(false);
-    regionExtractCandidates.set([]);
     regionRunsRequestToken += 1;
     regionRunsAbortController?.abort();
     regionRunsAbortController = null;
@@ -1353,14 +1334,6 @@ export function createAdminDataController() {
     return true;
   }
 
-  function handleRegionSearchQueryInput(event) {
-    return mapRegionController.handleRegionSearchQueryInput(event);
-  }
-
-  async function resolveRegionExtractCandidates() {
-    return mapRegionController.resolveRegionExtractCandidates();
-  }
-
   async function saveDataRegion(event) {
     event?.preventDefault?.();
     if (!ensureFilterTagChangesDiscarded()) return;
@@ -1374,7 +1347,6 @@ export function createAdminDataController() {
       name: String(currentDraft.name || '').trim(),
       slug: String(currentDraft.slug || '').trim(),
       sourceType: 'extract',
-      searchQuery: String(currentDraft.searchQuery || '').trim(),
       extractSource: String(currentDraft.extractSource || '').trim(),
       extractId: String(currentDraft.extractId || '').trim(),
       extractLabel: String(currentDraft.extractLabel || '').trim(),
@@ -1618,7 +1590,7 @@ export function createAdminDataController() {
   }
 
   function getRegionExtractPrimaryText(region) {
-    return String(region?.extractLabel || region?.searchQuery || '').trim() || '---';
+    return String(region?.extractLabel || region?.name || region?.extractId || '').trim() || '---';
   }
 
   function getRegionExtractSecondaryText(region) {
@@ -1807,8 +1779,6 @@ export function createAdminDataController() {
     regionDeleting,
     regionSyncBusy,
     regionSyncCancelBusy,
-    regionResolveBusy,
-    regionExtractCandidates,
     selectedDataRegionId,
     regionRuns,
     regionRunsLoading,
@@ -1819,7 +1789,6 @@ export function createAdminDataController() {
     regionRunsLimit,
     regionEditorOpen,
     initialized,
-    applyRegionExtractCandidate,
     confirmDiscardFilterTagChanges,
     ensureFilterTagChangesDiscarded,
     ensureLoaded,
@@ -1840,7 +1809,6 @@ export function createAdminDataController() {
     getRegionStatusMeta,
     getRegionSyncModeLabel,
     getMapRegionFeatureMeta,
-    handleRegionSearchQueryInput,
     isFilterTagSelected,
     loadFilterPresets,
     loadDataSettings,
@@ -1852,7 +1820,6 @@ export function createAdminDataController() {
     findRegionByMapFeature,
     applyRegionDraftFromMapFeature,
     resetFilterTagAllowlistToDefault,
-    resolveRegionExtractCandidates,
     saveDataRegion,
     saveFilterPreset,
     saveFilterTagAllowlist,

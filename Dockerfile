@@ -1,33 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
-ARG TIPPECANOE_REF=2.79.0
 ARG PLANETILER_VERSION=0.10.2
-ARG QUACKOSM_VERSION=0.17.0
-ARG DUCKDB_VERSION=1.4.4
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
 ARG DEBIAN_IMAGE=debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
-ARG PIP_VERSION=26.0.1
 ARG RUNTIME_BASE_IMAGE=runtime-base
-
-FROM ${DEBIAN_IMAGE} AS tippecanoe-builder
-ARG TIPPECANOE_REF
-
-WORKDIR /tmp/tippecanoe
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-  apt-get update \
-  && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    build-essential \
-    git \
-    pkg-config \
-    zlib1g-dev \
-    libsqlite3-dev
-
-RUN git clone --depth 1 --branch "${TIPPECANOE_REF}" https://github.com/felt/tippecanoe.git . \
-  && make -j"$(nproc)" \
-  && strip tippecanoe tile-join
 
 FROM ghcr.io/onthegomap/planetiler:${PLANETILER_VERSION} AS planetiler-dist
 
@@ -74,9 +50,6 @@ RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG
   && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\\n')"
 
 FROM ${NODE_IMAGE} AS runtime-base
-ARG QUACKOSM_VERSION
-ARG DUCKDB_VERSION
-ARG PIP_VERSION
 ARG PLANETILER_VERSION
 
 WORKDIR /app
@@ -85,51 +58,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
   apt-get update \
   && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python3-venv \
     ca-certificates \
     libsqlite3-0 \
-    osmium-tool \
+    osm2pgsql \
     zlib1g \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=tippecanoe-builder /tmp/tippecanoe/tippecanoe /usr/local/bin/tippecanoe
-COPY --from=tippecanoe-builder /tmp/tippecanoe/tile-join /usr/local/bin/tile-join
 COPY --from=planetiler-dist /opt/java/openjdk /opt/java/openjdk
 COPY --from=planetiler-dist /app /opt/planetiler
 
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-  python3 -m venv /opt/pyosm \
-  && /opt/pyosm/bin/pip install "pip==${PIP_VERSION}" \
-  && /opt/pyosm/bin/pip install "quackosm==${QUACKOSM_VERSION}" "duckdb==${DUCKDB_VERSION}"
-
-# Pre-install DuckDB spatial extension so it does not need to be downloaded at runtime.
-# The extensions.duckdb.org server requires a DuckDB User-Agent and is unreachable from inside
-# running containers (Docker network blocks the request). Pre-baking the extension avoids this.
-RUN <<PYEOF
-/opt/pyosm/bin/python3 - << 'INNER'
-import urllib.request, gzip, shutil, io, os, platform
-import sys
-
-ver = os.environ.get('DUCKDB_VERSION', '1.4.4')
-machine = platform.machine()
-plat = 'linux_amd64' if machine == 'x86_64' else 'linux_arm64'
-url = 'http://extensions.duckdb.org/v{}/{}/spatial.duckdb_extension.gz'.format(ver, plat)
-target = os.path.expanduser('~/.duckdb/extensions/v{}/{}/spatial.duckdb_extension'.format(ver, plat))
-os.makedirs(os.path.dirname(target), exist_ok=True)
-req = urllib.request.Request(url, headers={'User-Agent': 'DuckDB/v{} ({})'.format(ver, plat)})
-resp = urllib.request.urlopen(req, timeout=120)
-data = resp.read()
-buf = io.BytesIO(data)
-with gzip.open(buf) as gz:
-    with open(target, 'wb') as out:
-        shutil.copyfileobj(gz, out)
-print('DuckDB spatial extension installed: ' + target)
-INNER
-PYEOF
-
-RUN mkdir -p /app/data/cache /app/data/quackosm
+RUN mkdir -p /app/data/cache
 
 RUN <<'EOF'
 set -eu
@@ -144,7 +82,6 @@ INNER
 chmod +x /usr/local/bin/planetiler
 EOF
 
-ENV PYTHON_BIN=/opt/pyosm/bin/python
 ENV XDG_CACHE_HOME=/app/data/cache
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH=/opt/java/openjdk/bin:${PATH}
@@ -156,7 +93,6 @@ FROM ${RUNTIME_BASE_IMAGE} AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PYTHON_BIN=/opt/pyosm/bin/python
 
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
@@ -168,6 +104,7 @@ COPY scripts ./scripts
 COPY workers ./workers
 COPY src ./src
 COPY --from=frontend-build /app/frontend/build ./frontend/build
+COPY frontend/static ./frontend/static
 COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version.generated.json
 
 EXPOSE 3252

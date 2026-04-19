@@ -7,10 +7,9 @@ const {
   loadSubregions,
   updateRegionPostSync
 } = require('./region-db');
-const { applyRegionImport, publishPmtilesArchive } = require('./import-applier');
+const { publishPmtilesArchive } = require('./import-applier');
 
 module.exports = {
-  applyRegionImport,
   assertRegionSupportsManagedSync,
   exportRegionMembersToGeojsonNdjson,
   exportRegionRenderFeaturesToGeojsonNdjson,
