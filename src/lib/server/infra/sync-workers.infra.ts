@@ -349,6 +349,12 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     let outputTail = '';
     let parsedSummary = null;
     let pendingStagePromise: Promise<unknown> = Promise.resolve();
+    const sourceDataUpdatedAtPromise = (() => {
+      if (queueEntry && typeof queueEntry.sourceDataUpdatedAtPromise?.then === 'function') {
+        return queueEntry.sourceDataUpdatedAtPromise.catch(() => null);
+      }
+      return Promise.resolve(String(queueEntry?.sourceDataUpdatedAt || '').trim() || null);
+    })();
     let lastStagePersistTs = 0;
     let lastStageSignature = '';
 
@@ -471,6 +477,21 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       return pendingStagePromise.catch(() => {});
     }
 
+    function waitForSourceDataUpdatedAt() {
+      return sourceDataUpdatedAtPromise.catch(() => null);
+    }
+
+    async function finalizeSuccess(summary = {}) {
+      const sourceDataUpdatedAt = await waitForSourceDataUpdatedAt();
+      await finalizeRun(run.id, {
+        success: true,
+        summary: {
+          ...summary,
+          sourceDataUpdatedAt: sourceDataUpdatedAt || null
+        }
+      });
+    }
+
     child.on('error', (error) => {
       currentSyncChild = null;
       currentRun = null;
@@ -517,13 +538,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         return;
       }
       if (code === 0 && parsedSummary) {
-        finalize({
-          success: true,
-          summary: {
-            ...parsedSummary,
-            sourceDataUpdatedAt: queueEntry.sourceDataUpdatedAt || null
-          }
-        }).catch(() => {});
+        waitForPendingStage()
+          .then(() => finalizeSuccess(parsedSummary))
+          .catch(() => {});
         return;
       }
       finalize({
@@ -616,8 +633,22 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       }
 
       const skipUpstreamCheck = options.skipUpstreamCheck === true;
+      const lastSyncStatus = String(region?.lastSyncStatus || '')
+        .trim()
+        .toLowerCase();
+      const shouldProbeUpstreamBeforeQueue =
+        !skipUpstreamCheck &&
+        String(options.triggerReason || '')
+          .trim()
+          .toLowerCase() !== 'manual' &&
+        Boolean(region?.lastSuccessfulSyncAt) &&
+        lastSyncStatus !== 'failed' &&
+        typeof dataSettingsService.getRegionUpstreamState === 'function';
+
       let upstreamRegion = region;
-      if (!skipUpstreamCheck && typeof dataSettingsService.getRegionUpstreamState === 'function') {
+      let sourceDataUpdatedAt = null;
+      let sourceDataUpdatedAtPromise = null;
+      if (shouldProbeUpstreamBeforeQueue) {
         try {
           upstreamRegion =
             (await dataSettingsService.getRegionUpstreamState(region, {
@@ -626,21 +657,30 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         } catch {
           upstreamRegion = region;
         }
-      }
-
-      if (!skipUpstreamCheck && shouldSkipSyncBecauseUpToDate(upstreamRegion)) {
-        if (options.triggerReason === 'manual') {
-          throw new Error('No upstream update is available for this region');
+        if (shouldSkipSyncBecauseUpToDate(upstreamRegion)) {
+          if (options.triggerReason === 'manual') {
+            throw new Error('No upstream update is available for this region');
+          }
+          if (typeof dataSettingsService.rescheduleRegionAfterSkippedSync === 'function') {
+            await dataSettingsService.rescheduleRegionAfterSkippedSync(numericRegionId);
+          }
+          return {
+            queued: false,
+            skipped: true,
+            run: null,
+            region: await dataSettingsService.getRegionById(numericRegionId)
+          };
         }
-        if (typeof dataSettingsService.rescheduleRegionAfterSkippedSync === 'function') {
-          await dataSettingsService.rescheduleRegionAfterSkippedSync(numericRegionId);
-        }
-        return {
-          queued: false,
-          skipped: true,
-          run: null,
-          region: await dataSettingsService.getRegionById(numericRegionId)
-        };
+        sourceDataUpdatedAt = String(upstreamRegion?.latestSourceDataUpdatedAt || '').trim() || null;
+      } else if (!skipUpstreamCheck && typeof dataSettingsService.getRegionUpstreamState === 'function') {
+        sourceDataUpdatedAtPromise = Promise.resolve()
+          .then(() =>
+            dataSettingsService.getRegionUpstreamState(region, {
+              forceRefresh: false
+            })
+          )
+          .then((value) => String(value?.latestSourceDataUpdatedAt || '').trim() || null)
+          .catch(() => null);
       }
 
       const run = await dataSettingsService.createQueuedRun(
@@ -651,7 +691,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       queue.push({
         runId: run.id,
         regionId: numericRegionId,
-        sourceDataUpdatedAt: upstreamRegion?.latestSourceDataUpdatedAt || null
+        sourceDataUpdatedAt,
+        sourceDataUpdatedAtPromise
       });
       queuedRegionIds.add(numericRegionId);
       reloadSchedulesInBackground(`enqueue:${numericRegionId}`);

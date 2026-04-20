@@ -157,7 +157,8 @@ System notes:
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
-  - Returns `400` when the region has already been successfully synced and the upstream extract is still up to date.
+  - Manual syncs queue immediately and do not wait for an upstream freshness probe before the PBF download starts.
+  - Returns `400` when the region cannot be queued, for example if the id is invalid, the region is disabled, or its curated extract is unresolved.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-cancel`
   - Master-admin only.
   - Requests cancellation of the region's queued or running sync. Running syncs have their entire worker process tree terminated (graceful SIGTERM/taskkill, then SIGKILL fallback after 10s); queued syncs are dropped from the queue.

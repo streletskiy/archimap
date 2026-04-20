@@ -372,6 +372,73 @@ test('managed sync workers return queued responses without waiting for schedule 
   await waitForMicrotasks();
 });
 
+test('managed sync workers start initial manual sync without waiting for upstream probing', async () => {
+  const children = [];
+  const upstreamGate = createDeferredPromise();
+  let upstreamChecks = 0;
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 15,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle',
+        lastSuccessfulSyncAt: null
+      }
+    ],
+    {
+      getRegionUpstreamState: async (regionOrId) => {
+        upstreamChecks += 1;
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        await upstreamGate.promise;
+        return {
+          ...region,
+          latestSourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
+        };
+      }
+    }
+  );
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await Promise.race([
+    workers.requestRegionSync(15, {
+      triggerReason: 'manual',
+      requestedBy: 'tester'
+    }),
+    new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 50))
+  ]);
+
+  assert.equal(queued?.timeout, undefined);
+  assert.equal(upstreamChecks, 1);
+  assert.equal(children.length, 1);
+  assert.equal(queued.queued, true);
+
+  upstreamGate.resolve();
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":5}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+});
+
 test('managed sync workers defer post-sync maintenance until the queue drains', async () => {
   const children = [];
   const successEvents = [];
@@ -658,7 +725,7 @@ test('managed sync workers heartbeat queued and running runs while using stale-o
   workers.stop();
 });
 
-test('managed sync workers reject manual sync when upstream data is already up to date', async () => {
+test('managed sync workers queue manual sync even when upstream data is already up to date', async () => {
   let spawnCalls = 0;
   const dataSettingsService = createManagedDataSettingsService(
     [
@@ -702,11 +769,17 @@ test('managed sync workers reject manual sync when upstream data is already up t
     log: { log() {}, error() {} }
   });
 
-  await assert.rejects(
-    () => workers.requestRegionSync(11, { triggerReason: 'manual', requestedBy: 'tester' }),
-    /No upstream update is available/
-  );
+  const skipped = await workers.requestRegionSync(11, {
+    triggerReason: 'scheduled',
+    requestedBy: 'system'
+  });
+  assert.equal(skipped.queued, false);
+  assert.equal(skipped.skipped, true);
   assert.equal(spawnCalls, 0);
+
+  const queued = await workers.requestRegionSync(11, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(queued.queued, true);
+  assert.equal(spawnCalls, 1);
 });
 
 test('managed sync workers skip scheduled sync when upstream data is already up to date', async () => {

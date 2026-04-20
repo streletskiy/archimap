@@ -446,6 +446,7 @@ paths:
   /api/admin/app-settings/data/regions/{regionId}/sync-now:
     post:
       summary: Queue a managed sync run for a region
+      description: Manual syncs queue immediately and do not wait for an upstream freshness probe first.
       parameters:
         - in: path
           name: regionId
@@ -461,7 +462,7 @@ paths:
         '200':
           description: Region sync queued
         '400':
-          description: Invalid region id or region cannot be queued
+          description: Invalid region id, disabled region, or unresolved curated extract
         '403':
           description: Master admin required
   /api/admin/app-settings/data/regions/{regionId}/sync-cancel:

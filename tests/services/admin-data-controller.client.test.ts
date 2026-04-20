@@ -608,6 +608,266 @@ test('stale upstream status refresh does not clear a live queued sync state', as
   }
 });
 
+test('manual sync stays disabled until upstream status is loaded for an existing region', async () => {
+  const { createAdminDataController } = await loadControllerModule();
+  const upstreamGate = createDeferred();
+  const fetchCalls = [];
+
+  const idleRegion = {
+    id: 77,
+    slug: 'demo-region',
+    name: 'Demo Region',
+    sourceType: 'extract',
+    searchQuery: 'Demo',
+    extractSource: 'geofabrik',
+    extractId: 'demo/region',
+    extractLabel: 'Demo Region',
+    extractResolutionStatus: 'resolved',
+    extractResolutionError: null,
+    canSync: true,
+    enabled: true,
+    autoSyncEnabled: true,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 24,
+    pmtilesMinZoom: 13,
+    pmtilesMaxZoom: 16,
+    sourceLayer: 'buildings',
+    lastSyncStatus: 'idle',
+    lastSyncError: null,
+    lastSuccessfulSyncAt: '2026-04-10T00:00:00.000Z',
+    sourceDataUpdatedAt: '2026-04-10T00:00:00.000Z',
+    latestSourceDataUpdatedAt: null,
+    upstreamCheckedAt: null,
+    upstreamStatus: 'unknown',
+    upstreamError: null,
+    updateAvailable: false,
+    lastSyncFinishedAt: '2026-04-10T00:00:00.000Z',
+    nextSyncAt: '2026-04-12T00:00:00.000Z',
+    pmtilesBytes: 1024,
+    dbBytes: 2048,
+    dbBytesApproximate: false,
+    bounds: null
+  };
+
+  const queuedRegion = {
+    ...idleRegion,
+    lastSyncStatus: 'queued',
+    lastSyncError: null
+  };
+
+  mock.method(globalThis, 'fetch', async (input, init: LooseRecord = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+    fetchCalls.push({ url, method });
+
+    if (method === 'GET' && url.startsWith('/api/admin/app-settings/data/regions/upstream-status?')) {
+      return upstreamGate.promise;
+    }
+
+    if (method === 'POST' && url.endsWith('/api/admin/app-settings/data/regions/77/sync-now')) {
+      throw new Error(`unexpected request: ${method} ${url}`);
+    }
+
+    if (method === 'GET' && url === '/api/admin/app-settings/data') {
+      return createJsonResponse({
+        ok: true,
+        item: {
+          source: 'db',
+          bootstrap: { completed: true, source: null },
+          regions: [queuedRegion],
+          filterTags: {
+            source: 'default',
+            allowlist: [],
+            defaultAllowlist: [],
+            availableKeys: [],
+            updatedBy: null,
+            updatedAt: null
+          },
+          filterPresets: {
+            source: 'db',
+            items: []
+          }
+        }
+      });
+    }
+
+    throw new Error(`unexpected request: ${method} ${url}`);
+  });
+
+  try {
+    const controller = createAdminDataController();
+    controller.dataSettings.set({
+      source: 'db',
+      bootstrap: { completed: true, source: null },
+      regions: [idleRegion],
+      filterTags: {
+        source: 'default',
+        allowlist: [],
+        defaultAllowlist: [],
+        availableKeys: [],
+        updatedBy: null,
+        updatedAt: null
+      },
+      filterPresets: {
+        source: 'db',
+        items: []
+      }
+    });
+    controller.initialized.set(true);
+
+    const upstreamPromise = controller.refreshRegionUpstreamStatuses([77], {
+      silent: true,
+      forceRefresh: true
+    });
+
+    let region = get(controller.dataSettings).regions.find((item) => item.id === 77);
+    assert.equal(controller.canSyncRegionNow(region), false);
+    assert.match(controller.getRegionSyncBlockedReason(region), /upstream/i);
+
+    await controller.syncRegionNow(77);
+
+    assert.equal(
+      fetchCalls.some(
+        (call) => call.method === 'POST' && call.url.endsWith('/api/admin/app-settings/data/regions/77/sync-now')
+      ),
+      false
+    );
+
+    upstreamGate.resolve(
+      createJsonResponse({
+        ok: true,
+        items: [
+          {
+            ...idleRegion,
+            latestSourceDataUpdatedAt: '2026-04-11T02:00:00.000Z',
+            upstreamCheckedAt: '2026-04-11T02:05:00.000Z',
+            upstreamStatus: 'update_available',
+            updateAvailable: true
+          }
+        ]
+      })
+    );
+
+    await upstreamPromise;
+    await Promise.resolve();
+
+    region = get(controller.dataSettings).regions.find((item) => item.id === 77);
+    assert.equal(region?.upstreamStatus, 'update_available');
+    assert.equal(controller.canSyncRegionNow(region), true);
+    assert.equal(region?.latestSourceDataUpdatedAt, '2026-04-11T02:00:00.000Z');
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test('manual sync stays disabled when the region is already up to date upstream', async () => {
+  const { createAdminDataController } = await loadControllerModule();
+  const fetchCalls = [];
+
+  const upToDateRegion = {
+    id: 77,
+    slug: 'demo-region',
+    name: 'Demo Region',
+    sourceType: 'extract',
+    searchQuery: 'Demo',
+    extractSource: 'geofabrik',
+    extractId: 'demo/region',
+    extractLabel: 'Demo Region',
+    extractResolutionStatus: 'resolved',
+    extractResolutionError: null,
+    canSync: true,
+    enabled: true,
+    autoSyncEnabled: true,
+    autoSyncOnStart: false,
+    autoSyncIntervalHours: 24,
+    pmtilesMinZoom: 13,
+    pmtilesMaxZoom: 16,
+    sourceLayer: 'buildings',
+    lastSyncStatus: 'idle',
+    lastSyncError: null,
+    lastSuccessfulSyncAt: '2026-04-10T00:00:00.000Z',
+    sourceDataUpdatedAt: '2026-04-10T00:00:00.000Z',
+    latestSourceDataUpdatedAt: '2026-04-10T00:00:00.000Z',
+    upstreamCheckedAt: '2026-04-11T02:05:00.000Z',
+    upstreamStatus: 'up_to_date',
+    upstreamError: null,
+    updateAvailable: false,
+    lastSyncFinishedAt: '2026-04-10T00:00:00.000Z',
+    nextSyncAt: '2026-04-12T00:00:00.000Z',
+    pmtilesBytes: 1024,
+    dbBytes: 2048,
+    dbBytesApproximate: false,
+    bounds: null
+  };
+
+  mock.method(globalThis, 'fetch', async (input, init: LooseRecord = {}) => {
+    const url = String(input);
+    const method = String(init.method || 'GET').toUpperCase();
+    fetchCalls.push({ url, method });
+
+    if (method === 'GET' && url === '/api/admin/app-settings/data') {
+      return createJsonResponse({
+        ok: true,
+        item: {
+          source: 'db',
+          bootstrap: { completed: true, source: null },
+          regions: [upToDateRegion],
+          filterTags: {
+            source: 'default',
+            allowlist: [],
+            defaultAllowlist: [],
+            availableKeys: [],
+            updatedBy: null,
+            updatedAt: null
+          },
+          filterPresets: {
+            source: 'db',
+            items: []
+          }
+        }
+      });
+    }
+
+    throw new Error(`unexpected request: ${method} ${url}`);
+  });
+
+  try {
+    const controller = createAdminDataController();
+    controller.dataSettings.set({
+      source: 'db',
+      bootstrap: { completed: true, source: null },
+      regions: [upToDateRegion],
+      filterTags: {
+        source: 'default',
+        allowlist: [],
+        defaultAllowlist: [],
+        availableKeys: [],
+        updatedBy: null,
+        updatedAt: null
+      },
+      filterPresets: {
+        source: 'db',
+        items: []
+      }
+    });
+    controller.initialized.set(true);
+
+    assert.equal(controller.canSyncRegionNow(upToDateRegion), false);
+    assert.match(controller.getRegionSyncBlockedReason(upToDateRegion), /upstream/i);
+
+    await controller.syncRegionNow(77);
+
+    assert.equal(
+      fetchCalls.some(
+        (call) => call.method === 'POST' && call.url.endsWith('/api/admin/app-settings/data/regions/77/sync-now')
+      ),
+      false
+    );
+  } finally {
+    mock.restoreAll();
+  }
+});
+
 test('controller restores the persisted region editor selection and clears it on close', async () => {
   const { createAdminDataController } = await loadControllerModule();
   const previousSessionStorage = global.sessionStorage;

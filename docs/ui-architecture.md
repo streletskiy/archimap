@@ -163,7 +163,8 @@ When a new control is needed:
 - Save, sync, and delete actions live on the right side of the bounds row inside the current-status card instead of floating outside the status block.
 - On narrow screens, save/sync/delete actions stack vertically and stretch to the available width instead of introducing horizontal scrolling inside the status card.
 - The current-status card must show both the imported source version and the latest upstream version, so admins can see whether a real region update exists before starting a sync.
-- If the upstream extract is already up to date, the manual sync action stays disabled; failed or never-synced regions remain actionable.
+- Manual `Sync now` for an already-synced region must stay disabled until the upstream snapshot has been loaded; if that snapshot already shows the region is up to date, it stays disabled.
+- While a sync is active, the current-status card shows the live stage progress and stage detail text from the backend run state, so the download percentage and progress summary stay visible inside the modal.
 - Region list loading should stay fast even with many regions: load the base region list first, then lazily refresh upstream status only for the visible page and the currently selected region.
 - Opening a region modal must stay responsive: upstream checks and sync-history loading run independently in the background and must not block the modal shell from rendering.
 - Creating a new country-level `geofabrik` region through the standard `Create region` action must automatically create a country aggregate plus hidden subregions, and aggregate syncs must process those subregions sequentially.

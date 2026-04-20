@@ -55,7 +55,7 @@ Managed region sync architecture in this repository is:
 
 - PostgreSQL-only for managed imports and runtime building data.
 - Curated extract catalog from repository-managed manifest/admin map data.
-- Direct PBF download from known upstream URLs.
+- Aria2-backed PBF download from known upstream URLs, with live progress in the sync console and admin status card.
 - `osm2pgsql` flex import into PostgreSQL staging, then controlled merge into canonical tables.
 - `planetiler` as the only PMTiles build engine.
 

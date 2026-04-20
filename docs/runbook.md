@@ -24,7 +24,7 @@
 
 ## Docker release script behavior
 
-- Runtime base tag is derived from dependency versions for the managed sync toolchain (`planetiler`, `osm2pgsql`, Java/runtime deps).
+- Runtime base tag is derived from dependency versions for the managed sync toolchain (`planetiler`, `osm2pgsql`, `aria2`, Java/runtime deps).
 - `scripts/release-docker.sh` and `scripts/release-docker.ps1` skip rebuilding `runtime-base` if that tag already exists in registry.
 - Force rebuild only when needed:
   - Bash: `--force-runtime-base`
@@ -61,6 +61,9 @@
 
 1. Open `Admin -> Data`, select or create the target region in the modal editor, and update its settings there.
 2. Run `Sync now` for the target region from the same modal or `npm run tiles:build -- --region-id=<id>`.
+   - For a region that has already been synced once, wait for the upstream snapshot to load before using `Sync now`. If that snapshot shows the region as up to date upstream, the button stays disabled; otherwise manual and first-time syncs start downloading the PBF immediately.
+   - Scheduled/background runs may still pause for an upstream freshness check when that check can prevent a redundant rerun.
+   - While the PBF is downloading, the modal's current-status card shows the live stage progress and detail text, and the worker console prints the same download summaries.
 3. Optional maintenance rebuild without re-import:
    - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`
 4. Verify PMTiles:
@@ -116,6 +119,7 @@
 ### Region sync CLI fails immediately
 
 - Check PostgreSQL/PostGIS connectivity (`DATABASE_URL`, `DB_PROVIDER=postgres`).
+- Verify `aria2c` is available in the runtime image or `ARIA2_BIN` points to it.
 - Verify `osm2pgsql` is available in the container/runtime image.
 - If the failure is in the archive build stage, verify `planetiler` / `PLANETILER_BIN`.
 - Managed region sync no longer depends on Python importer tooling, QuackOSM, DuckDB, `osmium`, or `tippecanoe`.

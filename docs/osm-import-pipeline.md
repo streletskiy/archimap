@@ -6,7 +6,7 @@ It is the source of truth for the current managed architecture:
 
 - PostgreSQL + PostGIS only for managed region sync.
 - Curated extract metadata from repository-local manifest/catalog data.
-- Direct upstream PBF download from stored URLs.
+- Aria2-backed upstream PBF download from stored URLs, with console progress mirrored into the sync status state.
 - `osm2pgsql` flex import into PostgreSQL staging.
 - Controlled merge/apply into canonical tables.
 - `planetiler` as the only PMTiles build engine.
@@ -59,11 +59,12 @@ The standard admin create flow is curated-only:
 ## Prerequisites
 
 - PostgreSQL + PostGIS (`DB_PROVIDER=postgres`)
+- `aria2`
 - `osm2pgsql`
 - `planetiler`
 - Java runtime for `planetiler`
 
-The Docker runtime image contains these dependencies.
+The Docker runtime image contains these dependencies, including `aria2c` for managed extract downloads.
 
 ## End-to-end flow
 
@@ -76,8 +77,11 @@ The Docker runtime image contains these dependencies.
    - curated `extractSource` + `extractId` are present
    - `extractResolutionStatus=resolved`
    - managed sync is running with `DB_PROVIDER=postgres`
+   - manual syncs, including first-time syncs, queue immediately and let the PBF download start without waiting for a freshness probe
+   - scheduled/background runs may still probe upstream before queueing so they can skip a redundant rerun when the source is already up to date
 5. The sync creates a temp workspace for the run.
 6. [`scripts/region-sync/extract-download.ts`](../scripts/region-sync/extract-download.ts) looks up the manifest entry and downloads the PBF from its stored `downloadUrl`.
+   - the downloader prefers `aria2c`, streams progress updates into the run stage state, and falls back to streamed fetch if `aria2c` is unavailable
 7. [`scripts/region-sync/osm2pgsql-import.ts`](../scripts/region-sync/osm2pgsql-import.ts) creates a per-run PostgreSQL staging schema and runs `osm2pgsql` flex with [`scripts/region-sync/osm2pgsql-flex.lua`](../scripts/region-sync/osm2pgsql-flex.lua).
 8. The flex config keeps only building geometry relevant to ArchiMap:
    - `building`
@@ -107,7 +111,7 @@ The Docker runtime image contains these dependencies.
 
 Managed sync emits these high-level stages:
 
-- `download`: direct PBF download from curated upstream URL
+- `download`: `aria2`-backed PBF download from curated upstream URL with live progress
 - `extract`: `osm2pgsql` flex import into PostgreSQL staging
 - `apply`: controlled merge/apply into canonical tables
 - `export`: export region members from PostgreSQL for PMTiles input
@@ -127,7 +131,7 @@ Managed sync emits these high-level stages:
 ### `scripts/region-sync/extract-download.ts`
 
 - Resolves the curated manifest entry.
-- Downloads the upstream PBF directly from `downloadUrl`.
+- Downloads the upstream PBF from `downloadUrl` using `aria2c` when available, with progress logged to the console and emitted into sync stage state.
 - Records source snapshot metadata (size, sha256, timestamps, source ids).
 
 ### `scripts/region-sync/osm2pgsql-flex.lua`

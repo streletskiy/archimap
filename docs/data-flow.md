@@ -20,13 +20,13 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - Schedule recomputation is coalesced and performed in the background so region save/sync requests do not wait for the full timer refresh.
 3. Queue launches [`scripts/sync-osm-region.ts`](../scripts/sync-osm-region.ts) for a concrete `regionId`.
 4. The sync script acts as an orchestrator and delegates the real stages to `scripts/region-sync/**`:
-   - `extract-download.ts`: curated catalog lookup + direct upstream PBF download
+   - `extract-download.ts`: curated catalog lookup + aria2-backed upstream PBF download with stage progress
    - `osm2pgsql-import.ts`: `osm2pgsql` flex import into per-run PostgreSQL staging schema
    - `import-applier.ts`: transactional merge/apply from staging into canonical tables + protected PMTiles swap
    - `region-db.ts`: region config loading + current-members export, including direct GeoJSON feature streaming for `--pmtiles-only`
    - `pmtiles-builder.ts`: `planetiler` build wrapper for the region NDJSON export
 5. The region sync script runs the full OSM import pipeline described in [OSM Import Pipeline](osm-import-pipeline.md):
-   - curated manifest validation and direct PBF download from the stored upstream URL
+   - curated manifest validation and aria2-backed PBF download from the stored upstream URL
    - `osm2pgsql` flex import into PostgreSQL staging
    - transactional merge into `osm.building_contours` and `data_region_memberships`
    - region-specific PMTiles build and protected swap

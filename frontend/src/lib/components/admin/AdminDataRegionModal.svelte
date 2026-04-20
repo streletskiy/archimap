@@ -325,6 +325,7 @@
   $: activeStageDetail = activeRun?.stageDetail ? String(activeRun.stageDetail) : '';
   $: seenStages = activeRun ? resolveSeenStages(activeRun) : new Set();
   $: pipeline = computePipelineState(activeRun, seenStages || new Set());
+  $: activeStageDisplayProgress = activeStageProgress ?? pipeline.overallProgress;
   $: syncIsActive = Boolean(selectedRegion) && ['queued', 'running'].includes(
     String(selectedRegion?.lastSyncStatus || '').trim().toLowerCase()
   );
@@ -451,7 +452,7 @@
                   <div class="data-region-stage-title">
                     {$t('admin.data.form.syncStageTitle')}:
                     <span class="data-region-stage-name">{activeStageLabel || $t('admin.data.form.syncStageWorking')}</span>
-                    <span class="data-region-stage-percent">{pipeline.overallProgress}%</span>
+                    <span class="data-region-stage-percent">{activeStageDisplayProgress}%</span>
                   </div>
                   {#if activeStageDetail}
                     <div class="data-region-stage-detail">{activeStageDetail}</div>
@@ -478,9 +479,9 @@
                 aria-label={$t('admin.data.form.syncStageProgressLabel')}
                 aria-valuemin="0"
                 aria-valuemax="100"
-                aria-valuenow={pipeline.overallProgress}
+                aria-valuenow={activeStageDisplayProgress}
               >
-                <div class="data-region-stage-progress-bar" style="width: {pipeline.overallProgress}%"></div>
+                <div class="data-region-stage-progress-bar" style="width: {activeStageDisplayProgress}%"></div>
               </div>
             </div>
           {/if}

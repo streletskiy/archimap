@@ -453,7 +453,7 @@ async function runRegionSync(region, runtimeOptions) {
     const downloaded = await downloadManagedRegionExtract({
       region,
       workspace,
-      onStage: async (stage, detail) => emitStageJson(stage, null, detail)
+      onStage: async (stage, detail, progress = null) => emitStageJson(stage, progress, detail)
     });
 
     const stageImport = await importPbfToPostgresStage({

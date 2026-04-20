@@ -44,6 +44,7 @@ Reference: [`Dockerfile`](../../Dockerfile)
   - `frontend/static`
   - production `node_modules`
   - `osm2pgsql`
+  - `aria2`
   - `planetiler` wrapper + Java runtime
   - no QuackOSM / DuckDB / Python importer / `tippecanoe` runtime dependency for managed region sync
 
