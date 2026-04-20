@@ -19,6 +19,7 @@
 - `scripts/region-sync/**`: modular managed region-sync pipeline (curated extract catalog lookup, aria2-backed PBF download with progress, `osm2pgsql` staging import, PostgreSQL merge/apply, PMTiles build).
 - PostgreSQL runtime storage:
   - `osm.building_contours`: PostGIS `geom` + bbox/tags metadata; GeoJSON is rendered on demand for API/PMTiles export.
+  - `data_sync_regions`: region definitions with support for hierarchy (country aggregates and hidden subregions).
   - region-scoped staging schemas created by managed sync runs for `osm2pgsql` flex import before controlled merge into canonical tables.
   - `public.building_search_source`: searchable subset with generated `search_tsv`.
 - SQLite:

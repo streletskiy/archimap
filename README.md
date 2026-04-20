@@ -36,6 +36,12 @@ cp .env.example .env
 npm run dev
 ```
 
+Create a master admin user to access the dashboard:
+
+```bash
+npm run admin:create-master -- --email=admin@example.com --password=securepassword
+```
+
 Optional production-like run:
 
 ```bash

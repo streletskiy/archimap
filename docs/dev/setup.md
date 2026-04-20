@@ -10,7 +10,9 @@
    - copy [`.env.example`](../../.env.example) -> `.env`
 3. Start dev runtime:
    - `npm run dev`
-4. Optional production-like local run:
+4. Create a master admin:
+   - `npm run admin:create-master -- --email=admin@example.com --password=securepassword`
+5. Optional production-like local run:
    - `npm run build`
    - `npm run start`
 5. Recommended verification after changes:
