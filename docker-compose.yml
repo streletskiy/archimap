@@ -55,7 +55,6 @@ services:
     entrypoint: ['tail', '-f', '/dev/null']
     volumes:
       - ./data:/data
-      - ./scripts/region-sync/osm2pgsql-flex.lua:/osm2pgsql-flex.lua:ro
 
   redis:
     image: redis:7-alpine

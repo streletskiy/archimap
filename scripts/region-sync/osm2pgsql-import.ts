@@ -9,7 +9,7 @@ const DEFAULT_OSM2PGSQL_CONTAINER = 'archimap-osm2pgsql';
 const FLEX_CONFIG_PATH = path.resolve(__dirname, 'osm2pgsql-flex.lua');
 const CONTAINER_DATA_ROOT = '/data';
 const HOST_DATA_ROOT = '/app/data';
-const CONTAINER_FLEX_CONFIG_PATH = '/osm2pgsql-flex.lua';
+const CONTAINER_FLEX_CONFIG_PATH = '/tmp/archimap-osm2pgsql-flex.lua';
 
 function toContainerPath(hostPath) {
   const normalizedPath = String(hostPath || '').replace(/\\/g, '/');
@@ -44,6 +44,36 @@ function detectOsm2pgsqlContainer(env: LooseRecord = process.env) {
   const probe = spawnSync('docker', ['exec', container, 'osm2pgsql', '--version'], { stdio: 'pipe', shell: false });
   if (probe.status === 0 && !probe.error) return container;
   return null;
+}
+
+function ensureOsm2pgsqlContainerFlexConfig(
+  containerName: string,
+  env: LooseRecord = process.env,
+  spawnSyncRef = spawnSync
+) {
+  const copyResult = spawnSyncRef(
+    'docker',
+    ['cp', FLEX_CONFIG_PATH, `${containerName}:${CONTAINER_FLEX_CONFIG_PATH}`],
+    {
+      stdio: 'pipe',
+      shell: false,
+      env
+    }
+  );
+  if (copyResult.error) {
+    throw copyResult.error;
+  }
+  if ((copyResult.status ?? 1) !== 0) {
+    const stdout = String(copyResult.stdout || '').trim();
+    const stderr = String(copyResult.stderr || '').trim();
+    const detail = [stdout, stderr].filter(Boolean).join('\n');
+    throw new Error(
+      `Failed to copy osm2pgsql flex config into container "${containerName}"${
+        detail ? `:\n${detail}` : ''
+      }`
+    );
+  }
+  return CONTAINER_FLEX_CONFIG_PATH;
 }
 
 function resolveOsm2pgsqlJobs(env: LooseRecord = process.env) {
@@ -93,7 +123,7 @@ function buildOsm2pgsqlArgs({
   ];
 }
 
-function buildStageSchemaName(region, env: LooseRecord = process.env) {
+function buildStageSchemaName(region, _env: LooseRecord = process.env) {
   const regionId = Number(region?.id || 0);
   const suffix = `${Date.now().toString(36)}${Math.round(Math.random() * 0xffffff)
     .toString(36)
@@ -169,12 +199,13 @@ async function importPbfToPostgresStage({
       // Docker exec on the sidecar container
       const containerPbfPath = toContainerPath(String(pbfPath));
       const containerDbUrl = resolveDatabaseUrlForContainer(databaseUrl);
+      const containerFlexConfigPath = ensureOsm2pgsqlContainerFlexConfig(containerName, env);
 
       const osm2pgsqlArgs = buildOsm2pgsqlArgs({
         databaseUrl: containerDbUrl,
         pbfPath: containerPbfPath,
         stageSchema: schemaName,
-        flexConfigPath: CONTAINER_FLEX_CONFIG_PATH,
+        flexConfigPath: containerFlexConfigPath,
         jobs,
         cacheMb
       });
@@ -245,6 +276,7 @@ module.exports = {
   FLEX_CONFIG_PATH,
   buildStageSchemaName,
   buildOsm2pgsqlArgs,
+  ensureOsm2pgsqlContainerFlexConfig,
   dropStageSchema,
   importPbfToPostgresStage,
   resolveOsm2pgsqlBin
