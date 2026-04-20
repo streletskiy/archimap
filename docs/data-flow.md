@@ -36,7 +36,8 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - updated region sync metadata and bounds for runtime clients
 7. For managed in-app syncs, the runtime runs post-sync maintenance through `ServerRuntime` boot modules:
    - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite) and dispatches incremental refreshes to `workers/refresh-search-index.worker.ts`
-   - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
+   - `design-ref-suggestions.boot.js` refreshes the distinct `design:ref` suggestion cache
+   - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh after the heavier read-model refreshes so the Postgres scans do not overlap
 
 ## Safety invariants
 

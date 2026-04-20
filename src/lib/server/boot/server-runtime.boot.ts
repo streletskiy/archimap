@@ -70,6 +70,28 @@ async function runPostDbStartupTasks(runtime: LooseRecord) {
   }
 }
 
+async function runPostSyncTasks(runtime: LooseRecord, payload: LooseRecord = null) {
+  const managedRegionSync = Boolean(payload?.region);
+  const reason = managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync';
+
+  try {
+    await Promise.resolve(runtime.osmSyncService?.cleanupSyncedLocalOverwritesAfterImport?.());
+  } catch (error) {
+    runtime.logger.error('osm_sync_cleanup_after_import_failed', {
+      error: String(error?.message || error)
+    });
+  }
+
+  await runtime.rebuildSearchIndex(reason);
+  runtime.resetFilterTagKeysCache?.();
+
+  try {
+    await Promise.resolve(runtime.refreshDesignRefSuggestionsCache?.(reason));
+  } finally {
+    runtime.scheduleFilterTagKeysCacheRebuild?.(reason);
+  }
+}
+
 class ServerRuntime {
   [key: string]: any;
 
@@ -370,20 +392,7 @@ class ServerRuntime {
       getContoursTotal: async () =>
         Number((await this.db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
       onSyncSuccess: async (payload = null) => {
-        const managedRegionSync = Boolean(payload?.region);
-        try {
-          await this.osmSyncService?.cleanupSyncedLocalOverwritesAfterImport?.();
-        } catch (error) {
-          this.logger.error('osm_sync_cleanup_after_import_failed', {
-            error: String(error?.message || error)
-          });
-        }
-        await this.rebuildSearchIndex(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
-        this.resetFilterTagKeysCache();
-        this.scheduleFilterTagKeysCacheRebuild(managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync');
-        await this.refreshDesignRefSuggestionsCache?.(
-          managedRegionSync ? `region-sync:${payload.region.id}` : 'region-sync'
-        );
+        await runPostSyncTasks(this, payload);
       }
     });
   }
@@ -541,5 +550,6 @@ function createServerRuntime(options: LooseRecord = {}) {
 module.exports = {
   ServerRuntime,
   createServerRuntime,
-  runPostDbStartupTasks
+  runPostDbStartupTasks,
+  runPostSyncTasks
 };
