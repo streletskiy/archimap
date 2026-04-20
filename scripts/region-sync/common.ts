@@ -13,8 +13,17 @@ function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+function resolveWorkspaceBaseDir() {
+  // Use data/workspaces so sidecar containers (planetiler, osm2pgsql) sharing
+  // the ./data volume can access workspace files.
+  const dataDir = String(process.env.ARCHIMAP_DATA_DIR || '').trim() || path.join(__dirname, '..', '..', 'data');
+  const base = path.join(dataDir, 'workspaces');
+  fs.mkdirSync(base, { recursive: true });
+  return base;
+}
+
 function createWorkspace(regionId) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `archimap-region-${Number(regionId)}-`));
+  return fs.mkdtempSync(path.join(resolveWorkspaceBaseDir(), `archimap-region-${Number(regionId)}-`));
 }
 
 function encodeOsmFeatureId(osmType, osmId) {

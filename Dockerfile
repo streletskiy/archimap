@@ -1,11 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-ARG PLANETILER_VERSION=0.10.2
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
-ARG DEBIAN_IMAGE=debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
 ARG RUNTIME_BASE_IMAGE=runtime-base
-
-FROM ghcr.io/onthegomap/planetiler:${PLANETILER_VERSION} AS planetiler-dist
 
 FROM ${NODE_IMAGE} AS deps
 
@@ -47,10 +43,9 @@ COPY legal ./legal
 COPY frontend ./frontend
 RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG="${BUILD_LATEST_TAG}" node --import tsx scripts/generate-version.ts \
   && npm --prefix frontend run build \
-  && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\\n')"
+  && node -e "require('fs').writeFileSync('frontend/build/package.json', '{\"type\":\"module\"}\n')"
 
 FROM ${NODE_IMAGE} AS runtime-base
-ARG PLANETILER_VERSION
 
 WORKDIR /app
 
@@ -59,35 +54,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
+    gnupg \
     libsqlite3-0 \
-    osm2pgsql \
     zlib1g \
+  && install -m 0755 -d /etc/apt/keyrings \
+  && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+  && chmod a+r /etc/apt/keyrings/docker.asc \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+    > /etc/apt/sources.list.d/docker.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends docker-ce-cli \
+  && apt-get purge -y --auto-remove curl gnupg \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=planetiler-dist /opt/java/openjdk /opt/java/openjdk
-COPY --from=planetiler-dist /app /opt/planetiler
-
 RUN mkdir -p /app/data/cache
-
-RUN <<'EOF'
-set -eu
-cat > /usr/local/bin/planetiler <<'INNER'
-#!/bin/sh
-set -eu
-exec "${JAVA_HOME:-/opt/java/openjdk}/bin/java" \
-  -cp "/opt/planetiler/resources:/opt/planetiler/classes:/opt/planetiler/libs/*" \
-  com.onthegomap.planetiler.Main \
-  "$@"
-INNER
-chmod +x /usr/local/bin/planetiler
-EOF
-
-ENV XDG_CACHE_HOME=/app/data/cache
-ENV JAVA_HOME=/opt/java/openjdk
-ENV PATH=/opt/java/openjdk/bin:${PATH}
-ENV PLANETILER_BIN=/usr/local/bin/planetiler
-ENV PLANETILER_HOME=/opt/planetiler
-ENV PLANETILER_VERSION=${PLANETILER_VERSION}
 
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
 
@@ -110,4 +91,3 @@ COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version
 EXPOSE 3252
 
 CMD ["node", "--import", "tsx", "scripts/runtime-start.ts"]
-

@@ -13,21 +13,21 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_INPUT = path.join(REPO_ROOT, 'frontend', 'static', 'admin-regions.geojson');
 const DEFAULT_OUTPUT = path.join(REPO_ROOT, 'frontend', 'static', 'admin-regions.pmtiles');
 const DEFAULT_METADATA_OUTPUT = `${DEFAULT_OUTPUT}.meta.json`;
-const DEFAULT_IMAGE = 'archimap-runtime-base:admin-regions';
 const DEFAULT_LAYER = 'regions';
 const DEFAULT_PLANETILER_BIN = String(process.env.PLANETILER_BIN || 'planetiler').trim() || 'planetiler';
+const DEFAULT_PLANETILER_CONTAINER =
+  String(process.env.PLANETILER_CONTAINER || 'archimap-planetiler').trim() || 'archimap-planetiler';
 
 function parseArgs(argv = process.argv.slice(2)): LooseRecord {
   const options = {
     input: DEFAULT_INPUT,
     output: DEFAULT_OUTPUT,
-    image: DEFAULT_IMAGE,
     layer: DEFAULT_LAYER,
     minZoom: 0,
     maxZoom: 7,
-    skipImageBuild: false,
     local: false,
     planetilerBin: DEFAULT_PLANETILER_BIN,
+    planetilerContainer: DEFAULT_PLANETILER_CONTAINER,
     metadataOutput: DEFAULT_METADATA_OUTPUT
   };
 
@@ -49,11 +49,6 @@ function parseArgs(argv = process.argv.slice(2)): LooseRecord {
       index += 1;
       continue;
     }
-    if (arg === '--image') {
-      options.image = String(argv[index + 1] || '').trim() || DEFAULT_IMAGE;
-      index += 1;
-      continue;
-    }
     if (arg === '--layer') {
       options.layer = String(argv[index + 1] || '').trim() || DEFAULT_LAYER;
       index += 1;
@@ -69,16 +64,17 @@ function parseArgs(argv = process.argv.slice(2)): LooseRecord {
       index += 1;
       continue;
     }
-    if (arg === '--skip-image-build') {
-      options.skipImageBuild = true;
-      continue;
-    }
     if (arg === '--local') {
       options.local = true;
       continue;
     }
     if (arg === '--planetiler-bin') {
       options.planetilerBin = String(argv[index + 1] || '').trim() || DEFAULT_PLANETILER_BIN;
+      index += 1;
+      continue;
+    }
+    if (arg === '--planetiler-container') {
+      options.planetilerContainer = String(argv[index + 1] || '').trim() || DEFAULT_PLANETILER_CONTAINER;
       index += 1;
       continue;
     }
@@ -133,16 +129,20 @@ function cleanupJournal(output) {
   fs.rmSync(journalPath, { force: true });
 }
 
-function buildRuntimeBaseImage(image) {
-  run('docker', ['build', '--target', 'runtime-base', '-t', image, '.']);
-}
-
 function canRunLocalPlanetiler(planetilerBin) {
   const result = spawnSync(planetilerBin, ['--version'], {
     cwd: REPO_ROOT,
     stdio: 'ignore',
     shell: false,
     env: process.env
+  });
+  return result.status === 0;
+}
+
+function canRunPlanetilerContainer(container) {
+  const result = spawnSync('docker', ['exec', container, 'java', '-version'], {
+    stdio: 'ignore',
+    shell: false
   });
   return result.status === 0;
 }
@@ -191,37 +191,41 @@ function buildPmtilesLocal({
   }
 }
 
-function buildPmtilesDocker({
-  image,
+function buildPmtilesContainer({
+  planetilerContainer,
   input,
   output,
   layer,
   minZoom,
   maxZoom
 }: LooseRecord) {
-  const workspaceInput = `/workspace/${path.relative(REPO_ROOT, input).replace(/\\/g, '/')}`;
-  const workspaceOutput = `/workspace/${path.relative(REPO_ROOT, output).replace(/\\/g, '/')}`;
+  const CONTAINER_WORKSPACE = '/workspace';
+  const inputRel = path.relative(REPO_ROOT, input).replace(/\\/g, '/');
+  const outputRel = path.relative(REPO_ROOT, output).replace(/\\/g, '/');
+
   const schemaHostPath = `${output}.planetiler.yml`;
-  const schemaWorkspacePath = `/workspace/${path.relative(REPO_ROOT, schemaHostPath).replace(/\\/g, '/')}`;
+  const schemaRel = path.relative(REPO_ROOT, schemaHostPath).replace(/\\/g, '/');
+
   writePlanetilerSchema(schemaHostPath, {
     schemaName: 'ArchiMap Admin Regions',
-    inputPath: workspaceInput,
+    inputPath: `${CONTAINER_WORKSPACE}/${inputRel}`,
     layer,
     attributeKeys: collectAdminRegionAttributeKeys(input),
     includeFeatureId: false
   });
+
   try {
     run('docker', [
       'run',
       '--rm',
-      '-v',
-      `${REPO_ROOT}:/workspace`,
-      '-w',
-      '/workspace',
-      image,
-      'planetiler',
-      schemaWorkspacePath,
-      `--output=${workspaceOutput}`,
+      '-v', `${REPO_ROOT}:${CONTAINER_WORKSPACE}`,
+      '-w', CONTAINER_WORKSPACE,
+      DEFAULT_PLANETILER_IMAGE,
+      'java',
+      '-cp', '/app/resources:/app/classes:/app/libs/*',
+      'com.onthegomap.planetiler.Main',
+      `${CONTAINER_WORKSPACE}/${schemaRel}`,
+      `--output=${CONTAINER_WORKSPACE}/${outputRel}`,
       '--force',
       `--minzoom=${String(minZoom)}`,
       `--maxzoom=${String(maxZoom)}`
@@ -238,8 +242,8 @@ function writeMetadata({
   layer,
   minZoom,
   maxZoom,
-  image,
   planetilerBin,
+  planetilerContainer,
   mode
 }) {
   const payload = {
@@ -251,8 +255,8 @@ function writeMetadata({
     layer,
     minZoom,
     maxZoom,
-    image,
     planetilerBin,
+    planetilerContainer,
     mode,
     generatedAt: new Date().toISOString()
   };
@@ -268,16 +272,26 @@ function main() {
 
   const useLocalBuild =
     options.local ||
-    canRunLocalPlanetiler(options.planetilerBin || detectPlanetilerExecutable(process.env) || DEFAULT_PLANETILER_BIN);
+    canRunLocalPlanetiler(
+      options.planetilerBin || detectPlanetilerExecutable(process.env) || DEFAULT_PLANETILER_BIN
+    );
+
   if (useLocalBuild) {
     buildPmtilesLocal(options);
   } else {
-    if (!options.skipImageBuild) {
-      buildRuntimeBaseImage(options.image);
+    const container = options.planetilerContainer || DEFAULT_PLANETILER_CONTAINER;
+    if (!canRunPlanetilerContainer(container)) {
+      throw new Error(
+        `Cannot run planetiler: no native binary and container "${container}" is not available. ` +
+          'Install planetiler, set PLANETILER_BIN, or ensure the planetiler sidecar container is running.'
+      );
     }
-    buildPmtilesDocker(options);
+    buildPmtilesContainer(options);
   }
+
   cleanupJournal(options.output);
+
+  const mode = useLocalBuild ? 'local-planetiler' : 'container-planetiler';
   writeMetadata({
     input: options.input,
     output: options.output,
@@ -285,9 +299,9 @@ function main() {
     layer: options.layer,
     minZoom: options.minZoom,
     maxZoom: options.maxZoom,
-    image: useLocalBuild ? null : options.image,
     planetilerBin: useLocalBuild ? options.planetilerBin : null,
-    mode: useLocalBuild ? 'local-planetiler' : 'docker-runtime-base-planetiler'
+    planetilerContainer: useLocalBuild ? null : options.planetilerContainer,
+    mode
   });
 
   const sizeBytes = Number(fs.statSync(options.output).size || 0);
@@ -299,9 +313,9 @@ function main() {
       layer: options.layer,
       minZoom: options.minZoom,
       maxZoom: options.maxZoom,
-      image: useLocalBuild ? null : options.image,
       planetilerBin: useLocalBuild ? options.planetilerBin : null,
-      mode: useLocalBuild ? 'local-planetiler' : 'docker-runtime-base-planetiler'
+      planetilerContainer: useLocalBuild ? null : options.planetilerContainer,
+      mode
     })
   );
 }

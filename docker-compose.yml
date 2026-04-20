@@ -22,13 +22,40 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
+      # Sidecar tool container names (used by region-sync scripts)
+      PLANETILER_CONTAINER: archimap-planetiler
+      OSM2PGSQL_CONTAINER: archimap-osm2pgsql
     volumes:
       - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       redis:
         condition: service_started
       db-postgres:
         condition: service_healthy
+      planetiler:
+        condition: service_started
+      osm2pgsql:
+        condition: service_started
+
+  planetiler:
+    image: ghcr.io/onthegomap/planetiler:0.10.2
+    container_name: archimap-planetiler
+    restart: unless-stopped
+    entrypoint: ['tail', '-f', '/dev/null']
+    volumes:
+      - ./data:/data
+    environment:
+      XDG_CACHE_HOME: /data/cache
+
+  osm2pgsql:
+    image: iboates/osm2pgsql:2.2.0
+    container_name: archimap-osm2pgsql
+    restart: unless-stopped
+    entrypoint: ['tail', '-f', '/dev/null']
+    volumes:
+      - ./data:/data
+      - ./scripts/region-sync/osm2pgsql-flex.lua:/osm2pgsql-flex.lua:ro
 
   redis:
     image: redis:7-alpine

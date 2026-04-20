@@ -4,6 +4,10 @@ const { spawnSync } = require('child_process');
 const { ensureDir } = require('./common');
 
 const DEFAULT_PLANETILER_BIN = String(process.env.PLANETILER_BIN || 'planetiler').trim() || 'planetiler';
+const DEFAULT_PLANETILER_CONTAINER =
+  String(process.env.PLANETILER_CONTAINER || '').trim() || 'archimap-planetiler';
+const CONTAINER_DATA_ROOT = '/data';
+const HOST_DATA_ROOT = '/app/data';
 
 function runCommand(exe, args, options: LooseRecord = {}) {
   const result = spawnSync(exe, args, {
@@ -26,6 +30,22 @@ function detectPlanetilerExecutable(env: LooseRecord = process.env) {
     if (probe.ok) return exe;
   }
   return null;
+}
+
+function detectPlanetilerContainer(env: LooseRecord = process.env) {
+  const container = String(env.PLANETILER_CONTAINER || DEFAULT_PLANETILER_CONTAINER).trim();
+  if (!container) return null;
+  const probe = runCommand('docker', ['exec', container, 'java', '-version'], { stdio: 'pipe' });
+  if (probe.ok) return container;
+  return null;
+}
+
+function toContainerPath(hostPath) {
+  const normalizedPath = String(hostPath || '').replace(/\\/g, '/');
+  if (normalizedPath.startsWith(HOST_DATA_ROOT + '/') || normalizedPath === HOST_DATA_ROOT) {
+    return CONTAINER_DATA_ROOT + normalizedPath.slice(HOST_DATA_ROOT.length);
+  }
+  return normalizedPath;
 }
 
 function normalizeAttributeKeys(attributeKeys = []) {
@@ -93,15 +113,56 @@ function runPlanetilerBuild({
   includeFeatureId = false,
   env = process.env
 }: LooseRecord) {
-  const exe = String(planetilerExe || '').trim() || detectPlanetilerExecutable(env);
-  if (!exe) {
-    throw new Error('planetiler is not available. Install planetiler or set PLANETILER_BIN.');
+  const nativeExe = String(planetilerExe || '').trim() || detectPlanetilerExecutable(env);
+  const containerName = nativeExe ? null : detectPlanetilerContainer(env);
+
+  if (!nativeExe && !containerName) {
+    throw new Error(
+      'planetiler is not available. Install planetiler, set PLANETILER_BIN, or ensure the planetiler sidecar container is running.'
+    );
   }
 
   const effectiveSchemaPath =
     String(schemaPath || '').trim() ||
     path.join(path.dirname(outputPath), `${path.basename(outputPath, '.pmtiles')}.planetiler.yml`);
 
+  if (containerName) {
+    // Write schema with container-relative paths for the source data
+    const containerInputPath = toContainerPath(inputPath);
+    writePlanetilerSchema(effectiveSchemaPath, {
+      schemaName,
+      inputPath: containerInputPath,
+      layer,
+      attributeKeys,
+      includeFeatureId
+    });
+    ensureDir(outputPath);
+
+    const containerSchemaPath = toContainerPath(effectiveSchemaPath);
+    const containerOutputPath = toContainerPath(outputPath);
+
+    const args = [
+      'exec', containerName,
+      'java', '-cp', '/app/resources:/app/classes:/app/libs/*',
+      'com.onthegomap.planetiler.Main',
+      containerSchemaPath,
+      `--output=${containerOutputPath}`,
+      '--force',
+      `--minzoom=${String(minZoom)}`,
+      `--maxzoom=${String(maxZoom)}`
+    ];
+    const built = runCommand('docker', args, { env });
+    if (!built.ok) {
+      throw new Error(`planetiler (container) failed with exit code ${built.status}`);
+    }
+
+    return {
+      planetilerExe: `docker:${containerName}`,
+      schemaPath: effectiveSchemaPath
+    };
+  }
+
+  // Native execution (local dev or planetiler installed in main container)
   writePlanetilerSchema(effectiveSchemaPath, {
     schemaName,
     inputPath,
@@ -118,20 +179,22 @@ function runPlanetilerBuild({
     `--minzoom=${String(minZoom)}`,
     `--maxzoom=${String(maxZoom)}`
   ];
-  const built = runCommand(exe, args, { env });
+  const built = runCommand(nativeExe, args, { env });
   if (!built.ok) {
     throw new Error(`planetiler failed with exit code ${built.status}`);
   }
 
   return {
-    planetilerExe: exe,
+    planetilerExe: nativeExe,
     schemaPath: effectiveSchemaPath
   };
 }
 
 module.exports = {
   detectPlanetilerExecutable,
+  detectPlanetilerContainer,
   normalizeAttributeKeys,
   runPlanetilerBuild,
+  toContainerPath,
   writePlanetilerSchema
 };

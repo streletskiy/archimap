@@ -5,7 +5,19 @@ const { Client } = require('pg');
 
 const DEFAULT_STAGE_TABLE = 'region_import_stage';
 const DEFAULT_OSM2PGSQL_BIN = String(process.env.OSM2PGSQL_BIN || 'osm2pgsql').trim() || 'osm2pgsql';
+const DEFAULT_OSM2PGSQL_CONTAINER = 'archimap-osm2pgsql';
 const FLEX_CONFIG_PATH = path.resolve(__dirname, 'osm2pgsql-flex.lua');
+const CONTAINER_DATA_ROOT = '/data';
+const HOST_DATA_ROOT = '/app/data';
+const CONTAINER_FLEX_CONFIG_PATH = '/osm2pgsql-flex.lua';
+
+function toContainerPath(hostPath) {
+  const normalizedPath = String(hostPath || '').replace(/\\/g, '/');
+  if (normalizedPath.startsWith(HOST_DATA_ROOT + '/') || normalizedPath === HOST_DATA_ROOT) {
+    return CONTAINER_DATA_ROOT + normalizedPath.slice(HOST_DATA_ROOT.length);
+  }
+  return normalizedPath;
+}
 
 function quoteIdentifier(value) {
   const text = String(value || '').trim();
@@ -17,6 +29,21 @@ function quoteIdentifier(value) {
 
 function resolveOsm2pgsqlBin(env: LooseRecord = process.env) {
   return String(env.OSM2PGSQL_BIN || DEFAULT_OSM2PGSQL_BIN).trim() || DEFAULT_OSM2PGSQL_BIN;
+}
+
+function detectOsm2pgsqlNative(env: LooseRecord = process.env) {
+  const bin = resolveOsm2pgsqlBin(env);
+  const probe = spawnSync(bin, ['--version'], { stdio: 'pipe', shell: false });
+  if (probe.status === 0 && !probe.error) return bin;
+  return null;
+}
+
+function detectOsm2pgsqlContainer(env: LooseRecord = process.env) {
+  const container = String(env.OSM2PGSQL_CONTAINER || DEFAULT_OSM2PGSQL_CONTAINER).trim();
+  if (!container) return null;
+  const probe = spawnSync('docker', ['exec', container, 'osm2pgsql', '--version'], { stdio: 'pipe', shell: false });
+  if (probe.status === 0 && !probe.error) return container;
+  return null;
 }
 
 function resolveOsm2pgsqlJobs(env: LooseRecord = process.env) {
@@ -35,12 +62,14 @@ function buildOsm2pgsqlArgs({
   databaseUrl,
   pbfPath,
   stageSchema,
+  flexConfigPath,
   jobs,
   cacheMb
 }: {
   databaseUrl: string;
   pbfPath: string;
   stageSchema: string;
+  flexConfigPath: string;
   jobs: number;
   cacheMb: number;
 }) {
@@ -51,7 +80,7 @@ function buildOsm2pgsqlArgs({
     '-O',
     'flex',
     '-S',
-    FLEX_CONFIG_PATH,
+    flexConfigPath,
     '--middle-schema',
     stageSchema,
     '-d',
@@ -95,6 +124,12 @@ async function dropStageSchema(databaseUrl, stageSchema) {
   }
 }
 
+function resolveDatabaseUrlForContainer(databaseUrl) {
+  // Inside docker compose, osm2pgsql sidecar uses the same network.
+  // The DATABASE_URL from archimap already uses the docker service hostname (db-postgres).
+  return databaseUrl;
+}
+
 async function importPbfToPostgresStage({
   region,
   databaseUrl,
@@ -106,7 +141,6 @@ async function importPbfToPostgresStage({
 }: LooseRecord) {
   const schemaName = String(stageSchema || buildStageSchemaName(region, env)).trim();
   const tableName = String(stageTable || DEFAULT_STAGE_TABLE).trim() || DEFAULT_STAGE_TABLE;
-  const osm2pgsqlBin = resolveOsm2pgsqlBin(env);
   const jobs = resolveOsm2pgsqlJobs(env);
   const cacheMb = resolveOsm2pgsqlCacheMb(env);
 
@@ -114,30 +148,82 @@ async function importPbfToPostgresStage({
     await onStage('extract', `importing ${path.basename(String(pbfPath || 'source.osm.pbf'))} with osm2pgsql`);
   }
 
+  // Decide: native binary or container sidecar
+  const nativeBin = detectOsm2pgsqlNative(env);
+  const containerName = nativeBin ? null : detectOsm2pgsqlContainer(env);
+
+  if (!nativeBin && !containerName) {
+    throw new Error(
+      'osm2pgsql is not available. Install osm2pgsql, set OSM2PGSQL_BIN, or ensure the osm2pgsql sidecar container is running.'
+    );
+  }
+
   await createStageSchema(databaseUrl, schemaName);
   try {
-    const args = buildOsm2pgsqlArgs({
-      databaseUrl,
-      pbfPath: String(pbfPath),
-      stageSchema: schemaName,
-      jobs,
-      cacheMb
-    });
+    const stageEnv = {
+      OSM2PGSQL_STAGE_TABLE: tableName,
+      OSM2PGSQL_OUTPUT_SCHEMA: schemaName
+    };
 
-    const result = spawnSync(osm2pgsqlBin, args, {
-      stdio: 'inherit',
-      shell: false,
-      env: {
-        ...env,
-        OSM2PGSQL_STAGE_TABLE: tableName,
-        OSM2PGSQL_OUTPUT_SCHEMA: schemaName
+    if (containerName) {
+      // Docker exec on the sidecar container
+      const containerPbfPath = toContainerPath(String(pbfPath));
+      const containerDbUrl = resolveDatabaseUrlForContainer(databaseUrl);
+
+      const osm2pgsqlArgs = buildOsm2pgsqlArgs({
+        databaseUrl: containerDbUrl,
+        pbfPath: containerPbfPath,
+        stageSchema: schemaName,
+        flexConfigPath: CONTAINER_FLEX_CONFIG_PATH,
+        jobs,
+        cacheMb
+      });
+
+      const dockerArgs = [
+        'exec',
+        '-e', `OSM2PGSQL_STAGE_TABLE=${tableName}`,
+        '-e', `OSM2PGSQL_OUTPUT_SCHEMA=${schemaName}`,
+        containerName,
+        'osm2pgsql',
+        ...osm2pgsqlArgs
+      ];
+
+      const result = spawnSync('docker', dockerArgs, {
+        stdio: 'inherit',
+        shell: false,
+        env
+      });
+      if (result.error) {
+        throw result.error;
       }
-    });
-    if (result.error) {
-      throw result.error;
-    }
-    if ((result.status ?? 1) !== 0) {
-      throw new Error(`osm2pgsql failed with exit code ${result.status ?? 1}`);
+      if ((result.status ?? 1) !== 0) {
+        throw new Error(`osm2pgsql (container) failed with exit code ${result.status ?? 1}`);
+      }
+    } else {
+      // Native execution
+      const args = buildOsm2pgsqlArgs({
+        databaseUrl,
+        pbfPath: String(pbfPath),
+        stageSchema: schemaName,
+        flexConfigPath: FLEX_CONFIG_PATH,
+        jobs,
+        cacheMb
+      });
+
+      const result = spawnSync(nativeBin, args, {
+        stdio: 'inherit',
+        shell: false,
+        env: {
+          ...env,
+          ...stageEnv
+        }
+      });
+      if (result.error) {
+        throw result.error;
+      }
+      if ((result.status ?? 1) !== 0) {
+        throw new Error(`osm2pgsql failed with exit code ${result.status ?? 1}`);
+      }
     }
 
     return {
