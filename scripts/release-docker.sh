@@ -13,6 +13,8 @@ BUILDER="archimap-multiarch"
 SKIP_BINFMT_REPAIR=0
 SKIP_RUNTIME_BASE=0
 FORCE_RUNTIME_BASE=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
   cat <<'EOF'
@@ -28,7 +30,7 @@ Options:
   --no-cache                  Disable build cache
   --cache-ref <value>         Cache image ref (default: <image>:buildcache)
   --planetiler-version <value> Planetiler version (default: 0.10.2)
-  --runtime-base-tag <value>  Runtime base tag (default: derived from deps)
+  --runtime-base-tag <value>  Runtime base tag (default: derived from runtime-base stage hash)
   --builder <value>           Buildx builder name (default: archimap-multiarch)
   --skip-binfmt-repair        Skip binfmt auto-install
   --skip-runtime-base         Skip runtime-base build/push (use existing tag)
@@ -78,9 +80,13 @@ if [[ -z "${CACHE_REF}" ]]; then
   CACHE_REF="${IMAGE}:buildcache"
 fi
 
+if [[ -z "${RUNTIME_BASE_TAG}" ]] && ! command -v node >/dev/null 2>&1; then
+  echo "node is required to derive the runtime-base tag" >&2
+  exit 1
+fi
+
 if [[ -z "${RUNTIME_BASE_TAG}" ]]; then
-  raw_runtime_base_tag="runtime-base-pl${PLANETILER_VERSION}"
-  RUNTIME_BASE_TAG="$(printf '%s' "${raw_runtime_base_tag}" | tr '/:@ ' '-' | tr -c 'A-Za-z0-9._-' '-')"
+  RUNTIME_BASE_TAG="$(node "${REPO_ROOT}/scripts/lib/runtime-base-tag.js" --planetiler-version "${PLANETILER_VERSION}" --dockerfile "${REPO_ROOT}/Dockerfile")"
 fi
 RUNTIME_BASE_IMAGE="${IMAGE}:${RUNTIME_BASE_TAG}"
 

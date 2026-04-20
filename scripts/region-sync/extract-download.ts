@@ -9,6 +9,9 @@ const { ensureDir } = require('./common');
 
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_ARIA2_BIN = String(process.env.ARIA2_BIN || 'aria2c').trim() || 'aria2c';
+const DEFAULT_ALLOW_FETCH_FALLBACK = String(process.env.REGION_SYNC_ALLOW_FETCH_FALLBACK || '')
+  .trim()
+  .toLowerCase() === 'true';
 const DEFAULT_ARIA2_SUMMARY_INTERVAL_SEC = 1;
 const DEFAULT_ARIA2_SPLIT = 8;
 const DEFAULT_ARIA2_MIN_SPLIT_SIZE = '1M';
@@ -474,6 +477,7 @@ async function downloadManagedRegionExtract({
   spawnRef = spawn,
   spawnSyncRef = spawnSync,
   aria2Bin = DEFAULT_ARIA2_BIN,
+  allowFetchFallback = DEFAULT_ALLOW_FETCH_FALLBACK,
   log = console,
   timeoutMs = DEFAULT_DOWNLOAD_TIMEOUT_MS,
   onStage = null
@@ -485,46 +489,56 @@ async function downloadManagedRegionExtract({
   ensureDir(targetPath);
   const fetchRef = resolveFetchImpl(fetchImpl);
   const sourceLabel = `${extract.extractSource}:${extract.extractId}`;
-  const fetchSourceMtime = await resolveSourceMtime(extract.downloadUrl, fetchRef, timeoutMs);
   const useAria2 = isAria2Available(aria2Bin, spawnSyncRef);
+  const allowFallback = Boolean(allowFetchFallback);
+
+  if (!useAria2) {
+    if (!allowFallback) {
+      const error = new Error(
+        `aria2c is not available in this runtime. Rebuild/pull the image with aria2 or set ARIA2_BIN. Set REGION_SYNC_ALLOW_FETCH_FALLBACK=true only for emergency streamed fetch fallback.`
+      );
+      log.error(`[region-sync:download] ${error.message}`);
+      throw error;
+    }
+
+    log.log(`[region-sync:download] aria2 unavailable; using streamed fetch fallback`);
+    const fallbackResult = await downloadWithFetch({
+      downloadUrl: extract.downloadUrl,
+      targetPath,
+      fetchRef,
+      timeoutMs,
+      onStage,
+      sourceLabel,
+      log
+    });
+    return {
+      extract,
+      pbfPath: targetPath,
+      sourceSnapshot: {
+        extractSource: extract.extractSource,
+        extractId: extract.extractId,
+        sha256: fallbackResult.snapshot.sha256,
+        sizeBytes: fallbackResult.snapshot.sizeBytes,
+        sourceMtime: fallbackResult.snapshot.sourceMtime || fetchSourceMtime,
+        localPath: targetPath
+      }
+    };
+  }
+
+  const fetchSourceMtime = await resolveSourceMtime(extract.downloadUrl, fetchRef, timeoutMs);
 
   try {
-    const downloadResult = useAria2
-      ? await downloadWithAria2({
-          downloadUrl: extract.downloadUrl,
-          targetPath,
-          workspace,
-          aria2Bin,
-          timeoutMs,
-          onStage,
-          sourceLabel,
-          log,
-          spawnRef
-        })
-      : await downloadWithFetch({
-          downloadUrl: extract.downloadUrl,
-          targetPath,
-          fetchRef,
-          timeoutMs,
-          onStage,
-          sourceLabel,
-          log
-        });
-
-    if (!useAria2) {
-      return {
-        extract,
-        pbfPath: targetPath,
-        sourceSnapshot: {
-          extractSource: extract.extractSource,
-          extractId: extract.extractId,
-          sha256: downloadResult.snapshot.sha256,
-          sizeBytes: downloadResult.snapshot.sizeBytes,
-          sourceMtime: downloadResult.snapshot.sourceMtime || fetchSourceMtime,
-          localPath: targetPath
-        }
-      };
-    }
+    const downloadResult = await downloadWithAria2({
+      downloadUrl: extract.downloadUrl,
+      targetPath,
+      workspace,
+      aria2Bin,
+      timeoutMs,
+      onStage,
+      sourceLabel,
+      log,
+      spawnRef
+    });
 
     return {
       extract,
@@ -539,35 +553,34 @@ async function downloadManagedRegionExtract({
       }
     };
   } catch (error) {
-    if (useAria2) {
-      log.log?.(
-        `[region-sync:download] aria2 unavailable or failed; falling back to streamed fetch: ${String(
-          error?.message || error
-        )}`
-      );
-      const fallbackResult = await downloadWithFetch({
-        downloadUrl: extract.downloadUrl,
-        targetPath,
-        fetchRef,
-        timeoutMs,
-        onStage,
-        sourceLabel,
-        log
-      });
-      return {
-        extract,
-        pbfPath: targetPath,
-        sourceSnapshot: {
-          extractSource: extract.extractSource,
-          extractId: extract.extractId,
-          sha256: fallbackResult.snapshot.sha256,
-          sizeBytes: fallbackResult.snapshot.sizeBytes,
-          sourceMtime: fallbackResult.snapshot.sourceMtime || fetchSourceMtime,
-          localPath: targetPath
-        }
-      };
+    if (!allowFallback) {
+      throw error;
     }
-    throw error;
+
+    log.log(
+      `[region-sync:download] aria2 failed; falling back to streamed fetch: ${String(error?.message || error)}`
+    );
+    const fallbackResult = await downloadWithFetch({
+      downloadUrl: extract.downloadUrl,
+      targetPath,
+      fetchRef,
+      timeoutMs,
+      onStage,
+      sourceLabel,
+      log
+    });
+    return {
+      extract,
+      pbfPath: targetPath,
+      sourceSnapshot: {
+        extractSource: extract.extractSource,
+        extractId: extract.extractId,
+        sha256: fallbackResult.snapshot.sha256,
+        sizeBytes: fallbackResult.snapshot.sizeBytes,
+        sourceMtime: fallbackResult.snapshot.sourceMtime || fetchSourceMtime,
+        localPath: targetPath
+      }
+    };
   }
 }
 

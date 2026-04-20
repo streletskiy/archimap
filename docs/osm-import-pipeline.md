@@ -64,7 +64,7 @@ The standard admin create flow is curated-only:
 - `planetiler`
 - Java runtime for `planetiler`
 
-The Docker runtime image contains these dependencies, including `aria2c` for managed extract downloads.
+The Docker runtime image contains these dependencies, including `aria2c` for managed extract downloads. The managed sync code expects `aria2c` by default and only uses streamed fetch if `REGION_SYNC_ALLOW_FETCH_FALLBACK=true` is set intentionally.
 
 ## End-to-end flow
 
@@ -81,7 +81,7 @@ The Docker runtime image contains these dependencies, including `aria2c` for man
    - scheduled/background runs may still probe upstream before queueing so they can skip a redundant rerun when the source is already up to date
 5. The sync creates a temp workspace for the run.
 6. [`scripts/region-sync/extract-download.ts`](../scripts/region-sync/extract-download.ts) looks up the manifest entry and downloads the PBF from its stored `downloadUrl`.
-   - the downloader prefers `aria2c`, streams progress updates into the run stage state, and falls back to streamed fetch if `aria2c` is unavailable
+   - the downloader uses `aria2c`, streams progress updates into the run stage state, and fails fast if `aria2c` is unavailable unless `REGION_SYNC_ALLOW_FETCH_FALLBACK=true` is set intentionally
 7. [`scripts/region-sync/osm2pgsql-import.ts`](../scripts/region-sync/osm2pgsql-import.ts) creates a per-run PostgreSQL staging schema and runs `osm2pgsql` flex with [`scripts/region-sync/osm2pgsql-flex.lua`](../scripts/region-sync/osm2pgsql-flex.lua).
 8. The flex config keeps only building geometry relevant to ArchiMap:
    - `building`
@@ -131,7 +131,7 @@ Managed sync emits these high-level stages:
 ### `scripts/region-sync/extract-download.ts`
 
 - Resolves the curated manifest entry.
-- Downloads the upstream PBF from `downloadUrl` using `aria2c` when available, with progress logged to the console and emitted into sync stage state.
+- Downloads the upstream PBF from `downloadUrl` using `aria2c`, with progress logged to the console and emitted into sync stage state.
 - Records source snapshot metadata (size, sha256, timestamps, source ids).
 
 ### `scripts/region-sync/osm2pgsql-flex.lua`

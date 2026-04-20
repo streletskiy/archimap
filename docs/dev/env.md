@@ -94,6 +94,7 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `DATABASE_URL`, `DATABASE_PATH`, `ARCHIMAP_DB_PATH`, `OSM_DB_PATH`
 - `LOCAL_EDITS_DB_PATH`, `USER_EDITS_DB_PATH`, `USER_AUTH_DB_PATH`
 - `ARIA2_BIN` - optional absolute path to `aria2c`. The Docker runtime image ships `aria2c` out of the box.
+- `REGION_SYNC_ALLOW_FETCH_FALLBACK` - set to `true` only for temporary emergency fallback to streamed fetch when `aria2c` is unavailable. Production should leave this unset.
 - `PLANETILER_BIN` - optional absolute path to the `planetiler` wrapper/command. The Docker runtime image ships `/usr/local/bin/planetiler` out of the box.
 - `PMTILES_PROGRESS_JSON` / `PMTILES_PROGRESS_INTERVAL_SEC` - optional build-stage progress tuning for managed PMTiles generation.
 - `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` - apply-stage batching knob for the PostgreSQL merge/apply path.

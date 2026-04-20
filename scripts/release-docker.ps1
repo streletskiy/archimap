@@ -32,6 +32,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
   $PSNativeCommandUseErrorActionPreference = $false
 }
 $env:DOCKER_BUILDKIT = "1"
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
   throw "Version is required. Example: .\scripts\release-docker.ps1 -Version 1.2.3"
@@ -45,9 +46,17 @@ if ([string]::IsNullOrWhiteSpace($CacheRef)) {
   $CacheRef = "${Image}:buildcache"
 }
 
+if ([string]::IsNullOrWhiteSpace($RuntimeBaseTag) -and -not (Get-Command node -ErrorAction SilentlyContinue)) {
+  throw "node is required to derive the runtime-base tag"
+}
+
 if ([string]::IsNullOrWhiteSpace($RuntimeBaseTag)) {
-  $rawRuntimeBaseTag = "runtime-base-pl$PlanetilerVersion"
-  $RuntimeBaseTag = ($rawRuntimeBaseTag -replace '[^A-Za-z0-9._-]', '-')
+  $runtimeBaseTagArgs = @(
+    (Join-Path $RepoRoot "scripts/lib/runtime-base-tag.js"),
+    "--planetiler-version", $PlanetilerVersion,
+    "--dockerfile", (Join-Path $RepoRoot "Dockerfile")
+  )
+  $RuntimeBaseTag = ((& node @runtimeBaseTagArgs) | Out-String).Trim()
 }
 $RuntimeBaseImage = "${Image}:$RuntimeBaseTag"
 

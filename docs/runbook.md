@@ -24,7 +24,7 @@
 
 ## Docker release script behavior
 
-- Runtime base tag is derived from dependency versions for the managed sync toolchain (`planetiler`, `osm2pgsql`, `aria2`, Java/runtime deps).
+- Runtime base tag is derived from the `runtime-base` Dockerfile stage inputs, so changes to the runtime package set (including `aria2`) automatically produce a new registry tag.
 - `scripts/release-docker.sh` and `scripts/release-docker.ps1` skip rebuilding `runtime-base` if that tag already exists in registry.
 - Force rebuild only when needed:
   - Bash: `--force-runtime-base`
@@ -120,6 +120,7 @@
 
 - Check PostgreSQL/PostGIS connectivity (`DATABASE_URL`, `DB_PROVIDER=postgres`).
 - Verify `aria2c` is available in the runtime image or `ARIA2_BIN` points to it.
+- Managed sync does not silently downgrade to streamed fetch in production unless `REGION_SYNC_ALLOW_FETCH_FALLBACK=true` is set intentionally.
 - Verify `osm2pgsql` is available in the container/runtime image.
 - If the failure is in the archive build stage, verify `planetiler` / `PLANETILER_BIN`.
 - Managed region sync no longer depends on Python importer tooling, QuackOSM, DuckDB, `osmium`, or `tippecanoe`.

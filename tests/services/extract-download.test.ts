@@ -128,3 +128,46 @@ test('downloadManagedRegionExtract uses aria2 progress output and records source
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('downloadManagedRegionExtract fails fast when aria2 is unavailable and fallback is disabled', async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-download-'));
+  let fetchCalled = false;
+
+  try {
+    await assert.rejects(
+      downloadManagedRegionExtract({
+        region: {
+          extractSource: 'geofabrik',
+          extractId: 'finland'
+        },
+        workspace,
+        regionCatalog: {
+          findEntry() {
+            return {
+              extractSource: 'geofabrik',
+              extractId: 'finland',
+              downloadUrl: 'https://download.example/finland.osm.pbf'
+            };
+          }
+        },
+        fetchImpl: async () => {
+          fetchCalled = true;
+          throw new Error('fetch should not be called when aria2 is unavailable');
+        },
+        spawnSyncRef: () => ({ status: 1 }),
+        spawnRef: () => {
+          throw new Error('spawn should not be called when aria2 is unavailable');
+        },
+        log: {
+          log() {},
+          error() {}
+        }
+      }),
+      /aria2c is not available in this runtime/
+    );
+
+    assert.equal(fetchCalled, false);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
