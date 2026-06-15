@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
-const { createSensitiveValueFingerprint, sendCachedJson } = require('../infra/http-cache.infra');
+const { sendCachedJson } = require('../infra/http-cache.infra');
 const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
 const {
   CUSTOM_BASEMAP_TILEJSON_PROXY_URL,
@@ -61,7 +61,6 @@ function registerAppRoutes(deps) {
     getFilterTagKeysCached,
     getAllFilterTagKeysCached,
     isFilterTagKeysRebuildInProgress,
-    settingsSecret
   } = deps;
   const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
   const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
@@ -107,6 +106,8 @@ function registerAppRoutes(deps) {
         : {};
     return {
       config: generalConfig,
+      source: String(effectiveGeneralSettings?.source || 'env').trim() || 'env',
+      updatedAt: effectiveGeneralSettings?.updatedAt ? String(effectiveGeneralSettings.updatedAt) : null,
       customBasemapUrl: normalizeCustomBasemapUrl(generalConfig?.customBasemapUrl, DEFAULT_CUSTOM_BASEMAP_URL),
       customBasemapApiKey: normalizeBasemapApiKey(generalConfig?.customBasemapApiKey)
     };
@@ -177,7 +178,8 @@ function registerAppRoutes(deps) {
 
   app.get(CUSTOM_BASEMAP_TILEJSON_PROXY_URL, async (req, res) => {
     try {
-      const { customBasemapUrl, customBasemapApiKey } = await getEffectiveBasemapSettings();
+      const effectiveBasemapSettings = await getEffectiveBasemapSettings();
+      const { customBasemapUrl, customBasemapApiKey } = effectiveBasemapSettings;
       if (!customBasemapUrl) {
         return res.status(400).json({
           code: 'ERR_CUSTOM_BASEMAP_NOT_CONFIGURED',
@@ -205,10 +207,8 @@ function registerAppRoutes(deps) {
         cacheControl: 'private, no-cache',
         etagPayload: {
           tilejson: etagTilejson,
-          customBasemapApiKeyFingerprint: createSensitiveValueFingerprint(
-            customBasemapApiKey,
-            settingsSecret || process.env.APP_SETTINGS_SECRET || process.env.SESSION_SECRET
-          )
+          settingsVersion: effectiveBasemapSettings.updatedAt || effectiveBasemapSettings.source,
+          hasCustomBasemapCredentials: Boolean(customBasemapApiKey)
         }
       });
     } catch (error) {

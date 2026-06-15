@@ -1,7 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  createSensitiveValueFingerprint,
   createWeakEtag,
   isResourceNotModified,
   sendCachedJson,
@@ -51,18 +50,6 @@ test('createWeakEtag returns deterministic weak etag', () => {
   assert.match(a, /^W\/"/);
 });
 
-test('createSensitiveValueFingerprint fingerprints secret-like cache inputs with a server key', () => {
-  const a = createSensitiveValueFingerprint('secret-api-key', 'server-secret');
-  const b = createSensitiveValueFingerprint('secret-api-key', 'server-secret');
-  const c = createSensitiveValueFingerprint('other-secret-api-key', 'server-secret');
-  const d = createSensitiveValueFingerprint('secret-api-key', 'other-server-secret');
-
-  assert.equal(a, b);
-  assert.notEqual(a, c);
-  assert.notEqual(a, d);
-  assert.equal(a.includes('secret-api-key'), false);
-});
-
 test('sendCachedJson can derive ETag from a safe payload instead of the response body', () => {
   const req = {
     headers: {},
@@ -75,19 +62,19 @@ test('sendCachedJson can derive ETag from a safe payload instead of the response
   sendCachedJson(req, first, { url: 'https://tiles.example.test/{z}/{x}/{y}.mvt?key=secret-one' }, {
     etagPayload: {
       url: 'https://tiles.example.test/{z}/{x}/{y}.mvt',
-      apiKeyFingerprint: 'fingerprint-one'
+      settingsVersion: '2026-06-15T12:00:00Z'
     }
   });
   sendCachedJson(req, second, { url: 'https://tiles.example.test/{z}/{x}/{y}.mvt?key=secret-two' }, {
     etagPayload: {
       url: 'https://tiles.example.test/{z}/{x}/{y}.mvt',
-      apiKeyFingerprint: 'fingerprint-one'
+      settingsVersion: '2026-06-15T12:00:00Z'
     }
   });
   sendCachedJson(req, third, { url: 'https://tiles.example.test/{z}/{x}/{y}.mvt?key=secret-two' }, {
     etagPayload: {
       url: 'https://tiles.example.test/{z}/{x}/{y}.mvt',
-      apiKeyFingerprint: 'fingerprint-two'
+      settingsVersion: '2026-06-15T12:00:01Z'
     }
   });
 
