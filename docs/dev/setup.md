@@ -15,7 +15,7 @@
 5. Optional production-like local run:
    - `npm run build`
    - `npm run start`
-5. Recommended verification after changes:
+6. Recommended verification after changes:
    - `npm run lint`
    - `npm run typecheck`
    - `npm run frontend:check`

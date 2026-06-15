@@ -43,3 +43,4 @@ frontend/src/lib/version.generated.json
 files/
 .benchmarks
 .skills
+.claude/worktrees/
