@@ -628,8 +628,6 @@ async function exportRegionRenderFeaturesToGeojsonNdjson({ dbProvider, databaseU
           }
         }
       });
-    } catch (error) {
-      throw error;
     } finally {
       await closeWriteStream(writer);
     }

@@ -1,5 +1,4 @@
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { once } = require('events');
 const { moveFileSync } = require('../../src/lib/server/utils/fs');

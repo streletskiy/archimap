@@ -220,7 +220,7 @@ function buildPmtilesContainer({
       '--rm',
       '-v', `${REPO_ROOT}:${CONTAINER_WORKSPACE}`,
       '-w', CONTAINER_WORKSPACE,
-      DEFAULT_PLANETILER_IMAGE,
+      planetilerContainer,
       'java',
       '-cp', '/app/resources:/app/classes:/app/libs/*',
       'com.onthegomap.planetiler.Main',

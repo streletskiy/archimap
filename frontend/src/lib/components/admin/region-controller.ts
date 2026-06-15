@@ -26,7 +26,6 @@ type RegionControllerArgs = {
 function createMapRegionController({
   dataSettings,
   dataStatus,
-  regionDraft,
   patchRegionDraft,
   dataT
 }: RegionControllerArgs) {

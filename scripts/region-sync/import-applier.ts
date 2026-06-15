@@ -1096,6 +1096,7 @@ function publishPmtilesArchive({ dataDir, region, builtPmtilesPath }) {
 }
 
 module.exports = {
+  applyRegionImportToPostgres,
   applyRegionImportFromPostgresStage,
   buildPostgresCopyTextLine,
   computePostgresContourSummaryTotal,
@@ -1105,5 +1106,6 @@ module.exports = {
   hasPostgresRegionMemberships,
   normalizeSourceSnapshotForInsert,
   publishPmtilesArchive,
+  readImportRowsInBatches,
   resolveImportApplyBatchSize
 };

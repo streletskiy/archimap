@@ -66,7 +66,7 @@ test('resolveLocalBasemapGlyphPath falls back to local Noto glyphs for Open Sans
 
   assert.match(
     result,
-    /frontend[\\\/](?:build[\\\/]client|static)[\\\/]basemaps-assets[\\\/]fonts[\\\/]Noto Sans Medium[\\\/]0-255\.pbf$/
+    /frontend[\\/](?:build[\\/]client|static)[\\/]basemaps-assets[\\/]fonts[\\/]Noto Sans Medium[\\/]0-255\.pbf$/
   );
 });
 
@@ -111,7 +111,7 @@ test('resolveLocalBasemapGlyphPath decodes encoded fontstack segments before loo
 
   assert.match(
     result,
-    /frontend[\\\/](?:build[\\\/]client|static)[\\\/]basemaps-assets[\\\/]fonts[\\\/]Noto Sans Regular[\\\/]0-255\.pbf$/
+    /frontend[\\/](?:build[\\/]client|static)[\\/]basemaps-assets[\\/]fonts[\\/]Noto Sans Regular[\\/]0-255\.pbf$/
   );
 });
 

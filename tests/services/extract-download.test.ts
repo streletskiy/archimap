@@ -55,7 +55,7 @@ test('downloadManagedRegionExtract uses aria2 progress output and records source
           };
         }
       },
-      fetchImpl: async (input, init = {}) => {
+      fetchImpl: async (input, init: { method?: string } = {}) => {
         assert.equal(String(input), 'https://download.example/finland.osm.pbf');
         assert.equal(String(init.method || 'GET').toUpperCase(), 'HEAD');
         return {

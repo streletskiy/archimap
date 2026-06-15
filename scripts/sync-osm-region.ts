@@ -306,7 +306,7 @@ function runRuntimeFollowups({
   });
 }
 
-async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}, dataDir = null) {
+async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}, _dataDir = null) {
   return buildPmtilesFromGeojson({
     region,
     geojsonPath,

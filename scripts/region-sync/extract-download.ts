@@ -181,7 +181,7 @@ async function resolveSourceMtime(downloadUrl, fetchRef, timeoutMs) {
   }
 }
 
-function streamFileHash(targetPath) {
+function streamFileHash(targetPath): Promise<{ sha256: string; sizeBytes: number }> {
   const hash = crypto.createHash('sha256');
   let sizeBytes = 0;
 
@@ -357,7 +357,7 @@ async function downloadWithAria2({
 
   await reporter.emit('download', `fetching ${sourceLabel}`, 0);
 
-  return new Promise((resolve, reject) => {
+  return new Promise<{ sourceMtime: string | null }>((resolve, reject) => {
     let child;
     try {
       child = spawnRef(aria2Bin, [
@@ -519,7 +519,7 @@ async function downloadManagedRegionExtract({
         extractId: extract.extractId,
         sha256: fallbackResult.snapshot.sha256,
         sizeBytes: fallbackResult.snapshot.sizeBytes,
-        sourceMtime: fallbackResult.snapshot.sourceMtime || fetchSourceMtime,
+        sourceMtime: fallbackResult.snapshot.sourceMtime || null,
         localPath: targetPath
       }
     };
