@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
-const { sendCachedJson } = require('../infra/http-cache.infra');
+const { createSensitiveValueFingerprint, sendCachedJson } = require('../infra/http-cache.infra');
 const { sendPmtiles } = require('../infra/pmtiles-stream.infra');
 const {
   CUSTOM_BASEMAP_TILEJSON_PROXY_URL,
@@ -60,7 +60,8 @@ function registerAppRoutes(deps) {
     styleRegionOverridesService,
     getFilterTagKeysCached,
     getAllFilterTagKeysCached,
-    isFilterTagKeysRebuildInProgress
+    isFilterTagKeysRebuildInProgress,
+    settingsSecret
   } = deps;
   const frontendBuildDir = path.join(rootDir, 'frontend', 'build');
   const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
@@ -194,8 +195,21 @@ function registerAppRoutes(deps) {
         customBasemapApiKey,
         getRequestOrigin(req)
       );
+      const etagTilejson = rewriteCustomBasemapTileJson(
+        tilejson,
+        buildBasemapSourceUrl(customBasemapUrl, ''),
+        '',
+        getRequestOrigin(req)
+      );
       return sendCachedJson(req, res, proxiedTilejson, {
-        cacheControl: 'private, no-cache'
+        cacheControl: 'private, no-cache',
+        etagPayload: {
+          tilejson: etagTilejson,
+          customBasemapApiKeyFingerprint: createSensitiveValueFingerprint(
+            customBasemapApiKey,
+            settingsSecret || process.env.APP_SETTINGS_SECRET || process.env.SESSION_SECRET
+          )
+        }
       });
     } catch (error) {
       return res.status(Number(error?.status) || 502).json({

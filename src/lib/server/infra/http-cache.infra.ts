@@ -1,14 +1,30 @@
 const crypto = require('crypto');
 const zlib = require('zlib');
 
+const fallbackEtagHmacKey = crypto.randomBytes(32);
+
 function toHttpDate(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
   return date.toUTCString();
 }
 
-function createWeakEtag(payloadBuffer) {
-  const hash = crypto.createHash('sha256').update(payloadBuffer).digest('base64url');
+function resolveEtagHmacKey(secret) {
+  const text = String(secret || '').trim();
+  return text || fallbackEtagHmacKey;
+}
+
+function createSensitiveValueFingerprint(value, secret) {
+  const text = String(value ?? '');
+  if (!text) return '';
+  return crypto.createHmac('sha256', resolveEtagHmacKey(secret)).update(text).digest('base64url');
+}
+
+function createWeakEtag(payloadBuffer, options: LooseRecord = {}) {
+  const hmacKey = options.hmacKey ? resolveEtagHmacKey(options.hmacKey) : null;
+  const hash = hmacKey
+    ? crypto.createHmac('sha256', hmacKey).update(payloadBuffer).digest('base64url')
+    : crypto.createHash('sha256').update(payloadBuffer).digest('base64url');
   return `W/"${payloadBuffer.length.toString(16)}-${hash}"`;
 }
 
@@ -76,7 +92,11 @@ function compressPayload(buffer, encoding) {
 function sendCachedJson(req, res, payload, options: LooseRecord = {}) {
   const payloadText = JSON.stringify(payload);
   const rawBuffer = Buffer.from(payloadText, 'utf8');
-  const etag = createWeakEtag(rawBuffer);
+  const etagPayload = Object.prototype.hasOwnProperty.call(options, 'etagPayload') ? options.etagPayload : payload;
+  const etagBuffer = Buffer.from(JSON.stringify(etagPayload), 'utf8');
+  const etag = createWeakEtag(etagBuffer, {
+    hmacKey: options.etagHmacKey
+  });
   const lastModified = toHttpDate(options.lastModified);
   const cacheControl = String(options.cacheControl || 'private, no-cache').trim();
   const shouldCompress = rawBuffer.length >= Number(options.minCompressionBytes || 1024);
@@ -110,6 +130,7 @@ function sendCachedJson(req, res, payload, options: LooseRecord = {}) {
 module.exports = {
   toHttpDate,
   createWeakEtag,
+  createSensitiveValueFingerprint,
   isResourceNotModified,
   sendCachedJson
 };

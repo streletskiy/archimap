@@ -645,10 +645,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         lastSyncStatus !== 'failed' &&
         typeof dataSettingsService.getRegionUpstreamState === 'function';
 
-      let upstreamRegion = region;
       let sourceDataUpdatedAt = null;
       let sourceDataUpdatedAtPromise = null;
       if (shouldProbeUpstreamBeforeQueue) {
+        let upstreamRegion;
         try {
           upstreamRegion =
             (await dataSettingsService.getRegionUpstreamState(region, {

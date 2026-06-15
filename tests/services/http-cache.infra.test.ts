@@ -1,7 +1,46 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createWeakEtag, isResourceNotModified, toHttpDate } = require('../../src/lib/server/infra/http-cache.infra');
+const {
+  createSensitiveValueFingerprint,
+  createWeakEtag,
+  isResourceNotModified,
+  sendCachedJson,
+  toHttpDate
+} = require('../../src/lib/server/infra/http-cache.infra');
 const { parseRangeHeader } = require('../../src/lib/server/infra/pmtiles-stream.infra');
+
+function createJsonResponseStub() {
+  const headers = new Map();
+  return {
+    statusCode: null,
+    body: null,
+    ended: false,
+    headers,
+    type(value) {
+      this.setHeader('Content-Type', value);
+      return this;
+    },
+    setHeader(name, value) {
+      headers.set(String(name).toLowerCase(), String(value));
+      return this;
+    },
+    getHeader(name) {
+      return headers.get(String(name).toLowerCase());
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    send(body) {
+      this.body = Buffer.isBuffer(body) ? body.toString('utf8') : body;
+      return this;
+    },
+    end() {
+      this.ended = true;
+      return this;
+    }
+  };
+}
 
 test('createWeakEtag returns deterministic weak etag', () => {
   const a = createWeakEtag(Buffer.from('{"ok":true}', 'utf8'));
@@ -10,6 +49,52 @@ test('createWeakEtag returns deterministic weak etag', () => {
   assert.equal(a, b);
   assert.notEqual(a, c);
   assert.match(a, /^W\/"/);
+});
+
+test('createSensitiveValueFingerprint fingerprints secret-like cache inputs with a server key', () => {
+  const a = createSensitiveValueFingerprint('secret-api-key', 'server-secret');
+  const b = createSensitiveValueFingerprint('secret-api-key', 'server-secret');
+  const c = createSensitiveValueFingerprint('other-secret-api-key', 'server-secret');
+  const d = createSensitiveValueFingerprint('secret-api-key', 'other-server-secret');
+
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  assert.notEqual(a, d);
+  assert.equal(a.includes('secret-api-key'), false);
+});
+
+test('sendCachedJson can derive ETag from a safe payload instead of the response body', () => {
+  const req = {
+    headers: {},
+    method: 'GET'
+  };
+  const first = createJsonResponseStub();
+  const second = createJsonResponseStub();
+  const third = createJsonResponseStub();
+
+  sendCachedJson(req, first, { url: 'https://tiles.example.test/{z}/{x}/{y}.mvt?key=secret-one' }, {
+    etagPayload: {
+      url: 'https://tiles.example.test/{z}/{x}/{y}.mvt',
+      apiKeyFingerprint: 'fingerprint-one'
+    }
+  });
+  sendCachedJson(req, second, { url: 'https://tiles.example.test/{z}/{x}/{y}.mvt?key=secret-two' }, {
+    etagPayload: {
+      url: 'https://tiles.example.test/{z}/{x}/{y}.mvt',
+      apiKeyFingerprint: 'fingerprint-one'
+    }
+  });
+  sendCachedJson(req, third, { url: 'https://tiles.example.test/{z}/{x}/{y}.mvt?key=secret-two' }, {
+    etagPayload: {
+      url: 'https://tiles.example.test/{z}/{x}/{y}.mvt',
+      apiKeyFingerprint: 'fingerprint-two'
+    }
+  });
+
+  assert.equal(first.getHeader('etag'), second.getHeader('etag'));
+  assert.notEqual(first.getHeader('etag'), third.getHeader('etag'));
+  assert.match(first.body, /secret-one/);
+  assert.match(second.body, /secret-two/);
 });
 
 test('isResourceNotModified supports If-None-Match and If-Modified-Since', () => {
