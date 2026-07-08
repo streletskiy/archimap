@@ -7,6 +7,12 @@ const NDJSON_STREAM_HIGH_WATER_MARK = 1024 * 1024;
 const DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2;
 const DEFAULT_BUILDING_EXTRUSION_LEVELS = 1;
 const DEFAULT_RENDER_HIDE_BASE_WHEN_PARTS = 0;
+const REGION_WORKSPACE_PREFIX = 'archimap-region-';
+const REGION_WORKSPACE_NAME_PATTERN = /^archimap-region-\d+-[^\\/]+$/;
+const WORKSPACE_MARKER_FILE = '.archimap-workspace.json';
+const DEFAULT_WORKSPACE_STALE_MS = 24 * 60 * 60 * 1000;
+const STALE_WORKSPACE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+let lastStaleWorkspaceSweepAt = 0;
 
 function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -21,8 +27,160 @@ function resolveWorkspaceBaseDir() {
   return base;
 }
 
-function createWorkspace(regionId) {
-  return fs.mkdtempSync(path.join(resolveWorkspaceBaseDir(), `archimap-region-${Number(regionId)}-`));
+function resolveWorkspaceStaleMs(env: LooseRecord = process.env) {
+  const rawHours = String(env.REGION_SYNC_WORKSPACE_STALE_HOURS || '').trim();
+  if (!rawHours) return DEFAULT_WORKSPACE_STALE_MS;
+  const hours = Number(rawHours);
+  if (!Number.isFinite(hours) || hours <= 0) {
+    return DEFAULT_WORKSPACE_STALE_MS;
+  }
+  return Math.max(1, Math.min(24 * 30, hours)) * 60 * 60 * 1000;
+}
+
+function isPidAlive(pid, killRef = process.kill.bind(process)) {
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) {
+    return false;
+  }
+  try {
+    killRef(numericPid, 0);
+    return true;
+  } catch (error) {
+    return String(error?.code || '') === 'EPERM';
+  }
+}
+
+function normalizeWorkspacePath(workspace) {
+  return path.resolve(String(workspace || '').trim());
+}
+
+function isRegionWorkspacePath(workspace, baseDir = resolveWorkspaceBaseDir()) {
+  const workspacePath = normalizeWorkspacePath(workspace);
+  if (!workspacePath) return false;
+  const basePath = path.resolve(baseDir);
+  const relativePath = path.relative(basePath, workspacePath);
+  return (
+    Boolean(relativePath) &&
+    !relativePath.startsWith('..') &&
+    !path.isAbsolute(relativePath) &&
+    !relativePath.includes(path.sep) &&
+    REGION_WORKSPACE_NAME_PATTERN.test(path.basename(workspacePath))
+  );
+}
+
+function readWorkspaceMarker(workspace) {
+  const markerPath = path.join(workspace, WORKSPACE_MARKER_FILE);
+  if (!fs.existsSync(markerPath)) return null;
+  try {
+    const payload = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspaceMarker(workspace, regionId) {
+  const payload = {
+    kind: 'archimap-region-sync-workspace',
+    regionId: Number(regionId),
+    pid: process.pid,
+    createdAt: new Date().toISOString()
+  };
+  try {
+    fs.writeFileSync(path.join(workspace, WORKSPACE_MARKER_FILE), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  } catch {
+    // The marker only improves stale cleanup; the workspace is still usable.
+  }
+}
+
+function removeWorkspace(workspace, options: LooseRecord = {}) {
+  const workspacePath = normalizeWorkspacePath(workspace);
+  const baseDir = options.baseDir || resolveWorkspaceBaseDir();
+  if (!isRegionWorkspacePath(workspacePath, baseDir)) {
+    throw new Error(`Refusing to remove non-region workspace: ${workspacePath}`);
+  }
+  fs.rmSync(workspacePath, { recursive: true, force: true });
+  return true;
+}
+
+function shouldSkipWorkspaceForActiveMarker(workspace, isPidAliveRef) {
+  const marker = readWorkspaceMarker(workspace);
+  const markerPid = Number(marker?.pid);
+  return Number.isInteger(markerPid) && markerPid > 0 && isPidAliveRef(markerPid);
+}
+
+function cleanupStaleWorkspaces(options: LooseRecord = {}) {
+  const baseDir = options.baseDir || resolveWorkspaceBaseDir();
+  const staleMs = Number(options.staleMs ?? resolveWorkspaceStaleMs(options.env || process.env));
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const isPidAliveRef = typeof options.isPidAliveRef === 'function' ? options.isPidAliveRef : isPidAlive;
+  const keepPaths = new Set(
+    (Array.isArray(options.keepPaths) ? options.keepPaths : [])
+      .map((entry) => normalizeWorkspacePath(entry))
+      .filter(Boolean)
+  );
+  const summary = {
+    scanned: 0,
+    removed: 0,
+    skipped: 0,
+    errors: 0
+  };
+
+  if (!Number.isFinite(staleMs) || staleMs <= 0 || !fs.existsSync(baseDir)) {
+    return summary;
+  }
+
+  for (const entry of fs.readdirSync(baseDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith(REGION_WORKSPACE_PREFIX)) continue;
+    const workspacePath = path.join(baseDir, entry.name);
+    if (!REGION_WORKSPACE_NAME_PATTERN.test(entry.name)) continue;
+    summary.scanned += 1;
+
+    if (keepPaths.has(normalizeWorkspacePath(workspacePath))) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    try {
+      if (shouldSkipWorkspaceForActiveMarker(workspacePath, isPidAliveRef)) {
+        summary.skipped += 1;
+        continue;
+      }
+      const stat = fs.statSync(workspacePath);
+      const modifiedMs = Number(stat.mtimeMs || 0);
+      if (Number.isFinite(modifiedMs) && nowMs - modifiedMs < staleMs) {
+        summary.skipped += 1;
+        continue;
+      }
+      removeWorkspace(workspacePath, { baseDir });
+      summary.removed += 1;
+    } catch {
+      summary.errors += 1;
+    }
+  }
+
+  return summary;
+}
+
+function maybeCleanupStaleWorkspaces(options: LooseRecord = {}) {
+  const nowMs = Number(options.nowMs ?? Date.now());
+  if (!options.force && nowMs - lastStaleWorkspaceSweepAt < STALE_WORKSPACE_SWEEP_INTERVAL_MS) {
+    return null;
+  }
+  lastStaleWorkspaceSweepAt = nowMs;
+  return cleanupStaleWorkspaces({
+    ...options,
+    nowMs
+  });
+}
+
+function createWorkspace(regionId, options: LooseRecord = {}) {
+  maybeCleanupStaleWorkspaces({
+    log: options.log
+  });
+  const workspace = fs.mkdtempSync(path.join(resolveWorkspaceBaseDir(), `archimap-region-${Number(regionId)}-`));
+  writeWorkspaceMarker(workspace, regionId);
+  return workspace;
 }
 
 function encodeOsmFeatureId(osmType, osmId) {
@@ -436,18 +594,22 @@ module.exports = {
   buildFeature3dPropertiesFromTagsJson,
   deriveFeatureKindFromTagsJson,
   buildPmtilesSwap,
+  cleanupStaleWorkspaces,
   closeWriteStream,
   createWorkspace,
   encodeOsmFeatureId,
   ensureDir,
   formatGeojsonFeatureLine,
   formatRenderedGeojsonFeatureLine,
+  isRegionWorkspacePath,
   normalizeFeatureKind,
   normalizeGeometryWkbHex,
   parseRenderedGeojsonFeaturePayload,
   parseRowPayload,
   readImportRows,
   readRenderedGeojsonFeatures,
+  removeWorkspace,
+  resolveWorkspaceBaseDir,
   updateBounds,
   writeStreamLine,
   writeRowsToNdjsonFile

@@ -99,6 +99,7 @@ test('startParentWatchdog exits when the configured parent disappears', () => {
   const timers = [];
   const exitCalls = [];
   const stderrWrites = [];
+  const cleanupReasons = [];
 
   const stop = startParentWatchdog({
     env: { REGION_SYNC_PARENT_PID: '555' },
@@ -120,7 +121,8 @@ test('startParentWatchdog exits when the configured parent disappears', () => {
       write(message) {
         stderrWrites.push(String(message));
       }
-    }
+    },
+    onBeforeExit: (reason) => cleanupReasons.push(reason)
   });
 
   assert.equal(timers.length, 1);
@@ -128,6 +130,7 @@ test('startParentWatchdog exits when the configured parent disappears', () => {
   timers[0].fn();
 
   assert.deepEqual(exitCalls, [131]);
+  assert.deepEqual(cleanupReasons, ['parent process 555 disappeared']);
   assert.equal(stderrWrites.length, 1);
 
   stop();

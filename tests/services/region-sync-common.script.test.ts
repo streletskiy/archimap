@@ -1,14 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const {
   buildFeature3dPropertiesFromTagsJson,
+  cleanupStaleWorkspaces,
   createWorkspace,
   formatGeojsonFeatureLine,
   formatRenderedGeojsonFeatureLine,
+  isRegionWorkspacePath,
   parseRowPayload,
+  removeWorkspace,
+  resolveWorkspaceBaseDir,
   writeRowsToNdjsonFile
 } = require('../../scripts/region-sync/common');
 const {
@@ -17,6 +22,106 @@ const {
   exportImportRowsToGeojson,
   summarizeImportRows
 } = require('../../scripts/region-sync/pmtiles-builder');
+
+test('workspace cleanup only removes stale managed region workspaces', () => {
+  const previousDataDir = process.env.ARCHIMAP_DATA_DIR;
+  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-workspace-cleanup-'));
+  process.env.ARCHIMAP_DATA_DIR = tempDataDir;
+
+  try {
+    const baseDir = resolveWorkspaceBaseDir();
+    const nowMs = Date.UTC(2026, 0, 2, 12, 0, 0);
+    const oldDate = new Date(nowMs - 2 * 60 * 60 * 1000);
+    const staleWorkspace = path.join(baseDir, 'archimap-region-2-stale');
+    const freshWorkspace = path.join(baseDir, 'archimap-region-3-fresh');
+    const unrelatedDir = path.join(baseDir, 'manual-cache');
+
+    fs.mkdirSync(staleWorkspace, { recursive: true });
+    fs.writeFileSync(path.join(staleWorkspace, 'source.osm.pbf'), 'pbf');
+    fs.utimesSync(staleWorkspace, oldDate, oldDate);
+    fs.mkdirSync(freshWorkspace, { recursive: true });
+    fs.mkdirSync(unrelatedDir, { recursive: true });
+
+    const summary = cleanupStaleWorkspaces({
+      nowMs,
+      staleMs: 60 * 60 * 1000,
+      isPidAliveRef: () => false
+    });
+
+    assert.equal(summary.removed, 1);
+    assert.equal(fs.existsSync(staleWorkspace), false);
+    assert.equal(fs.existsSync(freshWorkspace), true);
+    assert.equal(fs.existsSync(unrelatedDir), true);
+    assert.equal(isRegionWorkspacePath(freshWorkspace), true);
+    assert.equal(isRegionWorkspacePath(unrelatedDir), false);
+  } finally {
+    if (previousDataDir == null) {
+      delete process.env.ARCHIMAP_DATA_DIR;
+    } else {
+      process.env.ARCHIMAP_DATA_DIR = previousDataDir;
+    }
+    fs.rmSync(tempDataDir, { recursive: true, force: true });
+  }
+});
+
+test('workspace cleanup keeps stale workspaces owned by a live marker pid', () => {
+  const previousDataDir = process.env.ARCHIMAP_DATA_DIR;
+  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-workspace-marker-'));
+  process.env.ARCHIMAP_DATA_DIR = tempDataDir;
+
+  try {
+    const nowMs = Date.UTC(2026, 0, 2, 12, 0, 0);
+    const oldDate = new Date(nowMs - 2 * 60 * 60 * 1000);
+    const workspace = createWorkspace(4, { log: null });
+    fs.utimesSync(workspace, oldDate, oldDate);
+
+    const skipped = cleanupStaleWorkspaces({
+      nowMs,
+      staleMs: 60 * 60 * 1000,
+      isPidAliveRef: () => true
+    });
+    assert.equal(skipped.removed, 0);
+    assert.equal(fs.existsSync(workspace), true);
+
+    const removed = cleanupStaleWorkspaces({
+      nowMs,
+      staleMs: 60 * 60 * 1000,
+      isPidAliveRef: () => false
+    });
+    assert.equal(removed.removed, 1);
+    assert.equal(fs.existsSync(workspace), false);
+  } finally {
+    if (previousDataDir == null) {
+      delete process.env.ARCHIMAP_DATA_DIR;
+    } else {
+      process.env.ARCHIMAP_DATA_DIR = previousDataDir;
+    }
+    fs.rmSync(tempDataDir, { recursive: true, force: true });
+  }
+});
+
+test('removeWorkspace rejects paths outside the managed workspace root', () => {
+  const previousDataDir = process.env.ARCHIMAP_DATA_DIR;
+  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-workspace-guard-'));
+  process.env.ARCHIMAP_DATA_DIR = tempDataDir;
+
+  try {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-region-8-outside-'));
+    try {
+      assert.throws(() => removeWorkspace(outside), /Refusing to remove non-region workspace/);
+      assert.equal(fs.existsSync(outside), true);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  } finally {
+    if (previousDataDir == null) {
+      delete process.env.ARCHIMAP_DATA_DIR;
+    } else {
+      process.env.ARCHIMAP_DATA_DIR = previousDataDir;
+    }
+    fs.rmSync(tempDataDir, { recursive: true, force: true });
+  }
+});
 
 test('parseRowPayload accepts WKB-only importer rows for PostgreSQL sync', () => {
   const row = parseRowPayload(

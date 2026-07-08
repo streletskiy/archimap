@@ -97,6 +97,7 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `REGION_SYNC_ALLOW_FETCH_FALLBACK` - set to `true` only for temporary emergency fallback to streamed fetch when `aria2c` is unavailable. Production should leave this unset.
 - `PLANETILER_BIN` - optional absolute path to the `planetiler` wrapper/command. The Docker runtime image ships `/usr/local/bin/planetiler` out of the box.
 - `PMTILES_PROGRESS_JSON` / `PMTILES_PROGRESS_INTERVAL_SEC` - optional build-stage progress tuning for managed PMTiles generation.
+- `REGION_SYNC_WORKSPACE_STALE_HOURS` - stale-cleanup threshold for leftover `data/workspaces/archimap-region-*` per-run workspaces; default `24`.
 - `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` - apply-stage batching knob for the PostgreSQL merge/apply path.
 - `REGION_SYNC_RENDER_CACHE_REFRESH` - `true` refreshes `osm.region_render_features` after PostgreSQL apply so later `--pmtiles-only` rebuilds can reuse the derived render model; default `false` keeps the current full-sync path lighter.
 - `ADMIN_REGIONS_PMTILES_ON_START` - `auto` (default), `always`, or `never`; controls whether the container startup checks and optionally rebuilds `frontend/build/client/admin-regions.pmtiles`.

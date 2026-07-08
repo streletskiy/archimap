@@ -3,6 +3,7 @@ require('dotenv').config({ quiet: true });
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { cleanupStaleWorkspaces, createWorkspace, removeWorkspace } = require('./region-sync/common');
 
 const SHOULD_EMIT_STAGE_JSON =
   String(process.env.REGION_SYNC_EMIT_STAGE_JSON || '')
@@ -10,6 +11,34 @@ const SHOULD_EMIT_STAGE_JSON =
     .toLowerCase() === 'true';
 
 let aggregateStageContext: LooseRecord | null = null;
+const activeWorkspaces = new Set();
+
+function registerActiveWorkspace(workspace) {
+  const workspacePath = path.resolve(String(workspace || '').trim());
+  if (workspacePath) {
+    activeWorkspaces.add(workspacePath);
+  }
+  return workspace;
+}
+
+function cleanupManagedWorkspace(workspace, reason = 'completed') {
+  const workspacePath = path.resolve(String(workspace || '').trim());
+  if (!workspacePath) return;
+  activeWorkspaces.delete(workspacePath);
+  try {
+    removeWorkspace(workspacePath);
+  } catch (error) {
+    console.warn(`[region-sync] workspace cleanup failed after ${reason}: ${String(error?.message || error)}`);
+  }
+}
+
+function cleanupActiveWorkspaces(reason = 'process exit') {
+  for (const workspace of [...activeWorkspaces]) {
+    cleanupManagedWorkspace(workspace, reason);
+  }
+}
+
+process.on('exit', () => cleanupActiveWorkspaces('process exit'));
 
 function setAggregateStageContext(context: LooseRecord | null) {
   aggregateStageContext = context;
@@ -46,6 +75,7 @@ function emitStageJson(stage, progress = null, detail = null, extras: LooseRecor
 
 function handleCancellationSignal(signal) {
   emitStageJson('cancelling', null, `signal=${signal}`);
+  cleanupActiveWorkspaces(`signal ${signal}`);
   setTimeout(() => {
     try {
       process.exit(130);
@@ -58,7 +88,6 @@ process.on('SIGTERM', () => handleCancellationSignal('SIGTERM'));
 process.on('SIGINT', () => handleCancellationSignal('SIGINT'));
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
-const { createWorkspace } = require('./region-sync/common');
 const { downloadManagedRegionExtract } = require('./region-sync/extract-download');
 const { applyRegionImportFromPostgresStage, publishPmtilesArchive } = require('./region-sync/import-applier');
 const { buildPmtilesFromGeojson } = require('./region-sync/pmtiles-builder');
@@ -185,6 +214,7 @@ function startParentWatchdog(options: LooseRecord = {}) {
   const clearIntervalRef = typeof options.clearIntervalRef === 'function' ? options.clearIntervalRef : clearInterval;
   const killRef = typeof options.killRef === 'function' ? options.killRef : process.kill.bind(process);
   const exitRef = typeof options.exitRef === 'function' ? options.exitRef : process.exit.bind(process);
+  const beforeExitRef = typeof options.onBeforeExit === 'function' ? options.onBeforeExit : cleanupActiveWorkspaces;
   const stderr = options.stderr || process.stderr;
 
   const timer = setIntervalRef(() => {
@@ -195,6 +225,11 @@ function startParentWatchdog(options: LooseRecord = {}) {
       stderr.write(`[region-sync] parent process ${parentPid} is gone; stopping orphaned sync worker\n`);
     } catch {
       // ignore stderr failures during forced exit
+    }
+    try {
+      beforeExitRef(`parent process ${parentPid} disappeared`);
+    } catch {
+      // ignore cleanup hook failures during forced exit
     }
     try {
       exitRef(131);
@@ -403,7 +438,7 @@ function createApplyStageProgressEmitter() {
 
 async function buildRegionPmtilesOnly(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
-  const workspace = createWorkspace(region.id);
+  const workspace = registerActiveWorkspace(createWorkspace(region.id));
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
@@ -438,13 +473,13 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
       bounds: exported.bounds
     };
   } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
+    cleanupManagedWorkspace(workspace, 'pmtiles-only run');
   }
 }
 
 async function runRegionSync(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
-  const workspace = createWorkspace(region.id);
+  const workspace = registerActiveWorkspace(createWorkspace(region.id));
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
   let stageSchema = null;
@@ -518,7 +553,7 @@ async function runRegionSync(region, runtimeOptions) {
         console.warn(`[region-sync] staging schema cleanup failed: ${String(error?.message || error)}`);
       }
     }
-    fs.rmSync(workspace, { recursive: true, force: true });
+    cleanupManagedWorkspace(workspace, 'region sync run');
   }
 }
 
@@ -624,6 +659,10 @@ async function main() {
 
     const runtimeOptions = createRuntimeOptions();
     assertManagedRegionSyncPostgres(runtimeOptions);
+    const staleCleanup = cleanupStaleWorkspaces();
+    if (staleCleanup.removed > 0) {
+      console.log(`[region-sync] removed ${staleCleanup.removed} stale workspace(s)`);
+    }
     const region = await loadRegion(runtimeOptions, args.regionId);
     assertRegionSupportsManagedSync(region);
 
