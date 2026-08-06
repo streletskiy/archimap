@@ -3,7 +3,7 @@ function createLruCache({ max = 200, ttlMs = 15000 }: LooseRecord = {}) {
 
   function isFresh(entry) {
     if (!entry) return false;
-    return (Date.now() - entry.ts) <= ttlMs;
+    return Date.now() - entry.ts <= ttlMs;
   }
 
   function get(key) {

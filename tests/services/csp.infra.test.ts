@@ -30,7 +30,7 @@ function parseCspDirectiveSources(csp, directiveName) {
 
 async function loadHooksServerModule() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'hooks.server.ts');
-  return import(`${pathToFileURL(modulePath).href}?v=${hooksServerImportCounter += 1}`);
+  return import(`${pathToFileURL(modulePath).href}?v=${(hooksServerImportCounter += 1)}`);
 }
 
 test('csp prod profile has no unsafe-inline', () => {
@@ -70,8 +70,11 @@ test('parseRuntimeEnv defaults CSP connect origins for carto and overpass fallba
     const connectOrigins = new Set(parseDelimitedValues(runtimeEnv.cspConnectSrcExtra));
 
     assert.ok(connectOrigins.has('https://tiles.basemaps.cartocdn.com'));
+    assert.ok(connectOrigins.has('https://api.maptiler.com'));
     assert.ok(connectOrigins.has('https://overpass-api.de'));
     assert.ok(connectOrigins.has('https://overpass.kumi.systems'));
+    assert.equal(connectOrigins.has('https://protomaps.github.io'), false);
+    assert.equal(connectOrigins.has('http://localhost:8080'), false);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousNodeEnv;
@@ -94,19 +97,23 @@ test('frontend hook CSP allows browser Overpass requests by default', async () =
         request: new Request('http://localhost/'),
         url: new URL('http://localhost/')
       },
-      resolve: async () => new Response('<!doctype html><html><head></head><body>ok</body></html>', {
-        headers: {
-          'content-type': 'text/html; charset=utf-8'
-        }
-      })
+      resolve: async () =>
+        new Response('<!doctype html><html><head></head><body>ok</body></html>', {
+          headers: {
+            'content-type': 'text/html; charset=utf-8'
+          }
+        })
     });
 
     const csp = String(response.headers.get('content-security-policy') || '');
     const connectSrc = parseCspDirectiveSources(csp, 'connect-src');
     assert.ok(connectSrc.size > 0);
     assert.ok(connectSrc.has('https://tiles.basemaps.cartocdn.com'));
+    assert.ok(connectSrc.has('https://api.maptiler.com'));
     assert.ok(connectSrc.has('https://overpass-api.de'));
     assert.ok(connectSrc.has('https://maps.mail.ru'));
+    assert.equal(connectSrc.has('https://protomaps.github.io'), false);
+    assert.equal(connectSrc.has('http://localhost:8080'), false);
     assert.equal(/\bscript-src\s[^;]*unsafe-inline/.test(csp), false);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -117,12 +124,43 @@ test('frontend hook CSP allows browser Overpass requests by default', async () =
   }
 });
 
+test('frontend hook disables CSS preload hints while keeping JS preloads enabled', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  let resolveOptions;
+
+  try {
+    const { handle } = await loadHooksServerModule();
+    await handle({
+      event: {
+        request: new Request('http://localhost/'),
+        url: new URL('http://localhost/')
+      },
+      resolve: async (_event, options) => {
+        resolveOptions = options;
+        return new Response('<!doctype html><html><head></head><body>ok</body></html>', {
+          headers: {
+            'content-type': 'text/html; charset=utf-8'
+          }
+        });
+      }
+    });
+
+    assert.equal(typeof resolveOptions?.preload, 'function');
+    assert.equal(resolveOptions.preload({ type: 'css', path: '/_app/immutable/assets/app.css' }), false);
+    assert.equal(resolveOptions.preload({ type: 'js', path: '/_app/immutable/start.js' }), true);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
+});
+
 test('extractInlineScriptHashesFromHtml tolerates spaced and malformed script closing tags', () => {
   const firstBody = 'window.__ARCHIMAP__ = { ready: true };';
   const secondBody = 'console.log("inline");';
-  const expected = [firstBody, secondBody].map((body) => (
-    `'sha256-${crypto.createHash('sha256').update(body, 'utf8').digest('base64')}'`
-  ));
+  const expected = [firstBody, secondBody].map(
+    (body) => `'sha256-${crypto.createHash('sha256').update(body, 'utf8').digest('base64')}'`
+  );
 
   const hashes = extractInlineScriptHashesFromHtml(`
     <script>${firstBody}</script   >

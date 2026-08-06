@@ -1,8 +1,12 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { getRuntimeConfig } from '$lib/services/config';
+  import { locale } from '$lib/i18n/index';
+  import { getCurrentTheme } from '$lib/services/map/map-theme-utils';
+  import { createMapStyleSyncController } from '$lib/services/map/map-style-sync';
   import { loadMapRuntime, resolvePmtilesUrl } from '$lib/services/map-runtime';
   import { buildRegionLayerId, buildRegionSourceId } from '$lib/services/region-pmtiles';
   import { getEditKey, parseEditKey } from '$lib/utils/edit-ui';
@@ -13,8 +17,6 @@
   export let editIdByKey = new Map();
   export let selectedFeature = { type: 'FeatureCollection', features: [] };
 
-  const LIGHT = '/styles/positron-custom.json';
-  const DARK = '/styles/dark-matter-custom.json';
   const SRC = 'edited-points';
   const L_CLUSTER = 'edited-points-clusters';
   const L_COUNT = 'edited-points-cluster-count';
@@ -32,16 +34,18 @@
   let protocol = null;
   let mapInitNonce = 0;
   let activeRegionPmtiles = [];
+  const mapStyleSync = createMapStyleSyncController({
+    getMap: () => map,
+    getTheme: getCurrentTheme,
+    getLocaleCode: () => get(locale),
+    getRuntimeConfig
+  });
 
   function ensureMapRuntime() {
     if (!mapRuntimePromise) {
       mapRuntimePromise = loadMapRuntime();
     }
     return mapRuntimePromise;
-  }
-
-  function styleByTheme() {
-    return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark' ? DARK : LIGHT;
   }
 
   function getEditedFillLayerIds() {
@@ -250,9 +254,11 @@
     }
 
     const config = getRuntimeConfig();
+    const initialStyle = await mapStyleSync.resolveInitialStyle(config);
+    if (map || !mapEl || initNonce !== mapInitNonce) return;
     map = new maplibregl.Map({
       container: mapEl,
-      style: styleByTheme(),
+      style: initialStyle,
       center: [config.mapDefault.lon, config.mapDefault.lat],
       zoom: Math.max(12, Number(config.mapDefault.zoom || 14)),
       attributionControl: false
@@ -327,14 +333,17 @@
     void ensureMap();
 
     const observer = new MutationObserver(() => {
-      if (map) {
-        map.setStyle(styleByTheme());
-      }
+      void mapStyleSync.syncMapStyle();
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const unsubscribeLocale = locale.subscribe(() => {
+      void mapStyleSync.syncMapStyle();
+    });
 
     return () => {
+      unsubscribeLocale();
       observer.disconnect();
+      mapStyleSync.reset();
       destroyMap();
     };
   });

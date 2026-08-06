@@ -87,7 +87,12 @@ function registerSearchRoutes({ app, searchRateLimiter, getBuildingSearchResults
 
     const { bbox, error: bboxError } = parseSearchBbox(req.query);
     if (bboxError || !bbox) {
-      return res.status(400).json({ code: bboxError ? 'ERR_INVALID_BBOX' : 'ERR_BBOX_REQUIRED', error: bboxError || 'bbox is required for map search' });
+      return res
+        .status(400)
+        .json({
+          code: bboxError ? 'ERR_INVALID_BBOX' : 'ERR_BBOX_REQUIRED',
+          error: bboxError || 'bbox is required for map search'
+        });
     }
 
     const lon = Number(req.query.lon);

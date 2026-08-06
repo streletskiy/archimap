@@ -4,7 +4,15 @@ const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
 async function loadFilterPipelineUtils() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'components', 'map', 'filter-pipeline-utils.ts');
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'components',
+    'map',
+    'filter-pipeline-utils.ts'
+  );
   return import(pathToFileURL(modulePath).href);
 }
 
@@ -59,36 +67,63 @@ test('normalizeFilterRules validates operators and trims values', async () => {
   const badNumeric = normalizeFilterRules([{ key: 'levels', op: 'greater_than', value: 'many' }]);
   assert.match(String(badNumeric.invalidReason || ''), /numeric/i);
 
-  assert.equal(matchesFilterRule({
-    sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
-    archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
-  }, { key: 'style', op: 'equals', valueNormalized: 'local style' }), true);
-  assert.equal(matchesFilterRule({
-    sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
-    archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
-  }, { key: 'material', op: 'equals', valueNormalized: 'stone' }), true);
-  assert.equal(matchesFilterRule({
-    sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
-    archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
-  }, { key: 'colour', op: 'equals', valueNormalized: 'red' }), true);
+  assert.equal(
+    matchesFilterRule(
+      {
+        sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+        archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+      },
+      { key: 'style', op: 'equals', valueNormalized: 'local style' }
+    ),
+    true
+  );
+  assert.equal(
+    matchesFilterRule(
+      {
+        sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+        archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+      },
+      { key: 'material', op: 'equals', valueNormalized: 'stone' }
+    ),
+    true
+  );
+  assert.equal(
+    matchesFilterRule(
+      {
+        sourceTags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
+        archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
+      },
+      { key: 'colour', op: 'equals', valueNormalized: 'red' }
+    ),
+    true
+  );
 });
 
 test('buildFeatureStateDiffPlan returns only changed ids', async () => {
   const { buildFeatureStateDiffPlan } = await loadFilterPipelineUtils();
   const plan = buildFeatureStateDiffPlan([2, 4, 6], [4, 6, 8, 10]);
-  assert.deepEqual(plan.toDisable.sort((a, b) => a - b), [2]);
-  assert.deepEqual(plan.toEnable.sort((a, b) => a - b), [8, 10]);
+  assert.deepEqual(
+    plan.toDisable.sort((a, b) => a - b),
+    [2]
+  );
+  assert.deepEqual(
+    plan.toEnable.sort((a, b) => a - b),
+    [8, 10]
+  );
   assert.equal(plan.total, 4);
 });
 
 test('expandBboxWithMargin builds coverage window around viewport', async () => {
   const { expandBboxWithMargin } = await loadFilterPipelineUtils();
-  const windowBbox = expandBboxWithMargin({
-    west: 10,
-    south: 20,
-    east: 14,
-    north: 26
-  }, 0.25);
+  const windowBbox = expandBboxWithMargin(
+    {
+      west: 10,
+      south: 20,
+      east: 14,
+      north: 26
+    },
+    0.25
+  );
   assert.deepEqual(windowBbox, {
     west: 9,
     south: 18.5,
@@ -141,3 +176,30 @@ test('marker fallback gets a larger match budget on lower zooms and suppresses t
   assert.equal(getFilterStatusCodeForRenderMode('contours', false), 'applied');
 });
 
+test('viewport duplicate skip only applies after a completed authoritative request', async () => {
+  const { shouldSkipViewportAuthoritativeRequest } = await loadMapFilterPipeline();
+  assert.equal(
+    shouldSkipViewportAuthoritativeRequest({
+      requestKey: 'abc',
+      lastCompletedRequestKey: '',
+      reason: 'viewport'
+    }),
+    false
+  );
+  assert.equal(
+    shouldSkipViewportAuthoritativeRequest({
+      requestKey: 'abc',
+      lastCompletedRequestKey: 'abc',
+      reason: 'viewport'
+    }),
+    true
+  );
+  assert.equal(
+    shouldSkipViewportAuthoritativeRequest({
+      requestKey: 'abc',
+      lastCompletedRequestKey: 'abc',
+      reason: 'rules'
+    }),
+    false
+  );
+});

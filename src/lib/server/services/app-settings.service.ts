@@ -1,12 +1,13 @@
 const crypto = require('crypto');
+const {
+  DEFAULT_CUSTOM_BASEMAP_URL,
+  normalizeBasemapApiKey,
+  normalizeBasemapProvider,
+  normalizeCustomBasemapUrl
+} = require('./basemap-config');
 
 function createAppSettingsService(options: LooseRecord = {}) {
-  const {
-    db,
-    settingsSecret,
-    fallbackSmtp = {},
-    fallbackGeneral = {}
-  } = options;
+  const { db, settingsSecret, fallbackSmtp = {}, fallbackGeneral = {} } = options;
 
   if (!db) {
     throw new Error('createAppSettingsService: db is required');
@@ -18,12 +19,16 @@ function createAppSettingsService(options: LooseRecord = {}) {
   }
 
   const secretKey = crypto.createHash('sha256').update(secret).digest();
-  const dbProvider = String(db.provider || '').trim().toLowerCase();
+  const dbProvider = String(db.provider || '')
+    .trim()
+    .toLowerCase();
   let generalSettingsSchema = null;
 
   function normalizeBoolean(value, fallback = false) {
     if (typeof value === 'boolean') return value;
-    const text = String(value ?? '').trim().toLowerCase();
+    const text = String(value ?? '')
+      .trim()
+      .toLowerCase();
     if (text === 'true' || text === '1' || text === 'yes') return true;
     if (text === 'false' || text === '0' || text === 'no') return false;
     return Boolean(fallback);
@@ -45,14 +50,28 @@ function createAppSettingsService(options: LooseRecord = {}) {
     const appDisplayName = String(raw.appDisplayName || raw.app_display_name || 'archimap').trim() || 'archimap';
     const appBaseUrl = String(raw.appBaseUrl || raw.app_base_url || '').trim();
     const registrationEnabled = normalizeBoolean(raw.registrationEnabled ?? raw.registration_enabled, true);
-    const userEditRequiresPermission = normalizeBoolean(raw.userEditRequiresPermission ?? raw.user_edit_requires_permission, true);
+    const userEditRequiresPermission = normalizeBoolean(
+      raw.userEditRequiresPermission ?? raw.user_edit_requires_permission,
+      true
+    );
     const metricsToken = String(raw.metricsToken || raw.metrics_token || '').trim();
+    const basemapProvider = normalizeBasemapProvider(raw.basemapProvider ?? raw.basemap_provider);
+    const maptilerApiKey = normalizeBasemapApiKey(raw.maptilerApiKey || raw.maptiler_api_key);
+    const customBasemapUrl = normalizeCustomBasemapUrl(
+      raw.customBasemapUrl || raw.custom_basemap_url,
+      DEFAULT_CUSTOM_BASEMAP_URL
+    );
+    const customBasemapApiKey = normalizeBasemapApiKey(raw.customBasemapApiKey || raw.custom_basemap_api_key);
     return {
       appDisplayName,
       appBaseUrl,
       registrationEnabled,
       userEditRequiresPermission,
-      metricsToken
+      metricsToken,
+      basemapProvider,
+      maptilerApiKey,
+      customBasemapUrl,
+      customBasemapApiKey
     };
   }
 
@@ -87,33 +106,80 @@ function createAppSettingsService(options: LooseRecord = {}) {
     if (generalSettingsSchema) return generalSettingsSchema;
 
     let hasMetricsToken: boolean;
+    let hasBasemapProvider: boolean;
+    let hasMaptilerApiKey: boolean;
+    let hasCustomBasemapUrl: boolean;
+    let hasCustomBasemapApiKey: boolean;
     try {
       if (dbProvider === 'postgres') {
-        const row = await db.prepare(`
-          SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'app_general_settings'
-              AND column_name = 'metrics_token'
-          ) AS has_metrics_token
-        `).get();
-        hasMetricsToken = Boolean(row?.has_metrics_token || row?.hasMetricsToken);
+        const rows = await db
+          .prepare(
+            `
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'app_general_settings'
+            AND column_name IN (
+              'metrics_token',
+              'basemap_provider',
+              'maptiler_api_key',
+              'custom_basemap_url',
+              'custom_basemap_api_key'
+            )
+        `
+          )
+          .all();
+        const columnNames = new Set(
+          rows.map((row) =>
+            String(row?.column_name || '')
+              .trim()
+              .toLowerCase()
+          )
+        );
+        hasMetricsToken = columnNames.has('metrics_token');
+        hasBasemapProvider = columnNames.has('basemap_provider');
+        hasMaptilerApiKey = columnNames.has('maptiler_api_key');
+        hasCustomBasemapUrl = columnNames.has('custom_basemap_url');
+        hasCustomBasemapApiKey = columnNames.has('custom_basemap_api_key');
       } else {
         const rows = await db.prepare('PRAGMA table_info(app_general_settings)').all();
-        hasMetricsToken = rows.some((row) => String(row?.name || '').trim().toLowerCase() === 'metrics_token');
+        const columnNames = new Set(
+          rows.map((row) =>
+            String(row?.name || '')
+              .trim()
+              .toLowerCase()
+          )
+        );
+        hasMetricsToken = columnNames.has('metrics_token');
+        hasBasemapProvider = columnNames.has('basemap_provider');
+        hasMaptilerApiKey = columnNames.has('maptiler_api_key');
+        hasCustomBasemapUrl = columnNames.has('custom_basemap_url');
+        hasCustomBasemapApiKey = columnNames.has('custom_basemap_api_key');
       }
     } catch {
       hasMetricsToken = false;
+      hasBasemapProvider = false;
+      hasMaptilerApiKey = false;
+      hasCustomBasemapUrl = false;
+      hasCustomBasemapApiKey = false;
     }
 
-    generalSettingsSchema = { hasMetricsToken };
+    generalSettingsSchema = {
+      hasMetricsToken,
+      hasBasemapProvider,
+      hasMaptilerApiKey,
+      hasCustomBasemapUrl,
+      hasCustomBasemapApiKey
+    };
     return generalSettingsSchema;
   }
 
   async function readStoredSmtpRow() {
     try {
-      return await db.prepare(`
+      return (
+        (await db
+          .prepare(
+            `
         SELECT
           smtp_url,
           smtp_host,
@@ -127,7 +193,10 @@ function createAppSettingsService(options: LooseRecord = {}) {
         FROM app_smtp_settings
         WHERE id = 1
         LIMIT 1
-      `).get() || null;
+      `
+          )
+          .get()) || null
+      );
     } catch {
       return null;
     }
@@ -137,19 +206,35 @@ function createAppSettingsService(options: LooseRecord = {}) {
     try {
       const schema = await getGeneralSettingsSchema();
       const metricsTokenSelect = schema.hasMetricsToken ? 'metrics_token,' : 'NULL AS metrics_token,';
-      return await db.prepare(`
+      const basemapProviderSelect = schema.hasBasemapProvider ? 'basemap_provider,' : 'NULL AS basemap_provider,';
+      const maptilerApiKeySelect = schema.hasMaptilerApiKey ? 'maptiler_api_key,' : 'NULL AS maptiler_api_key,';
+      const customBasemapUrlSelect = schema.hasCustomBasemapUrl ? 'custom_basemap_url,' : 'NULL AS custom_basemap_url,';
+      const customBasemapApiKeySelect = schema.hasCustomBasemapApiKey
+        ? 'custom_basemap_api_key,'
+        : 'NULL AS custom_basemap_api_key,';
+      return (
+        (await db
+          .prepare(
+            `
         SELECT
           app_display_name,
           app_base_url,
           registration_enabled,
           user_edit_requires_permission,
           ${metricsTokenSelect}
+          ${basemapProviderSelect}
+          ${maptilerApiKeySelect}
+          ${customBasemapUrlSelect}
+          ${customBasemapApiKeySelect}
           updated_by,
           updated_at
         FROM app_general_settings
         WHERE id = 1
         LIMIT 1
-      `).get() || null;
+      `
+          )
+          .get()) || null
+      );
     } catch {
       return null;
     }
@@ -160,19 +245,18 @@ function createAppSettingsService(options: LooseRecord = {}) {
     const hasDbRecord = Boolean(row);
     const dbConfig = row
       ? normalizeSmtpShape({
-        url: row.smtp_url,
-        host: row.smtp_host,
-        port: row.smtp_port,
-        secure: Number(row.smtp_secure || 0) > 0,
-        user: row.smtp_user,
-        from: row.email_from,
-        pass: decryptSecret(row.smtp_pass_enc)
-      })
+          url: row.smtp_url,
+          host: row.smtp_host,
+          port: row.smtp_port,
+          secure: Number(row.smtp_secure || 0) > 0,
+          user: row.smtp_user,
+          from: row.email_from,
+          pass: decryptSecret(row.smtp_pass_enc)
+        })
       : null;
 
     const hasDbValues = Boolean(
-      dbConfig
-      && (dbConfig.url || dbConfig.host || dbConfig.user || dbConfig.from || dbConfig.pass)
+      dbConfig && (dbConfig.url || dbConfig.host || dbConfig.user || dbConfig.from || dbConfig.pass)
     );
 
     const chosen = hasDbValues ? dbConfig : fallback;
@@ -196,20 +280,24 @@ function createAppSettingsService(options: LooseRecord = {}) {
     const hasDbRecord = Boolean(row);
     const dbConfig = row
       ? normalizeGeneralShape({
-        app_display_name: row.app_display_name,
-        app_base_url: row.app_base_url,
-        registration_enabled: Number(row.registration_enabled || 0) > 0,
-        user_edit_requires_permission: Number(row.user_edit_requires_permission || 0) > 0,
-        metrics_token: row.metrics_token
-      })
+          app_display_name: row.app_display_name,
+          app_base_url: row.app_base_url,
+          registration_enabled: Number(row.registration_enabled || 0) > 0,
+          user_edit_requires_permission: Number(row.user_edit_requires_permission || 0) > 0,
+          metrics_token: row.metrics_token,
+          basemap_provider: row.basemap_provider,
+          maptiler_api_key: row.maptiler_api_key,
+          custom_basemap_url: row.custom_basemap_url,
+          custom_basemap_api_key: row.custom_basemap_api_key
+        })
       : null;
 
     const hasDbValues = Boolean(
-      dbConfig
-      && (dbConfig.appDisplayName
-        || dbConfig.appBaseUrl
-        || Object.prototype.hasOwnProperty.call(row || {}, 'registration_enabled')
-        || Object.prototype.hasOwnProperty.call(row || {}, 'user_edit_requires_permission'))
+      dbConfig &&
+      (dbConfig.appDisplayName ||
+        dbConfig.appBaseUrl ||
+        Object.prototype.hasOwnProperty.call(row || {}, 'registration_enabled') ||
+        Object.prototype.hasOwnProperty.call(row || {}, 'user_edit_requires_permission'))
     );
 
     const chosen = hasDbValues ? dbConfig : fallback;
@@ -264,7 +352,11 @@ function createAppSettingsService(options: LooseRecord = {}) {
         appBaseUrl: effective.config.appBaseUrl,
         registrationEnabled: effective.config.registrationEnabled,
         userEditRequiresPermission: effective.config.userEditRequiresPermission,
-        metricsToken: effective.config.metricsToken
+        metricsToken: effective.config.metricsToken,
+        basemapProvider: effective.config.basemapProvider,
+        maptilerApiKey: effective.config.maptilerApiKey,
+        customBasemapUrl: effective.config.customBasemapUrl,
+        customBasemapApiKey: effective.config.customBasemapApiKey
       },
       updatedBy: effective.updatedBy,
       updatedAt: effective.updatedAt
@@ -287,8 +379,10 @@ function createAppSettingsService(options: LooseRecord = {}) {
     const passRaw = hasPasswordField ? String(input.pass || '') : '';
     const passTrimmed = passRaw.trim();
     const pass = hasPasswordField
-      ? (passTrimmed || (keepPassword ? String(existing.pass || '') : ''))
-      : (keepPassword ? String(existing.pass || '') : '');
+      ? passTrimmed || (keepPassword ? String(existing.pass || '') : '')
+      : keepPassword
+        ? String(existing.pass || '')
+        : '';
 
     return {
       ...normalized,
@@ -303,7 +397,9 @@ function createAppSettingsService(options: LooseRecord = {}) {
     const encryptedPass = next.pass ? encryptSecret(next.pass) : '';
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO app_smtp_settings (
         id,
         smtp_url,
@@ -327,16 +423,18 @@ function createAppSettingsService(options: LooseRecord = {}) {
         email_from = excluded.email_from,
         updated_by = excluded.updated_by,
         updated_at = datetime('now')
-    `).run(
-      next.url || null,
-      next.host || null,
-      next.port,
-      next.secure ? 1 : 0,
-      next.user || null,
-      encryptedPass || null,
-      next.from || null,
-      updatedBy
-    );
+    `
+      )
+      .run(
+        next.url || null,
+        next.host || null,
+        next.port,
+        next.secure ? 1 : 0,
+        next.user || null,
+        encryptedPass || null,
+        next.from || null,
+        updatedBy
+      );
 
     return getSmtpSettingsForAdmin();
   }
@@ -344,68 +442,95 @@ function createAppSettingsService(options: LooseRecord = {}) {
   async function saveGeneralSettings(input: LooseRecord = {}, actor = null) {
     const next = normalizeGeneralShape(input);
     const updatedBy = actor == null ? null : String(actor).trim().toLowerCase() || null;
+    if (next.basemapProvider === 'maptiler' && !next.maptilerApiKey) {
+      const error = new Error('MapTiler API key is required when MapTiler basemap is enabled');
+      error.status = 400;
+      throw error;
+    }
+    if (next.basemapProvider === 'custom' && !next.customBasemapUrl) {
+      const error = new Error('Custom basemap URL is required when custom basemap is enabled');
+      error.status = 400;
+      throw error;
+    }
     let metricsTokenToSave = next.metricsToken;
     if (!metricsTokenToSave) {
       metricsTokenToSave = crypto.randomBytes(32).toString('hex');
     }
     const schema = await getGeneralSettingsSchema();
 
+    const insertColumns = [
+      'id',
+      'app_display_name',
+      'app_base_url',
+      'registration_enabled',
+      'user_edit_requires_permission'
+    ];
+    const insertValues = ['1', '?', '?', '?', '?'];
+    const updateClauses = [
+      'app_display_name = excluded.app_display_name',
+      'app_base_url = excluded.app_base_url',
+      'registration_enabled = excluded.registration_enabled',
+      'user_edit_requires_permission = excluded.user_edit_requires_permission'
+    ];
+    const params = [
+      next.appDisplayName,
+      next.appBaseUrl || null,
+      next.registrationEnabled ? 1 : 0,
+      next.userEditRequiresPermission ? 1 : 0
+    ];
+
     if (schema.hasMetricsToken) {
-      await db.prepare(`
-        INSERT INTO app_general_settings (
-          id,
-          app_display_name,
-          app_base_url,
-          registration_enabled,
-          user_edit_requires_permission,
-          metrics_token,
-          updated_by,
-          updated_at
-        )
-        VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          app_display_name = excluded.app_display_name,
-          app_base_url = excluded.app_base_url,
-          registration_enabled = excluded.registration_enabled,
-          user_edit_requires_permission = excluded.user_edit_requires_permission,
-          metrics_token = excluded.metrics_token,
-          updated_by = excluded.updated_by,
-          updated_at = datetime('now')
-      `).run(
-        next.appDisplayName,
-        next.appBaseUrl || null,
-        next.registrationEnabled ? 1 : 0,
-        next.userEditRequiresPermission ? 1 : 0,
-        metricsTokenToSave || null,
-        updatedBy
-      );
-    } else {
-      await db.prepare(`
-        INSERT INTO app_general_settings (
-          id,
-          app_display_name,
-          app_base_url,
-          registration_enabled,
-          user_edit_requires_permission,
-          updated_by,
-          updated_at
-        )
-        VALUES (1, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          app_display_name = excluded.app_display_name,
-          app_base_url = excluded.app_base_url,
-          registration_enabled = excluded.registration_enabled,
-          user_edit_requires_permission = excluded.user_edit_requires_permission,
-          updated_by = excluded.updated_by,
-          updated_at = datetime('now')
-      `).run(
-        next.appDisplayName,
-        next.appBaseUrl || null,
-        next.registrationEnabled ? 1 : 0,
-        next.userEditRequiresPermission ? 1 : 0,
-        updatedBy
-      );
+      insertColumns.push('metrics_token');
+      insertValues.push('?');
+      updateClauses.push('metrics_token = excluded.metrics_token');
+      params.push(metricsTokenToSave || null);
     }
+
+    if (schema.hasBasemapProvider) {
+      insertColumns.push('basemap_provider');
+      insertValues.push('?');
+      updateClauses.push('basemap_provider = excluded.basemap_provider');
+      params.push(next.basemapProvider);
+    }
+
+    if (schema.hasMaptilerApiKey) {
+      insertColumns.push('maptiler_api_key');
+      insertValues.push('?');
+      updateClauses.push('maptiler_api_key = excluded.maptiler_api_key');
+      params.push(next.maptilerApiKey || null);
+    }
+
+    if (schema.hasCustomBasemapUrl) {
+      insertColumns.push('custom_basemap_url');
+      insertValues.push('?');
+      updateClauses.push('custom_basemap_url = excluded.custom_basemap_url');
+      params.push(next.customBasemapUrl || DEFAULT_CUSTOM_BASEMAP_URL);
+    }
+
+    if (schema.hasCustomBasemapApiKey) {
+      insertColumns.push('custom_basemap_api_key');
+      insertValues.push('?');
+      updateClauses.push('custom_basemap_api_key = excluded.custom_basemap_api_key');
+      params.push(next.customBasemapApiKey || null);
+    }
+
+    insertColumns.push('updated_by', 'updated_at');
+    insertValues.push('?', "datetime('now')");
+    updateClauses.push('updated_by = excluded.updated_by', "updated_at = datetime('now')");
+    params.push(updatedBy);
+
+    await db
+      .prepare(
+        `
+      INSERT INTO app_general_settings (
+        ${insertColumns.join(',\n          ')}
+      )
+      VALUES (${insertValues.join(', ')})
+      ON CONFLICT(id) DO UPDATE SET
+        ${updateClauses.join(',\n        ')}
+    `
+      )
+      .run(...params);
 
     return getGeneralSettingsForAdmin();
   }

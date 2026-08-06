@@ -22,6 +22,7 @@ const FILTER_DATA_SELECT_FIELDS_SQL = `
     ai.design_year,
     ai.material,
     ai.material_concrete,
+    ai.roof_shape,
     ai.colour,
     ai.levels,
     ai.year_built,
@@ -91,6 +92,81 @@ function resolveBboxQueryMode(isPostgres, rtreeState) {
   return rtreeState?.ready ? 'rtree' : 'plain';
 }
 
+const DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2;
+const DEFAULT_BUILDING_EXTRUSION_LEVELS = 1;
+
+function parseTagNumber(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const normalized = text.replace(',', '.');
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function roundMeterValue(value) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) return 0;
+  return Math.round(Math.max(0, normalized) * 100) / 100;
+}
+
+function readFirstNumericTag(tags, keys = []) {
+  for (const key of Array.isArray(keys) ? keys : []) {
+    if (!Object.prototype.hasOwnProperty.call(tags || {}, key)) continue;
+    const value = parseTagNumber(tags?.[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function deriveLevelsTextFromSourceTags(sourceTags = {}) {
+  const explicitLevels = readFirstNumericTag(sourceTags, ['building:levels', 'levels']);
+  if (Number.isInteger(explicitLevels) && explicitLevels >= 0 && explicitLevels <= 300) {
+    return String(explicitLevels);
+  }
+  const explicitHeight = readFirstNumericTag(sourceTags, ['building:height', 'height']);
+  const minLevel = readFirstNumericTag(sourceTags, ['building:min_level', 'min_level']);
+  const explicitMinHeight = readFirstNumericTag(sourceTags, ['building:min_height', 'min_height']);
+  const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
+  const normalizedExplicitMinHeight =
+    Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
+  const baseHeight = Math.max(normalizedExplicitMinHeight, normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS);
+  if (!(Number.isFinite(explicitHeight) && explicitHeight > baseHeight)) {
+    return null;
+  }
+  const estimatedLevels = Math.max(1, Math.round((explicitHeight - baseHeight) / DEFAULT_BUILDING_LEVEL_HEIGHT_METERS));
+  if (!Number.isInteger(estimatedLevels) || estimatedLevels < 0 || estimatedLevels > 300) {
+    return null;
+  }
+  return String(estimatedLevels);
+}
+
+function buildRender3dPropertiesFromSourceTags(sourceTags = {}) {
+  const levels = readFirstNumericTag(sourceTags, ['building:levels', 'levels']);
+  const explicitHeight = readFirstNumericTag(sourceTags, ['building:height', 'height']);
+  const minLevel = readFirstNumericTag(sourceTags, ['building:min_level', 'min_level']);
+  const explicitMinHeight = readFirstNumericTag(sourceTags, ['building:min_height', 'min_height']);
+  const normalizedLevels = Number.isFinite(levels) && levels > 0 ? levels : DEFAULT_BUILDING_EXTRUSION_LEVELS;
+  const normalizedExplicitHeight = Number.isFinite(explicitHeight) && explicitHeight > 0 ? explicitHeight : null;
+  const normalizedMinLevel = Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0;
+  const normalizedExplicitMinHeight =
+    Number.isFinite(explicitMinHeight) && explicitMinHeight > 0 ? explicitMinHeight : 0;
+  const levelDerivedMinHeight = normalizedMinLevel * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
+  const renderMinHeightMeters = Math.max(normalizedExplicitMinHeight, levelDerivedMinHeight);
+  const levelDerivedHeightMeters = renderMinHeightMeters + normalizedLevels * DEFAULT_BUILDING_LEVEL_HEIGHT_METERS;
+  const renderHeightMeters =
+    normalizedExplicitHeight != null && normalizedExplicitHeight > renderMinHeightMeters
+      ? normalizedExplicitHeight
+      : levelDerivedHeightMeters;
+
+  return {
+    renderHeightMeters: roundMeterValue(renderHeightMeters),
+    renderMinHeightMeters: roundMeterValue(renderMinHeightMeters)
+  };
+}
+
 function mapFilterDataRow(row) {
   const osmKey = `${row.osm_type}/${row.osm_id}`;
   let sourceTags: LooseRecord;
@@ -99,6 +175,8 @@ function mapFilterDataRow(row) {
   } catch {
     sourceTags = {};
   }
+  const derivedLevels = deriveLevelsTextFromSourceTags(sourceTags);
+  const render3dProperties = buildRender3dPropertiesFromSourceTags(sourceTags);
   const hasExtraInfo = row.info_osm_id != null;
   const split = hasExtraInfo ? splitBuildingMaterialSelection(row.material) : null;
   const minLon = Number(row.min_lon);
@@ -110,27 +188,31 @@ function mapFilterDataRow(row) {
   return {
     osmKey,
     sourceTags,
+    levels: row.levels ?? derivedLevels ?? null,
+    renderHeightMeters: render3dProperties.renderHeightMeters,
+    renderMinHeightMeters: render3dProperties.renderMinHeightMeters,
     archiInfo: hasExtraInfo
       ? {
-        osm_type: row.osm_type,
-        osm_id: row.osm_id,
-        name: row.name,
-        style: row.style,
-        design: row.design,
-        design_ref: row.design_ref,
-        design_year: row.design_year,
-        material: split?.material ?? row.material,
-        material_concrete: split?.material_concrete ?? row.material_concrete,
-        colour: row.colour,
-        levels: row.levels,
-        year_built: row.year_built,
-        architect: row.architect,
-        address: row.address,
-        description: row.description,
-        archimap_description: row.archimap_description || row.description || null,
-        updated_by: row.updated_by,
-        updated_at: row.updated_at
-      }
+          osm_type: row.osm_type,
+          osm_id: row.osm_id,
+          name: row.name,
+          style: row.style,
+          design: row.design,
+          design_ref: row.design_ref,
+          design_year: row.design_year,
+          material: split?.material ?? row.material,
+          material_concrete: split?.material_concrete ?? row.material_concrete,
+          roof_shape: row.roof_shape,
+          colour: row.colour,
+          levels: row.levels,
+          year_built: row.year_built,
+          architect: row.architect,
+          address: row.address,
+          description: row.description,
+          archimap_description: row.archimap_description || row.description || null,
+          updated_by: row.updated_by,
+          updated_at: row.updated_at
+        }
       : null,
     hasExtraInfo,
     centerLon,
@@ -145,7 +227,8 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
 
   const isPostgres = db.provider === 'postgres';
 
-  const selectFilterRowsBboxRtree = !isPostgres ? db.prepare(`
+  const selectFilterRowsBboxRtree = !isPostgres
+    ? db.prepare(`
     SELECT
       bc.osm_type,
       bc.osm_id,
@@ -162,6 +245,7 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       ai.design_year,
       ai.material,
       ai.material_concrete,
+      ai.roof_shape,
       ai.colour,
       ai.levels,
       ai.year_built,
@@ -181,9 +265,11 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       AND br.max_lat >= ?
       AND br.min_lat <= ?
     LIMIT ?
-  `) : null;
+  `)
+    : null;
 
-  const selectFilterMatchRowsBboxRtree = !isPostgres ? db.prepare(`
+  const selectFilterMatchRowsBboxRtree = !isPostgres
+    ? db.prepare(`
     SELECT
       bc.osm_type,
       bc.osm_id,
@@ -200,18 +286,22 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       AND br.max_lat >= ?
       AND br.min_lat <= ?
     LIMIT ?
-  `) : null;
+  `)
+    : null;
 
-  const selectFilterRowsBboxPlain = !isPostgres ? db.prepare(`
+  const selectFilterRowsBboxPlain = !isPostgres
+    ? db.prepare(`
     ${FILTER_DATA_SELECT_FIELDS_SQL}
     WHERE bc.max_lon >= ?
       AND bc.min_lon <= ?
       AND bc.max_lat >= ?
       AND bc.min_lat <= ?
     LIMIT ?
-  `) : null;
+  `)
+    : null;
 
-  const selectFilterMatchRowsBboxPlain = !isPostgres ? db.prepare(`
+  const selectFilterMatchRowsBboxPlain = !isPostgres
+    ? db.prepare(`
     SELECT
       bc.osm_type,
       bc.osm_id,
@@ -226,7 +316,8 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       AND bc.max_lat >= ?
       AND bc.min_lat <= ?
     LIMIT ?
-  `) : null;
+  `)
+    : null;
 
   const selectFilterRowsBboxPostgis = isPostgres ? db.prepare(FILTER_DATA_POSTGIS_BBOX_SQL) : null;
   const selectFilterMatchRowsBboxPostgis = isPostgres ? db.prepare(FILTER_MATCH_TAGS_ONLY_POSTGIS_BBOX_SQL) : null;
@@ -259,44 +350,45 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       const chunk = keys.slice(index, index + CHUNK_SIZE);
       const chunkRows = isPostgres
         ? await (() => {
-          const valuesSql = chunk.map(() => '(?::text, ?::bigint)').join(', ');
-          const params = [];
-          for (const item of chunk) {
-            params.push(item.osmType, item.osmId);
-          }
-          return db.prepare(`
+            const valuesSql = chunk.map(() => '(?::text, ?::bigint)').join(', ');
+            const params = [];
+            for (const item of chunk) {
+              params.push(item.osmType, item.osmId);
+            }
+            return db
+              .prepare(
+                `
             WITH requested(osm_type, osm_id) AS (
               VALUES ${valuesSql}
             )
             ${FILTER_DATA_SELECT_FIELDS_SQL}
             JOIN requested req
               ON bc.osm_type = req.osm_type AND bc.osm_id = req.osm_id
-          `).all(...params);
-        })()
+          `
+              )
+              .all(...params);
+          })()
         : await (() => {
-          const clauses = chunk.map(() => '(bc.osm_type = ? AND bc.osm_id = ?)').join(' OR ');
-          const params = [];
-          for (const item of chunk) {
-            params.push(item.osmType, item.osmId);
-          }
-          return db.prepare(`
+            const clauses = chunk.map(() => '(bc.osm_type = ? AND bc.osm_id = ?)').join(' OR ');
+            const params = [];
+            for (const item of chunk) {
+              params.push(item.osmType, item.osmId);
+            }
+            return db
+              .prepare(
+                `
             ${FILTER_DATA_SELECT_FIELDS_SQL}
             WHERE ${clauses}
-          `).all(...params);
-        })();
+          `
+              )
+              .all(...params);
+          })();
       rows.push(...chunkRows);
     }
     return rows;
   }
 
-  async function selectTagOnlyPostgresMatchRowsByBbox({
-    minLon,
-    minLat,
-    maxLon,
-    maxLat,
-    rules,
-    maxResults
-  }) {
+  async function selectTagOnlyPostgresMatchRowsByBbox({ minLon, minLat, maxLon, maxLat, rules, maxResults }) {
     if (!isPostgres) return null;
     const compiledTagRules = compilePostgresFilterRulesPredicate(rules, {
       rowAlias: 'base',
@@ -336,14 +428,9 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       WHERE ${compiledTagRules.sql}
       LIMIT ?
     `;
-    return db.prepare(selectTagOnlyRowsSql).all(
-      minLon,
-      minLat,
-      maxLon,
-      maxLat,
-      ...compiledTagRules.params,
-      maxResults + 1
-    );
+    return db
+      .prepare(selectTagOnlyRowsSql)
+      .all(minLon, minLat, maxLon, maxLat, ...compiledTagRules.params, maxResults + 1);
   }
 
   async function selectGuardedPostgresCandidateRowsByBbox({
@@ -357,16 +444,18 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
   }) {
     if (!isPostgres) return [];
     const requiredArchiColumns = collectRequiredArchiColumns(archiRules);
-    const aiJoinSql = requiredArchiColumns.length > 0
-      ? `
+    const aiJoinSql =
+      requiredArchiColumns.length > 0
+        ? `
       LEFT JOIN local.architectural_info ai
         ON ai.osm_type = guarded.osm_type AND ai.osm_id = guarded.osm_id
       `
-      : '';
-    const aiSelectSql = requiredArchiColumns.length > 0
-      ? `ai.osm_id AS info_osm_id,
+        : '';
+    const aiSelectSql =
+      requiredArchiColumns.length > 0
+        ? `ai.osm_id AS info_osm_id,
         ${requiredArchiColumns.map((column) => `ai.${column}`).join(',\n        ')}`
-      : 'NULL::bigint AS info_osm_id';
+        : 'NULL::bigint AS info_osm_id';
     const compiledGuardRules = compilePostgresFilterRulesGuardPredicate(rules, {
       rowAlias: 'base',
       tagsAlias: 'base.tags_jsonb'
@@ -418,14 +507,9 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       FROM guarded
       ${aiJoinSql}
     `;
-    return db.prepare(selectGuardedCandidateRowsSql).all(
-      minLon,
-      minLat,
-      maxLon,
-      maxLat,
-      ...compiledGuardRules.params,
-      candidateLimit
-    );
+    return db
+      .prepare(selectGuardedCandidateRowsSql)
+      .all(minLon, minLat, maxLon, maxLat, ...compiledGuardRules.params, candidateLimit);
   }
 
   return {

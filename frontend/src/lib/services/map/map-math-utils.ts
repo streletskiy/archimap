@@ -26,17 +26,12 @@ export function expandBboxWithMargin(bbox, marginRatio = 0.25) {
   };
 }
 
-export function getAdaptiveCoverageMarginRatio({
-  lastCount = 0,
-  defaultLimit = 12_000,
-  min = 0.2,
-  max = 0.35
-} = {}) {
+export function getAdaptiveCoverageMarginRatio({ lastCount = 0, defaultLimit = 12_000, min = 0.2, max = 0.35 } = {}) {
   const minRatio = clampMapNumber(min, 0, 1);
   const maxRatio = clampMapNumber(max, minRatio, 1);
   const count = Math.max(0, Number(lastCount) || 0);
   const limit = Math.max(1, Number(defaultLimit) || 1);
   const saturation = clampMapNumber(count / limit, 0, 1);
-  const ratio = maxRatio - ((maxRatio - minRatio) * saturation);
+  const ratio = maxRatio - (maxRatio - minRatio) * saturation;
   return clampMapNumber(ratio, minRatio, maxRatio);
 }

@@ -1,9 +1,4 @@
-function validateSecurityConfig({
-  nodeEnv,
-  sessionSecret,
-  appBaseUrl,
-  sessionAllowMemoryFallback
-}) {
+function validateSecurityConfig({ nodeEnv, sessionSecret, appBaseUrl, sessionAllowMemoryFallback }) {
   const isProduction = nodeEnv === 'production';
   const weakSessionSecret = sessionSecret === 'dev-secret-change-me';
   const hasAppBaseUrl = String(appBaseUrl || '').length > 0;

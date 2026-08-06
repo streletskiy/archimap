@@ -77,7 +77,9 @@ const STYLE_LABELS = Object.freeze({
 });
 
 function normalizeLocaleCode(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (text === 'ru') return 'ru';
   return 'en';
 }
@@ -111,15 +113,17 @@ export function toHumanArchitectureStyle(value, localeCode = null) {
   if (parts.length === 0) return text;
 
   const currentLocale = resolveLocaleCode(localeCode);
-  const translated = parts.map((part) => {
-    const rawKey = part.toLowerCase();
-    if (EMPTY_STYLE_TOKENS.has(rawKey)) return null;
-    const key = ARCHITECTURE_STYLE_ALIASES[rawKey] || rawKey;
-    if (STYLE_KEY_SET.has(key)) {
-      return getStyleLabelByLocale(key, currentLocale) || translateNow(styleLabelKey(key)) || part;
-    }
-    return part;
-  }).filter(Boolean);
+  const translated = parts
+    .map((part) => {
+      const rawKey = part.toLowerCase();
+      if (EMPTY_STYLE_TOKENS.has(rawKey)) return null;
+      const key = ARCHITECTURE_STYLE_ALIASES[rawKey] || rawKey;
+      if (STYLE_KEY_SET.has(key)) {
+        return getStyleLabelByLocale(key, currentLocale) || translateNow(styleLabelKey(key)) || part;
+      }
+      return part;
+    })
+    .filter(Boolean);
   return translated.length > 0 ? translated.join('; ') : null;
 }
 
@@ -153,8 +157,7 @@ const ARCHITECTURE_STYLE_KEY_BY_LABEL_NORMALIZED = (() => {
 
 export function getArchitectureStyleOptions(localeCode = null, regionSlugs = [], overrides = []) {
   const resolvedLocaleCode = resolveLocaleCode(localeCode);
-  return STYLE_KEYS
-    .filter((styleKey) => isArchitectureStyleAllowed(styleKey, regionSlugs, overrides))
+  return STYLE_KEYS.filter((styleKey) => isArchitectureStyleAllowed(styleKey, regionSlugs, overrides))
     .map((value) => ({
       value,
       label: getStyleLabelByLocale(value, resolvedLocaleCode) || value
@@ -164,23 +167,19 @@ export function getArchitectureStyleOptions(localeCode = null, regionSlugs = [],
 
 export function getArchitectureStyleDefaultRules(localeCode = null) {
   const resolvedLocaleCode = resolveLocaleCode(localeCode);
-  return STYLE_KEYS
-    .map((value) => {
-      const macroRegions = Array.isArray(STYLE_ALLOWED_REGIONS[value])
-        ? [...STYLE_ALLOWED_REGIONS[value]]
-        : [];
-      const regionPatterns = Array.isArray(STYLE_ALLOWED_REGION_PATTERNS[value])
-        ? [...STYLE_ALLOWED_REGION_PATTERNS[value]]
-        : [];
-      return {
-        value,
-        label: getStyleLabelByLocale(value, resolvedLocaleCode) || value,
-        isGlobal: macroRegions.length === 0 && regionPatterns.length === 0,
-        macroRegions,
-        regionPatterns
-      };
-    })
-    .sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
+  return STYLE_KEYS.map((value) => {
+    const macroRegions = Array.isArray(STYLE_ALLOWED_REGIONS[value]) ? [...STYLE_ALLOWED_REGIONS[value]] : [];
+    const regionPatterns = Array.isArray(STYLE_ALLOWED_REGION_PATTERNS[value])
+      ? [...STYLE_ALLOWED_REGION_PATTERNS[value]]
+      : [];
+    return {
+      value,
+      label: getStyleLabelByLocale(value, resolvedLocaleCode) || value,
+      isGlobal: macroRegions.length === 0 && regionPatterns.length === 0,
+      macroRegions,
+      regionPatterns
+    };
+  }).sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
 }
 
 export function resolveArchitectureStyleSearchKey(queryText) {
@@ -219,10 +218,7 @@ export function resolveArchitectureStyleSearchKeys(queryText) {
     }
     for (const label of labels) {
       const normalizedLabel = normalizeStyleSearchText(label);
-      if (
-        normalizedLabel.includes(normalizedQuery) ||
-        normalizedQuery.includes(normalizedLabel)
-      ) {
+      if (normalizedLabel.includes(normalizedQuery) || normalizedQuery.includes(normalizedLabel)) {
         matched.add(key);
         break;
       }
@@ -243,7 +239,9 @@ export function resolveArchitectureStyleSearchKeys(queryText) {
 }
 
 export function normalizeArchitectureStyleKey(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) return '';
   if (EMPTY_STYLE_TOKENS.has(text)) return '';
   if (ARCHITECTURE_STYLE_ALIASES[text]) return ARCHITECTURE_STYLE_ALIASES[text];

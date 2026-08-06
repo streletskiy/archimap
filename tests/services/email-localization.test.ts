@@ -39,7 +39,10 @@ test('email copy is sourced from the shared locale json files', () => {
   );
 
   assert.equal(ruCopy.registration.subject, sharedRuLocale.email.registration.subject);
-  assert.equal(ruCopy.passwordReset.validity(20), sharedRuLocale.email.passwordReset.validity.replace('{minutes}', '20'));
+  assert.equal(
+    ruCopy.passwordReset.validity(20),
+    sharedRuLocale.email.passwordReset.validity.replace('{minutes}', '20')
+  );
   assert.equal(
     ruCopy.smtpTest.callout('admin@example.test'),
     sharedRuLocale.email.smtpTest.callout.replace('{email}', 'admin@example.test')

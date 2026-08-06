@@ -4,7 +4,8 @@ const { Client } = require('pg');
 
 function listPostgresMigrationFiles(migrationsDir) {
   if (!fs.existsSync(migrationsDir)) return [];
-  return fs.readdirSync(migrationsDir)
+  return fs
+    .readdirSync(migrationsDir)
     .filter((name) => /^\d+.*\.sql$/.test(name))
     .sort((a, b) => a.localeCompare(b));
 }
@@ -40,7 +41,7 @@ async function runPendingPostgresMigrations({
     if (files.length === 0) {
       throw new Error(
         `No PostgreSQL migration files found in ${migrationsDir}. ` +
-        'Check that container image contents are not masked by a bind mount over /app/db.'
+          'Check that container image contents are not masked by a bind mount over /app/db.'
       );
     }
 
@@ -50,10 +51,7 @@ async function runPendingPostgresMigrations({
       await client.query('BEGIN');
       try {
         await client.query(migrationSql);
-        await client.query(
-          'INSERT INTO public.schema_migrations (id, applied_at) VALUES ($1, NOW())',
-          [file]
-        );
+        await client.query('INSERT INTO public.schema_migrations (id, applied_at) VALUES ($1, NOW())', [file]);
         await client.query('COMMIT');
         logger.info('pg_migration_applied', { id: file });
       } catch (error) {

@@ -12,13 +12,7 @@ param(
 
   [string]$CacheRef,
 
-  [string]$TippecanoeRef = "2.79.0",
-
-  [string]$QuackosmVersion = "0.17.0",
-
-  [string]$DuckdbVersion = "1.4.4",
-
-  [string]$PipVersion = "26.0.1",
+  [string]$PlanetilerVersion = "0.10.2",
 
   [string]$RuntimeBaseTag = "",
 
@@ -38,6 +32,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
   $PSNativeCommandUseErrorActionPreference = $false
 }
 $env:DOCKER_BUILDKIT = "1"
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
   throw "Version is required. Example: .\scripts\release-docker.ps1 -Version 1.2.3"
@@ -51,9 +46,17 @@ if ([string]::IsNullOrWhiteSpace($CacheRef)) {
   $CacheRef = "${Image}:buildcache"
 }
 
+if ([string]::IsNullOrWhiteSpace($RuntimeBaseTag) -and -not (Get-Command node -ErrorAction SilentlyContinue)) {
+  throw "node is required to derive the runtime-base tag"
+}
+
 if ([string]::IsNullOrWhiteSpace($RuntimeBaseTag)) {
-  $rawRuntimeBaseTag = "runtime-base-t$TippecanoeRef-q$QuackosmVersion-d$DuckdbVersion-p$PipVersion"
-  $RuntimeBaseTag = ($rawRuntimeBaseTag -replace '[^A-Za-z0-9._-]', '-')
+  $runtimeBaseTagArgs = @(
+    (Join-Path $RepoRoot "scripts/lib/runtime-base-tag.js"),
+    "--planetiler-version", $PlanetilerVersion,
+    "--dockerfile", (Join-Path $RepoRoot "Dockerfile")
+  )
+  $RuntimeBaseTag = ((& node @runtimeBaseTagArgs) | Out-String).Trim()
 }
 $RuntimeBaseImage = "${Image}:$RuntimeBaseTag"
 
@@ -284,10 +287,7 @@ $args = @(
   "buildx", "build",
   "--builder", $Builder,
   "--platform", $Platforms,
-  "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
-  "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
-  "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
-  "--build-arg", "PIP_VERSION=$PipVersion",
+  "--build-arg", "PLANETILER_VERSION=$PlanetilerVersion",
   "--build-arg", "RUNTIME_BASE_IMAGE=$RuntimeBaseImage",
   "--build-arg", "BUILD_SHA=$($gitBuild.Sha)",
   "--build-arg", "BUILD_DESCRIBE=$($gitBuild.Describe)",
@@ -313,10 +313,7 @@ if (-not $SkipRuntimeBase) {
       "--builder", $Builder,
       "--platform", $Platforms,
       "--target", "runtime-base",
-      "--build-arg", "TIPPECANOE_REF=$TippecanoeRef",
-      "--build-arg", "QUACKOSM_VERSION=$QuackosmVersion",
-      "--build-arg", "DUCKDB_VERSION=$DuckdbVersion",
-      "--build-arg", "PIP_VERSION=$PipVersion",
+      "--build-arg", "PLANETILER_VERSION=$PlanetilerVersion",
       "-t", $RuntimeBaseImage,
       "--push"
     )
@@ -358,10 +355,7 @@ Write-Host "Version tag: $Version" -ForegroundColor Gray
 Write-Host "Publish latest tag: $(if ($publishLatest) { 'yes' } else { 'no' })" -ForegroundColor Gray
 Write-Host "Runtime base image: $RuntimeBaseImage" -ForegroundColor Gray
 Write-Host "Platforms: $Platforms" -ForegroundColor Gray
-Write-Host "Tippecanoe ref: $TippecanoeRef" -ForegroundColor Gray
-Write-Host "QuackOSM version: $QuackosmVersion" -ForegroundColor Gray
-Write-Host "DuckDB version: $DuckdbVersion" -ForegroundColor Gray
-Write-Host "pip version: $PipVersion" -ForegroundColor Gray
+Write-Host "Planetiler version: $PlanetilerVersion" -ForegroundColor Gray
 Write-Host "Build SHA: $($gitBuild.Sha)" -ForegroundColor Gray
 Write-Host "Build describe: $($gitBuild.Describe)" -ForegroundColor Gray
 if (-not [string]::IsNullOrWhiteSpace($gitBuild.LatestTag)) {

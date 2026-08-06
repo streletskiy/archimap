@@ -60,6 +60,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -95,6 +96,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -148,8 +150,10 @@ async function withTimeout(promise, timeoutMs = 1000) {
 
 test('saveSettings encrypts the client secret and OAuth callback stores connected token state', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
 
   const restore = installFetchMock([
     (url, _init) => {
@@ -173,20 +177,27 @@ test('saveSettings encrypts the client secret and OAuth callback stores connecte
     settingsSecret: 'test-secret'
   });
 
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
 
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT client_secret_enc
     FROM app_osm_settings
     WHERE id = 1
-  `).get();
+  `
+    )
+    .get();
   assert.ok(String(row.client_secret_enc || '').includes('.'));
   assert.notEqual(String(row.client_secret_enc || ''), 'client-secret');
 
@@ -205,20 +216,25 @@ test('saveSettings encrypts the client secret and OAuth callback stores connecte
 
 test('startOAuth rejects when the OSM client secret is missing', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   const service = createOsmSyncService({
     db,
     settingsSecret: 'test-secret'
   });
 
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
 
   await assert.rejects(
     () => service.startOAuth('admin@example.com'),
@@ -232,86 +248,154 @@ test('startOAuth rejects when the OSM client secret is missing', async () => {
 
 test('saveSettings only maps the OSM master auth host to the master API host', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   const service = createOsmSyncService({
     db,
     settingsSecret: 'test-secret'
   });
 
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://master.apis.dev.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://master.apis.dev.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
 
-  let row = db.prepare(`
+  let row = db
+    .prepare(
+      `
     SELECT api_base_url
     FROM app_osm_settings
     WHERE id = 1
-  `).get();
+  `
+    )
+    .get();
   assert.equal(row.api_base_url, 'https://master.apis.dev.openstreetmap.org');
 
   const fallbackDb = createTestDb();
-  fallbackDb.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
+  fallbackDb
+    .prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
     .run('archimap', 'https://archimap.local');
   const fallbackService = createOsmSyncService({
     db: fallbackDb,
     settingsSecret: 'test-secret'
   });
 
-  await fallbackService.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://master.apis.dev.openstreetmap.org.evil',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await fallbackService.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://master.apis.dev.openstreetmap.org.evil',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
 
-  row = fallbackDb.prepare(`
+  row = fallbackDb
+    .prepare(
+      `
     SELECT api_base_url
     FROM app_osm_settings
     WHERE id = 1
-  `).get();
+  `
+    )
+    .get();
   assert.equal(row.api_base_url, 'https://api.openstreetmap.org');
 });
 
 test('listSyncCandidates groups accepted edits by building and exposes sync state', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 101, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 101, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, updated_at
     ) VALUES (?, ?, ?, ?)
-  `).run('way', 101, 'New Name', '2026-01-02T00:00:00Z');
+  `
+  ).run('way', 101, 'New Name', '2026-01-02T00:00:00Z');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(1, 'way', 101, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z', 'New Name', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run(
+    1,
+    'way',
+    101,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(2, 'way', 101, 'admin@example.com', 'partially_accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z', 'New Name', 'synced', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z');
-  db.prepare(`
+  `
+  ).run(
+    2,
+    'way',
+    101,
+    'admin@example.com',
+    'partially_accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'synced',
+    '2026-01-03T00:00:00Z',
+    '2026-01-03T00:00:00Z'
+  );
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(3, 'relation', 202, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Rel Old' }), '2026-01-01T00:00:00Z', 'Rel New', 'failed', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    3,
+    'relation',
+    202,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Rel Old' }),
+    '2026-01-01T00:00:00Z',
+    'Rel New',
+    'failed',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
   const candidates = await service.listSyncCandidates();
 
@@ -344,14 +428,18 @@ test('listSyncCandidates groups accepted edits by building and exposes sync stat
 
 test('listSyncCandidates derives displayAddress from contour address tags', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     150,
     JSON.stringify({
@@ -360,17 +448,34 @@ test('listSyncCandidates derives displayAddress from contour address tags', asyn
     }),
     '2026-01-01T00:00:00Z'
   );
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, updated_at
     ) VALUES (?, ?, ?)
-  `).run('way', 150, '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 150, '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(150, 'way', 150, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z', 'New Name', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    150,
+    'way',
+    150,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
   const candidates = await service.listSyncCandidates();
   const candidate = candidates.items.find((item) => item.osmId === 150);
@@ -381,26 +486,34 @@ test('listSyncCandidates derives displayAddress from contour address tags', asyn
 
 test('listSyncCandidates reactivates a building when a newer accepted edit is still unsynced', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 303, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 303, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, updated_at
     ) VALUES (?, ?, ?, ?)
-  `).run('way', 303, 'New Name', '2026-01-04T00:00:00Z');
+  `
+  ).run('way', 303, 'New Name', '2026-01-04T00:00:00Z');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     4,
     'way',
     303,
@@ -414,12 +527,14 @@ test('listSyncCandidates reactivates a building when a newer accepted edit is st
     '2026-01-02T00:00:00Z',
     '2026-01-02T00:00:00Z'
   );
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     5,
     'way',
     303,
@@ -443,6 +558,71 @@ test('listSyncCandidates reactivates a building when a newer accepted edit is st
   assert.equal(candidate.syncStatus, 'unsynced');
   assert.equal(candidate.syncReadOnly, false);
   assert.equal(candidate.canSync, true);
+});
+
+test('getSyncCandidate keeps untouched contour tags in the desired map when live OSM is unavailable', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+
+  db.prepare(
+    `
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `
+  ).run(
+    'way',
+    404,
+    JSON.stringify({
+      building: 'yes',
+      source: 'survey',
+      name: 'Old Name'
+    }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(
+    `
+    INSERT INTO local.architectural_info (
+      osm_type, osm_id, name, updated_at
+    ) VALUES (?, ?, ?, ?)
+  `
+  ).run('way', 404, 'New Name', '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, name, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `
+  ).run(
+    404,
+    'way',
+    404,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({
+      building: 'yes',
+      source: 'survey',
+      name: 'Old Name'
+    }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+
+  const candidate = await service.getSyncCandidate('way', 404);
+
+  assert.ok(candidate);
+  assert.equal(candidate.currentContourTags.building, 'yes');
+  assert.equal(candidate.desiredTags.building, 'yes');
+  assert.equal(candidate.desiredTags.source, 'survey');
+  assert.equal(candidate.desiredTags.name, 'New Name');
 });
 
 test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can list candidates', async () => {
@@ -509,14 +689,20 @@ test('listSyncCandidates avoids sqlite-only datetime ordering so postgres can li
   assert.equal(candidates.total, 1);
   assert.equal(candidates.items.length, 1);
   assert.equal(candidates.items[0].osmId, 80061889);
-  assert.ok(preparedSql.some((sql) => sql.includes('ORDER BY page_groups.latest_updated_at DESC, ranked.updated_at DESC, ranked.id DESC')));
+  assert.ok(
+    preparedSql.some((sql) =>
+      sql.includes('ORDER BY page_groups.latest_updated_at DESC, ranked.updated_at DESC, ranked.id DESC')
+    )
+  );
   assert.ok(!preparedSql.some((sql) => sql.includes('ORDER BY datetime(ue.updated_at)')));
 });
 
 test('syncCandidateToOsm publishes diff and marks rows as synced', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
 
   const changesetBodies = [];
   const restore = installFetchMock([
@@ -533,7 +719,9 @@ test('syncCandidateToOsm publishes diff and marks rows as synced', async () => {
         return createFetchResponse('<osm><user display_name="Test User"/></osm>');
       }
       if (url.endsWith('/api/0.6/way/101') && (!init.method || init.method === 'GET')) {
-        return createFetchResponse('<osm><way id="101" version="3" visible="true"><tag k="name" v="Old Name"/></way></osm>');
+        return createFetchResponse(
+          '<osm><way id="101" version="3" visible="true"><tag k="name" v="Old Name"/></way></osm>'
+        );
       }
       if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
         changesetBodies.push(String(init.body || ''));
@@ -550,34 +738,56 @@ test('syncCandidateToOsm publishes diff and marks rows as synced', async () => {
   ]);
 
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
   const oauth = await service.startOAuth('admin@example.com');
   await service.handleOauthCallback({
     code: 'auth-code',
     state: oauth.state
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 101, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 101, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 101, 'New Name', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 101, 'New Name', '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(1, 'way', 101, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z', 'New Name', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    1,
+    'way',
+    101,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
   const result = await service.syncCandidateToOsm('way', 101, 'admin@example.com');
   restore();
@@ -587,11 +797,15 @@ test('syncCandidateToOsm publishes diff and marks rows as synced', async () => {
   assert.equal(changesetBodies.length, 1);
   assert.match(changesetBodies[0], /Update architectural info:/);
 
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT sync_status, sync_changeset_id, sync_summary_json
     FROM user_edits.building_user_edits
     WHERE id = 1
-  `).get();
+  `
+    )
+    .get();
   assert.equal(row.sync_status, 'synced');
   assert.equal(Number(row.sync_changeset_id), 123);
   assert.match(String(row.sync_summary_json || ''), /123/);
@@ -599,8 +813,10 @@ test('syncCandidateToOsm publishes diff and marks rows as synced', async () => {
 
 test('syncCandidateToOsm writes style only to building:architecture and removes legacy tags', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
 
   const putBodies = [];
   const restore = installFetchMock([
@@ -617,7 +833,9 @@ test('syncCandidateToOsm writes style only to building:architecture and removes 
         return createFetchResponse('<osm><user display_name="Test User"/></osm>');
       }
       if (url.endsWith('/api/0.6/way/102') && (!init.method || init.method === 'GET')) {
-        return createFetchResponse('<osm><way id="102" version="3" visible="true"><tag k="architecture" v="Old Style"/><tag k="style" v="Old Style"/></way></osm>');
+        return createFetchResponse(
+          '<osm><way id="102" version="3" visible="true"><tag k="architecture" v="Old Style"/><tag k="style" v="Old Style"/></way></osm>'
+        );
       }
       if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
         return createFetchResponse('124');
@@ -634,34 +852,56 @@ test('syncCandidateToOsm writes style only to building:architecture and removes 
   ]);
 
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
   const oauth = await service.startOAuth('admin@example.com');
   await service.handleOauthCallback({
     code: 'auth-code',
     state: oauth.state
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 102, JSON.stringify({ architecture: 'Old Style', style: 'Old Style' }), '2026-01-01T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 102, JSON.stringify({ architecture: 'Old Style', style: 'Old Style' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, style, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 102, 'New Style', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 102, 'New Style', '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, style, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(4, 'way', 102, 'admin@example.com', 'accepted', JSON.stringify(['style']), JSON.stringify({ architecture: 'Old Style', style: 'Old Style' }), '2026-01-01T00:00:00Z', 'New Style', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    4,
+    'way',
+    102,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['style']),
+    JSON.stringify({ architecture: 'Old Style', style: 'Old Style' }),
+    '2026-01-01T00:00:00Z',
+    'New Style',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
   const result = await service.syncCandidateToOsm('way', 102, 'admin@example.com');
   restore();
@@ -675,10 +915,119 @@ test('syncCandidateToOsm writes style only to building:architecture and removes 
   assert.equal(putBodies[0].includes('k="style"'), false);
 });
 
+test('syncCandidateToOsm writes roof shape only to roof:shape and removes legacy aliases', async () => {
+  const db = createTestDb();
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
+
+  const putBodies = [];
+  const restore = installFetchMock([
+    (url, init) => {
+      if (url.endsWith('/oauth2/token')) {
+        return createFetchResponse({
+          access_token: 'access-token',
+          refresh_token: 'refresh-token',
+          token_type: 'Bearer',
+          scope: 'write_api write_changeset_comments'
+        });
+      }
+      if (url.endsWith('/api/0.6/user/details')) {
+        return createFetchResponse('<osm><user display_name="Test User"/></osm>');
+      }
+      if (url.endsWith('/api/0.6/way/105') && (!init.method || init.method === 'GET')) {
+        return createFetchResponse(
+          '<osm><way id="105" version="2" visible="true"><tag k="roof:shape" v="flat"/><tag k="roof_shape" v="flat"/><tag k="building:roof:shape" v="flat"/></way></osm>'
+        );
+      }
+      if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
+        return createFetchResponse('128');
+      }
+      if (url.endsWith('/api/0.6/way/105') && init.method === 'PUT') {
+        putBodies.push(String(init.body || ''));
+        return createFetchResponse('');
+      }
+      if (url.endsWith('/api/0.6/changeset/128/close') && init.method === 'PUT') {
+        return createFetchResponse('');
+      }
+      return null;
+    }
+  ]);
+
+  const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
+  const oauth = await service.startOAuth('admin@example.com');
+  await service.handleOauthCallback({
+    code: 'auth-code',
+    state: oauth.state
+  });
+
+  db.prepare(
+    `
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `
+  ).run(
+    'way',
+    105,
+    JSON.stringify({ 'roof:shape': 'flat', roof_shape: 'flat', 'building:roof:shape': 'flat' }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(
+    `
+    INSERT INTO local.architectural_info (osm_type, osm_id, roof_shape, updated_at)
+    VALUES (?, ?, ?, ?)
+  `
+  ).run('way', 105, 'gabled', '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
+      source_osm_updated_at, roof_shape, sync_status, updated_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `
+  ).run(
+    15,
+    'way',
+    105,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['roof_shape']),
+    JSON.stringify({ 'roof:shape': 'flat', roof_shape: 'flat' }),
+    '2026-01-01T00:00:00Z',
+    'gabled',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+
+  const result = await service.syncCandidateToOsm('way', 105, 'admin@example.com');
+  restore();
+
+  assert.equal(result.ok, true);
+  assert.equal(putBodies.length, 1);
+  assert.match(putBodies[0], /<tag k="roof:shape" v="gabled"\/>/);
+  assert.equal(putBodies[0].includes('k="roof_shape"'), false);
+  assert.equal(putBodies[0].includes('k="building:roof:shape"'), false);
+});
+
 test('syncCandidateToOsm writes colour and architect only to modern tags and removes legacy aliases', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
 
   const putBodies = [];
   const restore = installFetchMock([
@@ -695,7 +1044,9 @@ test('syncCandidateToOsm writes colour and architect only to modern tags and rem
         return createFetchResponse('<osm><user display_name="Test User"/></osm>');
       }
       if (url.endsWith('/api/0.6/way/104') && (!init.method || init.method === 'GET')) {
-        return createFetchResponse('<osm><way id="104" version="6" visible="true"><tag k="colour" v="#778899"/><tag k="architect_name" v="Old Architect"/></way></osm>');
+        return createFetchResponse(
+          '<osm><way id="104" version="6" visible="true"><tag k="colour" v="#778899"/><tag k="architect_name" v="Old Architect"/></way></osm>'
+        );
       }
       if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
         return createFetchResponse('127');
@@ -712,39 +1063,43 @@ test('syncCandidateToOsm writes colour and architect only to modern tags and rem
   ]);
 
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
   const oauth = await service.startOAuth('admin@example.com');
   await service.handleOauthCallback({
     code: 'auth-code',
     state: oauth.state
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run(
-    'way',
-    104,
-    JSON.stringify({ colour: '#778899', architect_name: 'Old Architect' }),
-    '2026-01-01T00:00:00Z'
-  );
-  db.prepare(`
+  `
+  ).run('way', 104, JSON.stringify({ colour: '#778899', architect_name: 'Old Architect' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, colour, architect, updated_at)
     VALUES (?, ?, ?, ?, ?)
-  `).run('way', 104, '#112233', 'New Architect', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 104, '#112233', 'New Architect', '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, colour, architect, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     14,
     'way',
     104,
@@ -773,8 +1128,10 @@ test('syncCandidateToOsm writes colour and architect only to modern tags and rem
 
 test('syncCandidateToOsm writes design project tags into OSM XML', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
 
   const putBodies = [];
   const restore = installFetchMock([
@@ -791,7 +1148,9 @@ test('syncCandidateToOsm writes design project tags into OSM XML', async () => {
         return createFetchResponse('<osm><user display_name="Test User"/></osm>');
       }
       if (url.endsWith('/api/0.6/way/103') && (!init.method || init.method === 'GET')) {
-        return createFetchResponse('<osm><way id="103" version="2" visible="true"><tag k="name" v="Old Design"/></way></osm>');
+        return createFetchResponse(
+          '<osm><way id="103" version="2" visible="true"><tag k="name" v="Old Design"/></way></osm>'
+        );
       }
       if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
         return createFetchResponse('126');
@@ -808,34 +1167,58 @@ test('syncCandidateToOsm writes design project tags into OSM XML', async () => {
   ]);
 
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
   const oauth = await service.startOAuth('admin@example.com');
   await service.handleOauthCallback({
     code: 'auth-code',
     state: oauth.state
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 103, JSON.stringify({ name: 'Old Design' }), '2026-01-01T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 103, JSON.stringify({ name: 'Old Design' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, design, design_ref, design_year, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run('way', 103, 'typical', '1-447С-43', 1972, '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 103, 'typical', '1-447С-43', 1972, '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, design, design_ref, design_year, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(13, 'way', 103, 'admin@example.com', 'accepted', JSON.stringify(['design', 'design_ref', 'design_year']), JSON.stringify({ name: 'Old Design' }), '2026-01-01T00:00:00Z', 'typical', '1-447С-43', 1972, 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    13,
+    'way',
+    103,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['design', 'design_ref', 'design_year']),
+    JSON.stringify({ name: 'Old Design' }),
+    '2026-01-01T00:00:00Z',
+    'typical',
+    '1-447С-43',
+    1972,
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
   const result = await service.syncCandidateToOsm('way', 103, 'admin@example.com');
   restore();
@@ -849,8 +1232,10 @@ test('syncCandidateToOsm writes design project tags into OSM XML', async () => {
 
 test('syncCandidatesToOsm publishes multiple buildings in one changeset', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
 
   const changesetBodies = [];
   const putBodies = [];
@@ -870,16 +1255,20 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
         return createFetchResponse('<osm><user display_name="Test User"/></osm>');
       }
       if (url.endsWith('/api/0.6/way/201') && (!init.method || init.method === 'GET')) {
-        return createFetchResponse('<osm><way id="201" version="4" visible="true"><tag k="name" v="Old One"/></way></osm>');
+        return createFetchResponse(
+          '<osm><way id="201" version="4" visible="true"><nd ref="301"/><nd ref="302"/><nd ref="301"/><tag k="name" v="Old One"/></way></osm>'
+        );
       }
-      if (url.endsWith('/api/0.6/way/202') && (!init.method || init.method === 'GET')) {
-        return createFetchResponse('<osm><way id="202" version="7" visible="true"><tag k="name" v="Old Two"/></way></osm>');
+      if (url.endsWith('/api/0.6/relation/202') && (!init.method || init.method === 'GET')) {
+        return createFetchResponse(
+          '<osm><relation id="202" version="7" visible="true"><member type="way" ref="401" role="outer"/><member type="way" ref="402" role="inner"/><tag k="name" v="Old Two"/><tag k="type" v="multipolygon"/></relation></osm>'
+        );
       }
       if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
         changesetBodies.push(String(init.body || ''));
         return createFetchResponse('125');
       }
-      if ((url.endsWith('/api/0.6/way/201') || url.endsWith('/api/0.6/way/202')) && init.method === 'PUT') {
+      if ((url.endsWith('/api/0.6/way/201') || url.endsWith('/api/0.6/relation/202')) && init.method === 'PUT') {
         putBodies.push(String(init.body || ''));
         return createFetchResponse('');
       }
@@ -898,45 +1287,100 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
     settingsSecret: 'test-secret',
     enqueueSearchIndexRefresh
   });
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
   const oauth = await service.startOAuth('admin@example.com');
   await service.handleOauthCallback({
     code: 'auth-code',
     state: oauth.state
   });
 
-  db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at) VALUES (?, ?, ?, ?)`)
-    .run('way', 201, JSON.stringify({ name: 'Old One' }), '2026-01-01T00:00:00Z');
-  db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at) VALUES (?, ?, ?, ?)`)
-    .run('way', 202, JSON.stringify({ name: 'Old Two' }), '2026-01-01T00:00:00Z');
-  db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at) VALUES (?, ?, ?, ?)`)
-    .run('way', 201, 'New One', '2026-01-02T00:00:00Z');
-  db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at) VALUES (?, ?, ?, ?)`)
-    .run('way', 202, 'New Two', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at) VALUES (?, ?, ?, ?)`).run(
+    'way',
+    201,
+    JSON.stringify({ name: 'Old One' }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at) VALUES (?, ?, ?, ?)`).run(
+    'relation',
+    202,
+    JSON.stringify({ name: 'Old Two' }),
+    '2026-01-01T00:00:00Z'
+  );
+  db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at) VALUES (?, ?, ?, ?)`).run(
+    'way',
+    201,
+    'New One',
+    '2026-01-02T00:00:00Z'
+  );
+  db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at) VALUES (?, ?, ?, ?)`).run(
+    'relation',
+    202,
+    'New Two',
+    '2026-01-02T00:00:00Z'
+  );
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(11, 'way', 201, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old One' }), '2026-01-01T00:00:00Z', 'New One', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run(
+    11,
+    'way',
+    201,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old One' }),
+    '2026-01-01T00:00:00Z',
+    'New One',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(12, 'way', 202, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Two' }), '2026-01-01T00:00:00Z', 'New Two', 'unsynced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    12,
+    'relation',
+    202,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Two' }),
+    '2026-01-01T00:00:00Z',
+    'New Two',
+    'unsynced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
-  const result = await withTimeout(service.syncCandidatesToOsm([
-    { osmType: 'way', osmId: 201 },
-    { osmType: 'way', osmId: 202 }
-  ], 'admin@example.com'), 1000);
+  const result = await withTimeout(
+    service.syncCandidatesToOsm(
+      [
+        { osmType: 'way', osmId: 201 },
+        { osmType: 'relation', osmId: 202 }
+      ],
+      'admin@example.com'
+    ),
+    1000
+  );
   restore();
   await new Promise((resolve) => setTimeout(resolve, 25));
 
@@ -947,22 +1391,43 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
   assert.match(changesetBodies[0], /2 buildings/);
   assert.equal(putBodies.length, 2);
   assert.ok(putBodies.every((body) => body.includes('changeset="125"')));
+  const wayBody = putBodies.find((body) => body.includes('<way id="201"'));
+  const relationBody = putBodies.find((body) => body.includes('<relation id="202"'));
+  assert.ok(wayBody);
+  assert.ok(relationBody);
+  assert.match(wayBody, /<nd ref="301"\/>\s*<nd ref="302"\/>\s*<nd ref="301"\/>/);
+  assert.match(
+    relationBody,
+    /<member type="way" ref="401" role="outer"\/>\s*<member type="way" ref="402" role="inner"\/>/
+  );
 
-  const syncedRows = db.prepare(`
+  const syncedRows = db
+    .prepare(
+      `
     SELECT sync_status, sync_changeset_id
     FROM user_edits.building_user_edits
     ORDER BY id
-  `).all();
-  assert.deepEqual(syncedRows.map((row) => row.sync_status), ['synced', 'synced']);
-  assert.deepEqual(syncedRows.map((row) => Number(row.sync_changeset_id)), [125, 125]);
+  `
+    )
+    .all();
+  assert.deepEqual(
+    syncedRows.map((row) => row.sync_status),
+    ['synced', 'synced']
+  );
+  assert.deepEqual(
+    syncedRows.map((row) => Number(row.sync_changeset_id)),
+    [125, 125]
+  );
   assert.equal(refreshCalls, 0);
   assert.equal(searchRefreshCalls, 0);
 });
 
 test('syncCandidateToOsm rejects already published read-only candidates', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   const service = createOsmSyncService({ db, settingsSecret: 'test-secret' });
   const restore = installFetchMock([
     (url, init) => {
@@ -981,34 +1446,56 @@ test('syncCandidateToOsm rejects already published read-only candidates', async 
     }
   ]);
 
-  await service.saveSettings({
-    providerName: 'OpenStreetMap',
-    authBaseUrl: 'https://www.openstreetmap.org',
-    apiBaseUrl: 'https://api.openstreetmap.org',
-    clientId: 'client-id',
-    clientSecret: 'client-secret',
-    redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
-  }, 'admin@example.com');
+  await service.saveSettings(
+    {
+      providerName: 'OpenStreetMap',
+      authBaseUrl: 'https://www.openstreetmap.org',
+      apiBaseUrl: 'https://api.openstreetmap.org',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://example.com/api/admin/app-settings/osm/oauth/callback'
+    },
+    'admin@example.com'
+  );
   const oauth = await service.startOAuth('admin@example.com');
   await service.handleOauthCallback({
     code: 'auth-code',
     state: oauth.state
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 301, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 301, JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 301, 'New Name', '2026-01-02T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 301, 'New Name', '2026-01-02T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(31, 'way', 301, 'admin@example.com', 'accepted', JSON.stringify(['name']), JSON.stringify({ name: 'Old Name' }), '2026-01-01T00:00:00Z', 'New Name', 'synced', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+  `
+  ).run(
+    31,
+    'way',
+    301,
+    'admin@example.com',
+    'accepted',
+    JSON.stringify(['name']),
+    JSON.stringify({ name: 'Old Name' }),
+    '2026-01-01T00:00:00Z',
+    'New Name',
+    'synced',
+    '2026-01-02T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
   await assert.rejects(
     () => service.syncCandidateToOsm('way', 301, 'admin@example.com'),
@@ -1038,8 +1525,10 @@ test('syncCandidateToOsm rejects when OSM account is not connected', async () =>
 
 test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite and preserves history', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   let refreshCalls = 0;
   let searchRefreshCalls = 0;
   const service = createOsmSyncService({
@@ -1054,21 +1543,27 @@ test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite a
     }
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 101, JSON.stringify({ name: 'New Name' }), '2026-01-10T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 101, JSON.stringify({ name: 'New Name' }), '2026-01-10T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 101, 'New Name', '2026-01-10T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 101, 'New Name', '2026-01-10T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, sync_attempted_at, sync_succeeded_at,
       sync_changeset_id, sync_summary_json, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     1,
     'way',
     101,
@@ -1092,18 +1587,26 @@ test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite a
   assert.equal(result.ok, true);
   assert.equal(result.cleaned.length, 1);
 
-  const localRow = db.prepare(`
+  const localRow = db
+    .prepare(
+      `
     SELECT COUNT(*) AS total
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
-  `).get('way', 101);
+  `
+    )
+    .get('way', 101);
   assert.equal(Number(localRow.total || 0), 0);
 
-  const syncRow = db.prepare(`
+  const syncRow = db
+    .prepare(
+      `
     SELECT sync_status, sync_cleaned_at
     FROM user_edits.building_user_edits
     WHERE id = 1
-  `).get();
+  `
+    )
+    .get();
   assert.equal(syncRow.sync_status, 'cleaned');
   assert.ok(syncRow.sync_cleaned_at);
   assert.equal(refreshCalls, 0);
@@ -1112,8 +1615,10 @@ test('cleanupSyncedLocalOverwritesAfterImport removes matching local overwrite a
 
 test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes outside synced fields', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   let searchRefreshCalls = 0;
   const service = createOsmSyncService({
     db,
@@ -1123,10 +1628,12 @@ test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes 
     }
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     102,
     JSON.stringify({
@@ -1135,17 +1642,21 @@ test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes 
     }),
     '2026-01-10T00:00:00Z'
   );
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 102, 'Synced Name', '2026-01-10T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 102, 'Synced Name', '2026-01-10T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, name, sync_status, sync_attempted_at, sync_succeeded_at,
       sync_changeset_id, sync_summary_json, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     2,
     'way',
     102,
@@ -1169,19 +1680,25 @@ test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes 
   assert.equal(result.ok, true);
   assert.equal(result.cleaned.length, 1);
 
-  const localRow = db.prepare(`
+  const localRow = db
+    .prepare(
+      `
     SELECT COUNT(*) AS total
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
-  `).get('way', 102);
+  `
+    )
+    .get('way', 102);
   assert.equal(Number(localRow.total || 0), 0);
   assert.equal(searchRefreshCalls, 1);
 });
 
 test('cleanupSyncedLocalOverwritesAfterImport skips search index refresh for material-only overwrites', async () => {
   const db = createTestDb();
-  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`)
-    .run('archimap', 'https://archimap.local');
+  db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
+    'archimap',
+    'https://archimap.local'
+  );
   let searchRefreshCalls = 0;
   const service = createOsmSyncService({
     db,
@@ -1191,21 +1708,27 @@ test('cleanupSyncedLocalOverwritesAfterImport skips search index refresh for mat
     }
   });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 103, JSON.stringify({ material: 'brick' }), '2026-01-10T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 103, JSON.stringify({ material: 'brick' }), '2026-01-10T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (osm_type, osm_id, material, updated_at)
     VALUES (?, ?, ?, ?)
-  `).run('way', 103, 'brick', '2026-01-10T00:00:00Z');
-  db.prepare(`
+  `
+  ).run('way', 103, 'brick', '2026-01-10T00:00:00Z');
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, status, edited_fields_json, source_tags_json,
       source_osm_updated_at, material, sync_status, sync_attempted_at, sync_succeeded_at,
       sync_changeset_id, sync_summary_json, updated_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     3,
     'way',
     103,

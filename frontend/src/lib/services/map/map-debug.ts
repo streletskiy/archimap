@@ -81,9 +81,7 @@ export function createMapDebugController({
       setPaintPropertyCalls: Number(setPaintPropertyCalls) || 0
     };
 
-    const phaseHistory = Array.isArray(globalDebug.filterPhaseHistory)
-      ? globalDebug.filterPhaseHistory
-      : [];
+    const phaseHistory = Array.isArray(globalDebug.filterPhaseHistory) ? globalDebug.filterPhaseHistory : [];
     globalDebug.filterPhaseHistory = [...phaseHistory, String(phase || 'idle')].slice(-120);
 
     const map = getMap();
@@ -92,7 +90,7 @@ export function createMapDebugController({
     const visibilityByLayer = {};
     for (const layerId of getLayerIds()) {
       visibilityByLayer[layerId] = map.getLayer(layerId)
-        ? (map.getLayoutProperty(layerId, 'visibility') || 'visible')
+        ? map.getLayoutProperty(layerId, 'visibility') || 'visible'
         : 'missing';
     }
     globalDebug.layersVisibility = visibilityByLayer;
@@ -103,9 +101,7 @@ export function createMapDebugController({
   function recordSetFilter(layerId) {
     const globalDebug = ensureWindowDebugState();
     if (!globalDebug) return;
-    const current = Array.isArray(globalDebug.setFilterLayers)
-      ? globalDebug.setFilterLayers
-      : [];
+    const current = Array.isArray(globalDebug.setFilterLayers) ? globalDebug.setFilterLayers : [];
     globalDebug.setFilterLayers = [...current, String(layerId)].slice(-80);
   }
 

@@ -9,7 +9,8 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - region settings/status
    - sync run history
    - feature-to-region membership
-3. Region source selection is DB-only.
+3. Standard region creation comes from the curated admin region catalog (`frontend/static/admin-regions.geojson` + `src/lib/server/data/region-catalog.json`).
+4. Extract metadata source of truth is repository-local manifest data (`extractSource`, `extractId`, `downloadUrl`, optional `stateUrl`).
 
 ## Managed sync pipeline
 
@@ -19,15 +20,15 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - Schedule recomputation is coalesced and performed in the background so region save/sync requests do not wait for the full timer refresh.
 3. Queue launches [`scripts/sync-osm-region.ts`](../scripts/sync-osm-region.ts) for a concrete `regionId`.
 4. The sync script acts as an orchestrator and delegates the real stages to `scripts/region-sync/**`:
-   - `python-extractor.ts`: Python detection/dependency checks + `sync-osm-buildings.py` invocation
-   - `db-ingester.ts`: facade for region loading/export and DB import publishing
+   - `extract-download.ts`: curated catalog lookup + aria2-backed upstream PBF download with stage progress
+   - `osm2pgsql-import.ts`: `osm2pgsql` flex import into per-run PostgreSQL staging schema
+   - `import-applier.ts`: transactional merge/apply from staging into canonical tables + protected PMTiles swap
    - `region-db.ts`: region config loading + current-members export, including direct GeoJSON feature streaming for `--pmtiles-only`
-   - `import-applier.ts`: transactional DB apply + protected PMTiles swap
-   - `pmtiles-builder.ts`: `tippecanoe` wrapper plus NDJSON -> GeoJSON conversion when the importer does not already emit a dedicated build stream
+   - `pmtiles-builder.ts`: `planetiler` build wrapper for the region NDJSON export
 5. The region sync script runs the full OSM import pipeline described in [OSM Import Pipeline](osm-import-pipeline.md):
-   - extract resolution through `quackosm`
-   - provider-specific transformation/export through `duckdb` (`WKB` + GeoJSON feature NDJSON + summary metadata in one pass for PostgreSQL DB import/PMTiles, `GeoJSON` for SQLite and PMTiles build)
-   - transactional import into `osm.building_contours` and `data_region_memberships`
+   - curated manifest validation and aria2-backed PBF download from the stored upstream URL
+   - `osm2pgsql` flex import into PostgreSQL staging
+   - transactional merge into `osm.building_contours` and `data_region_memberships`
    - region-specific PMTiles build and protected swap
 6. The result is:
    - a refreshed union dataset in the runtime DB
@@ -35,7 +36,8 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
    - updated region sync metadata and bounds for runtime clients
 7. For managed in-app syncs, the runtime runs post-sync maintenance through `ServerRuntime` boot modules:
    - `search-index.boot.js` rebuilds the search read-model (`building_search_source` in PostgreSQL, `building_search_source` + `building_search_fts` in SQLite) and dispatches incremental refreshes to `workers/refresh-search-index.worker.ts`
-   - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh
+   - `design-ref-suggestions.boot.js` refreshes the distinct `design:ref` suggestion cache
+   - `filter-tag-keys.boot.js` resets and schedules `filter_tag_keys_cache` refresh after the heavier read-model refreshes so the Postgres scans do not overlap
 
 ## Safety invariants
 
@@ -45,6 +47,7 @@ Detailed managed OSM import reference: [OSM Import Pipeline](osm-import-pipeline
 - If a region import produces `0` features, the sync fails and the previous successful PMTiles file is kept.
 - If PMTiles build/swap fails, the previous successful PMTiles file is restored and region data cleanup is not silently committed.
 - Interrupted `queued/running` runs are recovered on restart as failed/abandoned and then automatically re-queued once during startup.
+- Managed region sync is PostgreSQL-only; SQLite, QuackOSM, DuckDB, Python importer, `osmium`, and `tippecanoe` are not part of the managed runtime path anymore.
 
 ## Runtime request flow
 

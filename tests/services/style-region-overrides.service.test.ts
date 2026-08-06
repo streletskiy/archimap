@@ -50,11 +50,14 @@ test('style region overrides service saves, updates, lists, and deletes override
   const db = createTestDb();
   const service = createStyleRegionOverridesService({ db });
 
-  const first = await service.saveOverride({
-    region_pattern: 'RU-*',
-    style_key: 'omani',
-    is_allowed: true
-  }, 'admin@example.com');
+  const first = await service.saveOverride(
+    {
+      region_pattern: 'RU-*',
+      style_key: 'omani',
+      is_allowed: true
+    },
+    'admin@example.com'
+  );
 
   assert.equal(first.region_pattern, 'ru-*');
   assert.equal(first.style_key, 'omani');
@@ -62,11 +65,14 @@ test('style region overrides service saves, updates, lists, and deletes override
   assert.equal(first.updated_by, 'admin@example.com');
   assert.equal(Number.isInteger(first.id), true);
 
-  const updated = await service.saveOverride({
-    region_pattern: 'ru-*',
-    style_key: 'omani',
-    is_allowed: false
-  }, 'moderator@example.com');
+  const updated = await service.saveOverride(
+    {
+      region_pattern: 'ru-*',
+      style_key: 'omani',
+      is_allowed: false
+    },
+    'moderator@example.com'
+  );
 
   assert.equal(updated.id, first.id);
   assert.equal(updated.is_allowed, false);
@@ -78,12 +84,14 @@ test('style region overrides service saves, updates, lists, and deletes override
   assert.equal(adminItems[0].created_at != null, true);
 
   const publicItems = await service.listPublicOverrides();
-  assert.deepEqual(publicItems, [{
-    id: first.id,
-    region_pattern: 'ru-*',
-    style_key: 'omani',
-    is_allowed: false
-  }]);
+  assert.deepEqual(publicItems, [
+    {
+      id: first.id,
+      region_pattern: 'ru-*',
+      style_key: 'omani',
+      is_allowed: false
+    }
+  ]);
 
   const deleted = await service.deleteOverride(first.id);
   assert.equal(deleted.id, first.id);

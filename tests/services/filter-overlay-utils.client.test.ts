@@ -9,11 +9,8 @@ async function loadFilterOverlayUtils() {
 }
 
 test('filter overlay stays quiet at contour zooms and remains visible below zoom 13', async () => {
-  const {
-    getFilterApplyOverlayState,
-    shouldShowFilterApplyOverlay,
-    shouldShowFilterRefiningMessage
-  } = await loadFilterOverlayUtils();
+  const { getFilterApplyOverlayState, shouldShowFilterApplyOverlay, shouldShowFilterRefiningMessage } =
+    await loadFilterOverlayUtils();
 
   const busyState = {
     statusCode: 'refining',

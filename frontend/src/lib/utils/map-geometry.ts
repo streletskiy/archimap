@@ -44,17 +44,11 @@ export function focusMapOnGeometry(map, maplibregl, geometry, options: LooseReco
   const bounds = getGeometryBounds(maplibregl, geometry);
   if (!bounds || bounds.isEmpty()) return;
 
-  const {
-    duration = 450,
-    pointZoom = 15,
-    padding = 80,
-    maxZoom = 15
-  } = options;
+  const { duration = 450, pointZoom = 15, padding = 80, maxZoom = 15 } = options;
 
   const southWest = bounds.getSouthWest();
   const northEast = bounds.getNorthEast();
-  const isPoint = Math.abs(southWest.lng - northEast.lng) < 1e-8
-    && Math.abs(southWest.lat - northEast.lat) < 1e-8;
+  const isPoint = Math.abs(southWest.lng - northEast.lng) < 1e-8 && Math.abs(southWest.lat - northEast.lat) < 1e-8;
 
   if (isPoint) {
     map.easeTo({ center: [southWest.lng, southWest.lat], zoom: pointZoom, duration });

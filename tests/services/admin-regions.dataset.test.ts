@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const adminRegionsPath = path.resolve(__dirname, '..', '..', 'frontend', 'static', 'admin-regions.geojson');
+const regionCatalogPath = path.resolve(__dirname, '..', '..', 'src', 'lib', 'server', 'data', 'region-catalog.json');
 const adminRegions = JSON.parse(fs.readFileSync(adminRegionsPath, 'utf8'));
+const regionCatalog = JSON.parse(fs.readFileSync(regionCatalogPath, 'utf8'));
 
 const BERBERA_POINT = [45.0143, 10.4396];
 const HARGEISA_POINT = [44.0581, 9.5624];
@@ -42,8 +44,7 @@ function isPointInRing(point, ring) {
 
     const [xi, yi] = start;
     const [xj, yj] = end;
-    const intersects = ((yi > y) !== (yj > y))
-      && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
 
     if (intersects) inside = !inside;
   }
@@ -87,7 +88,10 @@ test('israel-and-palestine admin region uses Natural Earth union coverage', () =
   assert.ok(feature, 'israel-and-palestine feature should exist');
   assert.equal(feature.properties.ExtractSource, 'geofabrik');
   assert.equal(feature.properties.GeometrySource, 'natural-earth');
-  assert.ok(geometryContainsPoint(feature.geometry, JERUSALEM_POINT), 'israel-and-palestine contour should include Jerusalem');
+  assert.ok(
+    geometryContainsPoint(feature.geometry, JERUSALEM_POINT),
+    'israel-and-palestine contour should include Jerusalem'
+  );
   assert.ok(geometryContainsPoint(feature.geometry, GAZA_POINT), 'israel-and-palestine contour should include Gaza');
 });
 
@@ -107,8 +111,48 @@ test('crimean-fed-district admin region uses one combined Natural Earth Admin 1 
   assert.ok(feature, 'crimean-fed-district feature should exist');
   assert.equal(feature.properties.ExtractSource, 'geofabrik');
   assert.equal(feature.properties.GeometrySource, 'natural-earth-admin1-union');
-  assert.ok(geometryContainsPoint(feature.geometry, CRIMEA_INTERIOR_POINT), 'crimean-fed-district contour should include Crimea');
-  assert.ok(geometryContainsPoint(feature.geometry, SEVASTOPOL_INTERIOR_POINT), 'crimean-fed-district contour should include Sevastopol');
+  assert.ok(
+    geometryContainsPoint(feature.geometry, CRIMEA_INTERIOR_POINT),
+    'crimean-fed-district contour should include Crimea'
+  );
+  assert.ok(
+    geometryContainsPoint(feature.geometry, SEVASTOPOL_INTERIOR_POINT),
+    'crimean-fed-district contour should include Sevastopol'
+  );
   assert.equal(getFeatureByExtractId('russia/southern_federal_district/crimea_republic'), null);
   assert.equal(getFeatureByExtractId('russia/southern_federal_district/sevastopol'), null);
+});
+
+test('admin regions dataset carries direct download metadata for curated runtime sync', () => {
+  const nizhny = getFeatureByExtractId('russia/volga_federal_district/nizhny_novgorod_oblast');
+  const california = getFeatureByExtractId('us/california');
+  const kuwait = getFeatureByExtractId('osmfr_asia_kuwait');
+
+  assert.equal(
+    nizhny?.properties?.DownloadUrl,
+    'https://download.openstreetmap.fr/extracts/russia/volga_federal_district/nizhny_novgorod_oblast.osm.pbf'
+  );
+  assert.equal(
+    nizhny?.properties?.StateUrl,
+    'https://download.openstreetmap.fr/extracts/russia/volga_federal_district/nizhny_novgorod_oblast.state.txt'
+  );
+  assert.equal(california?.properties?.DownloadUrl, 'https://download.geofabrik.de/north-america/us/california-latest.osm.pbf');
+  assert.equal(kuwait?.properties?.DownloadUrl, 'https://download.openstreetmap.fr/extracts/asia/kuwait.osm.pbf');
+  assert.equal(kuwait?.properties?.StateUrl, 'https://download.openstreetmap.fr/extracts/asia/kuwait.state.txt');
+});
+
+test('local region catalog includes hidden geofabrik subregions for country aggregates', () => {
+  const germany = regionCatalog.entries.find(
+    (entry) => entry?.extractSource === 'geofabrik' && entry?.extractId === 'germany'
+  );
+  const bayern = regionCatalog.entries.find(
+    (entry) => entry?.extractSource === 'geofabrik' && entry?.extractId === 'bayern'
+  );
+
+  assert.ok(germany, 'germany country aggregate entry should exist');
+  assert.equal(germany.countryAggregateEligible, true);
+  assert.ok(bayern, 'bayern hidden subregion entry should exist');
+  assert.equal(bayern.visibleInAdmin, false);
+  assert.equal(bayern.countryAggregateParentId, 'germany');
+  assert.equal(bayern.downloadUrl, 'https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf');
 });

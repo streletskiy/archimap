@@ -1,68 +1,38 @@
-import type {
-  RegionExtractCandidate,
-  RegionExtractSearchResult,
-  RegionExtractValidationResult
-} from '$shared/types';
+import type { RegionExtractCandidate, RegionExtractSearchResult, RegionExtractValidationResult } from '$shared/types';
 
 function createExtractsDomain(context: LooseRecord = {}) {
-  const {
-    ensureBootstrapped,
-    normalizeNullableText,
-    extractResolver
-  } = context;
+  const { ensureBootstrapped, normalizeNullableText, regionCatalog, extractResolver } = context;
 
-  function requireExtractResolver() {
-    if (
-      !extractResolver
-      || typeof extractResolver.searchExtractCandidates !== 'function'
-      || typeof extractResolver.resolveExactExtract !== 'function'
-    ) {
-      throw new Error('Extract resolver is not configured');
-    }
-    return extractResolver;
+  function hasRegionCatalog() {
+    return (
+      regionCatalog &&
+      typeof regionCatalog.findEntry === 'function' &&
+      typeof regionCatalog.searchVisibleEntries === 'function'
+    );
   }
 
-  function normalizeExtractCandidate(candidate: LooseRecord = {}): RegionExtractCandidate | null {
-    const extractSource = normalizeNullableText(
-      candidate.extractSource ?? candidate.source,
-      64
+  function hasExtractResolver() {
+    return (
+      extractResolver &&
+      typeof extractResolver.searchExtractCandidates === 'function' &&
+      typeof extractResolver.resolveExactExtract === 'function'
     );
-    const extractId = normalizeNullableText(
-      candidate.extractId ?? candidate.fileName ?? candidate.id,
-      240
-    );
+  }
+
+  function normalizeCatalogEntry(entry: LooseRecord = {}): RegionExtractCandidate | null {
+    const extractSource = normalizeNullableText(entry.extractSource, 64);
+    const extractId = normalizeNullableText(entry.extractId, 240);
     if (!extractSource || !extractId) {
       return null;
     }
-    const extractLabel = normalizeNullableText(
-      candidate.extractLabel ?? candidate.label ?? candidate.name ?? extractId,
-      240
-    ) || extractId;
     return {
       extractSource,
       extractId,
-      extractLabel,
-      downloadUrl: normalizeNullableText(candidate.downloadUrl ?? candidate.url, 1000),
-      matchKind: normalizeNullableText(candidate.matchKind, 64),
-      exact: candidate.exact === true
+      extractLabel: normalizeNullableText(entry.name ?? entry.extractLabel ?? extractId, 240) || extractId,
+      downloadUrl: normalizeNullableText(entry.downloadUrl, 4000),
+      matchKind: 'catalog',
+      exact: true
     };
-  }
-
-  function buildResolutionRequiredMessage(result: { message?: string | null; errorCode?: string | null } = {}, query = '') {
-    const base = normalizeNullableText(result.message, 1000);
-    if (base) return base;
-    const searchQuery = normalizeNullableText(query, 240);
-    if (result.errorCode === 'multiple') {
-      return searchQuery
-        ? `Query "${searchQuery}" matches multiple extract candidates. Choose one manually.`
-        : 'Query matches multiple extract candidates. Choose one manually.';
-    }
-    if (result.errorCode === 'not_found') {
-      return searchQuery
-        ? `No exact canonical extract was found for query "${searchQuery}".`
-        : 'Exact canonical extract was not found.';
-    }
-    return 'Region requires manual canonical extract selection.';
   }
 
   async function searchExtractCandidates(query, options: LooseRecord = {}): Promise<RegionExtractSearchResult> {
@@ -75,15 +45,59 @@ function createExtractsDomain(context: LooseRecord = {}) {
       };
     }
 
-    const resolver = requireExtractResolver();
-    const result = await resolver.searchExtractCandidates(normalizedQuery, options);
-    const items = Array.isArray(result?.items)
-      ? result.items.map(normalizeExtractCandidate).filter((item): item is RegionExtractCandidate => Boolean(item))
-      : [];
+    let items: RegionExtractCandidate[] = [];
+    if (hasRegionCatalog()) {
+      items = regionCatalog
+        .searchVisibleEntries(normalizedQuery, options)
+        .map(normalizeCatalogEntry)
+        .filter((item): item is RegionExtractCandidate => Boolean(item));
+    } else if (hasExtractResolver()) {
+      const result = await extractResolver.searchExtractCandidates(normalizedQuery, options);
+      items = (Array.isArray(result?.items) ? result.items : [])
+        .map(normalizeCatalogEntry)
+        .filter((item): item is RegionExtractCandidate => Boolean(item));
+    }
 
     return {
       query: normalizedQuery,
       items
+    };
+  }
+
+  async function resolveExactExtractCandidate(query, options: LooseRecord = {}) {
+    await ensureBootstrapped();
+    const extractSource = normalizeNullableText(options.source, 64);
+    const normalizedQuery = normalizeNullableText(query, 240);
+    if (!extractSource || !normalizedQuery) {
+      return {
+        candidate: null,
+        errorCode: 'not_found',
+        message: 'Exact canonical extract was not found.'
+      };
+    }
+
+    let candidate = null;
+    if (hasRegionCatalog()) {
+      candidate = normalizeCatalogEntry(regionCatalog.findEntry(extractSource, normalizedQuery) || {});
+    }
+    if (!candidate && hasExtractResolver()) {
+      const result = await extractResolver.resolveExactExtract(normalizedQuery, {
+        source: extractSource
+      });
+      candidate = normalizeCatalogEntry(result?.candidate || {});
+    }
+    if (!candidate) {
+      return {
+        candidate: null,
+        errorCode: 'not_found',
+        message: 'Exact canonical extract was not found.'
+      };
+    }
+
+    return {
+      candidate,
+      errorCode: null,
+      message: null
     };
   }
 
@@ -96,10 +110,7 @@ function createExtractsDomain(context: LooseRecord = {}) {
       input.extractSource ?? input.extract_source ?? previous?.extractSource,
       64
     );
-    const extractId = normalizeNullableText(
-      input.extractId ?? input.extract_id ?? previous?.extractId,
-      240
-    );
+    const extractId = normalizeNullableText(input.extractId ?? input.extract_id ?? previous?.extractId, 240);
     const providedLabel = normalizeNullableText(
       input.extractLabel ?? input.extract_label ?? previous?.extractLabel,
       240
@@ -108,38 +119,39 @@ function createExtractsDomain(context: LooseRecord = {}) {
     if (!extractSource || !extractId) {
       return {
         candidate: null,
-        error: 'Select a canonical extract before saving the region.'
+        error: 'Select a curated extract before saving the region (canonical extract selection is required).'
       };
     }
 
-    try {
-      const result = await requireExtractResolver().resolveExactExtract(extractId, {
+    let candidate = null;
+    if (hasRegionCatalog()) {
+      candidate = normalizeCatalogEntry(regionCatalog.findEntry(extractSource, extractId) || {});
+    }
+    if (!candidate && hasExtractResolver()) {
+      const result = await extractResolver.resolveExactExtract(extractId, {
         source: extractSource
       });
-      const candidate = normalizeExtractCandidate(result?.candidate || {});
-      if (!candidate) {
-        return {
-          candidate: null,
-          error: buildResolutionRequiredMessage(result, extractId)
-        };
-      }
-      return {
-        candidate: {
-          ...candidate,
-          extractLabel: candidate.extractLabel || providedLabel || extractId
-        },
-        error: null
-      };
-    } catch (error) {
+      candidate = normalizeCatalogEntry(result?.candidate || {});
+    }
+    if (!candidate) {
       return {
         candidate: null,
-        error: `Failed to validate canonical extract: ${String(error?.message || error || 'Unknown error')}`
+        error: `Curated extract is not available in the local catalog: ${extractSource} ${extractId}`
       };
     }
+
+    return {
+      candidate: {
+        ...candidate,
+        extractLabel: candidate.extractLabel || providedLabel || extractId
+      },
+      error: null
+    };
   }
 
   return {
     searchExtractCandidates,
+    resolveExactExtractCandidate,
     validateSelectedExtract
   };
 }

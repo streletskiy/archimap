@@ -14,20 +14,18 @@
 - `frontend/src/lib/components/base/**`: project UI wrappers that bind generated primitives to ArchiMap tokens, shared sizing, and event contracts.
 - `frontend/src/routes/admin/+page.svelte`: thin admin route container for auth guard, tab routing, and admin URL state (`tab`, `editId`).
 - `frontend/src/lib/components/admin/**`: decomposed admin UI (`AdminUsersTab`, `AdminEditsTab`, `AdminSettingsTab`, `AdminDataTab`, `AdminFiltersTab`, `AdminStylesTab`, `AdminMap`) with a shared data-controller for `Data`/`Filters`, plus tab-local subcomponents for list/filter/detail panes (`EditListFilters`, `EditDetailPane`, `SyncCandidateCard`, `SyncCandidateDetailPane`, `AdminDataForm`, `AdminDataRegionList`, `AdminDataHistorySection`, `AdminFilterTagsSection`, `AdminFilterPresetsSection`, `StyleOverridesDialog`, `StyleDefaultsSection`).
-- `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre.
-- `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers).
-- `scripts/region-sync/**`: modular managed region-sync pipeline (extract, DB ingest/apply, PMTiles build).
+- `frontend/src/lib/components/map/MapCanvas.svelte`: map render/bind layer for MapLibre, including the 2D/3D building mode toggle, URL-synced 3D camera state, automatic `building:part` activation for 3D building rendering, extrusion-based hover/selection/filter overlays in 3D mode, pitch changes, Overpass fallback synchronization, and the public `building-3d-stack.ts` facade for 3D building orchestration.
+- `frontend/src/lib/services/map/**`: extracted non-UI map logic (filter pipeline, debug hooks, math, layer/theme/search helpers, plus the public `building-3d-stack.ts` facade and the active `building-renderer-maplibre.ts` backend contract for building/3D rendering helpers).
+- `scripts/region-sync/**`: modular managed region-sync pipeline (curated extract catalog lookup, aria2-backed PBF download with progress, `osm2pgsql` staging import, PostgreSQL merge/apply, PMTiles build).
 - PostgreSQL runtime storage:
   - `osm.building_contours`: PostGIS `geom` + bbox/tags metadata; GeoJSON is rendered on demand for API/PMTiles export.
+  - `data_sync_regions`: region definitions with support for hierarchy (country aggregates and hidden subregions).
+  - region-scoped staging schemas created by managed sync runs for `osm2pgsql` flex import before controlled merge into canonical tables.
   - `public.building_search_source`: searchable subset with generated `search_tsv`.
 - SQLite:
-  - `data/archimap.db` (main app DB)
-  - `data/osm.db` (OSM contours/search source)
-  - `data/local-edits.db` (accepted local edits)
-  - `data/user-edits.db` (moderation queue + stored source geometry/tags snapshots for contour-less Overpass edits)
-  - `data/users.db` (auth/users)
+  - legacy/local-dev app storage only; managed region sync and the runtime building data path no longer target SQLite.
 - Redis (optional): session store backend.
-- PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`.
+- PMTiles: per-region vector tile files served as `/api/data/regions/:regionId/pmtiles`; region exports carry derived `render_height_m` / `render_min_height_m` properties plus `render_hide_base_when_parts`, and the managed export path first materializes a temporary indexed PostgreSQL table of `building:part` rows before streaming separate base/remainder passes so client-side `fill-extrusion` layers can render building and `building:part` volumes without a second metadata request, suppress the parent footprint when detailed parts are present, and still extrude any uncovered remainder of the base contour. Managed sync/runtime builds these archives with `planetiler` only.
 - Browser-local map fallback cache: Overpass-loaded building tiles are stored in IndexedDB from `frontend/src/lib/services/map/overpass-buildings.ts` so uncovered viewports can be revisited without re-downloading the same area in one session. When the user saves an edit for one of those buildings, the app also persists a server-side snapshot of the source geometry/tags in `user_edits.building_user_edits`, so later account/admin views do not depend on the browser cache. The same client-side module also tracks the last sync timestamp, exposes explicit load/refresh/clear controls, and uses a small concurrent worker pool that prefers the last working public endpoint for each tile while cooling down `403/504/5xx` hosts.
 
 ## Execution boundaries
@@ -35,8 +33,8 @@
 - Client-only code: `frontend/src/lib/**` and Svelte routes/components.
 - Shared UI composition follows `ui/** -> base/** -> shell/routes`; product code should not consume generated primitives directly.
 - Client map services: `frontend/src/lib/services/map/**`, `frontend/src/lib/services/map-runtime.ts`.
-  - `frontend/src/lib/services/map/overpass-buildings.ts`: client-side Overpass fallback loader/cache with viewport tiling, browser-local persistence, explicit load/refresh/clear controls, and a small concurrent worker pool that prefers the last working public endpoint while cooling down failing hosts.
-  - `frontend/src/lib/services/map/overpass-data-utils.ts`: normalization helpers for locally loaded Overpass building features and their search/filter/detail payloads, including source snapshots used when saving Overpass-backed edits.
+  - `frontend/src/lib/services/map/overpass-buildings.ts`: client-side Overpass fallback loader/cache with viewport tiling, browser-local persistence, explicit load/refresh/clear controls, a small concurrent worker pool that prefers the last working public endpoint while cooling down failing hosts, and client-side 3D-ready property normalization plus synthetic remainder expansion for fallback extrusions.
+  - `frontend/src/lib/services/map/overpass-data-utils.ts`: normalization helpers for locally loaded Overpass building features and their search/filter/detail payloads, including source snapshots used when saving Overpass-backed edits, derived 3D height/base values from `building:height` / `height` or `building:levels` / `levels` plus `min_height` / `min_level`, cheap parent/part candidate matching, and client-side `building_remainder` generation (`base - union(parts)`) for partially covered parent footprints.
 - Server-only code: `src/lib/server/**`.
 - Internal HTTP route modules: `src/lib/server/http/**`.
 - Building filter backend decomposition:
@@ -65,6 +63,7 @@
   - `src/lib/server/services/admin/admin-settings.service.ts`: email-preview, app-settings, data-settings, and region-sync orchestration
   - `src/lib/server/services/admin/admin-edits.service.ts`: admin edit moderation, merge flows, and admin user detail queries
   - `src/lib/server/services/style-region-overrides.service.ts`: public/admin style-region override rule persistence and validation
+  - `src/lib/server/services/basemap-proxy.service.ts`: same-origin proxy and TileJSON rewrite helpers for custom basemaps; Protomaps glyph/sprite assets are served from local static files under `frontend/static/basemaps-assets`
   - `src/lib/server/services/osm-sync.service.ts`: thin façade over `osm-oauth.ts`, `osm-api-client.ts`, `osm-changeset-builder.ts`, and `osm-candidate-resolver.ts` for OSM admin sync and OAuth flows
 - Frontend map filter decomposition:
   - `frontend/src/lib/services/map/map-filter-pipeline.ts`: filter lifecycle orchestration entrypoint for viewport events and status transitions
@@ -73,13 +72,18 @@
   - `frontend/src/lib/services/map/filter-worker-dispatcher.ts`: lazy `MapFilterService` worker lifecycle and request dispatch
   - `frontend/src/lib/services/map/filter-diff-apply-strategy.ts`: highlight diff/apply strategy over MapLibre paint properties
 - Frontend map canvas decomposition:
-  - `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, and overlay markup
-  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, buffered hover/click hit-testing for pmtiles buildings, and search-result click routing
-  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, carto fallback visibility, and base-label stacking
-- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`) composed by `data-settings.service.ts`.
+- `frontend/src/lib/components/map/MapCanvas.svelte`: Svelte container for MapLibre mount/unmount, reactive store bridging, URL-synced 2D/3D camera switching, and overlay markup
+  - `frontend/src/lib/components/map/map-selection-controller.ts`: map selection, selected-feature highlight, 2D contour vs 3D extrusion hit-testing, and search-result click routing
+  - `frontend/src/lib/components/map/map-region-layers-controller.ts`: region source/layer orchestration, PMTiles coverage checks, provider-aware basemap building visibility, and base-label stacking
+  - `frontend/src/lib/services/map/building-3d-stack.ts`: public facade for building layer ids, 3D height/base helpers, and renderer backend dispatch
+  - `frontend/src/lib/services/map/building-renderer-maplibre.ts`: current MapLibre extrusion backend implementation behind the building renderer contract
+  - `frontend/src/lib/services/map/map-3d-utils.ts`: shared 3D height/base derivation rules, parent-footprint suppression property names, and MapLibre extrusion expressions for PMTiles and Overpass buildings
+  - `frontend/src/lib/services/map/map-theme-utils.ts`: basemap style resolution for CARTO/MapTiler/custom proxied basemaps, local Protomaps sprite/glyph asset wiring, a custom high-contrast monochrome Protomaps flavor for custom basemaps, MapTiler POI/ferry/3D-building suppression, and locale-aware label transformation before styles reach MapLibre
+  - `frontend/src/lib/services/map/map-style-sync.ts`: shared theme/locale-driven basemap style synchronization used by secondary map widgets outside the main canvas
+- Data settings domain modules: `src/lib/server/services/data-settings/**` (`bootstrap`, `extracts`, `regions`, `sync-runs`, `presets`, `region-catalog`) composed by `data-settings.service.ts`.
 - Shared search source normalization: `src/lib/server/services/search-index-source.service.ts` now covers `name`, `address`, `style`, `architect`, and `design_ref` for the building search index.
 - Shared utilities: `src/lib/shared/**`, including `src/lib/shared/types/**` for cross-cutting domain contracts shared by backend and frontend (`Region`, `FilterPreset`, `BuildingEdit`, `SyncCandidate`, and related admin payloads).
-- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.ts`, `frontend/src/lib/client/filterUrlState.ts`, `frontend/src/lib/client/section-routes.ts`.
+- Client URL-state helpers (deep links): `frontend/src/lib/client/urlState.ts`, `frontend/src/lib/client/filterUrlState.ts`, `frontend/src/lib/client/section-routes.ts`. The map deep-link contract includes camera center/zoom plus optional `pitch`, `bearing`, and `3d` state.
 - Admin UI boundaries: `frontend/src/routes/admin/+page.svelte` owns only route-level coordination; tab-specific UI/state live under `frontend/src/lib/components/admin/**`, and the `Filters` tab contains both filter-tag allowlist management and DB-backed filter-preset CRUD.
 
 ## Security and auth points
@@ -118,12 +122,15 @@
 - Runtime preset source of truth is backend-managed storage exposed through `GET /api/filter-presets`; frontend constants no longer store preset definitions.
 - Preset names support persisted localized values (`nameI18n`); map/admin UI resolves labels by active locale with `name` fallback.
 - Custom building filter renders through dedicated region-scoped highlight layers:
-  - `<region>-filter-highlight-fill`
-  - `<region>-filter-highlight-line`
+  - 2D: `<region>-filter-highlight-fill`, `<region>-filter-highlight-line`
+  - 3D: `<region>-filter-highlight-extrusion`
 - Building hover renders through dedicated region-scoped hover layers:
-  - `<region>-hover-fill`
-  - `<region>-hover-line`
-  - Hover hit-testing uses a small pixel buffer around the cursor so thin building contours still respond to pointer hover and click.
+  - 2D: `<region>-hover-fill`, `<region>-hover-line`
+  - 3D: `<region>-hover-extrusion`
+- Selected-building emphasis renders through dedicated region-scoped selection layers:
+  - 2D: `<region>-selected-fill`, `<region>-selected-line`
+  - 3D: `<region>-selected-extrusion`
+- Hover/click hit-testing uses a small pixel buffer around the cursor in 2D so thin building contours still respond to pointer input; in 3D mode the same interaction queries only `fill-extrusion` layers so hover and clicks land on the visible building volumes instead of hidden flat footprints.
 - Filter evaluation for architectural fields uses merged local values first and then falls back to raw OSM tags, so accepted/synced edits participate in map highlighting the same way they do in building details.
 - Filtering uses a two-phase pipeline:
   - Optimistic phase: client immediately applies cached matches for current `rulesHash + bboxHash + zoomBucket`.
@@ -152,7 +159,7 @@
   - `filter-diff-apply-strategy.js`: chunked highlight diff/apply over MapLibre paint properties
   - supporting utilities remain split into `filter-bbox.js`, `filter-cache.js`, `filter-fetcher.js`, and `filter-utils.js`
 - Active coverage-window avoids redundant viewport refetches while current viewport remains inside expanded window.
-- Matched buildings are marked with `setFeatureState({ isFiltered: true, filterColor: '#rrggbb' })` using encoded OSM ids (`way/relation + osm_id`), and highlight layers render by `feature-state`.
+- Matched buildings are marked by stable OSM identity keys (`osm_key`) embedded in the region and Overpass feature properties, so selection and highlight layers do not depend on Planetiler-assigned vector-tile feature ids.
 - When one building matches multiple layers, the highest-priority layer wins and provides the visible `filterColor`.
 - Feature-state updates are diff-based (`toEnable` / `toDisable`) via worker apply-plan and are chunked per frame for smoothness.
 - Style priority is `base -> filter highlight -> selected`, so selected building style always wins over filtered highlight.
@@ -183,7 +190,8 @@ SvelteKit Node runtime (server.sveltekit.ts)
       |- cached JSON + PMTiles streaming
       |- sync hooks + PMTiles/search/filter maintenance jobs
   |
-  +--> SQLite (main + osm + local/user edits + auth)
+  +--> PostgreSQL + PostGIS (managed sync + runtime building data)
+  +--> SQLite (legacy/local-dev app storage only)
   +--> Redis session store (optional, prod)
   +--> workers/scripts (region-sync pipeline, search index rebuild, search index refresh, tag cache rebuild)
 ```

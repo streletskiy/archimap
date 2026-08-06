@@ -32,8 +32,12 @@ function getSectionChild(pathname, sectionName) {
 }
 
 function parseLegacyInfoTab(searchParams) {
-  const tabRaw = String(searchParams.get('tab') || searchParams.get('info') || '').trim().toLowerCase();
-  const docRaw = String(searchParams.get('doc') || searchParams.get('section') || '').trim().toLowerCase();
+  const tabRaw = String(searchParams.get('tab') || searchParams.get('info') || '')
+    .trim()
+    .toLowerCase();
+  const docRaw = String(searchParams.get('doc') || searchParams.get('section') || '')
+    .trim()
+    .toLowerCase();
 
   if (tabRaw === 'privacy-policy') return 'privacy';
   if (tabRaw === 'user-agreement') return 'agreement';
@@ -54,13 +58,17 @@ function parseLegacyInfoTab(searchParams) {
 
 function parseLegacyAccountTab(searchParams) {
   if (searchParams.has('editId') || searchParams.has('edit')) return 'edits';
-  const tabRaw = String(searchParams.get('tab') || searchParams.get('section') || '').trim().toLowerCase();
+  const tabRaw = String(searchParams.get('tab') || searchParams.get('section') || '')
+    .trim()
+    .toLowerCase();
   if (tabRaw === 'edits' || tabRaw === 'history') return 'edits';
   return 'settings';
 }
 
 function parseLegacyAdminTab(searchParams) {
-  const tabRaw = String(searchParams.get('tab') || searchParams.get('section') || '').trim().toLowerCase();
+  const tabRaw = String(searchParams.get('tab') || searchParams.get('section') || '')
+    .trim()
+    .toLowerCase();
   if (searchParams.has('edit') || searchParams.has('adminEdit')) return 'edits';
   if (tabRaw === 'users') return 'users';
   if (tabRaw === 'data') return 'data';
@@ -78,7 +86,9 @@ export function resolveInfoTabFromUrl(input) {
   const url = toUrl(input);
   const child = getSectionChild(url.pathname, 'info');
   if (child != null && child !== '') {
-    const slug = String(child.split('/')[0] || '').trim().toLowerCase();
+    const slug = String(child.split('/')[0] || '')
+      .trim()
+      .toLowerCase();
     if (slug === 'terms' || slug === 'agreement') return 'agreement';
     if (slug === 'privacy') return 'privacy';
     return 'about';
@@ -90,7 +100,9 @@ export function resolveAccountTabFromUrl(input) {
   const url = toUrl(input);
   const child = getSectionChild(url.pathname, 'account');
   if (child != null && child !== '') {
-    const slug = String(child.split('/')[0] || '').trim().toLowerCase();
+    const slug = String(child.split('/')[0] || '')
+      .trim()
+      .toLowerCase();
     if (slug === 'edits' || slug === 'history') return 'edits';
     return 'settings';
   }
@@ -109,7 +121,9 @@ export function resolveAdminTabFromUrl(input) {
   if (url.searchParams.has('edit') || url.searchParams.has('adminEdit')) return 'edits';
   const child = getSectionChild(url.pathname, 'admin');
   if (child != null && child !== '') {
-    const slug = String(child.split('/')[0] || '').trim().toLowerCase();
+    const slug = String(child.split('/')[0] || '')
+      .trim()
+      .toLowerCase();
     if (slug === 'users') return 'users';
     if (slug === 'data') return 'data';
     if (slug === 'osm') return 'osm';
@@ -158,7 +172,10 @@ export function buildAccountEditUrl(input, editId) {
 export function buildAdminUrl(input, tab) {
   const current = toUrl(input);
   const next = new URL(current.toString());
-  const slug = tab === 'users' || tab === 'data' || tab === 'osm' || tab === 'filters' || tab === 'styles' || tab === 'settings' ? tab : 'edits';
+  const slug =
+    tab === 'users' || tab === 'data' || tab === 'osm' || tab === 'filters' || tab === 'styles' || tab === 'settings'
+      ? tab
+      : 'edits';
   next.pathname = buildSectionPath(current.pathname, 'admin', slug);
   next.searchParams.delete('tab');
   next.searchParams.delete('section');

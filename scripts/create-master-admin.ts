@@ -24,7 +24,9 @@ function parseArgs(argv = process.argv.slice(2)): LooseRecord {
 }
 
 function normalizeEmail(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function isValidEmail(value) {
@@ -93,16 +95,16 @@ async function ensureUsersSchemaPostgres(client) {
 }
 
 function printUsageAndExit() {
-  console.log('Usage: node --import tsx scripts/create-master-admin.ts --email=<email> [--password=<password>] [--first-name=<name>] [--last-name=<name>]');
+  console.log(
+    'Usage: node --import tsx scripts/create-master-admin.ts --email=<email> [--password=<password>] [--first-name=<name>] [--last-name=<name>]'
+  );
   console.log('Behavior: creates a new master admin, or promotes existing user to master admin.');
   process.exit(1);
 }
 
 function runSqlite({ email, password, firstName, lastName }: LooseRecord) {
   const Database = require('better-sqlite3');
-  const userAuthDbPath = String(
-    process.env.USER_AUTH_DB_PATH || path.join(process.cwd(), 'data', 'users.db')
-  ).trim();
+  const userAuthDbPath = String(process.env.USER_AUTH_DB_PATH || path.join(process.cwd(), 'data', 'users.db')).trim();
   if (!userAuthDbPath) {
     throw new Error('USER_AUTH_DB_PATH is empty');
   }
@@ -118,7 +120,8 @@ function runSqlite({ email, password, firstName, lastName }: LooseRecord) {
     const existing = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
     if (existing) {
       const nextPasswordHash = password ? hashPassword(password) : String(existing.password_hash || '');
-      db.prepare(`
+      db.prepare(
+        `
         UPDATE users
         SET
           password_hash = ?,
@@ -128,7 +131,8 @@ function runSqlite({ email, password, firstName, lastName }: LooseRecord) {
           is_admin = 1,
           is_master_admin = 1
         WHERE id = ?
-      `).run(nextPasswordHash, firstName, lastName, existing.id);
+      `
+      ).run(nextPasswordHash, firstName, lastName, existing.id);
       console.log(`[admin:create] user promoted to master admin: ${email}`);
       return;
     }
@@ -137,10 +141,12 @@ function runSqlite({ email, password, firstName, lastName }: LooseRecord) {
       throw new Error('--password is required when creating a new user');
     }
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin)
       VALUES (?, ?, ?, ?, 1, 1, 1)
-    `).run(email, hashPassword(password), firstName, lastName);
+    `
+    ).run(email, hashPassword(password), firstName, lastName);
     console.log(`[admin:create] master admin created: ${email}`);
   } finally {
     db.close();
@@ -160,7 +166,8 @@ async function runPostgres({ email, password, firstName, lastName }: LooseRecord
     if (existing.rowCount > 0) {
       const row = existing.rows[0];
       const nextPasswordHash = password ? hashPassword(password) : String(row.password_hash || '');
-      await client.query(`
+      await client.query(
+        `
         UPDATE auth.users
         SET
           password_hash = $1,
@@ -170,7 +177,9 @@ async function runPostgres({ email, password, firstName, lastName }: LooseRecord
           is_admin = 1,
           is_master_admin = 1
         WHERE id = $4
-      `, [nextPasswordHash, firstName, lastName, row.id]);
+      `,
+        [nextPasswordHash, firstName, lastName, row.id]
+      );
       console.log(`[admin:create] user promoted to master admin: ${email}`);
       return;
     }
@@ -179,10 +188,13 @@ async function runPostgres({ email, password, firstName, lastName }: LooseRecord
       throw new Error('--password is required when creating a new user');
     }
 
-    await client.query(`
+    await client.query(
+      `
       INSERT INTO auth.users (email, password_hash, first_name, last_name, can_edit, is_admin, is_master_admin)
       VALUES ($1, $2, $3, $4, 1, 1, 1)
-    `, [email, hashPassword(password), firstName, lastName]);
+    `,
+      [email, hashPassword(password), firstName, lastName]
+    );
     console.log(`[admin:create] master admin created: ${email}`);
   } finally {
     await client.end();
@@ -205,7 +217,9 @@ async function run() {
     throw new Error('--password must contain at least 8 characters');
   }
 
-  const explicitDbProvider = String(process.env.DB_PROVIDER || '').trim().toLowerCase();
+  const explicitDbProvider = String(process.env.DB_PROVIDER || '')
+    .trim()
+    .toLowerCase();
   const explicitUserAuthPath = String(process.env.USER_AUTH_DB_PATH || '').trim();
   const provider = explicitDbProvider || (explicitUserAuthPath ? 'sqlite' : getDbProvider(process.env));
   if (provider === 'postgres') {

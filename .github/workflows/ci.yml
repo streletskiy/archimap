@@ -15,7 +15,7 @@ jobs:
       DB_PROVIDER: sqlite
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -90,7 +90,7 @@ jobs:
       DATABASE_URL: postgresql://archimap:archimap@127.0.0.1:5432/archimap
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

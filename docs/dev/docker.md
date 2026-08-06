@@ -10,9 +10,9 @@
 
 Reference: [`Dockerfile`](../../Dockerfile)
 
-1. `tippecanoe-builder`
+1. `planetiler-dist`
 
-- Builds `tippecanoe` and `tile-join` once from pinned ref.
+- Pulls the pinned upstream `ghcr.io/onthegomap/planetiler` image and reuses its Java runtime + application classpath in our `runtime-base`.
 
 2. `deps`
 
@@ -41,10 +41,12 @@ Reference: [`Dockerfile`](../../Dockerfile)
 - Contains only runtime assets:
   - backend runtime code (`server.sveltekit.ts`, `server.ts`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`
+  - `frontend/static`
   - production `node_modules`
-  - python venv with `quackosm`/`duckdb`
-  - `tippecanoe` binaries
-  - QuackOSM's cache root is mapped to `/app/data/cache`, so precalculated extract indexes survive container restarts when the default `./data:/app/data` volume is present.
+  - `osm2pgsql`
+  - `aria2`
+  - `planetiler` wrapper + Java runtime
+  - no QuackOSM / DuckDB / Python importer / `tippecanoe` runtime dependency for managed region sync
 
 ## Cache Stability Rules
 
@@ -53,7 +55,6 @@ Reference: [`Dockerfile`](../../Dockerfile)
 - BuildKit cache mounts are used for:
   - npm (`/root/.npm`)
   - apt (`/var/cache/apt`, `/var/lib/apt/lists`)
-  - pip (`/root/.cache/pip`)
 
 ## Build Context
 
@@ -66,6 +67,28 @@ Reference: [`Dockerfile`](../../Dockerfile)
 - local env files (`.env`, `.env.*`, except examples)
 
 ## Release Pipeline
+
+Every push to `dev` runs [`.github/workflows/docker-dev.yml`](../../.github/workflows/docker-dev.yml). The workflow:
+
+- builds only `linux/amd64` and publishes `streletskiy/archimap:dev`
+- uses the same build metadata and hashed `runtime-base` tag as the release scripts
+- builds `runtime-base` only when its derived tag is missing from Docker Hub
+- reuses GitHub Actions caches and cancels superseded builds so an older commit cannot overwrite a newer `dev` image
+
+The repository must have these GitHub Actions secrets:
+
+- `DOCKERHUB_USERNAME` — Docker Hub account name
+- `DOCKERHUB_TOKEN` — Docker Hub personal access token with read/write permission
+
+Deploy the current development image:
+
+```bash
+export ARCHIMAP_IMAGE=streletskiy/archimap:dev
+docker pull streletskiy/archimap:dev
+docker compose up -d
+```
+
+Versioned multi-arch releases remain manual and use the release scripts below.
 
 Use release scripts:
 
@@ -116,10 +139,15 @@ Docker downloads only changed layers during pull.
 
 `docker-compose.yml` reads `ARCHIMAP_IMAGE`, so the same compose file can be used for:
 
-- local source builds (`docker compose up --build`, default image tag `streletskiy/archimap:dev`)
+- local source builds (`docker compose up --build`, default image tag `archimap-local:dev`)
 - registry deploys (`ARCHIMAP_IMAGE=streletskiy/archimap:<version> docker compose up -d`)
 
-`admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` only when the archive is missing or out of date.
+The `archimap` service also sets `pull_policy: never`. Compose therefore does not silently pull a registry image for the app service when the local Docker image cache was wiped or Docker was reinstalled. This avoids accidentally booting an older published tag while iterating on the local working tree:
+
+- for local source changes, rebuild explicitly with `docker compose up -d --build archimap`
+- for published releases, pull the image first (`docker pull streletskiy/archimap:<version>`) and then run `docker compose up -d`
+
+`admin-regions.pmtiles` is expected to be committed in the repository. The runtime container checks the served `admin-regions.geojson` hash on startup and rebuilds `admin-regions.pmtiles` with `planetiler` only when the archive is missing or out of date.
 
 ## PostgreSQL + PostGIS (default in Compose)
 
@@ -130,6 +158,7 @@ docker compose up -d
 ```
 
 The Compose service sets `shm_size: 512m` for `db-postgres` because Docker's default 64MB `/dev/shm` is often too small for PostGIS parallel workers and bbox filter queries.
+It also sets `log_autovacuum_min_duration=-1` to suppress noisy autovacuum skip messages from the long-lived `region_import_stage` table during managed syncs.
 
 Pending PostgreSQL migrations are applied automatically on app startup. Manual migrations/smoke remain available in the compose network for recovery or verification:
 

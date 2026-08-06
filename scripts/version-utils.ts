@@ -44,9 +44,7 @@ function parseSemverParts(version) {
     return null;
   }
 
-  const prerelease = prereleaseRaw
-    ? prereleaseRaw.split('.').filter((item) => item.length > 0)
-    : [];
+  const prerelease = prereleaseRaw ? prereleaseRaw.split('.').filter((item) => item.length > 0) : [];
 
   return { major, minor, patch, prerelease };
 }
@@ -119,7 +117,9 @@ function pickHighestSemver(candidates = []) {
 function createVersionPayload(input: LooseRecord = {}) {
   const packageVersion = normalizeVersion(input.packageVersion) || '0.0.0';
   const describe = String(input.describe || '').trim();
-  const commit = String(input.commit || '').trim().toLowerCase();
+  const commit = String(input.commit || '')
+    .trim()
+    .toLowerCase();
   const dirty = Boolean(input.dirty) || describe.endsWith('-dirty');
   const buildTime = String(input.buildTime || new Date().toISOString()).trim();
   const appName = String(input.appName || 'archimap').trim() || 'archimap';

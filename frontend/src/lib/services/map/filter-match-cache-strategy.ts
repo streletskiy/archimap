@@ -106,7 +106,13 @@ function normalizeMatchPayload(
 type FilterMatchCacheStrategyOptions = {
   filterCache: FilterCacheLike;
   filterFetcher: FilterFetcherLike;
-  buildFilterRequestCacheKey: (spec: FilterRequestSpec, coverageHash: string, zoomBucket: number, renderMode?: 'contours' | 'markers', dataVersion?: number) => string;
+  buildFilterRequestCacheKey: (
+    spec: FilterRequestSpec,
+    coverageHash: string,
+    zoomBucket: number,
+    renderMode?: 'contours' | 'markers',
+    dataVersion?: number
+  ) => string;
   buildPrefetchCoverageWindow: (coverageWindow: BboxSnapshot | null | undefined) => BboxSnapshot | null;
   resolveMap: () => FilterMapLike | null | undefined;
   getLatestFilterToken: () => number;
@@ -120,18 +126,20 @@ function isAbortError(error) {
   return String(error?.name || '').toLowerCase() === 'aborterror';
 }
 
-export function createFilterMatchCacheStrategy({
-  filterCache,
-  filterFetcher,
-  buildFilterRequestCacheKey,
-  buildPrefetchCoverageWindow,
-  resolveMap,
-  getLatestFilterToken,
-  recordFilterRequestDebugEvent,
-  recordFilterTelemetry,
-  prefetchEnabled = true,
-  prefetchMinIntervalMs = 900
-}: FilterMatchCacheStrategyOptions = {} as FilterMatchCacheStrategyOptions) {
+export function createFilterMatchCacheStrategy(
+  {
+    filterCache,
+    filterFetcher,
+    buildFilterRequestCacheKey,
+    buildPrefetchCoverageWindow,
+    resolveMap,
+    getLatestFilterToken,
+    recordFilterRequestDebugEvent,
+    recordFilterTelemetry,
+    prefetchEnabled = true,
+    prefetchMinIntervalMs = 900
+  }: FilterMatchCacheStrategyOptions = {} as FilterMatchCacheStrategyOptions
+) {
   let prefetchFilterAbortController: AbortController | null = null;
   let filterPrefetchTimer: ReturnType<typeof setTimeout> | null = null;
   let filterLastPrefetchAt = 0;
@@ -182,7 +190,13 @@ export function createFilterMatchCacheStrategy({
     { allowCache = true }: { allowCache?: boolean } = {}
   ): Promise<Omit<FilterRequestResolution, 'spec'>> {
     const renderMode = normalizeRenderMode(context.renderMode);
-    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket, renderMode, context.dataVersion);
+    const requestCacheKey = buildFilterRequestCacheKey(
+      spec,
+      context.coverageHash,
+      context.zoomBucket,
+      renderMode,
+      context.dataVersion
+    );
     const maxResults = normalizeMatchLimit(context.matchLimit, 12_000);
     if (allowCache) {
       const cached = filterCache.getCachedFilterMatches(requestCacheKey);
@@ -252,7 +266,13 @@ export function createFilterMatchCacheStrategy({
     context: FilterCoverageContext
   ): FilterRequestResolution | null {
     const renderMode = normalizeRenderMode(context.renderMode);
-    const requestCacheKey = buildFilterRequestCacheKey(spec, context.coverageHash, context.zoomBucket, renderMode, context.dataVersion);
+    const requestCacheKey = buildFilterRequestCacheKey(
+      spec,
+      context.coverageHash,
+      context.zoomBucket,
+      renderMode,
+      context.dataVersion
+    );
     const cached = filterCache.getCachedFilterMatches(requestCacheKey);
     if (!cached) return null;
     return {
@@ -290,25 +310,24 @@ export function createFilterMatchCacheStrategy({
       signal
     });
     const itemsById = new Map(
-      (Array.isArray(batchPayload?.items) ? batchPayload.items : [])
-        .map((item) => [String(item?.id || ''), item])
+      (Array.isArray(batchPayload?.items) ? batchPayload.items : []).map((item) => [String(item?.id || ''), item])
     );
 
     return specs.map((spec): FilterRequestResolution => {
-        const payload = itemsById.get(String(spec.id || '')) || {
-          matchedKeys: [],
-          matchedFeatureIds: [],
-          matchedCount: 0,
-          meta: {
-            rulesHash: spec.rulesHash,
-            bboxHash: context.bboxHash,
-            truncated: false,
-            elapsedMs: Number(batchPayload?.meta?.elapsedMs || 0),
-            cacheHit: Boolean(batchPayload?.meta?.cacheHit),
-            renderMode,
-            dataVersion: context.dataVersion
-          }
-        };
+      const payload = itemsById.get(String(spec.id || '')) || {
+        matchedKeys: [],
+        matchedFeatureIds: [],
+        matchedCount: 0,
+        meta: {
+          rulesHash: spec.rulesHash,
+          bboxHash: context.bboxHash,
+          truncated: false,
+          elapsedMs: Number(batchPayload?.meta?.elapsedMs || 0),
+          cacheHit: Boolean(batchPayload?.meta?.cacheHit),
+          renderMode,
+          dataVersion: context.dataVersion
+        }
+      };
       const normalizedPayload = normalizeMatchPayload(payload, {
         rulesHash: payload?.meta?.rulesHash || spec.rulesHash,
         bboxHash: payload?.meta?.bboxHash || context.bboxHash,
@@ -341,13 +360,19 @@ export function createFilterMatchCacheStrategy({
     const spec = context.requestSpecs[0];
     if (!Array.isArray(spec?.rules) || spec.rules.length === 0) return;
     const now = Date.now();
-    if ((now - filterLastPrefetchAt) < prefetchMinIntervalMs) return;
+    if (now - filterLastPrefetchAt < prefetchMinIntervalMs) return;
     const prefetchBbox = buildPrefetchCoverageWindow(context.coverageWindow);
     if (!prefetchBbox) return;
     const prefetchHash = buildBboxHash(prefetchBbox, 4);
     const renderMode = normalizeRenderMode(context.renderMode);
     const maxResults = normalizeMatchLimit(context.matchLimit, 12_000);
-    const prefetchCacheKey = buildFilterRequestCacheKey(spec, prefetchHash, context.zoomBucket, renderMode, context.dataVersion);
+    const prefetchCacheKey = buildFilterRequestCacheKey(
+      spec,
+      prefetchHash,
+      context.zoomBucket,
+      renderMode,
+      context.dataVersion
+    );
     if (filterCache.getCachedFilterMatches(prefetchCacheKey)) return;
 
     cancelPrefetch();
@@ -375,19 +400,22 @@ export function createFilterMatchCacheStrategy({
           signal
         });
         if (token !== Number(getLatestFilterToken?.() ?? token)) return;
-        filterCache.putCachedFilterMatches(prefetchCacheKey, normalizeMatchPayload(payload, {
-          rulesHash: spec.rulesHash,
-          bboxHash: prefetchHash,
-          coverageHash: prefetchHash,
-          coverageWindow: prefetchBbox,
-          zoomBucket: context.zoomBucket,
-          dataVersion: context.dataVersion,
-          renderMode,
-          cacheHit: Boolean(payload?.meta?.cacheHit),
-          fallback: Boolean(payload?.meta?.fallback),
-          truncated: Boolean(payload?.meta?.truncated),
-          elapsedMs: Number(payload?.meta?.elapsedMs || 0)
-        }));
+        filterCache.putCachedFilterMatches(
+          prefetchCacheKey,
+          normalizeMatchPayload(payload, {
+            rulesHash: spec.rulesHash,
+            bboxHash: prefetchHash,
+            coverageHash: prefetchHash,
+            coverageWindow: prefetchBbox,
+            zoomBucket: context.zoomBucket,
+            dataVersion: context.dataVersion,
+            renderMode,
+            cacheHit: Boolean(payload?.meta?.cacheHit),
+            fallback: Boolean(payload?.meta?.fallback),
+            truncated: Boolean(payload?.meta?.truncated),
+            elapsedMs: Number(payload?.meta?.elapsedMs || 0)
+          })
+        );
         recordFilterRequestDebugEvent?.('prefetch-finish');
         recordFilterTelemetry?.('prefetch_finish', {
           prefetchHash,

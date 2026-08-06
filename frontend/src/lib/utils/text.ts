@@ -7,6 +7,7 @@ export const BUILDING_EDITABLE_FIELDS = Object.freeze([
   'designRef',
   'designYear',
   'material',
+  'roofShape',
   'colour',
   'levels',
   'yearBuilt',
@@ -48,7 +49,9 @@ export function formatDisplayText(...values) {
 }
 
 export function clampText(value, maxLen = 120) {
-  return String(value || '').trim().slice(0, maxLen);
+  return String(value || '')
+    .trim()
+    .slice(0, maxLen);
 }
 
 export function normalizeIntegerField(value, min, max) {

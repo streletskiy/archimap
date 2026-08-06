@@ -83,9 +83,7 @@ test('MapFilterService forwards request-plan and resolved-payload worker message
               type: 'build-resolved-payload-result',
               requestId: message.requestId,
               ok: true,
-              highlightColorGroups: [
-                { color: '#111111', ids: [2] }
-              ],
+              highlightColorGroups: [{ color: '#111111', ids: [2] }],
               matchedFeatureIds: [2],
               matchedCount: 1,
               meta: {
@@ -112,23 +110,23 @@ test('MapFilterService forwards request-plan and resolved-payload worker message
     });
 
     const plan = await service.request('build-request-plan', {
-      rules: [
-        { key: 'name', op: 'contains', value: 'alpha' }
-      ]
+      rules: [{ key: 'name', op: 'contains', value: 'alpha' }]
     });
 
     assert.equal(plan.ok, true);
     assert.equal(postedMessages[0].type, 'build-request-plan');
 
     const resolved = await service.request('build-resolved-payload', {
-      prepared: plan.ok ? plan : {
-        layers: [],
-        combinedGroup: null,
-        requestSpecs: [],
-        hasStandaloneLayers: false,
-        rulesHash: 'fnv1a-0',
-        heavy: false
-      },
+      prepared: plan.ok
+        ? plan
+        : {
+            layers: [],
+            combinedGroup: null,
+            requestSpecs: [],
+            hasStandaloneLayers: false,
+            rulesHash: 'fnv1a-0',
+            heavy: false
+          },
       payloads: [
         {
           requestId: 'layer:layer-1',

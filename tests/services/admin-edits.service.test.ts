@@ -53,6 +53,7 @@ function createBlockedAdminEditsService(syncStatus) {
       'design_ref',
       'design_year',
       'material',
+      'roof_shape',
       'colour',
       'levels',
       'year_built',
@@ -81,7 +82,7 @@ function createDbStub({ editSourceRow = {}, statusRow = { status: 'accepted' } }
 
       if (
         text.includes(
-          'SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description'
+          'SELECT name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description'
         )
       ) {
         return {
@@ -200,6 +201,7 @@ function createRefreshTrackingService({
       'design_ref',
       'design_year',
       'material',
+      'roof_shape',
       'colour',
       'levels',
       'year_built',
@@ -233,7 +235,7 @@ function createBulkMergeTrackingService({
 
       if (
         text.includes(
-          'SELECT name, style, design, design_ref, design_year, material, material_concrete, colour, levels, year_built, architect, address, archimap_description'
+          'SELECT name, style, design, design_ref, design_year, material, material_concrete, roof_shape, colour, levels, year_built, architect, address, archimap_description'
         )
       ) {
         return {
@@ -329,6 +331,7 @@ function createBulkMergeTrackingService({
       'design_ref',
       'design_year',
       'material',
+      'roof_shape',
       'colour',
       'levels',
       'year_built',

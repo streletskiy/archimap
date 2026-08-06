@@ -7,15 +7,14 @@ IMAGE="streletskiy/archimap"
 PLATFORMS="linux/amd64,linux/arm64"
 NO_CACHE=0
 CACHE_REF=""
-TIPPECANOE_REF="2.79.0"
-QUACKOSM_VERSION="0.17.0"
-DUCKDB_VERSION="1.4.4"
-PIP_VERSION="26.0.1"
+PLANETILER_VERSION="0.10.2"
 RUNTIME_BASE_TAG=""
 BUILDER="archimap-multiarch"
 SKIP_BINFMT_REPAIR=0
 SKIP_RUNTIME_BASE=0
 FORCE_RUNTIME_BASE=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
   cat <<'EOF'
@@ -30,11 +29,8 @@ Options:
   --platforms <value>         Target platforms (default: linux/amd64,linux/arm64)
   --no-cache                  Disable build cache
   --cache-ref <value>         Cache image ref (default: <image>:buildcache)
-  --tippecanoe-ref <value>    Tippecanoe git ref (default: 2.79.0)
-  --quackosm-version <value>  QuackOSM version (default: 0.17.0)
-  --duckdb-version <value>    DuckDB version (default: 1.4.4)
-  --pip-version <value>       pip version in runtime base (default: 26.0.1)
-  --runtime-base-tag <value>  Runtime base tag (default: derived from deps)
+  --planetiler-version <value> Planetiler version (default: 0.10.2)
+  --runtime-base-tag <value>  Runtime base tag (default: derived from runtime-base stage hash)
   --builder <value>           Buildx builder name (default: archimap-multiarch)
   --skip-binfmt-repair        Skip binfmt auto-install
   --skip-runtime-base         Skip runtime-base build/push (use existing tag)
@@ -55,10 +51,7 @@ while [[ $# -gt 0 ]]; do
     --platforms) PLATFORMS="${2:-}"; shift 2 ;;
     --no-cache) NO_CACHE=1; shift ;;
     --cache-ref) CACHE_REF="${2:-}"; shift 2 ;;
-    --tippecanoe-ref) TIPPECANOE_REF="${2:-}"; shift 2 ;;
-    --quackosm-version) QUACKOSM_VERSION="${2:-}"; shift 2 ;;
-    --duckdb-version) DUCKDB_VERSION="${2:-}"; shift 2 ;;
-    --pip-version) PIP_VERSION="${2:-}"; shift 2 ;;
+    --planetiler-version) PLANETILER_VERSION="${2:-}"; shift 2 ;;
     --runtime-base-tag) RUNTIME_BASE_TAG="${2:-}"; shift 2 ;;
     --builder) BUILDER="${2:-}"; shift 2 ;;
     --skip-binfmt-repair) SKIP_BINFMT_REPAIR=1; shift ;;
@@ -87,9 +80,13 @@ if [[ -z "${CACHE_REF}" ]]; then
   CACHE_REF="${IMAGE}:buildcache"
 fi
 
+if [[ -z "${RUNTIME_BASE_TAG}" ]] && ! command -v node >/dev/null 2>&1; then
+  echo "node is required to derive the runtime-base tag" >&2
+  exit 1
+fi
+
 if [[ -z "${RUNTIME_BASE_TAG}" ]]; then
-  raw_runtime_base_tag="runtime-base-t${TIPPECANOE_REF}-q${QUACKOSM_VERSION}-d${DUCKDB_VERSION}-p${PIP_VERSION}"
-  RUNTIME_BASE_TAG="$(printf '%s' "${raw_runtime_base_tag}" | tr '/:@ ' '-' | tr -c 'A-Za-z0-9._-' '-')"
+  RUNTIME_BASE_TAG="$(node "${REPO_ROOT}/scripts/lib/runtime-base-tag.js" --planetiler-version "${PLANETILER_VERSION}" --dockerfile "${REPO_ROOT}/Dockerfile")"
 fi
 RUNTIME_BASE_IMAGE="${IMAGE}:${RUNTIME_BASE_TAG}"
 
@@ -168,10 +165,7 @@ args=(
   buildx build
   --builder "${BUILDER}"
   --platform "${PLATFORMS}"
-  --build-arg "TIPPECANOE_REF=${TIPPECANOE_REF}"
-  --build-arg "QUACKOSM_VERSION=${QUACKOSM_VERSION}"
-  --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
-  --build-arg "PIP_VERSION=${PIP_VERSION}"
+  --build-arg "PLANETILER_VERSION=${PLANETILER_VERSION}"
   --build-arg "RUNTIME_BASE_IMAGE=${RUNTIME_BASE_IMAGE}"
   --build-arg "BUILD_SHA=${BUILD_SHA}"
   --build-arg "BUILD_DESCRIBE=${BUILD_DESCRIBE}"
@@ -204,10 +198,7 @@ if [[ "${SKIP_RUNTIME_BASE}" -eq 0 ]]; then
       --builder "${BUILDER}"
       --platform "${PLATFORMS}"
       --target runtime-base
-      --build-arg "TIPPECANOE_REF=${TIPPECANOE_REF}"
-      --build-arg "QUACKOSM_VERSION=${QUACKOSM_VERSION}"
-      --build-arg "DUCKDB_VERSION=${DUCKDB_VERSION}"
-      --build-arg "PIP_VERSION=${PIP_VERSION}"
+      --build-arg "PLANETILER_VERSION=${PLANETILER_VERSION}"
       -t "${RUNTIME_BASE_IMAGE}"
     )
     if [[ "${NO_CACHE}" -eq 1 ]]; then
@@ -238,10 +229,7 @@ log "Version tag: ${VERSION}"
 log "Publish latest tag: $([[ "${PUBLISH_LATEST}" -eq 1 ]] && echo yes || echo no)"
 log "Runtime base image: ${RUNTIME_BASE_IMAGE}"
 log "Platforms: ${PLATFORMS}"
-log "Tippecanoe ref: ${TIPPECANOE_REF}"
-log "QuackOSM version: ${QUACKOSM_VERSION}"
-log "DuckDB version: ${DUCKDB_VERSION}"
-log "pip version: ${PIP_VERSION}"
+log "Planetiler version: ${PLANETILER_VERSION}"
 log "Build SHA: ${BUILD_SHA}"
 log "Build describe: ${BUILD_DESCRIBE}"
 if [[ -n "${BUILD_LATEST_TAG}" ]]; then

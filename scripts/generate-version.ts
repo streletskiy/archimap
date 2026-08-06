@@ -23,10 +23,12 @@ function readPackageVersion() {
 
 function runGit(command) {
   try {
-    return String(execSync(command, {
-      cwd: ROOT_DIR,
-      stdio: ['ignore', 'pipe', 'ignore']
-    }) || '').trim();
+    return String(
+      execSync(command, {
+        cwd: ROOT_DIR,
+        stdio: ['ignore', 'pipe', 'ignore']
+      }) || ''
+    ).trim();
   } catch {
     return '';
   }
@@ -52,7 +54,10 @@ function main() {
   const packageVersion = readPackageVersion();
   const buildTime = new Date().toISOString();
   const describe = String(process.env.BUILD_DESCRIBE || '').trim() || runGit('git describe --tags --always --dirty');
-  const commit = String(process.env.BUILD_SHA || '').trim().toLowerCase() || runGit('git rev-parse --short HEAD');
+  const commit =
+    String(process.env.BUILD_SHA || '')
+      .trim()
+      .toLowerCase() || runGit('git rev-parse --short HEAD');
   const latestTag = normalizeVersion(process.env.BUILD_LATEST_TAG) || resolveLatestSemverTagFromGit();
   const gitAvailable = Boolean(describe || commit);
   const payload = createVersionPayload({

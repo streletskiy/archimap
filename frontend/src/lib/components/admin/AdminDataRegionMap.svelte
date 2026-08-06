@@ -1,9 +1,11 @@
 <script>
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
-  import { t, translateNow } from '$lib/i18n/index';
+  import { locale, t, translateNow } from '$lib/i18n/index';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { getRuntimeConfig } from '$lib/services/config';
+  import { createMapStyleSyncController } from '$lib/services/map/map-style-sync';
   import { loadMapRuntime } from '$lib/services/map-runtime';
   import { focusMapOnGeometry } from '$lib/utils/map-geometry';
 
@@ -13,8 +15,6 @@
   export let selectedRegionId = null;
   export let disabled = false;
 
-  const LIGHT = '/styles/positron-custom.json';
-  const DARK = '/styles/dark-matter-custom.json';
   const REGIONS_SOURCE_ID = 'admin-data-regions-source';
   const REGIONS_FILL_LAYER_ID = 'admin-data-regions-fill';
   const REGIONS_LINE_LAYER_ID = 'admin-data-regions-line';
@@ -41,6 +41,12 @@
   let selectedFeatureIds = [];
   let hoveredFeatureId = null;
   let hoveredFeatureMeta = null;
+  const mapStyleSync = createMapStyleSyncController({
+    getMap: () => map,
+    getTheme: () => (isDarkTheme() ? 'dark' : 'light'),
+    getLocaleCode: () => get(locale),
+    getRuntimeConfig
+  });
 
   function ensureMapRuntime() {
     if (!mapRuntimePromise) {
@@ -51,10 +57,6 @@
 
   function isDarkTheme() {
     return String(document.documentElement?.getAttribute('data-theme') || '').toLowerCase() === 'dark';
-  }
-
-  function styleByTheme() {
-    return isDarkTheme() ? DARK : LIGHT;
   }
 
   function getRegionLineColors() {
@@ -636,9 +638,11 @@
 
     maplibregl = runtime.maplibregl;
     const config = getRuntimeConfig();
+    const initialStyle = await mapStyleSync.resolveInitialStyle(config);
+    if (map || !mapEl || initNonce !== mapInitNonce) return;
     map = new maplibregl.Map({
       container: mapEl,
-      style: styleByTheme(),
+      style: initialStyle,
       center: [config.mapDefault.lon, config.mapDefault.lat],
       zoom: Math.max(3, Number(config.mapDefault.zoom || 4)),
       attributionControl: false
@@ -730,17 +734,20 @@
 
   onMount(() => {
     const observer = new MutationObserver(() => {
-      if (map) {
-        map.setStyle(styleByTheme());
-      }
+      void mapStyleSync.syncMapStyle();
     });
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['data-theme']
     });
+    const unsubscribeLocale = locale.subscribe(() => {
+      void mapStyleSync.syncMapStyle();
+    });
 
     return () => {
+      unsubscribeLocale();
       observer.disconnect();
+      mapStyleSync.reset();
       destroyMap();
     };
   });

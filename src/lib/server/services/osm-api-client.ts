@@ -17,7 +17,10 @@ async function fetchText(url, init: LooseRecord = {}, deps: LooseOsmClientDeps =
   return text;
 }
 
-async function exchangeCodeForToken({ code, verifier, authBaseUrl, redirectUri, clientId, clientSecret }: LooseRecord, deps: LooseOsmClientDeps = {}) {
+async function exchangeCodeForToken(
+  { code, verifier, authBaseUrl, redirectUri, clientId, clientSecret }: LooseRecord,
+  deps: LooseOsmClientDeps = {}
+) {
   const body = new URLSearchParams();
   body.set('grant_type', 'authorization_code');
   body.set('code', String(code || ''));
@@ -33,9 +36,15 @@ async function exchangeCodeForToken({ code, verifier, authBaseUrl, redirectUri, 
   });
   const text = await response.text();
   let payload: LooseRecord;
-  try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
   if (!response.ok) {
-    const error = new Error(String(payload?.error_description || payload?.error || text || `OSM token exchange failed (${response.status})`)) as LooseRecord;
+    const error = new Error(
+      String(payload?.error_description || payload?.error || text || `OSM token exchange failed (${response.status})`)
+    ) as LooseRecord;
     error.status = response.status;
     error.code = payload?.error || `OSM_TOKEN_HTTP_${response.status}`;
     throw error;
@@ -45,9 +54,13 @@ async function exchangeCodeForToken({ code, verifier, authBaseUrl, redirectUri, 
 
 async function fetchOsmUserDetails(accessToken, apiBaseUrl, deps: LooseOsmClientDeps = {}) {
   try {
-    const xml = await fetchText(new URL('/api/0.6/user/details', apiBaseUrl), {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/xml, text/xml;q=0.9, */*;q=0.1' }
-    }, deps);
+    const xml = await fetchText(
+      new URL('/api/0.6/user/details', apiBaseUrl),
+      {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/xml, text/xml;q=0.9, */*;q=0.1' }
+      },
+      deps
+    );
     const match = String(xml || '').match(/<user\b([^>]*)>/i);
     if (!match) return null;
     const attrs: LooseRecord = attrsToObject(match[1]);
@@ -59,18 +72,42 @@ async function fetchOsmUserDetails(accessToken, apiBaseUrl, deps: LooseOsmClient
 
 async function fetchOsmElement(osmType, osmId, accessToken, apiBaseUrl, deps: LooseOsmClientDeps = {}) {
   const endpoint = new URL(`/api/0.6/${encodeURIComponent(osmType)}/${encodeURIComponent(osmId)}`, apiBaseUrl);
-  const xml = await fetchText(endpoint, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/xml, text/xml;q=0.9, */*;q=0.1'
-    }
-  }, deps);
+  const xml = await fetchText(
+    endpoint,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/xml, text/xml;q=0.9, */*;q=0.1'
+      }
+    },
+    deps
+  );
   return parseOsmElementResponse(xml);
 }
 
-export {
-  fetchText,
-  exchangeCodeForToken,
-  fetchOsmUserDetails,
-  fetchOsmElement
-};
+async function fetchOsmElementVersion(
+  osmType,
+  osmId,
+  version,
+  accessToken,
+  apiBaseUrl,
+  deps: LooseOsmClientDeps = {}
+) {
+  const endpoint = new URL(
+    `/api/0.6/${encodeURIComponent(osmType)}/${encodeURIComponent(osmId)}/${encodeURIComponent(version)}`,
+    apiBaseUrl
+  );
+  const xml = await fetchText(
+    endpoint,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/xml, text/xml;q=0.9, */*;q=0.1'
+      }
+    },
+    deps
+  );
+  return parseOsmElementResponse(xml);
+}
+
+export { fetchText, exchangeCodeForToken, fetchOsmUserDetails, fetchOsmElement, fetchOsmElementVersion };

@@ -19,7 +19,11 @@ function getAddressParts(source, normalizeText) {
     city: firstNormalized(normalizeText, [source?.['addr:city'], source?.addr_city]),
     place: firstNormalized(normalizeText, [source?.['addr:place'], source?.addr_place]),
     street: firstNormalized(normalizeText, [source?.['addr:street'], source?.addr_street, source?.addr_stree]),
-    housenumber: firstNormalized(normalizeText, [source?.['addr:housenumber'], source?.addr_housenumber, source?.addr_hous])
+    housenumber: firstNormalized(normalizeText, [
+      source?.['addr:housenumber'],
+      source?.addr_housenumber,
+      source?.addr_hous
+    ])
   };
 }
 
@@ -54,10 +58,7 @@ export function hasStructuredAddressParts(source, normalizeText) {
 export function parseAddressFields(source, normalizeText, { fallbackAddress = '', allowFallbackAsFull = true } = {}) {
   const parts = getAddressParts(source, normalizeText);
   return {
-    full: firstNormalized(normalizeText, [
-      parts.full,
-      allowFallbackAsFull ? fallbackAddress : ''
-    ]),
+    full: firstNormalized(normalizeText, [parts.full, allowFallbackAsFull ? fallbackAddress : '']),
     postcode: parts.postcode,
     city: parts.city,
     place: parts.place,
@@ -68,9 +69,5 @@ export function parseAddressFields(source, normalizeText, { fallbackAddress = ''
 
 export function resolveAddressText(source, normalizeText, fallbackAddress = '') {
   const parts = getAddressParts(source, normalizeText);
-  return firstNormalized(normalizeText, [
-    parts.full,
-    fallbackAddress,
-    buildAddressText(parts, normalizeText)
-  ]);
+  return firstNormalized(normalizeText, [parts.full, fallbackAddress, buildAddressText(parts, normalizeText)]);
 }

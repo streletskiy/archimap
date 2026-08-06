@@ -119,9 +119,7 @@ function parseTagsJson(raw) {
   if (!text) return {};
   try {
     const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -168,11 +166,11 @@ function buildAddressFromTags(tags = {}) {
 
 function hasSearchSourceValues(sourceRow) {
   return Boolean(
-    normalizeNullableSearchText(sourceRow?.name)
-    || normalizeNullableSearchText(sourceRow?.address)
-    || normalizeNullableSearchText(sourceRow?.style)
-    || normalizeNullableSearchText(sourceRow?.architect)
-    || normalizeNullableSearchText(sourceRow?.design_ref)
+    normalizeNullableSearchText(sourceRow?.name) ||
+    normalizeNullableSearchText(sourceRow?.address) ||
+    normalizeNullableSearchText(sourceRow?.style) ||
+    normalizeNullableSearchText(sourceRow?.architect) ||
+    normalizeNullableSearchText(sourceRow?.design_ref)
   );
 }
 
@@ -188,32 +186,11 @@ function normalizeSearchSourceRow(rawRow) {
   if (getFeatureKindFromTagsJson(rawRow.tags_json) === 'building_part') {
     return null;
   }
-  const name = pickFirstText(
-    rawRow.local_name,
-    tags.name,
-    tags['name:ru'],
-    tags.official_name
-  );
-  const address = pickFirstText(
-    rawRow.local_address,
-    buildAddressFromTags(tags)
-  );
-  const style = pickFirstText(
-    rawRow.local_style,
-    tags['building:architecture'],
-    tags.architecture,
-    tags.style
-  );
-  const architect = pickFirstText(
-    rawRow.local_architect,
-    tags.architect,
-    tags.architect_name
-  );
-  const designRef = pickFirstText(
-    rawRow.local_design_ref,
-    tags['design:ref'],
-    tags.design_ref
-  );
+  const name = pickFirstText(rawRow.local_name, tags.name, tags['name:ru'], tags.official_name);
+  const address = pickFirstText(rawRow.local_address, buildAddressFromTags(tags));
+  const style = pickFirstText(rawRow.local_style, tags['building:architecture'], tags.architecture, tags.style);
+  const architect = pickFirstText(rawRow.local_architect, tags.architect, tags.architect_name);
+  const designRef = pickFirstText(rawRow.local_design_ref, tags['design:ref'], tags.design_ref);
   const centerLon = Number(rawRow.center_lon);
   const centerLat = Number(rawRow.center_lat);
 
@@ -234,9 +211,7 @@ function normalizeSearchSourceRow(rawRow) {
 }
 
 function normalizeSearchSourceRows(rows = []) {
-  return rows
-    .map(normalizeSearchSourceRow)
-    .filter(Boolean);
+  return rows.map(normalizeSearchSourceRow).filter(Boolean);
 }
 
 module.exports = {

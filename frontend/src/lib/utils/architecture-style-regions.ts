@@ -1,47 +1,55 @@
 const EX_USSR = Object.freeze([
-  'am', 'az', 'by', 'ee', 'ge', 'kz', 'kg', 'lv', 'lt', 'md', 'ru', 'tj', 'tm', 'ua', 'uz'
+  'am',
+  'az',
+  'by',
+  'ee',
+  'ge',
+  'kz',
+  'kg',
+  'lv',
+  'lt',
+  'md',
+  'ru',
+  'tj',
+  'tm',
+  'ua',
+  'uz'
 ]);
 
-const NORDIC = Object.freeze([
-  'dk', 'fi', 'is', 'no', 'se'
-]);
+const NORDIC = Object.freeze(['dk', 'fi', 'is', 'no', 'se']);
 
-const DUTCH = Object.freeze([
-  'nl'
-]);
+const DUTCH = Object.freeze(['nl']);
 
-const CZECH_CUBIST = Object.freeze([
-  'cz', 'sk'
-]);
+const CZECH_CUBIST = Object.freeze(['cz', 'sk']);
 
-const BYZANTINE_LEGACY = Object.freeze([
-  'am', 'bg', 'by', 'cy', 'ge', 'gr', 'md', 'mk', 'ro', 'rs', 'ru', 'tr', 'ua'
-]);
+const BYZANTINE_LEGACY = Object.freeze(['am', 'bg', 'by', 'cy', 'ge', 'gr', 'md', 'mk', 'ro', 'rs', 'ru', 'tr', 'ua']);
 
 const OTTOMAN_LEGACY = Object.freeze([
-  'al', 'ba', 'bg', 'gr', 'jo', 'lb', 'me', 'mk', 'ps', 'ro', 'rs', 'sy', 'tr', 'xk'
+  'al',
+  'ba',
+  'bg',
+  'gr',
+  'jo',
+  'lb',
+  'me',
+  'mk',
+  'ps',
+  'ro',
+  'rs',
+  'sy',
+  'tr',
+  'xk'
 ]);
 
-const ANGLOPHONE_GEORGIAN = Object.freeze([
-  'ca', 'gb', 'ie', 'us'
-]);
+const ANGLOPHONE_GEORGIAN = Object.freeze(['ca', 'gb', 'ie', 'us']);
 
-const VICTORIAN_CORE = Object.freeze([
-  'au', 'ca', 'gb', 'ie', 'in', 'my', 'nz', 'pk', 'sg', 'us', 'za'
-]);
+const VICTORIAN_CORE = Object.freeze(['au', 'ca', 'gb', 'ie', 'in', 'my', 'nz', 'pk', 'sg', 'us', 'za']);
 
-const STALINIST_CORE = Object.freeze([
-  ...EX_USSR,
-  'bg', 'cz', 'de', 'hu', 'pl', 'ro', 'sk'
-]);
+const STALINIST_CORE = Object.freeze([...EX_USSR, 'bg', 'cz', 'de', 'hu', 'pl', 'ro', 'sk']);
 
-const SWAHILI_COAST = Object.freeze([
-  'ke', 'tz'
-]);
+const SWAHILI_COAST = Object.freeze(['ke', 'tz']);
 
-const MAMLUK_CORE = Object.freeze([
-  'eg', 'il', 'jo', 'lb', 'ps', 'sy'
-]);
+const MAMLUK_CORE = Object.freeze(['eg', 'il', 'jo', 'lb', 'ps', 'sy']);
 
 export const STYLE_ALLOWED_REGIONS = Object.freeze({
   mamluk: [...MAMLUK_CORE],
@@ -69,15 +77,23 @@ export const STYLE_ALLOWED_REGIONS = Object.freeze({
 export const STYLE_ALLOWED_REGION_PATTERNS = Object.freeze({});
 
 function normalizeStyleKey(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function normalizeRegionSlugList(regionSlugs = []) {
-  return Array.from(new Set(
-    (Array.isArray(regionSlugs) ? regionSlugs : [])
-      .map((item) => String(item || '').trim().toLowerCase())
-      .filter(Boolean)
-  ));
+  return Array.from(
+    new Set(
+      (Array.isArray(regionSlugs) ? regionSlugs : [])
+        .map((item) =>
+          String(item || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    )
+  );
 }
 
 function escapeRegionPatternForRegex(value) {
@@ -85,8 +101,12 @@ function escapeRegionPatternForRegex(value) {
 }
 
 function matchRegionPattern(regionPattern, regionSlug) {
-  const pattern = String(regionPattern || '').trim().toLowerCase();
-  const slug = String(regionSlug || '').trim().toLowerCase();
+  const pattern = String(regionPattern || '')
+    .trim()
+    .toLowerCase();
+  const slug = String(regionSlug || '')
+    .trim()
+    .toLowerCase();
   if (!pattern || !slug) return false;
   if (!pattern.includes('*')) return pattern === slug;
   const regex = new RegExp(`^${escapeRegionPatternForRegex(pattern).replace(/\*/g, '.*')}$`);
@@ -103,8 +123,12 @@ function hasMatchingRegionPattern(regionPatterns, regionSlugs) {
 }
 
 function getOverrideSpecificity(regionPattern, regionSlug) {
-  const pattern = String(regionPattern || '').trim().toLowerCase();
-  const slug = String(regionSlug || '').trim().toLowerCase();
+  const pattern = String(regionPattern || '')
+    .trim()
+    .toLowerCase();
+  const slug = String(regionSlug || '')
+    .trim()
+    .toLowerCase();
   const wildcardCount = (pattern.match(/\*/g) || []).length;
   return {
     exactMatch: pattern === slug,
@@ -124,7 +148,9 @@ function compareOverridePriority(left, right) {
 }
 
 export function extractMacroRegionCodeFromSlug(regionSlug) {
-  const text = String(regionSlug || '').trim().toLowerCase();
+  const text = String(regionSlug || '')
+    .trim()
+    .toLowerCase();
   if (!text) return '';
   const [macroRegion = ''] = text.split('-', 1);
   return macroRegion.trim();
@@ -140,7 +166,9 @@ export function resolveArchitectureStyleOverrideDecision(styleKey, regionSlugs =
   let bestMatch = null;
   for (const [index, override] of (Array.isArray(overrides) ? overrides : []).entries()) {
     const overrideStyleKey = normalizeStyleKey(override?.style_key);
-    const regionPattern = String(override?.region_pattern || '').trim().toLowerCase();
+    const regionPattern = String(override?.region_pattern || '')
+      .trim()
+      .toLowerCase();
     if (!overrideStyleKey || overrideStyleKey !== normalizedStyleKey || !regionPattern) continue;
 
     for (const regionSlug of normalizedRegionSlugs) {

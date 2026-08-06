@@ -28,15 +28,14 @@ function encodeLegacyFilterLayers(filters) {
     filters.map((layer) => [
       MODE_TO_CODE[layer.mode] || MODE_TO_CODE.and,
       String(layer.color || '').replace(/^#/, ''),
-      layer.rules.map((rule) => (
+      layer.rules.map((rule) =>
         VALUELESS_RULE_OPS.has(rule.op)
           ? [rule.key, OP_TO_CODE[rule.op] || OP_TO_CODE.contains]
           : [rule.key, OP_TO_CODE[rule.op] || OP_TO_CODE.contains, rule.value]
-      ))
+      )
     ])
   ];
-  return Buffer
-    .from(JSON.stringify(payload), 'utf8')
+  return Buffer.from(JSON.stringify(payload), 'utf8')
     .toString('base64')
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
@@ -57,9 +56,7 @@ test('encodeFilterLayersForUrl and decodeFilterLayersFromUrl roundtrip layer fil
     {
       color: '#3b82f6',
       mode: 'layer',
-      rules: [
-        { key: 'building:material', op: 'equals', value: 'brick' }
-      ]
+      rules: [{ key: 'building:material', op: 'equals', value: 'brick' }]
     }
   ];
 
@@ -80,9 +77,7 @@ test('encodeFilterLayersForUrl and decodeFilterLayersFromUrl roundtrip layer fil
       priority: 1,
       color: '#3b82f6',
       mode: 'layer',
-      rules: [
-        { key: 'building:material', op: 'equals', value: 'brick' }
-      ]
+      rules: [{ key: 'building:material', op: 'equals', value: 'brick' }]
     }
   ]);
 });
@@ -93,9 +88,7 @@ test('decodeFilterLayersFromUrl does not support legacy v1 links', async () => {
     {
       color: '#f59e0b',
       mode: 'and',
-      rules: [
-        { key: 'building:levels', op: 'greater_or_equals', value: '5' }
-      ]
+      rules: [{ key: 'building:levels', op: 'greater_or_equals', value: '5' }]
     }
   ]);
   assert.equal(decodeFilterLayersFromUrl(legacyEncoded), null);
@@ -105,4 +98,3 @@ test('decodeFilterLayersFromUrl returns null for invalid payload', async () => {
   const { decodeFilterLayersFromUrl } = await loadFilterUrlStateModule();
   assert.equal(decodeFilterLayersFromUrl('not-a-valid-filter-state'), null);
 });
-

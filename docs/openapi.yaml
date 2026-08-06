@@ -130,6 +130,8 @@ paths:
                   type: string
                 designYear:
                   type: integer
+                roofShape:
+                  type: string
                 levels:
                   type: integer
                 yearBuilt:
@@ -332,7 +334,7 @@ paths:
       summary: Get DB-backed data settings summary
       responses:
         '200':
-          description: Data settings payload
+          description: Data settings payload without blocking live upstream checks for every region
         '401':
           description: Unauthorized
         '403':
@@ -365,6 +367,28 @@ paths:
           description: Saved region
         '400':
           description: Validation failed
+        '403':
+          description: Master admin required
+  /api/admin/app-settings/data/regions/upstream-status:
+    get:
+      summary: Get live upstream status for selected managed data regions
+      parameters:
+        - in: query
+          name: ids
+          required: true
+          schema:
+            type: string
+          description: Comma-separated managed region ids.
+        - in: query
+          name: force
+          schema:
+            type: boolean
+          description: Force bypass of the short-lived server-side upstream cache.
+      responses:
+        '200':
+          description: Region upstream status list
+        '400':
+          description: Invalid region ids
         '403':
           description: Master admin required
   /api/admin/app-settings/data/regions/{regionId}:
@@ -422,6 +446,7 @@ paths:
   /api/admin/app-settings/data/regions/{regionId}/sync-now:
     post:
       summary: Queue a managed sync run for a region
+      description: Manual syncs queue immediately and do not wait for an upstream freshness probe first.
       parameters:
         - in: path
           name: regionId
@@ -437,9 +462,37 @@ paths:
         '200':
           description: Region sync queued
         '400':
-          description: Invalid region id or region cannot be queued
+          description: Invalid region id, disabled region, or unresolved curated extract
         '403':
           description: Master admin required
+  /api/admin/app-settings/data/regions/{regionId}/sync-cancel:
+    post:
+      summary: Cancel a queued or running region sync
+      description: |
+        Requests cancellation of the region's active sync run. If the run is currently executing,
+        the child process tree is terminated and the run transitions to `abandoned` after cleanup.
+        If the run is only queued, it is removed from the queue and immediately marked `abandoned`.
+        The response indicates which target was cancelled (`running`, `queued`, or `none`).
+      parameters:
+        - in: path
+          name: regionId
+          required: true
+          schema:
+            type: integer
+        - in: header
+          name: x-csrf-token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cancellation result
+        '400':
+          description: Invalid region id or cancel request refused
+        '403':
+          description: Master admin required
+        '503':
+          description: Sync queue is currently unavailable
   /api/buildings/filter-data-bbox:
     get:
       summary: Get filter payload for visible bbox
@@ -658,9 +711,20 @@ paths:
                       type: boolean
                     userEditRequiresPermission:
                       type: boolean
+                    basemapProvider:
+                      type: string
+                      enum: [carto, maptiler, custom]
+                    maptilerApiKey:
+                      type: string
+                    customBasemapUrl:
+                      type: string
+                    customBasemapApiKey:
+                      type: string
       responses:
         '200':
           description: Saved
+        '400':
+          description: Invalid general settings payload
         '401':
           description: Unauthorized
         '403':
@@ -767,7 +831,7 @@ paths:
       summary: Get runtime JS config payload
       responses:
         '200':
-          description: window.__ARCHIMAP_CONFIG bootstrap payload
+          description: window.__ARCHIMAP_CONFIG bootstrap payload, including `basemap` runtime settings and available region PMTiles metadata. Custom basemap TileJSON and tile requests are served through same-origin proxy routes, while sprite and glyph assets are served from local static files.
   /api/filter-presets:
     get:
       summary: Get public runtime filter presets
@@ -1018,36 +1082,6 @@ paths:
           description: Master admin required
         '404':
           description: Filter preset not found
-  /api/admin/app-settings/data/regions/resolve-extract:
-    post:
-      summary: Resolve extract candidates for a managed region
-      parameters:
-        - in: header
-          name: x-csrf-token
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [query]
-              properties:
-                query:
-                  type: string
-                source:
-                  type: string
-      responses:
-        '200':
-          description: Extract resolution result
-        '400':
-          description: Validation failed
-        '401':
-          description: Unauthorized
-        '403':
-          description: Master admin required
   /api/admin/app-settings/osm:
     get:
       summary: Get OSM sync settings

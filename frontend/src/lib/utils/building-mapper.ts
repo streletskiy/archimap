@@ -1,11 +1,6 @@
-import {
-  normalizeArchitectureStyleKey,
-  toHumanArchitectureStyle
-} from './architecture-style.js';
-import {
-  normalizeBuildingMaterialSelection,
-  splitBuildingMaterialSelection
-} from './building-material.js';
+import { normalizeArchitectureStyleKey, toHumanArchitectureStyle } from './architecture-style.js';
+import { normalizeBuildingMaterialSelection, splitBuildingMaterialSelection } from './building-material.js';
+import { normalizeRoofShapeSelection } from './roof-shape.js';
 import { buildAddressText, hasStructuredAddressParts, parseAddressFields } from './building-address.js';
 import { normalizeIntegerField, pickFirstText } from './text.js';
 
@@ -20,6 +15,7 @@ export function createEmptyBuildingForm() {
     design: '',
     designRef: '',
     material: '',
+    roofShape: '',
     colour: '',
     archimapDescription: '',
     addressFull: '',
@@ -42,6 +38,7 @@ export function createEmptyBuildingComparable() {
     design: '',
     designRef: '',
     material: '',
+    roofShape: '',
     colour: '',
     archimapDescription: '',
     address: ''
@@ -56,6 +53,7 @@ export function createEmptyBulkBuildingFieldState() {
     designRef: { isMixed: false, sampleValues: [], initialValue: '' },
     designYear: { isMixed: false, sampleValues: [], initialValue: '' },
     material: { isMixed: false, sampleValues: [], initialValue: '' },
+    roofShape: { isMixed: false, sampleValues: [], initialValue: '' },
     colour: { isMixed: false, sampleValues: [], initialValue: '' },
     levels: { isMixed: false, sampleValues: [], initialValue: '' },
     yearBuilt: { isMixed: false, sampleValues: [], initialValue: '' },
@@ -72,6 +70,7 @@ const BULK_FIELD_FORM_MAP = Object.freeze({
   designRef: ['designRef'],
   designYear: ['designYear'],
   material: ['material'],
+  roofShape: ['roofShape'],
   colour: ['colour'],
   levels: ['levels'],
   yearBuilt: ['yearBuilt'],
@@ -93,9 +92,7 @@ function dedupeComparableValues(values = []) {
 
 function buildBulkFieldState(hydratedItems = [], comparableKey, form = createEmptyBuildingForm()) {
   const initialValue = pickFirstText(hydratedItems[0]?.initialComparable?.[comparableKey]);
-  const sampleValues = dedupeComparableValues(
-    hydratedItems.map((item) => item?.initialComparable?.[comparableKey])
-  );
+  const sampleValues = dedupeComparableValues(hydratedItems.map((item) => item?.initialComparable?.[comparableKey]));
   const isMixed = sampleValues.length > 1;
   const formKeys = BULK_FIELD_FORM_MAP[comparableKey] || [];
 
@@ -159,14 +156,17 @@ export function normalizeStyleForBuildingForm(value) {
 }
 
 export function buildAddressFromBuildingForm(formValue = createEmptyBuildingForm()) {
-  return buildAddressText({
-    full: formValue.addressFull,
-    postcode: formValue.addressPostcode,
-    city: formValue.addressCity,
-    place: formValue.addressPlace,
-    street: formValue.addressStreet,
-    housenumber: formValue.addressHouseNumber
-  }, pickFirstText);
+  return buildAddressText(
+    {
+      full: formValue.addressFull,
+      postcode: formValue.addressPostcode,
+      city: formValue.addressCity,
+      place: formValue.addressPlace,
+      street: formValue.addressStreet,
+      housenumber: formValue.addressHouseNumber
+    },
+    pickFirstText
+  );
 }
 
 export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingForm()) {
@@ -177,6 +177,7 @@ export function buildBuildingComparableSnapshot(formValue = createEmptyBuildingF
     designRef: pickFirstText(formValue.designRef),
     designYear: pickFirstText(formValue.designYear),
     material: normalizeBuildingMaterialSelection(formValue.material),
+    roofShape: normalizeRoofShapeSelection(formValue.roofShape),
     colour: pickFirstText(formValue.colour).toLowerCase(),
     levels: pickFirstText(formValue.levels),
     yearBuilt: pickFirstText(formValue.yearBuilt),
@@ -194,9 +195,7 @@ export function buildOsmTagEntries(sourceTags = {}) {
   return Object.entries(sourceTags)
     .map(([key, value]) => ({
       key: String(key || '').trim(),
-      value: value == null
-        ? ''
-        : (typeof value === 'object' ? JSON.stringify(value) : String(value))
+      value: value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)
     }))
     .filter((item) => item.key.length > 0)
     .sort((left, right) => left.key.localeCompare(right.key, 'en'));
@@ -217,6 +216,9 @@ export function hydrateBuildingForm(details) {
     info.material ?? sourceTags?.['building:material'] ?? sourceTags?.material,
     info.material_concrete ?? sourceTags?.['building:material:concrete'] ?? sourceTags?.material_concrete
   );
+  const roofShape = normalizeRoofShapeSelection(
+    info.roof_shape ?? sourceTags?.['roof:shape'] ?? sourceTags?.roof_shape ?? sourceTags?.['building:roof:shape']
+  );
   const form = {
     name: pickFirstText(info.name, sourceTags?.name, sourceTags?.['name:ru'], sourceTags?.['name:en']),
     levels: normalizeIntegerField(info.levels ?? sourceTags?.['building:levels'] ?? sourceTags?.levels, 0, 300),
@@ -232,11 +234,16 @@ export function hydrateBuildingForm(details) {
     ),
     architect: pickFirstText(info.architect, sourceTags?.architect, sourceTags?.architect_name),
     style: normalizeStyleForBuildingForm(
-      info.styleRaw ?? info.style ?? sourceTags?.['building:architecture'] ?? sourceTags?.architecture ?? sourceTags?.style
+      info.styleRaw ??
+        info.style ??
+        sourceTags?.['building:architecture'] ??
+        sourceTags?.architecture ??
+        sourceTags?.style
     ),
     design: pickFirstText(info.design, sourceTags?.design),
     designRef: pickFirstText(info.design_ref, sourceTags?.['design:ref'], sourceTags?.design_ref),
     material: materialSelection,
+    roofShape,
     colour: pickFirstText(info.colour, sourceTags?.['building:colour'], sourceTags?.colour),
     archimapDescription: pickFirstText(info.archimap_description, info.description),
     addressFull: nextAddressFields.full,
@@ -254,19 +261,25 @@ export function hydrateBuildingForm(details) {
   if (pickFirstText(info.design_year)) synthesizedTags['design:year'] = info.design_year;
   if (pickFirstText(info.material)) {
     const split = splitBuildingMaterialSelection(info.material);
-    
+
     // Clear all possible material tags first
     delete synthesizedTags['material'];
     delete synthesizedTags['building:material'];
     delete synthesizedTags['material_concrete'];
     delete synthesizedTags['building:material:concrete'];
-    
+
     synthesizedTags['building:material'] = split.material;
     if (split.materialConcrete) {
       synthesizedTags['building:material:concrete'] = split.materialConcrete;
     }
   }
-  
+  if (pickFirstText(info.roof_shape)) {
+    delete synthesizedTags['roof:shape'];
+    delete synthesizedTags.roof_shape;
+    delete synthesizedTags['building:roof:shape'];
+    synthesizedTags['roof:shape'] = info.roof_shape;
+  }
+
   // Also check if info.material_concrete was explicitly provided independently
   if (pickFirstText(info.material_concrete)) {
     synthesizedTags['building:material:concrete'] = info.material_concrete;
@@ -281,7 +294,8 @@ export function hydrateBuildingForm(details) {
     else if (sourceTags['year_built']) synthesizedTags['year_built'] = info.year_built;
     else synthesizedTags['building:year_built'] = info.year_built;
   }
-  if (pickFirstText(info.architect)) synthesizedTags[sourceTags['architect_name'] ? 'architect_name' : 'architect'] = info.architect;
+  if (pickFirstText(info.architect))
+    synthesizedTags[sourceTags['architect_name'] ? 'architect_name' : 'architect'] = info.architect;
   if (pickFirstText(info.name)) synthesizedTags['name'] = info.name;
 
   return {

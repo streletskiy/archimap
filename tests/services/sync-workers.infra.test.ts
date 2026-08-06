@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('events');
 
-const { initSyncWorkersInfra } = require('../../src/lib/server/infra/sync-workers.infra');
+const { initSyncWorkersInfra, _test_ } = require('../../src/lib/server/infra/sync-workers.infra');
 
 type ManagedDataSettingsOverrides = {
   refreshAllNextSyncAt?: () => Promise<Array<Record<string, unknown>>>;
@@ -43,7 +43,8 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
   let managedEnabled = true;
   const regionMap = new Map(regions.map((region) => [region.id, { ...region }]));
   const runMap = new Map();
-  const defaultRefreshAllNextSyncAt = async () => [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region }));
+  const defaultRefreshAllNextSyncAt = async () =>
+    [...regionMap.values()].filter(() => managedEnabled).map((region) => ({ ...region }));
 
   return {
     setManagedEnabled(value) {
@@ -57,9 +58,13 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
       const item = regionMap.get(Number(regionId));
       return item ? { ...item } : null;
     },
+    getRegionUpstreamState: async (regionOrId) => {
+      const region = typeof regionOrId === 'object' && regionOrId ? regionOrId : regionMap.get(Number(regionOrId));
+      return region ? { ...region } : null;
+    },
     createQueuedRun: async (regionId, triggerReason, requestedBy) => {
       const run = {
-        id: nextRunId += 1,
+        id: (nextRunId += 1),
         regionId: Number(regionId),
         status: 'queued',
         triggerReason,
@@ -105,18 +110,71 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
         region: region ? { ...region } : null
       };
     },
-    markRunFailed: async (runId, errorText) => {
+    markRunFailed: async (runId, errorText, options: LooseRecord = {}) => {
       const run = runMap.get(Number(runId));
-      run.status = 'failed';
+      run.status = String(options?.status || 'failed');
       run.error = String(errorText || '');
       const region = regionMap.get(run.regionId);
       if (region) {
-        region.lastSyncStatus = 'failed';
+        region.lastSyncStatus = run.status;
       }
       return {
         run: { ...run },
         region: region ? { ...region } : null
       };
+    },
+    updateRunStage: async (runId, stage, progress = null, detail = null) => {
+      const run = runMap.get(Number(runId));
+      if (!run) return null;
+      run.stage = stage || null;
+      run.stageProgress = Number.isFinite(Number(progress)) ? Number(progress) : null;
+      run.stageDetail = detail || null;
+      return { ...run };
+    },
+    touchRunHeartbeat: async (runId) => {
+      const run = runMap.get(Number(runId));
+      if (!run || !['queued', 'running'].includes(String(run.status || ''))) {
+        return run ? { ...run } : null;
+      }
+      run.updatedAt = `heartbeat:${Date.now()}`;
+      return { ...run };
+    },
+    markRunCancelRequested: async (runId) => {
+      const run = runMap.get(Number(runId));
+      if (!run) return null;
+      run.cancelRequested = true;
+      run.stage = 'cancelling';
+      return { ...run };
+    },
+    abandonActiveRunsForRegion: async (regionId) => {
+      const numericRegionId = Number(regionId);
+      const runs = [...runMap.values()]
+        .filter((run) => run.regionId === numericRegionId && ['queued', 'running'].includes(String(run.status || '')))
+        .map((run) => {
+          run.status = 'abandoned';
+          run.error = 'Sync cancelled by user';
+          return { ...run };
+        });
+      const region = regionMap.get(numericRegionId);
+      let repairedRegionState = false;
+      if (region && runs.length > 0) {
+        region.lastSyncStatus = 'abandoned';
+      } else if (region && ['queued', 'running'].includes(String(region.lastSyncStatus || ''))) {
+        region.lastSyncStatus = 'abandoned';
+        repairedRegionState = true;
+      }
+      return {
+        runs,
+        region: region ? { ...region } : null,
+        repairedRegionState
+      };
+    },
+    rescheduleRegionAfterSkippedSync: async (regionId) => {
+      const region = regionMap.get(Number(regionId));
+      if (region) {
+        region.nextSyncAt = 'rescheduled';
+      }
+      return region ? { ...region } : null;
     },
     ...overrides
   };
@@ -167,7 +225,12 @@ test('managed sync workers execute region jobs through a single queue', async ()
   assert.equal(spawnCalls.length, 1);
   assert.deepEqual(spawnCalls[0], ['--import', 'tsx', 'managed.ts', '--region-id=1']);
 
-  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].stdout.emit(
+    'data',
+    Buffer.from(
+      'SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'
+    )
+  );
   children[0].emit('close', 0, null);
 
   await waitForMicrotasks();
@@ -176,26 +239,97 @@ test('managed sync workers execute region jobs through a single queue', async ()
   assert.deepEqual(spawnCalls[1], ['--import', 'tsx', 'managed.ts', '--region-id=2']);
 });
 
-test('managed sync workers return queued responses without waiting for schedule refresh', async () => {
+test('managed sync workers skip child start for runs abandoned during markRunStarted and continue draining', async () => {
   const children = [];
-  const refreshGate = createDeferredPromise();
-  let refreshStarted = 0;
+  const spawnCalls = [];
   const dataSettingsService = createManagedDataSettingsService([
     {
-      id: 1,
+      id: 71,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 72,
       enabled: true,
       autoSyncEnabled: false,
       autoSyncOnStart: false,
       nextSyncAt: null,
       lastSyncStatus: 'idle'
     }
-  ], {
-    refreshAllNextSyncAt: async () => {
-      refreshStarted += 1;
-      await refreshGate.promise;
-      return [];
+  ]);
+  const baseMarkRunStarted = dataSettingsService.markRunStarted;
+  dataSettingsService.markRunStarted = async (runId) => {
+    const started = await baseMarkRunStarted(runId);
+    if (started?.regionId === 71) {
+      await dataSettingsService.markRunFailed(runId, 'Superseded by successful sync run #1', {
+        status: 'abandoned'
+      });
+      return dataSettingsService.getRunById(runId);
     }
+    return started;
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: (_execPath, args) => {
+      spawnCalls.push(args);
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
   });
+
+  const first = await workers.requestRegionSync(71, { triggerReason: 'manual', requestedBy: 'tester' });
+  const second = await workers.requestRegionSync(72, { triggerReason: 'manual', requestedBy: 'tester' });
+
+  await waitForMicrotasks();
+
+  const firstRun = await dataSettingsService.getRunById(first.run.id);
+  assert.equal(firstRun?.status, 'abandoned');
+  assert.equal(spawnCalls.length, 1);
+  assert.deepEqual(spawnCalls[0], ['--import', 'tsx', 'managed.ts', '--region-id=72']);
+
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  const secondRun = await dataSettingsService.getRunById(second.run.id);
+  assert.equal(secondRun?.status, 'success');
+});
+
+test('managed sync workers return queued responses without waiting for schedule refresh', async () => {
+  const children = [];
+  const refreshGate = createDeferredPromise();
+  let refreshStarted = 0;
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 1,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle'
+      }
+    ],
+    {
+      refreshAllNextSyncAt: async () => {
+        refreshStarted += 1;
+        await refreshGate.promise;
+        return [];
+      }
+    }
+  );
 
   const workers = initSyncWorkersInfra({
     spawn: () => {
@@ -227,9 +361,81 @@ test('managed sync workers return queued responses without waiting for schedule 
   assert.equal(queued?.queued, true);
 
   refreshGate.resolve();
-  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'));
+  children[0].stdout.emit(
+    'data',
+    Buffer.from(
+      'SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'
+    )
+  );
   children[0].emit('close', 0, null);
 
+  await waitForMicrotasks();
+});
+
+test('managed sync workers start initial manual sync without waiting for upstream probing', async () => {
+  const children = [];
+  const upstreamGate = createDeferredPromise();
+  let upstreamChecks = 0;
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 15,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle',
+        lastSuccessfulSyncAt: null
+      }
+    ],
+    {
+      getRegionUpstreamState: async (regionOrId) => {
+        upstreamChecks += 1;
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        await upstreamGate.promise;
+        return {
+          ...region,
+          latestSourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
+        };
+      }
+    }
+  );
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await Promise.race([
+    workers.requestRegionSync(15, {
+      triggerReason: 'manual',
+      requestedBy: 'tester'
+    }),
+    new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 50))
+  ]);
+
+  assert.equal(queued?.timeout, undefined);
+  assert.equal(upstreamChecks, 1);
+  assert.equal(children.length, 1);
+  assert.equal(queued.queued, true);
+
+  upstreamGate.resolve();
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":5}\n'));
+  children[0].emit('close', 0, null);
   await waitForMicrotasks();
 });
 
@@ -424,7 +630,606 @@ test('managed sync workers disable standalone runtime followup in child env', as
 
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0]?.env?.REGION_SYNC_SKIP_RUNTIME_FOLLOWUP, 'true');
+  assert.equal(spawnCalls[0]?.env?.REGION_SYNC_PARENT_PID, String(process.pid));
 
   workers.stop();
   await waitForMicrotasks();
+});
+
+test('managed sync workers heartbeat queued and running runs while using stale-only recovery sweeps', async () => {
+  const children = [];
+  const heartbeatCalls = [];
+  const recoveryCalls = [];
+  const intervals = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 61,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 62,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseTouchRunHeartbeat = dataSettingsService.touchRunHeartbeat;
+  dataSettingsService.touchRunHeartbeat = async (runId) => {
+    heartbeatCalls.push(Number(runId));
+    return baseTouchRunHeartbeat(runId);
+  };
+  dataSettingsService.recoverInterruptedRuns = (async (reason?: any, options?: any) => {
+    recoveryCalls.push({ reason, options });
+    return [];
+  }) as typeof dataSettingsService.recoverInterruptedRuns;
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} },
+    setIntervalRef: (fn, ms) => {
+      const timer = { fn, ms, unref() {} };
+      intervals.push(timer);
+      return timer;
+    },
+    clearIntervalRef: () => {},
+    runHeartbeatIntervalMs: 5_000,
+    interruptedRunStaleMs: 45_000,
+    recoverySweepIntervalMs: 20_000
+  });
+
+  await workers.initAutoSync();
+  await workers.requestRegionSync(61, { triggerReason: 'manual', requestedBy: 'tester' });
+  await workers.requestRegionSync(62, { triggerReason: 'manual', requestedBy: 'tester' });
+
+  const heartbeatTimer = intervals.find((timer) => timer.ms === 5_000);
+  const recoveryTimer = intervals.find((timer) => timer.ms === 20_000);
+  assert.ok(heartbeatTimer);
+  assert.ok(recoveryTimer);
+
+  await heartbeatTimer.fn();
+  await waitForMicrotasks();
+
+  assert.ok(heartbeatCalls.length >= 2);
+  assert.ok(heartbeatCalls.includes(2), `expected running run heartbeat, got ${heartbeatCalls.join(',')}`);
+  assert.ok(heartbeatCalls.includes(3), `expected queued run heartbeat, got ${heartbeatCalls.join(',')}`);
+
+  const initialRecoveryCall = recoveryCalls[0];
+  assert.equal(initialRecoveryCall?.reason, 'Sync interrupted by process restart');
+  assert.equal(initialRecoveryCall?.options?.staleMs, 45_000);
+
+  await recoveryTimer.fn();
+  await waitForMicrotasks();
+  assert.ok(recoveryCalls.length >= 2);
+
+  // Finish the running child to avoid dangling state in the test process.
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  workers.stop();
+});
+
+test('managed sync workers queue manual sync even when upstream data is already up to date', async () => {
+  let spawnCalls = 0;
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 11,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle',
+        lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+      }
+    ],
+    {
+      getRegionUpstreamState: async (regionOrId) => {
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        return {
+          ...region,
+          upstreamStatus: 'up_to_date',
+          latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
+        };
+      }
+    }
+  );
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      spawnCalls += 1;
+      return createChildProcessStub();
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const skipped = await workers.requestRegionSync(11, {
+    triggerReason: 'scheduled',
+    requestedBy: 'system'
+  });
+  assert.equal(skipped.queued, false);
+  assert.equal(skipped.skipped, true);
+  assert.equal(spawnCalls, 0);
+
+  const queued = await workers.requestRegionSync(11, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(queued.queued, true);
+  assert.equal(spawnCalls, 1);
+});
+
+test('managed sync workers skip scheduled sync when upstream data is already up to date', async () => {
+  let spawnCalls = 0;
+  let rescheduled = 0;
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 12,
+        enabled: true,
+        autoSyncEnabled: true,
+        autoSyncOnStart: false,
+        nextSyncAt: '2026-04-08T00:00:00.000Z',
+        lastSyncStatus: 'idle',
+        lastSuccessfulSyncAt: '2026-04-01T00:00:00.000Z'
+      }
+    ],
+    {
+      getRegionUpstreamState: async (regionOrId) => {
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        return {
+          ...region,
+          upstreamStatus: 'up_to_date',
+          latestSourceDataUpdatedAt: '2026-04-01T00:00:00.000Z'
+        };
+      },
+      rescheduleRegionAfterSkippedSync: async (regionId) => {
+        rescheduled += 1;
+        return dataSettingsService.getRegionById(regionId);
+      }
+    }
+  );
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      spawnCalls += 1;
+      return createChildProcessStub();
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const result = await workers.requestRegionSync(12, {
+    triggerReason: 'scheduled',
+    requestedBy: 'system'
+  });
+
+  assert.equal(result.queued, false);
+  assert.equal(result.skipped, true);
+  assert.equal(spawnCalls, 0);
+  assert.equal(rescheduled, 1);
+});
+
+test('managed sync workers pass imported source version marker to successful runs', async () => {
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 13,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'idle'
+      }
+    ],
+    {
+      getRegionUpstreamState: async (regionOrId) => {
+        const region =
+          typeof regionOrId === 'object' && regionOrId
+            ? regionOrId
+            : await dataSettingsService.getRegionById(regionOrId);
+        return {
+          ...region,
+          latestSourceDataUpdatedAt: '2026-04-07T23:15:47.000Z'
+        };
+      }
+    }
+  );
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await workers.requestRegionSync(13, {
+    triggerReason: 'manual',
+    requestedBy: 'tester'
+  });
+  assert.ok(queued?.run?.id);
+
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":5}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+
+  const savedRun = await dataSettingsService.getRunById(queued.run.id);
+  assert.equal(savedRun?.summary?.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
+});
+
+test('initAutoSync requeues recovered interrupted runs without waiting for upstream refresh', async () => {
+  const children = [];
+  let upstreamChecks = 0;
+  const dataSettingsService = createManagedDataSettingsService(
+    [
+      {
+        id: 14,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: false,
+        nextSyncAt: null,
+        lastSyncStatus: 'abandoned',
+        lastSyncError: 'Sync interrupted by process restart'
+      }
+    ],
+    {
+      recoverInterruptedRuns: async () => [{ id: 91, regionId: 14, status: 'abandoned' }],
+      getRegionUpstreamState: async () => {
+        upstreamChecks += 1;
+        throw new Error('recovery should bypass upstream refresh');
+      }
+    }
+  );
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  await workers.initAutoSync();
+
+  assert.equal(upstreamChecks, 0);
+  assert.equal(children.length, 1);
+  const region = await dataSettingsService.getRegionById(14);
+  assert.equal(region?.lastSyncStatus, 'running');
+});
+
+test('managed sync workers parse SYNC_STAGE_JSON markers and persist stage updates', async () => {
+  const stageCalls = [];
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 21,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseUpdateRunStage = dataSettingsService.updateRunStage;
+  dataSettingsService.updateRunStage = async (runId, stage, progress, detail) => {
+    stageCalls.push({ runId, stage, progress, detail });
+    return baseUpdateRunStage(runId, stage, progress, detail);
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: (_execPath, _args, spawnOptions = {}) => {
+      const child = createChildProcessStub();
+      child.spawnOptions = spawnOptions;
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await workers.requestRegionSync(21, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.ok(queued?.run?.id);
+
+  // Ensure the child is spawned with the stage-emission env flag
+  assert.equal(children[0].spawnOptions?.env?.REGION_SYNC_EMIT_STAGE_JSON, 'true');
+
+  // First stage: extract (no progress). Second stage: build with progress. Third: done (terminal, forced).
+  children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"extract","detail":"downloading"}\n'));
+  // Same stage again within the throttle window — must be ignored
+  children[0].stdout.emit('data', Buffer.from('SYNC_STAGE_JSON={"stage":"extract","detail":"downloading"}\n'));
+  children[0].stdout.emit(
+    'data',
+    Buffer.from('SYNC_STAGE_JSON={"stage":"build","progress":42,"detail":"shard 1/3"}\n')
+  );
+  children[0].stdout.emit(
+    'data',
+    Buffer.from(
+      'SYNC_RESULT_JSON={"activeFeatureCount":10,"importedFeatureCount":10,"orphanDeletedCount":0,"pmtilesBytes":100,"bounds":{"west":1,"south":1,"east":2,"north":2}}\n'
+    )
+  );
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  // Let pending stage promises settle
+  await waitForMicrotasks();
+
+  const stagesSeen = stageCalls.map((entry) => entry.stage);
+  assert.ok(stagesSeen.includes('extract'), `expected extract stage, got ${stagesSeen.join(',')}`);
+  assert.ok(stagesSeen.includes('build'), `expected build stage, got ${stagesSeen.join(',')}`);
+  // Duplicate extract entry within throttle window must have been suppressed
+  assert.equal(stagesSeen.filter((value) => value === 'extract').length, 1);
+  const buildEntry = stageCalls.find((entry) => entry.stage === 'build');
+  assert.equal(buildEntry?.progress, 42);
+  assert.equal(buildEntry?.detail, 'shard 1/3');
+});
+
+test('managed sync workers cancel a running sync and finalize it as abandoned', async () => {
+  const cancelMarks = [];
+  const children = [];
+  const killedPids = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 31,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const baseMarkCancel = dataSettingsService.markRunCancelRequested;
+  dataSettingsService.markRunCancelRequested = async (runId) => {
+    cancelMarks.push(runId);
+    return baseMarkCancel(runId);
+  };
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      child.pid = 12345;
+      const originalKill = child.kill.bind(child);
+      child.kill = (signal = 'SIGTERM') => {
+        killedPids.push({ pid: child.pid, signal });
+        originalKill(signal);
+      };
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const queued = await workers.requestRegionSync(31, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(children.length, 1);
+
+  const result = await workers.requestRegionSyncCancel(31);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.target, 'running');
+  assert.deepEqual(cancelMarks, [queued.run.id]);
+
+  // On non-Windows platforms the worker uses child.kill('SIGTERM').
+  // On Windows it delegates to taskkill without calling child.kill — so
+  // killedPids may be empty. The test must tolerate both.
+  if (process.platform !== 'win32') {
+    assert.ok(killedPids.length >= 1);
+  }
+
+  // The child then emits close (which createChildProcessStub already did
+  // synchronously via child.kill on non-Windows). For Windows, emit manually:
+  if (process.platform === 'win32') {
+    children[0].emit('close', null, 'SIGTERM');
+  }
+  await waitForMicrotasks();
+  await waitForMicrotasks();
+
+  const finalRun = await dataSettingsService.getRunById(queued.run.id);
+  assert.equal(finalRun?.status, 'abandoned');
+});
+
+test('signalProcessTree targets the detached POSIX process group', () => {
+  const killCalls = [];
+  const child = createChildProcessStub();
+  child.pid = 4242;
+  child.kill = () => {
+    throw new Error('child.kill fallback should not be used when group signalling succeeds');
+  };
+
+  const result = _test_.signalProcessTree(
+    child,
+    'SIGTERM',
+    { error() {} },
+    {
+      platform: 'linux',
+      killRef: (pid, signal) => {
+        killCalls.push({ pid, signal });
+      }
+    }
+  );
+
+  assert.equal(result, true);
+  assert.deepEqual(killCalls, [{ pid: -4242, signal: 'SIGTERM' }]);
+});
+
+test('managed sync workers cancel a queued sync by removing it from the queue', async () => {
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 41,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    },
+    {
+      id: 42,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const firstQueued = await workers.requestRegionSync(41, { triggerReason: 'manual', requestedBy: 'tester' });
+  const secondQueued = await workers.requestRegionSync(42, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(children.length, 1); // only first drained
+
+  const result = await workers.requestRegionSyncCancel(42);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.target, 'queued');
+
+  const cancelledRun = await dataSettingsService.getRunById(secondQueued.run.id);
+  assert.equal(cancelledRun?.status, 'abandoned');
+
+  // Finish the first to avoid dangling child
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  // First one must still be success, not touched by cancel
+  const firstRun = await dataSettingsService.getRunById(firstQueued.run.id);
+  assert.equal(firstRun?.status, 'success');
+});
+
+test('requestRegionSyncCancel returns no-op when region has no active sync', async () => {
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 51,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => createChildProcessStub(),
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const result = await workers.requestRegionSyncCancel(51);
+  assert.equal(result.cancelled, false);
+  assert.equal(result.target, 'none');
+});
+
+test('requestRegionSyncCancel abandons stale runs when no local worker owns the region sync', async () => {
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 61,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: false,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+
+  const staleRun = await dataSettingsService.createQueuedRun(61, 'manual', 'tester');
+  await dataSettingsService.markRunStarted(staleRun.id);
+
+  const workers = initSyncWorkersInfra({
+    spawn: () => createChildProcessStub(),
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  });
+
+  const result = await workers.requestRegionSyncCancel(61);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.target, 'stale');
+
+  const finalRun = await dataSettingsService.getRunById(staleRun.id);
+  assert.equal(finalRun?.status, 'abandoned');
+  const region = await dataSettingsService.getRegionById(61);
+  assert.equal(region?.lastSyncStatus, 'abandoned');
 });

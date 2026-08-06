@@ -3,14 +3,12 @@ import {
   applyFilterPaintHighlight,
   normalizeFilterPaintColorGroups
 } from '../../components/map/filter-highlight-utils.js';
-import {
-  applyFilterFallbackMarkerGroups
-} from './filter-fallback-marker-utils.js';
+import { applyFilterFallbackMarkerGroups } from './filter-fallback-marker-utils.js';
 import {
   BUILDING_FEATURE_KIND,
   BUILDING_PART_FEATURE_KIND,
   buildRegionBuildingLayerFilterExpression
-} from './map-layer-utils.js';
+} from './building-3d-stack.js';
 import { getNow, normalizeLayerIdsSnapshot } from './filter-utils.js';
 import type {
   FilterColorGroup,
@@ -55,23 +53,29 @@ function areHighlightColorGroupsEqual(left, right) {
 }
 
 function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefined, buildingPartsVisible = true) {
-  const fillLayerIds = Array.isArray(layerIds?.filterHighlightFillLayerIds)
-    ? layerIds.filterHighlightFillLayerIds
+  const extrusionLayerIds = Array.isArray(layerIds?.filterHighlightExtrusionLayerIds)
+    ? layerIds.filterHighlightExtrusionLayerIds
     : [];
-  const lineLayerIds = Array.isArray(layerIds?.filterHighlightLineLayerIds)
-    ? layerIds.filterHighlightLineLayerIds
+  const fillLayerIds = Array.isArray(layerIds?.filterHighlightFillLayerIds) ? layerIds.filterHighlightFillLayerIds : [];
+  const lineLayerIds = Array.isArray(layerIds?.filterHighlightLineLayerIds) ? layerIds.filterHighlightLineLayerIds : [];
+  const buildingFillLayerIds = Array.isArray(layerIds?.buildingFillLayerIds) ? layerIds.buildingFillLayerIds : [];
+  const buildingExtrusionLayerIds = Array.isArray(layerIds?.buildingExtrusionLayerIds)
+    ? layerIds.buildingExtrusionLayerIds
     : [];
-  const buildingFillLayerIds = Array.isArray(layerIds?.buildingFillLayerIds)
-    ? layerIds.buildingFillLayerIds
-    : [];
-  const buildingLineLayerIds = Array.isArray(layerIds?.buildingLineLayerIds)
-    ? layerIds.buildingLineLayerIds
-    : [];
+  const buildingLineLayerIds = Array.isArray(layerIds?.buildingLineLayerIds) ? layerIds.buildingLineLayerIds : [];
   const buildingPartFillLayerIds = Array.isArray(layerIds?.buildingPartFillLayerIds)
     ? layerIds.buildingPartFillLayerIds
     : [];
+  const buildingPartExtrusionLayerIds = Array.isArray(layerIds?.buildingPartExtrusionLayerIds)
+    ? layerIds.buildingPartExtrusionLayerIds
+    : [];
   const buildingPartLineLayerIds = Array.isArray(layerIds?.buildingPartLineLayerIds)
     ? layerIds.buildingPartLineLayerIds
+    : [];
+  const buildingPartFilterHighlightExtrusionLayerIds = Array.isArray(
+    layerIds?.buildingPartFilterHighlightExtrusionLayerIds
+  )
+    ? layerIds.buildingPartFilterHighlightExtrusionLayerIds
     : [];
   const buildingPartFilterHighlightFillLayerIds = Array.isArray(layerIds?.buildingPartFilterHighlightFillLayerIds)
     ? layerIds.buildingPartFilterHighlightFillLayerIds
@@ -80,12 +84,16 @@ function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefi
     ? layerIds.buildingPartFilterHighlightLineLayerIds
     : [];
   return [
+    `ext:${extrusionLayerIds.join(',')}`,
     `fill:${fillLayerIds.join(',')}`,
     `line:${lineLayerIds.join(',')}`,
     `bfill:${buildingFillLayerIds.join(',')}`,
+    `bext:${buildingExtrusionLayerIds.join(',')}`,
     `bline:${buildingLineLayerIds.join(',')}`,
     `pfill:${buildingPartFillLayerIds.join(',')}`,
+    `pext:${buildingPartExtrusionLayerIds.join(',')}`,
     `pline:${buildingPartLineLayerIds.join(',')}`,
+    `pfext:${buildingPartFilterHighlightExtrusionLayerIds.join(',')}`,
     `pffill:${buildingPartFilterHighlightFillLayerIds.join(',')}`,
     `pfln:${buildingPartFilterHighlightLineLayerIds.join(',')}`,
     `parts:${buildingPartsVisible ? 'visible' : 'hidden'}`
@@ -94,8 +102,9 @@ function buildHighlightLayerSignature(layerIds: LayerIdsSnapshot | null | undefi
 
 function normalizeFeatureIds(values: Array<number | string | null | undefined> | null | undefined) {
   if (!Array.isArray(values)) return [];
-  return [...new Set(values.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
-    .sort((left, right) => left - right);
+  return [...new Set(values.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))].sort(
+    (left, right) => left - right
+  );
 }
 
 type MarkerGroup = {
@@ -131,6 +140,10 @@ function applyBuildingLayerFilters({
   });
   const partLineFilter = partFillFilter;
   for (const layerId of layerIds.buildingPartFillLayerIds || []) {
+    if (!map.getLayer(layerId)) continue;
+    map.setFilter(layerId, partFillFilter);
+  }
+  for (const layerId of layerIds.buildingPartExtrusionLayerIds || []) {
     if (!map.getLayer(layerId)) continue;
     map.setFilter(layerId, partFillFilter);
   }
@@ -185,14 +198,13 @@ export function createFilterDiffApplyStrategy({
     const buildingPartsVisible = Boolean(meta.buildingPartsVisible ?? getBuildingPartsVisible?.() ?? true);
     const nextFeatureIds = normalizeFeatureIds(meta.featureIds || filteredFeatureIds);
     const layerSignature = buildHighlightLayerSignature(layerIds, buildingPartsVisible);
-    const renderMode = String(meta.renderMode || lastAppliedRenderMode || 'contours') === 'markers' ? 'markers' : 'contours';
+    const renderMode =
+      String(meta.renderMode || lastAppliedRenderMode || 'contours') === 'markers' ? 'markers' : 'contours';
     const previousActive = Boolean(meta.previousActive ?? lastAppliedHighlightActive);
     const staticPaintProperties = Boolean(
-      meta.forceStaticPaintProperties
-      || (
-        meta.forceStaticPaintProperties == null
-        && (layerSignature !== lastAppliedHighlightLayerSignature || renderMode !== lastAppliedRenderMode)
-      )
+      meta.forceStaticPaintProperties ||
+      (meta.forceStaticPaintProperties == null &&
+        (layerSignature !== lastAppliedHighlightLayerSignature || renderMode !== lastAppliedRenderMode))
     );
     let buildingHighlightResult;
     let buildingPartHighlightResult;
@@ -210,11 +222,13 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: [],
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.filterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.filterHighlightFillLayerIds,
         lineLayerIds: layerIds.filterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
           featureKind: BUILDING_FEATURE_KIND,
-          active: false
+          active: false,
+          hideBaseWhenParts: buildingPartsVisible
         })
       });
       buildingPartHighlightResult = applyFilterPaintHighlight({
@@ -222,6 +236,7 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: [],
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.buildingPartFilterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.buildingPartFilterHighlightFillLayerIds,
         lineLayerIds: layerIds.buildingPartFilterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
@@ -248,11 +263,13 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: filteredColorGroups,
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.filterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.filterHighlightFillLayerIds,
         lineLayerIds: layerIds.filterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
           featureKind: BUILDING_FEATURE_KIND,
-          active: false
+          active: false,
+          hideBaseWhenParts: buildingPartsVisible
         })
       });
       buildingPartHighlightResult = applyFilterPaintHighlight({
@@ -260,6 +277,7 @@ export function createFilterDiffApplyStrategy({
         normalizedColorGroups: filteredColorGroups,
         previousActive,
         forceStaticPaintProperties: staticPaintProperties,
+        extrusionLayerIds: layerIds.buildingPartFilterHighlightExtrusionLayerIds,
         fillLayerIds: layerIds.buildingPartFilterHighlightFillLayerIds,
         lineLayerIds: layerIds.buildingPartFilterHighlightLineLayerIds,
         additionalFilterExpression: buildRegionBuildingLayerFilterExpression({
@@ -276,11 +294,13 @@ export function createFilterDiffApplyStrategy({
     }
     lastAppliedHighlightLayerSignature = layerSignature;
     lastAppliedRenderMode = renderMode;
-    const paintPropertyCalls = Number(buildingHighlightResult.paintPropertyCalls || 0)
-      + Number(buildingPartHighlightResult.paintPropertyCalls || 0);
-    const active = renderMode === 'markers'
-      ? Boolean(markerResult.active)
-      : Boolean(buildingHighlightResult.active || buildingPartHighlightResult.active);
+    const paintPropertyCalls =
+      Number(buildingHighlightResult.paintPropertyCalls || 0) +
+      Number(buildingPartHighlightResult.paintPropertyCalls || 0);
+    const active =
+      renderMode === 'markers'
+        ? Boolean(markerResult.active)
+        : Boolean(buildingHighlightResult.active || buildingPartHighlightResult.active);
     lastAppliedHighlightActive = active;
     const elapsedMs = Math.round(getNow() - applyStartedAt);
     patchState?.({
@@ -313,14 +333,14 @@ export function createFilterDiffApplyStrategy({
     const nextMarkerGroups = buildMarkerGroups(nextColorGroups);
     const layerIds = getHighlightLayerIds();
     const buildingPartsVisible = Boolean(meta.buildingPartsVisible ?? getBuildingPartsVisible?.() ?? true);
-    const renderMode = String(meta.renderMode || lastAppliedRenderMode || 'contours') === 'markers'
-      ? 'markers'
-      : 'contours';
-    const nextMatchedCount = meta.matchedCount != null && Number.isFinite(Number(meta.matchedCount))
-      ? Math.max(0, Math.trunc(Number(meta.matchedCount)))
-      : null;
+    const renderMode =
+      String(meta.renderMode || lastAppliedRenderMode || 'contours') === 'markers' ? 'markers' : 'contours';
+    const nextMatchedCount =
+      meta.matchedCount != null && Number.isFinite(Number(meta.matchedCount))
+        ? Math.max(0, Math.trunc(Number(meta.matchedCount)))
+        : null;
     const normalizedFeatureIds = normalizeFeatureIds(
-      meta.matchedFeatureIds || nextColorGroups.flatMap((group) => Array.isArray(group?.ids) ? group.ids : [])
+      meta.matchedFeatureIds || nextColorGroups.flatMap((group) => (Array.isArray(group?.ids) ? group.ids : []))
     );
     const nextFeatureCount = nextMatchedCount != null ? nextMatchedCount : normalizedFeatureIds.length;
     const nextLayerSignature = buildHighlightLayerSignature(layerIds, buildingPartsVisible);

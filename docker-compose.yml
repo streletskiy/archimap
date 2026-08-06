@@ -22,13 +22,39 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
+      # Sidecar tool container names (used by region-sync scripts)
+      PLANETILER_CONTAINER: archimap-planetiler
+      OSM2PGSQL_CONTAINER: archimap-osm2pgsql
     volumes:
       - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       redis:
         condition: service_started
       db-postgres:
         condition: service_healthy
+      planetiler:
+        condition: service_started
+      osm2pgsql:
+        condition: service_started
+
+  planetiler:
+    image: ghcr.io/onthegomap/planetiler:0.10.2
+    container_name: archimap-planetiler
+    restart: unless-stopped
+    entrypoint: ['tail', '-f', '/dev/null']
+    volumes:
+      - ./data:/data
+    environment:
+      XDG_CACHE_HOME: /data/cache
+
+  osm2pgsql:
+    image: iboates/osm2pgsql:2.2.0
+    container_name: archimap-osm2pgsql
+    restart: unless-stopped
+    entrypoint: ['tail', '-f', '/dev/null']
+    volumes:
+      - ./data:/data
 
   redis:
     image: redis:7-alpine
@@ -48,6 +74,33 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
+    # Tuned for bulk geo-data imports (large COPY + GiST index rebuilds).
+    # max_wal_size=4GB      – fewer checkpoints during bulk writes
+    # checkpoint_completion_target=0.9 – spread checkpoint I/O
+    # shared_buffers=512MB  – hot data cache (¼ of 2 GB container budget is fine)
+    # work_mem=64MB         – faster sorts/hashes for GiST index build
+    # maintenance_work_mem=512MB – faster CREATE INDEX / ANALYZE
+    # effective_io_concurrency=2 – eMMC/SD random-read parallelism
+    # wal_buffers=16MB      – buffer WAL in memory before flushing
+    # log_autovacuum_min_duration=-1 – keep autovacuum skip noise out of the container log
+    command:
+      - postgres
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - effective_io_concurrency=2
+      - -c
+      - wal_buffers=16MB
+      - -c
+      - log_autovacuum_min_duration=-1
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

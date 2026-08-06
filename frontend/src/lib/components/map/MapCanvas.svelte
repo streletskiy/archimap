@@ -15,23 +15,57 @@
     getFilterApplyOverlayState,
     shouldShowFilterRefiningMessage
   } from '$lib/services/map/filter-overlay-utils';
+  import { FILTER_FALLBACK_MARKER_MAX_ZOOM } from '$lib/services/map/filter-fallback-marker-utils';
   import {
     bringBaseLabelLayersAboveCustomLayers,
     bringSearchResultsLayersToFront,
-    applyBuildingThemePaint as applyBuildingThemePaintToLayers,
+    applyLabelLayerVisibility as applyMapLabelLayerVisibility
+  } from '$lib/services/map/map-layer-utils';
+  import {
+    DEFAULT_MAP_3D_PITCH,
     applyBuildingPartsLayerVisibility as applyBuildingPartsLayerVisibilityToLayers,
-    applyLabelLayerVisibility as applyMapLabelLayerVisibility,
+    applyBuildingThemePaint as applyBuildingThemePaintToLayers,
     bindMapInteractionHandlers,
     ensureOverpassBuildingSourceAndLayers,
+    getCurrentBuildingsExtrusionLayerIds,
     getCurrentBuildingsFillLayerIds,
     getCurrentBuildingsLineLayerIds,
+    getCurrentBuildingHoverExtrusionLayerIds,
+    getCurrentBuildingHoverFillLayerIds,
+    getCurrentBuildingHoverLineLayerIds,
+    getCurrentBuildingPartExtrusionLayerIds,
     getCurrentBuildingPartFillLayerIds,
-    getCurrentBuildingPartLineLayerIds,
+    getCurrentBuildingPartFilterHighlightExtrusionLayerIds,
     getCurrentBuildingPartFilterHighlightFillLayerIds,
     getCurrentBuildingPartFilterHighlightLineLayerIds,
-    getCurrentBuildingHoverFillLayerIds,
-    getCurrentBuildingHoverLineLayerIds
-  } from '$lib/services/map/map-layer-utils';
+    getCurrentBuildingPartLineLayerIds,
+    getCurrentFilterHighlightExtrusionLayerIds,
+    getCurrentFilterHighlightFillLayerIds,
+    getCurrentFilterHighlightLineLayerIds,
+    getCurrentOverpassBuildingsExtrusionLayerIds,
+    getCurrentOverpassBuildingsFillLayerIds,
+    getCurrentOverpassBuildingsLineLayerIds,
+    getCurrentOverpassBuildingHoverExtrusionLayerIds,
+    getCurrentOverpassBuildingHoverFillLayerIds,
+    getCurrentOverpassBuildingHoverLineLayerIds,
+    getCurrentOverpassBuildingPartExtrusionLayerIds,
+    getCurrentOverpassBuildingPartFillLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightFillLayerIds,
+    getCurrentOverpassBuildingPartFilterHighlightLineLayerIds,
+    getCurrentOverpassBuildingPartLineLayerIds,
+    getCurrentOverpassFilterHighlightExtrusionLayerIds,
+    getCurrentOverpassFilterHighlightFillLayerIds,
+    getCurrentOverpassFilterHighlightLineLayerIds,
+    getCurrentOverpassSelectedExtrusionLayerIds,
+    getCurrentOverpassSelectedFillLayerIds,
+    getCurrentOverpassSelectedLineLayerIds,
+    getCurrentSelectedExtrusionLayerIds,
+    getCurrentSelectedFillLayerIds,
+    getCurrentSelectedLineLayerIds,
+    getRegionLayerIds,
+    getEffectiveBuildingPartsVisibility
+  } from '$lib/services/map/building-3d-stack';
   import {
     fitMapToSearchResults as fitMapToSearchItems,
     updateSearchMarkers as updateSearchMarkerSource
@@ -40,8 +74,8 @@
     getBuildingHoverThemePaint,
     getBuildingThemePaint,
     getCurrentTheme,
-    getMapStyleForTheme,
-    LIGHT_MAP_STYLE_URL,
+    getMapStyleSignature,
+    resolveMapStyleForTheme,
     STYLE_OVERLAY_FADE_MS
   } from '$lib/services/map/map-theme-utils';
   import {
@@ -56,11 +90,12 @@
     scheduleOverpassViewportRefresh
   } from '$lib/services/map/overpass-buildings';
   import { loadMapRuntime } from '$lib/services/map-runtime';
-  import { t, translateNow } from '$lib/i18n/index';
+  import { locale, t, translateNow } from '$lib/i18n/index';
   import {
     lastMapCamera,
     mapFocusRequest,
     mapLabelsVisible,
+    mapBuildings3dEnabled,
     mapBuildingPartsVisible,
     mapZoom,
     setMapSelectionShiftKey,
@@ -69,16 +104,22 @@
     selectedBuilding,
     selectedBuildings,
     setMapCenter,
+    setMapBearing,
     setMapReady,
+    setMapPitch,
     setMapViewport,
     setMapZoom
   } from '$lib/stores/map';
   import { buildingFilterLayers, buildingFilterRuntime, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
   import { searchMapState, searchState } from '$lib/stores/search';
-  import { pointInBounds } from '$lib/services/region-pmtiles';
+  import { getActiveRegionPmtiles, isViewportCoveredByRegions } from '$lib/services/region-pmtiles';
   import { createMapRegionLayersController } from './map-region-layers-controller';
   import { createMapSelectionController } from './map-selection-controller';
   import { buildBboxSnapshot } from './filter-pipeline-utils';
+  import {
+    hasInitialFilterReplayTargetReady,
+    resolveInitialFilterReplayAction
+  } from '$lib/services/map/filter-initial-replay';
   import OverpassFallbackOverlay from './OverpassFallbackOverlay.svelte';
 
   const FILTER_APPLY_PROGRESS_TICK_MS = 120;
@@ -94,11 +135,12 @@
   let lastSearchFitSeq;
   let searchFitSeqInitialized = false;
   let lastMapFocusRequestId;
-  let currentMapStyleUrl = LIGHT_MAP_STYLE_URL;
+  let currentMapStyleSignature = '';
   let runtimeConfig = null;
   let styleTransitionOverlaySrc = null;
   let styleTransitionOverlayVisible = false;
   let styleTransitionTimer = null;
+  let mapStyleRequestSeq = 0;
   let stopBuildingFilterLayers = null;
   let currentBuildingFilterLayers = [];
   let filterStatusOverlayText;
@@ -113,6 +155,15 @@
   let lastOverpassDataVersion;
   let lastOverpassLoading;
   let cameraStoreSyncEnabled = false;
+  let effectiveBuildingPartsVisible = false;
+  let initialFilterReplayEnabled = false;
+  let initialFilterReplayQueued = false;
+  let initialFilterReplayRetryTimer = null;
+
+  $: effectiveBuildingPartsVisible = getEffectiveBuildingPartsVisibility({
+    buildingPartsVisible: $mapBuildingPartsVisible,
+    buildings3dEnabled: $mapBuildings3dEnabled
+  });
 
   beforeNavigate((navigation) => {
     if (typeof window === 'undefined') return;
@@ -187,6 +238,7 @@
         || Number($overpassBuildingsState.featureCount || 0) > 0
         || Number($overpassBuildingsState.tileCount || 0) > 0
     );
+    $mapBuildings3dEnabled;
     $mapBuildingPartsVisible;
     currentBuildingFilterLayers;
     overpassLayerVisible;
@@ -268,7 +320,8 @@
         : ($selectedBuilding?.osmType && $selectedBuilding?.osmId ? [$selectedBuilding] : [])
     ),
     getMapLabelsVisible: () => $mapLabelsVisible,
-    getBuildingPartsVisible: () => $mapBuildingPartsVisible,
+    getBuildings3dEnabled: () => $mapBuildings3dEnabled,
+    getBuildingPartsVisible: () => effectiveBuildingPartsVisible,
     getBuildingFilterLayers: () => currentBuildingFilterLayers,
     getWindowOrigin: () => window.location.origin,
     onBindStyleInteractionHandlers: () => bindStyleInteractionHandlers(),
@@ -276,7 +329,8 @@
     onUpdateSearchMarkers: (items) => updateSearchMarkers(items),
     onApplyBuildingThemePaint: (theme) => applyBuildingThemePaint(theme),
     onApplyLabelLayerVisibility: (visible) => applyLabelLayerVisibility(visible),
-    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility($mapBuildingPartsVisible, {
+    onApplyBuildingPartsLayerVisibility: () => applyBuildingPartsLayerVisibility(effectiveBuildingPartsVisible, {
+      buildings3dEnabled: $mapBuildings3dEnabled,
       forceHighlightVisible: currentBuildingFilterLayers.length > 0
     }),
     onRefreshHoverFromPointer: () => selectionController.refreshHoverFromLastPointer(),
@@ -300,10 +354,27 @@
     onStatusChange: setBuildingFilterRuntimeStatus,
     translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
   });
+  const filterState = filterPipeline.state;
+
+  function shouldPrimeLowZoomInitialFilterReplay() {
+    if (!map || !Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) return false;
+    if (typeof map.loaded === 'function' && !map.loaded()) return false;
+    const zoom = Number(map.getZoom?.());
+    if (!Number.isFinite(zoom) || zoom >= FILTER_FALLBACK_MARKER_MAX_ZOOM) return false;
+    return String(get(filterState)?.phase || 'idle') !== 'authoritative';
+  }
 
   stopBuildingFilterLayers = buildingFilterLayers.subscribe((layers) => {
     currentBuildingFilterLayers = Array.isArray(layers) ? layers : [];
     if (map) {
+      if (shouldPrimeLowZoomInitialFilterReplay()) {
+        initialFilterReplayEnabled = true;
+        initialFilterReplayQueued = false;
+        if (initialFilterReplayRetryTimer) {
+          clearTimeout(initialFilterReplayRetryTimer);
+          initialFilterReplayRetryTimer = null;
+        }
+      }
       filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
     }
   });
@@ -311,6 +382,8 @@
   const selectionController = createMapSelectionController({
     getMap: () => map,
     getActiveRegions: () => regionLayersController.getActiveRegionPmtiles(),
+    getBuildings3dEnabled: () => $mapBuildings3dEnabled,
+    getBuildingPartsVisible: () => effectiveBuildingPartsVisible,
     recordDebugSetFilter,
     debugSelectionLog,
     dispatchBuildingClick: (payload) => dispatch('buildingClick', payload)
@@ -322,38 +395,15 @@
   const handleMapPointerMove = (event) => selectionController.handleMapPointerMove(event);
   const handleMapPointerLeave = () => selectionController.handleMapPointerLeave();
 
-  function getViewportSamplePoints(bounds = map?.getBounds?.(), mapRef = map) {
-    if (!bounds || !mapRef) return [];
-    const west = Number(bounds.getWest?.());
-    const east = Number(bounds.getEast?.());
-    const south = Number(bounds.getSouth?.());
-    const north = Number(bounds.getNorth?.());
-    if (![west, east, south, north].every(Number.isFinite)) return [];
-    const center = mapRef.getCenter?.();
-    if (!center) return [];
-    const midLon = (west + east) / 2;
-    const midLat = (north + south) / 2;
-    return [
-      [center.lng, center.lat],
-      [west, north],
-      [east, north],
-      [east, south],
-      [west, south],
-      [midLon, north],
-      [midLon, south],
-      [west, midLat],
-      [east, midLat]
-    ];
-  }
-
   function getCoverageRegions() {
     const activeRegions = regionLayersController.getActiveRegionPmtiles();
     if (Array.isArray(activeRegions) && activeRegions.length > 0) {
       return activeRegions;
     }
-    return Array.isArray(runtimeConfig?.buildingRegionsPmtiles)
-      ? runtimeConfig.buildingRegionsPmtiles
-      : [];
+    if (!map || !Array.isArray(runtimeConfig?.buildingRegionsPmtiles)) {
+      return [];
+    }
+    return getActiveRegionPmtiles(runtimeConfig.buildingRegionsPmtiles, map.getBounds?.());
   }
 
   function isViewportCoveredByProcessedRegions() {
@@ -361,9 +411,7 @@
       return true;
     }
     const regions = getCoverageRegions();
-    const points = getViewportSamplePoints();
-    if (regions.length === 0 || points.length === 0) return false;
-    return points.every(([lon, lat]) => regions.some((region) => pointInBounds(lon, lat, region.bounds)));
+    return isViewportCoveredByRegions(regions, map?.getBounds?.(), map?.getCenter?.());
   }
 
   function syncOverpassMapLayers() {
@@ -376,7 +424,8 @@
       data: getOverpassFeatureCollection(),
       buildingPaint,
       hoverPaint,
-      buildingPartsVisible: $mapBuildingPartsVisible,
+      buildings3dEnabled: $mapBuildings3dEnabled,
+      buildingPartsVisible: effectiveBuildingPartsVisible,
       buildingPartHighlightVisible: currentBuildingFilterLayers.length > 0,
       visible: overpassLayerVisible
     });
@@ -429,6 +478,79 @@
     syncOverpassMapLayers();
   }
 
+  function hasInitialFilterReplayHighlightLayersReady() {
+    if (!map) return false;
+    const layerIds = regionLayersController.getCurrentMapLayerIds();
+    const candidateLayerIds = [
+      ...(Array.isArray(layerIds?.filterHighlightExtrusionLayerIds) ? layerIds.filterHighlightExtrusionLayerIds : []),
+      ...(Array.isArray(layerIds?.filterHighlightFillLayerIds) ? layerIds.filterHighlightFillLayerIds : []),
+      ...(Array.isArray(layerIds?.filterHighlightLineLayerIds) ? layerIds.filterHighlightLineLayerIds : []),
+      ...(Array.isArray(layerIds?.buildingPartFilterHighlightExtrusionLayerIds) ? layerIds.buildingPartFilterHighlightExtrusionLayerIds : []),
+      ...(Array.isArray(layerIds?.buildingPartFilterHighlightFillLayerIds) ? layerIds.buildingPartFilterHighlightFillLayerIds : []),
+      ...(Array.isArray(layerIds?.buildingPartFilterHighlightLineLayerIds) ? layerIds.buildingPartFilterHighlightLineLayerIds : [])
+    ];
+    return candidateLayerIds.some((layerId) => Boolean(map.getLayer?.(layerId)));
+  }
+
+  function scheduleInitialFilterReplay() {
+    if (!map || initialFilterReplayQueued || !initialFilterReplayEnabled) return;
+    if (!Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) return;
+    if (typeof map.once !== 'function' && typeof map.loaded !== 'function') return;
+
+    const runReplay = () => {
+      if (!map || !initialFilterReplayEnabled) {
+        initialFilterReplayQueued = false;
+        return;
+      }
+      if (initialFilterReplayRetryTimer) {
+        clearTimeout(initialFilterReplayRetryTimer);
+        initialFilterReplayRetryTimer = null;
+      }
+      if (!Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) {
+        initialFilterReplayEnabled = false;
+        initialFilterReplayQueued = false;
+        return;
+      }
+
+      // Marker-mode deep links can replay immediately; contour mode still needs
+      // the region highlight layers to exist before a static reapply is useful.
+      regionLayersController.syncMapRegionSources();
+      if (!hasInitialFilterReplayTargetReady({
+        zoom: map.getZoom?.(),
+        hasHighlightLayers: hasInitialFilterReplayHighlightLayersReady()
+      })) {
+        initialFilterReplayRetryTimer = window.setTimeout(runReplay, 120);
+        return;
+      }
+
+      const nextReplayAction = resolveInitialFilterReplayAction({
+        hasFilters: true,
+        phase: $filterState.phase,
+        paintCalls: $filterState.setPaintPropertyCallsLast
+      });
+      initialFilterReplayEnabled = false;
+      initialFilterReplayQueued = false;
+      if (nextReplayAction === 'refresh') {
+        filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
+        return;
+      }
+      if (nextReplayAction === 'reapply') {
+        filterPipeline.reapplyFilteredHighlight();
+      }
+    };
+
+    initialFilterReplayQueued = true;
+    if (typeof map.loaded === 'function' && map.loaded()) {
+      queueMicrotask(runReplay);
+      return;
+    }
+    if (typeof map.once === 'function') {
+      map.once('load', runReplay);
+      return;
+    }
+    queueMicrotask(runReplay);
+  }
+
   function handleOverpassFallbackLoad() {
     const payload = getOverpassViewportPayload();
     if (!payload) return;
@@ -445,8 +567,6 @@
     void clearOverpassCache();
   }
 
-  const filterState = filterPipeline.state;
-
   function updateSearchMarkers(items) {
     updateSearchMarkerSource(map, items);
   }
@@ -459,6 +579,8 @@
     if (!map || !cameraStoreSyncEnabled) return;
     setMapCenter(map.getCenter());
     setMapZoom(map.getZoom());
+    setMapPitch(map.getPitch());
+    setMapBearing(map.getBearing());
     setMapViewport(buildBboxSnapshot(map.getBounds?.()));
   }
 
@@ -472,25 +594,91 @@
     applyBuildingThemePaintToLayers({
       map,
       theme,
+      extrusionLayerIds: getCurrentBuildingsExtrusionLayerIds(activeRegions),
       fillLayerIds: getCurrentBuildingsFillLayerIds(activeRegions),
       lineLayerIds: getCurrentBuildingsLineLayerIds(activeRegions),
+      partExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(activeRegions),
       partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
       partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegions),
       hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
       hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions)
     });
   }
 
-  function applyBuildingPartsLayerVisibility(visible = $mapBuildingPartsVisible, { forceHighlightVisible = false } = {}) {
+  function applyBuildingPartsLayerVisibility(
+    visible = effectiveBuildingPartsVisible,
+    {
+      buildings3dEnabled = $mapBuildings3dEnabled,
+      forceHighlightVisible = false
+    } = {}
+  ) {
     const activeRegions = regionLayersController.getActiveRegionPmtiles();
     applyBuildingPartsLayerVisibilityToLayers({
       map,
-      visible,
+      sourceVisible: true,
+      partVisible: visible,
+      buildings3dEnabled,
+      fillLayerIds: getRegionLayerIds(activeRegions, 'fill'),
+      extrusionLayerIds: getRegionLayerIds(activeRegions, 'extrusion'),
+      lineLayerIds: getRegionLayerIds(activeRegions, 'line'),
+      filterHighlightExtrusionLayerIds: getCurrentFilterHighlightExtrusionLayerIds(activeRegions),
+      filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegions),
+      filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegions),
       forceHighlightVisible,
-      partFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegions),
-      partLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegions),
-      partFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegions),
-      partFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegions)
+      partFillLayerIds: getRegionLayerIds(activeRegions, 'part-fill'),
+      partExtrusionLayerIds: getRegionLayerIds(activeRegions, 'part-extrusion'),
+      partLineLayerIds: getRegionLayerIds(activeRegions, 'part-line'),
+      partFilterHighlightExtrusionLayerIds: getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegions),
+      partFilterHighlightFillLayerIds: getRegionLayerIds(activeRegions, 'part-filter-highlight-fill'),
+      partFilterHighlightLineLayerIds: getRegionLayerIds(activeRegions, 'part-filter-highlight-line'),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegions),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegions),
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(activeRegions),
+      selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegions),
+      selectedLineLayerIds: getCurrentSelectedLineLayerIds(activeRegions)
+    });
+    applyBuildingPartsLayerVisibilityToLayers({
+      map,
+      sourceVisible: overpassLayerVisible,
+      partVisible: visible,
+      buildings3dEnabled,
+      fillLayerIds: getCurrentOverpassBuildingsFillLayerIds(),
+      extrusionLayerIds: getCurrentOverpassBuildingsExtrusionLayerIds(),
+      lineLayerIds: getCurrentOverpassBuildingsLineLayerIds(),
+      filterHighlightExtrusionLayerIds: getCurrentOverpassFilterHighlightExtrusionLayerIds(),
+      filterHighlightFillLayerIds: getCurrentOverpassFilterHighlightFillLayerIds(),
+      filterHighlightLineLayerIds: getCurrentOverpassFilterHighlightLineLayerIds(),
+      forceHighlightVisible,
+      partFillLayerIds: getCurrentOverpassBuildingPartFillLayerIds(),
+      partExtrusionLayerIds: getCurrentOverpassBuildingPartExtrusionLayerIds(),
+      partLineLayerIds: getCurrentOverpassBuildingPartLineLayerIds(),
+      partFilterHighlightExtrusionLayerIds: getCurrentOverpassBuildingPartFilterHighlightExtrusionLayerIds(),
+      partFilterHighlightFillLayerIds: getCurrentOverpassBuildingPartFilterHighlightFillLayerIds(),
+      partFilterHighlightLineLayerIds: getCurrentOverpassBuildingPartFilterHighlightLineLayerIds(),
+      hoverExtrusionLayerIds: getCurrentOverpassBuildingHoverExtrusionLayerIds(),
+      hoverFillLayerIds: getCurrentOverpassBuildingHoverFillLayerIds(),
+      hoverLineLayerIds: getCurrentOverpassBuildingHoverLineLayerIds(),
+      selectedExtrusionLayerIds: getCurrentOverpassSelectedExtrusionLayerIds(),
+      selectedFillLayerIds: getCurrentOverpassSelectedFillLayerIds(),
+      selectedLineLayerIds: getCurrentOverpassSelectedLineLayerIds()
+    });
+  }
+
+  function applyBuildings3dCamera(enabled = $mapBuildings3dEnabled, { animate = false } = {}) {
+    if (!map) return;
+    const currentPitch = Number(map.getPitch?.() ?? 0);
+    if (!Number.isFinite(currentPitch)) return;
+    if (enabled) {
+      if (currentPitch > 0.1) return;
+    } else if (Math.abs(currentPitch) < 0.1) {
+      return;
+    }
+    map.easeTo({
+      pitch: enabled ? DEFAULT_MAP_3D_PITCH : 0,
+      duration: animate ? 420 : 0,
+      essential: true
     });
   }
 
@@ -545,14 +733,28 @@
     map.once('idle', tryRestore);
   }
 
-  function applyThemeToMap(theme) {
-    if (!map) return;
-    const nextStyle = getMapStyleForTheme(theme);
-    if (nextStyle === currentMapStyleUrl) return;
+  async function applyThemeToMap(theme) {
+    if (!map || !runtimeConfig) return;
+    const nextStyleSignature = getMapStyleSignature(theme, runtimeConfig, get(locale));
+    if (nextStyleSignature === currentMapStyleSignature) return;
+
+    const requestSeq = ++mapStyleRequestSeq;
     captureStyleTransitionOverlay();
-    currentMapStyleUrl = nextStyle;
-    map.setStyle(nextStyle);
-    restoreCustomLayersAfterStyleChange();
+
+    try {
+      const nextStyle = await resolveMapStyleForTheme(theme, {
+        runtimeConfig,
+        localeCode: get(locale)
+      });
+      if (!map || requestSeq !== mapStyleRequestSeq) return;
+      currentMapStyleSignature = nextStyleSignature;
+      map.setStyle(nextStyle);
+      restoreCustomLayersAfterStyleChange();
+    } catch {
+      if (requestSeq === mapStyleRequestSeq) {
+        clearStyleTransitionOverlaySoon();
+      }
+    }
   }
 
   $: {
@@ -597,13 +799,20 @@
   $: if (map && $mapFocusRequest && $mapFocusRequest.id !== lastMapFocusRequestId) {
     lastMapFocusRequestId = $mapFocusRequest.id;
     const nextZoom = normalizeOptionalMapZoom($mapFocusRequest.zoom) ?? map.getZoom();
-    map.easeTo({
+    const nextCamera = {
       center: [Number($mapFocusRequest.lon), Number($mapFocusRequest.lat)],
       offset: [Number($mapFocusRequest.offsetX || 0), Number($mapFocusRequest.offsetY || 0)],
       zoom: nextZoom,
       duration: Number($mapFocusRequest.duration || 420),
       essential: true
-    });
+    };
+    if (Number.isFinite(Number($mapFocusRequest.pitch))) {
+      nextCamera.pitch = Number($mapFocusRequest.pitch);
+    }
+    if (Number.isFinite(Number($mapFocusRequest.bearing))) {
+      nextCamera.bearing = Number($mapFocusRequest.bearing);
+    }
+    map.easeTo(nextCamera);
     void lastMapFocusRequestId;
   }
 
@@ -612,10 +821,19 @@
   }
 
   $: if (map) {
-    const buildingPartsVisible = $mapBuildingPartsVisible;
+    applyBuildings3dCamera(Boolean($mapBuildings3dEnabled), { animate: true });
+  }
+
+  $: if (map) {
+    const buildingPartsVisible = effectiveBuildingPartsVisible;
+    const buildings3dEnabled = $mapBuildings3dEnabled;
     const forceHighlightVisible = Array.isArray($buildingFilterLayers) && $buildingFilterLayers.length > 0;
-    applyBuildingPartsLayerVisibility(buildingPartsVisible, { forceHighlightVisible });
+    applyBuildingPartsLayerVisibility(buildingPartsVisible, {
+      buildings3dEnabled,
+      forceHighlightVisible
+    });
     filterPipeline.reapplyFilteredHighlight();
+    scheduleInitialFilterReplay();
   }
 
   onMount(() => {
@@ -629,7 +847,13 @@
       runtimeConfig = config;
       protocol = new ProtocolCtor();
       maplibregl.addProtocol('pmtiles', protocol.tile);
-      currentMapStyleUrl = getMapStyleForTheme(getCurrentTheme());
+      const currentTheme = getCurrentTheme();
+      currentMapStyleSignature = getMapStyleSignature(currentTheme, config, get(locale));
+      const initialStyle = await resolveMapStyleForTheme(currentTheme, {
+        runtimeConfig: config,
+        localeCode: get(locale)
+      });
+      if (!mountAlive) return;
       const initialCamera = resolveInitialMapCamera({
         url: window.location.href,
         persistedCamera: get(lastMapCamera),
@@ -643,17 +867,28 @@
         lat: Number(config.mapDefault.lat),
         z: Number(config.mapDefault.zoom)
       };
+      const initialPitch = $mapBuildings3dEnabled && Number.isFinite(Number(initialCamera.pitch))
+        ? Number(initialCamera.pitch)
+        : ($mapBuildings3dEnabled ? DEFAULT_MAP_3D_PITCH : 0);
+      const initialBearing = $mapBuildings3dEnabled && Number.isFinite(Number(initialCamera.bearing))
+        ? Number(initialCamera.bearing)
+        : 0;
       setMapCenter({
         lng: initialCamera.lng,
         lat: initialCamera.lat
       });
       setMapZoom(initialCamera.z);
+      setMapPitch(initialPitch);
+      setMapBearing(initialBearing);
 
       map = new maplibregl.Map({
         container,
-        style: currentMapStyleUrl,
+        style: initialStyle,
         center: [initialCamera.lng, initialCamera.lat],
         zoom: Number(initialCamera.z),
+        pitch: initialPitch,
+        bearing: initialBearing,
+        antialias: true,
         attributionControl: false
       });
       // Reserve Shift+Click for bulk building selection on the main map surface.
@@ -671,7 +906,6 @@
       });
       map.on('moveend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('moveend', () => regionLayersController.scheduleCoverageCheck());
-      map.on('move', () => regionLayersController.scheduleCoverageCheck());
       map.on('zoomend', () => filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers));
       map.on('zoomend', syncMapZoomStore);
       map.on('zoomend', () => regionLayersController.syncMapRegionSources());
@@ -704,22 +938,41 @@
         filterPipeline.scheduleFilterRulesRefresh(currentBuildingFilterLayers);
         regionLayersController.scheduleCoverageCheck();
         syncOverpassViewportState();
+        initialFilterReplayEnabled = Array.isArray(currentBuildingFilterLayers) && currentBuildingFilterLayers.length > 0;
+        scheduleInitialFilterReplay();
       });
 
       themeObserver = new MutationObserver(() => {
-        applyThemeToMap(getCurrentTheme());
+        void applyThemeToMap(getCurrentTheme());
       });
       themeObserver.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['data-theme']
       });
+      const unsubscribeLocale = locale.subscribe(() => {
+        void applyThemeToMap(getCurrentTheme());
+      });
+
+      return () => {
+        unsubscribeLocale();
+      };
     }
 
-    initMap().catch(() => {
-      // Keep empty fallback state if map runtime cannot initialize.
-    });
+    let cleanupLocaleSubscription = null;
+
+    initMap()
+      .then((cleanup) => {
+        cleanupLocaleSubscription = typeof cleanup === 'function' ? cleanup : null;
+      })
+      .catch(() => {
+        cleanupLocaleSubscription = null;
+      });
 
     return () => {
+      if (cleanupLocaleSubscription) {
+        cleanupLocaleSubscription();
+        cleanupLocaleSubscription = null;
+      }
       mountAlive = false;
     };
   });
@@ -731,6 +984,8 @@
     setMapReady(false);
     setMapCenter(null);
     setMapZoom(null);
+    setMapPitch(null);
+    setMapBearing(null);
     setMapViewport(null);
     if (themeObserver) {
       themeObserver.disconnect();
@@ -745,11 +1000,17 @@
       clearTimeout(overpassViewportPrimeTimer);
       overpassViewportPrimeTimer = null;
     }
+    if (initialFilterReplayRetryTimer) {
+      clearTimeout(initialFilterReplayRetryTimer);
+      initialFilterReplayRetryTimer = null;
+    }
     recordOverpassDebugState();
     if (filterApplyClockTimer) {
       clearInterval(filterApplyClockTimer);
       filterApplyClockTimer = null;
     }
+    initialFilterReplayQueued = false;
+    initialFilterReplayEnabled = false;
     selectionController.destroy();
     regionLayersController.destroy();
     filterPipeline.destroy();

@@ -1,12 +1,13 @@
 const { createRuntimeSettingsCache } = require('../services/runtime-settings-cache.service');
+const {
+  DEFAULT_CUSTOM_BASEMAP_URL,
+  normalizeBasemapApiKey,
+  normalizeBasemapProvider,
+  normalizeCustomBasemapUrl
+} = require('../services/basemap-config');
 
 function createRuntimeSettingsBoot(options: LooseRecord = {}) {
-  const {
-    appSettingsService,
-    dataSettingsService,
-    defaults = {},
-    filterTags = {}
-  } = options;
+  const { appSettingsService, dataSettingsService, defaults = {}, filterTags = {} } = options;
 
   if (!appSettingsService || !dataSettingsService) {
     throw new Error('createRuntimeSettingsBoot: appSettingsService and dataSettingsService are required');
@@ -17,6 +18,10 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     appBaseUrl = '',
     registrationEnabled = true,
     userEditRequiresPermission = true,
+    basemapProvider = 'carto',
+    maptilerApiKey = '',
+    customBasemapUrl = DEFAULT_CUSTOM_BASEMAP_URL,
+    customBasemapApiKey = '',
     smtpUrl = '',
     smtpHost = '',
     smtpPort = 587,
@@ -25,16 +30,17 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
     smtpPass = '',
     emailFrom = ''
   } = defaults;
-  const {
-    defaultAllowlist = [],
-    normalizeFilterTagKeyList
-  } = filterTags;
+  const { defaultAllowlist = [], normalizeFilterTagKeyList } = filterTags;
 
   const generalConfigFallback = {
     appDisplayName,
     appBaseUrl,
     registrationEnabled,
-    userEditRequiresPermission
+    userEditRequiresPermission,
+    basemapProvider,
+    maptilerApiKey,
+    customBasemapUrl,
+    customBasemapApiKey
   };
   const smtpConfigFallback = {
     url: smtpUrl,
@@ -53,7 +59,22 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
       appDisplayName: String(config.appDisplayName || appDisplayName).trim() || appDisplayName,
       appBaseUrl: String(config.appBaseUrl || '').trim(),
       registrationEnabled: Boolean(config.registrationEnabled),
-      userEditRequiresPermission: Boolean(config.userEditRequiresPermission)
+      userEditRequiresPermission: Boolean(config.userEditRequiresPermission),
+      basemapProvider: (() => {
+        const provider = normalizeBasemapProvider(config.basemapProvider || basemapProvider);
+        const nextMaptilerApiKey = normalizeBasemapApiKey(config.maptilerApiKey);
+        const nextCustomBasemapUrl = normalizeCustomBasemapUrl(config.customBasemapUrl, customBasemapUrl);
+        if (provider === 'maptiler' && !nextMaptilerApiKey) {
+          return 'carto';
+        }
+        if (provider === 'custom' && !nextCustomBasemapUrl) {
+          return 'carto';
+        }
+        return provider;
+      })(),
+      maptilerApiKey: normalizeBasemapApiKey(config.maptilerApiKey),
+      customBasemapUrl: normalizeCustomBasemapUrl(config.customBasemapUrl, customBasemapUrl),
+      customBasemapApiKey: normalizeBasemapApiKey(config.customBasemapApiKey)
     })
   });
 
@@ -66,9 +87,7 @@ function createRuntimeSettingsBoot(options: LooseRecord = {}) {
       port: Number(config.port || smtpPort),
       secure: Boolean(config.secure),
       user: String(config.user || '').trim(),
-      pass: config.keepPassword === false
-        ? ''
-        : String(config.pass || previous.pass || '').trim(),
+      pass: config.keepPassword === false ? '' : String(config.pass || previous.pass || '').trim(),
       from: String(config.from || '').trim()
     })
   });

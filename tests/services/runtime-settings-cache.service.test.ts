@@ -44,9 +44,7 @@ test('createRuntimeSettingsCache applySnapshot can preserve previous values via 
     load: async () => ({ config: null }),
     normalize: (config, previous) => ({
       host: String(config.host || previous.host || '').trim(),
-      pass: config.keepPassword === false
-        ? ''
-        : String(config.pass || previous.pass || '').trim()
+      pass: config.keepPassword === false ? '' : String(config.pass || previous.pass || '').trim()
     })
   });
 

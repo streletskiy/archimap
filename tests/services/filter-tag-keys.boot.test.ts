@@ -83,3 +83,37 @@ test('empty filter tag cache triggers a cold-start rebuild on first read', async
   assert.equal(spawnCalls.length, 1);
   assert.deepEqual(spawnCalls[0].args, ['--import', 'tsx', 'workers/rebuild-filter-tag-keys-cache.worker.ts']);
 });
+
+test('successful empty filter tag rebuild does not keep respawning on later reads', async () => {
+  const spawnCalls = [];
+  const boot = createFilterTagKeysBoot({
+    db: createDbStub(),
+    dbProvider: 'sqlite',
+    logger: { info() {}, error() {} },
+    spawn: (_execPath, args, options) => {
+      const child = createChildProcessStub();
+      spawnCalls.push({ args, options, child });
+      return child;
+    },
+    processExecPath: 'node',
+    rootDir: '/app',
+    filterTagKeysRebuildScriptPath: 'workers/rebuild-filter-tag-keys-cache.worker.ts',
+    env: {},
+    sqlite: {
+      dbPath: '/tmp/archimap.db',
+      osmDbPath: '/tmp/osm.db'
+    },
+    getEffectiveFilterTagAllowlist: () => ({ allowlistSet: new Set() }),
+    normalizeFilterTagKey: (key) => String(key || '').trim()
+  });
+
+  const firstRead = await boot.getAllFilterTagKeysCached();
+  assert.deepEqual(firstRead, []);
+  assert.equal(spawnCalls.length, 1);
+
+  spawnCalls[0].child.emit('close', 0, null);
+
+  const secondRead = await boot.getAllFilterTagKeysCached();
+  assert.deepEqual(secondRead, []);
+  assert.equal(spawnCalls.length, 1);
+});

@@ -1,6 +1,12 @@
 import type { Region, RegionInput } from '$shared/types';
 
 const DELETE_REGION_SQL = {
+  countActiveRuns: `
+    SELECT COUNT(*) AS total
+    FROM data_region_sync_runs
+    WHERE region_id = ?
+      AND status IN ('queued', 'running')
+  `,
   countMemberships: `
     SELECT COUNT(*) AS total
     FROM data_region_memberships
@@ -61,7 +67,8 @@ function createRegionsDomain(context: LooseRecord = {}) {
     hasResolvedExtract,
     fallback,
     now,
-    validateSelectedExtract
+    validateSelectedExtract,
+    countrySubregionsCatalog
   } = context;
 
   async function getRegionById(regionId): Promise<Region | null> {
@@ -69,18 +76,46 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return rowToRegion(await getRegionRowById(regionId));
   }
 
-  async function listRegions(options: { includeDisabled?: boolean; includeStorageStats?: boolean } = {}): Promise<Region[]> {
+  async function countActiveRuns(regionId) {
+    return Number((await db.prepare(DELETE_REGION_SQL.countActiveRuns).get(Number(regionId)))?.total || 0);
+  }
+
+  async function listRegions(
+    options: {
+      includeDisabled?: boolean;
+      includeStorageStats?: boolean;
+      includeHiddenSubregions?: boolean;
+    } = {}
+  ): Promise<Region[]> {
     await ensureBootstrapped();
     const includeDisabled = options.includeDisabled !== false;
     const includeStorageStats = options.includeStorageStats === true;
+    const includeHiddenSubregions = options.includeHiddenSubregions === true;
     const rows = await listRegionRows();
-    const items = rows
-      .map(rowToRegion)
-      .filter((item): item is Region => Boolean(item))
-      .filter((item) => includeDisabled || item.enabled);
-    return includeStorageStats
-      ? await context.enrichRegionsWithStorageStats(items)
-      : items;
+    const all = rows.map(rowToRegion).filter((item): item is Region => Boolean(item));
+
+    const subregionStats = new Map<number, { count: number; done: number }>();
+    for (const region of all) {
+      if (region.parentRegionId == null) continue;
+      const stats = subregionStats.get(region.parentRegionId) || { count: 0, done: 0 };
+      stats.count += 1;
+      if (region.lastSuccessfulSyncAt) stats.done += 1;
+      subregionStats.set(region.parentRegionId, stats);
+    }
+
+    const items = all
+      .filter((item) => includeDisabled || item.enabled)
+      .filter((item) => includeHiddenSubregions || item.visibleInAdmin)
+      .map((item) => {
+        const stats = subregionStats.get(item.id);
+        if (!stats) return item;
+        return {
+          ...item,
+          subregionCount: stats.count,
+          subregionCompletedCount: stats.done
+        };
+      });
+    return includeStorageStats ? await context.enrichRegionsWithStorageStats(items) : items;
   }
 
   async function ensureUniqueSlug(baseSlug, excludeRegionId = null) {
@@ -89,12 +124,16 @@ function createRegionsDomain(context: LooseRecord = {}) {
     let suffix = 2;
 
     while (true) {
-      const row = await db.prepare(`
+      const row = await db
+        .prepare(
+          `
         SELECT id
         FROM data_sync_regions
         WHERE slug = ?
         LIMIT 1
-      `).get(candidate);
+      `
+        )
+        .get(candidate);
       if (!row || Number(row.id) === Number(excludeRegionId || 0)) {
         return candidate;
       }
@@ -115,13 +154,11 @@ function createRegionsDomain(context: LooseRecord = {}) {
 
   async function normalizeRegionInput(input: RegionInput = {}, previous: Region | null = null) {
     const previousRegion = previous || null;
-    const hasLegacySourceValueField = Object.prototype.hasOwnProperty.call(input, 'sourceValue')
-      || Object.prototype.hasOwnProperty.call(input, 'source_value');
+    const hasLegacySourceValueField =
+      Object.prototype.hasOwnProperty.call(input, 'sourceValue') ||
+      Object.prototype.hasOwnProperty.call(input, 'source_value');
     const rawSearchQuery = normalizeNullableText(
-      input.searchQuery
-        ?? input.search_query
-        ?? previousRegion?.searchQuery
-        ?? '',
+      input.searchQuery ?? input.search_query ?? previousRegion?.searchQuery ?? '',
       240
     );
     const extractSource = normalizeNullableText(
@@ -136,15 +173,12 @@ function createRegionsDomain(context: LooseRecord = {}) {
       input.extractLabel ?? input.extract_label ?? previousRegion?.extractLabel ?? '',
       240
     );
-    const sourceTypeRaw = String(
-      input.sourceType ?? input.source_type ?? previousRegion?.sourceType ?? 'extract'
-    ).trim().toLowerCase();
+    const sourceTypeRaw = String(input.sourceType ?? input.source_type ?? previousRegion?.sourceType ?? 'extract')
+      .trim()
+      .toLowerCase();
     const sourceType = sourceTypeRaw || 'extract';
     const searchQuery = rawSearchQuery || extractLabel || extractId || '';
-    const name = normalizeNullableText(
-      input.name ?? previousRegion?.name ?? extractLabel ?? searchQuery ?? '',
-      160
-    );
+    const name = normalizeNullableText(input.name ?? previousRegion?.name ?? extractLabel ?? searchQuery ?? '', 160);
     const slugRaw = normalizeNullableText(
       input.slug ?? previousRegion?.slug ?? name ?? extractLabel ?? searchQuery ?? 'region',
       100
@@ -165,11 +199,19 @@ function createRegionsDomain(context: LooseRecord = {}) {
         extractSource,
         extractId,
         extractResolutionStatus: previousRegion?.extractResolutionStatus
-      }) ? 'resolved' : 'needs_resolution',
+      })
+        ? 'resolved'
+        : 'needs_resolution',
       extractResolutionError: null,
       enabled: normalizeBoolean(input.enabled ?? previousRegion?.enabled, true),
-      autoSyncEnabled: normalizeBoolean(input.autoSyncEnabled ?? previousRegion?.autoSyncEnabled, fallback.autoSyncEnabled),
-      autoSyncOnStart: normalizeBoolean(input.autoSyncOnStart ?? previousRegion?.autoSyncOnStart, fallback.autoSyncOnStart),
+      autoSyncEnabled: normalizeBoolean(
+        input.autoSyncEnabled ?? previousRegion?.autoSyncEnabled,
+        fallback.autoSyncEnabled
+      ),
+      autoSyncOnStart: normalizeBoolean(
+        input.autoSyncOnStart ?? previousRegion?.autoSyncOnStart,
+        fallback.autoSyncOnStart
+      ),
       autoSyncIntervalHours: normalizeInteger(
         input.autoSyncIntervalHours ?? previousRegion?.autoSyncIntervalHours,
         fallback.autoSyncIntervalHours,
@@ -188,8 +230,30 @@ function createRegionsDomain(context: LooseRecord = {}) {
         0,
         22
       ),
-      sourceLayer: normalizeSourceLayer(
-        input.sourceLayer ?? previousRegion?.sourceLayer ?? fallback.sourceLayer
+      sourceLayer: normalizeSourceLayer(input.sourceLayer ?? previousRegion?.sourceLayer ?? fallback.sourceLayer),
+      regionKind: (() => {
+        const raw = String(input.regionKind ?? input.region_kind ?? previousRegion?.regionKind ?? 'standalone')
+          .trim()
+          .toLowerCase();
+        return ['standalone', 'country_aggregate', 'subregion'].includes(raw) ? raw : 'standalone';
+      })(),
+      parentRegionId: (() => {
+        const raw = input.parentRegionId ?? input.parent_region_id ?? previousRegion?.parentRegionId ?? null;
+        const numeric = Number(raw);
+        return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+      })(),
+      orderInParent: (() => {
+        const raw = input.orderInParent ?? input.order_in_parent ?? previousRegion?.orderInParent ?? null;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
+      })(),
+      visibleInAdmin: normalizeBoolean(
+        input.visibleInAdmin ?? input.visible_in_admin ?? previousRegion?.visibleInAdmin,
+        true
+      ),
+      countryCode: normalizeNullableText(
+        input.countryCode ?? input.country_code ?? previousRegion?.countryCode ?? '',
+        8
       ),
       bounds: previousRegion?.bounds || null,
       lastSyncStartedAt: previousRegion?.lastSyncStartedAt || null,
@@ -202,9 +266,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     };
 
     next.pmtilesMaxZoom = Math.max(next.pmtilesMinZoom, next.pmtilesMaxZoom);
-    next.nextSyncAt = hasResolvedExtract(next)
-      ? computeNextSyncAt(next, now())
-      : null;
+    next.nextSyncAt = hasResolvedExtract(next) ? computeNextSyncAt(next, now()) : null;
 
     const errors = [];
     if (hasLegacySourceValueField) {
@@ -216,7 +278,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
       errors.push('Only sourceType=extract is supported in v2');
     }
     if (!next.extractSource || !next.extractId) {
-      errors.push('Select a canonical extract before saving the region');
+      errors.push('Select a curated extract before saving the region (canonical extract selection is required)');
     }
     if (!next.name) {
       errors.push('Region name is required');
@@ -234,35 +296,138 @@ function createRegionsDomain(context: LooseRecord = {}) {
     };
   }
 
-  async function saveRegion(input: RegionInput = {}, actor = null): Promise<Region> {
+  function buildCountryAggregateRegionInput(input: LooseRecord = {}): RegionInput {
+    const source = input && typeof input === 'object' ? input : {};
+    const next: RegionInput = {};
+
+    const regionId = Number(source?.id || 0);
+    if (Number.isInteger(regionId) && regionId > 0) {
+      next.id = regionId;
+    }
+
+    const name = normalizeNullableText(source?.name, 160);
+    if (name) next.name = name;
+
+    const slug = normalizeNullableText(source?.slug, 100);
+    if (slug) next.slug = slug;
+
+    const searchQuery = normalizeNullableText(source?.searchQuery ?? source?.search_query, 240);
+    if (searchQuery) next.searchQuery = searchQuery;
+
+    const extractLabel = normalizeNullableText(source?.extractLabel ?? source?.extract_label, 240);
+    if (extractLabel) next.extractLabel = extractLabel;
+
+    if (Object.prototype.hasOwnProperty.call(source, 'enabled')) {
+      next.enabled = source.enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'autoSyncEnabled')) {
+      next.autoSyncEnabled = source.autoSyncEnabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'autoSyncOnStart')) {
+      next.autoSyncOnStart = source.autoSyncOnStart;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'autoSyncIntervalHours')) {
+      next.autoSyncIntervalHours = source.autoSyncIntervalHours;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'pmtilesMinZoom')) {
+      next.pmtilesMinZoom = source.pmtilesMinZoom;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'pmtilesMaxZoom')) {
+      next.pmtilesMaxZoom = source.pmtilesMaxZoom;
+    }
+
+    const sourceLayer = normalizeNullableText(source?.sourceLayer, 120);
+    if (sourceLayer) next.sourceLayer = sourceLayer;
+
+    return next;
+  }
+
+  function buildRegionExtractKey(extractSource = '', extractId = '') {
+    const normalizedSource = normalizeNullableText(extractSource, 64);
+    const normalizedExtractId = normalizeNullableText(extractId, 240);
+    if (!normalizedExtractId) return '';
+    return `${String(normalizedSource || '').trim().toLowerCase()}:${String(normalizedExtractId).trim().toLowerCase()}`;
+  }
+
+  async function assertCountryAggregateUpgradeAllowed(existing: Region | null = null) {
+    if (!existing) return;
+    if (existing.regionKind === 'subregion') {
+      throw new Error('Subregion records cannot be converted into country aggregates');
+    }
+    if (existing.regionKind === 'country_aggregate') {
+      return;
+    }
+
+    const membershipCount = await countRegionMemberships(existing.id);
+    if (membershipCount > 0 || existing.lastSuccessfulSyncAt || existing.bounds) {
+      throw new Error(
+        'This country region already contains synced standalone data. Delete it and recreate it to switch to sequential subregions.'
+      );
+    }
+  }
+
+  async function findCountryAggregateMatch(region: LooseRecord = {}) {
+    if (!countrySubregionsCatalog || typeof countrySubregionsCatalog.findByExtractId !== 'function') {
+      return null;
+    }
+
+    const extractSource = normalizeNullableText(region?.extractSource ?? region?.extract_source ?? '', 64);
+    if (String(extractSource || '').trim().toLowerCase() !== 'geofabrik') {
+      return null;
+    }
+
+    const extractId = normalizeNullableText(region?.extractId ?? region?.extract_id ?? '', 240);
+    if (!extractId) {
+      return null;
+    }
+    if (!/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i.test(extractId)) {
+      return null;
+    }
+
+    const match = await countrySubregionsCatalog.findByExtractId(extractId);
+    if (!match || match.subregion) {
+      return null;
+    }
+
+    const country = match.country;
+    return Array.isArray(country?.subregions) && country.subregions.length > 0 ? country : null;
+  }
+
+  async function saveRegionInternal(
+    input: RegionInput = {},
+    actor = null,
+    options: LooseRecord = {}
+  ): Promise<Region> {
     await ensureBootstrapped();
+    const allowCountryAggregateExpansion = options.allowCountryAggregateExpansion !== false;
     const regionId = Number(input?.id || 0);
     const existing = regionId > 0 ? await getRegionById(regionId) : null;
     if (regionId > 0 && !existing) {
       throw new Error('Region not found');
     }
-    if (existing && ['queued', 'running'].includes(existing.lastSyncStatus)) {
+    if (
+      existing &&
+      ['queued', 'running'].includes(existing.lastSyncStatus) &&
+      (await countActiveRuns(existing.id)) > 0
+    ) {
       throw new Error('Region cannot be updated while it is queued or actively syncing');
     }
 
     if (existing) {
       const existingExtractSource = normalizeNullableText(existing.extractSource, 64) || '';
       const existingExtractId = normalizeNullableText(existing.extractId, 240) || '';
-      const nextExtractSource = normalizeNullableText(
-        input.extractSource ?? input.extract_source ?? existing.extractSource ?? '',
-        64
-      ) || '';
-      const nextExtractId = normalizeNullableText(
-        input.extractId ?? input.extract_id ?? existing.extractId ?? '',
-        240
-      ) || '';
-      const extractChanged = existingExtractSource !== nextExtractSource
-        || existingExtractId !== nextExtractId;
+      const nextExtractSource =
+        normalizeNullableText(input.extractSource ?? input.extract_source ?? existing.extractSource ?? '', 64) || '';
+      const nextExtractId =
+        normalizeNullableText(input.extractId ?? input.extract_id ?? existing.extractId ?? '', 240) || '';
+      const extractChanged = existingExtractSource !== nextExtractSource || existingExtractId !== nextExtractId;
       const hasSavedCanonicalExtract = Boolean(existingExtractSource && existingExtractId);
       if (extractChanged && hasSavedCanonicalExtract) {
         const membershipCount = await countRegionMemberships(existing.id);
         if (membershipCount > 0 || existing.lastSuccessfulSyncAt) {
-          throw new Error('Changing canonical extract for an already synced region is not supported. Create a new region instead.');
+          throw new Error(
+            'Changing the curated extract for an already synced region is not supported. Create a new region instead.'
+          );
         }
       }
     }
@@ -272,9 +437,20 @@ function createRegionsDomain(context: LooseRecord = {}) {
       throw new Error(normalized.errors.join(' '));
     }
 
+    if (allowCountryAggregateExpansion) {
+      const country = await findCountryAggregateMatch(normalized.value);
+      if (country) {
+        return createCountryAggregate({
+          countryId: country.countryId,
+          actor,
+          region: buildCountryAggregateRegionInput(normalized.value)
+        });
+      }
+    }
+
     const extractValidation = await validateSelectedExtract(normalized.value, existing);
     if (extractValidation.error || !extractValidation.candidate) {
-      throw new Error(extractValidation.error || 'Failed to validate canonical extract');
+      throw new Error(extractValidation.error || 'Failed to validate curated extract');
     }
 
     const next = {
@@ -291,7 +467,9 @@ function createRegionsDomain(context: LooseRecord = {}) {
 
     const updatedBy = normalizeNullableText(actor, 160);
     if (existing) {
-      await db.prepare(`
+      await db
+        .prepare(
+          `
         UPDATE data_sync_regions
         SET
           slug = ?,
@@ -311,29 +489,41 @@ function createRegionsDomain(context: LooseRecord = {}) {
           pmtiles_max_zoom = ?,
           source_layer = ?,
           next_sync_at = ?,
+          region_kind = ?,
+          parent_region_id = ?,
+          order_in_parent = ?,
+          visible_in_admin = ?,
+          country_code = ?,
           updated_by = ?,
           updated_at = datetime('now')
         WHERE id = ?
-      `).run(
-        next.slug,
-        next.name,
-        next.sourceType,
-        next.sourceValue,
-        next.extractSource,
-        next.extractId,
-        next.extractLabel,
-        next.extractResolutionStatus,
-        next.enabled ? 1 : 0,
-        next.autoSyncEnabled ? 1 : 0,
-        next.autoSyncOnStart ? 1 : 0,
-        next.autoSyncIntervalHours,
-        next.pmtilesMinZoom,
-        next.pmtilesMaxZoom,
-        next.sourceLayer,
-        next.nextSyncAt,
-        updatedBy,
-        existing.id
-      );
+      `
+        )
+        .run(
+          next.slug,
+          next.name,
+          next.sourceType,
+          next.sourceValue,
+          next.extractSource,
+          next.extractId,
+          next.extractLabel,
+          next.extractResolutionStatus,
+          next.enabled ? 1 : 0,
+          next.autoSyncEnabled ? 1 : 0,
+          next.autoSyncOnStart ? 1 : 0,
+          next.autoSyncIntervalHours,
+          next.pmtilesMinZoom,
+          next.pmtilesMaxZoom,
+          next.sourceLayer,
+          next.nextSyncAt,
+          next.regionKind,
+          next.parentRegionId,
+          next.orderInParent,
+          next.visibleInAdmin ? 1 : 0,
+          next.countryCode,
+          updatedBy,
+          existing.id
+        );
       const updatedRegion = await getRegionById(existing.id);
       if (!updatedRegion) {
         throw new Error('Failed to load saved region');
@@ -341,7 +531,9 @@ function createRegionsDomain(context: LooseRecord = {}) {
       return updatedRegion;
     }
 
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO data_sync_regions (
         slug,
         name,
@@ -361,43 +553,65 @@ function createRegionsDomain(context: LooseRecord = {}) {
         source_layer,
         last_sync_status,
         next_sync_at,
+        region_kind,
+        parent_region_id,
+        order_in_parent,
+        visible_in_admin,
+        country_code,
         updated_by,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, datetime('now'), datetime('now'))
-    `).run(
-      next.slug,
-      next.name,
-      next.sourceType,
-      next.sourceValue,
-      next.extractSource,
-      next.extractId,
-      next.extractLabel,
-      next.extractResolutionStatus,
-      next.enabled ? 1 : 0,
-      next.autoSyncEnabled ? 1 : 0,
-      next.autoSyncOnStart ? 1 : 0,
-      next.autoSyncIntervalHours,
-      next.pmtilesMinZoom,
-      next.pmtilesMaxZoom,
-      next.sourceLayer,
-      next.nextSyncAt,
-      updatedBy
-    );
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `
+      )
+      .run(
+        next.slug,
+        next.name,
+        next.sourceType,
+        next.sourceValue,
+        next.extractSource,
+        next.extractId,
+        next.extractLabel,
+        next.extractResolutionStatus,
+        next.enabled ? 1 : 0,
+        next.autoSyncEnabled ? 1 : 0,
+        next.autoSyncOnStart ? 1 : 0,
+        next.autoSyncIntervalHours,
+        next.pmtilesMinZoom,
+        next.pmtilesMaxZoom,
+        next.sourceLayer,
+        next.nextSyncAt,
+        next.regionKind,
+        next.parentRegionId,
+        next.orderInParent,
+        next.visibleInAdmin ? 1 : 0,
+        next.countryCode,
+        updatedBy
+      );
 
-    const row = await db.prepare(`
+    const row = await db
+      .prepare(
+        `
       SELECT id
       FROM data_sync_regions
       WHERE slug = ?
       ORDER BY id DESC
       LIMIT 1
-    `).get(next.slug);
+    `
+      )
+      .get(next.slug);
     const createdRegion = await getRegionById(row?.id);
     if (!createdRegion) {
       throw new Error('Failed to load saved region');
     }
     return createdRegion;
+  }
+
+  async function saveRegion(input: RegionInput = {}, actor = null): Promise<Region> {
+    return saveRegionInternal(input, actor, {
+      allowCountryAggregateExpansion: true
+    });
   }
 
   function buildDeleteResult(existing, deletedBy, membershipCount, runCount, orphanDeletedCount) {
@@ -444,7 +658,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
     if (!existing) {
       throw new Error('Region not found');
     }
-    if (['queued', 'running'].includes(existing.lastSyncStatus)) {
+    if (['queued', 'running'].includes(existing.lastSyncStatus) && (await countActiveRuns(existing.id)) > 0) {
       throw new Error('Region cannot be deleted while it is queued or actively syncing');
     }
 
@@ -453,10 +667,226 @@ function createRegionsDomain(context: LooseRecord = {}) {
     return tx();
   }
 
-  async function listRuntimePmtilesRegions(): Promise<Array<Pick<Region, 'id' | 'slug' | 'name' | 'sourceLayer' | 'bounds' | 'pmtilesMinZoom' | 'pmtilesMaxZoom' | 'lastSuccessfulSyncAt'>>> {
+  async function listSubregions(parentId: number): Promise<Region[]> {
+    const numericId = Number(parentId);
+    if (!Number.isInteger(numericId) || numericId <= 0) return [];
+    const rows = await db
+      .prepare(
+        `
+      SELECT
+        id, slug, name, source_type, source_value, extract_source, extract_id, extract_label,
+        extract_resolution_status, extract_resolution_error, enabled, auto_sync_enabled,
+        auto_sync_on_start, auto_sync_interval_hours, pmtiles_min_zoom, pmtiles_max_zoom,
+        source_layer, last_sync_started_at, last_sync_finished_at, last_sync_status,
+        last_sync_error, last_successful_sync_at, source_data_updated_at, next_sync_at,
+        bounds_west, bounds_south, bounds_east, bounds_north, last_feature_count, updated_by,
+        created_at, updated_at, parent_region_id, region_kind, order_in_parent,
+        visible_in_admin, country_code
+      FROM data_sync_regions
+      WHERE parent_region_id = ?
+      ORDER BY COALESCE(order_in_parent, 0), lower(name), id
+    `
+      )
+      .all(numericId);
+    return (Array.isArray(rows) ? rows : []).map(rowToRegion).filter((item): item is Region => Boolean(item));
+  }
+
+  async function listRegionTree(
+    options: { includeDisabled?: boolean; includeSubregions?: boolean } = {}
+  ): Promise<Region[]> {
     await ensureBootstrapped();
-    return (await listRegions({ includeDisabled: false }))
-      .filter((region) => region.enabled && region.bounds)
+    const includeDisabled = options.includeDisabled !== false;
+    const includeSubregions = options.includeSubregions !== false;
+    const rows = await listRegionRows();
+    const items = rows
+      .map(rowToRegion)
+      .filter((item): item is Region => Boolean(item))
+      .filter((item) => includeDisabled || item.enabled);
+    const byId = new Map<number, Region>();
+    for (const region of items) byId.set(region.id, region);
+
+    const visible = items.filter((region) => region.visibleInAdmin && region.parentRegionId == null);
+    if (!includeSubregions) return visible;
+
+    const childrenByParent = new Map<number, Region[]>();
+    for (const region of items) {
+      if (region.parentRegionId == null) continue;
+      const arr = childrenByParent.get(region.parentRegionId) || [];
+      arr.push(region);
+      childrenByParent.set(region.parentRegionId, arr);
+    }
+    for (const arr of childrenByParent.values()) {
+      arr.sort((a, b) => {
+        const ao = a.orderInParent ?? Number.MAX_SAFE_INTEGER;
+        const bo = b.orderInParent ?? Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a.name).localeCompare(String(b.name));
+      });
+    }
+
+    const out: Region[] = [];
+    for (const region of visible) {
+      const subs = childrenByParent.get(region.id) || [];
+      const successful = subs.filter((sub) => Boolean(sub.lastSuccessfulSyncAt));
+      out.push({
+        ...region,
+        subregions: subs,
+        subregionCount: subs.length,
+        subregionCompletedCount: successful.length
+      });
+    }
+    return out;
+  }
+
+  async function createCountryAggregate(options: LooseRecord = {}): Promise<Region> {
+    await ensureBootstrapped();
+    if (!countrySubregionsCatalog || typeof countrySubregionsCatalog.getCountry !== 'function') {
+      throw new Error('Country-subregions catalog is not configured');
+    }
+    const countryId = String(options?.countryId || '')
+      .trim()
+      .toLowerCase();
+    if (!countryId) {
+      throw new Error('countryId is required');
+    }
+    const country = await countrySubregionsCatalog.getCountry(countryId);
+    if (!country) {
+      throw new Error(`Country not found in Geofabrik catalog: ${countryId}`);
+    }
+    const actor = normalizeNullableText(options?.actor, 160);
+    const regionInput = buildCountryAggregateRegionInput(options?.region);
+    const requestedParentId = Number(regionInput.id || 0);
+    const existingParent = requestedParentId > 0 ? await getRegionById(requestedParentId) : null;
+    if (requestedParentId > 0 && !existingParent) {
+      throw new Error('Region not found');
+    }
+    await assertCountryAggregateUpgradeAllowed(existingParent);
+    const hasSubregions = Array.isArray(country.subregions) && country.subregions.length > 0;
+    const parentName = regionInput.name || country.name;
+    const parentSlug = regionInput.slug || slugify(country.countryId);
+    const parentSearchQuery = regionInput.searchQuery || country.name;
+    const parentExtractLabel = regionInput.extractLabel || country.name;
+
+    const parentRegion = await saveRegionInternal(
+      {
+        ...regionInput,
+        name: parentName,
+        slug: parentSlug,
+        extractSource: 'geofabrik',
+        extractId: country.countryId,
+        extractLabel: parentExtractLabel,
+        searchQuery: parentSearchQuery,
+        regionKind: hasSubregions ? 'country_aggregate' : 'standalone',
+        visibleInAdmin: true,
+        countryCode: country.iso
+      },
+      actor,
+      {
+        allowCountryAggregateExpansion: false
+      }
+    );
+
+    if (!hasSubregions) return parentRegion;
+
+    const existingSubregions = await listSubregions(parentRegion.id);
+    const existingSubregionByExtractKey = new Map<string, Region>();
+    for (const item of existingSubregions) {
+      const extractKey = buildRegionExtractKey(item.extractSource, item.extractId);
+      if (!extractKey || existingSubregionByExtractKey.has(extractKey)) continue;
+      existingSubregionByExtractKey.set(extractKey, item);
+    }
+
+    const subs: Region[] = [];
+    let orderIndex = 0;
+    for (const sub of country.subregions) {
+      const subSlug = slugify(`${country.countryId}-${sub.extractId.replace(/\//g, '-')}`);
+      const existingSubregion = existingSubregionByExtractKey.get(buildRegionExtractKey('geofabrik', sub.extractId));
+      const saved = await saveRegionInternal(
+        {
+          ...(existingSubregion?.id ? { id: existingSubregion.id } : {}),
+          name: `${parentRegion.name} · ${sub.name}`,
+          slug: subSlug,
+          extractSource: 'geofabrik',
+          extractId: sub.extractId,
+          extractLabel: sub.name,
+          searchQuery: sub.name,
+          regionKind: 'subregion',
+          parentRegionId: parentRegion.id,
+          orderInParent: orderIndex,
+          visibleInAdmin: false,
+          countryCode: sub.iso || country.iso,
+          autoSyncEnabled: false,
+          autoSyncOnStart: false,
+          autoSyncIntervalHours: parentRegion.autoSyncIntervalHours,
+          pmtilesMinZoom: parentRegion.pmtilesMinZoom,
+          pmtilesMaxZoom: parentRegion.pmtilesMaxZoom,
+          sourceLayer: parentRegion.sourceLayer
+        },
+        actor,
+        {
+          allowCountryAggregateExpansion: false
+        }
+      );
+      subs.push(saved);
+      orderIndex += 1;
+    }
+
+    return {
+      ...parentRegion,
+      subregions: subs,
+      subregionCount: subs.length,
+      subregionCompletedCount: 0
+    };
+  }
+
+  async function prepareRegionForSync(
+    regionId,
+    options: { requestedBy?: string | null; triggerReason?: string | null } = {}
+  ): Promise<Region | null> {
+    await ensureBootstrapped();
+    const numericRegionId = Number(regionId);
+    if (!Number.isInteger(numericRegionId) || numericRegionId <= 0) {
+      return null;
+    }
+
+    const existing = await getRegionById(numericRegionId);
+    if (!existing) {
+      return null;
+    }
+
+    const triggerReason = String(options?.triggerReason || '')
+      .trim()
+      .toLowerCase();
+    if (triggerReason !== 'manual') {
+      return existing;
+    }
+    if (existing.regionKind !== 'standalone') {
+      return existing;
+    }
+
+    const country = await findCountryAggregateMatch(existing);
+    if (!country) {
+      return existing;
+    }
+
+    return createCountryAggregate({
+      countryId: country.countryId,
+      actor: options?.requestedBy || null,
+      region: buildCountryAggregateRegionInput(existing)
+    });
+  }
+
+  async function listRuntimePmtilesRegions(): Promise<
+    Array<
+      Pick<
+        Region,
+        'id' | 'slug' | 'name' | 'sourceLayer' | 'bounds' | 'pmtilesMinZoom' | 'pmtilesMaxZoom' | 'lastSuccessfulSyncAt'
+      >
+    >
+  > {
+    await ensureBootstrapped();
+    return (await listRegions({ includeDisabled: false, includeHiddenSubregions: true }))
+      .filter((region) => region.enabled && region.bounds && region.regionKind !== 'country_aggregate')
       .map((region) => ({
         id: region.id,
         slug: region.slug,
@@ -472,8 +902,12 @@ function createRegionsDomain(context: LooseRecord = {}) {
   return {
     getRegionById,
     listRegions,
+    listRegionTree,
+    listSubregions,
     normalizeRegionInput,
     saveRegion,
+    prepareRegionForSync,
+    createCountryAggregate,
     deleteRegion,
     listRuntimePmtilesRegions,
     validateOverlap

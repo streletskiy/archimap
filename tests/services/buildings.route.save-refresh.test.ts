@@ -59,9 +59,7 @@ function createFeatureFromRow(row) {
   } catch {
     tags = {};
   }
-  const featureKind = Object.prototype.hasOwnProperty.call(tags, 'building:part')
-    ? 'building_part'
-    : 'building';
+  const featureKind = Object.prototype.hasOwnProperty.call(tags, 'building:part') ? 'building_part' : 'building';
   return {
     type: 'Feature',
     id: `${row.osm_type}/${row.osm_id}`,
@@ -93,7 +91,15 @@ function createRouteApp(options: LooseRecord = {}) {
   const defaultContour = {
     geometry_json: JSON.stringify({
       type: 'Polygon',
-      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+      coordinates: [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 1],
+          [0, 0]
+        ]
+      ]
     }),
     tags_json: JSON.stringify({ building: 'yes' }),
     updated_at: '2026-03-25T00:00:00Z'
@@ -290,7 +296,12 @@ test('building-info save updates an existing pending edit in place', async (t) =
 
 test('building-info save accepts overpass snapshot when contour row is missing', async (t) => {
   const { app, savedEdits } = createRouteApp({
-    currentContour: null
+    currentContour: null,
+    latestSnapshot: {
+      osm_type: 'way',
+      osm_id: 777,
+      source_osm_updated_at: new Date('2026-03-20T00:00:00Z').toString()
+    }
   });
   const server = await startServer(app);
   t.after(async () => stopServer(server));
@@ -303,7 +314,15 @@ test('building-info save accepts overpass snapshot when contour row is missing',
 
   const sourceGeometryJson = JSON.stringify({
     type: 'Polygon',
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+    coordinates: [
+      [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+        [0, 0]
+      ]
+    ]
   });
   const sourceTagsJson = JSON.stringify({
     building: 'yes',
@@ -329,13 +348,68 @@ test('building-info save accepts overpass snapshot when contour row is missing',
   assert.equal(savedEdits.length, 1);
   assert.equal(savedEdits[0]?.source_geometry_json, sourceGeometryJson);
   assert.equal(savedEdits[0]?.source_tags_json, sourceTagsJson);
-  assert.equal(savedEdits[0]?.source_osm_updated_at, null);
+  assert.equal(savedEdits[0]?.source_osm_updated_at, '2026-03-20T00:00:00Z');
+});
+
+test('building-info save normalizes source timestamp from contour Date values', async (t) => {
+  const contourUpdatedAt = new Date('2026-03-25T00:00:00Z');
+  const { app, savedEdits } = createRouteApp({
+    currentContour: {
+      geometry_json: JSON.stringify({
+        type: 'Polygon',
+        coordinates: [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 1],
+            [0, 0]
+          ]
+        ]
+      }),
+      tags_json: JSON.stringify({ building: 'yes' }),
+      updated_at: contourUpdatedAt
+    }
+  });
+  const server = await startServer(app);
+  t.after(async () => stopServer(server));
+
+  const port = (() => {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Server is not listening');
+    return address.port;
+  })();
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/building-info`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      osmType: 'way',
+      osmId: 808,
+      name: 'Contour house',
+      editedFields: ['name']
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(savedEdits.length, 1);
+  assert.equal(savedEdits[0]?.source_osm_updated_at, '2026-03-25T00:00:00Z');
 });
 
 test('building route falls back to the latest stored snapshot when contour row is missing', async (t) => {
   const snapshotGeometry = JSON.stringify({
     type: 'Polygon',
-    coordinates: [[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]
+    coordinates: [
+      [
+        [10, 10],
+        [11, 10],
+        [11, 11],
+        [10, 11],
+        [10, 10]
+      ]
+    ]
   });
   const snapshotTags = JSON.stringify({
     building: 'yes',

@@ -12,10 +12,8 @@ import {
 } from '$lib/stores/map';
 import { closeBuildingModal, openBuildingModal } from '$lib/stores/ui';
 import { normalizeArchitectureStyleKey } from '$lib/utils/architecture-style';
-import {
-  normalizeBuildingMaterialSelection,
-  splitBuildingMaterialSelection
-} from '$lib/utils/building-material';
+import { normalizeBuildingMaterialSelection, splitBuildingMaterialSelection } from '$lib/utils/building-material';
+import { normalizeRoofShapeSelection } from '$lib/utils/roof-shape';
 import { filterBuildingEditedFields } from '$lib/utils/building-edit-fields';
 import { resolveAddressText } from '$lib/utils/building-address';
 import { isAbortError } from '$lib/utils/error';
@@ -39,8 +37,7 @@ const initialState = {
 
 function isSelectionDebugEnabled() {
   const cfg = getRuntimeConfig();
-  const isLocalRuntime = typeof window !== 'undefined'
-    && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const isLocalRuntime = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   const meta = import.meta as LooseRecord;
   return Boolean(cfg?.mapSelection?.debug || meta?.env?.DEV || isLocalRuntime);
 }
@@ -55,9 +52,7 @@ function debugSelectionLog(eventName, payload: LooseRecord = {}) {
 
 function updateSelectionDebugHook(selection) {
   if (!isSelectionDebugEnabled() || typeof document === 'undefined') return;
-  const key = selection?.osmType && selection?.osmId
-    ? `${selection.osmType}/${selection.osmId}`
-    : '';
+  const key = selection?.osmType && selection?.osmId ? `${selection.osmType}/${selection.osmId}` : '';
   document.body.dataset.selectedBuildingId = key;
   window.__APP_STATE__ = window.__APP_STATE__ || {};
   window.__APP_STATE__.selectedBuildingId = key || null;
@@ -77,21 +72,27 @@ function normalizeArchiInfo(payload: LooseRecord) {
     style: styleRaw,
     styleRaw,
     design: pickNullableText(info.design, sourceTags?.design),
-    design_ref: pickNullableText(info.design_ref, info['design:ref'], sourceTags?.['design:ref'], sourceTags?.design_ref),
+    design_ref: pickNullableText(
+      info.design_ref,
+      info['design:ref'],
+      sourceTags?.['design:ref'],
+      sourceTags?.design_ref
+    ),
     design_year: coerceNullableIntegerText(
       info.design_year ?? info['design:year'] ?? sourceTags?.['design:year'] ?? sourceTags?.design_year,
       1000,
       2100
     ),
     levels: coerceNullableIntegerText(info.levels ?? info['building:levels'], 0, 300),
-    year_built: coerceNullableIntegerText(
-      info.year_built ?? info['building:year'] ?? info.start_date,
-      1000,
-      2100
-    ),
+    year_built: coerceNullableIntegerText(info.year_built ?? info['building:year'] ?? info.start_date, 1000, 2100),
     architect: pickNullableText(info.architect, info['building:architect']),
     material: normalizeBuildingMaterialSelection(
-      pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+      pickNullableText(
+        info.material,
+        info['building:material'],
+        sourceTags?.['building:material'],
+        sourceTags?.material
+      ),
       pickNullableText(
         info.material_concrete,
         info['building:material:concrete'],
@@ -99,21 +100,34 @@ function normalizeArchiInfo(payload: LooseRecord) {
         sourceTags?.material_concrete
       )
     ),
-    materialRaw: pickNullableText(info.material, info['building:material'], sourceTags?.['building:material'], sourceTags?.material),
+    materialRaw: pickNullableText(
+      info.material,
+      info['building:material'],
+      sourceTags?.['building:material'],
+      sourceTags?.material
+    ),
     materialConcrete: pickNullableText(
       info.material_concrete,
       info['building:material:concrete'],
       sourceTags?.['building:material:concrete'],
       sourceTags?.material_concrete
     ),
+    roof_shape: normalizeRoofShapeSelection(
+      pickNullableText(
+        info.roof_shape,
+        info.roofShape,
+        info['roof:shape'],
+        sourceTags?.['roof:shape'],
+        sourceTags?.roof_shape,
+        sourceTags?.['building:roof:shape']
+      )
+    ),
     colour: pickNullableText(info.colour, info['building:colour'], sourceTags?.['building:colour'], sourceTags?.colour),
     address: resolveAddressText(info, pickNullableText, info.address),
     description: pickNullableText(info.description),
     archimap_description: pickNullableText(info.archimap_description, info.description),
     design_ref_suggestions: Array.isArray(info.design_ref_suggestions)
-      ? info.design_ref_suggestions
-        .map((value) => pickNullableText(value))
-        .filter(Boolean)
+      ? info.design_ref_suggestions.map((value) => pickNullableText(value)).filter(Boolean)
       : [],
     _sourceTags: info._sourceTags && typeof info._sourceTags === 'object' ? info._sourceTags : {}
   };
@@ -148,12 +162,9 @@ function buildSourceSnapshotFromFeature(feature) {
       featureKind: null
     };
   }
-  const properties = feature?.properties && typeof feature.properties === 'object'
-    ? feature.properties
-    : {};
-  const sourceTags = properties?.source_tags && typeof properties.source_tags === 'object'
-    ? properties.source_tags
-    : {};
+  const properties = feature?.properties && typeof feature.properties === 'object' ? feature.properties : {};
+  const sourceTags =
+    properties?.source_tags && typeof properties.source_tags === 'object' ? properties.source_tags : {};
   return {
     sourceGeometryJson: feature?.geometry == null ? null : normalizeJsonString(feature.geometry),
     sourceTagsJson: normalizeJsonString(sourceTags),
@@ -167,14 +178,18 @@ function buildSourceSnapshotFromDetail(detail) {
     sourceGeometryJson: normalizeJsonString(detail?.sourceGeometryJson ?? detail?.source_geometry_json ?? null),
     sourceTagsJson: normalizeJsonString(detail?.sourceTagsJson ?? detail?.source_tags_json ?? null),
     sourceOsmUpdatedAt: pickNullableText(detail?.sourceOsmUpdatedAt ?? detail?.source_osm_updated_at ?? null),
-    featureKind: pickNullableText(detail?.featureKind ?? detail?.feature_kind ?? detail?.feature?.properties?.feature_kind ?? null)
+    featureKind: pickNullableText(
+      detail?.featureKind ?? detail?.feature_kind ?? detail?.feature?.properties?.feature_kind ?? null
+    )
   };
-  const fallback = detail?.feature ? buildSourceSnapshotFromFeature(detail.feature) : {
-    sourceGeometryJson: null,
-    sourceTagsJson: null,
-    sourceOsmUpdatedAt: null,
-    featureKind: null
-  };
+  const fallback = detail?.feature
+    ? buildSourceSnapshotFromFeature(detail.feature)
+    : {
+        sourceGeometryJson: null,
+        sourceTagsJson: null,
+        sourceOsmUpdatedAt: null,
+        featureKind: null
+      };
   return {
     sourceGeometryJson: explicit.sourceGeometryJson || fallback.sourceGeometryJson,
     sourceTagsJson: explicit.sourceTagsJson || fallback.sourceTagsJson,
@@ -210,6 +225,7 @@ function createFallbackBuildingDetails(detail = null) {
         material: null,
         materialRaw: null,
         materialConcrete: null,
+        roof_shape: null,
         colour: null,
         address: null,
         design_ref_suggestions: [],
@@ -233,7 +249,9 @@ function normalizeBuildingSelection(detail) {
     osmId,
     lon: lon != null && Number.isFinite(lon) ? lon : null,
     lat: lat != null && Number.isFinite(lat) ? lat : null,
-    featureKind: String(detail?.featureKind || detail?.feature_kind || detail?.feature?.properties?.feature_kind || '').trim() || null
+    featureKind:
+      String(detail?.featureKind || detail?.feature_kind || detail?.feature?.properties?.feature_kind || '').trim() ||
+      null
   };
 }
 
@@ -245,15 +263,14 @@ function getSelectionKey(selection) {
 }
 
 function toDisplayArchiInfoFromPayload(currentInfo, payload: LooseRecord, editedFields: LooseRecord[] = []) {
-  const next = currentInfo && typeof currentInfo === 'object'
-    ? { ...currentInfo }
-    : { _sourceTags: {} };
+  const next = currentInfo && typeof currentInfo === 'object' ? { ...currentInfo } : { _sourceTags: {} };
   const rawStyle = coerceNullableText(payload?.style);
   const rawDesign = coerceNullableText(payload?.design);
   const rawDesignRef = coerceNullableText(payload?.designRef);
   const rawDesignYear = coerceNullableIntegerText(payload?.designYear, 1000, 2100);
   const materialSelection = normalizeBuildingMaterialSelection(payload?.material);
   const splitMaterial = splitBuildingMaterialSelection(materialSelection);
+  const roofShape = normalizeRoofShapeSelection(payload?.roofShape);
   const editedFieldSet = new Set(normalizeEditedBuildingFields(editedFields));
   const applyAll = editedFieldSet.size === 0;
 
@@ -271,9 +288,11 @@ function toDisplayArchiInfoFromPayload(currentInfo, payload: LooseRecord, edited
     next.material = coerceNullableText(splitMaterial.material);
     next.material_concrete = coerceNullableText(splitMaterial.materialConcrete);
   }
+  if (applyAll || editedFieldSet.has('roofShape')) next.roof_shape = coerceNullableText(roofShape);
   if (applyAll || editedFieldSet.has('colour')) next.colour = coerceNullableText(payload?.colour);
   if (applyAll || editedFieldSet.has('levels')) next.levels = coerceNullableIntegerText(payload?.levels, 0, 300);
-  if (applyAll || editedFieldSet.has('yearBuilt')) next.year_built = coerceNullableIntegerText(payload?.yearBuilt, 1000, 2100);
+  if (applyAll || editedFieldSet.has('yearBuilt'))
+    next.year_built = coerceNullableIntegerText(payload?.yearBuilt, 1000, 2100);
   if (applyAll || editedFieldSet.has('architect')) next.architect = coerceNullableText(payload?.architect);
   if (applyAll || editedFieldSet.has('address')) next.address = coerceNullableText(payload?.address);
   if (applyAll || editedFieldSet.has('archimapDescription')) {
@@ -297,18 +316,20 @@ function getComparableFromSelectedBuildingDetail(detail) {
   }
 }
 
-function getBulkSaveTargets(options: {
-  selectionItems?: LooseRecord[];
-  currentState?: LooseRecord;
-  snapshot?: LooseRecord | null;
-  outgoingEditedFields?: string[];
-} = {}) {
+function getBulkSaveTargets(
+  options: {
+    selectionItems?: LooseRecord[];
+    currentState?: LooseRecord;
+    snapshot?: LooseRecord | null;
+    outgoingEditedFields?: string[];
+  } = {}
+) {
   const {
     selectionItems = [],
     currentState = {},
     snapshot = null,
     outgoingEditedFields = []
-  } = /** @type {LooseRecord} */ (options);
+  } = /** @type {LooseRecord} */ options;
   const items = Array.isArray(selectionItems) ? selectionItems : [];
   if (items.length === 0) return [];
   const isBulkSelection = items.length > 1;
@@ -320,28 +341,34 @@ function getBulkSaveTargets(options: {
   const currentSelectionKeys = Array.isArray(currentState.selectedBuildingDetailKeys)
     ? currentState.selectedBuildingDetailKeys
     : [];
-  const canCompareSelectionDetails = currentSelectionDetails.length === items.length
-    && currentSelectionKeys.length === selectionKeys.length
-    && currentSelectionKeys.every((key, index) => key === selectionKeys[index]);
+  const canCompareSelectionDetails =
+    currentSelectionDetails.length === items.length &&
+    currentSelectionKeys.length === selectionKeys.length &&
+    currentSelectionKeys.every((key, index) => key === selectionKeys[index]);
   const selectionDetailsByKey = canCompareSelectionDetails
     ? new Map(selectionKeys.map((key, index) => [key, currentSelectionDetails[index]]))
     : null;
 
-  return items.map((item, index) => {
-    const itemKey = selectionKeys[index];
-    const itemDetail = selectionDetailsByKey?.get(itemKey)
-      || (!isBulkSelection ? (currentState.buildingDetails || currentSelectionDetails[0] || null) : null);
-    const itemComparable = getComparableFromSelectedBuildingDetail(itemDetail);
-    const itemChangedFields = itemComparable ? getEditedBuildingFields(snapshot, itemComparable) : outgoingEditedFields;
-    const itemEditedFields = itemChangedFields.filter((field) => outgoingEditedFields.includes(field));
-    return itemEditedFields.length > 0
-      ? {
-          item,
-          editedFields: itemEditedFields,
-          sourceSnapshot: buildSourceSnapshotFromDetail(itemDetail)
-        }
-      : null;
-  }).filter(Boolean);
+  return items
+    .map((item, index) => {
+      const itemKey = selectionKeys[index];
+      const itemDetail =
+        selectionDetailsByKey?.get(itemKey) ||
+        (!isBulkSelection ? currentState.buildingDetails || currentSelectionDetails[0] || null : null);
+      const itemComparable = getComparableFromSelectedBuildingDetail(itemDetail);
+      const itemChangedFields = itemComparable
+        ? getEditedBuildingFields(snapshot, itemComparable)
+        : outgoingEditedFields;
+      const itemEditedFields = itemChangedFields.filter((field) => outgoingEditedFields.includes(field));
+      return itemEditedFields.length > 0
+        ? {
+            item,
+            editedFields: itemEditedFields,
+            sourceSnapshot: buildSourceSnapshotFromDetail(itemDetail)
+          }
+        : null;
+    })
+    .filter(Boolean);
 }
 
 export function createBuildingDetailsManager() {
@@ -361,15 +388,19 @@ export function createBuildingDetailsManager() {
 
   async function fetchBuildingDetails(detail, signal) {
     let feature = null;
-    const localOverpassDetail = detail?.feature?.properties?.source === 'overpass'
-      ? getOverpassBuildingDetails(detail.feature)
-      : getOverpassBuildingDetails(`${detail?.osmType || ''}/${detail?.osmId || ''}`);
+    const localOverpassDetail =
+      detail?.feature?.properties?.source === 'overpass'
+        ? getOverpassBuildingDetails(detail.feature)
+        : getOverpassBuildingDetails(`${detail?.osmType || ''}/${detail?.osmId || ''}`);
     if (localOverpassDetail) {
       return localOverpassDetail;
     }
     try {
       const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
-      const reviewStatus = String(data?.review_status || '').trim().toLowerCase() || null;
+      const reviewStatus =
+        String(data?.review_status || '')
+          .trim()
+          .toLowerCase() || null;
       const userEditId = Number(data?.user_edit_id || 0);
       let sourceTags = {};
       let sourceSnapshot;
@@ -386,7 +417,12 @@ export function createBuildingDetailsManager() {
         }
       }
       return {
-        feature_kind: data?.feature_kind || feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+        feature_kind:
+          data?.feature_kind ||
+          feature?.properties?.feature_kind ||
+          detail?.featureKind ||
+          detail?.feature?.properties?.feature_kind ||
+          null,
         sourceGeometryJson: sourceSnapshot.sourceGeometryJson,
         sourceTagsJson: sourceSnapshot.sourceTagsJson,
         sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt,
@@ -408,10 +444,15 @@ export function createBuildingDetailsManager() {
       if (isAbortError(primaryError)) throw primaryError;
       try {
         feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
-        const archiInfo = feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
+        const archiInfo =
+          feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
         const sourceSnapshot = buildSourceSnapshotFromFeature(feature);
         return {
-          feature_kind: feature?.properties?.feature_kind || detail?.featureKind || detail?.feature?.properties?.feature_kind || null,
+          feature_kind:
+            feature?.properties?.feature_kind ||
+            detail?.featureKind ||
+            detail?.feature?.properties?.feature_kind ||
+            null,
           sourceGeometryJson: sourceSnapshot.sourceGeometryJson,
           sourceTagsJson: sourceSnapshot.sourceTagsJson,
           sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt,
@@ -456,9 +497,7 @@ export function createBuildingDetailsManager() {
     });
 
     try {
-      const detailItems = await Promise.all(
-        normalizedSelections.map((item) => fetchBuildingDetails(item, signal))
-      );
+      const detailItems = await Promise.all(normalizedSelections.map((item) => fetchBuildingDetails(item, signal)));
       if (token !== activeBuildingDetailsToken) return;
       updateState({
         buildingDetails: detailItems[0] || null,
@@ -508,9 +547,10 @@ export function createBuildingDetailsManager() {
 
     if (shiftKey) {
       const existingIndex = currentSelections.findIndex((item) => getSelectionKey(item) === normalizedKey);
-      const nextSelections = existingIndex >= 0
-        ? currentSelections.filter((_, index) => index !== existingIndex)
-        : [...currentSelections, normalized];
+      const nextSelections =
+        existingIndex >= 0
+          ? currentSelections.filter((_, index) => index !== existingIndex)
+          : [...currentSelections, normalized];
 
       if (nextSelections.length === 0) {
         clearSelection();
@@ -589,8 +629,9 @@ export function createBuildingDetailsManager() {
     const activeSelections = Array.isArray(get(selectedBuildings)) ? get(selectedBuildings) : [];
     const selectionItems = activeSelections.length > 0 ? activeSelections : [normalized];
     const isBulkSelection = selectionItems.length > 1;
-    const hasBuildingPartSelection = currentState.buildingDetails?.feature_kind === 'building_part'
-      || selectionItems.some((item) => item?.featureKind === 'building_part');
+    const hasBuildingPartSelection =
+      currentState.buildingDetails?.feature_kind === 'building_part' ||
+      selectionItems.some((item) => item?.featureKind === 'building_part');
 
     if (!get(session).authenticated) {
       updateState({ saveStatus: translateNow('mapPage.authRequired') });
@@ -631,6 +672,7 @@ export function createBuildingDetailsManager() {
       designRef: hasBuildingPartSelection ? null : coerceNullableText(detail.designRef),
       designYear: hasBuildingPartSelection ? null : coerceNullableIntegerText(detail.designYear, 1000, 2100),
       material: coerceNullableText(normalizeBuildingMaterialSelection(detail.material)),
+      roofShape: coerceNullableText(normalizeRoofShapeSelection(detail.roofShape)),
       colour: coerceNullableText(detail.colour),
       levels: coerceNullableIntegerText(detail.levels, 0, 300),
       yearBuilt: coerceNullableIntegerText(detail.yearBuilt, 1000, 2100),
@@ -652,48 +694,56 @@ export function createBuildingDetailsManager() {
             osmType: target.item.osmType,
             osmId: target.item.osmId,
             editedFields: target.editedFields,
-            sourceGeometryJson: sourceSnapshot.sourceGeometryJson ?? currentState.buildingDetails?.sourceGeometryJson ?? null,
+            sourceGeometryJson:
+              sourceSnapshot.sourceGeometryJson ?? currentState.buildingDetails?.sourceGeometryJson ?? null,
             sourceTagsJson: sourceSnapshot.sourceTagsJson ?? currentState.buildingDetails?.sourceTagsJson ?? null,
-            sourceOsmUpdatedAt: sourceSnapshot.sourceOsmUpdatedAt ?? currentState.buildingDetails?.sourceOsmUpdatedAt ?? null,
-            featureKind: sourceSnapshot.featureKind ?? currentState.buildingDetails?.feature_kind ?? normalized.featureKind ?? null
+            sourceOsmUpdatedAt:
+              sourceSnapshot.sourceOsmUpdatedAt ?? currentState.buildingDetails?.sourceOsmUpdatedAt ?? null,
+            featureKind:
+              sourceSnapshot.featureKind ?? currentState.buildingDetails?.feature_kind ?? normalized.featureKind ?? null
           })
         });
       }
       const savedEditId = Number(lastSaveResult?.editId || 0);
-      const savedReviewStatus = String(lastSaveResult?.status || '').trim().toLowerCase() || 'pending';
+      const savedReviewStatus =
+        String(lastSaveResult?.status || '')
+          .trim()
+          .toLowerCase() || 'pending';
 
       state.update((current) => {
-        const isSameSelection = current.selectedBuildingIdentity
-          && current.selectedBuildingIdentity.osmType === payload.osmType
-          && current.selectedBuildingIdentity.osmId === payload.osmId;
+        const isSameSelection =
+          current.selectedBuildingIdentity &&
+          current.selectedBuildingIdentity.osmType === payload.osmType &&
+          current.selectedBuildingIdentity.osmId === payload.osmId;
         const selectionKeys = selectionItems.map((item) => getSelectionKey(item));
-        const canPatchSelectedDetails = isSameSelection
-          && Array.isArray(current.selectedBuildingDetails)
-          && current.selectedBuildingDetails.length === selectionItems.length
-          && Array.isArray(current.selectedBuildingDetailKeys)
-          && current.selectedBuildingDetailKeys.length === selectionKeys.length
-          && current.selectedBuildingDetailKeys.every((key, index) => key === selectionKeys[index]);
+        const canPatchSelectedDetails =
+          isSameSelection &&
+          Array.isArray(current.selectedBuildingDetails) &&
+          current.selectedBuildingDetails.length === selectionItems.length &&
+          Array.isArray(current.selectedBuildingDetailKeys) &&
+          current.selectedBuildingDetailKeys.length === selectionKeys.length &&
+          current.selectedBuildingDetailKeys.every((key, index) => key === selectionKeys[index]);
         const nextSelectedBuildingDetails = canPatchSelectedDetails
           ? current.selectedBuildingDetails.map((detail) => ({
               ...detail,
               review_status: savedReviewStatus,
-              user_edit_id: Number.isInteger(savedEditId) && savedEditId > 0 ? savedEditId : detail?.user_edit_id ?? null,
+              user_edit_id:
+                Number.isInteger(savedEditId) && savedEditId > 0 ? savedEditId : (detail?.user_edit_id ?? null),
               properties: {
-                archiInfo: toDisplayArchiInfoFromPayload(
-                  detail?.properties?.archiInfo,
-                  payload,
-                  outgoingEditedFields
-                )
+                archiInfo: toDisplayArchiInfoFromPayload(detail?.properties?.archiInfo, payload, outgoingEditedFields)
               }
             }))
           : current.selectedBuildingDetails;
         const nextBuildingDetails = canPatchSelectedDetails
           ? nextSelectedBuildingDetails[0] || current.buildingDetails
-          : (isSameSelection
+          : isSameSelection
             ? {
                 ...current.buildingDetails,
                 review_status: savedReviewStatus,
-                user_edit_id: Number.isInteger(savedEditId) && savedEditId > 0 ? savedEditId : current.buildingDetails?.user_edit_id ?? null,
+                user_edit_id:
+                  Number.isInteger(savedEditId) && savedEditId > 0
+                    ? savedEditId
+                    : (current.buildingDetails?.user_edit_id ?? null),
                 feature_kind: current.buildingDetails?.feature_kind || null,
                 region_slugs: Array.isArray(current.buildingDetails?.region_slugs)
                   ? current.buildingDetails.region_slugs
@@ -706,7 +756,7 @@ export function createBuildingDetailsManager() {
                   )
                 }
               }
-            : current.buildingDetails);
+            : current.buildingDetails;
 
         return {
           ...current,

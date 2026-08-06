@@ -97,15 +97,15 @@ function createFilterPresetController({
     filterPresets: FilterPresetState | null = null,
     options: { preserveSelection?: boolean; skipDraftSync?: boolean } = {}
   ) {
-    const current = (filterPresets && typeof filterPresets === 'object' ? filterPresets : {}) as Partial<FilterPresetState> & LooseRecord;
+    const current = (
+      filterPresets && typeof filterPresets === 'object' ? filterPresets : {}
+    ) as Partial<FilterPresetState> & LooseRecord;
     const preserveSelection = options.preserveSelection !== false;
     const skipDraftSync = options.skipDraftSync === true;
 
     const items = applyFilterPresetItems(current.items, current.source || 'db');
     const currentSelectedId = preserveSelection ? Number(get(selectedFilterPresetId) || 0) : 0;
-    const selected = items.find((item) => Number(item?.id || 0) === currentSelectedId)
-      || items[0]
-      || null;
+    const selected = items.find((item) => Number(item?.id || 0) === currentSelectedId) || items[0] || null;
 
     if (!selected) {
       selectedFilterPresetId.set(null);
@@ -229,12 +229,15 @@ function createFilterPresetController({
     dataStatus.set(dataT('status.loadingFilterPresets'));
     try {
       const data = await apiJson('/api/admin/app-settings/data/filter-presets');
-      seedFilterPresetItems({
-        source: String(data?.source || 'db'),
-        items: Array.isArray(data?.items) ? data.items : []
-      }, {
-        preserveSelection
-      });
+      seedFilterPresetItems(
+        {
+          source: String(data?.source || 'db'),
+          items: Array.isArray(data?.items) ? data.items : []
+        },
+        {
+          preserveSelection
+        }
+      );
       dataStatus.set('');
       return true;
     } catch (error) {

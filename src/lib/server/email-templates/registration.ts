@@ -9,11 +9,7 @@ const {
   escapeHtml,
   linkStyle
 } = require('./shell');
-const {
-  appendLocaleParam,
-  getEmailCopy,
-  normalizeEmailLocale
-} = require('./localization');
+const { appendLocaleParam, getEmailCopy, normalizeEmailLocale } = require('./localization');
 
 function registrationCodeHtmlTemplate({ code, expiresInMinutes, appDisplayName, confirmUrl, locale }) {
   const currentLocale = normalizeEmailLocale(locale);

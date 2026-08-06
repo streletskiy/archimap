@@ -16,6 +16,7 @@ from shapely.ops import unary_union
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_PATH = REPO_ROOT / 'frontend' / 'static' / 'admin-regions.geojson'
+CATALOG_OUTPUT_PATH = REPO_ROOT / 'src' / 'lib' / 'server' / 'data' / 'region-catalog.json'
 NATURAL_EARTH_URL = 'https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_countries.zip'
 NATURAL_EARTH_ADMIN1_URL = 'https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_1_states_provinces.zip'
 GEOFABRIK_INDEX_URL = 'https://download.geofabrik.de/index-v1.json'
@@ -33,6 +34,7 @@ COMBINED_COUNTRY_GEOMETRY_IDS = {
 EXTRA_GEOFABRIK_COUNTRY_EXTRACT_IDS = {
     'guernsey-jersey',
 }
+COUNTRY_SUBREGION_SKIP_IDS = {'russia', 'us'}
 COUNTRY_ID_ISO_OVERRIDES = {
     'kosovo': 'XK',
 }
@@ -41,36 +43,43 @@ EXTRA_COUNTRY_EXTRACTS = {
     'AX': {
         'extract_source': 'osmfr',
         'extract_id': 'osmfr_europe_finland_aland',
+        'download_path': 'europe/finland/aland',
         'name': 'Aland Islands',
     },
     'KW': {
         'extract_source': 'osmfr',
         'extract_id': 'osmfr_asia_kuwait',
+        'download_path': 'asia/kuwait',
         'name': 'Kuwait',
     },
     'FK': {
         'extract_source': 'geofabrik',
         'extract_id': 'geofabrik_europe_united-kingdom_falklands',
+        'geofabrik_index_id': 'falklands',
         'name': 'Falkland Islands',
     },
     'OM': {
         'extract_source': 'osmfr',
         'extract_id': 'osmfr_asia_oman',
+        'download_path': 'asia/oman',
         'name': 'Oman',
     },
     'SA': {
         'extract_source': 'osmfr',
         'extract_id': 'osmfr_asia_saudi_arabia',
+        'download_path': 'asia/saudi_arabia',
         'name': 'Saudi Arabia',
     },
     'QA': {
         'extract_source': 'osmfr',
         'extract_id': 'osmfr_asia_qatar',
+        'download_path': 'asia/qatar',
         'name': 'Qatar',
     },
     'TT': {
         'extract_source': 'osmfr',
         'extract_id': 'osmfr_central-america_trinidad_and_tobago',
+        'download_path': 'central-america/trinidad_and_tobago',
         'name': 'Trinidad and Tobago',
     },
 }
@@ -110,6 +119,7 @@ RUSSIA_ADMIN1_COMBINED_FEATURES = (
         'name': 'RU Russia Crimean Federal District',
         'extract_source': 'geofabrik',
         'extract_id': 'russia/crimean-fed-district',
+        'geofabrik_index_id': 'crimean-fed-district',
         'geometry_source': 'natural-earth-admin1-union',
         'region_kind': 'ru_region',
         'iso2': 'RU',
@@ -136,6 +146,41 @@ def fetch_text(url: str) -> str:
     request = urllib.request.Request(url, headers=HTTP_HEADERS)
     with urllib.request.urlopen(request, timeout=120) as response:
         return response.read().decode('utf-8', errors='replace')
+
+
+def normalize_path(value: str) -> str:
+    return str(value or '').replace('\\', '/').strip('/').strip()
+
+
+def build_osmfr_download_url(path: str) -> str:
+    normalized = normalize_path(path)
+    if not normalized:
+        raise ValueError('OSMFR download path is required')
+    return f'https://download.openstreetmap.fr/extracts/{normalized}.osm.pbf'
+
+
+def build_osmfr_state_url(path: str) -> str:
+    normalized = normalize_path(path)
+    if not normalized:
+        raise ValueError('OSMFR state path is required')
+    return f'https://download.openstreetmap.fr/extracts/{normalized}.state.txt'
+
+
+def get_geofabrik_download_url(feature_or_props) -> str | None:
+    properties = feature_or_props.get('properties', feature_or_props) if isinstance(feature_or_props, dict) else {}
+    urls = properties.get('urls') if isinstance(properties, dict) else None
+    if not isinstance(urls, dict):
+        return None
+    url = str(urls.get('pbf') or '').strip()
+    return url or None
+
+
+def attach_download_metadata(properties: dict, download_url: str | None, state_url: str | None = None) -> dict:
+    if download_url:
+        properties['DownloadUrl'] = str(download_url).strip()
+    if state_url:
+        properties['StateUrl'] = str(state_url).strip()
+    return properties
 
 
 def normalize_text(value: str) -> str:
@@ -439,7 +484,7 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
 
         output.append({
             'type': 'Feature',
-            'properties': {
+            'properties': attach_download_metadata({
                 'Slug': f'{iso_alpha2}-{slugify(extract_id)}',
                 'Name': f'{iso_code} {geofabrik_name}',
                 'ExtractId': extract_id,
@@ -447,7 +492,7 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
                 'GeometrySource': geometry_source,
                 'RegionKind': 'country',
                 'Iso2': iso_code
-            },
+            }, get_geofabrik_download_url(properties)),
             'geometry': geometry
         })
         seen_extract_ids.add(extract_id)
@@ -465,9 +510,29 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
             raise ValueError(f'Natural Earth geometry is empty for extra country {iso_code}')
 
         country_name = str(config.get('name') or matched_row.get('NAME_EN') or matched_row.get('NAME') or iso_code).strip()
+        download_url = None
+        state_url = None
+        if str(config['extract_source']).strip() == 'osmfr':
+            download_path = str(config.get('download_path') or '').strip()
+            download_url = build_osmfr_download_url(download_path)
+            state_url = build_osmfr_state_url(download_path)
+        else:
+            geofabrik_index_id = str(config.get('geofabrik_index_id') or '').strip()
+            geofabrik_feature = next(
+                (
+                    feature
+                    for feature in geofabrik_index.get('features', [])
+                    if str(feature.get('properties', {}).get('id') or '').strip() == geofabrik_index_id
+                ),
+                None
+            )
+            if geofabrik_feature is None:
+                raise ValueError(f'No Geofabrik feature found for extra country {iso_code}: {geofabrik_index_id}')
+            download_url = get_geofabrik_download_url(geofabrik_feature)
+
         output.append({
             'type': 'Feature',
-            'properties': {
+            'properties': attach_download_metadata({
                 'Slug': f'{iso_code.lower()}-{slugify(country_name)}',
                 'Name': f'{iso_code} {country_name}',
                 'ExtractId': str(config['extract_id']),
@@ -475,7 +540,7 @@ def build_country_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFram
                 'GeometrySource': 'natural-earth',
                 'RegionKind': 'country',
                 'Iso2': iso_code
-            },
+            }, download_url, state_url),
             'geometry': geometry
         })
 
@@ -505,14 +570,14 @@ def build_extra_geofabrik_country_features(geofabrik_index: dict, natural_earth:
 
         output.append({
             'type': 'Feature',
-            'properties': {
+            'properties': attach_download_metadata({
                 'Slug': slugify(extract_id),
                 'Name': geofabrik_name,
                 'ExtractId': extract_id,
                 'ExtractSource': 'geofabrik',
                 'GeometrySource': 'natural-earth',
                 'RegionKind': 'country',
-            },
+            }, get_geofabrik_download_url(geofabrik_feature)),
             'geometry': geometry
         })
 
@@ -560,7 +625,7 @@ def build_us_state_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFra
         state_name = humanize_segment(extract_id.split('/', 1)[1])
         output.append({
             'type': 'Feature',
-            'properties': {
+            'properties': attach_download_metadata({
                 'Slug': f'us-{slugify(extract_id.split("/", 1)[1])}',
                 'Name': f'US {state_name}',
                 'ExtractId': extract_id,
@@ -569,7 +634,7 @@ def build_us_state_features(geofabrik_index: dict, natural_earth: gpd.GeoDataFra
                 'RegionKind': 'us_state',
                 'Iso2': 'US',
                 'Iso3166_2': iso_codes[0] if iso_codes else None
-            },
+            }, get_geofabrik_download_url(properties)),
             'geometry': geometry
         })
     return output
@@ -592,6 +657,11 @@ def build_extra_poly_extract_features() -> list[dict]:
         }
         if str(config.get('iso2') or '').strip():
             properties['Iso2'] = str(config['iso2']).strip()
+        properties = attach_download_metadata(
+            properties,
+            build_osmfr_download_url(str(config['poly_path']).strip()),
+            build_osmfr_state_url(str(config['poly_path']).strip())
+        )
 
         output.append({
             'type': 'Feature',
@@ -720,18 +790,26 @@ def build_russia_admin1_match_map(natural_earth_admin1: gpd.GeoDataFrame) -> dic
     return matches
 
 
-def build_russia_region_features(natural_earth_admin1: gpd.GeoDataFrame) -> list[dict]:
+def build_russia_region_features(geofabrik_index: dict, natural_earth_admin1: gpd.GeoDataFrame) -> list[dict]:
     match_map = build_russia_admin1_match_map(natural_earth_admin1)
+    geofabrik_features_by_id = {
+        str(feature.get('properties', {}).get('id') or '').strip(): feature
+        for feature in geofabrik_index.get('features', [])
+    }
     output = []
     for config in RUSSIA_ADMIN1_COMBINED_FEATURES:
         rows = [match_map[path] for path in config['match_paths']]
         geometry = simplify_geometry(unary_union([row.geometry for row in rows]))
         if geometry is None:
             raise ValueError(f"Natural Earth Admin 1 union geometry is empty for {config['extract_id']}")
+        geofabrik_index_id = str(config.get('geofabrik_index_id') or config['extract_id']).strip()
+        geofabrik_feature = geofabrik_features_by_id.get(geofabrik_index_id)
+        if geofabrik_feature is None:
+            raise ValueError(f"No Geofabrik feature found for {config['extract_id']} ({geofabrik_index_id})")
 
         output.append({
             'type': 'Feature',
-            'properties': {
+            'properties': attach_download_metadata({
                 'Slug': str(config['slug']).strip(),
                 'Name': str(config['name']).strip(),
                 'ExtractId': str(config['extract_id']).strip(),
@@ -739,7 +817,7 @@ def build_russia_region_features(natural_earth_admin1: gpd.GeoDataFrame) -> list
                 'GeometrySource': str(config['geometry_source']).strip(),
                 'RegionKind': str(config['region_kind']).strip(),
                 'Iso2': str(config['iso2']).strip(),
-            },
+            }, get_geofabrik_download_url(geofabrik_feature)),
             'geometry': geometry
         })
 
@@ -754,7 +832,7 @@ def build_russia_region_features(natural_earth_admin1: gpd.GeoDataFrame) -> list
             raise ValueError(f'Natural Earth Admin 1 geometry is empty for {path}')
         output.append({
             'type': 'Feature',
-            'properties': {
+            'properties': attach_download_metadata({
                 'Slug': f'ru-{slugify("-".join(parts[1:]))}',
                 'Name': f'RU Russia {region_name}',
                 'ExtractId': path,
@@ -763,10 +841,89 @@ def build_russia_region_features(natural_earth_admin1: gpd.GeoDataFrame) -> list
                 'RegionKind': 'ru_region',
                 'Iso2': 'RU',
                 'Iso3166_2': str(row.get('iso_3166_2') or '').strip() or None
-            },
+            }, build_osmfr_download_url(path), build_osmfr_state_url(path)),
             'geometry': geometry
         })
     return output
+
+
+def build_manifest_entries(visible_features: list[dict], geofabrik_index: dict) -> list[dict]:
+    entries_by_key: dict[tuple[str, str], dict] = {}
+
+    def upsert(entry: dict) -> None:
+        extract_source = str(entry.get('extractSource') or '').strip()
+        extract_id = str(entry.get('extractId') or '').strip()
+        if not extract_source or not extract_id:
+            raise ValueError(f'Catalog entry is missing extract identity: {entry}')
+        key = (extract_source, extract_id)
+        existing = entries_by_key.get(key)
+        if existing is None:
+            entries_by_key[key] = entry
+            return
+        merged = dict(existing)
+        for prop_key, prop_value in entry.items():
+            if prop_value is None:
+                continue
+            if prop_key == 'visibleInAdmin':
+                merged[prop_key] = bool(existing.get(prop_key)) or bool(prop_value)
+                continue
+            merged[prop_key] = prop_value
+        entries_by_key[key] = merged
+
+    for feature in visible_features:
+        properties = feature.get('properties', {})
+        upsert({
+            'extractSource': str(properties.get('ExtractSource') or '').strip(),
+            'extractId': str(properties.get('ExtractId') or '').strip(),
+            'name': str(properties.get('Name') or '').strip() or None,
+            'slug': str(properties.get('Slug') or '').strip() or None,
+            'downloadUrl': str(properties.get('DownloadUrl') or '').strip() or None,
+            'stateUrl': str(properties.get('StateUrl') or '').strip() or None,
+            'regionKind': str(properties.get('RegionKind') or '').strip() or None,
+            'countryCode': str(properties.get('Iso2') or '').strip() or None,
+            'iso3166_2': str(properties.get('Iso3166_2') or '').strip() or None,
+            'visibleInAdmin': True,
+            'adminFeatureId': int(properties.get('Id')) if properties.get('Id') is not None else None,
+        })
+
+    for feature in geofabrik_index.get('features', []):
+        properties = feature.get('properties', {})
+        extract_id = str(properties.get('id') or '').strip()
+        if not extract_id:
+            continue
+        download_url = get_geofabrik_download_url(properties)
+        if not download_url:
+            continue
+
+        parent_extract_id = str(properties.get('parent') or '').strip() or None
+        iso_country = next(
+            (str(code).upper() for code in (properties.get('iso3166-1:alpha2') or []) if str(code).strip()),
+            None
+        )
+        iso_admin = next(
+            (str(code).upper() for code in (properties.get('iso3166-2') or []) if str(code).strip()),
+            None
+        )
+        is_country = iso_country is not None
+        upsert({
+            'extractSource': 'geofabrik',
+            'extractId': extract_id,
+            'name': str(properties.get('name') or extract_id).strip(),
+            'slug': None,
+            'downloadUrl': download_url,
+            'stateUrl': None,
+            'regionKind': 'country' if is_country else 'country_subregion',
+            'countryCode': iso_country if is_country else (iso_admin.split('-', 1)[0] if iso_admin and '-' in iso_admin else None),
+            'iso3166_2': iso_admin,
+            'visibleInAdmin': False,
+            'countryAggregateEligible': bool(is_country and extract_id not in COUNTRY_SUBREGION_SKIP_IDS),
+            'countryAggregateParentId': None if is_country else parent_extract_id,
+        })
+
+    return sorted(entries_by_key.values(), key=lambda item: (
+        str(item.get('extractSource') or ''),
+        str(item.get('extractId') or ''),
+    ))
 
 
 def assign_stable_ids(features: list[dict]) -> list[dict]:
@@ -793,8 +950,9 @@ def main() -> None:
     features.extend(build_extra_geofabrik_country_features(geofabrik_index, natural_earth))
     features.extend(build_us_state_features(geofabrik_index, natural_earth, natural_earth_admin1))
     features.extend(build_extra_poly_extract_features())
-    features.extend(build_russia_region_features(natural_earth_admin1))
+    features.extend(build_russia_region_features(geofabrik_index, natural_earth_admin1))
     features = assign_stable_ids(features)
+    manifest_entries = build_manifest_entries(features, geofabrik_index)
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(
@@ -802,8 +960,15 @@ def main() -> None:
         encoding='utf-8',
         newline='\n'
     )
+    CATALOG_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CATALOG_OUTPUT_PATH.write_text(
+        json.dumps({'version': 1, 'entries': manifest_entries}, ensure_ascii=False, separators=(',', ':')),
+        encoding='utf-8',
+        newline='\n'
+    )
 
     print(f'Wrote {len(features)} features to {OUTPUT_PATH}')
+    print(f'Wrote {len(manifest_entries)} catalog entries to {CATALOG_OUTPUT_PATH}')
 
 
 if __name__ == '__main__':

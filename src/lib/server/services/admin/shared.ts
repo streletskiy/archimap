@@ -7,15 +7,16 @@ type LooseAdminError = Error & {
 function createAdminError(status, message, options: LooseRecord = {}) {
   const error = new Error(String(message || 'Admin request failed')) as LooseAdminError;
   error.status = Number(status) || 400;
-  const fallbackCode = error.status === 401
-    ? 'ERR_AUTH_REQUIRED'
-    : error.status === 403
-      ? 'ERR_ACCESS_DENIED'
-      : error.status === 404
-        ? 'ERR_NOT_FOUND'
-        : error.status >= 500
-          ? 'ERR_INTERNAL'
-          : 'ERR_REQUEST_FAILED';
+  const fallbackCode =
+    error.status === 401
+      ? 'ERR_AUTH_REQUIRED'
+      : error.status === 403
+        ? 'ERR_ACCESS_DENIED'
+        : error.status === 404
+          ? 'ERR_NOT_FOUND'
+          : error.status >= 500
+            ? 'ERR_INTERNAL'
+            : 'ERR_REQUEST_FAILED';
   error.code = String(options.code || fallbackCode);
   if (options.details && typeof options.details === 'object') {
     error.details = options.details as LooseRecord;
@@ -48,7 +49,9 @@ function requireMasterAdmin(req, res, next) {
 }
 
 function isLikelyEmail(value) {
-  const email = String(value || '').trim().toLowerCase();
+  const email = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!email || email.length > 254) return false;
   if (email.includes(' ') || email.includes('\t') || email.includes('\n')) return false;
   const atIndex = email.indexOf('@');

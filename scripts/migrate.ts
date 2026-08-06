@@ -15,11 +15,19 @@ const logger = createLogger({
 async function runSqliteMigrations() {
   const Database = require('better-sqlite3');
   const dataDir = path.join(__dirname, '..', 'data');
-  const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
-  const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
-  const localEditsDbPath = String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() || path.join(dataDir, 'local-edits.db');
-  const userEditsDbPath = String(process.env.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db')).trim() || path.join(dataDir, 'user-edits.db');
-  const userAuthDbPath = String(process.env.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db');
+  const dbPath =
+    String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() ||
+    path.join(dataDir, 'archimap.db');
+  const osmDbPath =
+    String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
+  const localEditsDbPath =
+    String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() ||
+    path.join(dataDir, 'local-edits.db');
+  const userEditsDbPath =
+    String(process.env.USER_EDITS_DB_PATH || path.join(dataDir, 'user-edits.db')).trim() ||
+    path.join(dataDir, 'user-edits.db');
+  const userAuthDbPath =
+    String(process.env.USER_AUTH_DB_PATH || path.join(dataDir, 'users.db')).trim() || path.join(dataDir, 'users.db');
   const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
 
   const runtime = initDbBootstrapInfra({

@@ -27,7 +27,10 @@ test('i18n missing key logs warning in non-production', async () => {
   try {
     const output = i18n.translateNow('missing.key.path');
     assert.equal(output, 'missing.key.path');
-    assert.equal(warnings.some((line) => line.includes('Missing key')), true);
+    assert.equal(
+      warnings.some((line) => line.includes('Missing key')),
+      true
+    );
   } finally {
     console.warn = originalWarn;
     process.env.NODE_ENV = prevEnv;
@@ -43,4 +46,3 @@ test('locale switch changes translated output', async () => {
 
   assert.notEqual(enValue, ruValue);
 });
-

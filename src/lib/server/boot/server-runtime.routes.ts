@@ -46,6 +46,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     normalizeMapConfig: () => runtime.normalizeMapConfig(),
     getBuildInfo: runtime.getBuildInfo,
     getAppVersion: runtime.getAppVersion,
+    loadEffectiveGeneralConfig: () => runtime.appSettingsService.getEffectiveGeneralConfig(),
     registrationEnabled: runtime.config.registrationEnabled,
     getRegistrationEnabled: runtime.getRegistrationEnabled,
     dataSettingsService: runtime.dataSettingsService,
@@ -84,7 +85,9 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
     smtpTestHtmlTemplate,
     smtpTestTextTemplate,
     appSettingsService: runtime.appSettingsService,
-    settingsSecret: String(runtime.config.rawEnv.APP_SETTINGS_SECRET || runtime.config.sessionSecret).trim() || runtime.config.sessionSecret,
+    settingsSecret:
+      String(runtime.config.rawEnv.APP_SETTINGS_SECRET || runtime.config.sessionSecret).trim() ||
+      runtime.config.sessionSecret,
     dataSettingsService: runtime.dataSettingsService,
     getAllFilterTagKeysCached: runtime.getAllFilterTagKeysCached,
     applyFilterTagAllowlistSnapshot: runtime.applyFilterTagAllowlistSnapshot,
@@ -114,6 +117,7 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
       }
     },
     onRegionSyncRequested: (regionId, options) => runtime.syncWorkers?.requestRegionSync?.(regionId, options),
+    onRegionSyncCancelRequested: (regionId) => runtime.syncWorkers?.requestRegionSyncCancel?.(regionId),
     appDisplayName: runtime.config.appDisplayName,
     getAppDisplayName: runtime.getAppDisplayName,
     appBaseUrl: runtime.config.appBaseUrl,

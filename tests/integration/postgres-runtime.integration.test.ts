@@ -32,12 +32,22 @@ function setCookiesFromHeaders(cookieJar, headers) {
   if (parsed) cookieJar.set(parsed.name, parsed.value);
 }
 
-const ARCHI_RULE_KEYS = new Set(['name', 'style', 'levels', 'year_built', 'architect', 'address', 'description', 'archimap_description']);
+const ARCHI_RULE_KEYS = new Set([
+  'name',
+  'style',
+  'roof_shape',
+  'levels',
+  'year_built',
+  'architect',
+  'address',
+  'description',
+  'archimap_description'
+]);
 const FILTER_MATCH_CANDIDATE_CAP = 50000;
 
 function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 function parseOsmKey(value) {
@@ -74,6 +84,13 @@ function getRuleValue(item, key) {
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material')) return sourceTags['building:material'];
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'material')) return sourceTags.material;
   }
+  if (key === 'roof:shape' || key === 'roof_shape' || key === 'building:roof:shape') {
+    if (hasMeaningfulValue(archiInfo.roof_shape)) return archiInfo.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof:shape')) return sourceTags['roof:shape'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof_shape')) return sourceTags.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:roof:shape'))
+      return sourceTags['building:roof:shape'];
+  }
   if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) return archiInfo[key];
   if (Object.prototype.hasOwnProperty.call(sourceTags, key)) return sourceTags[key];
   if (ARCHI_RULE_KEYS.has(key)) return archiInfo[key];
@@ -89,7 +106,9 @@ function matchesFilterRule(item, rule) {
   if (actual == null) return false;
 
   const left = String(actual).toLowerCase();
-  const right = String(rule.value || '').trim().toLowerCase();
+  const right = String(rule.value || '')
+    .trim()
+    .toLowerCase();
   if (rule.op === 'equals') return left === right;
   if (rule.op === 'not_equals') return left !== right;
   if (rule.op === 'starts_with') return left.startsWith(right);
@@ -109,17 +128,18 @@ function mapFilterDataRow(row) {
     sourceTags,
     archiInfo: hasExtraInfo
       ? {
-        name: row.name,
-        style: row.style,
-        material: row.material,
-        colour: row.colour,
-        levels: row.levels,
-        year_built: row.year_built,
-        architect: row.architect,
-        address: row.address,
-        description: row.description,
-        archimap_description: row.archimap_description || row.description || null
-      }
+          name: row.name,
+          style: row.style,
+          material: row.material,
+          roof_shape: row.roof_shape,
+          colour: row.colour,
+          levels: row.levels,
+          year_built: row.year_built,
+          architect: row.architect,
+          address: row.address,
+          description: row.description,
+          archimap_description: row.archimap_description || row.description || null
+        }
       : null
   };
 }
@@ -130,7 +150,8 @@ async function upsertFilterFixtures(connectionString, fixtures) {
   try {
     await client.query('BEGIN');
     for (const fixture of fixtures) {
-      await client.query(`
+      await client.query(
+        `
         INSERT INTO osm.building_contours (
           osm_type, osm_id, tags_json, min_lon, min_lat, max_lon, max_lat, geom, updated_at
         )
@@ -153,27 +174,31 @@ async function upsertFilterFixtures(connectionString, fixtures) {
           max_lat = EXCLUDED.max_lat,
           geom = EXCLUDED.geom,
           updated_at = NOW()
-      `, [
-        fixture.osmType,
-        fixture.osmId,
-        JSON.stringify(fixture.tags || {}),
-        fixture.minLon,
-        fixture.minLat,
-        fixture.maxLon,
-        fixture.maxLat,
-        fixture.geometryJson
-      ]);
+      `,
+        [
+          fixture.osmType,
+          fixture.osmId,
+          JSON.stringify(fixture.tags || {}),
+          fixture.minLon,
+          fixture.minLat,
+          fixture.maxLon,
+          fixture.maxLat,
+          fixture.geometryJson
+        ]
+      );
 
       if (fixture.archiInfo) {
-        await client.query(`
+        await client.query(
+          `
           INSERT INTO local.architectural_info (
-            osm_type, osm_id, name, style, material, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
+            osm_type, osm_id, name, style, material, roof_shape, colour, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'postgres-runtime-test', NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'postgres-runtime-test', NOW())
           ON CONFLICT (osm_type, osm_id) DO UPDATE SET
             name = EXCLUDED.name,
             style = EXCLUDED.style,
             material = EXCLUDED.material,
+            roof_shape = EXCLUDED.roof_shape,
             colour = EXCLUDED.colour,
             levels = EXCLUDED.levels,
             year_built = EXCLUDED.year_built,
@@ -183,25 +208,28 @@ async function upsertFilterFixtures(connectionString, fixtures) {
             archimap_description = EXCLUDED.archimap_description,
             updated_by = EXCLUDED.updated_by,
             updated_at = NOW()
-        `, [
-          fixture.osmType,
-          fixture.osmId,
-          fixture.archiInfo.name ?? null,
-          fixture.archiInfo.style ?? null,
-          fixture.archiInfo.material ?? null,
-          fixture.archiInfo.colour ?? null,
-          fixture.archiInfo.levels ?? null,
-          fixture.archiInfo.year_built ?? null,
-          fixture.archiInfo.architect ?? null,
-          fixture.archiInfo.address ?? null,
-          fixture.archiInfo.description ?? null,
-          fixture.archiInfo.archimap_description ?? null
-        ]);
-      } else {
-        await client.query(
-          'DELETE FROM local.architectural_info WHERE osm_type = $1 AND osm_id = $2',
-          [fixture.osmType, fixture.osmId]
+        `,
+          [
+            fixture.osmType,
+            fixture.osmId,
+            fixture.archiInfo.name ?? null,
+            fixture.archiInfo.style ?? null,
+            fixture.archiInfo.material ?? null,
+            fixture.archiInfo.roof_shape ?? null,
+            fixture.archiInfo.colour ?? null,
+            fixture.archiInfo.levels ?? null,
+            fixture.archiInfo.year_built ?? null,
+            fixture.archiInfo.architect ?? null,
+            fixture.archiInfo.address ?? null,
+            fixture.archiInfo.description ?? null,
+            fixture.archiInfo.archimap_description ?? null
+          ]
         );
+      } else {
+        await client.query('DELETE FROM local.architectural_info WHERE osm_type = $1 AND osm_id = $2', [
+          fixture.osmType,
+          fixture.osmId
+        ]);
       }
     }
     await client.query(`
@@ -228,14 +256,14 @@ async function cleanupFilterFixtures(connectionString, fixtures) {
   try {
     await client.query('BEGIN');
     for (const fixture of fixtures) {
-      await client.query(
-        'DELETE FROM local.architectural_info WHERE osm_type = $1 AND osm_id = $2',
-        [fixture.osmType, fixture.osmId]
-      );
-      await client.query(
-        'DELETE FROM osm.building_contours WHERE osm_type = $1 AND osm_id = $2',
-        [fixture.osmType, fixture.osmId]
-      );
+      await client.query('DELETE FROM local.architectural_info WHERE osm_type = $1 AND osm_id = $2', [
+        fixture.osmType,
+        fixture.osmId
+      ]);
+      await client.query('DELETE FROM osm.building_contours WHERE osm_type = $1 AND osm_id = $2', [
+        fixture.osmType,
+        fixture.osmId
+      ]);
     }
     await client.query(`
       INSERT INTO osm.building_contours_summary (singleton_id, total, last_updated, refreshed_at)
@@ -261,25 +289,28 @@ async function insertUserEditFixtures(connectionString, fixtures) {
   try {
     await client.query('BEGIN');
     for (const fixture of fixtures) {
-      await client.query(`
+      await client.query(
+        `
         INSERT INTO user_edits.building_user_edits (
           osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, admin_comment, created_at, updated_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-      `, [
-        fixture.osmType,
-        fixture.osmId,
-        fixture.createdBy,
-        fixture.name ?? null,
-        fixture.style ?? null,
-        fixture.levels ?? null,
-        fixture.yearBuilt ?? null,
-        fixture.architect ?? null,
-        fixture.address ?? null,
-        fixture.archimapDescription ?? null,
-        fixture.status ?? 'pending',
-        fixture.adminComment ?? null
-      ]);
+      `,
+        [
+          fixture.osmType,
+          fixture.osmId,
+          fixture.createdBy,
+          fixture.name ?? null,
+          fixture.style ?? null,
+          fixture.levels ?? null,
+          fixture.yearBuilt ?? null,
+          fixture.architect ?? null,
+          fixture.address ?? null,
+          fixture.archimapDescription ?? null,
+          fixture.status ?? 'pending',
+          fixture.adminComment ?? null
+        ]
+      );
     }
     await client.query('COMMIT');
   } catch (error) {
@@ -323,7 +354,8 @@ async function buildExpectedAnonMatches(connectionString, payload) {
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    const rows = await client.query(`
+    const rows = await client.query(
+      `
       WITH env AS (
         SELECT ST_MakeEnvelope($1, $2, $3, $4, 4326) AS geom
       )
@@ -351,13 +383,9 @@ async function buildExpectedAnonMatches(connectionString, payload) {
         ON bc.geom && env.geom
       WHERE ST_Intersects(bc.geom, env.geom)
       LIMIT $5
-    `, [
-      Number(bbox.west),
-      Number(bbox.south),
-      Number(bbox.east),
-      Number(bbox.north),
-      candidateLimit
-    ]);
+    `,
+      [Number(bbox.west), Number(bbox.south), Number(bbox.east), Number(bbox.north), candidateLimit]
+    );
 
     const items = rows.rows.map(mapFilterDataRow);
     const matchedKeys = [];
@@ -429,8 +457,12 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
   });
 
   let serverOutput = '';
-  server.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); });
-  server.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
+  server.stdout.on('data', (chunk) => {
+    serverOutput += chunk.toString();
+  });
+  server.stderr.on('data', (chunk) => {
+    serverOutput += chunk.toString();
+  });
 
   async function waitUntilReady(timeoutMs = 25000) {
     const startedAt = Date.now();
@@ -448,27 +480,35 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
 
   async function createMasterAdmin({ email, password }: LooseRecord) {
     await new Promise<void>((resolve, reject) => {
-      const proc = spawn(process.execPath, [
-        '--import',
-        'tsx',
-        'scripts/create-master-admin.ts',
-        `--email=${email}`,
-        `--password=${password}`,
-        '--first-name=Pg',
-        '--last-name=Admin'
-      ], {
-        cwd: path.join(__dirname, '..', '..'),
-        env: {
-          ...process.env,
-          DB_PROVIDER: 'postgres',
-          DATABASE_URL: databaseUrl
-        },
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
+      const proc = spawn(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          'scripts/create-master-admin.ts',
+          `--email=${email}`,
+          `--password=${password}`,
+          '--first-name=Pg',
+          '--last-name=Admin'
+        ],
+        {
+          cwd: path.join(__dirname, '..', '..'),
+          env: {
+            ...process.env,
+            DB_PROVIDER: 'postgres',
+            DATABASE_URL: databaseUrl
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      );
 
       let output = '';
-      proc.stdout.on('data', (chunk) => { output += chunk.toString(); });
-      proc.stderr.on('data', (chunk) => { output += chunk.toString(); });
+      proc.stdout.on('data', (chunk) => {
+        output += chunk.toString();
+      });
+      proc.stderr.on('data', (chunk) => {
+        output += chunk.toString();
+      });
       proc.on('error', reject);
       proc.on('exit', (code: number | null) => {
         if (code === 0) return resolve();
@@ -536,31 +576,34 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
           osmType: 'way',
           osmId: baseId + 1,
           tags: { name: 'Alpha House', foo: 'bar', prefix: 'sample-one' },
-          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9990,10.0010],[-169.9970,10.0010],[-169.9970,10.0030],[-169.9990,10.0030],[-169.9990,10.0010]]]}',
-          minLon: -169.9990,
-          minLat: 10.0010,
-          maxLon: -169.9970,
-          maxLat: 10.0030,
+          geometryJson:
+            '{"type":"Polygon","coordinates":[[[-169.9990,10.0010],[-169.9970,10.0010],[-169.9970,10.0030],[-169.9990,10.0030],[-169.9990,10.0010]]]}',
+          minLon: -169.999,
+          minLat: 10.001,
+          maxLon: -169.997,
+          maxLat: 10.003,
           archiInfo: { name: 'Info Alpha', style: 'Modern', architect: 'Architect A' }
         },
         {
           osmType: 'relation',
           osmId: baseId + 2,
           tags: { name: 'Beta Hall', foo: 'baz', style: 'TagStyle', prefix: 'start-here' },
-          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9960,10.0040],[-169.9940,10.0040],[-169.9940,10.0060],[-169.9960,10.0060],[-169.9960,10.0040]]]}',
-          minLon: -169.9960,
-          minLat: 10.0040,
-          maxLon: -169.9940,
-          maxLat: 10.0060,
+          geometryJson:
+            '{"type":"Polygon","coordinates":[[[-169.9960,10.0040],[-169.9940,10.0040],[-169.9940,10.0060],[-169.9960,10.0060],[-169.9960,10.0040]]]}',
+          minLon: -169.996,
+          minLat: 10.004,
+          maxLon: -169.994,
+          maxLat: 10.006,
           archiInfo: { name: 'Info Beta', style: 'Classic' }
         },
         {
           osmType: 'way',
           osmId: baseId + 5,
           tags: { style: 'OSM Style', material: 'brick', colour: 'blue' },
-          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9910,10.0060],[-169.9895,10.0060],[-169.9895,10.0075],[-169.9910,10.0075],[-169.9910,10.0060]]]}',
-          minLon: -169.9910,
-          minLat: 10.0060,
+          geometryJson:
+            '{"type":"Polygon","coordinates":[[[-169.9910,10.0060],[-169.9895,10.0060],[-169.9895,10.0075],[-169.9910,10.0075],[-169.9910,10.0060]]]}',
+          minLon: -169.991,
+          minLat: 10.006,
           maxLon: -169.9895,
           maxLat: 10.0075,
           archiInfo: { style: 'Local Style', material: 'stone', colour: 'red' }
@@ -569,71 +612,73 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
           osmType: 'way',
           osmId: baseId + 3,
           tags: { 'archi.style': 'Neo', name: null },
-          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9950,10.0070],[-169.9930,10.0070],[-169.9930,10.0090],[-169.9950,10.0090],[-169.9950,10.0070]]]}',
-          minLon: -169.9950,
-          minLat: 10.0070,
-          maxLon: -169.9930,
-          maxLat: 10.0090,
+          geometryJson:
+            '{"type":"Polygon","coordinates":[[[-169.9950,10.0070],[-169.9930,10.0070],[-169.9930,10.0090],[-169.9950,10.0090],[-169.9950,10.0070]]]}',
+          minLon: -169.995,
+          minLat: 10.007,
+          maxLon: -169.993,
+          maxLat: 10.009,
           archiInfo: { name: 'Gamma Tower', style: 'Brutalist', levels: 5 }
         },
         {
           osmType: 'way',
           osmId: baseId + 4,
           tags: { prefix: 'none' },
-          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9920,10.0020],[-169.9900,10.0020],[-169.9900,10.0040],[-169.9920,10.0040],[-169.9920,10.0020]]]}',
-          minLon: -169.9920,
-          minLat: 10.0020,
-          maxLon: -169.9900,
-          maxLat: 10.0040,
+          geometryJson:
+            '{"type":"Polygon","coordinates":[[[-169.9920,10.0020],[-169.9900,10.0020],[-169.9900,10.0040],[-169.9920,10.0040],[-169.9920,10.0020]]]}',
+          minLon: -169.992,
+          minLat: 10.002,
+          maxLon: -169.99,
+          maxLat: 10.004,
           archiInfo: null
         }
       ];
 
       const payloads = [
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'name', op: 'contains', value: 'alpha' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'archi.style', op: 'equals', value: 'neo' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'foo', op: 'not_equals', value: 'bar' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'prefix', op: 'starts_with', value: 'start' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'style', op: 'exists', value: '' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'material', op: 'equals', value: 'stone' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'colour', op: 'equals', value: 'red' }]
         },
         {
-          bbox: { west: -170.0000, south: 10.0000, east: -169.9890, north: 10.0100 },
+          bbox: { west: -170.0, south: 10.0, east: -169.989, north: 10.01 },
           zoomBucket: 15,
           maxResults: 50,
           rules: [{ key: 'name', op: 'not_exists', value: '' }]
@@ -659,8 +704,12 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
           const expectedKeys = [...expected.matchedKeys].sort();
           assert.deepEqual(actualKeys, expectedKeys);
 
-          const actualFeatureIds = [...(body.matchedFeatureIds || [])].map((value) => Number(value)).sort((a, b) => a - b);
-          const expectedFeatureIds = [...expected.matchedFeatureIds].map((value) => Number(value)).sort((a, b) => a - b);
+          const actualFeatureIds = [...(body.matchedFeatureIds || [])]
+            .map((value) => Number(value))
+            .sort((a, b) => a - b);
+          const expectedFeatureIds = [...expected.matchedFeatureIds]
+            .map((value) => Number(value))
+            .sort((a, b) => a - b);
           assert.deepEqual(actualFeatureIds, expectedFeatureIds);
 
           assert.equal(Boolean(body?.meta?.truncated), expected.truncated);
@@ -692,11 +741,12 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
           osmType: 'way',
           osmId: baseId + 1,
           tags: { name: 'Draft Overlay House' },
-          geometryJson: '{"type":"Polygon","coordinates":[[[-169.9890,10.0010],[-169.9870,10.0010],[-169.9870,10.0030],[-169.9890,10.0030],[-169.9890,10.0010]]]}',
-          minLon: -169.9890,
-          minLat: 10.0010,
-          maxLon: -169.9870,
-          maxLat: 10.0030,
+          geometryJson:
+            '{"type":"Polygon","coordinates":[[[-169.9890,10.0010],[-169.9870,10.0010],[-169.9870,10.0030],[-169.9890,10.0030],[-169.9890,10.0010]]]}',
+          minLon: -169.989,
+          minLat: 10.001,
+          maxLon: -169.987,
+          maxLat: 10.003,
           archiInfo: null
         }
       ];
@@ -745,7 +795,11 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
     });
 
     for (const sqlitePath of Object.values(sqlitePaths)) {
-      assert.equal(fs.existsSync(sqlitePath), false, `SQLite file should not be created in postgres mode: ${sqlitePath}`);
+      assert.equal(
+        fs.existsSync(sqlitePath),
+        false,
+        `SQLite file should not be created in postgres mode: ${sqlitePath}`
+      );
     }
   } finally {
     if (server.exitCode == null) {

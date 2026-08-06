@@ -23,9 +23,7 @@ async function initSessionStore({
   maxAgeMs,
   logger = console
 }) {
-  const cookieSecure = typeof sessionCookieSecure === 'boolean'
-    ? sessionCookieSecure
-    : nodeEnv === 'production';
+  const cookieSecure = typeof sessionCookieSecure === 'boolean' ? sessionCookieSecure : nodeEnv === 'production';
 
   const sessionConfig = {
     secret: sessionSecret,

@@ -24,15 +24,17 @@ function buildSmtpDeliveryCandidates(raw: LooseRecord = {}) {
     return [{ type: 'url', url: smtpConfig.url, label: 'smtp_url' }];
   }
 
-  const out = [{
-    type: 'host',
-    host: smtpConfig.host,
-    port: smtpConfig.port,
-    secure: smtpConfig.secure,
-    user: smtpConfig.user,
-    pass: smtpConfig.pass,
-    label: `host:${smtpConfig.host}:${smtpConfig.port}`
-  }];
+  const out = [
+    {
+      type: 'host',
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      user: smtpConfig.user,
+      pass: smtpConfig.pass,
+      label: `host:${smtpConfig.host}:${smtpConfig.port}`
+    }
+  ];
 
   // Some providers/networks intermittently drop 587. Retry submission on 2525.
   if (!smtpConfig.secure && Number(smtpConfig.port) === 587) {
@@ -51,8 +53,12 @@ function buildSmtpDeliveryCandidates(raw: LooseRecord = {}) {
 }
 
 function isConnectionStageError(error) {
-  const code = String(error?.code || '').trim().toUpperCase();
-  const command = String(error?.command || '').trim().toUpperCase();
+  const code = String(error?.code || '')
+    .trim()
+    .toUpperCase();
+  const command = String(error?.command || '')
+    .trim()
+    .toUpperCase();
   const message = String(error?.message || '').toLowerCase();
 
   if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH'].includes(code)) {
@@ -67,7 +73,10 @@ function isConnectionStageError(error) {
 
 function createTransportFromCandidate(candidate) {
   if (candidate.type === 'url') {
-    return nodemailer.createTransport(candidate.url);
+    return nodemailer.createTransport(candidate.url, {
+      disableFileAccess: true,
+      disableUrlAccess: true
+    });
   }
   return nodemailer.createTransport({
     host: candidate.host,
@@ -76,7 +85,9 @@ function createTransportFromCandidate(candidate) {
     auth: { user: candidate.user, pass: candidate.pass },
     connectionTimeout: 20000,
     greetingTimeout: 20000,
-    socketTimeout: 30000
+    socketTimeout: 30000,
+    disableFileAccess: true,
+    disableUrlAccess: true
   });
 }
 
@@ -94,7 +105,11 @@ async function sendMailWithFallback(rawSmtpConfig, mailOptions: LooseRecord = {}
     const candidate = candidates[index];
     try {
       const transporter = createTransportFromCandidate(candidate);
-      const info = await transporter.sendMail(mailOptions);
+      const info = await transporter.sendMail({
+        ...mailOptions,
+        disableFileAccess: true,
+        disableUrlAccess: true
+      });
       const accepted = toList(info?.accepted);
       const rejected = toList(info?.rejected);
       const pending = toList(info?.pending);
@@ -123,7 +138,7 @@ async function sendMailWithFallback(rawSmtpConfig, mailOptions: LooseRecord = {}
       return { info, candidate };
     } catch (error) {
       lastError = error as LooseSmtpError;
-      const canRetry = index < (candidates.length - 1) && isConnectionStageError(error);
+      const canRetry = index < candidates.length - 1 && isConnectionStageError(error);
       logger.warn('smtp_delivery_attempt_failed', {
         ...logContext,
         candidate: candidate.label,

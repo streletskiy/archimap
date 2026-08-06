@@ -1,11 +1,11 @@
-# ArchiMap
+# Archimap
 
-ArchiMap is a self-hosted platform for architectural mapping and building analysis. It is built for architects, urban planners, GIS teams, and other specialists who need to inspect OpenStreetMap building data, enrich it with local project context, and keep it synchronized with a shared map workflow.
+Archimap is a self-hosted platform for architectural mapping and building analysis. It is built for architects, urban planners, GIS teams, and other specialists who need to inspect OpenStreetMap building data, enrich it with local project context, and keep it synchronized with a shared map workflow.
 
 ## Features
 
 - Sync OpenStreetMap building data into a local, project-owned database and tile set.
-- Explore buildings visually by floors, style, materials, function, density, and surrounding context.
+- Explore buildings visually by floors, style, materials, function, density, surrounding context, and a switchable 3D building mode that automatically uses `building:part` volumes when they are available, including the uncovered remainder of the parent footprint when parts do not cover the whole building, for both regional PMTiles and Overpass fallback data; in 3D mode hover, selection, filter highlighting, and click hit-testing move to the extruded volumes themselves while flat footprint overlays stay hidden.
 - When a viewport falls outside processed regions, load nearby buildings from a curated set of public Overpass endpoints directly in the browser via explicit controls, cache them locally, and let users create edits for them; on first save the app stores the source geometry/tags snapshot server-side so the same OSM id can be reopened later without relying on the browser cache.
 - Configure visual filters to expose missing architectural tags, compare building attributes, and focus on gaps in the map data.
 - Edit architectural tags and building metadata directly on the map with a review-and-moderation workflow.
@@ -18,7 +18,8 @@ ArchiMap is a self-hosted platform for architectural mapping and building analys
 
 - Frontend and public runtime: SvelteKit
 - Map rendering: MapLibre + PMTiles
-- Data storage: PostgreSQL + PostGIS or SQLite
+- Managed region sync + runtime data path: PostgreSQL + PostGIS
+- PMTiles build chain: `planetiler`
 - Sessions: Redis optional
 - UI layer: Tailwind CSS v4 + shadcn-svelte + Bits UI
 
@@ -35,6 +36,12 @@ cp .env.example .env
 npm run dev
 ```
 
+Create a master admin user to access the dashboard:
+
+```bash
+npm run admin:create-master -- --email=admin@example.com --password=securepassword
+```
+
 Optional production-like run:
 
 ```bash
@@ -48,7 +55,25 @@ npm run start
 docker compose up --build
 ```
 
-`docker-compose.yml` defaults to PostgreSQL + PostGIS. SQLite is still available for local development or explicit env override.
+`docker-compose.yml` defaults to PostgreSQL + PostGIS and is the supported setup for managed region syncs.
+
+Managed region sync architecture in this repository is:
+
+- PostgreSQL-only for managed imports and runtime building data.
+- Curated extract catalog from repository-managed manifest/admin map data.
+- Aria2-backed PBF download from known upstream URLs, with live progress in the sync console and admin status card.
+- `osm2pgsql` flex import into PostgreSQL staging, then controlled merge into canonical tables.
+- `planetiler` as the only PMTiles build engine.
+
+### Basemap provider
+
+Open `Admin -> Settings` and choose `CARTO`, `MapTiler`, or `Custom`.
+
+- `Custom` accepts any TileJSON URL, for example `http://localhost:8080/current.json` during local PMTiles testing.
+- An optional API key can be stored alongside the URL when the upstream basemap service expects `?key=...`.
+- If ArchiMap runs in Docker and the basemap service runs on the host machine, use a host-reachable address such as `http://host.docker.internal:8080/current.json` instead of raw `localhost`.
+- Custom basemap TileJSON and tile requests are proxied through same-origin routes, while sprite and glyph assets are served from local static files, so the browser does not need direct access to the upstream host or `protomaps.github.io`.
+- The custom Protomaps style uses a monochrome, high-contrast palette inspired by Protomaps `white`/`black` themes while still using the local PMTiles schema.
 
 ## Docs
 

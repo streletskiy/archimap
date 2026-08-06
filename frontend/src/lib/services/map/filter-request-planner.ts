@@ -1,7 +1,4 @@
-import {
-  EMPTY_LAYER_FILTER,
-  hashFilterExpression
-} from '../../components/map/filter-highlight-utils.js';
+import { EMPTY_LAYER_FILTER, hashFilterExpression } from '../../components/map/filter-highlight-utils.js';
 import {
   computeRulesHash,
   normalizeFilterLayers,
@@ -10,21 +7,22 @@ import {
   toFeatureIdSetFromMatches
 } from '../../components/map/filter-pipeline-utils.js';
 import { FILTER_LAYER_BASE_COLOR } from '../../constants/filter-presets.js';
-import type {
-  FilterPreparedRequestPlan,
-  FilterResolvedLayerPayload
-} from './filter-types.js';
+import type { FilterPreparedRequestPlan, FilterResolvedLayerPayload } from './filter-types.js';
 
 export { EMPTY_LAYER_FILTER, hashFilterExpression };
 
 export function isLayerInput(input) {
-  return Array.isArray(input) && input.some((item) => (
-    Array.isArray(item?.rules) ||
-    item?.mode != null ||
-    item?.color != null ||
-    item?.priority != null ||
-    item?.id != null
-  ));
+  return (
+    Array.isArray(input) &&
+    input.some(
+      (item) =>
+        Array.isArray(item?.rules) ||
+        item?.mode != null ||
+        item?.color != null ||
+        item?.priority != null ||
+        item?.id != null
+    )
+  );
 }
 
 export function normalizeFilterInputLayers(input) {
@@ -38,16 +36,20 @@ export function normalizeFilterInputLayers(input) {
   if (normalizedRules.rules.length === 0) {
     return { layers: [], invalidReason: '' };
   }
-  return normalizeFilterLayers([{
-    id: 'compat-filter-layer',
-    color: FILTER_LAYER_BASE_COLOR,
-    priority: 0,
-    mode: 'and',
-    rules: normalizedRules.rules
-  }]);
+  return normalizeFilterLayers([
+    {
+      id: 'compat-filter-layer',
+      color: FILTER_LAYER_BASE_COLOR,
+      priority: 0,
+      mode: 'and',
+      rules: normalizedRules.rules
+    }
+  ]);
 }
 
-export function prepareFilterRequestPlan(input): { ok: false; invalidReason: string } | ({ ok: true } & FilterPreparedRequestPlan) {
+export function prepareFilterRequestPlan(
+  input
+): { ok: false; invalidReason: string } | ({ ok: true } & FilterPreparedRequestPlan) {
   const normalizedLayers = normalizeFilterInputLayers(input);
   if (normalizedLayers.invalidReason) {
     return {
@@ -64,9 +66,9 @@ export function prepareFilterRequestPlan(input): { ok: false; invalidReason: str
     requestSpecs: preparedRequests.requestSpecs,
     hasStandaloneLayers: preparedRequests.hasStandaloneLayers,
     rulesHash: computeRulesHash(preparedRequests.layers),
-    heavy: preparedRequests.requestSpecs.some((spec) => (
-      Array.isArray(spec?.rules) && spec.rules.some((rule) => String(rule?.op || '') === 'contains')
-    ))
+    heavy: preparedRequests.requestSpecs.some(
+      (spec) => Array.isArray(spec?.rules) && spec.rules.some((rule) => String(rule?.op || '') === 'contains')
+    )
   };
 }
 
@@ -81,15 +83,16 @@ export function buildFilterRequestSpecs(layers) {
   const orLayers = combinedLayers.filter((layer) => layer.mode === 'or');
   const standaloneLayers = sortedLayers.filter((layer) => layer.mode === 'layer');
   const requestSpecs = [];
-  const combinedGroup = combinedLayers.length > 0
-    ? {
-      id: 'combined-group',
-      color: combinedLayers[0].color || FILTER_LAYER_BASE_COLOR,
-      priority: Number(combinedLayers[0].priority || 0),
-      hasAnd: andLayers.length > 0,
-      hasOr: orLayers.length > 0
-    }
-    : null;
+  const combinedGroup =
+    combinedLayers.length > 0
+      ? {
+          id: 'combined-group',
+          color: combinedLayers[0].color || FILTER_LAYER_BASE_COLOR,
+          priority: Number(combinedLayers[0].priority || 0),
+          hasAnd: andLayers.length > 0,
+          hasOr: orLayers.length > 0
+        }
+      : null;
 
   if (andLayers.length > 0) {
     const rules = andLayers.flatMap((layer) => layer.rules);
@@ -138,7 +141,11 @@ export function buildFilterRequestSpecs(layers) {
   };
 }
 
-export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cacheHit = false }): FilterResolvedLayerPayload {
+export function buildResolvedLayerPayload({
+  prepared,
+  payloadsByRequestId,
+  cacheHit = false
+}): FilterResolvedLayerPayload {
   const resolvedEntriesById = new Map();
   const requestSpecs = Array.isArray(prepared?.requestSpecs) ? prepared.requestSpecs : [];
   const combinedGroup = prepared?.combinedGroup || null;
@@ -196,9 +203,7 @@ export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cache
           unionOrSet.add(id);
         }
       }
-      combinedSet = combinedSet
-        ? new Set([...combinedSet].filter((id) => unionOrSet.has(id)))
-        : unionOrSet;
+      combinedSet = combinedSet ? new Set([...combinedSet].filter((id) => unionOrSet.has(id))) : unionOrSet;
     }
     if (combinedSet) {
       for (const id of combinedSet) {
@@ -233,9 +238,10 @@ export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cache
 
   const highlightColorGroups = [...highlightGroupsByColor.entries()].map(([color, bucket]) => {
     const ids = Array.isArray(bucket?.ids) ? [...bucket.ids].sort((left, right) => left - right) : [];
-    const points = Array.isArray(bucket?.points) && bucket.points.length > 0
-      ? [...bucket.points].sort((left, right) => left.id - right.id)
-      : [];
+    const points =
+      Array.isArray(bucket?.points) && bucket.points.length > 0
+        ? [...bucket.points].sort((left, right) => left.id - right.id)
+        : [];
     return {
       color,
       ids,
@@ -244,13 +250,17 @@ export function buildResolvedLayerPayload({ prepared, payloadsByRequestId, cache
   });
 
   const payloads = [...payloadsByRequestId.values()];
-  const matchedCount = renderMode === 'markers'
-    ? highlightColorGroups.reduce((sum, group) => (
-      sum + (Array.isArray(group?.points)
-        ? group.points.reduce((pointSum, point) => pointSum + Math.max(1, Number(point?.count || 1)), 0)
-        : 0)
-    ), 0)
-    : [...resolvedEntriesById.keys()].length;
+  const matchedCount =
+    renderMode === 'markers'
+      ? highlightColorGroups.reduce(
+          (sum, group) =>
+            sum +
+            (Array.isArray(group?.points)
+              ? group.points.reduce((pointSum, point) => pointSum + Math.max(1, Number(point?.count || 1)), 0)
+              : 0),
+          0
+        )
+      : [...resolvedEntriesById.keys()].length;
   return {
     highlightColorGroups,
     matchedFeatureIds: [...resolvedEntriesById.keys()].sort((left, right) => left - right),

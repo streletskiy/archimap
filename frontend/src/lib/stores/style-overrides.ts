@@ -3,8 +3,12 @@ import { apiJson } from '$lib/services/http';
 
 function normalizeStyleOverrideItem(item) {
   if (!item || typeof item !== 'object') return null;
-  const styleKey = String(item.style_key || '').trim().toLowerCase();
-  const regionPattern = String(item.region_pattern || '').trim().toLowerCase();
+  const styleKey = String(item.style_key || '')
+    .trim()
+    .toLowerCase();
+  const regionPattern = String(item.region_pattern || '')
+    .trim()
+    .toLowerCase();
   if (!styleKey || !regionPattern) return null;
   return {
     id: Number(item.id || 0),
@@ -17,9 +21,7 @@ function normalizeStyleOverrideItem(item) {
 }
 
 function normalizeStyleOverrideList(items) {
-  return (Array.isArray(items) ? items : [])
-    .map((item) => normalizeStyleOverrideItem(item))
-    .filter(Boolean);
+  return (Array.isArray(items) ? items : []).map((item) => normalizeStyleOverrideItem(item)).filter(Boolean);
 }
 
 export const styleRegionOverrides = writable([]);

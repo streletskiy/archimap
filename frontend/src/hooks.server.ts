@@ -57,6 +57,7 @@ const NODE_ENV = String(process.env.NODE_ENV || 'development');
 const DEFAULT_CSP_CONNECT_SRC_EXTRA = [
   'https://tiles.basemaps.cartocdn.com',
   'https://*.basemaps.cartocdn.com',
+  'https://api.maptiler.com',
   'https://overpass-api.de',
   'https://lz4.overpass-api.de',
   'https://z.overpass-api.de',
@@ -69,7 +70,11 @@ const CSP_CONNECT_SRC_EXTRA = String(process.env.CSP_CONNECT_SRC_EXTRA || DEFAUL
 export const handle: Handle = async ({ event, resolve }) => {
   const incomingRequestId = String(event.request.headers.get('x-request-id') || '').trim();
   const requestId = incomingRequestId || crypto.randomUUID();
-  const response = await resolve(event);
+  const response = await resolve(event, {
+    // Split CSS chunks are still linked as stylesheets, but skipping preload avoids
+    // noisy browser warnings when deferred route/component CSS is not consumed immediately.
+    preload: ({ type }) => type !== 'css'
+  });
   const contentType = String(response.headers.get('content-type') || '').toLowerCase();
   const isHtml = contentType.includes('text/html');
 

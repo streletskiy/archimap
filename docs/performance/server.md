@@ -35,7 +35,7 @@
   - Incremental search refresh is dispatched to `workers/refresh-search-index.worker.ts`, so save/moderation/cleanup requests only enqueue work and return immediately while the worker performs the DB write in the background.
   - PostgreSQL stores searchable rows in `building_search_source` with generated `search_tsv`.
   - SQLite keeps `building_search_source` plus `building_search_fts`.
-- `rebuild-filter-tag-keys-cache.worker` (PostgreSQL) switched from row-by-row insert to set-based `INSERT ... SELECT DISTINCT`.
+- `rebuild-filter-tag-keys-cache.worker` (PostgreSQL) now streams `osm.building_contours` in primary-key order, dedupes keys in Node, and writes the cache in a short transaction to keep backend memory pressure down.
 
 ## DB and indexes
 

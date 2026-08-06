@@ -30,7 +30,11 @@ function isResourceNotModified(req, { etag, lastModified }: LooseRecord) {
     if (ifModifiedSinceRaw) {
       const ifModifiedSinceTs = Date.parse(ifModifiedSinceRaw);
       const lastModifiedTs = Date.parse(lastModified);
-      if (Number.isFinite(ifModifiedSinceTs) && Number.isFinite(lastModifiedTs) && ifModifiedSinceTs >= lastModifiedTs) {
+      if (
+        Number.isFinite(ifModifiedSinceTs) &&
+        Number.isFinite(lastModifiedTs) &&
+        ifModifiedSinceTs >= lastModifiedTs
+      ) {
         return true;
       }
     }
@@ -72,7 +76,9 @@ function compressPayload(buffer, encoding) {
 function sendCachedJson(req, res, payload, options: LooseRecord = {}) {
   const payloadText = JSON.stringify(payload);
   const rawBuffer = Buffer.from(payloadText, 'utf8');
-  const etag = createWeakEtag(rawBuffer);
+  const etagPayload = Object.prototype.hasOwnProperty.call(options, 'etagPayload') ? options.etagPayload : payload;
+  const etagBuffer = Buffer.from(JSON.stringify(etagPayload), 'utf8');
+  const etag = createWeakEtag(etagBuffer);
   const lastModified = toHttpDate(options.lastModified);
   const cacheControl = String(options.cacheControl || 'private, no-cache').trim();
   const shouldCompress = rawBuffer.length >= Number(options.minCompressionBytes || 1024);

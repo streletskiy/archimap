@@ -1,7 +1,11 @@
 require('dotenv').config({ quiet: true });
 
 function getDbProvider(env = process.env) {
-  return String(env.DB_PROVIDER || 'sqlite').trim().toLowerCase() || 'sqlite';
+  return (
+    String(env.DB_PROVIDER || 'sqlite')
+      .trim()
+      .toLowerCase() || 'sqlite'
+  );
 }
 
 function getPostgresConnectionString(env = process.env) {

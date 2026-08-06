@@ -23,10 +23,16 @@ export function shouldShowFilterRefiningMessage(statusCode: unknown, zoom: unkno
   return normalizeStatusCode(statusCode) === 'refining';
 }
 
-export function shouldShowFilterApplyOverlay(filterState: {
-  statusCode?: unknown;
-  phase?: unknown;
-} | null | undefined, zoom: unknown) {
+export function shouldShowFilterApplyOverlay(
+  filterState:
+    | {
+        statusCode?: unknown;
+        phase?: unknown;
+      }
+    | null
+    | undefined,
+  zoom: unknown
+) {
   if (isOverlaySuppressedByZoom(zoom)) return false;
   const code = normalizeStatusCode(filterState?.statusCode);
   const phase = normalizePhase(filterState?.phase);
@@ -34,13 +40,19 @@ export function shouldShowFilterApplyOverlay(filterState: {
 }
 
 export function getFilterApplyOverlayState(
-  filterState: {
-    statusCode?: unknown;
-    phase?: unknown;
-  } | null | undefined,
-  filterRuntime: {
-    updatedAt?: unknown;
-  } | null | undefined,
+  filterState:
+    | {
+        statusCode?: unknown;
+        phase?: unknown;
+      }
+    | null
+    | undefined,
+  filterRuntime:
+    | {
+        updatedAt?: unknown;
+      }
+    | null
+    | undefined,
   nowMs = Date.now(),
   zoom: unknown = null
 ) {

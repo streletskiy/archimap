@@ -292,22 +292,74 @@ function registerAdminRoutes(deps: LooseRecord) {
     )
   );
 
+  app.get(
+    '/api/admin/app-settings/data/regions/tree',
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return sendPrivateJson(req, res, {
+          ok: true,
+          items: await adminSettingsService.listRegionTree(req.query?.includeDisabled)
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
+  app.get(
+    '/api/admin/app-settings/data/regions/country-catalog',
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return sendPrivateJson(req, res, {
+          ok: true,
+          items: await adminSettingsService.listCountryCatalog()
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
   app.post(
-    '/api/admin/app-settings/data/regions/resolve-extract',
+    '/api/admin/app-settings/data/regions/country-aggregate',
     requireCsrfSession,
     requireAuth,
     requireAdmin,
     requireMasterAdmin,
     withAdminError(
       async (req, res) => {
-        const resolved = await adminSettingsService.resolveExtractCandidates({
-          query: req.body?.query,
-          source: req.body?.source
-        });
         return res.json({
           ok: true,
-          query: resolved.query,
-          items: resolved.items
+          item: await adminSettingsService.createCountryAggregate(req.body, getSessionEditActorKey(req) || 'admin')
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
+  app.get(
+    '/api/admin/app-settings/data/regions/upstream-status',
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return sendPrivateJson(req, res, {
+          ok: true,
+          items: await adminSettingsService.getRegionsUpstreamStatus(req.query?.ids, req.query?.force)
         });
       },
       {
@@ -396,6 +448,26 @@ function registerAdminRoutes(deps: LooseRecord) {
             req.params.regionId,
             getSessionEditActorKey(req) || 'admin'
           )
+        });
+      },
+      {
+        status: 500,
+        message: 'Data settings service is unavailable'
+      }
+    )
+  );
+
+  app.post(
+    '/api/admin/app-settings/data/regions/:regionId/sync-cancel',
+    requireCsrfSession,
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return res.json({
+          ok: true,
+          item: await adminSettingsService.requestRegionSyncCancel(req.params.regionId)
         });
       },
       {
@@ -570,6 +642,29 @@ function registerAdminRoutes(deps: LooseRecord) {
       {
         status: 500,
         message: 'OSM sync service is unavailable'
+      }
+    )
+  );
+
+  app.post(
+    '/api/admin/osm-sync/repairs',
+    requireCsrfSession,
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return res.json({
+          ok: true,
+          item: await osmSyncService.repairDamagedRelations(
+            req.body || {},
+            getSessionEditActorKey(req) || 'admin'
+          )
+        });
+      },
+      {
+        status: 500,
+        message: 'OSM repair service is unavailable'
       }
     )
   );

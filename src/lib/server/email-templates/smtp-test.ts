@@ -1,15 +1,5 @@
-const {
-  EMAIL_THEME,
-  contentNoteStyle,
-  contentParagraphStyle,
-  emailShell,
-  escapeHtml
-} = require('./shell');
-const {
-  formatEmailDate,
-  getEmailCopy,
-  normalizeEmailLocale
-} = require('./localization');
+const { EMAIL_THEME, contentNoteStyle, contentParagraphStyle, emailShell, escapeHtml } = require('./shell');
+const { formatEmailDate, getEmailCopy, normalizeEmailLocale } = require('./localization');
 
 const DETAIL_BORDER = EMAIL_THEME.cardBorder;
 const DETAIL_LABEL_COLOR = EMAIL_THEME.textMuted;
@@ -109,7 +99,9 @@ function smtpTestTextTemplate({ smtp, testEmail, sentAt, appDisplayName, locale 
   const currentLocale = normalizeEmailLocale(locale);
   const copy = getEmailCopy(currentLocale);
   const appName = String(appDisplayName || '').trim() || 'archimap';
-  const rows = buildDetailRows({ smtp, testEmail, sentAt, locale: currentLocale }).map(([label, value]) => `${label}: ${value}`);
+  const rows = buildDetailRows({ smtp, testEmail, sentAt, locale: currentLocale }).map(
+    ([label, value]) => `${label}: ${value}`
+  );
   return [
     `${appName}: ${copy.smtpTest.subject}`,
     '',

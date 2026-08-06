@@ -41,14 +41,7 @@ function createDeferredDb(runtimePromise, provider) {
 }
 
 function createDbRuntimeBoot(options: LooseRecord = {}) {
-  const {
-    runtimeEnv,
-    rawEnv = process.env,
-    sqlite = {},
-    postgres = {},
-    logger,
-    provider
-  } = options;
+  const { runtimeEnv, rawEnv = process.env, sqlite = {}, postgres = {}, logger, provider } = options;
 
   const rtreeState = { supported: false, ready: false, rebuilding: false };
   let dbRuntimeReady = false;
@@ -63,20 +56,23 @@ function createDbRuntimeBoot(options: LooseRecord = {}) {
   });
   const db = createDeferredDb(dbRuntimePromise, provider);
 
-  dbRuntimePromise.then((runtime) => {
-    dbRuntimeReady = true;
-    if (runtime?.rtreeState && typeof runtime.rtreeState === 'object') {
-      rtreeState.supported = Boolean(runtime.rtreeState.supported);
-      rtreeState.ready = Boolean(runtime.rtreeState.ready);
-      rtreeState.rebuilding = Boolean(runtime.rtreeState.rebuilding);
-    }
-    scheduleBuildingContoursRtreeRebuild = typeof runtime?.scheduleBuildingContoursRtreeRebuild === 'function'
-      ? runtime.scheduleBuildingContoursRtreeRebuild
-      : (() => {});
-  }).catch((error) => {
-    logger.error('db_runtime_init_failed', { error: String(error?.message || error) });
-    process.exit(1);
-  });
+  dbRuntimePromise
+    .then((runtime) => {
+      dbRuntimeReady = true;
+      if (runtime?.rtreeState && typeof runtime.rtreeState === 'object') {
+        rtreeState.supported = Boolean(runtime.rtreeState.supported);
+        rtreeState.ready = Boolean(runtime.rtreeState.ready);
+        rtreeState.rebuilding = Boolean(runtime.rtreeState.rebuilding);
+      }
+      scheduleBuildingContoursRtreeRebuild =
+        typeof runtime?.scheduleBuildingContoursRtreeRebuild === 'function'
+          ? runtime.scheduleBuildingContoursRtreeRebuild
+          : () => {};
+    })
+    .catch((error) => {
+      logger.error('db_runtime_init_failed', { error: String(error?.message || error) });
+      process.exit(1);
+    });
 
   async function closeDbRuntime() {
     try {

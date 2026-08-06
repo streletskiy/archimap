@@ -113,6 +113,10 @@ CREATE TABLE IF NOT EXISTS app_general_settings (
   registration_enabled INTEGER NOT NULL DEFAULT 1,
   user_edit_requires_permission INTEGER NOT NULL DEFAULT 1,
   metrics_token TEXT,
+  basemap_provider TEXT NOT NULL DEFAULT 'carto',
+  maptiler_api_key TEXT,
+  custom_basemap_url TEXT NOT NULL DEFAULT '',
+  custom_basemap_api_key TEXT,
   updated_by TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -146,16 +150,22 @@ CREATE TABLE IF NOT EXISTS app_osm_oauth_states (
 
   function migrateLegacyOsmDataIfNeeded() {
     const hasLegacyContoursTable = Boolean(
-      db.prepare(`
+      db
+        .prepare(
+          `
         SELECT 1
         FROM main.sqlite_master
         WHERE type = 'table' AND name = 'building_contours'
         LIMIT 1
-      `).get()
+      `
+        )
+        .get()
     );
     if (!hasLegacyContoursTable) return;
 
-    const osmContoursCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0);
+    const osmContoursCount = Number(
+      db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0
+    );
     if (osmContoursCount > 0) return;
 
     db.exec(`
@@ -222,7 +232,9 @@ END;
   function needsBuildingContoursRtreeRebuild() {
     if (!rtreeState.supported) return false;
     const contourCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0);
-    const rtreeCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours_rtree').get()?.total || 0);
+    const rtreeCount = Number(
+      db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours_rtree').get()?.total || 0
+    );
     return contourCount !== rtreeCount;
   }
 
@@ -272,7 +284,7 @@ END;
         cursor = Number(rows[rows.length - 1].rowid);
 
         const now = Date.now();
-        if (inserted === total || (now - lastLoggedAt) >= 1000) {
+        if (inserted === total || now - lastLoggedAt >= 1000) {
           const percent = Math.min(100, (inserted / Math.max(1, total)) * 100);
           logger.log(`[db] R*Tree rebuild progress: ${inserted}/${total} (${percent.toFixed(1)}%)`);
           lastLoggedAt = now;
@@ -286,7 +298,9 @@ END;
       }
 
       const contourCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0);
-      const rtreeCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours_rtree').get()?.total || 0);
+      const rtreeCount = Number(
+        db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours_rtree').get()?.total || 0
+      );
       if (contourCount !== rtreeCount) {
         logger.warn('[db] R*Tree rebuild finished with drift, scheduling retry');
         setTimeout(() => scheduleBuildingContoursRtreeRebuild('retry'), 1000);
@@ -324,8 +338,12 @@ END;
   rtreeState.ready = rtreeState.supported && !needsBuildingContoursRtreeRebuild();
   if (rtreeState.supported) {
     const contourCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get()?.total || 0);
-    const rtreeCount = Number(db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours_rtree').get()?.total || 0);
-    logger.log(`[db] R*Tree status at startup: ready=${rtreeState.ready}, contours=${contourCount}, rtree=${rtreeCount}`);
+    const rtreeCount = Number(
+      db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours_rtree').get()?.total || 0
+    );
+    logger.log(
+      `[db] R*Tree status at startup: ready=${rtreeState.ready}, contours=${contourCount}, rtree=${rtreeCount}`
+    );
     if (!rtreeState.ready) {
       logger.log('[db] R*Tree requires rebuild, bbox endpoint will use fallback query until ready');
     }
@@ -343,6 +361,7 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
   design_year INTEGER,
   material TEXT,
   material_concrete TEXT,
+  roof_shape TEXT,
   colour TEXT,
   levels INTEGER,
   year_built INTEGER,
@@ -375,6 +394,7 @@ CREATE TABLE IF NOT EXISTS user_edits.building_user_edits (
   design_year INTEGER,
   material TEXT,
   material_concrete TEXT,
+  roof_shape TEXT,
   colour TEXT,
   levels INTEGER,
   year_built INTEGER,

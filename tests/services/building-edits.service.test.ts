@@ -24,6 +24,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -69,6 +70,7 @@ function createTestDb() {
       design_year INTEGER,
       material TEXT,
       material_concrete TEXT,
+      roof_shape TEXT,
       colour TEXT,
       levels INTEGER,
       year_built INTEGER,
@@ -114,10 +116,12 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', asy
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     1001,
     JSON.stringify({
@@ -129,31 +133,23 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', asy
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, style, levels, year_built, architect, address, description, archimap_description, updated_by, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run(
-    'way',
-    1001,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    'admin@example.com'
-  );
+  `
+  ).run('way', 1001, null, null, null, null, null, null, null, null, 'admin@example.com');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
+  `
+  ).run(
     1,
     'way',
     1001,
@@ -177,14 +173,50 @@ test('buildChangesFromRows uses OSM fallback for empty merged name/address', asy
   assert.equal(fields.has('architect'), false);
 });
 
+test('getOsmContourRow uses ST_AsGeoJSON projection on postgres', async () => {
+  let capturedSql = '';
+  let capturedArgs = [];
+  const expectedRow = {
+    osm_type: 'relation',
+    osm_id: 12325639,
+    tags_json: '{"building":"yes"}',
+    geometry_json: '{"type":"Polygon","coordinates":[]}',
+    updated_at: '2026-04-01T04:58:52.554Z'
+  };
+  const db = {
+    provider: 'postgres',
+    prepare(sql) {
+      capturedSql = String(sql || '');
+      return {
+        get: (...args) => {
+          capturedArgs = args;
+          return expectedRow;
+        }
+      };
+    },
+    transaction(fn) {
+      return fn;
+    }
+  };
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  const row = await service.getOsmContourRow('relation', 12325639);
+
+  assert.deepEqual(row, expectedRow);
+  assert.deepEqual(capturedArgs, ['relation', 12325639]);
+  assert.match(capturedSql, /ST_AsGeoJSON\(geom\)::text AS geometry_json/);
+});
+
 test('buildChangesFromRows does not report levels diff for numeric-equivalent values', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     2002,
     JSON.stringify({
@@ -193,25 +225,14 @@ test('buildChangesFromRows does not report levels diff for numeric-equivalent va
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
-    2,
-    'way',
-    2002,
-    'user@example.com',
-    null,
-    null,
-    1,
-    null,
-    null,
-    null,
-    null,
-    'pending'
-  );
+  `
+  ).run(2, 'way', 2002, 'user@example.com', null, null, 1, null, null, null, null, 'pending');
 
   const items = await service.getUserEditsList({ status: 'pending', limit: 10 });
   assert.equal(items.length, 1);
@@ -224,10 +245,12 @@ test('buildChangesFromRows labels levels changes with building:levels', async ()
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     2302,
     JSON.stringify({
@@ -236,30 +259,17 @@ test('buildChangesFromRows labels levels changes with building:levels', async ()
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, style, levels, year_built, architect, address, archimap_description, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
-    23,
-    'way',
-    2302,
-    'user@example.com',
-    'Дом с этажностью',
-    null,
-    5,
-    null,
-    null,
-    null,
-    null,
-    'pending'
-  );
+  `
+  ).run(23, 'way', 2302, 'user@example.com', 'Дом с этажностью', null, 5, null, null, null, null, 'pending');
 
   const item = await service.getUserEditDetailsById(23);
-  const changes = Array.isArray(item?.changes)
-    ? item.changes
-    : [];
+  const changes = Array.isArray(item?.changes) ? item.changes : [];
   const levelsChange = changes.find((change) => String(change.field || '') === 'levels');
   assert.ok(levelsChange);
   assert.equal(levelsChange?.osmTag, 'building:levels');
@@ -269,10 +279,12 @@ test('buildChangesFromRows labels colour and architect changes with modern tags'
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     2402,
     JSON.stringify({
@@ -282,21 +294,14 @@ test('buildChangesFromRows labels colour and architect changes with modern tags'
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, colour, architect, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
-    24,
-    'way',
-    2402,
-    'user@example.com',
-    'Дом с цветом и архитектором',
-    '#112233',
-    'New Architect',
-    'pending'
-  );
+  `
+  ).run(24, 'way', 2402, 'user@example.com', 'Дом с цветом и архитектором', '#112233', 'New Architect', 'pending');
 
   const item = await service.getUserEditDetailsById(24);
   const byField = new Map<string, { osmTag?: string }>(
@@ -306,14 +311,52 @@ test('buildChangesFromRows labels colour and architect changes with modern tags'
   assert.equal(byField.get('architect')?.osmTag, 'architect');
 });
 
+test('buildChangesFromRows labels roof shape changes with roof:shape', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+
+  db.prepare(
+    `
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
+    VALUES (?, ?, ?)
+  `
+  ).run(
+    'way',
+    2502,
+    JSON.stringify({
+      name: 'Дом с крышей',
+      'roof:shape': 'flat'
+    })
+  );
+
+  db.prepare(
+    `
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, roof_shape, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `
+  ).run(25, 'way', 2502, 'user@example.com', 'Дом с крышей', 'gabled', 'pending');
+
+  const item = await service.getUserEditDetailsById(25);
+  assert.ok(item);
+  assert.equal(item?.values.roof_shape, 'gabled');
+  const byField = new Map<string, { osmTag?: string }>(
+    (item?.changes || []).map((change) => [String(change.field || ''), change])
+  );
+  assert.equal(byField.get('roof_shape')?.osmTag, 'roof:shape');
+});
+
 test('buildChangesFromRows treats concrete material variants as one selection', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     2102,
     JSON.stringify({
@@ -322,20 +365,14 @@ test('buildChangesFromRows treats concrete material variants as one selection', 
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, material, material_concrete, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
-    21,
-    'way',
-    2102,
-    'user@example.com',
-    'concrete',
-    'panels',
-    'pending'
-  );
+  `
+  ).run(21, 'way', 2102, 'user@example.com', 'concrete', 'panels', 'pending');
 
   const items = await service.getUserEditsList({ status: 'pending', limit: 10 });
   assert.equal(items.length, 1);
@@ -348,10 +385,12 @@ test('getUserEditDetailsById exposes design project changes and values', async (
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     2202,
     JSON.stringify({
@@ -360,22 +399,14 @@ test('getUserEditDetailsById exposes design project changes and values', async (
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, design, design_ref, design_year, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
-    22,
-    'way',
-    2202,
-    'user@example.com',
-    'Дом с типовым тегом',
-    'typical',
-    '1-447С-43',
-    1972,
-    'pending'
-  );
+  `
+  ).run(22, 'way', 2202, 'user@example.com', 'Дом с типовым тегом', 'typical', '1-447С-43', 1972, 'pending');
 
   const item = await service.getUserEditDetailsById(22);
   assert.ok(item);
@@ -392,19 +423,23 @@ test('getUserEditsList marks accepted edit as orphaned when contour is missing',
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, updated_by, updated_at
     )
     VALUES (?, ?, ?, ?, datetime('now'))
-  `).run('way', 3003, 'Старый дом', 'admin@example.com');
+  `
+  ).run('way', 3003, 'Старый дом', 'admin@example.com');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(3, 'way', 3003, 'user@example.com', 'Старый дом', 'accepted');
+  `
+  ).run(3, 'way', 3003, 'user@example.com', 'Старый дом', 'accepted');
 
   const items = await service.getUserEditsList({ status: 'accepted', limit: 10 });
   assert.equal(items.length, 1);
@@ -418,19 +453,32 @@ test('getUserEditDetailsById marks overpass-backed edit snapshots separately fro
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, source_geometry_json, source_tags_json, source_osm_updated_at, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
+  `
+  ).run(
     31,
     'way',
     3101,
     'user@example.com',
     'Overpass building',
     'pending',
-    JSON.stringify({ type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] }),
+    JSON.stringify({
+      type: 'Polygon',
+      coordinates: [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 1],
+          [0, 0]
+        ]
+      ]
+    }),
     JSON.stringify({ name: 'Overpass building' }),
     null
   );
@@ -446,10 +494,12 @@ test('accepted edit keeps original change counters visible after merge', async (
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run(
+  `
+  ).run(
     'way',
     3103,
     JSON.stringify({
@@ -458,19 +508,23 @@ test('accepted edit keeps original change counters visible after merge', async (
     })
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, architect, updated_by, updated_at
     )
     VALUES (?, ?, ?, ?, ?, datetime('now'))
-  `).run('way', 3103, 'Принятое имя', 'Новый архитектор', 'admin@example.com');
+  `
+  ).run('way', 3103, 'Принятое имя', 'Новый архитектор', 'admin@example.com');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, architect, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(11, 'way', 3103, 'user@example.com', 'Принятое имя', 'Новый архитектор', 'accepted');
+  `
+  ).run(11, 'way', 3103, 'user@example.com', 'Принятое имя', 'Новый архитектор', 'accepted');
 
   const items = await service.getUserEditsList({ status: 'accepted', limit: 10 });
   assert.equal(items.length, 1);
@@ -485,17 +539,21 @@ test('getUserEditDetailsById marks edit as drifted when OSM tags changed after s
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
     VALUES (?, ?, ?)
-  `).run('way', 4004, JSON.stringify({ name: 'Новое имя' }));
+  `
+  ).run('way', 4004, JSON.stringify({ name: 'Новое имя' }));
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, source_tags_json, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(4, 'way', 4004, 'user@example.com', 'Локальное имя', 'pending', JSON.stringify({ name: 'Старое имя' }));
+  `
+  ).run(4, 'way', 4004, 'user@example.com', 'Локальное имя', 'pending', JSON.stringify({ name: 'Старое имя' }));
 
   const item = await service.getUserEditDetailsById(4);
   assert.equal(item?.osmPresent, true);
@@ -505,74 +563,144 @@ test('getUserEditDetailsById marks edit as drifted when OSM tags changed after s
 test('reassignUserEdit moves accepted local info to another building', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+  const targetSourceUpdatedAt = new Date('2026-01-02T00:00:00Z').toString();
 
-  db.prepare(`
-    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json)
-    VALUES (?, ?, ?), (?, ?, ?)
-  `).run(
+  db.prepare(
+    `
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+  `
+  ).run(
     'way',
     5005,
     JSON.stringify({ name: 'Исходное здание' }),
+    '2026-01-01T00:00:00Z',
     'way',
     6006,
-    JSON.stringify({ name: 'Целевое здание' })
+    JSON.stringify({ name: 'Целевое здание' }),
+    targetSourceUpdatedAt
   );
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, architect, updated_by, updated_at
     )
     VALUES (?, ?, ?, ?, ?, datetime('now'))
-  `).run('way', 5005, 'Локальное имя', 'Локальный архитектор', 'admin@example.com');
+  `
+  ).run('way', 5005, 'Локальное имя', 'Локальный архитектор', 'admin@example.com');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, architect, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(5, 'way', 5005, 'user@example.com', 'Локальное имя', 'Локальный архитектор', 'accepted');
+  `
+  ).run(5, 'way', 5005, 'user@example.com', 'Локальное имя', 'Локальный архитектор', 'accepted');
 
   const updated = await service.reassignUserEdit(5, { osmType: 'way', osmId: 6006 }, { actor: 'admin@example.com' });
   assert.equal(updated?.osmType, 'way');
   assert.equal(updated?.osmId, 6006);
 
-  const moved = db.prepare(`
+  const moved = db
+    .prepare(
+      `
     SELECT name, architect
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
-  `).get('way', 6006);
+  `
+    )
+    .get('way', 6006);
   assert.equal(moved?.name, 'Локальное имя');
   assert.equal(moved?.architect, 'Локальный архитектор');
 
-  const source = db.prepare(`
+  const source = db
+    .prepare(
+      `
     SELECT 1
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
-  `).get('way', 5005);
+  `
+    )
+    .get('way', 5005);
   assert.equal(source, undefined);
+});
+
+test('reassignUserEdit normalizes source timestamp when moving a pending edit', async () => {
+  const db = createTestDb();
+  const service = createBuildingEditsService({ db, normalizeUserEditStatus });
+  const targetSourceUpdatedAt = new Date('2026-02-02T00:00:00Z').toString();
+
+  db.prepare(
+    `
+    INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at)
+    VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+  `
+  ).run(
+    'way',
+    7105,
+    JSON.stringify({ name: 'Исходное здание' }),
+    '2026-02-01T00:00:00Z',
+    'way',
+    7206,
+    JSON.stringify({ name: 'Целевое здание' }),
+    targetSourceUpdatedAt
+  );
+
+  db.prepare(
+    `
+    INSERT INTO user_edits.building_user_edits (
+      id, osm_type, osm_id, created_by, name, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `
+  ).run(15, 'way', 7105, 'user@example.com', 'Черновик', 'pending');
+
+  const updated = await service.reassignUserEdit(15, { osmType: 'way', osmId: 7206 }, { actor: 'admin@example.com' });
+  assert.equal(updated?.osmId, 7206);
+
+  const movedEditRow = db
+    .prepare(
+      `
+    SELECT osm_type, osm_id, source_osm_updated_at
+    FROM user_edits.building_user_edits
+    WHERE id = ?
+  `
+    )
+    .get(15);
+  assert.equal(movedEditRow?.osm_type, 'way');
+  assert.equal(movedEditRow?.osm_id, 7206);
+  assert.equal(movedEditRow?.source_osm_updated_at, '2026-02-02T00:00:00Z');
 });
 
 test('deleteUserEdit removes pending edit history row', async () => {
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(6, 'way', 7007, 'user@example.com', 'Черновик', 'pending');
+  `
+  ).run(6, 'way', 7007, 'user@example.com', 'Черновик', 'pending');
 
   const deleted = await service.deleteUserEdit(6);
   assert.equal(deleted?.editId, 6);
   assert.equal(deleted?.status, 'pending');
   assert.equal(deleted?.deletedMergedLocal, false);
 
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT 1
     FROM user_edits.building_user_edits
     WHERE id = ?
-  `).get(6);
+  `
+    )
+    .get(6);
   assert.equal(row, undefined);
 });
 
@@ -580,23 +708,29 @@ test('withdrawPendingUserEdit removes the current user pending edit', async () =
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(60, 'way', 6060, 'user@example.com', 'Черновик', 'pending');
+  `
+  ).run(60, 'way', 6060, 'user@example.com', 'Черновик', 'pending');
 
   const withdrawn = await service.withdrawPendingUserEdit(60, 'user@example.com');
   assert.equal(withdrawn?.editId, 60);
   assert.equal(withdrawn?.status, 'pending');
   assert.equal(withdrawn?.deletedMergedLocal, false);
 
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT 1
     FROM user_edits.building_user_edits
     WHERE id = ?
-  `).get(60);
+  `
+    )
+    .get(60);
   assert.equal(row, undefined);
 });
 
@@ -604,14 +738,16 @@ test('withdrawPendingUserEdit blocks edits from other users and non-pending rows
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, created_at, updated_at
     )
     VALUES
       (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
       (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
+  `
+  ).run(
     61,
     'way',
     6061,
@@ -641,36 +777,48 @@ test('deleteUserEdit removes lone accepted edit together with merged local data'
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, updated_by, updated_at
     )
     VALUES (?, ?, ?, ?, datetime('now'))
-  `).run('way', 8008, 'Удаляемый дом', 'admin@example.com');
+  `
+  ).run('way', 8008, 'Удаляемый дом', 'admin@example.com');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, created_at, updated_at
     )
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(7, 'way', 8008, 'user@example.com', 'Удаляемый дом', 'accepted');
+  `
+  ).run(7, 'way', 8008, 'user@example.com', 'Удаляемый дом', 'accepted');
 
   const deleted = await service.deleteUserEdit(7);
   assert.equal(deleted?.status, 'accepted');
   assert.equal(deleted?.deletedMergedLocal, true);
 
-  const editRow = db.prepare(`
+  const editRow = db
+    .prepare(
+      `
     SELECT 1
     FROM user_edits.building_user_edits
     WHERE id = ?
-  `).get(7);
+  `
+    )
+    .get(7);
   assert.equal(editRow, undefined);
 
-  const localRow = db.prepare(`
+  const localRow = db
+    .prepare(
+      `
     SELECT 1
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
-  `).get('way', 8008);
+  `
+    )
+    .get('way', 8008);
   assert.equal(localRow, undefined);
 });
 
@@ -678,21 +826,25 @@ test('deleteUserEdit blocks deleting accepted edit when merged state is shared',
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO local.architectural_info (
       osm_type, osm_id, name, updated_by, updated_at
     )
     VALUES (?, ?, ?, ?, datetime('now'))
-  `).run('way', 9009, 'Общий дом', 'admin@example.com');
+  `
+  ).run('way', 9009, 'Общий дом', 'admin@example.com');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, created_at, updated_at
     )
     VALUES
       (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
       (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
+  `
+  ).run(
     8,
     'way',
     9009,
@@ -712,18 +864,26 @@ test('deleteUserEdit blocks deleting accepted edit when merged state is shared',
     (error) => error?.code === 'EDIT_DELETE_SHARED_MERGED_STATE'
   );
 
-  const editRow = db.prepare(`
+  const editRow = db
+    .prepare(
+      `
     SELECT 1
     FROM user_edits.building_user_edits
     WHERE id = ?
-  `).get(8);
+  `
+    )
+    .get(8);
   assert.ok(editRow);
 
-  const localRow = db.prepare(`
+  const localRow = db
+    .prepare(
+      `
     SELECT 1
     FROM local.architectural_info
     WHERE osm_type = ? AND osm_id = ?
-  `).get('way', 9009);
+  `
+    )
+    .get('way', 9009);
   assert.ok(localRow);
 });
 
@@ -731,7 +891,8 @@ test('synced, cleaned, and syncing edits are read only in admin moderation actio
   const db = createTestDb();
   const service = createBuildingEditsService({ db, normalizeUserEditStatus });
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO user_edits.building_user_edits (
       id, osm_type, osm_id, created_by, name, status, sync_status, created_at, updated_at
     )
@@ -739,10 +900,29 @@ test('synced, cleaned, and syncing edits are read only in admin moderation actio
       (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
       (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')),
       (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-  `).run(
-    10, 'way', 3010, 'user@example.com', 'Synced building', 'accepted', 'synced',
-    11, 'way', 3011, 'user@example.com', 'Cleaned building', 'accepted', 'cleaned',
-    12, 'way', 3012, 'user@example.com', 'Syncing building', 'accepted', 'syncing'
+  `
+  ).run(
+    10,
+    'way',
+    3010,
+    'user@example.com',
+    'Synced building',
+    'accepted',
+    'synced',
+    11,
+    'way',
+    3011,
+    'user@example.com',
+    'Cleaned building',
+    'accepted',
+    'cleaned',
+    12,
+    'way',
+    3012,
+    'user@example.com',
+    'Syncing building',
+    'accepted',
+    'syncing'
   );
 
   const cases = [
@@ -769,4 +949,3 @@ test('synced, cleaned, and syncing edits are read only in admin moderation actio
     );
   }
 });
-

@@ -1,16 +1,17 @@
 import { expandBboxWithMargin, getAdaptiveCoverageMarginRatio } from './map-math-utils';
-import type {
-  BboxSnapshot,
-  CoverageWindowSnapshot,
-  MoveVector
-} from './filter-types.js';
+import type { BboxSnapshot, CoverageWindowSnapshot, MoveVector } from './filter-types.js';
 
-export function buildBboxSnapshot(bounds: {
-  getWest?: () => number;
-  getSouth?: () => number;
-  getEast?: () => number;
-  getNorth?: () => number;
-} | null | undefined): BboxSnapshot | null {
+export function buildBboxSnapshot(
+  bounds:
+    | {
+        getWest?: () => number;
+        getSouth?: () => number;
+        getEast?: () => number;
+        getNorth?: () => number;
+      }
+    | null
+    | undefined
+): BboxSnapshot | null {
   const west = Number(bounds?.getWest?.());
   const south = Number(bounds?.getSouth?.());
   const east = Number(bounds?.getEast?.());
@@ -43,28 +44,35 @@ export function isViewportInsideBbox(
   const boxSouth = Number(containerBbox.south);
   const boxEast = Number(containerBbox.east);
   const boxNorth = Number(containerBbox.north);
-  if (![viewportWest, viewportSouth, viewportEast, viewportNorth, boxWest, boxSouth, boxEast, boxNorth].every(Number.isFinite)) {
+  if (
+    ![viewportWest, viewportSouth, viewportEast, viewportNorth, boxWest, boxSouth, boxEast, boxNorth].every(
+      Number.isFinite
+    )
+  ) {
     return false;
   }
   return (
-    viewportWest >= (boxWest - epsilon) &&
-    viewportSouth >= (boxSouth - epsilon) &&
-    viewportEast <= (boxEast + epsilon) &&
-    viewportNorth <= (boxNorth + epsilon)
+    viewportWest >= boxWest - epsilon &&
+    viewportSouth >= boxSouth - epsilon &&
+    viewportEast <= boxEast + epsilon &&
+    viewportNorth <= boxNorth + epsilon
   );
 }
 
-export function getCoverageWindowForViewport(viewportBbox: BboxSnapshot | null | undefined, {
-  lastCount = 0,
-  defaultLimit,
-  minMargin,
-  maxMargin
-}: {
-  lastCount?: number;
-  defaultLimit?: number;
-  minMargin?: number;
-  maxMargin?: number;
-} = {}): CoverageWindowSnapshot | null {
+export function getCoverageWindowForViewport(
+  viewportBbox: BboxSnapshot | null | undefined,
+  {
+    lastCount = 0,
+    defaultLimit,
+    minMargin,
+    maxMargin
+  }: {
+    lastCount?: number;
+    defaultLimit?: number;
+    minMargin?: number;
+    maxMargin?: number;
+  } = {}
+): CoverageWindowSnapshot | null {
   const marginRatio = getAdaptiveCoverageMarginRatio({
     lastCount,
     defaultLimit,
@@ -87,8 +95,8 @@ export function buildPrefetchCoverageWindow(
   const width = Number(coverageWindow.east) - Number(coverageWindow.west);
   const height = Number(coverageWindow.north) - Number(coverageWindow.south);
   if (!(width > 0) || !(height > 0)) return null;
-  const directionX = moveVector.dx > 0 ? 1 : (moveVector.dx < 0 ? -1 : 0);
-  const directionY = moveVector.dy > 0 ? 1 : (moveVector.dy < 0 ? -1 : 0);
+  const directionX = moveVector.dx > 0 ? 1 : moveVector.dx < 0 ? -1 : 0;
+  const directionY = moveVector.dy > 0 ? 1 : moveVector.dy < 0 ? -1 : 0;
   const shiftX = width * (directionX === 0 ? 0.7 : 1.02 * directionX);
   const shiftY = height * (directionY === 0 ? 0.7 : 1.02 * directionY);
   return {

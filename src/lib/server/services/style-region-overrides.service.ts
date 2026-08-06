@@ -18,7 +18,9 @@ function parseOverrideId(value) {
 }
 
 function normalizeRegionPattern(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) {
     throw createStyleRegionOverrideError(400, 'Region pattern is required');
   }
@@ -26,13 +28,18 @@ function normalizeRegionPattern(value) {
     throw createStyleRegionOverrideError(400, 'Region pattern is too long');
   }
   if (!/^[a-z0-9*][a-z0-9*_-]*$/.test(text)) {
-    throw createStyleRegionOverrideError(400, 'Region pattern may contain only latin letters, digits, "-", "_" and "*"');
+    throw createStyleRegionOverrideError(
+      400,
+      'Region pattern may contain only latin letters, digits, "-", "_" and "*"'
+    );
   }
   return text;
 }
 
 function normalizeStyleKey(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) {
     throw createStyleRegionOverrideError(400, 'Architecture style key is required');
   }
@@ -133,11 +140,12 @@ function createStyleRegionOverridesService(options: LooseRecord = {}) {
       region_pattern: normalizeRegionPattern(input.region_pattern),
       style_key: normalizeStyleKey(input.style_key),
       is_allowed: normalizeIsAllowed(input.is_allowed),
-      updated_by: String(actor || '').trim().toLowerCase() || null
+      updated_by:
+        String(actor || '')
+          .trim()
+          .toLowerCase() || null
     };
-    const storedAllowedValue = db.provider === 'postgres'
-      ? normalized.is_allowed
-      : (normalized.is_allowed ? 1 : 0);
+    const storedAllowedValue = db.provider === 'postgres' ? normalized.is_allowed : normalized.is_allowed ? 1 : 0;
 
     const tx = db.transaction(async () => {
       const existing = await selectOverrideByPatternAndStyle.get(normalized.region_pattern, normalized.style_key);

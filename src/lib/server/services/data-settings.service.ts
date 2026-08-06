@@ -1,21 +1,16 @@
-const {
-  DEFAULT_FILTER_TAG_ALLOWLIST,
-  normalizeFilterTagKeyList
-} = require('./filter-tags.service');
-const path = require('path');
+const { DEFAULT_FILTER_TAG_ALLOWLIST, normalizeFilterTagKeyList } = require('./filter-tags.service');
 const { createDataSettingsContext } = require('./data-settings/shared');
 const { createBootstrapDomain } = require('./data-settings/bootstrap');
 const { createExtractsDomain } = require('./data-settings/extracts');
+const { createRegionCatalog } = require('./data-settings/region-catalog');
 const { createRegionsDomain } = require('./data-settings/regions');
 const { createSyncRunsDomain } = require('./data-settings/sync-runs');
+const { createUpstreamDomain } = require('./data-settings/upstream');
 const { createPresetsDomain } = require('./data-settings/presets');
-const { createPythonExtractResolver } = require('../../../../scripts/region-sync/python-extractor');
 import type { AdminDataSettings, Region } from '$shared/types';
 
 function normalizeRegionPmtilesSlug(regionOrSlug) {
-  const raw = typeof regionOrSlug === 'object' && regionOrSlug
-    ? regionOrSlug.slug
-    : regionOrSlug;
+  const raw = typeof regionOrSlug === 'object' && regionOrSlug ? regionOrSlug.slug : regionOrSlug;
   const slug = String(raw || '')
     .trim()
     .toLowerCase()
@@ -66,19 +61,21 @@ function resolveExistingRegionPmtilesPath(dataDir, region) {
 }
 
 function createDataSettingsService(options: LooseRecord = {}) {
+  const { createCountrySubregionsCatalog } = require('./data-settings/country-subregions');
+  const regionCatalog = options.regionCatalog || createRegionCatalog(options);
+  const countrySubregionsCatalog =
+    options.countrySubregionsCatalog ||
+    createCountrySubregionsCatalog({
+      ...options,
+      regionCatalog
+    });
   const context = createDataSettingsContext({
     ...options,
-    extractResolver: options.extractResolver || createPythonExtractResolver({
-      importerPath: path.resolve(__dirname, '../../../../scripts/sync-osm-buildings.py')
-    })
+    regionCatalog,
+    extractResolver: options.extractResolver || null
   });
-  const {
-    db,
-    dataDir,
-    readAppDataSettingsRow,
-    normalizeNullableText,
-    computeRegionDbBytes
-  } = context;
+  context.countrySubregionsCatalog = countrySubregionsCatalog;
+  const { db, dataDir, readAppDataSettingsRow, normalizeNullableText, computeRegionDbBytes } = context;
 
   const bootstrapDomain = createBootstrapDomain(context);
   Object.assign(context, bootstrapDomain);
@@ -119,7 +116,9 @@ function createDataSettingsService(options: LooseRecord = {}) {
     const settingsRow = await readAppDataSettingsRow();
     const updatedBy = normalizeNullableText(actor, 160);
     const normalizedAllowlist = normalizeFilterTagKeyList(input);
-    await db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO app_data_settings (
         id,
         env_bootstrap_completed,
@@ -133,19 +132,23 @@ function createDataSettingsService(options: LooseRecord = {}) {
         filter_tag_allowlist_json = excluded.filter_tag_allowlist_json,
         updated_by = excluded.updated_by,
         updated_at = datetime('now')
-    `).run(
-      Number(settingsRow?.env_bootstrap_completed || 0) > 0 ? 1 : 0,
-      settingsRow?.env_bootstrap_source ? String(settingsRow.env_bootstrap_source) : null,
-      JSON.stringify(normalizedAllowlist),
-      updatedBy
-    );
+    `
+      )
+      .run(
+        Number(settingsRow?.env_bootstrap_completed || 0) > 0 ? 1 : 0,
+        settingsRow?.env_bootstrap_source ? String(settingsRow.env_bootstrap_source) : null,
+        JSON.stringify(normalizedAllowlist),
+        updatedBy
+      );
     return getFilterTagAllowlistForAdmin();
   }
 
   async function getLatestStorageStatsByRegionId() {
     let rows: LooseRecord[];
     try {
-      rows = await db.prepare(`
+      rows = await db
+        .prepare(
+          `
         SELECT runs.region_id, runs.pmtiles_bytes, runs.db_bytes, runs.db_bytes_approximate
         FROM data_region_sync_runs runs
         INNER JOIN (
@@ -154,7 +157,9 @@ function createDataSettingsService(options: LooseRecord = {}) {
           GROUP BY region_id
         ) latest
           ON latest.latest_id = runs.id
-      `).all();
+      `
+        )
+        .all();
     } catch {
       rows = [];
     }
@@ -194,18 +199,14 @@ function createDataSettingsService(options: LooseRecord = {}) {
     const computedStorageStatsByRegionId = new Map(
       await Promise.all(
         items.map(async (region) => {
-          const value = storageStatsByRegionId.has(region.id)
-            ? null
-            : await computeRegionDbBytes(region.id);
+          const value = storageStatsByRegionId.has(region.id) ? null : await computeRegionDbBytes(region.id);
           return [region.id, value] as const;
         })
       )
     );
 
     return items.map((region) => {
-      const stats = storageStatsByRegionId.get(region.id)
-        || computedStorageStatsByRegionId.get(region.id)
-        || {};
+      const stats = storageStatsByRegionId.get(region.id) || computedStorageStatsByRegionId.get(region.id) || {};
       return {
         ...region,
         pmtilesBytes: resolveStoredPmtilesBytes(region, stats.pmtilesBytes ?? null),
@@ -223,8 +224,31 @@ function createDataSettingsService(options: LooseRecord = {}) {
   const regionsDomain = createRegionsDomain(context);
   Object.assign(context, regionsDomain);
 
+  const upstreamDomain = createUpstreamDomain(context);
+  Object.assign(context, upstreamDomain);
+
   const syncRunsDomain = createSyncRunsDomain(context);
   const presetsDomain = createPresetsDomain(context);
+
+  async function mapWithConcurrency(items = [], limit = 4, iteratee = async (value, _index) => value) {
+    const source = Array.isArray(items) ? items : [];
+    if (source.length === 0) return [];
+    const normalizedLimit = Math.max(1, Math.min(16, Math.trunc(Number(limit) || 4)));
+    const results = new Array(source.length);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: Math.min(normalizedLimit, source.length) }, async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        if (currentIndex >= source.length) return;
+        results[currentIndex] = await iteratee(source[currentIndex], currentIndex);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  }
 
   async function getDataSettingsForAdmin(): Promise<AdminDataSettings> {
     await bootstrapDomain.ensureBootstrapped();
@@ -241,6 +265,26 @@ function createDataSettingsService(options: LooseRecord = {}) {
     };
   }
 
+  async function getRegionsUpstreamState(regionIds = [], options: LooseRecord = {}): Promise<Region[]> {
+    await bootstrapDomain.ensureBootstrapped();
+    const normalizedIds = [
+      ...new Set(
+        (Array.isArray(regionIds) ? regionIds : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      )
+    ];
+    if (normalizedIds.length === 0) {
+      return [];
+    }
+
+    const items = await mapWithConcurrency(normalizedIds, 4, async (regionId) =>
+      upstreamDomain.getRegionUpstreamState(regionId, options)
+    );
+
+    return items.filter((item): item is Region => Boolean(item));
+  }
+
   return {
     slugify: context.slugify,
     normalizeBounds: context.normalizeBounds,
@@ -249,11 +293,16 @@ function createDataSettingsService(options: LooseRecord = {}) {
     getBootstrapState: bootstrapDomain.getBootstrapState,
     bootstrapFromEnvIfNeeded: bootstrapDomain.bootstrapFromEnvIfNeeded,
     listRegions: regionsDomain.listRegions,
+    listRegionTree: regionsDomain.listRegionTree,
+    listSubregions: regionsDomain.listSubregions,
     getRegionById: regionsDomain.getRegionById,
     searchExtractCandidates: extractsDomain.searchExtractCandidates,
     saveRegion: regionsDomain.saveRegion,
+    createCountryAggregate: regionsDomain.createCountryAggregate,
+    listCountryCatalog: async () => countrySubregionsCatalog.getCountries(),
     deleteRegion: regionsDomain.deleteRegion,
     getDataSettingsForAdmin,
+    getRegionsUpstreamState,
     getFilterTagAllowlistForAdmin,
     getEffectiveFilterTagAllowlistConfig,
     saveFilterTagAllowlist,
@@ -262,13 +311,19 @@ function createDataSettingsService(options: LooseRecord = {}) {
     getFilterPresetsForRuntime: presetsDomain.getFilterPresetsForRuntime,
     saveFilterPreset: presetsDomain.saveFilterPreset,
     deleteFilterPresetById: presetsDomain.deleteFilterPresetById,
+    getRegionUpstreamState: upstreamDomain.getRegionUpstreamState,
     getRecentRuns: syncRunsDomain.getRecentRuns,
     getRunById: syncRunsDomain.getRunById,
     createQueuedRun: syncRunsDomain.createQueuedRun,
     markRunStarted: syncRunsDomain.markRunStarted,
     markRunSucceeded: syncRunsDomain.markRunSucceeded,
     markRunFailed: syncRunsDomain.markRunFailed,
+    markRunCancelRequested: syncRunsDomain.markRunCancelRequested,
+    abandonActiveRunsForRegion: syncRunsDomain.abandonActiveRunsForRegion,
+    updateRunStage: syncRunsDomain.updateRunStage,
+    touchRunHeartbeat: syncRunsDomain.touchRunHeartbeat,
     recoverInterruptedRuns: syncRunsDomain.recoverInterruptedRuns,
+    rescheduleRegionAfterSkippedSync: syncRunsDomain.rescheduleRegionAfterSkippedSync,
     refreshRegionNextSyncAt: syncRunsDomain.refreshRegionNextSyncAt,
     refreshAllNextSyncAt: syncRunsDomain.refreshAllNextSyncAt,
     validateOverlap: regionsDomain.validateOverlap

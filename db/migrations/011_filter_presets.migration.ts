@@ -1,10 +1,14 @@
 function hasTable(db, tableName) {
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT 1
     FROM sqlite_master
     WHERE type = 'table' AND name = ?
     LIMIT 1
-  `).get(tableName);
+  `
+    )
+    .get(tableName);
   return Boolean(row);
 }
 
@@ -15,12 +19,16 @@ function hasColumn(db, tableName, columnName) {
 }
 
 function hasIndex(db, indexName) {
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT 1
     FROM sqlite_master
     WHERE type = 'index' AND name = ?
     LIMIT 1
-  `).get(indexName);
+  `
+    )
+    .get(indexName);
   return Boolean(row);
 }
 

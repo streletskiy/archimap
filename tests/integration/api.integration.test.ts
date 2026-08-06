@@ -5,19 +5,7 @@ const { spawn } = require('child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
-const { ensurePythonImporterDeps } = require('../../scripts/region-sync/python-extractor');
 const { pickIntegrationPort } = require('./test-ports');
-
-let pythonExtractorDepsSkipReason = null;
-try {
-  ensurePythonImporterDeps();
-} catch (error) {
-  pythonExtractorDepsSkipReason = String(error?.message || error || 'Python extractor dependencies are unavailable');
-}
-
-const pythonExtractorIntegrationTestOptions = pythonExtractorDepsSkipReason
-  ? { skip: `python extractor deps unavailable: ${pythonExtractorDepsSkipReason}` }
-  : {};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,6 +30,14 @@ function setCookiesFromHeaders(cookieJar, headers) {
   if (!fallback) return;
   const parsed = parseSetCookie(fallback);
   if (parsed) cookieJar.set(parsed.name, parsed.value);
+}
+
+function parseAppConfigJsPayload(text) {
+  const match = String(text || '').match(/window\.__ARCHIMAP_CONFIG\s*=\s*(\{[\s\S]*\});?\s*$/);
+  if (!match) {
+    throw new Error('Failed to parse app-config.js payload');
+  }
+  return JSON.parse(match[1]);
 }
 
 test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
@@ -85,8 +81,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
   });
 
   let serverOutput = '';
-  server.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); });
-  server.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
+  server.stdout.on('data', (chunk) => {
+    serverOutput += chunk.toString();
+  });
+  server.stderr.on('data', (chunk) => {
+    serverOutput += chunk.toString();
+  });
 
   async function waitUntilReady(timeoutMs = 30000) {
     const startedAt = Date.now();
@@ -102,19 +102,8 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
     throw new Error(`Server did not become ready in ${timeoutMs}ms`);
   }
 
-  async function createMasterAdmin({
-    email,
-    password,
-    firstName,
-    lastName
-  }: LooseRecord) {
-    const args = [
-      '--import',
-      'tsx',
-      'scripts/create-master-admin.ts',
-      `--email=${email}`,
-      `--password=${password}`
-    ];
+  async function createMasterAdmin({ email, password, firstName, lastName }: LooseRecord) {
+    const args = ['--import', 'tsx', 'scripts/create-master-admin.ts', `--email=${email}`, `--password=${password}`];
     if (firstName) args.push(`--first-name=${firstName}`);
     if (lastName) args.push(`--last-name=${lastName}`);
 
@@ -130,8 +119,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       });
 
       let output = '';
-      script.stdout.on('data', (chunk) => { output += chunk.toString(); });
-      script.stderr.on('data', (chunk) => { output += chunk.toString(); });
+      script.stdout.on('data', (chunk) => {
+        output += chunk.toString();
+      });
+      script.stderr.on('data', (chunk) => {
+        output += chunk.toString();
+      });
       script.on('error', reject);
       script.on('exit', (code: number | null) => {
         if (code === 0) return resolve();
@@ -196,8 +189,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const appConfig = await callApi('/app-config.js');
       assert.equal(appConfig.status, 200);
       const appConfigText = await appConfig.text();
-      assert.match(appConfigText, /window\.__ARCHIMAP_CONFIG/);
-      assert.match(appConfigText, /"mapSelection":\{"debug":false\}/);
+      const appConfigPayload = parseAppConfigJsPayload(appConfigText);
+      assert.equal(appConfigPayload.basemap.provider, 'carto');
+      assert.equal(appConfigPayload.basemap.maptilerApiKey, '');
+      assert.equal(appConfigPayload.basemap.customBasemapUrl, '');
+      assert.equal(appConfigPayload.basemap.customBasemapApiKey, '');
+      assert.equal(appConfigPayload.mapSelection.debug, false);
     });
 
     await t.test('registration does not depend on bootstrap first admin', async () => {
@@ -322,6 +319,101 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.ok(Array.isArray(mapSearchBody.items));
     });
 
+    await t.test('general settings expose basemap provider in admin api and runtime config', async () => {
+      const generalSettings = await callApi('/api/admin/app-settings/general');
+      assert.equal(generalSettings.status, 200);
+      const generalSettingsBody = await generalSettings.json();
+      assert.equal(generalSettingsBody?.ok, true);
+      assert.equal(generalSettingsBody?.item?.general?.basemapProvider, 'carto');
+
+      const saveGeneral = await callApi('/api/admin/app-settings/general', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          general: {
+            ...(generalSettingsBody?.item?.general || {}),
+            appDisplayName: 'archimap',
+            appBaseUrl: baseUrl,
+            basemapProvider: 'maptiler',
+            maptilerApiKey: 'integration-maptiler-key'
+          }
+        })
+      });
+      assert.equal(saveGeneral.status, 200);
+      const saveGeneralBody = await saveGeneral.json();
+      assert.equal(saveGeneralBody?.ok, true);
+      assert.equal(saveGeneralBody?.item?.general?.basemapProvider, 'maptiler');
+      assert.equal(saveGeneralBody?.item?.general?.maptilerApiKey, 'integration-maptiler-key');
+
+      const appConfig = await callApi('/app-config.js');
+      assert.equal(appConfig.status, 200);
+      const appConfigText = await appConfig.text();
+      const appConfigPayload = parseAppConfigJsPayload(appConfigText);
+      assert.equal(appConfigPayload.basemap.provider, 'maptiler');
+      assert.equal(appConfigPayload.basemap.maptilerApiKey, 'integration-maptiler-key');
+      assert.equal(appConfigPayload.basemap.customBasemapUrl, '');
+      assert.equal(appConfigPayload.basemap.customBasemapApiKey, '');
+
+      const invalidGeneral = await callApi('/api/admin/app-settings/general', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          general: {
+            ...(saveGeneralBody?.item?.general || {}),
+            basemapProvider: 'maptiler',
+            maptilerApiKey: ''
+          }
+        })
+      });
+      assert.equal(invalidGeneral.status, 400);
+      const invalidGeneralBody = await invalidGeneral.json();
+      assert.match(String(invalidGeneralBody?.error || ''), /MapTiler API key/i);
+    });
+
+    await t.test('custom basemap settings are exposed in admin api and runtime config', async () => {
+      const generalSettings = await callApi('/api/admin/app-settings/general');
+      assert.equal(generalSettings.status, 200);
+      const generalSettingsBody = await generalSettings.json();
+
+      const saveCustomGeneral = await callApi('/api/admin/app-settings/general', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': csrfToken
+        },
+        body: JSON.stringify({
+          general: {
+            ...(generalSettingsBody?.item?.general || {}),
+            appDisplayName: 'archimap',
+            appBaseUrl: baseUrl,
+            basemapProvider: 'custom',
+            customBasemapUrl: 'https://tiles.example.com/current.json',
+            customBasemapApiKey: 'integration-custom-key'
+          }
+        })
+      });
+      assert.equal(saveCustomGeneral.status, 200);
+      const saveCustomGeneralBody = await saveCustomGeneral.json();
+      assert.equal(saveCustomGeneralBody?.ok, true);
+      assert.equal(saveCustomGeneralBody?.item?.general?.basemapProvider, 'custom');
+      assert.equal(saveCustomGeneralBody?.item?.general?.customBasemapUrl, 'https://tiles.example.com/current.json');
+      assert.equal(saveCustomGeneralBody?.item?.general?.customBasemapApiKey, 'integration-custom-key');
+
+      const customAppConfig = await callApi('/app-config.js');
+      assert.equal(customAppConfig.status, 200);
+      const customAppConfigText = await customAppConfig.text();
+      const customAppConfigPayload = parseAppConfigJsPayload(customAppConfigText);
+      assert.equal(customAppConfigPayload.basemap.provider, 'custom');
+      assert.equal(customAppConfigPayload.basemap.customBasemapUrl, 'https://tiles.example.com/current.json');
+      assert.equal(customAppConfigPayload.basemap.customBasemapApiKey, 'integration-custom-key');
+    });
+
     await t.test('style override admin endpoints work and building-info returns region_slugs', async () => {
       const createOverride = await callApi('/api/admin/style-overrides', {
         method: 'POST',
@@ -353,44 +445,72 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const publicOverrides = await callApi('/api/style-overrides');
       assert.equal(publicOverrides.status, 200);
       const publicOverridesBody = await publicOverrides.json();
-      assert.deepEqual(publicOverridesBody?.items, [{
-        id: createOverrideBody.item.id,
-        region_pattern: 'ru-*',
-        style_key: 'omani',
-        is_allowed: true
-      }]);
+      assert.deepEqual(publicOverridesBody?.items, [
+        {
+          id: createOverrideBody.item.id,
+          region_pattern: 'ru-*',
+          style_key: 'omani',
+          is_allowed: true
+        }
+      ]);
 
       const mainDb = new Database(path.join(tempRoot, 'archimap.db'));
       const localDb = new Database(path.join(tempRoot, 'local-edits.db'));
       const osmDb = new Database(path.join(tempRoot, 'osm.db'));
       try {
-        mainDb.prepare(`
+        mainDb
+          .prepare(
+            `
           INSERT INTO data_sync_regions (slug, name, updated_by)
           VALUES (?, ?, ?)
-        `).run('ru-moscow', 'Moscow', 'integration-test');
-        const regionId = Number(mainDb.prepare(`
+        `
+          )
+          .run('ru-moscow', 'Moscow', 'integration-test');
+        const regionId = Number(
+          mainDb
+            .prepare(
+              `
           SELECT id
           FROM data_sync_regions
           WHERE slug = ?
-        `).get('ru-moscow')?.id || 0);
+        `
+            )
+            .get('ru-moscow')?.id || 0
+        );
         assert.ok(regionId > 0);
 
-        mainDb.prepare(`
+        mainDb
+          .prepare(
+            `
           INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
           VALUES (?, ?, ?, datetime('now'), datetime('now'))
-        `).run(regionId, 'way', 101);
-        mainDb.prepare(`
+        `
+          )
+          .run(regionId, 'way', 101);
+        mainDb
+          .prepare(
+            `
           INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
           VALUES (?, ?, ?, datetime('now'), datetime('now'))
-        `).run(regionId, 'way', 102);
-        mainDb.prepare(`
+        `
+          )
+          .run(regionId, 'way', 102);
+        mainDb
+          .prepare(
+            `
           INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
           VALUES (?, ?, ?, datetime('now'), datetime('now'))
-        `).run(regionId, 'way', 103);
-        mainDb.prepare(`
+        `
+          )
+          .run(regionId, 'way', 103);
+        mainDb
+          .prepare(
+            `
           INSERT INTO data_region_memberships (region_id, osm_type, osm_id, created_at, updated_at)
           VALUES (?, ?, ?, datetime('now'), datetime('now'))
-        `).run(regionId, 'way', 104);
+        `
+          )
+          .run(regionId, 'way', 104);
 
         osmDb.exec(`
           CREATE TABLE IF NOT EXISTS building_contours (
@@ -407,122 +527,148 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           );
         `);
 
-        osmDb.prepare(`
+        osmDb
+          .prepare(
+            `
           INSERT OR REPLACE INTO building_contours (
             osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).run(
-          'way',
-          101,
-          JSON.stringify({
-            building: 'yes',
-            name: 'Integration test building'
-          }),
-          JSON.stringify({
-            type: 'Polygon',
-            coordinates: [[
-              [37.6, 55.7],
-              [37.61, 55.7],
-              [37.61, 55.71],
-              [37.6, 55.71],
-              [37.6, 55.7]
-            ]]
-          }),
-          37.6,
-          55.7,
-          37.61,
-          55.71
-        );
+        `
+          )
+          .run(
+            'way',
+            101,
+            JSON.stringify({
+              building: 'yes',
+              name: 'Integration test building'
+            }),
+            JSON.stringify({
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [37.6, 55.7],
+                  [37.61, 55.7],
+                  [37.61, 55.71],
+                  [37.6, 55.71],
+                  [37.6, 55.7]
+                ]
+              ]
+            }),
+            37.6,
+            55.7,
+            37.61,
+            55.71
+          );
 
-        osmDb.prepare(`
+        osmDb
+          .prepare(
+            `
           INSERT OR REPLACE INTO building_contours (
             osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).run(
-          'way',
-          102,
-          JSON.stringify({
-            'building:part': 'apartments',
-            name: 'Integration test part'
-          }),
-          JSON.stringify({
-            type: 'Polygon',
-            coordinates: [[
-              [37.62, 55.72],
-              [37.63, 55.72],
-              [37.63, 55.73],
-              [37.62, 55.73],
-              [37.62, 55.72]
-            ]]
-          }),
-          37.62,
-          55.72,
-          37.63,
-          55.73
-        );
+        `
+          )
+          .run(
+            'way',
+            102,
+            JSON.stringify({
+              'building:part': 'apartments',
+              name: 'Integration test part'
+            }),
+            JSON.stringify({
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [37.62, 55.72],
+                  [37.63, 55.72],
+                  [37.63, 55.73],
+                  [37.62, 55.73],
+                  [37.62, 55.72]
+                ]
+              ]
+            }),
+            37.62,
+            55.72,
+            37.63,
+            55.73
+          );
 
-        osmDb.prepare(`
+        osmDb
+          .prepare(
+            `
           INSERT OR REPLACE INTO building_contours (
             osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).run(
-          'way',
-          103,
-          JSON.stringify({
-            building: 'yes',
-            'building:part': 'apartments',
-            name: 'Integration test mixed building'
-          }),
-          JSON.stringify({
-            type: 'Polygon',
-            coordinates: [[
-              [37.64, 55.74],
-              [37.65, 55.74],
-              [37.65, 55.75],
-              [37.64, 55.75],
-              [37.64, 55.74]
-            ]]
-          }),
-          37.64,
-          55.74,
-          37.65,
-          55.75
-        );
+        `
+          )
+          .run(
+            'way',
+            103,
+            JSON.stringify({
+              building: 'yes',
+              'building:part': 'apartments',
+              name: 'Integration test mixed building'
+            }),
+            JSON.stringify({
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [37.64, 55.74],
+                  [37.65, 55.74],
+                  [37.65, 55.75],
+                  [37.64, 55.75],
+                  [37.64, 55.74]
+                ]
+              ]
+            }),
+            37.64,
+            55.74,
+            37.65,
+            55.75
+          );
 
-        osmDb.prepare(`
+        osmDb
+          .prepare(
+            `
           INSERT OR REPLACE INTO building_contours (
             osm_type, osm_id, tags_json, geometry_json, min_lon, min_lat, max_lon, max_lat, updated_at
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).run(
-          'way',
-          104,
-          JSON.stringify({
-            building: 'yes',
-            'building:material': 'concrete',
-            'building:material:concrete': 'panels',
-            name: 'Integration test concrete building'
-          }),
-          JSON.stringify({
-            type: 'Polygon',
-            coordinates: [[
-              [37.66, 55.76],
-              [37.67, 55.76],
-              [37.67, 55.77],
-              [37.66, 55.77],
-              [37.66, 55.76]
-            ]]
-          }),
-          37.66,
-          55.76,
-          37.67,
-          55.77
-        );
+        `
+          )
+          .run(
+            'way',
+            104,
+            JSON.stringify({
+              building: 'yes',
+              'building:material': 'concrete',
+              'building:material:concrete': 'panels',
+              name: 'Integration test concrete building'
+            }),
+            JSON.stringify({
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [37.66, 55.76],
+                  [37.67, 55.76],
+                  [37.67, 55.77],
+                  [37.66, 55.77],
+                  [37.66, 55.76]
+                ]
+              ]
+            }),
+            37.66,
+            55.76,
+            37.67,
+            55.77
+          );
 
-        localDb.prepare(`
+        localDb
+          .prepare(
+            `
           INSERT INTO architectural_info (
             osm_type,
             osm_id,
@@ -532,9 +678,13 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
             updated_at
           )
           VALUES (?, ?, ?, ?, ?, datetime('now'))
-        `).run('way', 101, 'Integration test building', 'omani', 'integration-test');
+        `
+          )
+          .run('way', 101, 'Integration test building', 'omani', 'integration-test');
 
-        localDb.prepare(`
+        localDb
+          .prepare(
+            `
           INSERT INTO architectural_info (
             osm_type,
             osm_id,
@@ -546,9 +696,13 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
             updated_at
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).run('way', 102, 'omani', '#8f6b3d', 3, 1988, 'integration-test');
+        `
+          )
+          .run('way', 102, 'omani', '#8f6b3d', 3, 1988, 'integration-test');
 
-        localDb.prepare(`
+        localDb
+          .prepare(
+            `
           INSERT INTO architectural_info (
             osm_type,
             osm_id,
@@ -558,7 +712,9 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
             updated_at
           )
           VALUES (?, ?, ?, ?, ?, datetime('now'))
-        `).run('way', 104, 'concrete', 'panels', 'integration-test');
+        `
+          )
+          .run('way', 104, 'concrete', 'panels', 'integration-test');
       } finally {
         mainDb.close();
         localDb.close();
@@ -616,11 +772,15 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
 
       const concreteUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
       try {
-        const pendingConcreteEdit = concreteUserEditsDb.prepare(`
+        const pendingConcreteEdit = concreteUserEditsDb
+          .prepare(
+            `
           SELECT material, material_concrete, design, design_ref, design_year
           FROM building_user_edits
           WHERE id = ?
-        `).get(concreteEditBody.editId);
+        `
+          )
+          .get(concreteEditBody.editId);
         assert.equal(pendingConcreteEdit?.material, 'concrete');
         assert.equal(pendingConcreteEdit?.material_concrete, 'blocks');
         assert.equal(pendingConcreteEdit?.design, 'typical');
@@ -640,10 +800,11 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
           osmType: 'way',
           osmId: 102,
           style: 'omani',
+          roofShape: 'gabled',
           colour: '#7f6a52',
           levels: '4',
           yearBuilt: '1989',
-          editedFields: ['style', 'colour', 'levels', 'year_built']
+          editedFields: ['style', 'roofShape', 'colour', 'levels', 'year_built']
         })
       });
       assert.equal(partEdit.status, 200);
@@ -654,13 +815,18 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
 
       const partUserEditsDb = new Database(path.join(tempRoot, 'user-edits.db'));
       try {
-        const pendingPartEdit = partUserEditsDb.prepare(`
+        const pendingPartEdit = partUserEditsDb
+          .prepare(
+            `
           SELECT *
           FROM building_user_edits
           WHERE id = ?
-        `).get(partEditBody.editId);
+        `
+          )
+          .get(partEditBody.editId);
         assert.equal(pendingPartEdit?.colour, '#7f6a52');
         assert.equal(pendingPartEdit?.style, 'omani');
+        assert.equal(pendingPartEdit?.roof_shape, 'gabled');
         assert.equal(pendingPartEdit?.levels, 4);
         assert.equal(pendingPartEdit?.year_built, 1989);
         assert.equal(pendingPartEdit?.name, null);
@@ -706,188 +872,173 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.deepEqual(publicOverridesAfterDeleteBody?.items, []);
     });
 
-    await t.test('admin data settings endpoints support create/rename/delete flow for regions', pythonExtractorIntegrationTestOptions, async () => {
-      const dataSettings = await callApi('/api/admin/app-settings/data');
-      assert.equal(dataSettings.status, 200);
-      const dataSettingsBody = await dataSettings.json();
-      assert.equal(dataSettingsBody?.ok, true);
-      assert.ok(Array.isArray(dataSettingsBody?.item?.regions));
+    await t.test('admin data settings endpoints support create/rename/delete flow for regions', async () => {
+        const dataSettings = await callApi('/api/admin/app-settings/data');
+        assert.equal(dataSettings.status, 200);
+        const dataSettingsBody = await dataSettings.json();
+        assert.equal(dataSettingsBody?.ok, true);
+        assert.ok(Array.isArray(dataSettingsBody?.item?.regions));
 
-      const resolveExtract = await callApi('/api/admin/app-settings/data/regions/resolve-extract', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-csrf-token': csrfToken
-        },
-        body: JSON.stringify({
-          query: 'Antarctica'
-        })
-      });
-      assert.equal(resolveExtract.status, 200);
-      const resolveExtractBody = await resolveExtract.json();
-      assert.equal(resolveExtractBody?.ok, true);
-      assert.ok(Array.isArray(resolveExtractBody?.items));
-      assert.ok(resolveExtractBody.items.some((item) => String(item?.extractId || '') === 'geofabrik_antarctica'));
+        const rejectLegacyPayload = await callApi('/api/admin/app-settings/data/regions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-csrf-token': csrfToken
+          },
+          body: JSON.stringify({
+            region: {
+              name: 'Legacy Payload',
+              slug: 'legacy-payload',
+              sourceType: 'extract',
+              sourceValue: 'Afghanistan',
+              extractSource: 'geofabrik',
+              extractId: 'afghanistan',
+              extractLabel: 'Afghanistan',
+              enabled: true,
+              autoSyncEnabled: false,
+              autoSyncOnStart: false,
+              autoSyncIntervalHours: 0,
+              pmtilesMinZoom: 12,
+              pmtilesMaxZoom: 15,
+              sourceLayer: 'buildings'
+            }
+          })
+        });
+        assert.equal(rejectLegacyPayload.status, 400);
+        const rejectLegacyBody = await rejectLegacyPayload.json();
+        assert.match(String(rejectLegacyBody?.error || ''), /sourceValue/i);
 
-      const rejectLegacyPayload = await callApi('/api/admin/app-settings/data/regions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-csrf-token': csrfToken
-        },
-        body: JSON.stringify({
-          region: {
-            name: 'Legacy Payload',
-            slug: 'legacy-payload',
-            sourceType: 'extract',
-            sourceValue: 'Antarctica',
-            extractSource: 'geofabrik',
-            extractId: 'geofabrik_antarctica',
-            extractLabel: 'antarctica',
-            enabled: true,
-            autoSyncEnabled: false,
-            autoSyncOnStart: false,
-            autoSyncIntervalHours: 0,
-            pmtilesMinZoom: 12,
-            pmtilesMaxZoom: 15,
-            sourceLayer: 'buildings'
+        const createRegion = await callApi('/api/admin/app-settings/data/regions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-csrf-token': csrfToken
+          },
+          body: JSON.stringify({
+            region: {
+              name: 'Test Region',
+              slug: 'test-region',
+              sourceType: 'extract',
+              extractSource: 'geofabrik',
+              extractId: 'afghanistan',
+              extractLabel: 'Afghanistan',
+              enabled: true,
+              autoSyncEnabled: false,
+              autoSyncOnStart: false,
+              autoSyncIntervalHours: 0,
+              pmtilesMinZoom: 12,
+              pmtilesMaxZoom: 15,
+              sourceLayer: 'buildings'
+            }
+          })
+        });
+        assert.equal(createRegion.status, 200);
+        const createRegionBody = await createRegion.json();
+        assert.equal(createRegionBody?.ok, true);
+        assert.equal(createRegionBody?.item?.slug, 'test-region');
+
+        const regions = await callApi('/api/admin/app-settings/data/regions');
+        assert.equal(regions.status, 200);
+        const regionsBody = await regions.json();
+        assert.ok(Array.isArray(regionsBody?.items));
+        let region = regionsBody.items.find((item) => String(item?.slug || '') === 'test-region');
+        assert.ok(region);
+        assert.equal(region.lastSyncStatus, 'idle');
+
+        const runs = await callApi(`/api/admin/app-settings/data/regions/${region.id}/runs`);
+        assert.equal(runs.status, 200);
+        const runsBody = await runs.json();
+        assert.equal(runsBody?.ok, true);
+        assert.ok(Array.isArray(runsBody?.items));
+        assert.equal(runsBody.items.length, 0);
+
+        const renameRegion = await callApi('/api/admin/app-settings/data/regions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-csrf-token': csrfToken
+          },
+          body: JSON.stringify({
+            region: {
+              id: region.id,
+              name: 'Renamed Test Region',
+              slug: 'renamed-test-region',
+              sourceType: 'extract',
+              extractSource: 'geofabrik',
+              extractId: 'afghanistan',
+              extractLabel: 'Afghanistan',
+              enabled: true,
+              autoSyncEnabled: false,
+              autoSyncOnStart: false,
+              autoSyncIntervalHours: 0,
+              pmtilesMinZoom: 12,
+              pmtilesMaxZoom: 15,
+              sourceLayer: 'buildings'
+            }
+          })
+        });
+        assert.equal(renameRegion.status, 200);
+        const renameRegionBody = await renameRegion.json();
+        assert.equal(renameRegionBody?.ok, true);
+        assert.equal(renameRegionBody?.item?.id, region.id);
+        assert.equal(renameRegionBody?.item?.slug, 'renamed-test-region');
+        assert.equal(renameRegionBody?.item?.name, 'Renamed Test Region');
+
+        const regionsAfterRename = await callApi('/api/admin/app-settings/data/regions');
+        assert.equal(regionsAfterRename.status, 200);
+        const regionsAfterRenameBody = await regionsAfterRename.json();
+        region = regionsAfterRenameBody.items.find((item) => Number(item?.id || 0) === Number(region.id));
+        assert.ok(region);
+        assert.equal(region.slug, 'renamed-test-region');
+        assert.equal(region.name, 'Renamed Test Region');
+
+        const regionPmtilesPath = path.join(repoDataDir, 'regions', `buildings-region-${region.slug}.pmtiles`);
+        fs.mkdirSync(path.dirname(regionPmtilesPath), { recursive: true });
+        fs.writeFileSync(regionPmtilesPath, Buffer.alloc(4096, 7));
+        generatedPmtilesPaths.push(regionPmtilesPath);
+
+        const response = await callApi(`/api/data/regions/${region.id}/pmtiles`, {
+          headers: {
+            range: 'bytes=0-1023'
           }
-        })
-      });
-      assert.equal(rejectLegacyPayload.status, 400);
-      const rejectLegacyBody = await rejectLegacyPayload.json();
-      assert.match(String(rejectLegacyBody?.error || ''), /sourceValue/i);
+        });
+        assert.equal(response.status, 206);
+        assert.equal(response.headers.get('accept-ranges'), 'bytes');
+        assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
+        const payload = new Uint8Array(await response.arrayBuffer());
+        assert.equal(payload.length, 1024);
 
-      const createRegion = await callApi('/api/admin/app-settings/data/regions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-csrf-token': csrfToken
-        },
-        body: JSON.stringify({
-          region: {
-            name: 'Test Region',
-            slug: 'test-region',
-            sourceType: 'extract',
-            searchQuery: 'Antarctica',
-            extractSource: 'geofabrik',
-            extractId: 'geofabrik_antarctica',
-            extractLabel: 'antarctica',
-            enabled: true,
-            autoSyncEnabled: false,
-            autoSyncOnStart: false,
-            autoSyncIntervalHours: 0,
-            pmtilesMinZoom: 12,
-            pmtilesMaxZoom: 15,
-            sourceLayer: 'buildings'
+        const full = await callApi(`/api/data/regions/${region.id}/pmtiles`);
+        assert.equal(full.status, 200);
+        const pmtilesEtag = String(full.headers.get('etag') || '');
+        assert.ok(pmtilesEtag.length > 0);
+        assert.ok(String(full.headers.get('last-modified') || '').length > 0);
+        await full.arrayBuffer();
+
+        const notModified = await callApi(`/api/data/regions/${region.id}/pmtiles`, {
+          headers: { 'if-none-match': pmtilesEtag }
+        });
+        assert.equal(notModified.status, 304);
+
+        const deleteRegion = await callApi(`/api/admin/app-settings/data/regions/${region.id}`, {
+          method: 'DELETE',
+          headers: {
+            'x-csrf-token': csrfToken
           }
-        })
+        });
+        const deleteRegionBody = await deleteRegion.json().catch(async () => ({ error: await deleteRegion.text() }));
+        assert.equal(deleteRegion.status, 200, JSON.stringify(deleteRegionBody));
+        assert.equal(deleteRegionBody?.ok, true);
+        assert.equal(deleteRegionBody?.item?.region?.id, region.id, JSON.stringify(deleteRegionBody));
+
+        const regionsAfterDelete = await callApi('/api/admin/app-settings/data/regions');
+        assert.equal(regionsAfterDelete.status, 200);
+        const regionsAfterDeleteBody = await regionsAfterDelete.json();
+        assert.equal(
+          regionsAfterDeleteBody.items.some((item) => Number(item?.id || 0) === Number(region.id)),
+          false
+        );
       });
-      assert.equal(createRegion.status, 200);
-      const createRegionBody = await createRegion.json();
-      assert.equal(createRegionBody?.ok, true);
-      assert.equal(createRegionBody?.item?.slug, 'test-region');
-
-      const regions = await callApi('/api/admin/app-settings/data/regions');
-      assert.equal(regions.status, 200);
-      const regionsBody = await regions.json();
-      assert.ok(Array.isArray(regionsBody?.items));
-      let region = regionsBody.items.find((item) => String(item?.slug || '') === 'test-region');
-      assert.ok(region);
-      assert.equal(region.lastSyncStatus, 'idle');
-
-      const runs = await callApi(`/api/admin/app-settings/data/regions/${region.id}/runs`);
-      assert.equal(runs.status, 200);
-      const runsBody = await runs.json();
-      assert.equal(runsBody?.ok, true);
-      assert.ok(Array.isArray(runsBody?.items));
-      assert.equal(runsBody.items.length, 0);
-
-      const renameRegion = await callApi('/api/admin/app-settings/data/regions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-csrf-token': csrfToken
-        },
-        body: JSON.stringify({
-          region: {
-            id: region.id,
-            name: 'Renamed Test Region',
-            slug: 'renamed-test-region',
-            sourceType: 'extract',
-            searchQuery: 'Antarctica',
-            extractSource: 'geofabrik',
-            extractId: 'geofabrik_antarctica',
-            extractLabel: 'antarctica',
-            enabled: true,
-            autoSyncEnabled: false,
-            autoSyncOnStart: false,
-            autoSyncIntervalHours: 0,
-            pmtilesMinZoom: 12,
-            pmtilesMaxZoom: 15,
-            sourceLayer: 'buildings'
-          }
-        })
-      });
-      assert.equal(renameRegion.status, 200);
-      const renameRegionBody = await renameRegion.json();
-      assert.equal(renameRegionBody?.ok, true);
-      assert.equal(renameRegionBody?.item?.id, region.id);
-      assert.equal(renameRegionBody?.item?.slug, 'renamed-test-region');
-      assert.equal(renameRegionBody?.item?.name, 'Renamed Test Region');
-
-      const regionsAfterRename = await callApi('/api/admin/app-settings/data/regions');
-      assert.equal(regionsAfterRename.status, 200);
-      const regionsAfterRenameBody = await regionsAfterRename.json();
-      region = regionsAfterRenameBody.items.find((item) => Number(item?.id || 0) === Number(region.id));
-      assert.ok(region);
-      assert.equal(region.slug, 'renamed-test-region');
-      assert.equal(region.name, 'Renamed Test Region');
-
-      const regionPmtilesPath = path.join(repoDataDir, 'regions', `buildings-region-${region.slug}.pmtiles`);
-      fs.mkdirSync(path.dirname(regionPmtilesPath), { recursive: true });
-      fs.writeFileSync(regionPmtilesPath, Buffer.alloc(4096, 7));
-      generatedPmtilesPaths.push(regionPmtilesPath);
-
-      const response = await callApi(`/api/data/regions/${region.id}/pmtiles`, {
-        headers: {
-          range: 'bytes=0-1023'
-        }
-      });
-      assert.equal(response.status, 206);
-      assert.equal(response.headers.get('accept-ranges'), 'bytes');
-      assert.match(String(response.headers.get('content-range') || ''), /^bytes 0-1023\/\d+$/);
-      const payload = new Uint8Array(await response.arrayBuffer());
-      assert.equal(payload.length, 1024);
-
-      const full = await callApi(`/api/data/regions/${region.id}/pmtiles`);
-      assert.equal(full.status, 200);
-      const pmtilesEtag = String(full.headers.get('etag') || '');
-      assert.ok(pmtilesEtag.length > 0);
-      assert.ok(String(full.headers.get('last-modified') || '').length > 0);
-      await full.arrayBuffer();
-
-      const notModified = await callApi(`/api/data/regions/${region.id}/pmtiles`, {
-        headers: { 'if-none-match': pmtilesEtag }
-      });
-      assert.equal(notModified.status, 304);
-
-      const deleteRegion = await callApi(`/api/admin/app-settings/data/regions/${region.id}`, {
-        method: 'DELETE',
-        headers: {
-          'x-csrf-token': csrfToken
-        }
-      });
-      const deleteRegionBody = await deleteRegion.json().catch(async () => ({ error: await deleteRegion.text() }));
-      assert.equal(deleteRegion.status, 200, JSON.stringify(deleteRegionBody));
-      assert.equal(deleteRegionBody?.ok, true);
-      assert.equal(deleteRegionBody?.item?.region?.id, region.id, JSON.stringify(deleteRegionBody));
-
-      const regionsAfterDelete = await callApi('/api/admin/app-settings/data/regions');
-      assert.equal(regionsAfterDelete.status, 200);
-      const regionsAfterDeleteBody = await regionsAfterDelete.json();
-      assert.equal(regionsAfterDeleteBody.items.some((item) => Number(item?.id || 0) === Number(region.id)), false);
-    });
 
     await t.test('filter preset admin/runtime endpoints support create/update/delete flow', async () => {
       const runtimeDefaults = await callApi('/api/filter-presets');
@@ -897,7 +1048,9 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const defaultKeys = new Set(runtimeDefaultsBody.items.map((item) => String(item?.key || '').trim()));
       assert.equal(defaultKeys.has('building-levels'), true);
       assert.equal(defaultKeys.has('building-material'), true);
-      const buildingLevelsDefault = runtimeDefaultsBody.items.find((item) => String(item?.key || '') === 'building-levels');
+      const buildingLevelsDefault = runtimeDefaultsBody.items.find(
+        (item) => String(item?.key || '') === 'building-levels'
+      );
       assert.equal(buildingLevelsDefault?.nameI18n?.en, 'Building levels');
       assert.equal(buildingLevelsDefault?.nameI18n?.ru, 'Этажность');
 
@@ -1087,7 +1240,10 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.ok(Array.isArray(markerPointLevelBody?.matchedLocations));
       assert.equal(markerPointLevelBody.matchedLocations.length, 4);
       assert.equal(markerPointLevelBody.matchedFeatureIds.length, 4);
-      assert.equal(markerPointLevelBody.matchedLocations.every((point) => point?.count === 1), true);
+      assert.equal(
+        markerPointLevelBody.matchedLocations.every((point) => point?.count === 1),
+        true
+      );
       assert.equal(markerPointLevelBody.matchedCount, 4);
       assert.equal(Boolean(markerPointLevelBody?.meta?.truncated), false);
 
@@ -1145,7 +1301,10 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.ok(Array.isArray(firstBody.items[0]?.matchedKeys));
       assert.ok(Array.isArray(firstBody.items[0]?.matchedLocations));
       assert.equal(firstBody.items[0]?.matchedLocations.length, 4);
-      assert.equal(firstBody.items[0]?.matchedLocations.every((point) => point?.count === 1), true);
+      assert.equal(
+        firstBody.items[0]?.matchedLocations.every((point) => point?.count === 1),
+        true
+      );
       assert.equal(firstBody.items[0]?.matchedCount, 4);
       assert.equal(firstBody.items[1]?.matchedLocations.length, 4);
       assert.equal(firstBody.items[1]?.matchedCount, 4);
@@ -1162,7 +1321,6 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(secondBody.items.length, 2);
       assert.equal(Boolean(secondBody.items[0]?.meta?.cacheHit), true);
     });
-
   } finally {
     if (server.exitCode == null) {
       server.kill('SIGTERM');

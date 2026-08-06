@@ -30,29 +30,38 @@ test('buildFtsMatchQuery escapes quotes', () => {
 
 test('normalizeSearchBbox rejects invalid bounds and normalizes numeric input', () => {
   const service = createSearchService({ db: createNoopDb() });
-  assert.deepEqual(service.normalizeSearchBbox({
-    west: '43.9',
-    south: '55.9',
-    east: '44.1',
-    north: '56.1'
-  }), {
-    west: 43.9,
-    south: 55.9,
-    east: 44.1,
-    north: 56.1
-  });
-  assert.equal(service.normalizeSearchBbox({
-    west: 44.1,
-    south: 55.9,
-    east: 43.9,
-    north: 56.1
-  }), null);
-  assert.equal(service.normalizeSearchBbox({
-    west: 43.9,
-    south: Number.NaN,
-    east: 44.1,
-    north: 56.1
-  }), null);
+  assert.deepEqual(
+    service.normalizeSearchBbox({
+      west: '43.9',
+      south: '55.9',
+      east: '44.1',
+      north: '56.1'
+    }),
+    {
+      west: 43.9,
+      south: 55.9,
+      east: 44.1,
+      north: 56.1
+    }
+  );
+  assert.equal(
+    service.normalizeSearchBbox({
+      west: 44.1,
+      south: 55.9,
+      east: 43.9,
+      north: 56.1
+    }),
+    null
+  );
+  assert.equal(
+    service.normalizeSearchBbox({
+      west: 43.9,
+      south: Number.NaN,
+      east: 44.1,
+      north: 56.1
+    }),
+    null
+  );
 });
 
 test('getBuildingSearchResults returns empty for short/empty tokens', async () => {

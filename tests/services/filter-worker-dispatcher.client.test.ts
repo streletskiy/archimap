@@ -4,7 +4,15 @@ const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
 async function loadFilterWorkerDispatcher() {
-  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'filter-worker-dispatcher.ts');
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'services',
+    'map',
+    'filter-worker-dispatcher.ts'
+  );
   return import(pathToFileURL(modulePath).href);
 }
 
@@ -40,4 +48,3 @@ test('filter worker dispatcher lazily creates and reuses the worker service', as
   dispatcher.destroy();
   assert.equal(destroyCalls, 1);
 });
-

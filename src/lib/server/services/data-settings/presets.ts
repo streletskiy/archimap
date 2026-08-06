@@ -22,12 +22,7 @@ const FILTER_PRESET_RULE_OPS = new Set([
   'less_than',
   'less_or_equals'
 ]);
-const FILTER_PRESET_NUMERIC_OPS = new Set([
-  'greater_than',
-  'greater_or_equals',
-  'less_than',
-  'less_or_equals'
-]);
+const FILTER_PRESET_NUMERIC_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
 const FILTER_PRESET_COLOR_RE = /^#[0-9a-f]{6}$/i;
 const FILTER_PRESET_LOCALE_RE = /^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i;
 
@@ -48,11 +43,15 @@ function normalizePresetKey(value) {
 }
 
 function normalizePresetName(value) {
-  return String(value || '').trim().slice(0, 160);
+  return String(value || '')
+    .trim()
+    .slice(0, 160);
 }
 
 function normalizePresetDescription(value) {
-  const text = String(value || '').trim().slice(0, 1000);
+  const text = String(value || '')
+    .trim()
+    .slice(0, 1000);
   return text || null;
 }
 
@@ -77,7 +76,9 @@ function normalizePresetNameI18n(value) {
     if (!name) continue;
     entries.push([locale, name]);
   }
-  entries.sort((left, right) => String(left[0] || '').localeCompare(String(right[0] || ''), 'en', { sensitivity: 'base' }));
+  entries.sort((left, right) =>
+    String(left[0] || '').localeCompare(String(right[0] || ''), 'en', { sensitivity: 'base' })
+  );
   return Object.fromEntries(entries);
 }
 
@@ -111,14 +112,18 @@ function parsePresetNameI18nJson(rawValue, fallbackName = null) {
 }
 
 function parseNumericFilterValue(rawValue) {
-  const text = String(rawValue ?? '').trim().replace(',', '.');
+  const text = String(rawValue ?? '')
+    .trim()
+    .replace(',', '.');
   if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
   const value = Number(text);
   return Number.isFinite(value) ? value : null;
 }
 
 function normalizeLayerMode(value) {
-  const mode = String(value || 'layer').trim().toLowerCase();
+  const mode = String(value || 'layer')
+    .trim()
+    .toLowerCase();
   return FILTER_PRESET_LAYER_MODES.has(mode) ? mode : null;
 }
 
@@ -167,7 +172,10 @@ function normalizeLayers(rawLayers = []): { layers: FilterPresetLayer[]; error: 
   const layers = [];
   for (let index = 0; index < input.length; index += 1) {
     const rawLayer = input[index] || {};
-    const id = String(rawLayer?.id || '').trim().slice(0, 128) || `preset-layer-${index + 1}`;
+    const id =
+      String(rawLayer?.id || '')
+        .trim()
+        .slice(0, 128) || `preset-layer-${index + 1}`;
     const color = normalizeLayerColor(rawLayer?.color);
     if (!color) {
       return { layers: [], error: 'Layer color must be a 6-digit hex color' };
@@ -239,11 +247,7 @@ function mapPresetRow(row: LooseRecord): FilterPreset | null {
 }
 
 function createPresetsDomain(context: LooseRecord = {}) {
-  const {
-    db,
-    ensureBootstrapped,
-    normalizeNullableText
-  } = context;
+  const { db, ensureBootstrapped, normalizeNullableText } = context;
 
   const selectAllPresets = db.prepare(`
     SELECT
@@ -328,9 +332,7 @@ function createPresetsDomain(context: LooseRecord = {}) {
 
   async function listFilterPresets(): Promise<FilterPreset[]> {
     const rows = await selectAllPresets.all();
-    return (Array.isArray(rows) ? rows : [])
-      .map(mapPresetRow)
-      .filter((item): item is FilterPreset => Boolean(item));
+    return (Array.isArray(rows) ? rows : []).map(mapPresetRow).filter((item): item is FilterPreset => Boolean(item));
   }
 
   async function getFilterPresetById(id): Promise<FilterPreset | null> {
@@ -412,8 +414,10 @@ function createPresetsDomain(context: LooseRecord = {}) {
     const inputName = hasNameInput ? normalizePresetName(input?.name) : '';
     const preferredName = pickPreferredName(inputNameI18n, existingName);
     const name = hasNameInput
-      ? (inputName || preferredName)
-      : (hasNameI18nInput ? preferredName : (existingName || preferredName));
+      ? inputName || preferredName
+      : hasNameI18nInput
+        ? preferredName
+        : existingName || preferredName;
     if (!name) {
       throw new Error('Filter preset name is required');
     }
@@ -431,14 +435,10 @@ function createPresetsDomain(context: LooseRecord = {}) {
     }
 
     const description = normalizePresetDescription(
-      Object.prototype.hasOwnProperty.call(input || {}, 'description')
-        ? input.description
-        : existing?.description
+      Object.prototype.hasOwnProperty.call(input || {}, 'description') ? input.description : existing?.description
     );
 
-    const layersInput = Object.prototype.hasOwnProperty.call(input || {}, 'layers')
-      ? input.layers
-      : existing?.layers;
+    const layersInput = Object.prototype.hasOwnProperty.call(input || {}, 'layers') ? input.layers : existing?.layers;
     const normalizedLayers = normalizeLayers(clonePresetLayers(layersInput));
     if (normalizedLayers.error) {
       throw new Error(normalizedLayers.error);

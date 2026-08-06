@@ -24,7 +24,10 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
   const queuedSearchIndexRefreshes = new Map();
   let searchIndexRefreshQueueScheduled = false;
   let searchIndexRefreshQueueRunning = false;
-  const isPostgres = String(dbProvider || db?.provider || '').trim().toLowerCase() === 'postgres';
+  const isPostgres =
+    String(dbProvider || db?.provider || '')
+      .trim()
+      .toLowerCase() === 'postgres';
   const searchIndexRefreshService = createSearchIndexRefreshService({
     db,
     logger
@@ -42,8 +45,9 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
     refreshSearchIndexForBuildingFallback: searchIndexRefreshService.refreshSearchIndexForBuilding
   });
 
-  const selectSearchCounts = db.prepare(isPostgres
-    ? `
+  const selectSearchCounts = db.prepare(
+    isPostgres
+      ? `
       SELECT
         (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
         EXISTS (
@@ -95,7 +99,7 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
             AND c.relname = 'idx_building_search_source_tsv'
         ) AS search_tsv_index_present
     `
-    : `
+      : `
       SELECT
         (SELECT COUNT(*) FROM building_search_source) AS search_source_count,
         (SELECT COUNT(*) FROM building_search_fts) AS search_fts_count
@@ -133,7 +137,8 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
             )
           LIMIT 1
         ) AS searchable_rows_expected
-    `);
+    `
+  );
   async function getSearchIndexCountsSnapshot() {
     return selectSearchCounts.get();
   }
@@ -142,14 +147,13 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
     const countsSnapshot = await getSearchIndexCountsSnapshot();
     const actualSourceRows = Number(countsSnapshot?.search_source_count || 0);
     const searchableRowsExpected = Boolean(countsSnapshot?.searchable_rows_expected);
-    const missingOrStaleSource = searchableRowsExpected
-      ? actualSourceRows === 0
-      : actualSourceRows > 0;
+    const missingOrStaleSource = searchableRowsExpected ? actualSourceRows === 0 : actualSourceRows > 0;
 
     if (isPostgres) {
       const searchTsvIndexPresent = Boolean(countsSnapshot?.search_tsv_index_present);
       const reasons = [];
-      if (missingOrStaleSource) reasons.push(`source ${actualSourceRows}/${searchableRowsExpected ? '>0 expected' : '0 expected'}`);
+      if (missingOrStaleSource)
+        reasons.push(`source ${actualSourceRows}/${searchableRowsExpected ? '>0 expected' : '0 expected'}`);
       if (actualSourceRows > 0 && !searchTsvIndexPresent) reasons.push('missing idx_building_search_source_tsv');
       if (reasons.length > 0) {
         return {
@@ -168,7 +172,8 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
 
     if (missingOrStaleSource || ftsMismatch) {
       const reasons = [];
-      if (missingOrStaleSource) reasons.push(`source ${actualSourceRows}/${searchableRowsExpected ? '>0 expected' : '0 expected'}`);
+      if (missingOrStaleSource)
+        reasons.push(`source ${actualSourceRows}/${searchableRowsExpected ? '>0 expected' : '0 expected'}`);
       if (ftsMismatch) reasons.push(`fts ${actualFtsRows}/${actualSourceRows}`);
       return {
         shouldRebuild: true,
@@ -302,10 +307,10 @@ function createSearchIndexBoot(options: LooseRecord = {}) {
         SEARCH_INDEX_BATCH_SIZE: String(batchSize),
         ...(dbProvider === 'sqlite'
           ? {
-            ARCHIMAP_DB_PATH: sqlite.dbPath,
-            OSM_DB_PATH: sqlite.osmDbPath,
-            LOCAL_EDITS_DB_PATH: sqlite.localEditsDbPath
-          }
+              ARCHIMAP_DB_PATH: sqlite.dbPath,
+              OSM_DB_PATH: sqlite.osmDbPath,
+              LOCAL_EDITS_DB_PATH: sqlite.localEditsDbPath
+            }
           : {})
       },
       stdio: 'inherit'

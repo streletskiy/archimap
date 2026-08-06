@@ -1,3 +1,5 @@
+import { buildVisibleBuildingSelectionScopeExpression } from '../../services/map/building-3d-stack.js';
+
 export function parseOsmKey(raw) {
   const text = String(raw || '').trim();
   if (!text || !text.includes('/')) return null;
@@ -12,7 +14,7 @@ export function parseOsmKey(raw) {
 export function decodeOsmFeatureId(featureId) {
   const n = Number(featureId);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return null;
-  const osmType = (n % 2) === 1 ? 'relation' : 'way';
+  const osmType = n % 2 === 1 ? 'relation' : 'way';
   const osmId = Math.floor(n / 2);
   if (!Number.isInteger(osmId) || osmId <= 0) return null;
   return { osmType, osmId };
@@ -20,16 +22,22 @@ export function decodeOsmFeatureId(featureId) {
 
 export function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 function normalizeSelectionIdentity(selection) {
+  const fromKey = parseOsmKey(selection?.osmKey ?? selection?.osm_key);
+  if (fromKey) return fromKey;
   const osmType = String(selection?.osmType ?? selection?.osm_type ?? '').trim();
   const osmId = Number(selection?.osmId ?? selection?.osm_id);
   if (!['way', 'relation'].includes(osmType) || !Number.isInteger(osmId) || osmId <= 0) {
     return null;
   }
   return { osmType, osmId };
+}
+
+function buildOsmKey(osmType, osmId) {
+  return `${osmType}/${osmId}`;
 }
 
 export function getFeatureIdentity(feature) {
@@ -72,9 +80,7 @@ function buildSelectionFilterFromIdentities(feature, identities) {
     return getSelectionFilter(feature, normalizedIdentities[0]);
   }
 
-  const fallbackFilters = normalizedIdentities
-    .map((identity) => getSelectionFilter(null, identity))
-    .filter(Boolean);
+  const fallbackFilters = normalizedIdentities.map((identity) => getSelectionFilter(null, identity)).filter(Boolean);
 
   if (fallbackFilters.length === 0) {
     return ['==', ['id'], -1];
@@ -90,18 +96,23 @@ export function getSelectionFilter(feature, identity) {
     return buildSelectionFilterFromIdentities(feature, identity);
   }
 
+  const fromFeatureKey = parseOsmKey(feature?.properties?.osm_key);
+  if (fromFeatureKey) {
+    return ['==', ['get', 'osm_key'], buildOsmKey(fromFeatureKey.osmType, fromFeatureKey.osmId)];
+  }
+
   const normalizedIdentity = normalizeSelectionIdentity(identity);
   if (normalizedIdentity?.osmType && Number.isInteger(normalizedIdentity?.osmId)) {
-    const encodedId = encodeOsmFeatureId(normalizedIdentity.osmType, normalizedIdentity.osmId);
-    if (Number.isInteger(encodedId) && encodedId > 0) {
-      return ['==', ['id'], encodedId];
+    const osmKey = buildOsmKey(normalizedIdentity.osmType, normalizedIdentity.osmId);
+    if (osmKey) {
+      return ['==', ['get', 'osm_key'], osmKey];
     }
   }
 
   if (identity?.osmType && Number.isInteger(identity?.osmId)) {
-    const encodedId = encodeOsmFeatureId(identity.osmType, identity.osmId);
-    if (Number.isInteger(encodedId) && encodedId > 0) {
-      return ['==', ['id'], encodedId];
+    const osmKey = buildOsmKey(identity.osmType, identity.osmId);
+    if (osmKey) {
+      return ['==', ['get', 'osm_key'], osmKey];
     }
   }
   const byFeatureId = feature?.id;
@@ -109,10 +120,19 @@ export function getSelectionFilter(feature, identity) {
     return ['==', ['id'], byFeatureId];
   }
   if (identity?.osmType && Number.isInteger(identity?.osmId)) {
-    return ['all',
+    return [
+      'all',
       ['==', ['get', 'osm_type'], identity.osmType],
       ['==', ['to-number', ['get', 'osm_id']], identity.osmId]
     ];
   }
   return ['==', ['id'], -1];
+}
+
+export function getVisibleSelectionFilter(feature, identity, { showBuildingParts = true } = {}) {
+  const idFilter = getSelectionFilter(feature, identity);
+  const scopeFilter = buildVisibleBuildingSelectionScopeExpression({
+    showBuildingParts
+  });
+  return scopeFilter ? ['all', scopeFilter, idFilter] : idFilter;
 }

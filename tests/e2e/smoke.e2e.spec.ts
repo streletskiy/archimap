@@ -6,6 +6,8 @@ const { test, expect } = require('@playwright/test');
 
 const PORT = 4020 + Math.floor(Math.random() * 120);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const BUILDING_LEVELS_FILTER_URL =
+  'AgEPYnVpbGRpbmc6bGV2ZWxzBgKG76wBAAEBMQL94EcBAAEBMgL9unQCAAcBMwAIATUC-5I8AgAHATUACAE5AvhxcQIABwE5AAgCMTYCwIT8AQAHAjE2';
 
 let server;
 let tmpRoot;
@@ -104,7 +106,9 @@ test('opens home page and initializes map without runtime JS errors', async ({ p
   const runtimeErrors = [];
   const shouldIgnoreRuntimeError = (text) => {
     const message = String(text || '');
-    return /Bad response code: 404|Wrong magic number for PMTiles archive|Failed to load resource|ERR_BLOCKED_BY_CLIENT/i.test(message);
+    return /Bad response code: 404|Wrong magic number for PMTiles archive|Failed to load resource|ERR_BLOCKED_BY_CLIENT/i.test(
+      message
+    );
   };
   page.on('pageerror', (error) => {
     const text = String(error?.message || error);
@@ -135,7 +139,9 @@ test('opens home page and initializes map without runtime JS errors', async ({ p
 
 test('opens legal info deep link on terms tab', async ({ page }) => {
   await page.goto(`${BASE_URL}/app/info?tab=legal&doc=terms`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.legal-markdown h1', { hasText: 'Пользовательское соглашение archimap' })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.legal-markdown h1', { hasText: 'Пользовательское соглашение archimap' })).toBeVisible({
+    timeout: 15000
+  });
   await expect(page.locator('.legal-markdown')).toBeVisible({ timeout: 15000 });
 });
 
@@ -174,6 +180,54 @@ test('keeps map deep link params and renders map', async ({ page }) => {
   await expect(page).toHaveURL(/[?&]z=/);
 });
 
+test('resolves URL filter state on initial deep link load without moving the camera', async ({ page }) => {
+  await page.goto(`${BASE_URL}/app?lat=56.320654&lng=44.002728&z=13.37&3d=0&f=${BUILDING_LEVELS_FILTER_URL}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect
+    .poll(async () => page.locator('.map-canvas').getAttribute('data-filter-phase'), {
+      timeout: 15000
+    })
+    .toBe('authoritative');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const debug = globalThis.window.__MAP_DEBUG__ || {};
+          const stats = debug.filterRequests || {};
+          return Number(stats.finish || 0);
+        }),
+      { timeout: 15000 }
+    )
+    .toBeGreaterThan(0);
+});
+
+test('resolves URL filter state on initial deep link load at marker zoom without moving the camera', async ({
+  page
+}) => {
+  await page.goto(`${BASE_URL}/app?lat=56.320654&lng=44.002728&z=12.5&3d=0&f=${BUILDING_LEVELS_FILTER_URL}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect
+    .poll(async () => page.locator('.map-canvas').getAttribute('data-filter-phase'), {
+      timeout: 15000
+    })
+    .toBe('authoritative');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const debug = globalThis.window.__MAP_DEBUG__ || {};
+          const stats = debug.filterRequests || {};
+          return Number(stats.finish || 0);
+        }),
+      { timeout: 15000 }
+    )
+    .toBeGreaterThan(0);
+});
+
 test('map attribution includes archimap', async ({ page }) => {
   await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
@@ -183,7 +237,9 @@ test('map attribution includes archimap', async ({ page }) => {
 test('building filter uses highlight layers and does not apply setFilter to base building layers', async ({ page }) => {
   await page.goto(`${BASE_URL}/app?building=way/1`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.map-canvas')).toBeVisible({ timeout: 15000 });
-  await expect.poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || '')).toBe('way/1');
+  await expect
+    .poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || ''))
+    .toBe('way/1');
 
   await openFilterPanel(page);
 
@@ -191,19 +247,45 @@ test('building filter uses highlight layers and does not apply setFilter to base
   await page.getByTestId('filter-value-input').first().fill('test');
   await page.getByTestId('filter-apply-button').click();
 
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || '')).toBe('paint-property');
-  await expect.poll(async () => page.evaluate(() => {
-    const debug = globalThis.window.__MAP_DEBUG__ || {};
-    const stats = debug.filterRequests || {};
-    return Number(stats.finish || 0);
-  }), { timeout: 10000 }).toBeGreaterThan(0);
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || ''), { timeout: 10000 }).toBe('authoritative');
-  await expect.poll(async () => page.evaluate(() => {
-    const debug = globalThis.window.__MAP_DEBUG__ || {};
-    const history = Array.isArray(debug.filterPhaseHistory) ? debug.filterPhaseHistory : [];
-    return history.includes('optimistic') && history.includes('authoritative');
-  }), { timeout: 10000 }).toBe(true);
-  await expect.poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || '')).toBe('way/1');
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-highlight-mode') || ''
+      )
+    )
+    .toBe('paint-property');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const debug = globalThis.window.__MAP_DEBUG__ || {};
+          const stats = debug.filterRequests || {};
+          return Number(stats.finish || 0);
+        }),
+      { timeout: 10000 }
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || ''),
+      { timeout: 10000 }
+    )
+    .toBe('authoritative');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const debug = globalThis.window.__MAP_DEBUG__ || {};
+          const history = Array.isArray(debug.filterPhaseHistory) ? debug.filterPhaseHistory : [];
+          return history.includes('optimistic') && history.includes('authoritative');
+        }),
+      { timeout: 10000 }
+    )
+    .toBe(true);
+  await expect
+    .poll(async () => page.evaluate(() => globalThis.document.body.dataset.selectedBuildingId || ''))
+    .toBe('way/1');
 
   const setFilterLayers = await page.evaluate(() => {
     const debug = globalThis.window.__MAP_DEBUG__ || {};
@@ -228,15 +310,27 @@ test('building filter handles fast rule updates and reaches authoritative state'
   await valueInput.fill('second');
   await applyBtn.click();
 
-  await expect.poll(async () => page.evaluate(() => {
-    const stats = (globalThis.window.__MAP_DEBUG__ || {}).filterRequests || {};
-    return Number(stats.start || 0);
-  })).toBeGreaterThan(0);
-  await expect.poll(async () => page.evaluate(() => {
-    const stats = (globalThis.window.__MAP_DEBUG__ || {}).filterRequests || {};
-    return Number(stats.finish || 0);
-  })).toBeGreaterThan(0);
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const stats = (globalThis.window.__MAP_DEBUG__ || {}).filterRequests || {};
+        return Number(stats.start || 0);
+      })
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const stats = (globalThis.window.__MAP_DEBUG__ || {}).filterRequests || {};
+        return Number(stats.finish || 0);
+      })
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')
+    )
+    .toBe('authoritative');
 });
 
 test('pan/zoom updates filter without request spam', async ({ page }) => {
@@ -246,7 +340,11 @@ test('pan/zoom updates filter without request spam', async ({ page }) => {
   await selectFilterTag(page, 'name - ');
   await page.getByTestId('filter-value-input').first().fill('a');
   await page.getByTestId('filter-apply-button').click();
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).toBe('authoritative');
+  await expect
+    .poll(async () =>
+      page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')
+    )
+    .toBe('authoritative');
   await closeFilterPanel(page);
 
   const baseline = await page.evaluate(() => {
@@ -272,34 +370,56 @@ test('pan/zoom updates filter without request spam', async ({ page }) => {
   await page.keyboard.press('=');
   await page.keyboard.press('-');
 
-  await expect.poll(async () => page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')).not.toBe('idle');
-  await expect.poll(async () => page.evaluate(() => {
-    const debug = globalThis.window.__MAP_DEBUG__ || {};
-    const stats = debug.filterRequests || {};
-    return Number(stats.start || 0);
-  })).toBeLessThan(14);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => globalThis.document.querySelector('.map-canvas')?.getAttribute('data-filter-phase') || '')
+    )
+    .not.toBe('idle');
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const debug = globalThis.window.__MAP_DEBUG__ || {};
+        const stats = debug.filterRequests || {};
+        return Number(stats.start || 0);
+      })
+    )
+    .toBeLessThan(14);
 
-  await expect.poll(async () => page.evaluate((snapshot) => {
-    const debug = globalThis.window.__MAP_DEBUG__ || {};
-    const req = debug.filterRequests || {};
-    return Number(req.start || 0) - Number(snapshot.start || 0);
-  }, baseline)).toBeLessThan(7);
+  await expect
+    .poll(async () =>
+      page.evaluate((snapshot) => {
+        const debug = globalThis.window.__MAP_DEBUG__ || {};
+        const req = debug.filterRequests || {};
+        return Number(req.start || 0) - Number(snapshot.start || 0);
+      }, baseline)
+    )
+    .toBeLessThan(7);
 
-  await expect.poll(async () => page.evaluate((snapshot) => {
-    const debug = globalThis.window.__MAP_DEBUG__ || {};
-    const telemetry = debug.filterTelemetry || {};
-    return Number((telemetry.counters || {}).filter_state_cleared || 0) - Number(snapshot.cleared || 0);
-  }, baseline)).toBeLessThan(1);
+  await expect
+    .poll(async () =>
+      page.evaluate((snapshot) => {
+        const debug = globalThis.window.__MAP_DEBUG__ || {};
+        const telemetry = debug.filterTelemetry || {};
+        return Number((telemetry.counters || {}).filter_state_cleared || 0) - Number(snapshot.cleared || 0);
+      }, baseline)
+    )
+    .toBeLessThan(1);
 
-  await expect.poll(async () => page.evaluate(() => {
-    const debug = globalThis.window.__MAP_DEBUG__ || {};
-    const events = Array.isArray((debug.filterTelemetry || {}).recentEvents) ? debug.filterTelemetry.recentEvents : [];
-    const delays = events
-      .filter((item) => item?.event === 'apply_plan_finish' && Number.isFinite(Number(item?.delayFromMoveEndMs)))
-      .map((item) => Number(item.delayFromMoveEndMs))
-      .sort((a, b) => a - b);
-    if (delays.length === 0) return 0;
-    const idx = Math.min(delays.length - 1, Math.floor(delays.length * 0.95));
-    return delays[idx];
-  })).toBeLessThan(2200);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const debug = globalThis.window.__MAP_DEBUG__ || {};
+        const events = Array.isArray((debug.filterTelemetry || {}).recentEvents)
+          ? debug.filterTelemetry.recentEvents
+          : [];
+        const delays = events
+          .filter((item) => item?.event === 'apply_plan_finish' && Number.isFinite(Number(item?.delayFromMoveEndMs)))
+          .map((item) => Number(item.delayFromMoveEndMs))
+          .sort((a, b) => a - b);
+        if (delays.length === 0) return 0;
+        const idx = Math.min(delays.length - 1, Math.floor(delays.length * 0.95));
+        return delays[idx];
+      })
+    )
+    .toBeLessThan(2200);
 });

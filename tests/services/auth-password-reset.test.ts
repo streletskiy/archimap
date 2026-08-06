@@ -9,21 +9,23 @@ const smtpTransportServicePath = require.resolve('../../src/lib/server/services/
 function createAuthDb() {
   const db = new Database(':memory:');
   db.exec("ATTACH DATABASE ':memory:' AS auth");
-  db.transaction = (fn) => async (...args) => {
-    db.exec('BEGIN');
-    try {
-      const result = await fn(...args);
-      db.exec('COMMIT');
-      return result;
-    } catch (error) {
+  db.transaction =
+    (fn) =>
+    async (...args) => {
+      db.exec('BEGIN');
       try {
-        db.exec('ROLLBACK');
-      } catch {
-        // ignore rollback cleanup errors to keep the original failure
+        const result = await fn(...args);
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // ignore rollback cleanup errors to keep the original failure
+        }
+        throw error;
       }
-      throw error;
-    }
-  };
+    };
   const { ensureAuthSchema } = require('../../src/lib/server/auth');
   ensureAuthSchema(db);
   return db;
@@ -82,7 +84,8 @@ test('password reset token can be confirmed once and updates the password', asyn
   const db = createAuthDb();
   t.after(() => db.close());
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO auth.users (
       email,
       password_hash,
@@ -93,7 +96,8 @@ test('password reset token can be confirmed once and updates the password', asyn
       is_master_admin
     )
     VALUES (?, ?, ?, ?, 0, 0, 0)
-  `).run('reset@example.test', 'scrypt$salt$hash', 'Reset', 'User');
+  `
+  ).run('reset@example.test', 'scrypt$salt$hash', 'Reset', 'User');
 
   const service = createAuthService({
     db,
@@ -139,7 +143,9 @@ test('password reset token can be confirmed once and updates the password', asyn
 
   assert.equal(confirmResult.payload.ok, true);
 
-  const resetRows = db.prepare('SELECT used_at FROM auth.password_reset_tokens WHERE email = ?').all('reset@example.test');
+  const resetRows = db
+    .prepare('SELECT used_at FROM auth.password_reset_tokens WHERE email = ?')
+    .all('reset@example.test');
   assert.equal(resetRows.length, 1);
   assert.ok(Number(resetRows[0].used_at || 0) > 0);
 

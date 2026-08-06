@@ -68,7 +68,9 @@ const BUILDING_MATERIAL_LABELS = Object.freeze({
 });
 
 function normalizeLocaleCode(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (text === 'ru') return 'ru';
   return 'en';
 }
@@ -117,13 +119,18 @@ function getBuildingMaterialLabelByLocale(key, localeCode) {
 }
 
 function getConcreteBuildingMaterialLabelByLocale(key, localeCode) {
-  const dict = CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS[normalizeLocaleCode(localeCode)]
-    || CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en;
-  return dict[String(key || '').trim()] || CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en[String(key || '').trim()] || null;
+  const dict =
+    CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS[normalizeLocaleCode(localeCode)] ||
+    CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en;
+  return (
+    dict[String(key || '').trim()] || CONCRETE_BUILDING_MATERIAL_VARIANT_LABELS.en[String(key || '').trim()] || null
+  );
 }
 
 function normalizeConcreteBuildingMaterialVariant(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) return '';
   if (CONCRETE_BUILDING_MATERIAL_VARIANT_VALUES.has(text)) return text;
   if (text.startsWith('concrete_')) {
@@ -134,7 +141,11 @@ function normalizeConcreteBuildingMaterialVariant(value) {
 }
 
 export function isConcreteBuildingMaterialVariantKey(value) {
-  return CONCRETE_BUILDING_MATERIAL_VARIANTS.has(String(value || '').trim().toLowerCase());
+  return CONCRETE_BUILDING_MATERIAL_VARIANTS.has(
+    String(value || '')
+      .trim()
+      .toLowerCase()
+  );
 }
 
 export function normalizeBuildingMaterialSelection(value, concreteVariant = null) {
@@ -170,7 +181,9 @@ export function splitBuildingMaterialSelection(value) {
 }
 
 export function normalizeBuildingMaterialKey(value) {
-  const text = String(value || '').trim().toLowerCase();
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!text) return '';
   if (EMPTY_BUILDING_MATERIAL_TOKENS.has(text)) return '';
 
@@ -187,14 +200,13 @@ export function normalizeBuildingMaterialKey(value) {
 
 export function getBuildingMaterialOptions(localeCode = null) {
   const resolvedLocaleCode = resolveLocaleCode(localeCode);
-  return BUILDING_MATERIAL_KEYS
-    .map((value) => ({
-      value,
-      label: getBuildingMaterialLabelByLocale(value, resolvedLocaleCode)
-        || getConcreteBuildingMaterialLabelByLocale(value, resolvedLocaleCode)
-        || value
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
+  return BUILDING_MATERIAL_KEYS.map((value) => ({
+    value,
+    label:
+      getBuildingMaterialLabelByLocale(value, resolvedLocaleCode) ||
+      getConcreteBuildingMaterialLabelByLocale(value, resolvedLocaleCode) ||
+      value
+  })).sort((a, b) => a.label.localeCompare(b.label, resolvedLocaleCode));
 }
 
 export function toHumanBuildingMaterial(value, localeCode = null) {
@@ -209,17 +221,19 @@ export function toHumanBuildingMaterial(value, localeCode = null) {
   if (parts.length === 0) return text;
 
   const resolvedLocaleCode = resolveLocaleCode(localeCode);
-  const translated = parts.map((part) => {
-    const normalized = normalizeBuildingMaterialSelection(part);
-    if (!normalized) return null;
-    if (CONCRETE_BUILDING_MATERIAL_VARIANTS.has(normalized)) {
-      return getConcreteBuildingMaterialLabelByLocale(normalized, resolvedLocaleCode) || part;
-    }
-    if (BUILDING_MATERIAL_KEY_SET.has(normalized)) {
-      return getBuildingMaterialLabelByLocale(normalized, resolvedLocaleCode) || part;
-    }
-    return part;
-  }).filter(Boolean);
+  const translated = parts
+    .map((part) => {
+      const normalized = normalizeBuildingMaterialSelection(part);
+      if (!normalized) return null;
+      if (CONCRETE_BUILDING_MATERIAL_VARIANTS.has(normalized)) {
+        return getConcreteBuildingMaterialLabelByLocale(normalized, resolvedLocaleCode) || part;
+      }
+      if (BUILDING_MATERIAL_KEY_SET.has(normalized)) {
+        return getBuildingMaterialLabelByLocale(normalized, resolvedLocaleCode) || part;
+      }
+      return part;
+    })
+    .filter(Boolean);
 
   return translated.length > 0 ? translated.join('; ') : null;
 }

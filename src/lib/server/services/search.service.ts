@@ -1,21 +1,22 @@
 function createSearchService(options: LooseRecord = {}) {
   const db = options.db;
   const isPostgres = db?.provider === 'postgres';
-  const isRebuildInProgress = typeof options.isRebuildInProgress === 'function'
-    ? options.isRebuildInProgress
-    : () => false;
+  const isRebuildInProgress =
+    typeof options.isRebuildInProgress === 'function' ? options.isRebuildInProgress : () => false;
   const defaultLon = Number.isFinite(options.defaultLon) ? Number(options.defaultLon) : 44.0059;
   const defaultLat = Number.isFinite(options.defaultLat) ? Number(options.defaultLat) : 56.3269;
   const maxSearchLimit = Math.max(1, Number(options.maxSearchLimit) || 5000);
 
   function normalizeSearchTokens(queryText) {
-    return [...new Set(
-      String(queryText || '')
-        .trim()
-        .split(/\s+/)
-        .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
-        .filter(Boolean)
-    )].slice(0, 8);
+    return [
+      ...new Set(
+        String(queryText || '')
+          .trim()
+          .split(/\s+/)
+          .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+          .filter(Boolean)
+      )
+    ].slice(0, 8);
   }
 
   function buildFtsMatchQuery(tokens) {
@@ -78,7 +79,9 @@ function createSearchService(options: LooseRecord = {}) {
         AND center_lat <= ?`
       : '';
     const bboxParams = bbox ? [bbox.west, bbox.east, bbox.south, bbox.north] : [];
-    const rows = await db.prepare(`
+    const rows = await db
+      .prepare(
+        `
       WITH src AS (
         SELECT
           ai.osm_type,
@@ -112,13 +115,13 @@ function createSearchService(options: LooseRecord = {}) {
       ${bboxSql}
       ORDER BY distance2 ASC, updated_at DESC
       LIMIT ? OFFSET ?
-    `).all(...whereParams, lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);
+    `
+      )
+      .all(...whereParams, lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);
 
     const hasMore = rows.length > cappedLimit;
     const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
-    const total = sliced.length > 0
-      ? Math.max(sliced.length, Number(sliced[0].total_count) || 0)
-      : 0;
+    const total = sliced.length > 0 ? Math.max(sliced.length, Number(sliced[0].total_count) || 0) : 0;
     const nextCursor = hasMore ? offset + cappedLimit : null;
     return {
       items: sliced.map((row) => ({
@@ -163,8 +166,11 @@ function createSearchService(options: LooseRecord = {}) {
       : '';
     const bboxParams = bbox ? [bbox.west, bbox.east, bbox.south, bbox.north] : [];
 
-    const rows = db.provider === 'postgres'
-      ? await db.prepare(`
+    const rows =
+      db.provider === 'postgres'
+        ? await db
+            .prepare(
+              `
         SELECT
           s.osm_type,
           s.osm_id,
@@ -184,8 +190,12 @@ function createSearchService(options: LooseRecord = {}) {
         ${bboxSql}
         ORDER BY s.local_priority DESC, rank DESC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
         LIMIT ? OFFSET ?
-      `).all(tokens.join(' '), lon, lon, lat, lat, tokens.join(' '), ...bboxParams, cappedLimit + 1, offset)
-      : await db.prepare(`
+      `
+            )
+            .all(tokens.join(' '), lon, lon, lat, lat, tokens.join(' '), ...bboxParams, cappedLimit + 1, offset)
+        : await db
+            .prepare(
+              `
         WITH matched AS (
           SELECT osm_key, bm25(building_search_fts) AS rank
           FROM building_search_fts
@@ -207,20 +217,24 @@ function createSearchService(options: LooseRecord = {}) {
           ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
         FROM matched m
         JOIN building_search_source s ON s.osm_key = m.osm_key
-        ${bbox ? `
+        ${
+          bbox
+            ? `
         WHERE s.center_lon >= ?
           AND s.center_lon <= ?
           AND s.center_lat >= ?
-          AND s.center_lat <= ?` : ''}
+          AND s.center_lat <= ?`
+            : ''
+        }
         ORDER BY s.local_priority DESC, m.rank ASC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
         LIMIT ? OFFSET ?
-      `).all(buildFtsMatchQuery(tokens), lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);
+      `
+            )
+            .all(buildFtsMatchQuery(tokens), lon, lon, lat, lat, ...bboxParams, cappedLimit + 1, offset);
 
     const hasMore = rows.length > cappedLimit;
     const sliced = hasMore ? rows.slice(0, cappedLimit) : rows;
-    const total = sliced.length > 0
-      ? Math.max(sliced.length, Number(sliced[0].total_count) || 0)
-      : 0;
+    const total = sliced.length > 0 ? Math.max(sliced.length, Number(sliced[0].total_count) || 0) : 0;
     const nextCursor = hasMore ? offset + cappedLimit : null;
 
     return {

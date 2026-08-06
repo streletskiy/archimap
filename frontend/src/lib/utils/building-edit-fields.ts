@@ -5,6 +5,7 @@ export const BUILDING_PART_EDITABLE_FIELDS = Object.freeze([
   'colour',
   'style',
   'material',
+  'roofShape',
   'yearBuilt'
 ]);
 
@@ -12,10 +13,7 @@ export const BULK_BUILDING_EDITABLE_FIELDS = Object.freeze(
   BUILDING_EDITABLE_FIELDS.filter((field) => field !== 'address' && field !== 'name')
 );
 
-export function getBuildingEditableFields({
-  isBulkSelection = false,
-  hasBuildingPartSelection = false
-} = {}) {
+export function getBuildingEditableFields({ isBulkSelection = false, hasBuildingPartSelection = false } = {}) {
   if (hasBuildingPartSelection) return BUILDING_PART_EDITABLE_FIELDS;
   if (isBulkSelection) return BULK_BUILDING_EDITABLE_FIELDS;
   return BUILDING_EDITABLE_FIELDS;

@@ -7,11 +7,7 @@ const {
   smtpTestHtmlTemplate: defaultSmtpTestHtmlTemplate,
   smtpTestTextTemplate: defaultSmtpTestTextTemplate
 } = require('../../email-templates');
-const {
-  appendLocaleParam,
-  getEmailCopy,
-  resolveEmailLocale
-} = require('../../email-templates/localization');
+const { appendLocaleParam, getEmailCopy, resolveEmailLocale } = require('../../email-templates/localization');
 const {
   createAdminError,
   isLikelyEmail,
@@ -25,6 +21,11 @@ function normalizeObject(value) {
   return value && typeof value === 'object' ? value : {};
 }
 
+function normalizeRegionIdList(value) {
+  const rawItems = Array.isArray(value) ? value : typeof value === 'string' ? String(value).split(',') : [];
+  return [...new Set(rawItems.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0))];
+}
+
 function createAdminSettingsService(options: LooseRecord = {}) {
   const {
     appSettingsService,
@@ -35,6 +36,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     onSmtpSettingsSaved,
     onDataRegionsSaved,
     onRegionSyncRequested,
+    onRegionSyncCancelRequested,
     onFilterPresetsSaved,
     registrationCodeHtmlTemplate = defaultRegistrationCodeHtmlTemplate,
     registrationCodeTextTemplate = defaultRegistrationCodeTextTemplate,
@@ -70,11 +72,17 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       registration: {
         code: '583401',
         expiresInMinutes: registrationCodeTtlMinutes,
-        confirmUrl: appendLocaleParam(`${currentAppBaseUrl || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`, currentLocale)
+        confirmUrl: appendLocaleParam(
+          `${currentAppBaseUrl || 'https://archimap.local'}/account/?registerToken=sample-token-ui-preview`,
+          currentLocale
+        )
       },
       passwordReset: {
         expiresInMinutes: passwordResetTtlMinutes,
-        resetUrl: appendLocaleParam(`${currentAppBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`, currentLocale)
+        resetUrl: appendLocaleParam(
+          `${currentAppBaseUrl || 'https://archimap.local'}/?auth=1&reset=sample-reset-token`,
+          currentLocale
+        )
       },
       smtpTest: {
         testEmail: 'admin@example.test',
@@ -176,7 +184,9 @@ function createAdminSettingsService(options: LooseRecord = {}) {
   }
 
   async function sendSmtpTest({ smtp, testEmail, locale }: LooseRecord = {}) {
-    const effectiveTestEmail = String(testEmail || '').trim().toLowerCase();
+    const effectiveTestEmail = String(testEmail || '')
+      .trim()
+      .toLowerCase();
     if (!isLikelyEmail(effectiveTestEmail)) {
       throw createAdminError(400, 'Provide a valid email for the test message');
     }
@@ -208,20 +218,27 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       locale: currentLocale
     });
 
-    if (!candidate.url && (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from)) {
+    if (
+      !candidate.url &&
+      (!candidate.host || !candidate.port || !candidate.user || !candidate.pass || !candidate.from)
+    ) {
       throw createAdminError(400, 'SMTP test requires host/port/user/password/from or smtp url');
     }
 
     try {
-      await sendMailWithFallback(candidate, {
-        from: candidate.from,
-        to: effectiveTestEmail,
-        subject,
-        text,
-        html
-      }, {
-        logContext: { flow: 'admin_smtp_test', to: '[REDACTED]' }
-      });
+      await sendMailWithFallback(
+        candidate,
+        {
+          from: candidate.from,
+          to: effectiveTestEmail,
+          subject,
+          text,
+          html
+        },
+        {
+          logContext: { flow: 'admin_smtp_test', to: '[REDACTED]' }
+        }
+      );
     } catch (error) {
       throw createAdminError(400, `SMTP test send failed: ${String(error?.message || error)}`);
     }
@@ -234,9 +251,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
 
   async function getDataSettingsItem() {
     const base = await ensureDataSettingsService().getDataSettingsForAdmin();
-    const availableKeys = typeof getAllFilterTagKeysCached === 'function'
-      ? await getAllFilterTagKeysCached()
-      : [];
+    const availableKeys = typeof getAllFilterTagKeysCached === 'function' ? await getAllFilterTagKeysCached() : [];
     return {
       ...base,
       filterTags: {
@@ -272,10 +287,12 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     try {
       const saved = await ensureDataSettingsService().saveFilterPreset(normalizeObject(preset), actor);
       if (typeof onFilterPresetsSaved === 'function') {
-        await Promise.resolve(onFilterPresetsSaved({
-          action: 'save',
-          saved
-        }));
+        await Promise.resolve(
+          onFilterPresetsSaved({
+            action: 'save',
+            saved
+          })
+        );
       }
       return saved;
     } catch (error) {
@@ -287,10 +304,12 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     try {
       const deleted = await ensureDataSettingsService().deleteFilterPresetById(id);
       if (typeof onFilterPresetsSaved === 'function') {
-        await Promise.resolve(onFilterPresetsSaved({
-          action: 'delete',
-          deleted
-        }));
+        await Promise.resolve(
+          onFilterPresetsSaved({
+            action: 'delete',
+            deleted
+          })
+        );
       }
       return deleted;
     } catch (error) {
@@ -299,25 +318,74 @@ function createAdminSettingsService(options: LooseRecord = {}) {
   }
 
   async function listRegions(includeDisabledRaw) {
-    const includeDisabled = String(includeDisabledRaw ?? 'true').trim().toLowerCase() !== 'false';
+    const includeDisabled =
+      String(includeDisabledRaw ?? 'true')
+        .trim()
+        .toLowerCase() !== 'false';
     return ensureDataSettingsService().listRegions({
       includeDisabled,
       includeStorageStats: true
     });
   }
 
-  async function resolveExtractCandidates({ query, source }: LooseRecord = {}) {
+  async function listRegionTree(includeDisabledRaw) {
+    const includeDisabled =
+      String(includeDisabledRaw ?? 'true')
+        .trim()
+        .toLowerCase() !== 'false';
+    return ensureDataSettingsService().listRegionTree({
+      includeDisabled,
+      includeSubregions: true
+    });
+  }
+
+  async function listCountryCatalog() {
     try {
-      const resolved = await ensureDataSettingsService().searchExtractCandidates(String(query || '').trim(), {
-        source: String(source || 'any').trim() || 'any',
-        limit: 12
-      });
-      return {
-        query: resolved.query,
-        items: resolved.items
-      };
+      return await ensureDataSettingsService().listCountryCatalog();
     } catch (error) {
-      throw createAdminError(400, String(error?.message || error || 'Failed to resolve extract candidates'));
+      throw createAdminError(502, String(error?.message || error || 'Failed to load country catalog'));
+    }
+  }
+
+  async function createCountryAggregate(body, actor) {
+    const service = ensureDataSettingsService();
+    const countryId = String(body?.countryId || '').trim();
+    if (!countryId) {
+      throw createAdminError(400, 'countryId is required');
+    }
+    try {
+      const saved = await service.createCountryAggregate({ countryId, actor });
+      if (typeof onDataRegionsSaved === 'function') {
+        await Promise.resolve(
+          onDataRegionsSaved({
+            action: 'save',
+            saved
+          })
+        );
+      }
+      return saved;
+    } catch (error) {
+      if (error?.status) throw error;
+      throw createAdminError(400, String(error?.message || error || 'Failed to create country aggregate'));
+    }
+  }
+
+  async function getRegionsUpstreamStatus(regionIdsRaw, forceRefreshRaw = false) {
+    const regionIds = normalizeRegionIdList(regionIdsRaw);
+    if (regionIds.length === 0) {
+      return [];
+    }
+
+    try {
+      return await ensureDataSettingsService().getRegionsUpstreamState(regionIds, {
+        forceRefresh:
+          String(forceRefreshRaw ?? '')
+            .trim()
+            .toLowerCase() === 'true'
+      });
+    } catch (error) {
+      if (error?.status) throw error;
+      throw createAdminError(400, String(error?.message || error || 'Failed to load region upstream status'));
     }
   }
 
@@ -328,7 +396,7 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       throw createAdminError(400, 'Invalid region id');
     }
     const page = Math.max(1, Math.trunc(Number(pageRaw) || 1));
-    const limit = parseLimit(limitRaw, 20, 1, 200);
+    const limit = parseLimit(limitRaw, 20, 1, 1000);
     const region = await service.getRegionById(regionId);
     if (!region) {
       throw createAdminError(404, 'Region not found');
@@ -351,11 +419,13 @@ function createAdminSettingsService(options: LooseRecord = {}) {
       const previous = candidate?.id ? await service.getRegionById(candidate.id) : null;
       const saved = await service.saveRegion(candidate, actor);
       if (typeof onDataRegionsSaved === 'function') {
-        await Promise.resolve(onDataRegionsSaved({
-          action: 'save',
-          saved,
-          previous
-        }));
+        await Promise.resolve(
+          onDataRegionsSaved({
+            action: 'save',
+            saved,
+            previous
+          })
+        );
       }
       return saved;
     } catch (error) {
@@ -376,10 +446,12 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     try {
       const deleted = await service.deleteRegion(regionId, actor);
       if (typeof onDataRegionsSaved === 'function') {
-        await Promise.resolve(onDataRegionsSaved({
-          action: 'delete',
-          deleted
-        }));
+        await Promise.resolve(
+          onDataRegionsSaved({
+            action: 'delete',
+            deleted
+          })
+        );
       }
       return deleted;
     } catch (error) {
@@ -407,6 +479,23 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     }
   }
 
+  async function requestRegionSyncCancel(regionIdRaw) {
+    ensureDataSettingsService();
+    if (typeof onRegionSyncCancelRequested !== 'function') {
+      throw createAdminError(503, 'Sync queue is currently unavailable');
+    }
+    const regionId = parseRegionId(regionIdRaw);
+    if (!regionId) {
+      throw createAdminError(400, 'Invalid region id');
+    }
+
+    try {
+      return await onRegionSyncCancelRequested(regionId);
+    } catch (error) {
+      throw createAdminError(400, String(error?.message || error || 'Failed to cancel region sync'));
+    }
+  }
+
   return {
     buildEmailPreviewPayload,
     getSmtpSettingsItem,
@@ -420,11 +509,15 @@ function createAdminSettingsService(options: LooseRecord = {}) {
     saveFilterPreset,
     deleteFilterPreset,
     listRegions,
-    resolveExtractCandidates,
+    listRegionTree,
+    listCountryCatalog,
+    createCountryAggregate,
+    getRegionsUpstreamStatus,
     getRegionRuns,
     saveRegion,
     deleteRegion,
-    requestRegionSync
+    requestRegionSync,
+    requestRegionSyncCancel
   };
 }
 

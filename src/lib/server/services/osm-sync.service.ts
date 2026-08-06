@@ -1,5 +1,6 @@
 const { createOsmOauthController } = require('./osm-oauth');
 const { createOsmCandidateResolver } = require('./osm-candidate-resolver');
+const { createOsmRepairService } = require('./osm-repair.service');
 
 type OsmSyncServiceDeps = {
   db?: any;
@@ -12,13 +13,8 @@ type OsmSyncServiceDeps = {
 };
 
 function createOsmSyncService(options: OsmSyncServiceDeps = {}) {
-  const {
-    db,
-    settingsSecret,
-    appSettingsService,
-    enqueueSearchIndexRefresh,
-    refreshDesignRefSuggestionsCache
-  } = options;
+  const { db, settingsSecret, appSettingsService, enqueueSearchIndexRefresh, refreshDesignRefSuggestionsCache } =
+    options;
 
   const oauth = createOsmOauthController({
     db,
@@ -32,6 +28,9 @@ function createOsmSyncService(options: OsmSyncServiceDeps = {}) {
     enqueueSearchIndexRefresh,
     refreshDesignRefSuggestionsCache
   });
+  const repairService = createOsmRepairService({
+    getCredentials: oauth.getCredentials
+  });
 
   return {
     getSettingsForAdmin: oauth.getSettingsForAdmin,
@@ -42,6 +41,7 @@ function createOsmSyncService(options: OsmSyncServiceDeps = {}) {
     getSyncCandidate: candidateResolver.getSyncCandidate,
     syncCandidatesToOsm: candidateResolver.syncCandidatesToOsm,
     syncCandidateToOsm: candidateResolver.syncCandidateToOsm,
+    repairDamagedRelations: repairService.repairDamagedRelations,
     cleanupSyncedLocalOverwritesAfterImport: candidateResolver.cleanupSyncedLocalOverwritesAfterImport
   };
 }

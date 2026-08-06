@@ -37,11 +37,15 @@ test('buildSmtpDeliveryCandidates keeps single candidate for secure transport', 
 test('sendMailWithFallback retries on connection error and succeeds with fallback', async (t) => {
   const originalCreateTransport = nodemailer.createTransport;
   let call = 0;
-  nodemailer.createTransport = () => {
+  const transportOptions = [];
+  const deliveryOptions = [];
+  nodemailer.createTransport = (options) => {
+    transportOptions.push(options);
     call += 1;
     const currentCall = call;
     return {
-      async sendMail() {
+      async sendMail(options) {
+        deliveryOptions.push(options);
         if (currentCall === 1) {
           const err = new Error('Greeting never received');
           err.code = 'ETIMEDOUT';
@@ -56,22 +60,65 @@ test('sendMailWithFallback retries on connection error and succeeds with fallbac
     nodemailer.createTransport = originalCreateTransport;
   });
 
-  const result = await sendMailWithFallback({
-    host: 'smtp-relay.brevo.com',
-    port: 587,
-    secure: false,
-    user: 'user',
-    pass: 'pass',
-    from: 'archimap <test@example.com>'
-  }, {
-    from: 'archimap <test@example.com>',
-    to: 'test@example.com',
-    subject: 'Test',
-    text: 'Hi'
-  });
+  const result = await sendMailWithFallback(
+    {
+      host: 'smtp-relay.brevo.com',
+      port: 587,
+      secure: false,
+      user: 'user',
+      pass: 'pass',
+      from: 'archimap <test@example.com>'
+    },
+    {
+      from: 'archimap <test@example.com>',
+      to: 'test@example.com',
+      subject: 'Test',
+      text: 'Hi'
+    }
+  );
 
   assert.equal(call, 2);
   assert.equal(result.info.messageId, 'ok');
+  assert.equal(transportOptions.every((options) => options.disableFileAccess === true), true);
+  assert.equal(transportOptions.every((options) => options.disableUrlAccess === true), true);
+  assert.equal(deliveryOptions.every((options) => options.disableFileAccess === true), true);
+  assert.equal(deliveryOptions.every((options) => options.disableUrlAccess === true), true);
+});
+
+test('sendMailWithFallback disables file and URL access for URL transports', async (t) => {
+  const originalCreateTransport = nodemailer.createTransport;
+  let transportUrl = '';
+  let transportDefaults = null;
+  let deliveryOptions = null;
+  nodemailer.createTransport = (url, defaults) => {
+    transportUrl = url;
+    transportDefaults = defaults;
+    return {
+      async sendMail(options) {
+        deliveryOptions = options;
+        return { messageId: 'ok', accepted: ['test@example.com'], rejected: [], pending: [] };
+      }
+    };
+  };
+  t.after(() => {
+    nodemailer.createTransport = originalCreateTransport;
+  });
+
+  await sendMailWithFallback(
+    { url: 'smtp://user:pass@example.com:587' },
+    {
+      to: 'test@example.com',
+      subject: 'Test',
+      text: 'Hi',
+      disableFileAccess: false,
+      disableUrlAccess: false
+    }
+  );
+
+  assert.equal(transportUrl, 'smtp://user:pass@example.com:587');
+  assert.deepEqual(transportDefaults, { disableFileAccess: true, disableUrlAccess: true });
+  assert.equal(deliveryOptions.disableFileAccess, true);
+  assert.equal(deliveryOptions.disableUrlAccess, true);
 });
 
 test('sendMailWithFallback throws when SMTP accepts no recipients', async (t) => {
@@ -92,19 +139,23 @@ test('sendMailWithFallback throws when SMTP accepts no recipients', async (t) =>
   });
 
   await assert.rejects(
-    () => sendMailWithFallback({
-      host: 'smtp-relay.brevo.com',
-      port: 2525,
-      secure: false,
-      user: 'user',
-      pass: 'pass',
-      from: 'archimap <test@example.com>'
-    }, {
-      from: 'archimap <test@example.com>',
-      to: 'test@example.com',
-      subject: 'Test',
-      text: 'Hi'
-    }),
+    () =>
+      sendMailWithFallback(
+        {
+          host: 'smtp-relay.brevo.com',
+          port: 2525,
+          secure: false,
+          user: 'user',
+          pass: 'pass',
+          from: 'archimap <test@example.com>'
+        },
+        {
+          from: 'archimap <test@example.com>',
+          to: 'test@example.com',
+          subject: 'Test',
+          text: 'Hi'
+        }
+      ),
     /accepted no recipients/i
   );
 });

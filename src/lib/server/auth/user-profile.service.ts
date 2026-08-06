@@ -1,9 +1,4 @@
-function createUserProfileService({
-  db,
-  normalizeEmail,
-  isValidEmail,
-  normalizeProfileName
-}: LooseRecord) {
+function createUserProfileService({ db, normalizeEmail, isValidEmail, normalizeProfileName }: LooseRecord) {
   async function updateCurrentProfile(req) {
     if (!req.session?.user) {
       return { status: 401, code: 'ERR_AUTH_REQUIRED', error: 'Authentication is required' };
@@ -15,7 +10,9 @@ function createUserProfileService({
 
     const firstName = normalizeProfileName(req.body?.firstName);
     const lastName = normalizeProfileName(req.body?.lastName);
-    await db.prepare('UPDATE auth.users SET first_name = ?, last_name = ? WHERE email = ?').run(firstName, lastName, email);
+    await db
+      .prepare('UPDATE auth.users SET first_name = ?, last_name = ? WHERE email = ?')
+      .run(firstName, lastName, email);
     req.session.user.firstName = firstName;
     req.session.user.lastName = lastName;
     return {
@@ -48,12 +45,22 @@ function createUserProfileService({
   }
 
   async function listUsers(query: LooseRecord = {}) {
-    const q = String(query?.q || '').trim().toLowerCase();
+    const q = String(query?.q || '')
+      .trim()
+      .toLowerCase();
     const sortByRaw = String(query?.sortBy || '').trim();
-    const sortDirRaw = String(query?.sortDir || '').trim().toLowerCase();
-    const roleFilter = String(query?.role || '').trim().toLowerCase();
-    const canEditFilter = String(query?.canEdit || '').trim().toLowerCase();
-    const hasEditsFilter = String(query?.hasEdits || '').trim().toLowerCase();
+    const sortDirRaw = String(query?.sortDir || '')
+      .trim()
+      .toLowerCase();
+    const roleFilter = String(query?.role || '')
+      .trim()
+      .toLowerCase();
+    const canEditFilter = String(query?.canEdit || '')
+      .trim()
+      .toLowerCase();
+    const hasEditsFilter = String(query?.hasEdits || '')
+      .trim()
+      .toLowerCase();
 
     const sortByMap = {
       email: 'u.email',
@@ -72,7 +79,9 @@ function createUserProfileService({
     const whereClauses = [];
     const params = [];
     if (q) {
-      whereClauses.push('(lower(u.email) LIKE ? OR lower(coalesce(u.first_name, \'\')) LIKE ? OR lower(coalesce(u.last_name, \'\')) LIKE ?)');
+      whereClauses.push(
+        "(lower(u.email) LIKE ? OR lower(coalesce(u.first_name, '')) LIKE ? OR lower(coalesce(u.last_name, '')) LIKE ?)"
+      );
       const pattern = `%${q}%`;
       params.push(pattern, pattern, pattern);
     }
@@ -84,7 +93,9 @@ function createUserProfileService({
     if (hasEditsFilter === 'false') whereClauses.push('COALESCE(e.edit_count, 0) = 0');
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    const rows = await db.prepare(`
+    const rows = await db
+      .prepare(
+        `
       SELECT
         u.email,
         u.first_name,
@@ -108,7 +119,9 @@ function createUserProfileService({
       ${whereSql}
       ORDER BY ${sortExpr} ${sortDir}, u.created_at DESC
       LIMIT 500
-    `).all(...params);
+    `
+      )
+      .all(...params);
 
     return {
       payload: {
@@ -141,7 +154,11 @@ function createUserProfileService({
     }
     const targetIsMasterAdmin = Number(target?.is_master_admin || 0) > 0;
     if (targetIsMasterAdmin && !isAdmin) {
-      return { status: 403, code: 'ERR_MASTER_ADMIN_DEMOTION_FORBIDDEN', error: 'A master admin cannot be demoted to a regular user' };
+      return {
+        status: 403,
+        code: 'ERR_MASTER_ADMIN_DEMOTION_FORBIDDEN',
+        error: 'A master admin cannot be demoted to a regular user'
+      };
     }
 
     await db.prepare('UPDATE auth.users SET is_admin = ? WHERE email = ?').run(isAdmin ? 1 : 0, email);

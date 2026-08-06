@@ -38,7 +38,7 @@ function parseOsmKey(value) {
 
 function encodeOsmFeatureId(osmType, osmId) {
   const typeBit = osmType === 'relation' ? 1 : 0;
-  return (Number(osmId) * 2) + typeBit;
+  return Number(osmId) * 2 + typeBit;
 }
 
 function normalizeFilterRule(rule: LooseRecord, _options: LooseRecord = {}) {
@@ -81,7 +81,7 @@ function getRuleValue(item, key) {
     return getRuleValue(item, key.slice(6));
   }
   const sourceTags = item?.sourceTags && typeof item.sourceTags === 'object' ? item.sourceTags : {};
-  
+
   // Apply archiInfo overrides for common OSM tags
   if (key === 'building:colour' || key === 'colour') {
     if (hasMeaningfulValue(archiInfo.colour)) return archiInfo.colour;
@@ -95,40 +95,49 @@ function getRuleValue(item, key) {
   }
   if (key === 'building:material:concrete' || key === 'material_concrete') {
     if (hasMeaningfulValue(archiInfo.material_concrete)) return archiInfo.material_concrete;
-    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material:concrete')) return sourceTags['building:material:concrete'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:material:concrete'))
+      return sourceTags['building:material:concrete'];
     if (Object.prototype.hasOwnProperty.call(sourceTags, 'material_concrete')) return sourceTags.material_concrete;
   }
+  if (key === 'roof:shape' || key === 'roof_shape' || key === 'building:roof:shape') {
+    if (hasMeaningfulValue(archiInfo.roof_shape)) return archiInfo.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof:shape')) return sourceTags['roof:shape'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'roof_shape')) return sourceTags.roof_shape;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'building:roof:shape'))
+      return sourceTags['building:roof:shape'];
+  }
   if (key === 'building:architecture' || key === 'architecture' || key === 'style') {
-     if (hasMeaningfulValue(archiInfo.style)) return archiInfo.style;
+    if (hasMeaningfulValue(archiInfo.style)) return archiInfo.style;
   }
   if (key === 'building:levels' || key === 'levels') {
-     if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
+    if (hasMeaningfulValue(archiInfo.levels)) return archiInfo.levels;
+    if (hasMeaningfulValue(item?.levels)) return item.levels;
   }
   if (key === 'building:year' || key === 'year_built' || key === 'start_date') {
-     if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;
+    if (hasMeaningfulValue(archiInfo.year_built)) return archiInfo.year_built;
   }
   if (key === 'architect' || key === 'architect_name') {
-     if (hasMeaningfulValue(archiInfo.architect)) return archiInfo.architect;
+    if (hasMeaningfulValue(archiInfo.architect)) return archiInfo.architect;
   }
   if (key === 'name' || key === 'name:ru' || key === 'name:en') {
-     if (hasMeaningfulValue(archiInfo.name)) return archiInfo.name;
+    if (hasMeaningfulValue(archiInfo.name)) return archiInfo.name;
   }
   if (key === 'description' || key === 'archimap_description') {
-     if (hasMeaningfulValue(archiInfo.archimap_description)) return archiInfo.archimap_description;
-     if (hasMeaningfulValue(archiInfo.description)) return archiInfo.description;
+    if (hasMeaningfulValue(archiInfo.archimap_description)) return archiInfo.archimap_description;
+    if (hasMeaningfulValue(archiInfo.description)) return archiInfo.description;
   }
   if (key === 'design') {
-     if (hasMeaningfulValue(archiInfo.design)) return archiInfo.design;
+    if (hasMeaningfulValue(archiInfo.design)) return archiInfo.design;
   }
   if (key === 'design:ref' || key === 'design_ref') {
-     if (hasMeaningfulValue(archiInfo.design_ref)) return archiInfo.design_ref;
-     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design:ref')) return sourceTags['design:ref'];
-     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design_ref')) return sourceTags.design_ref;
+    if (hasMeaningfulValue(archiInfo.design_ref)) return archiInfo.design_ref;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'design:ref')) return sourceTags['design:ref'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'design_ref')) return sourceTags.design_ref;
   }
   if (key === 'design:year' || key === 'design_year') {
-     if (hasMeaningfulValue(archiInfo.design_year)) return archiInfo.design_year;
-     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design:year')) return sourceTags['design:year'];
-     if (Object.prototype.hasOwnProperty.call(sourceTags, 'design_year')) return sourceTags.design_year;
+    if (hasMeaningfulValue(archiInfo.design_year)) return archiInfo.design_year;
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'design:year')) return sourceTags['design:year'];
+    if (Object.prototype.hasOwnProperty.call(sourceTags, 'design_year')) return sourceTags.design_year;
   }
 
   if (ARCHI_RULE_KEYS.has(key) && hasMeaningfulValue(archiInfo[key])) return archiInfo[key];
@@ -245,10 +254,7 @@ function normalizeFilterMatchRequest(request: LooseRecord, { isFilterTagAllowed 
 
 function getFilterMatchCandidateLimit(rules, maxResults) {
   const isHeavy = Array.isArray(rules) && rules.some((rule) => rule.op === 'contains');
-  return Math.max(
-    maxResults,
-    Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000))
-  );
+  return Math.max(maxResults, Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxResults * (isHeavy ? 8 : 6), 5000)));
 }
 
 function getBatchFilterMatchCandidateLimit(requests) {
@@ -257,18 +263,19 @@ function getBatchFilterMatchCandidateLimit(requests) {
     (best, request) => Math.max(best, getFilterMatchCandidateLimit(request?.rules, request?.maxResults)),
     0
   );
-  const totalRequested = normalizedRequests.reduce((sum, request) => sum + Math.max(0, Number(request?.maxResults || 0)), 0);
-  return Math.max(
-    5000,
-    Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxPerRequest, totalRequested))
+  const totalRequested = normalizedRequests.reduce(
+    (sum, request) => sum + Math.max(0, Number(request?.maxResults || 0)),
+    0
   );
+  return Math.max(5000, Math.min(FILTER_MATCH_CANDIDATE_CAP, Math.max(maxPerRequest, totalRequested)));
 }
 
-function buildFilterMatchResultForRules(items, rules, maxResults, {
-  bbox = null,
-  renderMode = 'contours',
-  zoomBucket = 0
-} = {}) {
+function buildFilterMatchResultForRules(
+  items,
+  rules,
+  maxResults,
+  { bbox = null, renderMode = 'contours', zoomBucket = 0 } = {}
+) {
   const matchedKeys = [];
   const matchedFeatureIds = [];
   const matchedLocations = [];
@@ -307,15 +314,15 @@ function buildFilterMatchResultForRules(items, rules, maxResults, {
         if (cellWidth > 0 && cellHeight > 0) {
           cellX = Math.max(0, Math.min(markerGrid.columns - 1, Math.floor((lon - markerBBox.west) / cellWidth)));
           cellY = Math.max(0, Math.min(markerGrid.rows - 1, Math.floor((lat - markerBBox.south) / cellHeight)));
-          centerLon = markerBBox.west + ((cellX + 0.5) * cellWidth);
-          centerLat = markerBBox.south + ((cellY + 0.5) * cellHeight);
+          centerLon = markerBBox.west + (cellX + 0.5) * cellWidth;
+          centerLat = markerBBox.south + (cellY + 0.5) * cellHeight;
         }
       } else {
         const cellSize = getMarkerAggregationLegacyCellSize(zoomBucket);
         cellX = Math.floor((lon + 180) / cellSize);
         cellY = Math.floor((lat + 90) / cellSize);
-        centerLon = ((cellX + 0.5) * cellSize) - 180;
-        centerLat = ((cellY + 0.5) * cellSize) - 90;
+        centerLon = (cellX + 0.5) * cellSize - 180;
+        centerLat = (cellY + 0.5) * cellSize - 90;
       }
       const key = buildMarkerAggregationCellKey(zoomBucket, gridKey, cellX, cellY);
       let cell = cells.get(key);
@@ -336,9 +343,7 @@ function buildFilterMatchResultForRules(items, rules, maxResults, {
       cell.count += 1;
     }
 
-    const limitedCells = [...cells.values()]
-      .sort((left, right) => left.id - right.id)
-      .slice(0, safeMaxResults);
+    const limitedCells = [...cells.values()].sort((left, right) => left.id - right.id).slice(0, safeMaxResults);
     truncated = cells.size > limitedCells.length;
     for (const cell of limitedCells) {
       matchedKeys.push(cell.key);
@@ -398,15 +403,19 @@ function buildFilterMatchResultForRules(items, rules, maxResults, {
   };
 }
 
-function buildFilterMatchBatchResults(items, requests, {
-  bbox = null,
-  bboxHash = '',
-  elapsedMs = 0,
-  cacheHit = false,
-  forceTruncated = false,
-  renderMode = 'contours',
-  zoomBucket = 0
-} = {}) {
+function buildFilterMatchBatchResults(
+  items,
+  requests,
+  {
+    bbox = null,
+    bboxHash = '',
+    elapsedMs = 0,
+    cacheHit = false,
+    forceTruncated = false,
+    renderMode = 'contours',
+    zoomBucket = 0
+  } = {}
+) {
   return (Array.isArray(requests) ? requests : []).map((request) => {
     const result = buildFilterMatchResultForRules(
       Array.isArray(items) ? items : [],
@@ -434,14 +443,18 @@ function buildFilterMatchBatchResults(items, requests, {
 }
 
 function normalizeActorKey(actorKeyRaw) {
-  return String(actorKeyRaw || '').trim().toLowerCase();
+  return String(actorKeyRaw || '')
+    .trim()
+    .toLowerCase();
 }
 
 function resolveZoomBucket(body: LooseRecord = {}) {
   const zoom = Number(body?.zoom);
   return Number.isFinite(Number(body?.zoomBucket))
     ? Number(body.zoomBucket)
-    : (Number.isFinite(zoom) ? Math.round(zoom * 2) / 2 : 0);
+    : Number.isFinite(zoom)
+      ? Math.round(zoom * 2) / 2
+      : 0;
 }
 
 async function applyPersonalEditsToRows(rows, actorKey, applyPersonalEditsToFilterItems, mapFilterDataRow) {
@@ -511,7 +524,10 @@ function createBuildingFiltersService({
       return { status: 400, error };
     }
 
-    const limit = Math.max(1, Math.min(FILTER_DATA_BBOX_MAX_LIMIT, Number(query?.limit) || FILTER_DATA_BBOX_DEFAULT_LIMIT));
+    const limit = Math.max(
+      1,
+      Math.min(FILTER_DATA_BBOX_MAX_LIMIT, Number(query?.limit) || FILTER_DATA_BBOX_DEFAULT_LIMIT)
+    );
     const { minLon, minLat, maxLon, maxLat } = bbox;
     const queryMode = queryService.getBboxQueryMode();
     const cacheKey = `${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${queryMode}`;
@@ -521,7 +537,12 @@ function createBuildingFiltersService({
     }
 
     const rows = await queryService.selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit);
-    const items = await applyPersonalEditsToRows(rows, actorKey, applyPersonalEditsToFilterItems, queryService.mapFilterDataRow);
+    const items = await applyPersonalEditsToRows(
+      rows,
+      actorKey,
+      applyPersonalEditsToFilterItems,
+      queryService.mapFilterDataRow
+    );
     const payload = { items, truncated: rows.length >= limit };
     bboxCache.set(cacheKey, payload);
     return { payload };
@@ -542,7 +563,11 @@ function createBuildingFiltersService({
       return { status: 400, code: 'ERR_REQUESTS_ARRAY_REQUIRED', error: 'requests must be an array' };
     }
     if (requestsRaw.length > FILTER_MATCH_BATCH_MAX_REQUESTS) {
-      return { status: 400, code: 'ERR_TOO_MANY_REQUESTS', error: `Too many requests (maximum ${FILTER_MATCH_BATCH_MAX_REQUESTS})` };
+      return {
+        status: 400,
+        code: 'ERR_TOO_MANY_REQUESTS',
+        error: `Too many requests (maximum ${FILTER_MATCH_BATCH_MAX_REQUESTS})`
+      };
     }
 
     const normalizedRequests = [];
@@ -593,19 +618,22 @@ function createBuildingFiltersService({
       };
     }
 
-    const allTagOnly = normalizedRequests.every((request) => splitPostgresPushdownRules(request.rules).fallbackRules.length === 0);
-    const candidateLimit = getBatchFilterMatchCandidateLimit(normalizedRequests);
-    const candidateRows = await queryService.selectFilterRowsByBbox(
-      minLon,
-      minLat,
-      maxLon,
-      maxLat,
-      candidateLimit,
-      { tagsOnly: actorKey === 'anon' && allTagOnly }
+    const allTagOnly = normalizedRequests.every(
+      (request) => splitPostgresPushdownRules(request.rules).fallbackRules.length === 0
     );
-    const candidateItems = actorKey === 'anon'
-      ? candidateRows.map(queryService.mapFilterDataRow)
-      : await applyPersonalEditsToRows(candidateRows, actorKeyRaw, applyPersonalEditsToFilterItems, queryService.mapFilterDataRow);
+    const candidateLimit = getBatchFilterMatchCandidateLimit(normalizedRequests);
+    const candidateRows = await queryService.selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit, {
+      tagsOnly: actorKey === 'anon' && allTagOnly
+    });
+    const candidateItems =
+      actorKey === 'anon'
+        ? candidateRows.map(queryService.mapFilterDataRow)
+        : await applyPersonalEditsToRows(
+            candidateRows,
+            actorKeyRaw,
+            applyPersonalEditsToFilterItems,
+            queryService.mapFilterDataRow
+          );
     const elapsedMs = Date.now() - startedAt;
     const items = buildFilterMatchBatchResults(candidateItems, normalizedRequests, {
       bbox,
@@ -704,16 +732,17 @@ function createBuildingFiltersService({
       const splitRules = splitPostgresPushdownRules(normalizedRules);
       const aggregateMarkers = shouldAggregateMarkerMatches(renderMode, zoomBucket);
       const tagOnlyMaxResults = aggregateMarkers ? FILTER_MATCH_CANDIDATE_CAP : maxResults;
-      const rows = splitRules.fallbackRules.length === 0
-        ? await queryService.selectTagOnlyPostgresMatchRowsByBbox({
-          minLon,
-          minLat,
-          maxLon,
-          maxLat,
-          rules: splitRules.tagOnlyRules,
-          maxResults: tagOnlyMaxResults
-        })
-        : null;
+      const rows =
+        splitRules.fallbackRules.length === 0
+          ? await queryService.selectTagOnlyPostgresMatchRowsByBbox({
+              minLon,
+              minLat,
+              maxLon,
+              maxLat,
+              rules: splitRules.tagOnlyRules,
+              maxResults: tagOnlyMaxResults
+            })
+          : null;
 
       if (rows) {
         const candidateItems = rows.map(queryService.mapFilterDataRow);

@@ -1,24 +1,34 @@
 import {
   bringBaseLabelLayersAboveCustomLayers,
   bringSearchResultsLayersToFront,
-  CARTO_BUILDING_LAYER_IDS,
+  ensureSearchResultsSourceAndLayers
+} from '../../services/map/map-layer-utils.js';
+import {
   ensureRegionBuildingSourceAndLayers,
-  ensureSearchResultsSourceAndLayers,
+  getBasemapBuildingLayerIds,
+  getBasemapSuppressedLayerIds,
+  getCurrentBuildingsExtrusionLayerIds,
   getCurrentBuildingSourceConfigs,
   getCurrentBuildingsFillLayerIds,
   getCurrentBuildingsLineLayerIds,
+  getCurrentBuildingPartExtrusionLayerIds,
   getCurrentBuildingPartFillLayerIds,
   getCurrentBuildingPartLineLayerIds,
+  getCurrentBuildingPartFilterHighlightExtrusionLayerIds,
   getCurrentBuildingPartFilterHighlightFillLayerIds,
   getCurrentBuildingPartFilterHighlightLineLayerIds,
+  getCurrentBuildingHoverExtrusionLayerIds,
   getCurrentBuildingHoverFillLayerIds,
   getCurrentBuildingHoverLineLayerIds,
+  getCurrentFilterHighlightExtrusionLayerIds,
   getCurrentFilterHighlightFillLayerIds,
   getCurrentFilterHighlightLineLayerIds,
+  getCurrentSelectedExtrusionLayerIds,
   getCurrentSelectedFillLayerIds,
   getCurrentSelectedLineLayerIds,
   removeRegionBuildingSourceAndLayers
-} from '../../services/map/map-layer-utils.js';
+} from '../../services/map/building-3d-stack.js';
+import { normalizeBasemapProvider } from '../../services/map/basemap-config.js';
 import {
   SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID,
   SEARCH_RESULTS_CLUSTER_LAYER_ID,
@@ -29,12 +39,10 @@ import { getBuildingHoverThemePaint, getBuildingThemePaint } from '../../service
 import {
   buildRegionSourceId,
   getActiveRegionPmtiles,
-  pointInBounds
+  isViewportCoveredByRegions,
+  shouldRenderRegionBuildings
 } from '../../services/region-pmtiles.js';
-import type {
-  FilterBuildingSourceConfig,
-  FilterMapLike
-} from '../../services/map/filter-types.js';
+import type { FilterBuildingSourceConfig, FilterMapLike } from '../../services/map/filter-types.js';
 
 const CARTO_SHOW_DELAY_MS = 160;
 
@@ -45,6 +53,9 @@ type RegionLike = {
 
 type RuntimeConfigLike = {
   buildingRegionsPmtiles?: RegionLike[];
+  basemap?: {
+    provider?: string;
+  };
 };
 
 type MapRegionLayersControllerOptions = {
@@ -54,6 +65,7 @@ type MapRegionLayersControllerOptions = {
   getSearchItems?: () => unknown[];
   getSelectedBuilding?: () => unknown;
   getMapLabelsVisible?: () => boolean | null | undefined;
+  getBuildings3dEnabled?: () => boolean | null | undefined;
   getBuildingPartsVisible?: () => boolean | null | undefined;
   getBuildingFilterLayers?: () => unknown[];
   getWindowOrigin?: () => string;
@@ -75,6 +87,7 @@ export function createMapRegionLayersController({
   getSearchItems,
   getSelectedBuilding,
   getMapLabelsVisible,
+  getBuildings3dEnabled,
   getBuildingPartsVisible,
   getBuildingFilterLayers,
   getWindowOrigin,
@@ -90,22 +103,29 @@ export function createMapRegionLayersController({
 }: MapRegionLayersControllerOptions = {}) {
   let activeRegionPmtiles: RegionLike[] = [];
   let coverageDebounceTimer = null;
-  let cartoShowTimer = null;
+  let basemapShowTimer = null;
   let coverageEvalToken = 0;
   let coverageVisibleState = 'visible';
 
   function getCurrentMapLayerIds() {
     return {
+      buildingExtrusionLayerIds: getCurrentBuildingsExtrusionLayerIds(activeRegionPmtiles),
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(activeRegionPmtiles),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(activeRegionPmtiles),
+      buildingPartExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(activeRegionPmtiles),
       buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(activeRegionPmtiles),
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(activeRegionPmtiles),
+      buildingPartFilterHighlightExtrusionLayerIds:
+        getCurrentBuildingPartFilterHighlightExtrusionLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(activeRegionPmtiles),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(activeRegionPmtiles),
-      buildingHoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles),
-      buildingHoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(activeRegionPmtiles),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(activeRegionPmtiles),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(activeRegionPmtiles),
+      filterHighlightExtrusionLayerIds: getCurrentFilterHighlightExtrusionLayerIds(activeRegionPmtiles),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(activeRegionPmtiles),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(activeRegionPmtiles),
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(activeRegionPmtiles),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(activeRegionPmtiles),
       selectedLineLayerIds: getCurrentSelectedLineLayerIds(activeRegionPmtiles)
     };
@@ -114,16 +134,22 @@ export function createMapRegionLayersController({
   function getAllCurrentMapLayerIds() {
     const layerIds = getCurrentMapLayerIds();
     return [
+      ...layerIds.buildingExtrusionLayerIds,
       ...layerIds.buildingFillLayerIds,
       ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartExtrusionLayerIds,
       ...layerIds.buildingPartFillLayerIds,
       ...layerIds.buildingPartLineLayerIds,
+      ...layerIds.filterHighlightExtrusionLayerIds,
       ...layerIds.filterHighlightFillLayerIds,
       ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.buildingPartFilterHighlightExtrusionLayerIds,
       ...layerIds.buildingPartFilterHighlightFillLayerIds,
       ...layerIds.buildingPartFilterHighlightLineLayerIds,
-      ...layerIds.buildingHoverFillLayerIds,
-      ...layerIds.buildingHoverLineLayerIds,
+      ...layerIds.hoverExtrusionLayerIds,
+      ...layerIds.hoverFillLayerIds,
+      ...layerIds.hoverLineLayerIds,
+      ...layerIds.selectedExtrusionLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -135,16 +161,22 @@ export function createMapRegionLayersController({
 
   function getMapLayerIdsForRegions(regions: RegionLike[] = []) {
     return {
+      buildingExtrusionLayerIds: getCurrentBuildingsExtrusionLayerIds(regions),
       buildingFillLayerIds: getCurrentBuildingsFillLayerIds(regions),
       buildingLineLayerIds: getCurrentBuildingsLineLayerIds(regions),
+      buildingPartExtrusionLayerIds: getCurrentBuildingPartExtrusionLayerIds(regions),
       buildingPartFillLayerIds: getCurrentBuildingPartFillLayerIds(regions),
       buildingPartLineLayerIds: getCurrentBuildingPartLineLayerIds(regions),
+      buildingPartFilterHighlightExtrusionLayerIds: getCurrentBuildingPartFilterHighlightExtrusionLayerIds(regions),
       buildingPartFilterHighlightFillLayerIds: getCurrentBuildingPartFilterHighlightFillLayerIds(regions),
       buildingPartFilterHighlightLineLayerIds: getCurrentBuildingPartFilterHighlightLineLayerIds(regions),
-      buildingHoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(regions),
-      buildingHoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(regions),
+      hoverExtrusionLayerIds: getCurrentBuildingHoverExtrusionLayerIds(regions),
+      hoverFillLayerIds: getCurrentBuildingHoverFillLayerIds(regions),
+      hoverLineLayerIds: getCurrentBuildingHoverLineLayerIds(regions),
+      filterHighlightExtrusionLayerIds: getCurrentFilterHighlightExtrusionLayerIds(regions),
       filterHighlightFillLayerIds: getCurrentFilterHighlightFillLayerIds(regions),
       filterHighlightLineLayerIds: getCurrentFilterHighlightLineLayerIds(regions),
+      selectedExtrusionLayerIds: getCurrentSelectedExtrusionLayerIds(regions),
       selectedFillLayerIds: getCurrentSelectedFillLayerIds(regions),
       selectedLineLayerIds: getCurrentSelectedLineLayerIds(regions)
     };
@@ -163,16 +195,22 @@ export function createMapRegionLayersController({
     if (!map) return false;
     const layerIds = getMapLayerIdsForRegions(regions);
     const allLayerIds = [
+      ...layerIds.buildingExtrusionLayerIds,
       ...layerIds.buildingFillLayerIds,
       ...layerIds.buildingLineLayerIds,
+      ...layerIds.buildingPartExtrusionLayerIds,
       ...layerIds.buildingPartFillLayerIds,
       ...layerIds.buildingPartLineLayerIds,
+      ...layerIds.filterHighlightExtrusionLayerIds,
       ...layerIds.filterHighlightFillLayerIds,
       ...layerIds.filterHighlightLineLayerIds,
+      ...layerIds.buildingPartFilterHighlightExtrusionLayerIds,
       ...layerIds.buildingPartFilterHighlightFillLayerIds,
       ...layerIds.buildingPartFilterHighlightLineLayerIds,
-      ...layerIds.buildingHoverFillLayerIds,
-      ...layerIds.buildingHoverLineLayerIds,
+      ...layerIds.hoverExtrusionLayerIds,
+      ...layerIds.hoverFillLayerIds,
+      ...layerIds.hoverLineLayerIds,
+      ...layerIds.selectedExtrusionLayerIds,
       ...layerIds.selectedFillLayerIds,
       ...layerIds.selectedLineLayerIds
     ];
@@ -187,10 +225,12 @@ export function createMapRegionLayersController({
   function hasSearchResultLayersReady() {
     const map = getMap?.();
     if (!map) return false;
-    return Boolean(map.getSource(SEARCH_RESULTS_SOURCE_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID))
-      && Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID));
+    return (
+      Boolean(map.getSource(SEARCH_RESULTS_SOURCE_ID)) &&
+      Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_COUNT_LAYER_ID)) &&
+      Boolean(map.getLayer(SEARCH_RESULTS_CLUSTER_LAYER_ID)) &&
+      Boolean(map.getLayer(SEARCH_RESULTS_LAYER_ID))
+    );
   }
 
   function getConfiguredRegionPmtiles(config: RuntimeConfigLike | null | undefined = getRuntimeConfig?.()) {
@@ -200,91 +240,72 @@ export function createMapRegionLayersController({
   function getViewportActiveRegionPmtiles(config: RuntimeConfigLike | null | undefined = getRuntimeConfig?.()) {
     const map = getMap?.();
     if (!map) return [];
+    if (!shouldRenderRegionBuildings(map.getZoom?.())) {
+      return [];
+    }
     return getActiveRegionPmtiles(getConfiguredRegionPmtiles(config), map.getBounds());
   }
 
-  function setCartoBuildingsVisibility(nextVisibility) {
+  function getBasemapProvider() {
+    return normalizeBasemapProvider(getRuntimeConfig?.()?.basemap?.provider);
+  }
+
+  function setBasemapBuildingsVisibility(nextVisibility) {
     const map = getMap?.();
     if (!map || !map.isStyleLoaded()) return;
+    const basemapProvider = getBasemapProvider();
+    for (const layerId of getBasemapSuppressedLayerIds(basemapProvider)) {
+      if (!map.getLayer(layerId)) continue;
+      map.setLayoutProperty(layerId, 'visibility', 'none');
+    }
     if (coverageVisibleState === nextVisibility) return;
-    for (const layerId of CARTO_BUILDING_LAYER_IDS) {
+    for (const layerId of getBasemapBuildingLayerIds(basemapProvider)) {
       if (!map.getLayer(layerId)) continue;
       map.setLayoutProperty(layerId, 'visibility', nextVisibility);
     }
     coverageVisibleState = nextVisibility;
   }
 
-  function queueCartoBuildingsVisibility(nextVisibility) {
+  function queueBasemapBuildingsVisibility(nextVisibility) {
     if (nextVisibility === 'none') {
-      if (cartoShowTimer) {
-        clearTimeout(cartoShowTimer);
-        cartoShowTimer = null;
+      if (basemapShowTimer) {
+        clearTimeout(basemapShowTimer);
+        basemapShowTimer = null;
       }
-      setCartoBuildingsVisibility('none');
+      setBasemapBuildingsVisibility('none');
       return;
     }
-    if (cartoShowTimer) {
-      clearTimeout(cartoShowTimer);
+    if (basemapShowTimer) {
+      clearTimeout(basemapShowTimer);
     }
-    cartoShowTimer = setTimeout(() => {
-      cartoShowTimer = null;
-      setCartoBuildingsVisibility('visible');
+    basemapShowTimer = setTimeout(() => {
+      basemapShowTimer = null;
+      setBasemapBuildingsVisibility('visible');
     }, CARTO_SHOW_DELAY_MS);
-  }
-
-  function getViewportSamplePoints() {
-    const map = getMap?.();
-    if (!map) return [];
-    const bounds = map.getBounds() as {
-      getWest?: () => number;
-      getEast?: () => number;
-      getSouth?: () => number;
-      getNorth?: () => number;
-    } | null | undefined;
-    if (!bounds) return [];
-    const west = bounds.getWest();
-    const east = bounds.getEast();
-    const south = bounds.getSouth();
-    const north = bounds.getNorth();
-    const center = map.getCenter();
-    const midLon = (west + east) / 2;
-    const midLat = (north + south) / 2;
-    return [
-      [center.lng, center.lat],
-      [west, north],
-      [east, north],
-      [east, south],
-      [west, south],
-      [midLon, north],
-      [midLon, south],
-      [west, midLat],
-      [east, midLat]
-    ];
   }
 
   async function evaluatePmtilesCoverage() {
     const map = getMap?.();
     if (!map || !map.isStyleLoaded()) return;
-    const token = ++coverageEvalToken;
-    const runtimeConfig = getRuntimeConfig?.();
-    const regions = activeRegionPmtiles.length > 0
-      ? activeRegionPmtiles
-      : getViewportActiveRegionPmtiles(runtimeConfig);
-    if (regions.length === 0) {
-      queueCartoBuildingsVisibility('visible');
+    if (!shouldRenderRegionBuildings(map.getZoom?.())) {
+      queueBasemapBuildingsVisibility('visible');
       return;
     }
-    const points = getViewportSamplePoints();
-    if (points.length === 0) return;
-    for (const [lon, lat] of points) {
-      if (token !== coverageEvalToken) return;
-      const covered = regions.some((region) => pointInBounds(lon, lat, region.bounds));
-      if (!covered) {
-        queueCartoBuildingsVisibility('visible');
-        return;
-      }
+    const token = ++coverageEvalToken;
+    const runtimeConfig = getRuntimeConfig?.();
+    const regions =
+      activeRegionPmtiles.length > 0 ? activeRegionPmtiles : getViewportActiveRegionPmtiles(runtimeConfig);
+    if (regions.length === 0) {
+      queueBasemapBuildingsVisibility('visible');
+      return;
     }
-    queueCartoBuildingsVisibility('none');
+    if (token !== coverageEvalToken) return;
+    const covered = isViewportCoveredByRegions(regions, map.getBounds(), map.getCenter?.());
+    if (!covered) {
+      queueBasemapBuildingsVisibility('visible');
+      return;
+    }
+    queueBasemapBuildingsVisibility('none');
   }
 
   function scheduleCoverageCheck() {
@@ -298,10 +319,7 @@ export function createMapRegionLayersController({
     }, 80);
   }
 
-  function ensureMapSourcesAndLayers(
-    config: RuntimeConfigLike,
-    { force = false }: { force?: boolean } = {}
-  ) {
+  function ensureMapSourcesAndLayers(config: RuntimeConfigLike, { force = false }: { force?: boolean } = {}) {
     const map = getMap?.();
     if (!map) return;
     const theme = getCurrentTheme?.();
@@ -329,6 +347,7 @@ export function createMapRegionLayersController({
     activeRegionPmtiles = nextActiveRegions;
     const currentBuildingFilters = getBuildingFilterLayers?.() || [];
     const hasActiveBuildingFilters = Array.isArray(currentBuildingFilters) && currentBuildingFilters.length > 0;
+    const buildings3dEnabled = Boolean(getBuildings3dEnabled?.() ?? false);
     const partsVisible = Boolean(getBuildingPartsVisible?.() ?? true);
     for (const region of nextActiveRegions) {
       const hadRegionLayers = hasRegionLayersReady([region]);
@@ -338,6 +357,7 @@ export function createMapRegionLayersController({
         buildingPaint,
         hoverPaint,
         origin: typeof getWindowOrigin === 'function' ? getWindowOrigin() : '',
+        buildings3dEnabled,
         buildingPartsVisible: partsVisible,
         buildingPartHighlightVisible: partsVisible || hasActiveBuildingFilters
       });
@@ -374,9 +394,9 @@ export function createMapRegionLayersController({
       clearTimeout(coverageDebounceTimer);
       coverageDebounceTimer = null;
     }
-    if (cartoShowTimer) {
-      clearTimeout(cartoShowTimer);
-      cartoShowTimer = null;
+    if (basemapShowTimer) {
+      clearTimeout(basemapShowTimer);
+      basemapShowTimer = null;
     }
     activeRegionPmtiles = [];
     coverageEvalToken = 0;

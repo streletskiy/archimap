@@ -8,7 +8,16 @@
   import { createUrlStateManager } from '$lib/services/url-state-manager';
   import { buildingFilterLayers, resetBuildingFilterLayers, setBuildingFilterLayers } from '$lib/stores/filters';
   import { session } from '$lib/stores/auth';
-  import { mapCenter, mapReady, mapZoom, requestMapFocus, selectedBuilding } from '$lib/stores/map';
+  import {
+    mapBearing,
+    mapBuildings3dEnabled,
+    mapCenter,
+    mapPitch,
+    mapReady,
+    mapZoom,
+    requestMapFocus,
+    selectedBuilding
+  } from '$lib/stores/map';
   import { closeSearchModal } from '$lib/stores/search';
   import { buildingModalOpen } from '$lib/stores/ui';
 
@@ -114,7 +123,10 @@
     urlStateManager.syncCamera({
       mapReady: $mapReady,
       mapCenter: $mapCenter,
-      mapZoom: $mapZoom
+      mapZoom: $mapZoom,
+      mapPitch: $mapPitch,
+      mapBearing: $mapBearing,
+      buildings3dEnabled: $mapBuildings3dEnabled
     });
   }
 

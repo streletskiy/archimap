@@ -93,25 +93,27 @@ test('integration: sveltekit runtime serves api parity', async () => {
 
   async function createMasterAdmin({ email, password }: LooseRecord) {
     await new Promise<void>((resolve, reject) => {
-      const script = spawn(process.execPath, [
-        '--import',
-        'tsx',
-        'scripts/create-master-admin.ts',
-        `--email=${email}`,
-        `--password=${password}`
-      ], {
-        cwd: path.join(__dirname, '..', '..'),
-        env: {
-          ...process.env,
-          DB_PROVIDER: 'sqlite',
-          USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
-        },
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
+      const script = spawn(
+        process.execPath,
+        ['--import', 'tsx', 'scripts/create-master-admin.ts', `--email=${email}`, `--password=${password}`],
+        {
+          cwd: path.join(__dirname, '..', '..'),
+          env: {
+            ...process.env,
+            DB_PROVIDER: 'sqlite',
+            USER_AUTH_DB_PATH: path.join(tempRoot, 'users.db')
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      );
 
       let output = '';
-      script.stdout.on('data', (chunk) => { output += chunk.toString(); });
-      script.stderr.on('data', (chunk) => { output += chunk.toString(); });
+      script.stdout.on('data', (chunk) => {
+        output += chunk.toString();
+      });
+      script.stderr.on('data', (chunk) => {
+        output += chunk.toString();
+      });
       script.on('error', reject);
       script.on('exit', (code: number | null) => {
         if (code === 0) return resolve();

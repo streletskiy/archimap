@@ -39,4 +39,3 @@ test('resolveAccountTabFromUrl and resolveAdminTabFromUrl keep legacy query comp
   assert.equal(buildAdminUrl('http://localhost/app/admin', 'filters').pathname, '/app/admin/filters');
   assert.equal(buildAdminUrl('http://localhost/app/admin', 'styles').pathname, '/app/admin/styles');
 });
-

@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { normalizeRoofShapeSelection } = require('./edits.service');
 
 const DEFAULT_AUTH_BASE_URL = 'https://www.openstreetmap.org';
 const DEFAULT_API_BASE_URL = 'https://api.openstreetmap.org';
@@ -60,9 +61,7 @@ function normalizeAuthBaseUrl(value) {
 function normalizeApiBaseUrl(value, authBaseUrl = DEFAULT_AUTH_BASE_URL) {
   const explicit = normalizeBaseUrl(value, '');
   if (explicit) return explicit;
-  return isMasterOsmAuthBaseUrl(authBaseUrl)
-    ? 'https://master.apis.dev.openstreetmap.org'
-    : DEFAULT_API_BASE_URL;
+  return isMasterOsmAuthBaseUrl(authBaseUrl) ? 'https://master.apis.dev.openstreetmap.org' : DEFAULT_API_BASE_URL;
 }
 
 function normalizeRedirectUri(value, baseUrl) {
@@ -171,8 +170,8 @@ function unescapeXml(value) {
     .replace(/&amp;/g, '&');
 }
 
-function attrsToObject(text = '') {
-  const attrs = {};
+function attrsToObject(text = ''): LooseRecord {
+  const attrs: LooseRecord = {};
   const re = /([A-Za-z_][A-Za-z0-9_.:-]*)="([^"]*)"/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(String(text || '')))) attrs[String(match[1])] = unescapeXml(match[2]);
@@ -193,14 +192,33 @@ function parseElementXml(xmlText) {
   const type = String(match[1]).trim().toLowerCase();
   const attrs = attrsToObject(match[2]);
   const inner = String(match[3] || '');
-  const tagIndex = inner.indexOf('<tag ');
-  const beforeTags = tagIndex >= 0 ? inner.slice(0, tagIndex).trimEnd() : inner.trimEnd();
-  const tags = {};
-  for (const tagMatch of inner.matchAll(/<tag\s+k="([^"]*)"\s+v="([^"]*)"\s*\/>/g)) {
-    const key = unescapeXml(tagMatch[1]);
-    if (key) tags[key] = unescapeXml(tagMatch[2]);
+  const nodeRefs = [];
+  for (const nodeMatch of inner.matchAll(/<nd\b([^>]*)\/\s*>/gi)) {
+    const nodeAttrs = attrsToObject(nodeMatch[1]);
+    const ref = String(nodeAttrs.ref || '').trim();
+    if (ref) nodeRefs.push(ref);
   }
-  return { type, attrs, beforeTags, tags, rawXml: text };
+  const members = [];
+  for (const memberMatch of inner.matchAll(/<member\b([^>]*)\/\s*>/gi)) {
+    const memberAttrs = attrsToObject(memberMatch[1]);
+    const memberType = String(memberAttrs.type || '')
+      .trim()
+      .toLowerCase();
+    const ref = String(memberAttrs.ref || '').trim();
+    if (!memberType || !ref) continue;
+    members.push({
+      type: memberType,
+      ref,
+      role: String(memberAttrs.role || '')
+    });
+  }
+  const tags = {};
+  for (const tagMatch of inner.matchAll(/<tag\b([^>]*)\/\s*>/gi)) {
+    const tagAttrs = attrsToObject(tagMatch[1]);
+    const key = String(tagAttrs.k || '');
+    if (key) tags[key] = String(tagAttrs.v || '');
+  }
+  return { type, attrs, nodeRefs, members, tags };
 }
 
 function parseGeneralSettingsRow(row: LooseRecord) {
@@ -245,6 +263,7 @@ function stateFromLocalRow(row: LooseRecord = {}) {
     design_ref: normalizeStateValue(row.local_design_ref),
     design_year: normalizeStateValue(row.local_design_year),
     material: normalizeMaterialValue(row.local_material, row.local_material_concrete),
+    roof_shape: normalizeStateValue(normalizeRoofShapeSelection(normalizeStateValue(row.local_roof_shape))),
     colour: normalizeStateValue(row.local_colour),
     levels: normalizeStateValue(row.local_levels),
     year_built: normalizeStateValue(row.local_year_built),
@@ -262,9 +281,14 @@ function stateFromContourTags(tags: LooseRecord = {}) {
     design_ref: normalizeStateValue(tags['design:ref'] || tags.design_ref),
     design_year: normalizeStateValue(tags['design:year'] || tags.design_year),
     material: normalizeMaterialValue(tags['building:material'] || tags.material),
+    roof_shape: normalizeStateValue(
+      normalizeRoofShapeSelection(tags['roof:shape'] || tags.roof_shape || tags['building:roof:shape'])
+    ),
     colour: normalizeStateValue(tags['building:colour'] || tags.colour),
     levels: normalizeStateValue(tags['building:levels'] || tags.levels),
-    year_built: normalizeStateValue(tags['building:year'] || tags.start_date || tags.construction_date || tags.year_built),
+    year_built: normalizeStateValue(
+      tags['building:year'] || tags.start_date || tags.construction_date || tags.year_built
+    ),
     architect: normalizeStateValue(tags.architect || tags.architect_name),
     address: normalizeStateValue(tags['addr:full'] || tags['addr:full:en']),
     description: normalizeStateValue(tags.description)
@@ -273,7 +297,21 @@ function stateFromContourTags(tags: LooseRecord = {}) {
 
 function diffStates(before: LooseRecord = {}, after: LooseRecord = {}) {
   const changed = [];
-  const keys = ['name', 'style', 'design', 'design_ref', 'design_year', 'material', 'colour', 'levels', 'year_built', 'architect', 'address', 'description'];
+  const keys = [
+    'name',
+    'style',
+    'design',
+    'design_ref',
+    'design_year',
+    'material',
+    'roof_shape',
+    'colour',
+    'levels',
+    'year_built',
+    'architect',
+    'address',
+    'description'
+  ];
   for (const key of keys) {
     if (before[key] !== after[key]) {
       changed.push({ key, before: before[key] ?? null, after: after[key] ?? null });
@@ -302,6 +340,8 @@ function controlledKeysForField(field) {
       return ['design:year', 'design_year'];
     case 'material':
       return ['building:material', 'material', 'building:material:concrete', 'material_concrete'];
+    case 'roof_shape':
+      return ['roof:shape', 'roof_shape', 'building:roof:shape'];
     case 'colour':
       return ['building:colour', 'colour'];
     case 'levels':
@@ -362,6 +402,13 @@ function applyFieldToTagMap(tags: LooseRecord, field, value, explicitlyEdited = 
       delete tags.material;
       delete tags.material_concrete;
       return ['material', 'material_concrete'];
+    case 'roof_shape': {
+      const roofShape = normalizeRoofShapeSelection(normalized);
+      tags['roof:shape'] = roofShape || normalized;
+      delete tags.roof_shape;
+      delete tags['building:roof:shape'];
+      return ['roof_shape', 'building:roof:shape'];
+    }
     case 'colour':
       tags['building:colour'] = normalized;
       delete tags.colour;
@@ -371,8 +418,11 @@ function applyFieldToTagMap(tags: LooseRecord, field, value, explicitlyEdited = 
       delete tags.levels;
       return ['levels'];
     case 'year_built':
-      tags['building:year'] = normalized;
-      return [];
+      tags['start_date'] = normalized;
+      delete tags['building:year'];
+      delete tags.construction_date;
+      delete tags.year_built;
+      return ['building:year', 'construction_date', 'year_built'];
     case 'architect':
       tags.architect = normalized;
       delete tags.architect_name;
@@ -408,19 +458,35 @@ function buildDesiredTagMap(currentTags: LooseRecord, candidateRows) {
     }
   }
 
+  if (desired['building:year']) {
+    if (!desired['start_date']) desired['start_date'] = desired['building:year'];
+    delete desired['building:year'];
+    removedKeys.add('building:year');
+  }
+  if (desired['construction_date']) {
+    if (!desired['start_date']) desired['start_date'] = desired['construction_date'];
+    delete desired['construction_date'];
+    removedKeys.add('construction_date');
+  }
+
   for (const key of Object.keys(desired)) {
     if (desired[key] == null || String(desired[key]).trim() === '') {
       delete desired[key];
     }
   }
 
-  return { desired: desired as LooseRecord, localState: localState as LooseRecord, explicitFields: [...explicitFields] as string[], removedKeys: [...removedKeys] as string[] };
+  return {
+    desired: desired as LooseRecord,
+    localState: localState as LooseRecord,
+    explicitFields: [...explicitFields] as string[],
+    removedKeys: [...removedKeys] as string[]
+  };
 }
 
 function parseOsmElementResponse(xmlText) {
   const xml = String(xmlText || '').trim();
-  const elementMatch = xml.match(/<\s*(node|way|relation)\b[\s\S]*?<\/\s*\1\s*>/i)
-    || xml.match(/<\s*(node|way|relation)\b[^>]*\/>/i);
+  const elementMatch =
+    xml.match(/<\s*(node|way|relation)\b[\s\S]*?<\/\s*\1\s*>/i) || xml.match(/<\s*(node|way|relation)\b[^>]*\/>/i);
   if (!elementMatch) {
     throw new Error('Unexpected OSM element response');
   }
@@ -431,9 +497,9 @@ function parseOsmElementResponse(xmlText) {
     return {
       type,
       attrs: attrsToObject(header),
-      beforeTags: '',
-      tags: {},
-      rawXml: fragment
+      nodeRefs: [],
+      members: [],
+      tags: {}
     };
   }
   return parseElementXml(fragment);

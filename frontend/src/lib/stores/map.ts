@@ -3,6 +3,7 @@ import { parseUrlState } from '../client/urlState.js';
 
 const MAP_LABELS_VISIBLE_STORAGE_KEY = 'archimap-map-labels-visible';
 const LAST_MAP_CAMERA_STORAGE_KEY = 'archimap-last-map-camera';
+const MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY = 'archimap-map-buildings-3d-enabled';
 const MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY = 'archimap-map-building-parts-visible';
 
 function getStorageHost(storageHost = null) {
@@ -45,17 +46,33 @@ export function normalizeOptionalMapZoom(value) {
   return Number.isFinite(zoom) ? zoom : null;
 }
 
+function normalizeOptionalMapNumber(value) {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
 export function normalizeLastMapCamera(value) {
   const lat = Number(value?.lat);
   const lng = Number(value?.lng);
   const zoom = normalizeOptionalMapZoom(value?.z);
+  const pitch = normalizeOptionalMapNumber(value?.pitch);
+  const bearing = normalizeOptionalMapNumber(value?.bearing);
   if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
   if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
-  return {
+  const camera: LooseRecord = {
     lat,
     lng,
     z: Number.isFinite(zoom) ? zoom : null
   };
+  if (pitch != null) {
+    camera.pitch = pitch;
+  }
+  if (bearing != null) {
+    camera.bearing = bearing;
+  }
+  return camera;
 }
 
 function readLastMapCameraFromStorage(storage) {
@@ -99,11 +116,18 @@ function persistLastMapCamera(camera, storageHost = null) {
 
 function withFallbackZoom(camera, fallbackCamera) {
   if (!camera) return null;
-  return {
+  const nextCamera: LooseRecord = {
     lat: camera.lat,
     lng: camera.lng,
     z: camera.z != null ? camera.z : fallbackCamera.z
   };
+  if (camera.pitch != null) {
+    nextCamera.pitch = camera.pitch;
+  }
+  if (camera.bearing != null) {
+    nextCamera.bearing = camera.bearing;
+  }
+  return nextCamera;
 }
 
 export function resolveInitialMapCamera({ url, fallbackCamera, persistedCamera }: LooseRecord = {}) {
@@ -139,20 +163,32 @@ function getInitialBuildingPartsVisibility() {
   return readStoredBoolean(getLocalStorage(), MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY, false);
 }
 
+function getInitialBuildings3dEnabled() {
+  return readStoredBoolean(getLocalStorage(), MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY, false);
+}
+
 export const selectedBuilding = writable(null);
 export const selectedBuildings = writable([]);
 export const mapSelectionShiftKey = writable(false);
 export const mapReady = writable(false);
 export const mapCenter = writable(null);
 export const mapZoom = writable(null);
+export const mapPitch = writable(null);
+export const mapBearing = writable(null);
 export const mapViewport = writable(null);
 export const mapFocusRequest = writable(null);
 export const mapLabelsVisible = writable(getInitialLabelsVisibility());
+export const mapBuildings3dEnabled = writable(getInitialBuildings3dEnabled());
 export const mapBuildingPartsVisible = writable(getInitialBuildingPartsVisibility());
 export const lastMapCamera = writable(getInitialLastMapCamera());
 
 export function syncMapVisibilityFromStorage(storageHost = null) {
   const nextLabelsVisible = readStoredBoolean(getLocalStorage(storageHost), MAP_LABELS_VISIBLE_STORAGE_KEY, true);
+  const nextBuildings3dEnabled = readStoredBoolean(
+    getLocalStorage(storageHost),
+    MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY,
+    false
+  );
   const nextBuildingPartsVisible = readStoredBoolean(
     getLocalStorage(storageHost),
     MAP_BUILDING_PARTS_VISIBLE_STORAGE_KEY,
@@ -160,6 +196,9 @@ export function syncMapVisibilityFromStorage(storageHost = null) {
   );
   if (get(mapLabelsVisible) !== nextLabelsVisible) {
     mapLabelsVisible.set(nextLabelsVisible);
+  }
+  if (get(mapBuildings3dEnabled) !== nextBuildings3dEnabled) {
+    mapBuildings3dEnabled.set(nextBuildings3dEnabled);
   }
   if (get(mapBuildingPartsVisible) !== nextBuildingPartsVisible) {
     mapBuildingPartsVisible.set(nextBuildingPartsVisible);
@@ -230,10 +269,7 @@ export function toggleSelectedBuilding(item) {
   const key = getSelectedBuildingKey(selection);
   const index = current.findIndex((entry) => getSelectedBuildingKey(entry) === key);
   if (index >= 0) {
-    syncSelectedBuildingSelection([
-      ...current.slice(0, index),
-      ...current.slice(index + 1)
-    ]);
+    syncSelectedBuildingSelection([...current.slice(0, index), ...current.slice(index + 1)]);
     return;
   }
   syncSelectedBuildingSelection([...current, selection]);
@@ -277,6 +313,26 @@ export function setMapZoom(zoom) {
   patchLastMapCamera({ z: value });
 }
 
+export function setMapPitch(pitch) {
+  const value = normalizeOptionalMapNumber(pitch);
+  if (value == null) {
+    mapPitch.set(null);
+    return;
+  }
+  mapPitch.set(value);
+  patchLastMapCamera({ pitch: value });
+}
+
+export function setMapBearing(bearing) {
+  const value = normalizeOptionalMapNumber(bearing);
+  if (value == null) {
+    mapBearing.set(null);
+    return;
+  }
+  mapBearing.set(value);
+  patchLastMapCamera({ bearing: value });
+}
+
 export function setMapViewport(viewport) {
   const west = Number(viewport?.west);
   const south = Number(viewport?.south);
@@ -299,6 +355,8 @@ export function requestMapFocus(payload: LooseRecord = {}) {
   const lat = Number(payload?.lat);
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
   const zoom = normalizeOptionalMapZoom(payload?.zoom);
+  const pitch = normalizeOptionalMapNumber(payload?.pitch);
+  const bearing = normalizeOptionalMapNumber(payload?.bearing);
   mapFocusRequest.set({
     id: Date.now() + Math.random(),
     lon,
@@ -306,6 +364,8 @@ export function requestMapFocus(payload: LooseRecord = {}) {
     offsetX: Number(payload?.offsetX || 0),
     offsetY: Number(payload?.offsetY || 0),
     zoom,
+    pitch,
+    bearing,
     duration: Number.isFinite(+payload?.duration) ? Number(payload.duration) : 420
   });
 }
@@ -314,6 +374,12 @@ export function setMapLabelsVisible(value) {
   const next = Boolean(value);
   mapLabelsVisible.set(next);
   persistStoredBoolean(getLocalStorage(), MAP_LABELS_VISIBLE_STORAGE_KEY, next);
+}
+
+export function setMapBuildings3dEnabled(value) {
+  const next = Boolean(value);
+  mapBuildings3dEnabled.set(next);
+  persistStoredBoolean(getLocalStorage(), MAP_BUILDINGS_3D_ENABLED_STORAGE_KEY, next);
 }
 
 export function setMapBuildingPartsVisible(value) {

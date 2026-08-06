@@ -4,10 +4,7 @@ import {
   normalizeFilterLayers,
   normalizeFilterRules
 } from '$lib/components/map/filter-pipeline-utils';
-import {
-  buildResolvedLayerPayload,
-  prepareFilterRequestPlan
-} from '$lib/services/map/filter-request-planner';
+import { buildResolvedLayerPayload, prepareFilterRequestPlan } from '$lib/services/map/filter-request-planner';
 import type {
   FilterWorkerBuildRequestPlanRequest,
   FilterWorkerBuildRequestPlanResponse,
@@ -77,24 +74,24 @@ function handlePrepareRulesRequest(payload: FilterWorkerPrepareRequest, requestI
     requestId,
     ok: true,
     rules,
-    layers: rules.length > 0
-      ? [{
-          id: 'compat-filter-layer',
-          color: '#f59e0b',
-          priority: 0,
-          mode: 'and' as const,
-          rules
-        }]
-      : [],
+    layers:
+      rules.length > 0
+        ? [
+            {
+              id: 'compat-filter-layer',
+              color: '#f59e0b',
+              priority: 0,
+              mode: 'and' as const,
+              rules
+            }
+          ]
+        : [],
     rulesHash: computeRulesHash(rules),
     heavy: rules.some((rule) => isHeavyRule(rule))
   });
 }
 
-function handleBuildRequestPlanRequest(
-  payload: FilterWorkerBuildRequestPlanRequest,
-  requestId: string
-) {
+function handleBuildRequestPlanRequest(payload: FilterWorkerBuildRequestPlanRequest, requestId: string) {
   const prepared = prepareFilterRequestPlan(payload.layers ?? payload.rules);
   if (prepared.ok === false) {
     postBuildRequestPlanResult({
@@ -119,10 +116,7 @@ function handleBuildRequestPlanRequest(
   });
 }
 
-function handleBuildResolvedPayloadRequest(
-  payload: FilterWorkerBuildResolvedPayloadRequest,
-  requestId: string
-) {
+function handleBuildResolvedPayloadRequest(payload: FilterWorkerBuildResolvedPayloadRequest, requestId: string) {
   if (!payload?.prepared || !Array.isArray(payload.payloads)) {
     postBuildResolvedPayloadResult({
       type: 'build-resolved-payload-result',
@@ -155,9 +149,7 @@ function handleBuildResolvedPayloadRequest(
 
 self.onmessage = (
   event: MessageEvent<
-    | FilterWorkerPrepareRequest
-    | FilterWorkerBuildRequestPlanRequest
-    | FilterWorkerBuildResolvedPayloadRequest
+    FilterWorkerPrepareRequest | FilterWorkerBuildRequestPlanRequest | FilterWorkerBuildResolvedPayloadRequest
   >
 ) => {
   // Chromium exposes an empty origin for same-origin messages sent to dedicated workers.

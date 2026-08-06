@@ -51,7 +51,6 @@ function createRegionDraft(region: Partial<Region> | null = null): RegionDraft {
     id: Number(region?.id || 0) || null,
     name: String(region?.name || ''),
     slug: String(region?.slug || ''),
-    searchQuery: String(region?.searchQuery || ''),
     extractSource: String(region?.extractSource || ''),
     extractId: String(region?.extractId || ''),
     extractLabel: String(region?.extractLabel || ''),
@@ -71,7 +70,9 @@ function normalizeRegionResolutionStatus(
   value: unknown,
   fallbackValue: RegionResolutionStatus = 'needs_resolution'
 ): RegionResolutionStatus {
-  const raw = String(value || fallbackValue || '').trim().toLowerCase();
+  const raw = String(value || fallbackValue || '')
+    .trim()
+    .toLowerCase();
   if (raw === 'resolved' || raw === 'needs_resolution' || raw === 'resolution_required' || raw === 'resolution_error') {
     return raw as RegionResolutionStatus;
   }
@@ -99,13 +100,13 @@ function normalizeFilterPresetLocale(localeValue) {
 }
 
 function normalizeFilterPresetName(value) {
-  return String(value || '').trim().slice(0, 160);
+  return String(value || '')
+    .trim()
+    .slice(0, 160);
 }
 
 function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
-  const source = nameI18n && typeof nameI18n === 'object' && !Array.isArray(nameI18n)
-    ? nameI18n
-    : {};
+  const source = nameI18n && typeof nameI18n === 'object' && !Array.isArray(nameI18n) ? nameI18n : {};
   const normalized: Record<string, string> = {};
   for (const [rawLocale, rawName] of Object.entries(source)) {
     const localeValue = normalizeFilterPresetLocale(rawLocale);
@@ -123,7 +124,7 @@ function normalizeFilterPresetNameI18n(nameI18n = null, fallbackName = '') {
 }
 
 function getPreferredFilterPresetName(nameI18n = null, fallback = '') {
-  const source = nameI18n && typeof nameI18n === 'object' ? nameI18n as Record<string, string> : {};
+  const source = nameI18n && typeof nameI18n === 'object' ? (nameI18n as Record<string, string>) : {};
   const defaultName = normalizeFilterPresetName(source?.[DEFAULT_LOCALE]);
   if (defaultName) return defaultName;
 
@@ -160,7 +161,9 @@ function normalizeFilterPresetRule(
   return normalized;
 }
 
-function normalizeFilterPresetLayersForDraft(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []): FilterPresetLayer[] {
+function normalizeFilterPresetLayersForDraft(
+  layers: Array<Partial<FilterPresetLayer> | LooseRecord> = []
+): FilterPresetLayer[] {
   const source = Array.isArray(layers) ? layers : [];
   if (source.length === 0) {
     return [createBuildingFilterLayerDraft()];
@@ -181,9 +184,14 @@ function normalizeFilterPresetLayersForDraft(layers: Array<Partial<FilterPresetL
   );
 }
 
-function normalizeFilterPresetLayersForSave(layers: Array<Partial<FilterPresetLayer> | LooseRecord> = [], options: LooseRecord = {}) {
+function normalizeFilterPresetLayersForSave(
+  layers: Array<Partial<FilterPresetLayer> | LooseRecord> = [],
+  options: LooseRecord = {}
+) {
   const dataT = typeof options?.dataT === 'function' ? options.dataT : (key) => key;
-  const normalized = normalizeFilterLayers(Array.isArray(layers) ? (layers as LooseRecord[]) : [], { preserveEmpty: false });
+  const normalized = normalizeFilterLayers(Array.isArray(layers) ? (layers as LooseRecord[]) : [], {
+    preserveEmpty: false
+  });
   if (normalized.invalidReason) {
     return {
       layers: [],
@@ -208,7 +216,9 @@ function normalizeFilterPresetLayersForSave(layers: Array<Partial<FilterPresetLa
   };
 }
 
-function normalizeFilterPresetItem(preset: ApiFilterPreset | FilterPresetDraft | LooseRecord | null = null): FilterPresetDraft {
+function normalizeFilterPresetItem(
+  preset: ApiFilterPreset | FilterPresetDraft | LooseRecord | null = null
+): FilterPresetDraft {
   const source = (preset && typeof preset === 'object' ? preset : {}) as Partial<FilterPresetDraft> & LooseRecord;
   const id = Number(source?.id || 0);
   const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
@@ -242,14 +252,18 @@ function getFilterPresetDisplayName(preset, localeValue = DEFAULT_LOCALE) {
   const source = preset && typeof preset === 'object' ? preset : {};
   const nameI18n = normalizeFilterPresetNameI18n(source?.nameI18n, source?.name);
   const targetLocale = normalizeFilterPresetLocale(localeValue) || DEFAULT_LOCALE;
-  return normalizeFilterPresetName(nameI18n[targetLocale])
-    || normalizeFilterPresetName(source?.name)
-    || getPreferredFilterPresetName(nameI18n);
+  return (
+    normalizeFilterPresetName(nameI18n[targetLocale]) ||
+    normalizeFilterPresetName(source?.name) ||
+    getPreferredFilterPresetName(nameI18n)
+  );
 }
 
 function getRecordTextValue(record: LooseRecord | null, keys: readonly string[] = []) {
   const source = record && typeof record === 'object' ? record : {};
-  const byLowercaseKey = new Map(Object.entries(source).map(([key, value]) => [String(key || '').toLowerCase(), value]));
+  const byLowercaseKey = new Map(
+    Object.entries(source).map(([key, value]) => [String(key || '').toLowerCase(), value])
+  );
 
   for (const key of Array.isArray(keys) ? keys : []) {
     const direct = source[key];
@@ -271,7 +285,9 @@ function slugifyLoose(value) {
 }
 
 function normalizeLookupValue(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function buildRegionExtractIdentity(extractSource, extractId) {
@@ -280,8 +296,13 @@ function buildRegionExtractIdentity(extractSource, extractId) {
   return `${normalizeLookupValue(extractSource) || 'osmfr'}:${normalizedExtractId}`;
 }
 
-function normalizeDataSettings(nextSettings: AdminDataSettings | LooseRecord | null, fallback: AdminDataSettings | LooseRecord): AdminDataSettings {
-  const value = (nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback) as Partial<AdminDataSettings> & LooseRecord;
+function normalizeDataSettings(
+  nextSettings: AdminDataSettings | LooseRecord | null,
+  fallback: AdminDataSettings | LooseRecord
+): AdminDataSettings {
+  const value = (
+    nextSettings && typeof nextSettings === 'object' ? nextSettings : fallback
+  ) as Partial<AdminDataSettings> & LooseRecord;
   return {
     source: String(value?.source || 'db'),
     bootstrap: {
@@ -301,8 +322,8 @@ function normalizeDataSettings(nextSettings: AdminDataSettings | LooseRecord | n
       source: String(value?.filterPresets?.source || 'db'),
       items: Array.isArray(value?.filterPresets?.items)
         ? (value.filterPresets.items as Array<ApiFilterPreset | FilterPresetDraft | LooseRecord>)
-          .map((item) => normalizeFilterPresetItem(item))
-          .filter((item) => item.id != null)
+            .map((item) => normalizeFilterPresetItem(item))
+            .filter((item) => item.id != null)
         : []
     }
   };
@@ -332,7 +353,11 @@ function getSavedFilterTagAllowlist(dataSettings: LooseRecord) {
   return Array.isArray(dataSettings?.filterTags?.allowlist) ? dataSettings.filterTags.allowlist : [];
 }
 
-function buildFilterTagDraftStateByKey(keys: readonly string[] = [], saved: readonly string[] = [], draft: readonly string[] = []) {
+function buildFilterTagDraftStateByKey(
+  keys: readonly string[] = [],
+  saved: readonly string[] = [],
+  draft: readonly string[] = []
+) {
   const result: LooseRecord = {};
   const savedSet = new Set(Array.isArray(saved) ? saved : []);
   const draftSet = new Set(Array.isArray(draft) ? draft : []);

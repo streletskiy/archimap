@@ -10,12 +10,15 @@ function createRateLimiterFactory(options: LooseRecord = {}) {
   if (redisUrl) {
     redisClient = createClient({ url: redisUrl, socket: { connectTimeout: 1500 } });
     redisClient.on('error', (err) => logger.warn('rate_limiter_redis_error', { error: String(err.message || err) }));
-    redisClient.connect().then(() => {
-      useRedis = true;
-      logger.info('rate_limiter_redis_connected');
-    }).catch((err) => {
-      logger.warn('rate_limiter_redis_fallback_memory', { error: String(err.message || err) });
-    });
+    redisClient
+      .connect()
+      .then(() => {
+        useRedis = true;
+        logger.info('rate_limiter_redis_connected');
+      })
+      .catch((err) => {
+        logger.warn('rate_limiter_redis_fallback_memory', { error: String(err.message || err) });
+      });
   }
 
   const cleanupTimer = setInterval(() => {
@@ -41,7 +44,7 @@ function createRateLimiterFactory(options: LooseRecord = {}) {
           const results = await multi.exec();
           const count = Number(results[0]) || 1;
           const ttl = Number(results[1]);
-          
+
           if (ttl < 0) {
             await redisClient.pExpire(key, windowMs);
           }
@@ -49,7 +52,9 @@ function createRateLimiterFactory(options: LooseRecord = {}) {
           if (count > maxRequests) {
             const retryAfterSec = Math.max(1, Math.ceil((ttl > 0 ? ttl : windowMs) / 1000));
             res.setHeader('Retry-After', String(retryAfterSec));
-            return res.status(429).json({ code: 'ERR_RATE_LIMITED', error: message || 'Too many requests, please try again later' });
+            return res
+              .status(429)
+              .json({ code: 'ERR_RATE_LIMITED', error: message || 'Too many requests, please try again later' });
           }
 
           return next();
@@ -68,7 +73,9 @@ function createRateLimiterFactory(options: LooseRecord = {}) {
       if (bucket.count > maxRequests) {
         const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
         res.setHeader('Retry-After', String(retryAfterSec));
-        return res.status(429).json({ code: 'ERR_RATE_LIMITED', error: message || 'Too many requests, please try again later' });
+        return res
+          .status(429)
+          .json({ code: 'ERR_RATE_LIMITED', error: message || 'Too many requests, please try again later' });
       }
 
       return next();

@@ -1,13 +1,13 @@
 import type { FilterPresetInput, FilterPresetState } from './filter-presets';
 import type { OsmElementType } from './common';
 
-export type RegionResolutionStatus =
-  | 'resolved'
-  | 'needs_resolution'
-  | 'resolution_required'
-  | 'resolution_error';
+export type RegionResolutionStatus = 'resolved' | 'needs_resolution' | 'resolution_required' | 'resolution_error';
+
+export type RegionUpstreamStatus = 'unknown' | 'up_to_date' | 'update_available' | 'error';
 
 export type RegionSourceType = 'extract';
+
+export type RegionKind = 'standalone' | 'country_aggregate' | 'subregion';
 
 export interface RegionBounds {
   west: number;
@@ -41,6 +41,12 @@ export interface Region {
   lastSyncStatus: string;
   lastSyncError: string | null;
   lastSuccessfulSyncAt: string | null;
+  sourceDataUpdatedAt: string | null;
+  latestSourceDataUpdatedAt: string | null;
+  upstreamCheckedAt: string | null;
+  upstreamStatus: RegionUpstreamStatus;
+  upstreamError: string | null;
+  updateAvailable: boolean;
   nextSyncAt: string | null;
   bounds: RegionBounds | null;
   lastFeatureCount: number | null;
@@ -50,6 +56,14 @@ export interface Region {
   updatedBy: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  regionKind: RegionKind;
+  parentRegionId: number | null;
+  orderInParent: number | null;
+  visibleInAdmin: boolean;
+  countryCode: string | null;
+  subregionCount?: number;
+  subregionCompletedCount?: number;
+  subregions?: Region[];
   __optimistic?: boolean;
 }
 
@@ -57,7 +71,6 @@ export interface RegionDraft {
   id: number | null;
   name: string;
   slug: string;
-  searchQuery: string;
   extractSource: string;
   extractId: string;
   extractLabel: string;
@@ -70,6 +83,8 @@ export interface RegionDraft {
   pmtilesMinZoom: number;
   pmtilesMaxZoom: number;
   sourceLayer: string;
+  regionKind?: RegionKind;
+  parentRegionId?: number | null;
 }
 
 export interface RegionInput {
@@ -95,6 +110,16 @@ export interface RegionInput {
   pmtilesMinZoom?: number | string;
   pmtilesMaxZoom?: number | string;
   sourceLayer?: string;
+  regionKind?: string;
+  region_kind?: string;
+  parentRegionId?: number | string | null;
+  parent_region_id?: number | string | null;
+  orderInParent?: number | string | null;
+  order_in_parent?: number | string | null;
+  visibleInAdmin?: boolean | number | string;
+  visible_in_admin?: boolean | number | string;
+  countryCode?: string | null;
+  country_code?: string | null;
 }
 
 export interface RegionExtractCandidate {

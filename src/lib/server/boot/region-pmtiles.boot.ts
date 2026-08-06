@@ -1,16 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const { moveFileSync } = require('../utils/fs');
-const {
-  resolveLegacyRegionPmtilesPath,
-  resolveRegionPmtilesPath
-} = require('../services/data-settings.service');
+const { resolveLegacyRegionPmtilesPath, resolveRegionPmtilesPath } = require('../services/data-settings.service');
 
 function createRegionPmtilesBoot(options: LooseRecord = {}) {
-  const {
-    dataDir,
-    logger = console
-  } = options;
+  const { dataDir, logger = console } = options;
 
   function migrateRegionPmtilesFile(previousRegion, savedRegion) {
     if (!savedRegion?.slug || !savedRegion?.id) return;
@@ -23,7 +17,9 @@ function createRegionPmtilesBoot(options: LooseRecord = {}) {
     }
     candidatePaths.push(resolveLegacyRegionPmtilesPath(dataDir, savedRegion.id));
 
-    const sourcePath = candidatePaths.find((candidate) => candidate && candidate !== targetPath && fs.existsSync(candidate));
+    const sourcePath = candidatePaths.find(
+      (candidate) => candidate && candidate !== targetPath && fs.existsSync(candidate)
+    );
     if (!sourcePath) return;
 
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });

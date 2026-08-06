@@ -1,10 +1,14 @@
 function hasTable(db, tableName) {
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT 1
     FROM sqlite_master
     WHERE type = 'table' AND name = ?
     LIMIT 1
-  `).get(tableName);
+  `
+    )
+    .get(tableName);
   return Boolean(row);
 }
 
@@ -47,6 +51,7 @@ function up(db) {
       last_sync_status TEXT NOT NULL DEFAULT 'idle',
       last_sync_error TEXT,
       last_successful_sync_at TEXT,
+      source_data_updated_at TEXT,
       next_sync_at TEXT,
       bounds_west REAL,
       bounds_south REAL,
@@ -119,10 +124,15 @@ function up(db) {
     db.exec('ALTER TABLE data_sync_regions ADD COLUMN extract_label TEXT;');
   }
   if (!hasColumn(db, 'data_sync_regions', 'extract_resolution_status')) {
-    db.exec("ALTER TABLE data_sync_regions ADD COLUMN extract_resolution_status TEXT NOT NULL DEFAULT 'needs_resolution';");
+    db.exec(
+      "ALTER TABLE data_sync_regions ADD COLUMN extract_resolution_status TEXT NOT NULL DEFAULT 'needs_resolution';"
+    );
   }
   if (!hasColumn(db, 'data_sync_regions', 'extract_resolution_error')) {
     db.exec('ALTER TABLE data_sync_regions ADD COLUMN extract_resolution_error TEXT;');
+  }
+  if (!hasColumn(db, 'data_sync_regions', 'source_data_updated_at')) {
+    db.exec('ALTER TABLE data_sync_regions ADD COLUMN source_data_updated_at TEXT;');
   }
   db.exec(`
     UPDATE data_sync_regions

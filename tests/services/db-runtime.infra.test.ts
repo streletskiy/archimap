@@ -2,11 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { _test_ } = require('../../src/lib/server/infra/db-runtime.infra');
 
-const {
-  replaceSqlitePositionalPlaceholders,
-  convertNamedParams,
-  createPostgresCompatDb
-} = _test_;
+const { replaceSqlitePositionalPlaceholders, convertNamedParams, createPostgresCompatDb } = _test_;
 
 test('replaceSqlitePositionalPlaceholders correctly replaces ? with $n ignoring strings/comments', () => {
   const sql = `
@@ -27,7 +23,7 @@ test('convertNamedParams replaces @name with $n and returns array of values', ()
   const sql = 'SELECT * FROM users WHERE id = @id AND age > @age OR user_id = @id';
   const params = { id: 123, age: 18 };
   const { text, values } = convertNamedParams(sql, params);
-  
+
   assert.equal(text, 'SELECT * FROM users WHERE id = $1 AND age > $2 OR user_id = $1');
   assert.deepEqual(values, [123, 18]);
 });

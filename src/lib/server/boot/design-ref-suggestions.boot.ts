@@ -1,9 +1,5 @@
 function createDesignRefSuggestionsBoot(options: LooseRecord = {}) {
-  const {
-    db,
-    dbProvider,
-    logger = console
-  } = options;
+  const { db, dbProvider, logger = console } = options;
 
   if (!db) {
     throw new Error('createDesignRefSuggestionsBoot: db is required');
@@ -13,8 +9,9 @@ function createDesignRefSuggestionsBoot(options: LooseRecord = {}) {
   let loadedAt = 0;
   let refreshPromise = null;
 
-  const selectDesignRefSuggestions = db.prepare(dbProvider === 'postgres'
-    ? `
+  const selectDesignRefSuggestions = db.prepare(
+    dbProvider === 'postgres'
+      ? `
       WITH values_union AS (
         SELECT NULLIF(btrim(design_ref), '') AS value
         FROM local.architectural_info
@@ -35,7 +32,7 @@ function createDesignRefSuggestionsBoot(options: LooseRecord = {}) {
       WHERE value IS NOT NULL
       ORDER BY lower(value), value
     `
-    : `
+      : `
       WITH values_union AS (
         SELECT NULLIF(trim(design_ref), '') AS value
         FROM local.architectural_info
@@ -50,7 +47,8 @@ function createDesignRefSuggestionsBoot(options: LooseRecord = {}) {
       FROM values_union
       WHERE value IS NOT NULL
       ORDER BY value COLLATE NOCASE, value
-    `);
+    `
+  );
 
   async function refreshDesignRefSuggestionsCache(reason = 'manual') {
     if (refreshPromise) {
@@ -59,9 +57,7 @@ function createDesignRefSuggestionsBoot(options: LooseRecord = {}) {
     refreshPromise = Promise.resolve()
       .then(async () => {
         const rows = await selectDesignRefSuggestions.all();
-        cachedValues = rows
-          .map((row) => String(row?.value || '').trim())
-          .filter(Boolean);
+        cachedValues = rows.map((row) => String(row?.value || '').trim()).filter(Boolean);
         loadedAt = Date.now();
         logger.info?.('design_ref_suggestions_refreshed', {
           reason,

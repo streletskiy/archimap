@@ -2,7 +2,9 @@ const crypto = require('crypto');
 const { maskSensitive } = require('../../shared/log-sanitizer');
 
 function normalizeLevel(value) {
-  const normalized = String(value || 'info').trim().toLowerCase();
+  const normalized = String(value || 'info')
+    .trim()
+    .toLowerCase();
   if (['debug', 'info', 'warn', 'error'].includes(normalized)) return normalized;
   return 'info';
 }
@@ -37,18 +39,38 @@ function createLogger(options: LooseRecord = {}) {
     child(extraFields: LooseRecord = {}) {
       const base = extraFields && typeof extraFields === 'object' ? { ...extraFields } : {};
       return {
-        debug(message, fields) { write('debug', message, { ...base, ...(fields || {}) }); },
-        info(message, fields) { write('info', message, { ...base, ...(fields || {}) }); },
-        warn(message, fields) { write('warn', message, { ...base, ...(fields || {}) }); },
-        error(message, fields) { write('error', message, { ...base, ...(fields || {}) }); },
-        log(message, fields) { write('info', message, { ...base, ...(fields || {}) }); }
+        debug(message, fields) {
+          write('debug', message, { ...base, ...(fields || {}) });
+        },
+        info(message, fields) {
+          write('info', message, { ...base, ...(fields || {}) });
+        },
+        warn(message, fields) {
+          write('warn', message, { ...base, ...(fields || {}) });
+        },
+        error(message, fields) {
+          write('error', message, { ...base, ...(fields || {}) });
+        },
+        log(message, fields) {
+          write('info', message, { ...base, ...(fields || {}) });
+        }
       };
     },
-    debug(message, fields) { write('debug', message, fields); },
-    info(message, fields) { write('info', message, fields); },
-    warn(message, fields) { write('warn', message, fields); },
-    error(message, fields) { write('error', message, fields); },
-    log(message, fields) { write('info', message, fields); },
+    debug(message, fields) {
+      write('debug', message, fields);
+    },
+    info(message, fields) {
+      write('info', message, fields);
+    },
+    warn(message, fields) {
+      write('warn', message, fields);
+    },
+    error(message, fields) {
+      write('error', message, fields);
+    },
+    log(message, fields) {
+      write('info', message, fields);
+    },
     requestId() {
       if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
       return crypto.randomBytes(16).toString('hex');

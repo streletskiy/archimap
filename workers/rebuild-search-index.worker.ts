@@ -16,7 +16,10 @@ const REASON = String(process.env.SEARCH_REBUILD_REASON || 'manual');
 const BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
 const DEFAULT_POSTGRES_PARALLEL_CHUNKS = Math.max(
   1,
-  Math.min(2, Math.floor((typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length || 2) / 2))
+  Math.min(
+    2,
+    Math.floor((typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length || 2) / 2)
+  )
 );
 const POSTGRES_PARALLEL_CHUNKS = Math.max(
   1,
@@ -162,12 +165,10 @@ function delayImmediate() {
 
 function logProgress(processed, totalContours, lastLogTs) {
   const now = Date.now();
-  if (processed !== totalContours && (now - lastLogTs) < 1200) {
+  if (processed !== totalContours && now - lastLogTs < 1200) {
     return lastLogTs;
   }
-  const percent = totalContours > 0
-    ? ((processed / totalContours) * 100).toFixed(1)
-    : '100.0';
+  const percent = totalContours > 0 ? ((processed / totalContours) * 100).toFixed(1) : '100.0';
   console.log(`[search-worker] indexed: ${processed}/${totalContours} (${percent}%)`);
   return now;
 }
@@ -401,7 +402,10 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
 `);
 
   const localInfoColumns = new Set(
-    db.prepare('PRAGMA local.table_info(architectural_info)').all().map((column) => String(column?.name || '').trim())
+    db
+      .prepare('PRAGMA local.table_info(architectural_info)')
+      .all()
+      .map((column) => String(column?.name || '').trim())
   );
   if (!localInfoColumns.has('description')) {
     db.exec('ALTER TABLE local.architectural_info ADD COLUMN description TEXT;');
@@ -444,9 +448,14 @@ USING fts5(
 function createSqliteDriver() {
   const Database = require('better-sqlite3');
   const dataDir = path.join(__dirname, '..', 'data');
-  const dbPath = String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() || path.join(dataDir, 'archimap.db');
-  const osmDbPath = String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
-  const localEditsDbPath = String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() || path.join(dataDir, 'local-edits.db');
+  const dbPath =
+    String(process.env.ARCHIMAP_DB_PATH || path.join(dataDir, 'archimap.db')).trim() ||
+    path.join(dataDir, 'archimap.db');
+  const osmDbPath =
+    String(process.env.OSM_DB_PATH || path.join(dataDir, 'osm.db')).trim() || path.join(dataDir, 'osm.db');
+  const localEditsDbPath =
+    String(process.env.LOCAL_EDITS_DB_PATH || path.join(dataDir, 'local-edits.db')).trim() ||
+    path.join(dataDir, 'local-edits.db');
   const db = new Database(dbPath);
 
   db.pragma('journal_mode = WAL');

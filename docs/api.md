@@ -33,7 +33,7 @@ System notes:
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`.
   - The runtime reuses the persisted `filter_tag_keys_cache` after restarts and only cold-starts a rebuild when the cache is empty.
-  - `warmingUp` stays true while the cache is empty or a background rebuild is running.
+  - `warmingUp` stays true while a background rebuild is running, and turns false once the cache has been successfully rebuilt even if the resulting key list is empty.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
 - `GET /api/filter-presets`
   - Returns runtime map filter presets from DB-backed admin settings storage.
@@ -67,7 +67,7 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
-  - Editable merged fields include `name`, `style`, `design`, `design_ref`, `design_year`, `material`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
+  - Editable merged fields include `name`, `style`, `design`, `design_ref`, `design_year`, `material`, `roof_shape`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
   - Response also includes `design_ref_suggestions[]`, backed by a startup-warmed in-memory cache of known project numbers.
   - `material` can represent the concrete subtypes `concrete_panels`, `concrete_blocks`, and `concrete_monolith`; the runtime stores them as `material=concrete` plus `material_concrete`.
   - Includes `region_slugs[]` for the building's current region memberships.
@@ -75,6 +75,7 @@ System notes:
 - `POST /api/building-info`
   - Submits or updates a user building edit.
   - Uses the same merged field vocabulary as `GET /api/building-info/:osmType/:osmId`.
+  - Request body may include `roofShape`, which maps to the OSM `roof:shape` tag and is also allowed for `building:part` edits.
   - Requires CSRF for session-authenticated writes.
 - `GET /api/style-overrides`
   - Public list of active style-region override rules used by the frontend style picker.
@@ -97,7 +98,13 @@ System notes:
 - `GET /api/admin/users`, `GET /api/admin/users/:email`, `GET /api/admin/users/:email/edits`
 - `POST /api/admin/users/edit-permission`, `POST /api/admin/users/role`
 - `GET /api/admin/app-settings/general`
+  - Returns DB-backed general runtime settings.
+  - `general` includes `appDisplayName`, `appBaseUrl`, `registrationEnabled`, `userEditRequiresPermission`, `metricsToken`, `basemapProvider`, `maptilerApiKey`, `customBasemapUrl`, and `customBasemapApiKey`.
 - `POST /api/admin/app-settings/general`
+  - Saves the same `general` payload as above.
+  - `basemapProvider` supports `carto`, `maptiler`, and `custom`.
+  - When `basemapProvider=maptiler`, `maptilerApiKey` is required.
+  - When `basemapProvider=custom`, `customBasemapUrl` is required and `customBasemapApiKey` is optional.
 - `GET /api/admin/app-settings/smtp`
 - `POST /api/admin/app-settings/smtp`
 - `POST /api/admin/app-settings/smtp/test`
@@ -105,7 +112,8 @@ System notes:
   - Returns DB-backed data settings summary, bootstrap state, and current regions.
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
   - Also returns filter presets config for admin (`filterPresets.source`, `filterPresets.items[]`).
-  - Region items include canonical extract metadata (`searchQuery`, `extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`) and storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`).
+  - Region items include curated extract metadata (`extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`), storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`), and the last locally known source-version fields (`sourceDataUpdatedAt`, `latestSourceDataUpdatedAt`, `upstreamCheckedAt`, `upstreamStatus`, `upstreamError`, `updateAvailable`).
+  - The endpoint intentionally avoids live upstream checks for every region so the admin list can load quickly even with many regions.
   - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
   - `filterPresets.items[]` includes `id`, `key`, `name`, `nameI18n`, `description`, `layers[]`, `createdAt`, `updatedAt`, `updatedBy`.
 - `POST /api/admin/app-settings/data/filter-tag-allowlist`
@@ -127,16 +135,17 @@ System notes:
 - `GET /api/admin/app-settings/data/regions`
   - Returns region list for admin UI.
   - Region payload mirrors admin data summary items, including extract-resolution fields plus cached storage stats `pmtilesBytes`, `dbBytes`, `dbBytesApproximate`.
-- `POST /api/admin/app-settings/data/regions/resolve-extract`
+- `GET /api/admin/app-settings/data/regions/upstream-status`
   - Master-admin only.
-  - Body: `{ query: "Moscow", source?: "any|..." }`.
-  - Returns `{ ok, query, items[] }`, where each candidate contains `extractSource`, `extractId`, `extractLabel`, and may also include `downloadUrl`, `matchKind`, `exact`.
+  - Query: `ids=1,2,3` and optional `force=true`.
+  - Returns live upstream status only for the requested region ids, so the admin UI can lazily refresh the visible page and the selected region without blocking the initial list load.
 - `POST /api/admin/app-settings/data/regions`
   - Creates or updates a region.
   - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
   - Supported source type: `sourceType=extract`.
-  - Request body uses canonical extract fields (`searchQuery`, `extractSource`, `extractId`, `extractLabel`).
-  - On save, server re-validates the selected canonical extract via exact resolver lookup. Ambiguous or missing canonical extract selection returns `400` with a manual-resolution message; managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
+  - Request body uses curated extract fields (`extractSource`, `extractId`, `extractLabel`) plus sync settings.
+  - Standard create flow is driven by the curated admin region catalog; there is no runtime extract-search/resolve endpoint in the normal UI flow.
+  - On save, server validates the selected curated extract against the repository manifest. Managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
 - `DELETE /api/admin/app-settings/data/regions/:regionId`
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
   - Regions in `queued` or `running` state cannot be deleted.
@@ -148,6 +157,14 @@ System notes:
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
+  - Manual syncs queue immediately and do not wait for an upstream freshness probe before the PBF download starts.
+  - Returns `400` when the region cannot be queued, for example if the id is invalid, the region is disabled, or its curated extract is unresolved.
+- `POST /api/admin/app-settings/data/regions/:regionId/sync-cancel`
+  - Master-admin only.
+  - Requests cancellation of the region's queued or running sync. Running syncs have their entire worker process tree terminated (graceful SIGTERM/taskkill, then SIGKILL fallback after 10s); queued syncs are dropped from the queue.
+  - On success the affected run transitions to status `abandoned` and the region returns to its previous state. The response body contains `{ cancelled, target }` where `target` is `running`, `queued`, or `none`.
+  - Returns `503` when the managed sync queue is not available in the current runtime mode.
+  - While a sync is active, the run row exposes live stage metadata (`stage`, `stageProgress`, `stageDetail`, `stageUpdatedAt`, `cancelRequested`) that the admin UI polls to render a progress bar and cancel button.
 - `GET /api/admin/app-settings/osm`
   - Master-admin only.
   - Returns OSM sync settings, connection state, and OAuth capability metadata for the `Admin -> Send to OSM` tab.
@@ -220,6 +237,10 @@ System notes:
 
 - `GET /app-config.js`
   - Returns `window.__ARCHIMAP_CONFIG`.
+  - Includes `basemap: { provider, maptilerApiKey, customBasemapUrl, customBasemapApiKey }`.
+  - Invalid `maptiler` runtime config without a key is normalized back to `carto` so the client map still boots.
+  - Invalid `custom` runtime config without a basemap URL is normalized back to `carto` so the client map still boots.
+  - Custom basemap TileJSON and tile requests are served through same-origin routes; sprite and glyph assets come from local static files.
   - Multi-region payload adds `buildingRegionsPmtiles[]`, each item containing:
     - `id`
     - `slug`
