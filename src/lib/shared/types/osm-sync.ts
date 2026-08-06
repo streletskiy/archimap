@@ -13,10 +13,18 @@ export interface SyncCandidateConflict {
   liveFingerprint: string | null;
 }
 
+export interface OsmRelationMember {
+  type: OsmElementType;
+  ref: string;
+  role: string;
+}
+
 export interface SyncCandidateLiveElement {
-  type: string;
+  type: OsmElementType;
   attrs: UnknownRecord | null;
   tags: Record<string, string>;
+  nodeRefs: string[];
+  members: OsmRelationMember[];
 }
 
 export interface SyncCandidateSummary {

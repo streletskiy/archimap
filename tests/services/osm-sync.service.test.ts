@@ -1256,19 +1256,19 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
       }
       if (url.endsWith('/api/0.6/way/201') && (!init.method || init.method === 'GET')) {
         return createFetchResponse(
-          '<osm><way id="201" version="4" visible="true"><tag k="name" v="Old One"/></way></osm>'
+          '<osm><way id="201" version="4" visible="true"><nd ref="301"/><nd ref="302"/><nd ref="301"/><tag k="name" v="Old One"/></way></osm>'
         );
       }
-      if (url.endsWith('/api/0.6/way/202') && (!init.method || init.method === 'GET')) {
+      if (url.endsWith('/api/0.6/relation/202') && (!init.method || init.method === 'GET')) {
         return createFetchResponse(
-          '<osm><way id="202" version="7" visible="true"><tag k="name" v="Old Two"/></way></osm>'
+          '<osm><relation id="202" version="7" visible="true"><member type="way" ref="401" role="outer"/><member type="way" ref="402" role="inner"/><tag k="name" v="Old Two"/><tag k="type" v="multipolygon"/></relation></osm>'
         );
       }
       if (url.endsWith('/api/0.6/changeset/create') && init.method === 'PUT') {
         changesetBodies.push(String(init.body || ''));
         return createFetchResponse('125');
       }
-      if ((url.endsWith('/api/0.6/way/201') || url.endsWith('/api/0.6/way/202')) && init.method === 'PUT') {
+      if ((url.endsWith('/api/0.6/way/201') || url.endsWith('/api/0.6/relation/202')) && init.method === 'PUT') {
         putBodies.push(String(init.body || ''));
         return createFetchResponse('');
       }
@@ -1311,7 +1311,7 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
     '2026-01-01T00:00:00Z'
   );
   db.prepare(`INSERT INTO osm.building_contours (osm_type, osm_id, tags_json, updated_at) VALUES (?, ?, ?, ?)`).run(
-    'way',
+    'relation',
     202,
     JSON.stringify({ name: 'Old Two' }),
     '2026-01-01T00:00:00Z'
@@ -1323,7 +1323,7 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
     '2026-01-02T00:00:00Z'
   );
   db.prepare(`INSERT INTO local.architectural_info (osm_type, osm_id, name, updated_at) VALUES (?, ?, ?, ?)`).run(
-    'way',
+    'relation',
     202,
     'New Two',
     '2026-01-02T00:00:00Z'
@@ -1358,7 +1358,7 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
   `
   ).run(
     12,
-    'way',
+    'relation',
     202,
     'admin@example.com',
     'accepted',
@@ -1375,7 +1375,7 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
     service.syncCandidatesToOsm(
       [
         { osmType: 'way', osmId: 201 },
-        { osmType: 'way', osmId: 202 }
+        { osmType: 'relation', osmId: 202 }
       ],
       'admin@example.com'
     ),
@@ -1391,6 +1391,15 @@ test('syncCandidatesToOsm publishes multiple buildings in one changeset', async 
   assert.match(changesetBodies[0], /2 buildings/);
   assert.equal(putBodies.length, 2);
   assert.ok(putBodies.every((body) => body.includes('changeset="125"')));
+  const wayBody = putBodies.find((body) => body.includes('<way id="201"'));
+  const relationBody = putBodies.find((body) => body.includes('<relation id="202"'));
+  assert.ok(wayBody);
+  assert.ok(relationBody);
+  assert.match(wayBody, /<nd ref="301"\/>\s*<nd ref="302"\/>\s*<nd ref="301"\/>/);
+  assert.match(
+    relationBody,
+    /<member type="way" ref="401" role="outer"\/>\s*<member type="way" ref="402" role="inner"\/>/
+  );
 
   const syncedRows = db
     .prepare(

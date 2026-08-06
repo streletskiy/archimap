@@ -303,7 +303,9 @@ function createOsmCandidateResolver(deps: CandidateResolverDeps) {
         ? {
             type: liveElement.type,
             attrs: liveElement.attrs,
-            tags: liveElement.tags
+            tags: liveElement.tags,
+            nodeRefs: liveElement.nodeRefs,
+            members: liveElement.members
           }
         : null,
       desiredTags: desired,

@@ -170,8 +170,8 @@ function unescapeXml(value) {
     .replace(/&amp;/g, '&');
 }
 
-function attrsToObject(text = '') {
-  const attrs = {};
+function attrsToObject(text = ''): LooseRecord {
+  const attrs: LooseRecord = {};
   const re = /([A-Za-z_][A-Za-z0-9_.:-]*)="([^"]*)"/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(String(text || '')))) attrs[String(match[1])] = unescapeXml(match[2]);
@@ -192,14 +192,33 @@ function parseElementXml(xmlText) {
   const type = String(match[1]).trim().toLowerCase();
   const attrs = attrsToObject(match[2]);
   const inner = String(match[3] || '');
-  const tagIndex = inner.indexOf('<tag ');
-  const beforeTags = tagIndex >= 0 ? inner.slice(0, tagIndex).trimEnd() : inner.trimEnd();
-  const tags = {};
-  for (const tagMatch of inner.matchAll(/<tag\s+k="([^"]*)"\s+v="([^"]*)"\s*\/>/g)) {
-    const key = unescapeXml(tagMatch[1]);
-    if (key) tags[key] = unescapeXml(tagMatch[2]);
+  const nodeRefs = [];
+  for (const nodeMatch of inner.matchAll(/<nd\b([^>]*)\/\s*>/gi)) {
+    const nodeAttrs = attrsToObject(nodeMatch[1]);
+    const ref = String(nodeAttrs.ref || '').trim();
+    if (ref) nodeRefs.push(ref);
   }
-  return { type, attrs, beforeTags, tags, rawXml: text };
+  const members = [];
+  for (const memberMatch of inner.matchAll(/<member\b([^>]*)\/\s*>/gi)) {
+    const memberAttrs = attrsToObject(memberMatch[1]);
+    const memberType = String(memberAttrs.type || '')
+      .trim()
+      .toLowerCase();
+    const ref = String(memberAttrs.ref || '').trim();
+    if (!memberType || !ref) continue;
+    members.push({
+      type: memberType,
+      ref,
+      role: String(memberAttrs.role || '')
+    });
+  }
+  const tags = {};
+  for (const tagMatch of inner.matchAll(/<tag\b([^>]*)\/\s*>/gi)) {
+    const tagAttrs = attrsToObject(tagMatch[1]);
+    const key = String(tagAttrs.k || '');
+    if (key) tags[key] = String(tagAttrs.v || '');
+  }
+  return { type, attrs, nodeRefs, members, tags };
 }
 
 function parseGeneralSettingsRow(row: LooseRecord) {
@@ -478,9 +497,9 @@ function parseOsmElementResponse(xmlText) {
     return {
       type,
       attrs: attrsToObject(header),
-      beforeTags: '',
-      tags: {},
-      rawXml: fragment
+      nodeRefs: [],
+      members: [],
+      tags: {}
     };
   }
   return parseElementXml(fragment);
