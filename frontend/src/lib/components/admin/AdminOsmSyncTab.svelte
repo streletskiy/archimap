@@ -6,6 +6,7 @@
     UiButton,
     UiCheckbox,
     UiInput,
+    UiTextarea,
     UiTable,
     UiTableBody,
     UiTableHead,
@@ -36,6 +37,9 @@
   let saveBusy = false;
   let connectBusy = false;
   let syncBusy = false;
+  let repairBusy = false;
+  let repairPlan = '';
+  let repairStatus = '';
   let detailBusy = false;
   let settings = null;
   let activeCandidates = [];
@@ -409,7 +413,36 @@
     }
   }
 
-  $: loading = settingsLoading || activeLoading || archivedLoading || saveBusy || connectBusy || syncBusy;
+  async function runRepairPlan() {
+    if (!isMasterAdmin || repairBusy || !String(repairPlan || '').trim()) return;
+    repairBusy = true;
+    repairStatus = translateNow('admin.osm.repair.running');
+    try {
+      let payload;
+      try {
+        payload = JSON.parse(repairPlan);
+      } catch {
+        throw new Error(translateNow('admin.osm.repair.invalid'));
+      }
+      const response = await apiJson('/api/admin/osm-sync/repairs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      repairStatus = response?.item?.dryRun
+        ? translateNow('admin.osm.repair.dryRunSuccess')
+        : translateNow('admin.osm.repair.success', {
+            changesetId: response?.item?.changesetId || '---'
+          });
+      repairPlan = '';
+    } catch (error) {
+      repairStatus = message(error, translateNow('admin.osm.repair.failed'));
+    } finally {
+      repairBusy = false;
+    }
+  }
+
+  $: loading = settingsLoading || activeLoading || archivedLoading || saveBusy || connectBusy || syncBusy || repairBusy;
   $: syncableCandidates = activeCandidates.filter((item) => canSyncCandidate(item));
   $: selectedSyncCandidates = resolveSelectedSyncCandidates(activeCandidates, selectedCandidateKeys);
   $: pruneSelectedCandidates();
@@ -513,6 +546,39 @@
     </section>
   {:else}
     <p class="text-sm ui-text-muted">{$t('admin.osm.masterOnly')}</p>
+  {/if}
+
+  {#if isMasterAdmin}
+    <details class="overflow-hidden rounded-xl border ui-border ui-surface-muted">
+      <summary class="cursor-pointer list-none p-3">
+        <p class="text-sm font-semibold ui-text-strong">{$t('admin.osm.repair.title')}</p>
+        <p class="mt-1 text-xs ui-text-muted">{$t('admin.osm.repair.hint')}</p>
+      </summary>
+      <div class="space-y-3 border-t ui-border px-3 py-3">
+        <label class="space-y-1 text-sm ui-text-body">
+          <span>{$t('admin.osm.repair.plan')}</span>
+          <UiTextarea
+            bind:value={repairPlan}
+            rows={10}
+            spellcheck="false"
+            placeholder={$t('admin.osm.repair.placeholder')}
+          ></UiTextarea>
+        </label>
+        <div class="flex flex-wrap items-center gap-2">
+          <UiButton
+            type="button"
+            variant="danger"
+            onclick={runRepairPlan}
+            disabled={repairBusy || !isOsmConnected() || !String(repairPlan || '').trim()}
+          >
+            {repairBusy ? $t('admin.osm.repair.running') : $t('admin.osm.repair.submit')}
+          </UiButton>
+          {#if repairStatus}
+            <span class="text-xs ui-text-subtle">{repairStatus}</span>
+          {/if}
+        </div>
+      </div>
+    </details>
   {/if}
 
   <section class="space-y-4 min-w-0">

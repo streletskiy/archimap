@@ -648,6 +648,18 @@
         "saving": "Saving...",
         "connecting": "Connecting..."
       },
+      "repair": {
+        "title": "Structural OSM repair",
+        "hint": "For reviewed plans only: the server checks versions, history, members, and geometry before opening a changeset.",
+        "plan": "Repair plan (JSON)",
+        "placeholder": "Paste a prepared repair plan",
+        "submit": "Validate and publish",
+        "running": "Validating and publishing...",
+        "dryRunSuccess": "Preflight passed; OSM was not changed",
+        "success": "Repair published in changeset {changesetId}",
+        "invalid": "The repair plan contains invalid JSON",
+        "failed": "Failed to complete the structural OSM repair"
+      },
       "list": {
         "title": "Sync queue",
         "empty": "No sync candidates found.",

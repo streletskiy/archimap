@@ -646,6 +646,29 @@ function registerAdminRoutes(deps: LooseRecord) {
     )
   );
 
+  app.post(
+    '/api/admin/osm-sync/repairs',
+    requireCsrfSession,
+    requireAuth,
+    requireAdmin,
+    requireMasterAdmin,
+    withAdminError(
+      async (req, res) => {
+        return res.json({
+          ok: true,
+          item: await osmSyncService.repairDamagedRelations(
+            req.body || {},
+            getSessionEditActorKey(req) || 'admin'
+          )
+        });
+      },
+      {
+        status: 500,
+        message: 'OSM repair service is unavailable'
+      }
+    )
+  );
+
   app.get(/^\/ui(?:\/.*)?$/, requireAuth, requireAdmin, (req, res) => {
     return res.redirect('/admin');
   });

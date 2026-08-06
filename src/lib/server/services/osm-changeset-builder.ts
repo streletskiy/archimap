@@ -246,6 +246,33 @@ async function updateOsmElement(accessToken, apiBaseUrl, currentElement, desired
   );
 }
 
+async function deleteOsmElement(accessToken, apiBaseUrl, currentElement, changesetId) {
+  const elementAttrs: LooseRecord = currentElement.attrs || {};
+  const attrs = sanitizeElementAttrs(elementAttrs, currentElement.type, changesetId);
+  const bodyXml = buildElementXml(
+    {
+      type: currentElement.type,
+      attrs,
+      nodeRefs: currentElement.nodeRefs,
+      members: currentElement.members
+    },
+    currentElement.tags || {}
+  );
+  assertElementStructurePreserved(currentElement, bodyXml);
+  return fetchText(
+    new URL(`/api/0.6/${encodeURIComponent(currentElement.type)}/${encodeURIComponent(elementAttrs.id)}`, apiBaseUrl),
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'text/xml; charset=utf-8',
+        Accept: 'text/plain, */*;q=0.1'
+      },
+      body: bodyXml
+    }
+  );
+}
+
 export {
   buildElementXml,
   normalizeElementStructure,
@@ -255,5 +282,6 @@ export {
   createChangeset,
   closeChangeset,
   sanitizeElementAttrs,
-  updateOsmElement
+  updateOsmElement,
+  deleteOsmElement
 };

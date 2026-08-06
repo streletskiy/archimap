@@ -85,4 +85,29 @@ async function fetchOsmElement(osmType, osmId, accessToken, apiBaseUrl, deps: Lo
   return parseOsmElementResponse(xml);
 }
 
-export { fetchText, exchangeCodeForToken, fetchOsmUserDetails, fetchOsmElement };
+async function fetchOsmElementVersion(
+  osmType,
+  osmId,
+  version,
+  accessToken,
+  apiBaseUrl,
+  deps: LooseOsmClientDeps = {}
+) {
+  const endpoint = new URL(
+    `/api/0.6/${encodeURIComponent(osmType)}/${encodeURIComponent(osmId)}/${encodeURIComponent(version)}`,
+    apiBaseUrl
+  );
+  const xml = await fetchText(
+    endpoint,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/xml, text/xml;q=0.9, */*;q=0.1'
+      }
+    },
+    deps
+  );
+  return parseOsmElementResponse(xml);
+}
+
+export { fetchText, exchangeCodeForToken, fetchOsmUserDetails, fetchOsmElement, fetchOsmElementVersion };
