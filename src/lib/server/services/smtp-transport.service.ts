@@ -73,7 +73,10 @@ function isConnectionStageError(error) {
 
 function createTransportFromCandidate(candidate) {
   if (candidate.type === 'url') {
-    return nodemailer.createTransport(candidate.url);
+    return nodemailer.createTransport(candidate.url, {
+      disableFileAccess: true,
+      disableUrlAccess: true
+    });
   }
   return nodemailer.createTransport({
     host: candidate.host,
@@ -82,7 +85,9 @@ function createTransportFromCandidate(candidate) {
     auth: { user: candidate.user, pass: candidate.pass },
     connectionTimeout: 20000,
     greetingTimeout: 20000,
-    socketTimeout: 30000
+    socketTimeout: 30000,
+    disableFileAccess: true,
+    disableUrlAccess: true
   });
 }
 
@@ -100,7 +105,11 @@ async function sendMailWithFallback(rawSmtpConfig, mailOptions: LooseRecord = {}
     const candidate = candidates[index];
     try {
       const transporter = createTransportFromCandidate(candidate);
-      const info = await transporter.sendMail(mailOptions);
+      const info = await transporter.sendMail({
+        ...mailOptions,
+        disableFileAccess: true,
+        disableUrlAccess: true
+      });
       const accepted = toList(info?.accepted);
       const rejected = toList(info?.rejected);
       const pending = toList(info?.pending);
