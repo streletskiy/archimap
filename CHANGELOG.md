@@ -1,0 +1,33 @@
+# Changelog
+
+## v0.8.3
+
+### 🚀 Features
+
+- **Modern Basemaps and 3D Mapping:** Added a configurable MapTiler basemap, custom PMTiles sources, 3D buildings, URL-backed camera settings, and a visual roof-shape selector ([2d07099](https://github.com/streletskiy/archimap/commit/2d070994835443b5f1de7caed13ed46c444b2d96), [5e5a803](https://github.com/streletskiy/archimap/commit/5e5a803066653902c8f7d40198fd38adf4e8992a), [69eba7f](https://github.com/streletskiy/archimap/commit/69eba7f11f6d198354a7409e0e32184455cac6f7), [925bd5c](https://github.com/streletskiy/archimap/commit/925bd5ce87d47d4c977dd8ec79228cc84be4e762), [4799efd](https://github.com/streletskiy/archimap/commit/4799efd8e4d26e1afc87de440fb7bb84cdef3c85)).
+- **Incremental Region Sync:** Added incremental diff and merge primitives, end-to-end incremental synchronization, Geofabrik country subdivisions, and Planetiler-based PMTiles generation ([3c67b65](https://github.com/streletskiy/archimap/commit/3c67b65571541bf8ffc8decdc8ebe76b66a6171f), [785a0e4](https://github.com/streletskiy/archimap/commit/785a0e4604a3abc1459b7c37e268193c19e5a12a), [aef5cfa](https://github.com/streletskiy/archimap/commit/aef5cfa368f4c93eb3a13f554c7cab03d831a2c3), [ffc4b39](https://github.com/streletskiy/archimap/commit/ffc4b39130bdaa3f1ef2b4a9ea17be8202a3d222)).
+- **Region Sync Operations:** Added segmented pipeline progress, cancellation, and clearer stage reporting in the admin interface ([fd3eb9a](https://github.com/streletskiy/archimap/commit/fd3eb9aaf82dd21b3ad1ced180755734e536d6ec), [81cf8c2](https://github.com/streletskiy/archimap/commit/81cf8c2981ea5b0dc3510aebd693bc64f8b107a0), [b7b662a](https://github.com/streletskiy/archimap/commit/b7b662a1872f09805a8bee18d00d3bad9f30f7e5)).
+
+### 🛠 Architecture & Refactoring
+
+- **Low-Memory Import Pipeline:** Reworked managed region sync around PostgreSQL, osmium, Planetiler, sharded PMTiles builds, and a low-memory export/apply path for large regions and lower-power hosts ([95d9621](https://github.com/streletskiy/archimap/commit/95d9621c54364d87234511fd41f111f3a79d6a12), [ff14c33](https://github.com/streletskiy/archimap/commit/ff14c33d847c32aa62b4621599facc1b0f14d757), [5091629](https://github.com/streletskiy/archimap/commit/50916295791c24b3a17fc08a281ee1eb48400729), [1e7f6b4](https://github.com/streletskiy/archimap/commit/1e7f6b4ff47c88591158b967003b9b6533a8a863)).
+- **Import Performance:** Reduced bulk-upsert work, materialized DuckDB exports, rebuilt indexes around large imports, and avoided unnecessary PostgreSQL re-exports ([b3c259e](https://github.com/streletskiy/archimap/commit/b3c259e61d0c05b40a7b72dd9aee912b195853ea), [5c2e32e](https://github.com/streletskiy/archimap/commit/5c2e32ec6282d01a25aeeccca9f65001d8f98b32), [6ae4bd3](https://github.com/streletskiy/archimap/commit/6ae4bd39c078fa60ff8052a5d02612d48347ce1d), [a30e05e](https://github.com/streletskiy/archimap/commit/a30e05e27223abfc544ff3f481e25e68425f3bc6)).
+- **Map Rendering:** Split the 3D stack and MapLibre renderer into isolated services while preserving map layer behavior ([db497a0](https://github.com/streletskiy/archimap/commit/db497a0f1430b199c9ae850a4a03cd15e68b57a9), [7da6fc6](https://github.com/streletskiy/archimap/commit/7da6fc6056fc3dd05b56c82b1f74bb252ecf7a46)).
+
+### 🐛 Bug Fixes
+
+- **OSM Relation Safety:** Preserved complete relation member lists during tag-only synchronization and added a guarded structural-repair workflow for already damaged relations ([3ebb966](https://github.com/streletskiy/archimap/commit/3ebb966a935130851d429a38e00d67506b59c1c4), [3b3112d](https://github.com/streletskiy/archimap/commit/3b3112d218e76903cf60ccc5316f569573002606)).
+- **Region Sync Reliability:** Prevented duplicate retries and requeues, recovered interrupted jobs correctly, cleaned temporary workspaces, and avoided out-of-memory failures on large PBF inputs ([3a9e361](https://github.com/streletskiy/archimap/commit/3a9e36145bc049ab432d3c77b390cfa91320d284), [33f6073](https://github.com/streletskiy/archimap/commit/33f607332303f55bb5aeff4e434119ba87b58153), [e4bb6ef](https://github.com/streletskiy/archimap/commit/e4bb6ef1932972c8016760bc589d513fc6e7c4a2), [a369e7b](https://github.com/streletskiy/archimap/commit/a369e7bc6bc04d62da36ff1091b7defd82038100), [6feb0fb](https://github.com/streletskiy/archimap/commit/6feb0fbef8e5f63b93592cb73236d77c94c2273d)).
+- **Security Hardening:** Protected basemap credentials from cache validators and ETags, hardened SMTP delivery, and resolved dependency security advisories ([4614e82](https://github.com/streletskiy/archimap/commit/4614e82ad573bb2d8525dc5994da967baeaaecf1), [34f8f28](https://github.com/streletskiy/archimap/commit/34f8f28c2bb2b0fa2527e66f528a5a46bb079076), [aba6c26](https://github.com/streletskiy/archimap/commit/aba6c267796da214a19984d7538ef733aa18233f), [648dcc3](https://github.com/streletskiy/archimap/commit/648dcc389ffef88d84d8cfbad700fcc041667fca)).
+- **Map and Admin UX:** Restored URL filters, stabilized low-zoom marker ordering and glyph routing, blocked premature sync actions, and kept unchanged OSM tags visually neutral ([9a645f0](https://github.com/streletskiy/archimap/commit/9a645f0c16a63356e15f35e591b78f0bfb3362eb), [1402ed7](https://github.com/streletskiy/archimap/commit/1402ed7a08a7d562d274443dd9454f9d405a8a74), [ae941ec](https://github.com/streletskiy/archimap/commit/ae941ecde4bcbd508e4c5c8a4aa7360279718625), [796f6f3](https://github.com/streletskiy/archimap/commit/796f6f340f3f9d8a916334ad7c84e6383e53dae0), [eb5a181](https://github.com/streletskiy/archimap/commit/eb5a181422eb2572a5e2336d8689fc5c8bcc1acf)).
+
+### 📦 Dependency Updates
+
+- **Runtime and Tooling:** Updated security-sensitive npm dependencies, refreshed both lockfiles, and confirmed clean production and development audits ([1f70cee](https://github.com/streletskiy/archimap/commit/1f70cee3c9ada50a480f6d63b810ee7168929051), [648dcc3](https://github.com/streletskiy/archimap/commit/648dcc389ffef88d84d8cfbad700fcc041667fca)).
+
+### 🔧 Maintenance
+
+- **Container Delivery:** Added automatic `dev` image publication and release automation for versioned multi-architecture images and `latest` ([f39024b](https://github.com/streletskiy/archimap/commit/f39024b108a3e0297c890cc75cd05295a840abe9)).
+- **Project Guidance:** Added the Graphify knowledge graph, agent instructions, repository-wide LF rules, and refreshed development and operational documentation ([10642ee](https://github.com/streletskiy/archimap/commit/10642ee0a267130e51fd7a14a787e2c00dc68f72), [9828a9b](https://github.com/streletskiy/archimap/commit/9828a9b9d4bcf3c5fb79668f04d47c11dbd50c82)).
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.8.2...0.8.3)

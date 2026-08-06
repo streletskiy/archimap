@@ -77,12 +77,14 @@ Open `Admin -> Settings` and choose `CARTO`, `MapTiler`, or `Custom`.
 
 ## Docs
 
+- Changelog -> [CHANGELOG.md](CHANGELOG.md)
 - Full index -> [docs/README.md](docs/README.md)
 - Architecture -> [docs/architecture.md](docs/architecture.md)
 - UI architecture -> [docs/ui-architecture.md](docs/ui-architecture.md)
 - Setup -> [docs/dev/setup.md](docs/dev/setup.md)
 - Environment -> [docs/dev/env.md](docs/dev/env.md)
 - Docker -> [docs/dev/docker.md](docs/dev/docker.md)
+- Release process -> [docs/dev/release.md](docs/dev/release.md)
 - OpenAPI contract -> [docs/openapi.yaml](docs/openapi.yaml)
 - API guide -> [docs/api.md](docs/api.md)
 - OSM import pipeline -> [docs/osm-import-pipeline.md](docs/osm-import-pipeline.md)

@@ -22,7 +22,13 @@
    - `/api/contours-status`
    - `/metrics` only when `METRICS_ENABLED=true`
 
-## Docker release script behavior
+## Automated Docker releases
+
+Pushing an `X.Y.Z` Git tag starts `.github/workflows/docker-release.yml`. Wait for it to
+publish and verify `streletskiy/archimap:X.Y.Z` and `streletskiy/archimap:latest` for both
+`linux/amd64` and `linux/arm64` before publishing the matching GitHub release.
+
+## Manual Docker release fallback
 
 - Runtime base tag is derived from the `runtime-base` Dockerfile stage inputs, so changes to the runtime package set (including `aria2`) automatically produce a new registry tag.
 - `scripts/release-docker.sh` and `scripts/release-docker.ps1` skip rebuilding `runtime-base` if that tag already exists in registry.
@@ -38,14 +44,14 @@
    - Logged in to target registry (`docker login`).
 2. Linux/macOS (Bash):
    - Minimal release:
-     - `./scripts/release-docker.sh --version 1.2.3`
+     - `./scripts/release-docker.sh --version 1.2.3 --latest`
    - Custom image/platforms:
      - `./scripts/release-docker.sh --version 1.2.3 --image yourorg/archimap --platforms linux/amd64,linux/arm64`
    - Force runtime-base rebuild:
      - `./scripts/release-docker.sh --version 1.2.3 --force-runtime-base`
 3. Windows (PowerShell):
    - Minimal release:
-     - `./scripts/release-docker.ps1 -Version 1.2.3`
+     - `./scripts/release-docker.ps1 -Version 1.2.3 -Latest`
    - Custom image/platforms:
      - `./scripts/release-docker.ps1 -Version 1.2.3 -Image yourorg/archimap -Platforms linux/amd64,linux/arm64`
    - Force runtime-base rebuild:
