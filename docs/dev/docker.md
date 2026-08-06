@@ -68,6 +68,28 @@ Reference: [`Dockerfile`](../../Dockerfile)
 
 ## Release Pipeline
 
+Every push to `dev` runs [`.github/workflows/docker-dev.yml`](../../.github/workflows/docker-dev.yml). The workflow:
+
+- builds only `linux/amd64` and publishes `streletskiy/archimap:dev`
+- uses the same build metadata and hashed `runtime-base` tag as the release scripts
+- builds `runtime-base` only when its derived tag is missing from Docker Hub
+- reuses GitHub Actions caches and cancels superseded builds so an older commit cannot overwrite a newer `dev` image
+
+The repository must have these GitHub Actions secrets:
+
+- `DOCKERHUB_USERNAME` — Docker Hub account name
+- `DOCKERHUB_TOKEN` — Docker Hub personal access token with read/write permission
+
+Deploy the current development image:
+
+```bash
+export ARCHIMAP_IMAGE=streletskiy/archimap:dev
+docker pull streletskiy/archimap:dev
+docker compose up -d
+```
+
+Versioned multi-arch releases remain manual and use the release scripts below.
+
 Use release scripts:
 
 - [`scripts/release-docker.ps1`](../../scripts/release-docker.ps1)
