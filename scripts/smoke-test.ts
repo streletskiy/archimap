@@ -2,7 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const TEST_PORT = 3322;
+const configuredTestPort = Number(process.env.ARCHIMAP_SMOKE_PORT);
+const TEST_PORT =
+  Number.isInteger(configuredTestPort) && configuredTestPort > 0 && configuredTestPort <= 65535
+    ? configuredTestPort
+    : 39000 + Math.floor(Math.random() * 1000);
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const PAGE_CHECKS = ['/', '/account', '/admin', '/info', '/app-config.js', '/api/contours-status'];
 const SMOKE_DB_PROVIDER =
