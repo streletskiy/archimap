@@ -1,2 +1,7 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 graphify-out/*.json linguist-generated=true
 graphify-out/graph.html linguist-generated=true

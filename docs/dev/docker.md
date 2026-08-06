@@ -75,6 +75,14 @@ Every push to `dev` runs [`.github/workflows/docker-dev.yml`](../../.github/work
 - builds `runtime-base` only when its derived tag is missing from Docker Hub
 - reuses GitHub Actions caches and cancels superseded builds so an older commit cannot overwrite a newer `dev` image
 
+Every pushed `X.Y.Z` tag runs
+[`.github/workflows/docker-release.yml`](../../.github/workflows/docker-release.yml). The workflow:
+
+- builds and publishes `linux/amd64` and `linux/arm64`
+- publishes both `streletskiy/archimap:X.Y.Z` and `streletskiy/archimap:latest`
+- checks that the shared `runtime-base` supports both release platforms before reusing it
+- verifies both published tags and platforms before completing
+
 The repository must have these GitHub Actions secrets:
 
 - `DOCKERHUB_USERNAME` — Docker Hub account name
@@ -88,7 +96,7 @@ docker pull streletskiy/archimap:dev
 docker compose up -d
 ```
 
-Versioned multi-arch releases remain manual and use the release scripts below.
+The release scripts below remain available as a manual fallback and for custom registries.
 
 Use release scripts:
 
@@ -96,12 +104,12 @@ Use release scripts:
 - [`scripts/release-docker.sh`](../../scripts/release-docker.sh)
 
 ```powershell
-./scripts/release-docker.ps1 -Version 1.2.3
+./scripts/release-docker.ps1 -Version 1.2.3 -Latest
 ```
 
 ```bash
 chmod +x ./scripts/release-docker.sh
-./scripts/release-docker.sh --version 1.2.3
+./scripts/release-docker.sh --version 1.2.3 --latest
 ```
 
 What it does:
