@@ -22,6 +22,7 @@
 - [Release](dev/release.md)
 - [Dataset](dev/dataset.md)
 - [i18n](dev/i18n.md)
+- [Graphify Knowledge Graph](dev/graphify.md)
 
 ## Performance
 

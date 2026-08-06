@@ -37,6 +37,7 @@
     "i18n:extract": "node --import tsx scripts/i18n-extract.ts",
     "i18n:validate": "node --import tsx scripts/i18n-validate.ts",
     "i18n:check": "node --import tsx scripts/i18n-check.ts",
+    "graphify:update": "node --import tsx scripts/update-graphify-snapshot.ts",
     "osm:audit-relations": "node --import tsx scripts/audit-osm-relation-members.ts",
     "start": "node --import tsx server.sveltekit.ts",
     "start:sveltekit": "node --import tsx server.sveltekit.ts",
