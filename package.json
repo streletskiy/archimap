@@ -70,7 +70,7 @@
     "polygon-clipping": "^0.15.7",
     "redis": "^5.8.2",
     "tsx": "^4.22.4",
-    "zod": "^4.1.11"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
