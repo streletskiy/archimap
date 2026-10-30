@@ -688,6 +688,30 @@ test('postgres runtime: auth/admin flow and no sqlite file creation', async (t) 
       try {
         await upsertFilterFixtures(databaseUrl, fixtures);
 
+        // OSM level aliases must retain local overrides in both query paths,
+        // even when the original contour has no building:levels tag.
+        const levelRequest = {
+          bbox: payloads[0].bbox,
+          zoomBucket: 15,
+          maxResults: 1,
+          rules: [{ key: 'building:levels', op: 'equals', value: '5' }]
+        };
+        const levelSingleResponse = await callAnonApi('/api/buildings/filter-matches', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(levelRequest)
+        });
+        assert.equal(levelSingleResponse.status, 200);
+        const levelSingle = await levelSingleResponse.json();
+        assert.deepEqual(levelSingle.matchedKeys, [`way/${baseId + 3}`]);
+        assert.equal(levelSingle.meta.truncated, false);
+        const levelBatchResponse = await callAnonApi('/api/buildings/filter-matches-batch', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ bbox: levelRequest.bbox, zoomBucket: 15, requests: [levelRequest] })
+        });
+        assert.equal(levelBatchResponse.status, 200);
+        const levelBatch = await levelBatchResponse.json();
+        assert.deepEqual(levelBatch.items[0].matchedKeys, levelSingle.matchedKeys);
+        assert.equal(levelBatch.items[0].meta.truncated, false);
+
         for (let i = 0; i < payloads.length; i += 1) {
           const payload = payloads[i];
           const expected = await buildExpectedAnonMatches(databaseUrl, payload);

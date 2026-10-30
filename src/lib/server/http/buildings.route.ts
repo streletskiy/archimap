@@ -1,4 +1,4 @@
-const { sendCachedJson } = require('../infra/http-cache.infra');
+const { sendCachedJson, sendCompressedJson } = require('../infra/http-cache.infra');
 const { buildFilterMatchBatchResults, createBuildingFiltersService } = require('../services/building-filters.service');
 const { createBuildingsRepository } = require('../services/buildings.repository');
 const {
@@ -98,7 +98,7 @@ function registerBuildingsRoutes(deps) {
     if (result.error) {
       return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
-    return res.json({ items: result.items || [] });
+    return sendCompressedJson(req, res, { items: result.items || [] });
   });
 
   app.get('/api/buildings/filter-data-bbox', filterDataBboxRateLimiter, async (req, res) => {
@@ -107,7 +107,7 @@ function registerBuildingsRoutes(deps) {
       return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
     return sendCachedJson(req, res, result.payload || { items: [], truncated: false }, {
-      cacheControl: 'public, max-age=10'
+      cacheControl: 'private, no-cache'
     });
   });
 
@@ -116,7 +116,7 @@ function registerBuildingsRoutes(deps) {
     if (result.error) {
       return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
-    return res.json(
+    return sendCompressedJson(req, res,
       result.payload || {
         items: [],
         meta: {
@@ -132,7 +132,7 @@ function registerBuildingsRoutes(deps) {
     if (result.error) {
       return res.status(result.status || 400).json({ code: result.code || 'ERR_REQUEST_FAILED', error: result.error });
     }
-    return res.json(
+    return sendCompressedJson(req, res,
       result.payload || {
         matchedKeys: [],
         matchedFeatureIds: [],

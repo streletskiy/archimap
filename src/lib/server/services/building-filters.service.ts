@@ -274,7 +274,7 @@ function buildFilterMatchResultForRules(
   items,
   rules,
   maxResults,
-  { bbox = null, renderMode = 'contours', zoomBucket = 0 } = {}
+  { bbox = null, renderMode = 'contours', zoomBucket = 0, includeLocations = true } = {}
 ) {
   const matchedKeys = [];
   const matchedFeatureIds = [];
@@ -370,6 +370,11 @@ function buildFilterMatchResultForRules(
     const item = items[index];
     const ok = rules.every((rule) => matchesFilterRule(item, rule));
     if (!ok) continue;
+    // Only report truncation after observing a match beyond the requested limit.
+    if (matchedCount >= safeMaxResults) {
+      truncated = true;
+      break;
+    }
     matchedCount += 1;
     matchedKeys.push(item.osmKey);
     const parsed = parseOsmKey(item.osmKey);
@@ -378,7 +383,7 @@ function buildFilterMatchResultForRules(
       matchedFeatureIds.push(featureId);
       const lon = Number(item.centerLon);
       const lat = Number(item.centerLat);
-      if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      if (includeLocations && Number.isFinite(lon) && Number.isFinite(lat)) {
         matchedLocations.push({
           id: featureId,
           lon,
@@ -387,10 +392,6 @@ function buildFilterMatchResultForRules(
           osmKey: item.osmKey
         });
       }
-    }
-    if (matchedCount >= safeMaxResults) {
-      truncated = true;
-      break;
     }
   }
 
@@ -413,7 +414,8 @@ function buildFilterMatchBatchResults(
     cacheHit = false,
     forceTruncated = false,
     renderMode = 'contours',
-    zoomBucket = 0
+    zoomBucket = 0,
+    includeLocations = true
   } = {}
 ) {
   return (Array.isArray(requests) ? requests : []).map((request) => {
@@ -424,7 +426,8 @@ function buildFilterMatchBatchResults(
       {
         bbox,
         renderMode,
-        zoomBucket
+        zoomBucket,
+        includeLocations
       }
     );
     return buildFilterMatchPayload({
@@ -582,18 +585,23 @@ function createBuildingFiltersService({
     const { minLon, minLat, maxLon, maxLat } = bbox;
     const zoomBucket = resolveZoomBucket(body);
     const renderMode = normalizeRenderMode(body?.renderMode);
+    const includeLocations = renderMode === 'markers' || body?.includeLocations !== false;
     const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
     const actorKey = normalizeActorKey(actorKeyRaw) || 'anon';
     const queryMode = queryService.getBboxQueryMode();
-    const cacheKey = `${actorKey}:batch:${bboxHash}:${zoomBucket}:${renderMode}:${queryMode}:${normalizedRequests.map((request) => `${request.id}:${request.rulesHash}:${request.maxResults}`).join('|')}`;
+    // Client IDs and hashes are correlation metadata, never cache identity.
+    const cacheKey = JSON.stringify([actorKey, 'batch', bboxHash, zoomBucket, renderMode, queryMode, includeLocations,
+      normalizedRequests.map((request) => [request.rules, request.maxResults])]);
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
       return {
         payload: {
-          items: (Array.isArray(cached?.items) ? cached.items : []).map((item) => ({
+          items: (Array.isArray(cached?.items) ? cached.items : []).map((item, index) => ({
             ...item,
+            id: normalizedRequests[index].id,
             meta: {
               ...(item?.meta || {}),
+              rulesHash: normalizedRequests[index].rulesHash,
               cacheHit: true,
               elapsedMs: Date.now() - startedAt
             }
@@ -634,16 +642,17 @@ function createBuildingFiltersService({
             applyPersonalEditsToFilterItems,
             queryService.mapFilterDataRow
           );
-    const elapsedMs = Date.now() - startedAt;
     const items = buildFilterMatchBatchResults(candidateItems, normalizedRequests, {
       bbox,
       bboxHash,
-      elapsedMs,
       cacheHit: false,
       forceTruncated: candidateRows.length >= candidateLimit,
       renderMode,
-      zoomBucket
+      zoomBucket,
+      includeLocations
     });
+    const elapsedMs = Date.now() - startedAt;
+    for (const item of items) item.meta.elapsedMs = elapsedMs;
     const payload = {
       items,
       meta: {
@@ -690,11 +699,12 @@ function createBuildingFiltersService({
     const { minLon, minLat, maxLon, maxLat } = bbox;
     const rulesHash = String(body?.rulesHash || '').trim() || stableRulesHash(normalizedRules);
     const renderMode = normalizeRenderMode(body?.renderMode);
+    const includeLocations = renderMode === 'markers' || body?.includeLocations !== false;
     const bboxHash = buildBboxHash(minLon, minLat, maxLon, maxLat);
     const zoomBucket = resolveZoomBucket(body);
     const actorKey = normalizeActorKey(actorKeyRaw) || 'anon';
     const queryMode = queryService.getBboxQueryMode();
-    const cacheKey = `${actorKey}:${rulesHash}:${bboxHash}:${zoomBucket}:${renderMode}:${maxResults}:${queryMode}`;
+    const cacheKey = JSON.stringify([actorKey, normalizedRules, bboxHash, zoomBucket, renderMode, maxResults, queryMode, includeLocations]);
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
       return {
@@ -702,6 +712,7 @@ function createBuildingFiltersService({
           ...cached,
           meta: {
             ...cached.meta,
+            rulesHash,
             cacheHit: true,
             elapsedMs: Date.now() - startedAt
           }
@@ -749,7 +760,8 @@ function createBuildingFiltersService({
         matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
           bbox,
           renderMode,
-          zoomBucket
+          zoomBucket,
+          includeLocations
         });
         matchedResult.truncated = rows.length > tagOnlyMaxResults || matchedResult.truncated;
       } else {
@@ -767,7 +779,8 @@ function createBuildingFiltersService({
         matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
           bbox,
           renderMode,
-          zoomBucket
+          zoomBucket,
+          includeLocations
         });
         matchedResult.truncated = candidateRows.length >= candidateLimit || matchedResult.truncated;
       }
@@ -783,7 +796,8 @@ function createBuildingFiltersService({
       matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
         bbox,
         renderMode,
-        zoomBucket
+        zoomBucket,
+        includeLocations
       });
       matchedResult.truncated = candidateRows.length >= candidateLimit || matchedResult.truncated;
     }

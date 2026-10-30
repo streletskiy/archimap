@@ -599,6 +599,7 @@ export function createFilterFetcher(
         bbox,
         zoomBucket,
         renderMode: String(renderMode || 'contours') === 'markers' ? 'markers' : 'contours',
+        includeLocations: renderMode === 'markers',
         rules,
         rulesHash,
         maxResults: Math.max(1, Math.trunc(requestedMaxResults))
@@ -648,6 +649,7 @@ export function createFilterFetcher(
         bbox,
         zoomBucket,
         renderMode: String(renderMode || 'contours') === 'markers' ? 'markers' : 'contours',
+        includeLocations: renderMode === 'markers',
         requests: (Array.isArray(requestSpecs) ? requestSpecs : []).map((spec) => ({
           id: String(spec?.id || ''),
           rules: Array.isArray(spec?.rules) ? spec.rules : [],

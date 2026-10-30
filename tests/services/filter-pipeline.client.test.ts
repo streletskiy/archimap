@@ -203,3 +203,146 @@ test('viewport duplicate skip only applies after a completed authoritative reque
     false
   );
 });
+
+function createPipelineMap() {
+  return {
+    getBounds: () => ({ getWest: () => 44, getSouth: () => 56, getEast: () => 44.1, getNorth: () => 56.1 }),
+    getZoom: () => 14,
+    getLayer: () => null
+  };
+}
+
+test('initial replay and moveend share the pending filter request', async (t) => {
+  const { createFilterPipeline } = await loadMapFilterPipeline();
+  const requests = [];
+  let resolveResponse;
+  let resolveApplied;
+  const response = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const applied = new Promise<{ count: number }>((resolve) => {
+    resolveApplied = resolve;
+  });
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(init);
+    return response;
+  });
+  const pipeline = createFilterPipeline({
+    map: createPipelineMap(),
+    onStatusChange: (status) => {
+      if (status.statusCode === 'applied') resolveApplied(status);
+    }
+  });
+  t.after(() => pipeline.destroy());
+  const filters = [{ key: 'building:levels', op: 'equals', value: '5' }];
+  await pipeline.applyBuildingFilters(filters);
+  await pipeline.applyBuildingFilters(filters);
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(requests.length, 1);
+  await pipeline.applyBuildingFilters(filters, { reason: 'viewport' });
+  await pipeline.applyBuildingFilters(filters, { reason: 'style' });
+  await new Promise((resolve) => setTimeout(resolve, 210));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].signal.aborted, false);
+  resolveResponse(new Response(JSON.stringify({ matchedKeys: ['way/1'], matchedFeatureIds: [2], meta: {} })));
+  const status = await applied;
+  assert.equal(status.count, 1);
+});
+
+test('style reload reapplies cached filter paint to recreated layers', async (t) => {
+  const { createFilterPipeline } = await loadMapFilterPipeline();
+  const paintCalls = [];
+  const fetch = t.mock.method(
+    globalThis,
+    'fetch',
+    async () =>
+      new Response(
+        JSON.stringify({
+          matchedKeys: ['way/1'],
+          matchedFeatureIds: [2],
+          meta: {}
+        })
+      )
+  );
+  let resolveApplied;
+  const applied = new Promise((resolve) => {
+    resolveApplied = resolve;
+  });
+  const pipeline = createFilterPipeline({
+    map: {
+      ...createPipelineMap(),
+      getLayer: (id) => (id === 'highlight' ? { id } : null),
+      setFilter: () => {},
+      setPaintProperty: (...args) => paintCalls.push(args)
+    },
+    getLayerIds: () => ({ filterHighlightFillLayerIds: ['highlight'] }),
+    onStatusChange: (status) => {
+      if (status.statusCode === 'applied') resolveApplied();
+    }
+  });
+  t.after(() => pipeline.destroy());
+  const filters = [{ key: 'building:levels', op: 'equals', value: '5' }];
+  await pipeline.applyBuildingFilters(filters);
+  await applied;
+  const initialPaintCalls = paintCalls.length;
+  assert.ok(initialPaintCalls > 0);
+  await pipeline.applyBuildingFilters(filters, { reason: 'style' });
+  assert.ok(paintCalls.length > initialPaintCalls);
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('clearing filters invalidates pending preparation and scheduled viewport refresh', async (t) => {
+  const { createFilterPipeline } = await loadMapFilterPipeline();
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response('{}'));
+  const pipeline = createFilterPipeline({ map: createPipelineMap() });
+  t.after(() => pipeline.destroy());
+  let state;
+  const unsubscribe = pipeline.state.subscribe((value) => {
+    state = value;
+  });
+  t.after(unsubscribe);
+  const filters = [{ key: 'building:levels', op: 'equals', value: '5' }];
+  const preparing = pipeline.applyBuildingFilters(filters);
+  pipeline.scheduleFilterRefresh(filters);
+  pipeline.clearFilterHighlight();
+  await preparing;
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.equal(state.phase, 'idle');
+});
+
+test('cleared filters cannot be repainted by a late response', async (t) => {
+  const { createFilterPipeline } = await loadMapFilterPipeline();
+  let resolveResponse;
+  let started;
+  let signal;
+  const response = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const requestStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    signal = init.signal;
+    started();
+    // Deliberately ignore abort to exercise stale-response protection.
+    return response;
+  });
+  const statuses = [];
+  const pipeline = createFilterPipeline({
+    map: createPipelineMap(),
+    onStatusChange: (status) => statuses.push(status)
+  });
+  t.after(() => pipeline.destroy());
+  await pipeline.applyBuildingFilters([{ key: 'building:levels', op: 'equals', value: '5' }]);
+  await requestStarted;
+  pipeline.clearFilterHighlight();
+  assert.equal(signal.aborted, true);
+  resolveResponse(new Response(JSON.stringify({ matchedKeys: ['way/1'], matchedFeatureIds: [2], meta: {} })));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(statuses.at(-1).statusCode, 'idle');
+  assert.equal(
+    statuses.some((status) => status.statusCode === 'applied'),
+    false
+  );
+});

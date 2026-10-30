@@ -19,6 +19,7 @@ const ARCHI_RULE_KEYS = new Set([
   'design_ref',
   'design_year',
   'material',
+  'material_concrete',
   'roof_shape',
   'colour',
   'levels',
@@ -37,6 +38,7 @@ const ARCHI_RULE_COLUMN_ORDER = [
   'design_ref',
   'design_year',
   'material',
+  'material_concrete',
   'roof_shape',
   'colour',
   'levels',
@@ -161,7 +163,26 @@ function parseNumericFilterValue(rawValue) {
 function usesArchiFallbackRuleKey(ruleKey) {
   const key = normalizeArchiRuleKey(ruleKey);
   if (!key) return false;
-  return key.startsWith('archi.') || ARCHI_RULE_KEYS.has(key);
+  return key.startsWith('archi.') || ARCHI_RULE_KEYS.has(key) || Boolean(getArchiOverrideColumn(key));
+}
+
+// These OSM aliases share the override precedence used by getRuleValue.
+// Pushing their raw tags into SQL would discard edited/derived matches.
+function getArchiOverrideColumn(key) {
+  const columns = {
+    'building:levels': 'levels',
+    'building:colour': 'colour',
+    'building:material': 'material',
+    'building:material:concrete': 'material_concrete',
+    'building:architecture': 'style',
+    architecture: 'style',
+    'building:year': 'year_built',
+    start_date: 'year_built',
+    architect_name: 'architect',
+    'name:ru': 'name',
+    'name:en': 'name'
+  };
+  return Object.prototype.hasOwnProperty.call(columns, key) ? columns[key] : null;
 }
 
 function splitPostgresPushdownRules(rules) {
@@ -188,6 +209,7 @@ function collectRequiredArchiColumns(rules) {
       fallbackKey = key;
     }
 
+    fallbackKey = getArchiOverrideColumn(fallbackKey || key) || fallbackKey;
     if (!ARCHI_RULE_KEYS.has(fallbackKey)) continue;
     required.add(fallbackKey);
     if (fallbackKey === 'archimap_description') {

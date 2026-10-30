@@ -36,14 +36,27 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
   - low match count -> larger window;
   - high match count -> smaller window.
 
-## Chunked feature-state apply
+## Highlight apply
 
-- Diff (`toDisable`, `toEnable`) is applied in chunks (`requestAnimationFrame`) to avoid long main-thread stalls.
-- Default chunk size: `540`.
-- For dense diffs (`toEnable + toDisable >= 1200`) a burst mode increases per-frame budget (`~8.5ms`) to reduce first visible update latency.
-- Dense burst can be toggled for profiling with URL param: `?filterDenseBurst=0|1`.
-- Each frame checks `latestFilterToken`; stale apply is cancelled early.
-- On cancellation, local tracked feature-state set is kept consistent with already applied partial changes.
+- The current contour path uses dedicated highlight layers with `match` expressions for membership and color. MapLibre compiles membership into a lookup table rather than scanning an ID array for every feature.
+- Reapplying equal groups skips unchanged paint work; recreating a style forces repaint.
+- `latestFilterToken` rejects stale request and worker results, including results that arrive after a clear.
+- Identical pending applies share their request. URL replay retains layer IDs, preserving client and server cache reuse.
+- Contour requests use `includeLocations=false`; marker requests retain coordinates. Both endpoints compress responses off the server event loop.
+
+### Dense-filter measurement (2026-10-30)
+
+The Nizhny Novgorod levels filter at `56.319684, 44.004552`, zoom `13.59`,
+returned 6,976 matches at a 1440×900 viewport. In the installed MapLibre expression
+engine, evaluating those keys and an equal number of non-matches four times
+(55,808 evaluations) took 300 ms with `in` and 9 ms with `match`; compilation
+took 1 ms and 2 ms respectively. Both returned the same 27,904 positive results.
+This is an isolated membership benchmark, not a claim about total page-load time.
+
+The 0.8.4 browser trace also recorded three repeated batch requests on one deep-link
+load, each carrying about 890 KB of uncompressed JSON including unused marker
+coordinates. Pending-request coalescing and contour-only payloads address those
+separate network costs.
 
 ## Prefetch
 

@@ -157,6 +157,7 @@ export function createFilterPipeline({
     maxItems: FILTER_MATCH_CACHE_MAX_ITEMS
   });
   let latestFilterToken = 0;
+  let pendingFilterApplySignature = '';
   let filterAuthoritativeTimer = null;
   let currentFilterRulesHash = 'fnv1a-0';
   let lastViewportHash = '';
@@ -393,74 +394,92 @@ export function createFilterPipeline({
     filterAuthoritativeTimer = setTimeout(
       async () => {
         filterAuthoritativeTimer = null;
-        if (token !== latestFilterToken || !resolveMap()) return;
-        const renderMode = String(context?.renderMode || 'contours') === 'markers' ? 'markers' : 'contours';
-        const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}:${renderMode}:${Number(context?.dataVersion || 0)}`;
-        const matchLimit = Number.isFinite(Number(context?.matchLimit))
-          ? Number(context.matchLimit)
-          : renderMode === 'markers'
-            ? getMarkerMatchLimit(context.zoomBucket)
-            : FILTER_MATCH_DEFAULT_LIMIT;
-        if (
-          shouldSkipViewportAuthoritativeRequest({
-            requestKey,
-            lastCompletedRequestKey: lastCompletedAuthoritativeRequestKey,
-            reason: context.reason
-          })
-        ) {
-          return;
-        }
-        filterMatchCacheStrategy.cancelPrefetch();
-        if (activeFilterAbortController) {
-          debugFilterLog('filter request abort', { requestKey });
-          recordFilterRequestDebugEvent('abort');
-          recordFilterTelemetry('request_abort', { requestKey });
-          activeFilterAbortController.abort();
-        }
-        activeFilterAbortController = new AbortController();
-        const signal = activeFilterAbortController.signal;
-        debugFilterLog('filter request start', {
-          requestKey,
-          phase: 'authoritative',
-          heavy: context.heavy,
-          coverageHash: context.coverageHash
-        });
-        recordFilterRequestDebugEvent('start');
-        recordFilterTelemetry('request_start', {
-          requestKey,
-          delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
-        });
-        updateFilterRuntimeStatus({
-          statusCode: 'refining'
-        });
-        let requestResults: FilterRequestResolution[];
         try {
-          const cachedResults: FilterRequestResolution[] = [];
-          const missingSpecs: FilterRequestSpec[] = [];
-          for (const spec of context.requestSpecs) {
-            const cachedResult = filterMatchCacheStrategy.getCachedRequestSpecResult(spec, context);
-            if (cachedResult) {
-              cachedResults.push(cachedResult);
-            } else {
-              missingSpecs.push(spec);
-            }
+          if (token !== latestFilterToken || !resolveMap()) return;
+          const renderMode = String(context?.renderMode || 'contours') === 'markers' ? 'markers' : 'contours';
+          const requestKey = `${context.rulesHash}:${context.coverageHash}:${context.zoomBucket}:${renderMode}:${Number(context?.dataVersion || 0)}`;
+          const matchLimit = Number.isFinite(Number(context?.matchLimit))
+            ? Number(context.matchLimit)
+            : renderMode === 'markers'
+              ? getMarkerMatchLimit(context.zoomBucket)
+              : FILTER_MATCH_DEFAULT_LIMIT;
+          if (
+            shouldSkipViewportAuthoritativeRequest({
+              requestKey,
+              lastCompletedRequestKey: lastCompletedAuthoritativeRequestKey,
+              reason: context.reason
+            })
+          ) {
+            return;
           }
+          filterMatchCacheStrategy.cancelPrefetch();
+          if (activeFilterAbortController) {
+            debugFilterLog('filter request abort', { requestKey });
+            recordFilterRequestDebugEvent('abort');
+            recordFilterTelemetry('request_abort', { requestKey });
+            activeFilterAbortController.abort();
+          }
+          activeFilterAbortController = new AbortController();
+          const signal = activeFilterAbortController.signal;
+          debugFilterLog('filter request start', {
+            requestKey,
+            phase: 'authoritative',
+            heavy: context.heavy,
+            coverageHash: context.coverageHash
+          });
+          recordFilterRequestDebugEvent('start');
+          recordFilterTelemetry('request_start', {
+            requestKey,
+            delayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null
+          });
+          updateFilterRuntimeStatus({
+            statusCode: 'refining'
+          });
+          let requestResults: FilterRequestResolution[];
+          try {
+            const cachedResults: FilterRequestResolution[] = [];
+            const missingSpecs: FilterRequestSpec[] = [];
+            for (const spec of context.requestSpecs) {
+              const cachedResult = filterMatchCacheStrategy.getCachedRequestSpecResult(spec, context);
+              if (cachedResult) {
+                cachedResults.push(cachedResult);
+              } else {
+                missingSpecs.push(spec);
+              }
+            }
 
-          requestResults = [...cachedResults];
-          if (missingSpecs.length > 0) {
-            const fetchedResults =
-              missingSpecs.length > 1
-                ? await (() =>
-                    filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(
-                      missingSpecs,
-                      {
-                        ...context,
-                        matchLimit
-                      },
-                      signal
-                    ))().catch(async (error) => {
-                    if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
-                    return Promise.all(
+            requestResults = [...cachedResults];
+            if (missingSpecs.length > 0) {
+              const fetchedResults =
+                missingSpecs.length > 1
+                  ? await (() =>
+                      filterMatchCacheStrategy.fetchMatchesBatchForRequestSpecs(
+                        missingSpecs,
+                        {
+                          ...context,
+                          matchLimit
+                        },
+                        signal
+                      ))().catch(async (error) => {
+                      if (String(error?.name || '').toLowerCase() === 'aborterror') throw error;
+                      return Promise.all(
+                        missingSpecs.map(async (spec) => {
+                          const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(
+                            spec,
+                            {
+                              ...context,
+                              matchLimit
+                            },
+                            signal
+                          );
+                          return {
+                            spec,
+                            ...result
+                          };
+                        })
+                      );
+                    })
+                  : await Promise.all(
                       missingSpecs.map(async (spec) => {
                         const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(
                           spec,
@@ -476,182 +495,176 @@ export function createFilterPipeline({
                         };
                       })
                     );
-                  })
-                : await Promise.all(
-                    missingSpecs.map(async (spec) => {
-                      const result = await filterMatchCacheStrategy.fetchMatchesForRequestSpec(
-                        spec,
-                        {
-                          ...context,
-                          matchLimit
-                        },
-                        signal
-                      );
-                      return {
-                        spec,
-                        ...result
-                      };
-                    })
-                  );
-            requestResults.push(...fetchedResults);
+              requestResults.push(...fetchedResults);
+            }
+          } catch (error) {
+            if (String(error?.name || '').toLowerCase() === 'aborterror') return;
+            return;
+          } finally {
+            if (activeFilterAbortController?.signal === signal) {
+              activeFilterAbortController = null;
+            }
           }
-        } catch (error) {
-          if (String(error?.name || '').toLowerCase() === 'aborterror') return;
-          return;
-        } finally {
-          if (activeFilterAbortController?.signal === signal) {
-            activeFilterAbortController = null;
-          }
-        }
-        if (token !== latestFilterToken) return;
+          if (token !== latestFilterToken) return;
 
-        const usedFallback = requestResults.some((result) => result.usedFallback);
-        const cacheHit = requestResults.length > 0 && requestResults.every((result) => result.cacheHit);
-        const requestPayloads = requestResults.map((result) => ({
-          requestId: result.spec.id,
-          payload: result.payload
-        }));
-        let resolvedPayload: FilterResolvedLayerPayload | null = null;
-        try {
-          const workerResult = await filterWorkerDispatcher.request('build-resolved-payload', {
-            prepared: context,
-            payloads: requestPayloads,
-            cacheHit
-          });
-          if (workerResult?.ok) {
-            resolvedPayload = {
-              highlightColorGroups: Array.isArray(workerResult.highlightColorGroups)
-                ? workerResult.highlightColorGroups
-                : [],
-              matchedFeatureIds: Array.isArray(workerResult.matchedFeatureIds) ? workerResult.matchedFeatureIds : [],
-              matchedCount: Number(workerResult.matchedCount || 0),
-              meta: {
-                ...(workerResult.meta || {}),
-                bboxHash: context.bboxHash,
-                coverageHash: context.coverageHash,
-                coverageWindow: context.coverageWindow,
-                rulesHash: context.rulesHash,
-                zoomBucket: context.zoomBucket,
-                dataVersion: context.dataVersion,
-                renderMode,
-                truncated: Boolean(workerResult.meta?.truncated),
-                elapsedMs: Number(workerResult.meta?.elapsedMs || 0),
-                cacheHit: Boolean(workerResult.meta?.cacheHit)
-              }
+          const usedFallback = requestResults.some((result) => result.usedFallback);
+          const cacheHit = requestResults.length > 0 && requestResults.every((result) => result.cacheHit);
+          const requestPayloads = requestResults.map((result) => ({
+            requestId: result.spec.id,
+            payload: result.payload
+          }));
+          let resolvedPayload: FilterResolvedLayerPayload | null = null;
+          try {
+            const workerResult = await filterWorkerDispatcher.request('build-resolved-payload', {
+              prepared: context,
+              payloads: requestPayloads,
+              cacheHit
+            });
+            if (workerResult?.ok) {
+              resolvedPayload = {
+                highlightColorGroups: Array.isArray(workerResult.highlightColorGroups)
+                  ? workerResult.highlightColorGroups
+                  : [],
+                matchedFeatureIds: Array.isArray(workerResult.matchedFeatureIds) ? workerResult.matchedFeatureIds : [],
+                matchedCount: Number(workerResult.matchedCount || 0),
+                meta: {
+                  ...(workerResult.meta || {}),
+                  bboxHash: context.bboxHash,
+                  coverageHash: context.coverageHash,
+                  coverageWindow: context.coverageWindow,
+                  rulesHash: context.rulesHash,
+                  zoomBucket: context.zoomBucket,
+                  dataVersion: context.dataVersion,
+                  renderMode,
+                  truncated: Boolean(workerResult.meta?.truncated),
+                  elapsedMs: Number(workerResult.meta?.elapsedMs || 0),
+                  cacheHit: Boolean(workerResult.meta?.cacheHit)
+                }
+              };
+            }
+          } catch {
+            resolvedPayload = null;
+          }
+          if (token !== latestFilterToken) return;
+          if (!resolvedPayload) {
+            const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
+              requestResults.map((result) => [result.spec.id, result.payload])
+            );
+            resolvedPayload = buildResolvedLayerPayload({
+              prepared: context,
+              payloadsByRequestId,
+              cacheHit
+            });
+            resolvedPayload.meta = {
+              ...(resolvedPayload.meta || {}),
+              bboxHash: context.bboxHash,
+              coverageHash: context.coverageHash,
+              coverageWindow: context.coverageWindow,
+              rulesHash: context.rulesHash,
+              zoomBucket: context.zoomBucket,
+              dataVersion: context.dataVersion,
+              renderMode,
+              truncated: Boolean(resolvedPayload.meta?.truncated),
+              elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
+              cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
             };
           }
-        } catch {
-          resolvedPayload = null;
-        }
-        if (!resolvedPayload) {
-          const payloadsByRequestId = new Map<string, FilterRequestResolution['payload']>(
-            requestResults.map((result) => [result.spec.id, result.payload])
+          const matchedSize = Number(resolvedPayload?.matchedCount || 0);
+          if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT && renderMode !== 'markers') {
+            updateFilterRuntimeStatus({
+              statusCode: 'too_many_matches',
+              count: matchedSize
+            });
+            lastCompletedAuthoritativeRequestKey = requestKey;
+            setFilterPhase('authoritative');
+            recordFilterTelemetry('request_degraded', {
+              requestKey,
+              count: matchedSize
+            });
+            return;
+          }
+
+          await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
+            resolvedPayload.highlightColorGroups || [],
+            token,
+            {
+              phase: 'authoritative',
+              forceReapply: context.reason === 'style',
+              renderMode,
+              matchedCount: Number(resolvedPayload?.matchedCount || 0),
+              matchedFeatureIds: Array.isArray(resolvedPayload?.matchedFeatureIds)
+                ? resolvedPayload.matchedFeatureIds
+                : []
+            }
           );
-          resolvedPayload = buildResolvedLayerPayload({
-            prepared: context,
-            payloadsByRequestId,
-            cacheHit
-          });
-          resolvedPayload.meta = {
-            ...(resolvedPayload.meta || {}),
-            bboxHash: context.bboxHash,
-            coverageHash: context.coverageHash,
-            coverageWindow: context.coverageWindow,
+          if (token !== latestFilterToken) return;
+          filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
+          activeFilterCoverageWindow = {
+            ...context.coverageWindow,
             rulesHash: context.rulesHash,
             zoomBucket: context.zoomBucket,
-            dataVersion: context.dataVersion,
-            renderMode,
-            truncated: Boolean(resolvedPayload.meta?.truncated),
-            elapsedMs: Number(resolvedPayload.meta?.elapsedMs || 0),
-            cacheHit: Boolean(resolvedPayload.meta?.cacheHit)
+            dataVersion: context.dataVersion
           };
-        }
-        const matchedSize = Number(resolvedPayload?.matchedCount || 0);
-        if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT && renderMode !== 'markers') {
-          updateFilterRuntimeStatus({
-            statusCode: 'too_many_matches',
-            count: matchedSize
+          activeFilterRenderMode = renderMode;
+          activeFilterCoverageKey = context.coverageHash;
+
+          patchState({
+            errorMessage: '',
+            lastElapsedMs: Number(resolvedPayload?.meta?.elapsedMs || 0),
+            lastCacheHit: Boolean(resolvedPayload?.meta?.cacheHit),
+            lastCount: matchedSize
           });
           lastCompletedAuthoritativeRequestKey = requestKey;
           setFilterPhase('authoritative');
-          recordFilterTelemetry('request_degraded', {
+          debugFilterLog('filter request finish', {
             requestKey,
-            count: matchedSize
+            count: matchedSize,
+            elapsedMs: currentState.lastElapsedMs,
+            cacheHit: currentState.lastCacheHit,
+            truncated: Boolean(resolvedPayload?.meta?.truncated),
+            fallback: usedFallback
           });
-          return;
+          recordFilterRequestDebugEvent('finish');
+          recordFilterTelemetry('request_finish', {
+            requestKey,
+            count: matchedSize,
+            elapsedMs: currentState.lastElapsedMs,
+            applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
+            setPaintPropertyCalls: currentState.setPaintPropertyCallsLast,
+            highlightedCount: filterDiffApplyStrategy.getFilteredFeatureCount()
+          });
+          updateFilterRuntimeStatus({
+            statusCode: getFilterStatusCodeForRenderMode(renderMode, Boolean(resolvedPayload?.meta?.truncated)),
+            count: currentState.lastCount,
+            elapsedMs: currentState.lastElapsedMs,
+            cacheHit: currentState.lastCacheHit,
+            setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
+          });
+          updateFilterDebugHook({
+            active: matchedSize > 0,
+            expr: ['literal', context.rulesHash],
+            mode: FILTER_HIGHLIGHT_MODE,
+            phase: currentState.phase,
+            lastElapsedMs: currentState.lastElapsedMs,
+            lastCount: currentState.lastCount,
+            cacheHit: currentState.lastCacheHit
+          });
+          filterMatchCacheStrategy.schedulePrefetch(context, token);
+        } finally {
+          if (token === latestFilterToken) pendingFilterApplySignature = '';
         }
-
-        await filterDiffApplyStrategy.applyFilteredFeaturePaintGroups(
-          resolvedPayload.highlightColorGroups || [],
-          token,
-          {
-            phase: 'authoritative',
-            renderMode,
-            matchedCount: Number(resolvedPayload?.matchedCount || 0),
-            matchedFeatureIds: Array.isArray(resolvedPayload?.matchedFeatureIds)
-              ? resolvedPayload.matchedFeatureIds
-              : []
-          }
-        );
-        if (token !== latestFilterToken) return;
-        filterCache.putCachedFilterMatches(context.cacheKey, resolvedPayload);
-        activeFilterCoverageWindow = {
-          ...context.coverageWindow,
-          rulesHash: context.rulesHash,
-          zoomBucket: context.zoomBucket,
-          dataVersion: context.dataVersion
-        };
-        activeFilterRenderMode = renderMode;
-        activeFilterCoverageKey = context.coverageHash;
-
-        patchState({
-          errorMessage: '',
-          lastElapsedMs: Number(resolvedPayload?.meta?.elapsedMs || 0),
-          lastCacheHit: Boolean(resolvedPayload?.meta?.cacheHit),
-          lastCount: matchedSize
-        });
-        lastCompletedAuthoritativeRequestKey = requestKey;
-        setFilterPhase('authoritative');
-        debugFilterLog('filter request finish', {
-          requestKey,
-          count: matchedSize,
-          elapsedMs: currentState.lastElapsedMs,
-          cacheHit: currentState.lastCacheHit,
-          truncated: Boolean(resolvedPayload?.meta?.truncated),
-          fallback: usedFallback
-        });
-        recordFilterRequestDebugEvent('finish');
-        recordFilterTelemetry('request_finish', {
-          requestKey,
-          count: matchedSize,
-          elapsedMs: currentState.lastElapsedMs,
-          applyDelayFromMoveEndMs: filterLastMoveEndAt > 0 ? Math.max(0, Date.now() - filterLastMoveEndAt) : null,
-          setPaintPropertyCalls: currentState.setPaintPropertyCallsLast,
-          highlightedCount: filterDiffApplyStrategy.getFilteredFeatureCount()
-        });
-        updateFilterRuntimeStatus({
-          statusCode: getFilterStatusCodeForRenderMode(renderMode, Boolean(resolvedPayload?.meta?.truncated)),
-          count: currentState.lastCount,
-          elapsedMs: currentState.lastElapsedMs,
-          cacheHit: currentState.lastCacheHit,
-          setPaintPropertyCalls: currentState.setPaintPropertyCallsLast
-        });
-        updateFilterDebugHook({
-          active: matchedSize > 0,
-          expr: ['literal', context.rulesHash],
-          mode: FILTER_HIGHLIGHT_MODE,
-          phase: currentState.phase,
-          lastElapsedMs: currentState.lastElapsedMs,
-          lastCount: currentState.lastCount,
-          cacheHit: currentState.lastCacheHit
-        });
-        filterMatchCacheStrategy.schedulePrefetch(context, token);
       },
       Math.max(0, Number(debounceMs) || 0)
     );
   }
 
-  function clearFilterHighlight() {
+  function cancelPendingFilterWork() {
+    latestFilterToken += 1;
+    pendingFilterApplySignature = '';
+    if (mapMoveDebounceTimer) {
+      clearTimeout(mapMoveDebounceTimer);
+      mapMoveDebounceTimer = null;
+    }
     if (activeFilterAbortController) {
       activeFilterAbortController.abort();
       activeFilterAbortController = null;
@@ -661,6 +674,10 @@ export function createFilterPipeline({
       clearTimeout(filterAuthoritativeTimer);
       filterAuthoritativeTimer = null;
     }
+  }
+
+  function clearFilterHighlight() {
+    cancelPendingFilterWork();
     filterDiffApplyStrategy.clearFilteredHighlight();
     patchState({
       statusMessage: '',
@@ -694,11 +711,27 @@ export function createFilterPipeline({
       clearFilterHighlight();
       return;
     }
-    const token = ++latestFilterToken;
+    const pendingSignature = JSON.stringify([
+      input,
+      buildBboxHash(getCurrentFilterBbox(), 4),
+      Math.round(Number(resolveMap()?.getZoom?.() || 0) * 2) / 2,
+      Number(resolveMap()?.getZoom?.() || 0) < FILTER_FALLBACK_MARKER_MAX_ZOOM ? 'markers' : 'contours',
+      resolveSourceDataVersion()
+    ]);
+    // Initial camera, source readiness and moveend can all replay the same
+    // filters while their request is running. Keep its token and response alive.
+    if (pendingFilterApplySignature === pendingSignature) {
+      if (reason === 'style') filterDiffApplyStrategy.reapplyFilteredHighlight();
+      return;
+    }
+    cancelPendingFilterWork();
+    const token = latestFilterToken;
+    pendingFilterApplySignature = pendingSignature;
     const prepared = await prepareRulesForFiltering(input);
     if (token !== latestFilterToken) return;
 
     if (!prepared.ok) {
+      pendingFilterApplySignature = '';
       patchState({
         errorMessage: prepared.error || resolveInvalidMessage(),
         statusMessage: ''
@@ -725,6 +758,7 @@ export function createFilterPipeline({
 
     const bbox = getCurrentFilterBbox();
     if (!bbox) {
+      pendingFilterApplySignature = '';
       patchState({
         statusMessage: ''
       });
@@ -772,6 +806,7 @@ export function createFilterPipeline({
         reason
       })
     ) {
+      pendingFilterApplySignature = '';
       setFilterPhase('authoritative');
       recordFilterTelemetry('coverage_window_hit', {
         bboxHash,
@@ -798,6 +833,7 @@ export function createFilterPipeline({
         token,
         {
           phase: 'optimistic',
+          forceReapply: reason === 'style',
           renderMode,
           matchedCount: Number(cachedPayload?.matchedCount || 0),
           matchedFeatureIds: Array.isArray(cachedPayload?.matchedFeatureIds) ? cachedPayload.matchedFeatureIds : []
@@ -838,6 +874,7 @@ export function createFilterPipeline({
         bboxHash,
         coverageHash
       });
+      pendingFilterApplySignature = '';
       return;
     }
 
@@ -861,6 +898,7 @@ export function createFilterPipeline({
         token,
         {
           phase: 'optimistic',
+          forceReapply: reason === 'style',
           renderMode,
           matchedCount: Number(reusedPayload?.matchedCount || 0),
           matchedFeatureIds: Array.isArray(reusedPayload?.matchedFeatureIds) ? reusedPayload.matchedFeatureIds : []
@@ -901,6 +939,7 @@ export function createFilterPipeline({
         bboxHash,
         coverageHash: activeFilterCoverageKey
       });
+      pendingFilterApplySignature = '';
       return;
     }
 
@@ -1007,6 +1046,7 @@ export function createFilterPipeline({
     filterLastMapCenter = null;
     filterLastMoveVector = { dx: 0, dy: 0 };
     latestFilterToken += 1;
+    pendingFilterApplySignature = '';
     handleStatusChange({
       phase: 'idle',
       statusCode: 'idle',
