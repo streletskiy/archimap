@@ -515,6 +515,7 @@ paths:
   /api/buildings/filter-data-bbox:
     get:
       summary: Get filter payload for visible bbox
+      description: Responses may contain personal edits and use private, no-cache HTTP caching with an ETag.
       parameters:
         - in: query
           name: minLon
@@ -554,6 +555,7 @@ paths:
         The response includes `matchedLocations[]` points for low-zoom marker fallback, in addition to `matchedFeatureIds[]` for contour highlight.
         When `renderMode=markers` and the zoom is below `5`, the backend can aggregate matches into viewport-relative cells and include `count` on each returned location; zooms `5-12` keep stable point-level locations.
         Use `POST /api/buildings/filter-matches-batch` when you need multiple rule sets against the same bbox.
+        Responses support Brotli/gzip and use private, no-store HTTP caching. Validated rules and actor scope determine server cache identity; client IDs and hashes are correlation metadata.
       requestBody:
         required: true
         content:
@@ -577,6 +579,10 @@ paths:
                   type: number
                 zoomBucket:
                   type: number
+                includeLocations:
+                  type: boolean
+                  default: true
+                  description: Set false to omit marker coordinates in contour mode (matchedLocations is empty). Marker mode always includes coordinates.
                 renderMode:
                   type: string
                   enum: [contours, markers]
@@ -940,6 +946,7 @@ paths:
         Batched variant of `POST /api/buildings/filter-matches`.
         Each item includes `matchedLocations[]` for low-zoom marker fallback, alongside `matchedFeatureIds[]` for contour highlight.
         When `renderMode=markers` and the zoom is below `5`, the backend can return aggregated marker cells with `count` instead of a full building list; zooms `5-12` keep stable point-level locations.
+        Responses support Brotli/gzip and use private, no-store HTTP caching. Validated rules and actor scope determine server cache identity; client IDs and hashes are correlation metadata.
       requestBody:
         required: true
         content:
@@ -964,6 +971,10 @@ paths:
                   type: number
                 zoomBucket:
                   type: number
+                includeLocations:
+                  type: boolean
+                  default: true
+                  description: Set false to omit marker coordinates in contour mode (matchedLocations is empty). Marker mode always includes coordinates.
                 renderMode:
                   type: string
                   enum: [contours, markers]

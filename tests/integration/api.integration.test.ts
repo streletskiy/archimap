@@ -1320,6 +1320,26 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       const secondBody = await second.json();
       assert.equal(secondBody.items.length, 2);
       assert.equal(Boolean(secondBody.items[0]?.meta?.cacheHit), true);
+
+      const compact = await callApi('/api/buildings/filter-matches-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'accept-encoding': 'gzip' },
+        body: JSON.stringify({ ...payload, renderMode: 'contours', includeLocations: false })
+      });
+      assert.equal(compact.status, 200);
+      assert.equal(compact.headers.get('cache-control'), 'private, no-store');
+      const compactBody = await compact.json();
+      assert.deepEqual(compactBody.items[0].matchedKeys, firstBody.items[0].matchedKeys);
+      assert.deepEqual(compactBody.items[0].matchedLocations, []);
+
+      const renamed = await callApi('/api/buildings/filter-matches-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...payload, requests: payload.requests.map((item) => ({ ...item, id: `new-${item.id}` })) })
+      });
+      const renamedBody = await renamed.json();
+      assert.equal(renamedBody.meta.cacheHit, true);
+      assert.equal(renamedBody.items[0].id, 'new-contains-test');
     });
   } finally {
     if (server.exitCode == null) {

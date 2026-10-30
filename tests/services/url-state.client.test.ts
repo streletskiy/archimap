@@ -120,3 +120,51 @@ test('parseUrlState decodes filter layers from compact query state', async () =>
     }
   ]);
 });
+
+test('deferred URL camera replay preserves the current filter layer identities', async () => {
+  const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'url-state-manager.ts');
+  const { createUrlStateManager } = await import(pathToFileURL(modulePath).href);
+  const { encodeFilterLayersForUrl } = await loadFilterUrlStateModule();
+  const { normalizeFilterLayers } = await loadFilterPipelineUtilsForUrl();
+  const filters = [{ color: '#f59e0b', mode: 'layer', rules: [{ key: 'building:levels', op: 'equals', value: '5' }] }];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    location: { href: `http://localhost/?lat=56.3&lng=44&z=14&f=${encodeFilterLayersForUrl(filters)}` }
+  } as unknown as typeof window;
+  let currentFilters = [];
+  const applied = [];
+  const manager = createUrlStateManager({
+    onApplyFilters: (next) => {
+      applied.push(next);
+      currentFilters = normalizeFilterLayers(next).layers;
+    }
+  });
+  try {
+    await manager.applyUrlStateToUi({ mapReady: false, currentFilters });
+    const initialFilters = currentFilters;
+    await manager.applyUrlStateToUi({ mapReady: true, currentFilters });
+    assert.equal(applied.length, 2);
+    assert.equal(applied[1], initialFilters);
+    assert.deepEqual(
+      currentFilters.map((layer) => layer.id),
+      initialFilters.map((layer) => layer.id)
+    );
+  } finally {
+    manager.destroy();
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+async function loadFilterPipelineUtilsForUrl() {
+  const modulePath = path.join(
+    process.cwd(),
+    'frontend',
+    'src',
+    'lib',
+    'components',
+    'map',
+    'filter-pipeline-utils.ts'
+  );
+  return import(pathToFileURL(modulePath).href);
+}

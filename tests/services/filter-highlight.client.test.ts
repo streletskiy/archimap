@@ -27,8 +27,8 @@ test('buildFilterHighlightExpression creates deterministic osm_key expression', 
   const result = buildFilterHighlightExpression({ encodedIds: [44, 44, 45, 'bad', -1], osmIds: [22, 22, 23] });
   assert.deepEqual(result.expr, [
     'any',
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(44), osmKeyFromEncodedId(45)]]],
-    ['in', ['to-number', ['coalesce', ['get', 'osm_id'], -1]], ['literal', [22, 23]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(44), osmKeyFromEncodedId(45)], true, false],
+    ['match', ['to-number', ['coalesce', ['get', 'osm_id'], -1]], [22, 23], true, false]
   ]);
   assert.equal(result.count, 2);
 });
@@ -37,6 +37,18 @@ test('buildFilterHighlightExpression returns empty filter when criteria has no i
   const { buildFilterHighlightExpression, EMPTY_LAYER_FILTER } = await loadFilterHighlightUtils();
   assert.deepEqual(buildFilterHighlightExpression([]).expr, EMPTY_LAYER_FILTER);
   assert.deepEqual(buildFilterHighlightExpression(null).expr, EMPTY_LAYER_FILTER);
+});
+
+test('dense highlight lookup evaluates the same membership in the real map expression engine', async () => {
+  const { expression } = require('../../frontend/node_modules/@maplibre/maplibre-gl-style-spec');
+  const { applyFilterPaintHighlight } = await loadFilterHighlightUtils();
+  const ids = Array.from({ length: 7000 }, (_, index) => index * 2 + 2);
+  const result = applyFilterPaintHighlight({ map: {}, colorGroups: [{ color: '#ff0000', ids }] });
+  const compiled = expression.createExpression(result.filterExpression, 'layers[0].filter');
+  assert.equal(compiled.result, 'success');
+  for (const [osmKey, expected] of [['way/1', true], ['way/7000', true], ['relation/1', false], ['way/7001', false], [null, false]]) {
+    assert.equal(compiled.value.evaluate({ zoom: 14 }, { type: 3, properties: { osm_key: osmKey } }), expected);
+  }
 });
 
 test('applyFilterHighlight only applies setFilter to highlight layers, not base building layers', async () => {
@@ -138,9 +150,9 @@ test('applyFilterPaintHighlight updates only highlight paint properties and rese
     type: 'setFilter',
     layerId: 'buildings-filter-highlight-fill',
     expr: [
-      'in',
+      'match',
       ['get', 'osm_key'],
-      ['literal', [osmKeyFromEncodedId(101), osmKeyFromEncodedId(102), osmKeyFromEncodedId(203)]]
+      [osmKeyFromEncodedId(101), osmKeyFromEncodedId(102), osmKeyFromEncodedId(203)], true, false
     ]
   });
   assert.deepEqual(calls[1], {
@@ -167,9 +179,9 @@ test('applyFilterPaintHighlight updates only highlight paint properties and rese
     type: 'setFilter',
     layerId: 'buildings-filter-highlight-outline',
     expr: [
-      'in',
+      'match',
       ['get', 'osm_key'],
-      ['literal', [osmKeyFromEncodedId(101), osmKeyFromEncodedId(102), osmKeyFromEncodedId(203)]]
+      [osmKeyFromEncodedId(101), osmKeyFromEncodedId(102), osmKeyFromEncodedId(203)], true, false
     ]
   });
   assert.deepEqual(calls[4], {
@@ -278,18 +290,18 @@ test('applyFilterPaintHighlight uses constant color for a single normalized colo
   assert.equal(applied.count, 3);
   assert.equal(applied.colorExpression, '#f59e0b');
   assert.deepEqual(applied.filterExpression, [
-    'in',
+    'match',
     ['get', 'osm_key'],
-    ['literal', [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)]]
+    [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)], true, false
   ]);
   assert.deepEqual(calls, [
     {
       type: 'setFilter',
       layerId: 'buildings-filter-highlight-fill',
       expr: [
-        'in',
+        'match',
         ['get', 'osm_key'],
-        ['literal', [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)]]
+        [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)], true, false
       ]
     },
     {
@@ -308,9 +320,9 @@ test('applyFilterPaintHighlight uses constant color for a single normalized colo
       type: 'setFilter',
       layerId: 'buildings-filter-highlight-outline',
       expr: [
-        'in',
+        'match',
         ['get', 'osm_key'],
-        ['literal', [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)]]
+        [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)], true, false
       ]
     },
     {
@@ -365,9 +377,9 @@ test('applyFilterPaintHighlight skips static paint properties when highlight sta
       type: 'setFilter',
       layerId: 'buildings-filter-highlight-fill',
       expr: [
-        'in',
+        'match',
         ['get', 'osm_key'],
-        ['literal', [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)]]
+        [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)], true, false
       ]
     },
     {
@@ -380,9 +392,9 @@ test('applyFilterPaintHighlight skips static paint properties when highlight sta
       type: 'setFilter',
       layerId: 'buildings-filter-highlight-outline',
       expr: [
-        'in',
+        'match',
         ['get', 'osm_key'],
-        ['literal', [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)]]
+        [osmKeyFromEncodedId(11), osmKeyFromEncodedId(12), osmKeyFromEncodedId(13)], true, false
       ]
     },
     {

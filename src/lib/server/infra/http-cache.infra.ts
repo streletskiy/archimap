@@ -1,5 +1,8 @@
 const crypto = require('crypto');
 const zlib = require('zlib');
+const { promisify } = require('node:util');
+const gzipAsync = promisify(zlib.gzip);
+const brotliCompressAsync = promisify(zlib.brotliCompress);
 
 function toHttpDate(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -52,10 +55,40 @@ function appendVaryHeader(res, value) {
 }
 
 function pickEncoding(acceptEncoding) {
-  const raw = String(acceptEncoding || '').toLowerCase();
-  if (raw.includes('br')) return 'br';
-  if (raw.includes('gzip')) return 'gzip';
-  return null;
+  const weights = new Map();
+  for (const entry of String(acceptEncoding || '').toLowerCase().split(',')) {
+    const [name, ...params] = entry.trim().split(';');
+    const quality = params.find((param) => param.trim().startsWith('q='));
+    const weight = quality == null ? 1 : Number(quality.trim().slice(2));
+    weights.set(name, Number.isFinite(weight) && weight >= 0 && weight <= 1 ? weight : 0);
+  }
+  return ['br', 'gzip']
+    .map((name) => ({ name, weight: weights.get(name) ?? weights.get('*') ?? 0 }))
+    .filter((entry) => entry.weight > 0)
+    .sort((left, right) => right.weight - left.weight)[0]?.name || null;
+}
+
+// POST results may contain personal edits. Compress off the event loop, without
+// validators or shared HTTP caching (a validator must not ignore the request body).
+async function sendCompressedJson(req, res, payload) {
+  const raw = Buffer.from(JSON.stringify(payload), 'utf8');
+  const encoding = raw.length >= 1024 ? pickEncoding(req.headers['accept-encoding']) : null;
+  const body = encoding === 'br'
+    ? await brotliCompressAsync(raw, {
+        params: {
+          [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
+          [zlib.constants.BROTLI_PARAM_QUALITY]: 4
+        }
+      })
+    : encoding === 'gzip'
+      ? await gzipAsync(raw, { level: 4 })
+      : raw;
+  res.type('application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'private, no-store');
+  appendVaryHeader(res, 'Accept-Encoding');
+  if (encoding) res.setHeader('Content-Encoding', encoding);
+  res.setHeader('Content-Length', String(body.length));
+  return res.status(200).send(body);
 }
 
 function compressPayload(buffer, encoding) {
@@ -113,5 +146,6 @@ module.exports = {
   toHttpDate,
   createWeakEtag,
   isResourceNotModified,
+  sendCompressedJson,
   sendCachedJson
 };

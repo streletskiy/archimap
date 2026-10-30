@@ -153,27 +153,27 @@ test('createFilterDiffApplyStrategy filters building parts separately and hides 
   assert.deepEqual(map.filters.get('part-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(202)], true, false]
   ]);
   assert.deepEqual(map.filters.get('highlight-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(202)], true, false]
   ]);
   assert.deepEqual(map.filters.get('highlight-extrusion'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building'],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(202)], true, false]
   ]);
   assert.deepEqual(map.filters.get('part-highlight-fill'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(202)], true, false]
   ]);
   assert.deepEqual(map.filters.get('part-highlight-extrusion'), [
     'all',
     ['==', ['coalesce', ['get', 'feature_kind'], 'building'], 'building_part'],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(202)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(202)], true, false]
   ]);
 });
 
@@ -221,7 +221,7 @@ test('createFilterDiffApplyStrategy keeps building remainder geometry in the bas
         ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
       ]
     ],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(303)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(303)], true, false]
   ]);
   assert.deepEqual(map.filters.get('highlight-extrusion'), [
     'all',
@@ -234,7 +234,7 @@ test('createFilterDiffApplyStrategy keeps building remainder geometry in the bas
         ['!=', ['coalesce', ['to-number', ['get', 'render_hide_base_when_parts']], 0], 1]
       ]
     ],
-    ['in', ['get', 'osm_key'], ['literal', [osmKeyFromEncodedId(303)]]]
+    ['match', ['get', 'osm_key'], [osmKeyFromEncodedId(303)], true, false]
   ]);
 });
 

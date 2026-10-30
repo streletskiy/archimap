@@ -4,6 +4,7 @@ const {
   createWeakEtag,
   isResourceNotModified,
   sendCachedJson,
+  sendCompressedJson,
   toHttpDate
 } = require('../../src/lib/server/infra/http-cache.infra');
 const { parseRangeHeader } = require('../../src/lib/server/infra/pmtiles-stream.infra');
@@ -48,6 +49,25 @@ test('createWeakEtag returns deterministic weak etag', () => {
   assert.equal(a, b);
   assert.notEqual(a, c);
   assert.match(a, /^W\/"/);
+});
+
+test('sendCompressedJson negotiates encoding and preserves private POST payloads', async () => {
+  const zlib = require('node:zlib');
+  const payload = { matchedKeys: Array.from({ length: 500 }, (_, index) => `way/${index}`) };
+  for (const [accept, encoding] of [['br, gzip', 'br'], ['br;q=0, gzip;q=0.8', 'gzip'], ['br;q=0, gzip;q=0', null]]) {
+    const res = createJsonResponseStub();
+    res.send = function (body) { this.body = body; return this; };
+    await sendCompressedJson({ method: 'POST', headers: { 'accept-encoding': accept, 'if-none-match': '*' } }, res, payload);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.getHeader('content-encoding') || null, encoding);
+    assert.equal(res.getHeader('cache-control'), 'private, no-store');
+    assert.equal(res.getHeader('vary'), 'Accept-Encoding');
+    assert.equal(res.getHeader('etag'), undefined);
+    const decoded = encoding === 'br' ? zlib.brotliDecompressSync(res.body)
+      : encoding === 'gzip' ? zlib.gunzipSync(res.body) : res.body;
+    assert.deepEqual(JSON.parse(decoded.toString()), payload);
+    if (encoding) assert.ok(res.body.length < decoded.length / 2);
+  }
 });
 
 test('sendCachedJson can derive ETag from a safe payload instead of the response body', () => {

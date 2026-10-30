@@ -129,7 +129,9 @@ export function createUrlStateManager({
     if (!force && nextFilterKey === currentFilterKey) return;
     filterApplyInFlight = true;
     try {
-      onApplyFilters?.(filters);
+      // Replaying the deferred camera must preserve layer identities: decoding
+      // the same URL again otherwise creates new IDs and misses filter caches.
+      onApplyFilters?.(nextFilterKey === currentFilterKey ? currentFilters : filters);
     } finally {
       queueMicrotask(() => {
         filterApplyInFlight = false;

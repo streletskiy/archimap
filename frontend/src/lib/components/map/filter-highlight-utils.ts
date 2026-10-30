@@ -221,7 +221,8 @@ function buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups) {
 
   if (canUseKeyExpression && activeKeys.length > 0) {
     return {
-      expr: ['in', ['get', 'osm_key'], ['literal', activeKeys]],
+      // `in` scans the entire list for every tile feature; `match` compiles a lookup table.
+      expr: ['match', ['get', 'osm_key'], activeKeys, true, false],
       count: keyCount
     };
   }
@@ -229,7 +230,7 @@ function buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups) {
   if (normalizedGroups.length === 1) {
     const ids = normalizedGroups[0]?.ids || [];
     return {
-      expr: ['in', ['id'], ['literal', ids]],
+      expr: ['match', ['id'], ids, true, false],
       count: ids.length
     };
   }
@@ -251,7 +252,7 @@ function buildFilterMembershipExpressionFromNormalizedGroups(normalizedGroups) {
   }
 
   return {
-    expr: ['in', ['id'], ['literal', activeIds]],
+    expr: ['match', ['id'], activeIds, true, false],
     count
   };
 }
@@ -382,12 +383,12 @@ export function buildFilterHighlightExpression(matched) {
   const clauses = [];
 
   if (derivedKeys.length > 0) {
-    clauses.push(['in', ['get', 'osm_key'], ['literal', derivedKeys]]);
+    clauses.push(['match', ['get', 'osm_key'], derivedKeys, true, false]);
   } else if (encodedIds.length > 0) {
-    clauses.push(['in', ['id'], ['literal', encodedIds]]);
+    clauses.push(['match', ['id'], encodedIds, true, false]);
   }
   if (osmIds.length > 0) {
-    clauses.push(['in', ['to-number', ['coalesce', ['get', 'osm_id'], -1]], ['literal', osmIds]]);
+    clauses.push(['match', ['to-number', ['coalesce', ['get', 'osm_id'], -1]], osmIds, true, false]);
   }
 
   if (clauses.length === 0) return { expr: EMPTY_LAYER_FILTER, count: 0 };

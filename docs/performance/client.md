@@ -22,8 +22,9 @@
   - Processed-region coverage checks for the Overpass fallback are skipped until map zoom `12+`, avoiding repeated region-boundary sampling while browsing the whole map.
 - Reduced unnecessary redraws:
   - Filter updates guarded by request token, abort semantics, and worker-built request plans plus resolved highlight payload composition.
-  - Filter highlight updates dedicated highlight layers via feature-state; base building layers are not re-filtered/hid.
-  - Feature-state diff apply is chunked per animation frame to smooth map interactions under large diffs.
+  - Filter highlight updates dedicated layers with paint expressions. Membership uses MapLibre `match` lookups instead of scanning thousands of IDs with `in` for every tile feature.
+  - Equivalent pending requests are coalesced; deferred URL camera replay preserves filter IDs. Clearing filters invalidates both pending requests and worker responses, and style recreation forces repaint even when layer IDs stay unchanged.
+  - Contour requests omit unused marker coordinates (`includeLocations=false`). Server responses use asynchronous Brotli/gzip compression and private HTTP caching rules.
   - Primary filter path is bbox server-matching (not rendered-feature enumeration), reducing request fan-out.
   - Authoritative fetch uses adaptive coverage-window and skips refetch while viewport stays inside active window.
   - Optional low-priority directional prefetch warms cache without competing with main requests.
