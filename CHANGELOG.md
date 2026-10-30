@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.9.0
+
+### ⚡ Performance
+
+- **Map Loading:** Lazy-load panels and their dictionaries, bound Overpass caches, retry failed map-runtime loads, and reuse selected-building details with at most four concurrent loads ([205715f](https://github.com/streletskiy/archimap/commit/205715f)).
+- **Floor Filters:** Add normalized floor attributes to new PMTiles archives for immediate provisional coloring; authoritative API results still include architectural and personal overrides. Project only required columns in batch queries ([205715f](https://github.com/streletskiy/archimap/commit/205715f)).
+- **Search and Responses:** Query multiple exact style keys with shared pagination, preserve viewport bounds, compress GET responses asynchronously, and cache/compress application configuration ([205715f](https://github.com/streletskiy/archimap/commit/205715f)).
+
+### 🐛 Bug Fixes
+
+- **Account and Edits:** Confirm logout before clearing account state, invalidate browser/server caches after mutations, discard stale selection responses, and preserve per-building IDs and partial failures during bulk saves ([205715f](https://github.com/streletskiy/archimap/commit/205715f), [ca13b1b](https://github.com/streletskiy/archimap/commit/ca13b1b)).
+- **Recovery:** Reconnect Redis after outages, probe live database/session readiness, serialize migrations, and replace immediate sync retry loops with bounded backoff and a manual-reset circuit ([ca13b1b](https://github.com/streletskiy/archimap/commit/ca13b1b)).
+
+### 🔧 Operations
+
+- **Import Isolation:** Move scheduling, imports and archive construction into an authenticated internal worker. The web container runs without root privileges or Docker socket access; Compose now has six services ([ca13b1b](https://github.com/streletskiy/archimap/commit/ca13b1b)).
+- **Resource Budgets:** Add container memory/CPU limits, log rotation, database query deadlines, PostgreSQL I/O statistics and tuned autovacuum thresholds ([ca13b1b](https://github.com/streletskiy/archimap/commit/ca13b1b)).
+- **Maintenance:** Add protected backup/off-host verification tools, metrics snapshots, stale-stage cleanup and bounded sync-history aggregation. Existing deployments must apply the new Compose configuration and review writable data permissions ([ca13b1b](https://github.com/streletskiy/archimap/commit/ca13b1b)).
+
+### ✅ Validation
+
+- Passed 483 unit tests, integration/security/smoke checks, 17 browser scenarios, formatting, lint, type checks and localization checks.
+- Added PostgreSQL CI budgets for 20,000-building filters during concurrent writes and an isolated-worker authentication/readiness test. Verified Redis/PostgreSQL outage recovery without restarting the application.
+- Database migrations are additive. Existing region archives retain API-based coloring until rebuilt with the new floor attributes.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.8.5...0.9.0)
+
 ## v0.8.5
 
 ### ⚡ Performance
