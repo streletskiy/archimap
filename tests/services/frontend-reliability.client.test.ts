@@ -325,7 +325,7 @@ test('floor preview expressions compile, preserve priority and exclude legacy ti
   );
 });
 
-test('floor preview is replaced by the mandatory authoritative response', async (t) => {
+test('floor preview survives layer refresh until the mandatory authoritative response', async (t) => {
   const { createFilterPipeline } = await load('services/map/map-filter-pipeline.ts');
   let finish;
   let applied;
@@ -361,8 +361,11 @@ test('floor preview is replaced by the mandatory authoritative response', async 
   await pipeline.applyBuildingFilters([{ key: 'building:levels', op: 'equals', value: '5' }]);
   assert.match(JSON.stringify(filters.at(-1)), /filter_schema/);
   await requestStarted;
+  pipeline.reapplyFilteredHighlight();
+  assert.match(JSON.stringify(filters.at(-1)), /filter_schema/);
   finish(json({ matchedKeys: ['way/123'], matchedFeatureIds: [246], meta: {} }));
   await completed;
+  pipeline.reapplyFilteredHighlight();
   assert.doesNotMatch(JSON.stringify(filters.at(-1)), /filter_schema/);
   assert.match(JSON.stringify(filters.at(-1)), /246|way\/123/);
 });
@@ -394,6 +397,7 @@ test('offline fallback removes the provisional floor colors', async (t) => {
   await pipeline.applyBuildingFilters([{ key: 'building:levels', op: 'equals', value: '5' }]);
   assert.match(JSON.stringify(filters.at(-1)), /filter_schema/);
   await completed;
+  pipeline.reapplyFilteredHighlight();
   assert.doesNotMatch(JSON.stringify(filters.at(-1)), /filter_schema/);
 });
 

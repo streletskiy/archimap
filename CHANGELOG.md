@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.2
+
+### 🐛 Bug Fixes
+
+- **Floor Preview Lifecycle:** Preserve provisional floor colors while map layers, theme, or building-part visibility refresh before the authoritative API response. Clear the preview when results arrive, filters reset, or the request fails.
+- **Regression Coverage:** Reproduce the production layer-refresh sequence while the filter response is pending and verify that completed or failed requests do not restore provisional colors.
+- **Test Startup:** Keep integration and browser fixture port ranges outside ports blocked by browser and Node.js fetch implementations.
+- **Backup Retention:** Retain database and configuration files by the backup set timestamp, so copying an older configuration cannot cause a fresh backup to lose its configuration files.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.9.1...0.9.2)
+
 ## v0.9.1
 
 ### 🐛 Bug Fixes

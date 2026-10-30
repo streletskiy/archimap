@@ -3,8 +3,9 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { test, expect } = require('@playwright/test');
+const { pickIntegrationPort } = require('../integration/test-ports');
 
-const PORT = 4020 + Math.floor(Math.random() * 120);
+const PORT = pickIntegrationPort('e2eSmoke');
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const BUILDING_LEVELS_FILTER_URL =
   'AgEPYnVpbGRpbmc6bGV2ZWxzBgKG76wBAAEBMQL94EcBAAEBMgL9unQCAAcBMwAIATUC-5I8AgAHATUACAE5AvhxcQIABwE5AAgCMTYCwIT8AQAHAjE2';

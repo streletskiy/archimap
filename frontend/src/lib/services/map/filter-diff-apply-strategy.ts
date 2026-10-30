@@ -187,12 +187,14 @@ export function createFilterDiffApplyStrategy({
   let lastAppliedHighlightLayerSignature = '';
   let lastAppliedHighlightActive = false;
   let lastAppliedRenderMode: 'contours' | 'markers' = 'contours';
+  let provisionalFloorPrepared = null;
 
   function getHighlightLayerIds() {
     return normalizeLayerIdsSnapshot(resolveLayerIds?.() || {});
   }
 
   function applyProvisionalFloorHighlight(prepared) {
+    provisionalFloorPrepared = prepared;
     const applied = applyFloorPreview({
       map: resolveMap?.(),
       layerIds: getHighlightLayerIds(),
@@ -345,6 +347,7 @@ export function createFilterDiffApplyStrategy({
     meta: FilterDiffApplyMeta = {}
   ) {
     if (token !== Number(getLatestFilterToken?.() ?? token)) return;
+    provisionalFloorPrepared = null;
 
     const nextColorGroups = normalizeFilterPaintColorGroups(colorGroups);
     const nextMarkerGroups = buildMarkerGroups(nextColorGroups);
@@ -429,6 +432,7 @@ export function createFilterDiffApplyStrategy({
   }
 
   function clearFilteredHighlight() {
+    provisionalFloorPrepared = null;
     filteredColorGroups = [];
     filteredMarkerGroups = [];
     filteredFeatureCount = 0;
@@ -469,6 +473,9 @@ export function createFilterDiffApplyStrategy({
   }
 
   function reapplyFilteredHighlight() {
+    // Sources, theme and building-part visibility can refresh before the API returns.
+    // Reapply the pending tile-based colors instead of the previous resolved IDs.
+    if (provisionalFloorPrepared && applyProvisionalFloorHighlight(provisionalFloorPrepared)) return;
     const layerIds = getHighlightLayerIds();
     const applyResult = applyCurrentHighlight({
       forceStaticPaintProperties: true,

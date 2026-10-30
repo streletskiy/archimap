@@ -3,6 +3,12 @@ param(
   [string]$ComposeRoot = 'C:\Users\Bonmucho\Documents\archimap',
   [int]$RetentionDays = 3
 )
+function Get-BackupCreatedAt([string]$FileName) {
+  if ($FileName -notmatch '^archimap-(\d{8}-\d{6})\.(dump|env|compose\.yml)$') { return $null }
+  $created = [DateTime]::MinValue
+  if ([DateTime]::TryParseExact($Matches[1], 'yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$created)) { return $created }
+  return $null
+}
 $ErrorActionPreference = 'Stop'
 $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 $endpoint = 'npipe:////./pipe/docker_engine'
@@ -34,7 +40,9 @@ try {
   $manifest | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $root 'latest.json.partial') -Encoding UTF8
   Move-Item -LiteralPath (Join-Path $root 'latest.json.partial') -Destination (Join-Path $root 'latest.json') -Force
   Get-ChildItem -LiteralPath $root -File -Filter 'archimap-*' | Where-Object {
-    $_.Name -match '^archimap-\d{8}-\d{6}\.(dump|env|compose\.yml)$' -and $_.LastWriteTime -lt (Get-Date).AddDays(-[Math]::Max(2, $RetentionDays))
+    # Copy-Item preserves source timestamps; retention follows the backup set date.
+    $created = Get-BackupCreatedAt $_.Name
+    $null -ne $created -and $created -lt (Get-Date).AddDays(-[Math]::Max(2, $RetentionDays))
   } | ForEach-Object {
     if ($_.DirectoryName -ne $root) { throw 'Backup retention path escaped root' }
     Remove-Item -LiteralPath $_.FullName
