@@ -1342,11 +1342,12 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(renamedBody.items[0].id, 'new-contains-test');
     });
   } finally {
-    if (server.exitCode == null) {
+    if (server.exitCode == null && server.signalCode == null) {
+      const closed = new Promise((resolve) => server.once('close', resolve));
       server.kill('SIGTERM');
-      await new Promise((resolve) => server.once('exit', resolve));
+      await closed;
     }
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     for (const filePath of generatedPmtilesPaths) {
       fs.rmSync(filePath, { force: true });
     }

@@ -309,7 +309,9 @@ function registerAppRoutes(deps) {
 
   // This archive can be rebuilt at startup, after adapter-node records static asset metadata.
   app.get('/admin-regions.pmtiles', (req, res) => {
-    return sendPmtiles(req, res, path.join(frontendBuildDir, 'client', 'admin-regions.pmtiles'), {
+    const sharedArchive = path.join(dataDir, 'cache', 'admin-regions.pmtiles');
+    const archive = fs.existsSync(sharedArchive) ? sharedArchive : path.join(frontendBuildDir, 'client', 'admin-regions.pmtiles');
+    return sendPmtiles(req, res, archive, {
       cacheControl: 'public, max-age=300, stale-while-revalidate=120'
     });
   });

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.1
+
+### 🐛 Bug Fixes
+
+- **Shared Administrative Tiles:** Publish rebuilt boundary archives atomically in the shared data directory so the web process serves worker updates. Keep the bundled archive as a startup fallback.
+- **Archive Builder:** Execute builds inside the existing Planetiler sidecar with explicit file transfer, preserving its resource limits and supporting Docker hosts whose filesystem paths differ from the worker.
+- **HTTP Checks:** Avoid browser-blocked ephemeral ports in Windows route tests and retry port conflicts.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.9.0...0.9.1)
+
 ## v0.9.0
 
 ### ⚡ Performance

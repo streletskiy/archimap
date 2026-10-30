@@ -5,8 +5,8 @@ const { spawnSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_INPUT = path.join(REPO_ROOT, 'frontend', 'build', 'client', 'admin-regions.geojson');
-const DEFAULT_OUTPUT = path.join(REPO_ROOT, 'frontend', 'build', 'client', 'admin-regions.pmtiles');
-const DEFAULT_METADATA_OUTPUT = `${DEFAULT_OUTPUT}.meta.json`;
+const BUNDLED_OUTPUT = path.join(REPO_ROOT, 'frontend', 'build', 'client', 'admin-regions.pmtiles');
+const DEFAULT_OUTPUT = path.join(REPO_ROOT, 'data', 'cache', 'admin-regions.pmtiles');
 const DEFAULT_MODE =
   String(process.env.ADMIN_REGIONS_PMTILES_ON_START || 'auto')
     .trim()
@@ -97,7 +97,7 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
   const mode = normalizeMode(options.mode || DEFAULT_MODE);
   const inputPath = path.resolve(REPO_ROOT, String(options.inputPath || DEFAULT_INPUT));
   const outputPath = path.resolve(REPO_ROOT, String(options.outputPath || DEFAULT_OUTPUT));
-  const metadataPath = path.resolve(REPO_ROOT, String(options.metadataPath || DEFAULT_METADATA_OUTPUT));
+  const metadataPath = path.resolve(REPO_ROOT, String(options.metadataPath || `${outputPath}.meta.json`));
   const planetilerBin = String(options.planetilerBin || DEFAULT_PLANETILER_BIN).trim() || DEFAULT_PLANETILER_BIN;
 
   if (mode === 'never') {
@@ -110,6 +110,14 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
     return { status: 'skipped', reason: 'missing_input' };
   }
 
+  // Both web and worker mount data; container-local build assets are only a fallback.
+  if (!options.outputPath && !fs.existsSync(outputPath) && fs.existsSync(BUNDLED_OUTPUT)) {
+    ensureParentDir(outputPath);
+    const seedPath = `${outputPath}.seed-${process.pid}`;
+    fs.copyFileSync(BUNDLED_OUTPUT, seedPath);
+    fs.renameSync(seedPath, outputPath);
+    if (fs.existsSync(`${BUNDLED_OUTPUT}.meta.json`)) fs.copyFileSync(`${BUNDLED_OUTPUT}.meta.json`, metadataPath);
+  }
   const outputExists = fs.existsSync(outputPath);
   const inputSha256 = hashFile(inputPath);
   const metadata = readMetadata(metadataPath);
@@ -130,13 +138,20 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
   ensureParentDir(outputPath);
   ensureParentDir(metadataPath);
 
+  const stagedOutput = `${outputPath}.building-${process.pid}-${crypto.randomBytes(6).toString('hex')}.pmtiles`;
+  const stagedMetadata = `${stagedOutput}.meta.json`;
   try {
     runPmtilesBuild({
       inputPath,
-      outputPath,
-      metadataPath,
+      outputPath: stagedOutput,
+      metadataPath: stagedMetadata,
       planetilerBin
     });
+    const publishedMetadata = JSON.parse(fs.readFileSync(stagedMetadata, 'utf8'));
+    publishedMetadata.output = toRepoRelative(outputPath);
+    fs.writeFileSync(stagedMetadata, `${JSON.stringify(publishedMetadata, null, 2)}\n`, 'utf8');
+    fs.renameSync(stagedOutput, outputPath);
+    fs.renameSync(stagedMetadata, metadataPath);
     return { status: outputExists ? 'rebuilt' : 'created', reason: rebuildReason };
   } catch (error) {
     const message = String(error?.message || error);
@@ -145,6 +160,9 @@ async function ensureAdminRegionsPmtiles(options: LooseRecord = {}) {
       return { status: 'failed_kept_existing', reason: rebuildReason, error: message };
     }
     throw error;
+  } finally {
+    fs.rmSync(stagedOutput, { force: true });
+    fs.rmSync(stagedMetadata, { force: true });
   }
 }
 
