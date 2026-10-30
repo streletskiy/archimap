@@ -1,7 +1,7 @@
 <script>
   import { get } from 'svelte/store';
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
+  import { createPageStore } from '$lib/stores/page.svelte';
   import FilterIcon from '$lib/components/icons/FilterIcon.svelte';
   import MenuIcon from '$lib/components/icons/MenuIcon.svelte';
   import SearchIcon from '$lib/components/icons/SearchIcon.svelte';
@@ -18,6 +18,8 @@
   import { openSearchModal, requestSearch, searchState, setSearchQuery } from '$lib/stores/search';
   import { t } from '$lib/i18n/index';
   import { getUserInitials, getUserLabel } from '$lib/utils/user-display';
+
+  const page = createPageStore();
 
   let menuOpen = false;
   let authOpen = false;

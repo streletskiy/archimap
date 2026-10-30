@@ -1,6 +1,6 @@
 <script>
   import { tick } from 'svelte';
-  import { page } from '$app/stores';
+  import { createPageStore } from '$lib/stores/page.svelte';
   import { UiButton, UiInput } from '$lib/components/base';
   import LoginForm from '$lib/components/login-form.svelte';
   import SignupForm from '$lib/components/signup-form.svelte';
@@ -8,6 +8,8 @@
   import { apiJson } from '$lib/services/http';
   import { setSession } from '$lib/stores/auth';
   import AuthCardShell from './AuthCardShell.svelte';
+
+  const page = createPageStore();
 
   export let open = false;
   export let preferredTab = 'login';

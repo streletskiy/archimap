@@ -1,11 +1,18 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_IMAGE=node:24-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
+ARG NODE_IMAGE=node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
 ARG RUNTIME_BASE_IMAGE=runtime-base
 
 FROM ${NODE_IMAGE} AS deps
 
+RUN apk add --no-cache python3 make g++
 WORKDIR /app
+RUN npm install --global npm@12.2.1 \
+  && npm install --prefix /tmp/npm-security --ignore-scripts --no-audit --no-fund undici@6.29.1 ip-address@10.7.4 \
+  && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && mv /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
+  && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && rm -rf /tmp/npm-security
 
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
@@ -14,8 +21,15 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend-deps
 
 WORKDIR /app/frontend
+RUN npm install --global npm@12.2.1 \
+  && npm install --prefix /tmp/npm-security --ignore-scripts --no-audit --no-fund undici@6.29.1 ip-address@10.7.4 \
+  && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && mv /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
+  && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && rm -rf /tmp/npm-security
 
 COPY frontend/package*.json ./
+COPY frontend/vendor ./vendor
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
   npm ci
 
@@ -48,26 +62,14 @@ RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG
 FROM ${NODE_IMAGE} AS runtime-base
 
 WORKDIR /app
+RUN npm install --global npm@12.2.1 \
+  && npm install --prefix /tmp/npm-security --ignore-scripts --no-audit --no-fund undici@6.29.1 ip-address@10.7.4 \
+  && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && mv /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
+  && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
+  && rm -rf /tmp/npm-security
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-  apt-get update \
-  && apt-get install -y --no-install-recommends \
-    aria2 \
-    ca-certificates \
-    curl \
-    gnupg \
-    libsqlite3-0 \
-    zlib1g \
-  && install -m 0755 -d /etc/apt/keyrings \
-  && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
-  && chmod a+r /etc/apt/keyrings/docker.asc \
-  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
-    > /etc/apt/sources.list.d/docker.list \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends docker-ce-cli \
-  && apt-get purge -y --auto-remove curl gnupg \
-  && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache aria2 ca-certificates docker-cli sqlite-libs zlib
 
 RUN mkdir -p /app/data/cache
 

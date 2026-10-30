@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { get } from 'svelte/store';
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { createPageStore } from '$lib/stores/page.svelte';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import {
     buildAccountEditUrl,
@@ -41,6 +41,8 @@
   import { getEditsDateRangeParams } from '$lib/utils/edit-date-range';
   import { formatUiDate, getChangeCounters, getDisplayEditStatusMeta, getEditAddress, getEditKey, getSyncBadgeMeta, isOverpassBackedEdit, parseEditKey } from '$lib/utils/edit-ui';
   import { getGeometryCenter } from '$lib/utils/map-geometry';
+
+  const page = createPageStore();
 
   const SRC = 'account-edited-points';
   const L_CLUSTER = 'account-edited-points-clusters';
@@ -257,6 +259,7 @@
     const initialStyle = await mapStyleSync.resolveInitialStyle(cfg);
     if (!mapEl || map || initNonce !== mapInitNonce) return;
     map = new maplibregl.Map({
+      zoomLevelsToOverscale: undefined,
       container: mapEl,
       style: initialStyle,
       center: [cfg.mapDefault.lon, cfg.mapDefault.lat],
@@ -548,9 +551,8 @@
     accountUrlSyncBusy = true;
     try {
       await goto(`${next.pathname}${next.search}${next.hash}`, {
-        replaceState: true,
-        keepFocus: true,
-        noScroll: true
+        replace: true,
+        reset: false
       });
     } finally {
       queueMicrotask(() => {

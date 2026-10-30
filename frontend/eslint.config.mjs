@@ -10,6 +10,7 @@ export default [
       '.svelte-kit/**',
       'build/**',
       'dist/**',
+      'vendor/**',
       'src/lib/components/ui/**',
       'svelte.config.js',
       'static/theme-init.js'

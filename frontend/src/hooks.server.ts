@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { Handle } from '@sveltejs/kit';
+import type { Handle } from '@sveltejs/kit/hooks';
 
 function normalizeOrigins(input: string) {
   return String(input || '')

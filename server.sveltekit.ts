@@ -37,6 +37,7 @@ const INTERNAL_EXACT_PATHS = new Set([
   '/readyz',
   '/metrics',
   '/app-config.js',
+  '/admin-regions.pmtiles',
   '/favicon.ico',
   '/.well-known/appspecific/com.chrome.devtools.json'
 ]);

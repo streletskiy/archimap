@@ -882,6 +882,7 @@
       setMapBearing(initialBearing);
 
       map = new maplibregl.Map({
+        zoomLevelsToOverscale: undefined,
         container,
         style: initialStyle,
         center: [initialCamera.lng, initialCamera.lat],

@@ -1,4 +1,3 @@
-import { resolve } from '$app/paths';
 import { getFilterLayersUrlSignature } from '$lib/client/filterUrlState';
 import { parseUrlState, patchUrlState } from '$lib/client/urlState';
 import { normalizeOptionalMapZoom, requestMapFocus, setMapBuildings3dEnabled } from '$lib/stores/map';
@@ -83,7 +82,7 @@ export function createUrlStateManager({
       }
       lastUrlBuildingKey = getUrlBuildingKey(nextState);
       lastUrlFilterKey = getUrlFilterKey(nextState);
-      const target = resolve(`${next.pathname}${next.search}${next.hash}`, {});
+      const target = `${next.pathname}${next.search}${next.hash}`;
       if (shouldReplaceState) {
         window.history.replaceState(window.history.state, '', target);
       } else {

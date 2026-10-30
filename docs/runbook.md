@@ -22,6 +22,19 @@
    - `/api/contours-status`
    - `/metrics` only when `METRICS_ENABLED=true`
 
+## Windows startup and recovery
+
+The NODE-H1 deployment uses the `Archimap Startup and Recovery` scheduled task.
+It runs as SYSTEM at Windows startup and every five minutes, with five one-minute
+retries if Docker or the application is not ready. The task executes
+`C:\ProgramData\Archimap\ensure-started.ps1` and records failures in `startup.log`
+in the same directory. Docker itself must have its own boot startup configured.
+
+The recovery script starts the existing Compose project without building or pulling
+images and checks `/readyz`. All five containers use `restart: unless-stopped`.
+For planned downtime, disable the scheduled task before stopping the stack, then
+enable it again afterwards. Inspect `Get-ScheduledTaskInfo -TaskName 'Archimap Startup and Recovery'` and verify `LastTaskResult` is zero after a manual task run.
+
 ## Automated Docker releases
 
 Pushing an `X.Y.Z` Git tag starts `.github/workflows/docker-release.yml`. Wait for it to

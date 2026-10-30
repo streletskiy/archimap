@@ -295,6 +295,13 @@ function registerAppRoutes(deps) {
     return res.sendFile(frontendIndexPath);
   });
 
+  // This archive can be rebuilt at startup, after adapter-node records static asset metadata.
+  app.get('/admin-regions.pmtiles', (req, res) => {
+    return sendPmtiles(req, res, path.join(frontendBuildDir, 'client', 'admin-regions.pmtiles'), {
+      cacheControl: 'public, max-age=300, stale-while-revalidate=120'
+    });
+  });
+
   app.get('/api/data/regions/:regionId/pmtiles', async (req, res) => {
     const regionId = Number(req.params.regionId);
     if (!Number.isInteger(regionId) || regionId <= 0) {

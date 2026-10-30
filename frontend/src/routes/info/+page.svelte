@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { createPageStore } from '$lib/stores/page.svelte';
   import { buildInfoUrl, resolveInfoTabFromUrl } from '$lib/client/section-routes';
   import { UiBadge, UiTabsNav } from '$lib/components/base';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
@@ -11,6 +11,8 @@
   import { APP_REPO_URL, APP_VERSION_DISPLAY } from '$lib/version';
   import agreementMarkdownSource from '../../../../legal/user-agreement.ru.md?raw';
   import privacyMarkdownSource from '../../../../legal/privacy-policy.ru.md?raw';
+
+  const page = createPageStore();
 
   let activeTab = resolveInfoTabFromUrl(get(page).url);
   let infoUrlSyncBusy = false;
@@ -52,9 +54,8 @@
     infoUrlSyncBusy = true;
     try {
       await goto(`${next.pathname}${next.search}${next.hash}`, {
-        replaceState: true,
-        keepFocus: true,
-        noScroll: true
+        replace: true,
+        reset: false
       });
     } finally {
       queueMicrotask(() => {

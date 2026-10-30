@@ -2,13 +2,18 @@ let mapRuntimePromise = null;
 
 export async function loadMapRuntime() {
   if (!mapRuntimePromise) {
-    mapRuntimePromise = Promise.all([import('maplibre-gl'), import('pmtiles')]).then(
-      ([maplibreModule, pmtilesModule]) => ({
-        maplibregl: maplibreModule.default,
+    mapRuntimePromise = Promise.all([
+      import('maplibre-gl'),
+      import('maplibre-gl/dist/maplibre-gl-worker.mjs?url'),
+      import('pmtiles')
+    ]).then(([maplibreModule, workerModule, pmtilesModule]) => {
+      maplibreModule.setWorkerUrl(workerModule.default);
+      return {
+        maplibregl: maplibreModule,
         PMTiles: pmtilesModule.PMTiles,
         Protocol: pmtilesModule.Protocol
-      })
-    );
+      };
+    });
   }
 
   return mapRuntimePromise;

@@ -257,6 +257,7 @@
     const initialStyle = await mapStyleSync.resolveInitialStyle(config);
     if (map || !mapEl || initNonce !== mapInitNonce) return;
     map = new maplibregl.Map({
+      zoomLevelsToOverscale: undefined,
       container: mapEl,
       style: initialStyle,
       center: [config.mapDefault.lon, config.mapDefault.lat],

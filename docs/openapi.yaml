@@ -6,6 +6,25 @@ info:
 servers:
   - url: http://localhost:3252
 paths:
+  /admin-regions.pmtiles:
+    get:
+      summary: Admin coverage PMTiles stream with runtime file metadata
+      parameters:
+        - in: header
+          name: Range
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full PMTiles payload
+        '206':
+          description: Partial content for a valid byte range
+        '304':
+          description: Archive has not changed
+        '404':
+          description: Admin coverage archive not found
+        '416':
+          description: Requested byte range is not satisfiable
   /healthz:
     get:
       summary: Liveness probe

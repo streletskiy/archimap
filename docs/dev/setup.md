@@ -3,7 +3,8 @@
 ## Local
 
 1. Install deps:
-   - use Node.js 24 LTS
+   - use Node.js 24 LTS, version 24.22.1 or newer
+   - install npm 12.2.1 (`npm install --global npm@12.2.1`)
    - `npm ci`
    - `npm --prefix frontend ci`
 2. Prepare env:
@@ -25,10 +26,13 @@
    - `npm run test:integration:postgres` when validating PostgreSQL-specific behavior with `DATABASE_URL`
 
    Frontend bootstrap note:
-   - `frontend/src/bootstrap/svelte.config.ts` is compiled into `frontend/svelte.config.js` by the frontend `generate:bootstrap` step.
+   - SvelteKit 3 configuration lives in `frontend/vite.config.ts`; no generated `svelte.config.js` is used.
    - `frontend/src/theme-init.ts` is compiled into `frontend/static/theme-init.js` by the frontend `generate:bootstrap` step.
 
 For frontend work, read [UI Architecture](../ui-architecture.md) before changing shared controls, app-level styling, dialogs, filters, or route shells.
+
+MapLibre GL 6 requires a browser with WebGL2. Its module worker is bundled and served
+locally with the application.
 
 ## Development loop
 

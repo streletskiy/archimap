@@ -8,7 +8,7 @@ This page is a human-readable companion to [OpenAPI](openapi.yaml). `docs/openap
 - API/system endpoints are dispatched to the internal app runtime created by `src/lib/server/boot/server-runtime.boot.ts` and exported through thin `server.ts` entrypoint for:
   - `/api/**`
   - `/healthz`, `/readyz`, `/metrics`
-  - `/app-config.js`, `/favicon.ico`, `/.well-known/appspecific/com.chrome.devtools.json`, `/ui/**`
+  - `/app-config.js`, `/admin-regions.pmtiles`, `/favicon.ico`, `/.well-known/appspecific/com.chrome.devtools.json`, `/ui/**`
 
 System notes:
 
@@ -19,6 +19,8 @@ System notes:
 
 ## Core endpoints
 
+- `GET /admin-regions.pmtiles`
+  - Streams the admin coverage archive with byte ranges and current file size/ETag, including after a startup rebuild.
 - `GET /api/version`
   - Returns build/runtime version payload.
   - Cache: `Cache-Control: no-store`.

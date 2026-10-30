@@ -10,51 +10,48 @@
 
 Reference: [`Dockerfile`](../../Dockerfile)
 
-1. `planetiler-dist`
-
-- Pulls the pinned upstream `ghcr.io/onthegomap/planetiler` image and reuses its Java runtime + application classpath in our `runtime-base`.
-
-2. `deps`
+1. `deps`
 
 - Installs backend production dependencies from `package-lock.json`.
-- Changes only when backend dependency manifests change.
+- Includes a build-only native toolchain so SQLite can be built for musl when no prebuilt binary is available.
 
-3. `frontend-deps`
+2. `frontend-deps`
 
 - Installs frontend dependencies from `frontend/package-lock.json`.
 - Isolated from backend source changes.
 
-4. `frontend-runtime-deps`
+3. `frontend-runtime-deps`
 
 - Starts from `frontend-deps` and prunes dev dependencies with `npm prune --omit=dev`.
 - Keeps the runtime image free of frontend dev dependencies.
 
-5. `frontend-build`
+4. `frontend-build`
 
 - Generates version metadata and builds frontend bundle from committed frontend assets.
 - Installs the backend production dependency tree in the build-platform stage so `scripts/generate-version.ts` uses a matching native `esbuild` binary.
 - Does not reuse the runtime `deps` layer.
 
+5. `runtime-base`
+
+- Installs aria2, Docker CLI, certificates, and SQLite/zlib runtime libraries from Alpine.
+- Uses npm 12.2.1 with its bundled Undici updated to 6.29.1 and ip-address to 10.7.4.
+
 6. `runtime`
 
-- Uses pinned `node:24-bookworm-slim`.
+- Uses digest-pinned `node:24.22.2-alpine` with the October 2026 security fixes.
 - Contains only runtime assets:
   - backend runtime code (`server.sveltekit.ts`, `server.ts`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`
   - `frontend/static`
   - production `node_modules`
-  - `osm2pgsql`
-  - `aria2`
-  - `planetiler` wrapper + Java runtime
+  - `aria2` and Docker CLI; osm2pgsql and Planetiler run in their dedicated Compose sidecars
   - no QuackOSM / DuckDB / Python importer / `tippecanoe` runtime dependency for managed region sync
 
 ## Cache Stability Rules
 
 - Dependency install is isolated before source code copy.
 - Frontend dependency install is isolated from frontend sources.
-- BuildKit cache mounts are used for:
-  - npm (`/root/.npm`)
-  - apt (`/var/cache/apt`, `/var/lib/apt/lists`)
+- BuildKit cache mounts reuse npm downloads (`/root/.npm`). Alpine runtime packages are installed without a retained package cache.
 
 ## Build Context
 

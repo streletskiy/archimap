@@ -73,3 +73,20 @@
   - `npm run admin:create-master -- --email=admin@example.com --password=<strong-password>`
 - The command can also promote an existing user to `is_admin=1` and `is_master_admin=1`.
 - Operational procedure is documented in [docs/runbook.md](runbook.md).
+
+## Dependency maintenance
+
+Both backend and frontend lockfiles are audited in CI, including development dependencies.
+Dependabot monitors both package directories. Node.js must be at least 24.22.1; the
+container pins 24.22.2 on Alpine by digest to include the October 2026 security fixes.
+Build and runtime stages use npm 12.2.1 to replace vulnerable dependencies bundled
+with the npm version in the upstream Node image; its bundled Undici is separately
+pinned to 6.29.1 and ip-address to 10.7.4. Native install scripts are
+approved by exact package version in the root package manifest.
+
+The frontend overrides `deepmerge` with the MIT-licensed local copy in
+[`frontend/vendor/deepmerge`](../frontend/vendor/deepmerge/README.md). It rejects
+prototype-related keys in both source and target objects to fix
+[GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4), for which no
+upstream patched release was available on 2026-10-30. Replace the local copy when
+an upstream fix is published; do not remove the override without a replacement.

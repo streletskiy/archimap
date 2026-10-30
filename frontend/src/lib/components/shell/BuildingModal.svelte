@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
-  import { page } from '$app/stores';
+  import { createPageStore } from '$lib/stores/page.svelte';
   import { fade, fly } from 'svelte/transition';
   import { UiBadge, UiButton, UiCheckbox, UiColorPicker, UiInput, UiScrollArea, UiSelect, UiTextarea } from '$lib/components/base';
   import { buildingModalOpen } from '$lib/stores/ui';
@@ -32,6 +32,8 @@
     formatDisplayText,
     pickFirstText
   } from '$lib/utils/text';
+
+  const page = createPageStore();
 
   export let buildingDetails = null;
   export let selectedBuildingDetails = [];

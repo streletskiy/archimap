@@ -1,5 +1,5 @@
 <script>
-  import { browser } from '$app/environment';
+  import { browser } from '$app/env';
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import { UiBadge, UiButton, UiInput, UiScrollArea } from '$lib/components/base';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';

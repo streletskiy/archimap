@@ -17,6 +17,7 @@ export default [
       'frontend/svelte.config.js',
       'frontend/static/theme-init.js',
       'frontend/src/**',
+      'frontend/vendor/**',
       'playwright-report/**',
       'test-results/**',
       'tmp/**'

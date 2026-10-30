@@ -3,14 +3,14 @@
 ## Core
 
 - `npm run dev`: build frontend then run server.
-- `npm run frontend:dev`: run the frontend Vite dev server only. It first regenerates `frontend/svelte.config.js` from `frontend/src/bootstrap/svelte.config.ts` and `frontend/static/theme-init.js` from `frontend/src/theme-init.ts`.
+- `npm run frontend:dev`: run the frontend Vite dev server only. It first regenerates `frontend/static/theme-init.js` from `frontend/src/theme-init.ts`, then synchronizes SvelteKit types using `frontend/vite.config.ts`.
 - `npm run build`: production frontend build.
-- `npm run frontend:build`: production frontend build only. It first regenerates `frontend/svelte.config.js` from `frontend/src/bootstrap/svelte.config.ts` and `frontend/static/theme-init.js` from `frontend/src/theme-init.ts`.
+- `npm run frontend:build`: production frontend build only. It first regenerates `frontend/static/theme-init.js` from `frontend/src/theme-init.ts`, then synchronizes SvelteKit types using `frontend/vite.config.ts`.
 - `npm run start`: run server.
 - `npm run lint`: backend + frontend lint.
 - `npm run frontend:lint`: frontend ESLint only.
-- `npm run frontend:check`: Svelte/type-level frontend validation. It uses the generated `frontend/svelte.config.js` so the SvelteKit config loads natively.
-- `npm run frontend:preview`: preview the built frontend locally. It first regenerates `frontend/svelte.config.js` from `frontend/src/bootstrap/svelte.config.ts` and `frontend/static/theme-init.js` from `frontend/src/theme-init.ts`.
+- `npm run frontend:check`: Svelte/type-level frontend validation. It synchronizes SvelteKit 3 configuration from `frontend/vite.config.ts`.
+- `npm run frontend:preview`: preview the built frontend locally. It first regenerates `frontend/static/theme-init.js` from `frontend/src/theme-init.ts`, then synchronizes SvelteKit types using `frontend/vite.config.ts`.
 - `npm run test`: CI-like non-E2E local gate (`frontend:build` + unit + integration + syntax + security + smoke).
 - [`node --import tsx scripts/generate-version.ts`](../../scripts/generate-version.ts): generate backend/frontend build version files.
 - `npm run version:print`: print generated version payload.
@@ -50,7 +50,7 @@ Notes:
 - Managed region sync is PostgreSQL-only. The runtime path no longer uses SQLite, QuackOSM, DuckDB, Python importer helpers, `osmium`, or `tippecanoe`.
 - `pmtiles-builder.ts` uses `planetiler` for regional PMTiles builds.
 - Managed imports use `osm2pgsql` flex into a per-run PostgreSQL staging schema and then merge into canonical tables; `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` still controls apply batching details where relevant.
-- `frontend/src/bootstrap/svelte.config.ts` is the source of truth for the frontend SvelteKit config. The generated `frontend/svelte.config.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
+- `frontend/vite.config.ts` is the source of truth for SvelteKit 3 configuration, adapter settings, and shared aliases.
 - `frontend/src/theme-init.ts` is the source of truth for the initial theme bootstrap. The generated `frontend/static/theme-init.js` is produced by frontend `generate:bootstrap`; do not edit the generated file directly.
 - Docker containers start through `scripts/runtime-start.ts`, which runs `scripts/ensure-admin-regions-pmtiles.ts` before booting `server.sveltekit.ts`.
 - `npm test` does not run Playwright; use `npm run test:e2e` separately when finalizing UI-impacting changes.

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { beforeNavigate, goto } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { createPageStore } from '$lib/stores/page.svelte';
 
   import { UiTabsNav } from '$lib/components/base';
   import PortalFrame from '$lib/components/shell/PortalFrame.svelte';
@@ -18,6 +18,8 @@
   import { parseUrlState, patchUrlState } from '$lib/client/urlState';
   import { t } from '$lib/i18n/index';
   import { session } from '$lib/stores/auth';
+
+  const page = createPageStore();
 
   const dataController = createAdminDataController();
   const filtersDirty = dataController.filtersDirty;
@@ -43,9 +45,8 @@
     adminUrlSyncBusy = true;
     try {
       await goto(`${next.pathname}${next.search}${next.hash}`, {
-        replaceState: true,
-        keepFocus: true,
-        noScroll: true
+        replace: true,
+        reset: false
       });
     } finally {
       queueMicrotask(() => {
