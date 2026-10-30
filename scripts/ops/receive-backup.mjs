@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import console from 'node:console';
+import { setTimeout, clearTimeout } from 'node:timers';
 
 const settings = JSON.parse(readFileSync(process.argv[2], 'utf8').replace(/^\uFEFF/, ''));
 const connection = JSON.parse(readFileSync(settings.connectionFile, 'utf8').replace(/^\uFEFF/, ''));
@@ -20,11 +21,12 @@ async function download(remote, local) {
       '--file', remote, '--target', local], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let complete = false;
     let tail = '';
+    const timeout = setTimeout(() => child.kill(), 3 * 3600000);
     child.stdout.on('data', (data) => { tail = (tail + String(data)).slice(-512); if (tail.includes('Download completed,')) complete = true; });
     // Never echo authentication or server messages into a scheduled-task log.
     child.stderr.on('data', () => {});
-    child.on('error', reject);
-    child.on('exit', (code) => code === 0 && complete ? resolve() : reject(new Error('Backup transfer failed')));
+    child.on('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.on('exit', (code) => { clearTimeout(timeout); return code === 0 && complete ? resolve() : reject(new Error('Backup transfer failed')); });
   });
 }
 async function hashFile(file) {
@@ -44,9 +46,17 @@ if (!existsSync(target) || statSync(target).size !== manifest.bytes || await has
   if (statSync(partial).size !== manifest.bytes || await hashFile(partial) !== manifest.sha256.toUpperCase()) throw new Error('Backup checksum mismatch');
   renameSync(partial, target);
 }
+for (const item of manifest.configuration || []) {
+  if (!/^archimap-\d{8}-\d{6}\.(env|compose\.yml)$/.test(item.file) || !/^[A-Fa-f0-9]{64}$/.test(item.sha256)
+    || !Number.isSafeInteger(item.bytes) || item.bytes <= 0) throw new Error('Invalid configuration manifest');
+  const configTarget = path.join(root, item.file);
+  await download(`${settings.remoteRoot}\\${item.file}`, `${configTarget}.partial`);
+  if (statSync(`${configTarget}.partial`).size !== item.bytes || await hashFile(`${configTarget}.partial`) !== item.sha256.toUpperCase()) throw new Error('Configuration checksum mismatch');
+  renameSync(`${configTarget}.partial`, configTarget);
+}
 writeFileSync(path.join(root, 'latest.json'), JSON.stringify({ ...manifest, verifiedUtc: new Date().toISOString() }));
 for (const name of readdirSync(root)) {
-  if (!/^archimap-\d{8}-\d{6}\.dump$/.test(name) || name === manifest.file) continue;
+  if (!/^archimap-\d{8}-\d{6}\.(dump|env|compose\.yml)$/.test(name) || name === manifest.file || (manifest.configuration || []).some((item) => item.file === name)) continue;
   const candidate = path.join(root, name);
   if (statSync(candidate).mtimeMs < Date.now() - 3 * 86400000) unlinkSync(candidate);
 }

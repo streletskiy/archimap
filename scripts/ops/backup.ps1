@@ -1,5 +1,6 @@
 param(
   [string]$BackupRoot = 'C:\ProgramData\Archimap\backups\daily',
+  [string]$ComposeRoot = 'C:\Users\Bonmucho\Documents\archimap',
   [int]$RetentionDays = 3
 )
 $ErrorActionPreference = 'Stop'
@@ -22,11 +23,18 @@ try {
   if ($LASTEXITCODE) { throw 'Backup transfer failed' }
   Move-Item -LiteralPath "$target.partial" -Destination $target
   $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-  $manifest = @{ file = $name; sha256 = $hash; bytes = (Get-Item -LiteralPath $target).Length; createdUtc = [DateTime]::UtcNow.ToString('o') }
+  $configuration = @()
+  foreach ($entry in @(@{source='.env';suffix='.env'},@{source='docker-compose.yml';suffix='.compose.yml'})) {
+    $configName = $name.Replace('.dump',$entry.suffix)
+    $configPath = Join-Path $root $configName
+    Copy-Item -LiteralPath (Join-Path $ComposeRoot $entry.source) -Destination $configPath
+    $configuration += @{file=$configName;sha256=(Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash;bytes=(Get-Item -LiteralPath $configPath).Length}
+  }
+  $manifest = @{ file = $name; sha256 = $hash; bytes = (Get-Item -LiteralPath $target).Length; createdUtc = [DateTime]::UtcNow.ToString('o'); configuration=$configuration }
   $manifest | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $root 'latest.json.partial') -Encoding UTF8
   Move-Item -LiteralPath (Join-Path $root 'latest.json.partial') -Destination (Join-Path $root 'latest.json') -Force
-  Get-ChildItem -LiteralPath $root -File -Filter 'archimap-*.dump' | Where-Object {
-    $_.Name -match '^archimap-\d{8}-\d{6}\.dump$' -and $_.LastWriteTime -lt (Get-Date).AddDays(-[Math]::Max(2, $RetentionDays))
+  Get-ChildItem -LiteralPath $root -File -Filter 'archimap-*' | Where-Object {
+    $_.Name -match '^archimap-\d{8}-\d{6}\.(dump|env|compose\.yml)$' -and $_.LastWriteTime -lt (Get-Date).AddDays(-[Math]::Max(2, $RetentionDays))
   } | ForEach-Object {
     if ($_.DirectoryName -ne $root) { throw 'Backup retention path escaped root' }
     Remove-Item -LiteralPath $_.FullName

@@ -47,9 +47,10 @@ SQL or query parameters in public reports. `track_io_timing` is enabled.
 `scripts/ops/backup.ps1` creates a consistent custom-format PostgreSQL dump, excludes
 rebuildable staging schemas, validates the archive table of contents, writes a SHA256
 manifest and retains three days. Store scripts and backups under the ACL-protected
-`C:\ProgramData\Archimap` directory. Run daily as SYSTEM. This covers the database;
-the deployment `.env` and generated PMTiles require their own protected copies or
-regeneration. Keep release rollback image tags until verification finishes.
+`C:\ProgramData\Archimap` directory. Run daily as SYSTEM. Each manifest also covers
+protected copies of `.env` and Compose; the receiver verifies and transfers them
+alongside the database. Generated PMTiles can be regenerated. Keep release rollback
+image tags until verification finishes.
 
 Copy completed dumps and their manifests to another machine. Verify byte count and
 SHA256 after transfer. A backup is not proven recoverable until `pg_restore
