@@ -1,6 +1,7 @@
 <script>
   import { beforeNavigate } from '$app/navigation';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import UiButton from '$lib/components/base/UiButton.svelte';
   import { get } from 'svelte/store';
   import { CUSTOM_MAP_ATTRIBUTION } from '$lib/constants/map';
   import { getRuntimeConfig } from '$lib/services/config';
@@ -111,6 +112,7 @@
     setMapZoom
   } from '$lib/stores/map';
   import { buildingFilterLayers, buildingFilterRuntime, setBuildingFilterRuntimeStatus } from '$lib/stores/filters';
+  import { buildingDataRevision } from '$lib/stores/building-data';
   import { searchMapState, searchState } from '$lib/stores/search';
   import { getActiveRegionPmtiles, isViewportCoveredByRegions } from '$lib/services/region-pmtiles';
   import { createMapRegionLayersController } from './map-region-layers-controller';
@@ -159,6 +161,9 @@
   let initialFilterReplayEnabled = false;
   let initialFilterReplayQueued = false;
   let initialFilterReplayRetryTimer = null;
+  let mapLoadFailed = false;
+  let mapLoadPending = false;
+  let retryMap = () => {};
 
   $: effectiveBuildingPartsVisible = getEffectiveBuildingPartsVisibility({
     buildingPartsVisible: $mapBuildingPartsVisible,
@@ -350,11 +355,16 @@
     mapDebug,
     getLayerIds: () => regionLayersController.getCurrentMapLayerIds(),
     getBuildingSourceConfigs: () => regionLayersController.getCurrentBuildingSourceConfigs(),
-    getSourceDataVersion: () => $overpassBuildingsState.dataVersion,
+    getSourceDataVersion: () => $overpassBuildingsState.dataVersion + $buildingDataRevision * 1_000_000,
     onStatusChange: setBuildingFilterRuntimeStatus,
     translateInvalidMessage: () => translateNow('mapPage.filterStatus.invalid')
   });
   const filterState = filterPipeline.state;
+
+  $: if (map && cameraStoreSyncEnabled) {
+    $buildingDataRevision;
+    filterPipeline.scheduleFilterRefresh(currentBuildingFilterLayers, { reason: 'data' });
+  }
 
   function shouldPrimeLowZoomInitialFilterReplay() {
     if (!map || !Array.isArray(currentBuildingFilterLayers) || currentBuildingFilterLayers.length === 0) return false;
@@ -961,13 +971,26 @@
 
     let cleanupLocaleSubscription = null;
 
-    initMap()
+    retryMap = () => {
+      if (!mountAlive || mapLoadPending) return;
+      mapLoadPending = true;
+      mapLoadFailed = false;
+      initMap()
       .then((cleanup) => {
+        if (!mountAlive) { cleanup?.(); return; }
         cleanupLocaleSubscription = typeof cleanup === 'function' ? cleanup : null;
       })
       .catch(() => {
         cleanupLocaleSubscription = null;
-      });
+        if (!mountAlive) return;
+        map?.remove();
+        map = null;
+        protocol?.destroy?.();
+        protocol = null;
+        mapLoadFailed = true;
+      }).finally(() => { mapLoadPending = false; });
+    };
+    retryMap();
 
     return () => {
       if (cleanupLocaleSubscription) {
@@ -1040,6 +1063,12 @@
   data-filter-set-paint-property-calls={String($filterState.setPaintPropertyCallsLast)}
   data-filter-last-paint-apply-ms={String($filterState.lastPaintApplyMs)}
 ></div>
+{#if mapLoadFailed}
+  <div class="map-load-error" role="alert">
+    <p>{$t('mapPage.loadFailed')}</p>
+    <UiButton onclick={retryMap} disabled={mapLoadPending}>{$t('common.retry')}</UiButton>
+  </div>
+{/if}
 <MapFeedbackOverlay
   filterStatusCode={$filterState.statusCode}
   {filterStatusOverlayText}
@@ -1067,6 +1096,15 @@
 />
 
 <style>
+  .map-load-error {
+    position: fixed;
+    inset: 40% 1rem auto;
+    z-index: 10;
+    display: grid;
+    justify-content: center;
+    gap: 1rem;
+    text-align: center;
+  }
   .map-canvas {
     position: fixed;
     inset: 0;

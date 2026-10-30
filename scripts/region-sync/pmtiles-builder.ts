@@ -11,6 +11,9 @@ const { expandRowsWithBuildingRemainders } = require('./building-remainder');
 const { runPlanetilerBuild } = require('./planetiler');
 
 const REGION_PMTILES_ATTRIBUTE_KEYS = Object.freeze([
+  'filter_schema',
+  'filter_levels',
+  'filter_levels_num',
   'feature_kind',
   'osm_id',
   'osm_key',

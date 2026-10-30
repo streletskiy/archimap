@@ -6,7 +6,7 @@
   import FilterLayersEditor from '$lib/components/filters/FilterLayersEditor.svelte';
   import CloseIcon from '$lib/components/icons/CloseIcon.svelte';
   import { locale, t, translateNow } from '$lib/i18n/index';
-  import { apiJson } from '$lib/services/http';
+  import { apiJsonCached } from '$lib/services/http';
   import {
     buildingFilterLayers,
     buildingFilterRuntime,
@@ -32,6 +32,8 @@
   let filterPresetsError = '';
   let filterPresetsRetryTimer = null;
   let panelWasOpen;
+  let destroyed = false;
+  const loadController = new AbortController();
 
   $: if (open && !panelWasOpen) {
     draftLayers = buildDraftLayers($buildingFilterLayers);
@@ -88,6 +90,7 @@
   function getFilterRuntimeLabel(runtime) {
     const statusCode = String(runtime?.statusCode || 'idle');
     if (statusCode === 'refining') return $t('header.filterStatus.refining');
+    if (statusCode === 'failed') return $t('mapPage.filterFailed');
     if (statusCode === 'too_many_matches') return $t('header.filterStatus.tooMany');
     if (statusCode === 'truncated') return $t('header.filterStatus.truncated');
     if (statusCode === 'invalid') return $t('header.filterStatus.invalid');
@@ -147,6 +150,7 @@
   }
 
   function scheduleFilterTagKeysRetry(delayMs = 1500) {
+    if (destroyed) return;
     if (filterTagKeysRetryTimer) {
       clearTimeout(filterTagKeysRetryTimer);
     }
@@ -160,7 +164,7 @@
     filterTagKeysLoading = true;
     filterTagKeysError = '';
     try {
-      const payload = await apiJson('/api/filter-tag-keys');
+      const payload = await apiJsonCached('/api/filter-tag-keys', { ttlMs: 5000, signal: loadController.signal });
       const keys = Array.isArray(payload?.keys) ? payload.keys : [];
       const warmingUp = Boolean(payload?.warmingUp);
       filterTagKeys = keys;
@@ -176,6 +180,7 @@
   }
 
   function scheduleFilterPresetsRetry(delayMs = 2500) {
+    if (destroyed) return;
     if (filterPresetsRetryTimer) {
       clearTimeout(filterPresetsRetryTimer);
     }
@@ -189,7 +194,7 @@
     filterPresetsLoading = true;
     filterPresetsError = '';
     try {
-      const payload = await apiJson('/api/filter-presets');
+      const payload = await apiJsonCached('/api/filter-presets', { ttlMs: 30_000, signal: loadController.signal });
       filterPresets = Array.isArray(payload?.items) ? payload.items : [];
     } catch {
       filterPresetsError = $t('header.presets.loadFailed');
@@ -217,6 +222,8 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
+    loadController.abort();
     if (filterTagKeysRetryTimer) {
       clearTimeout(filterTagKeysRetryTimer);
       filterTagKeysRetryTimer = null;

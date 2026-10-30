@@ -132,7 +132,18 @@ function registerAppRoutes(deps) {
     return `${protocol}://${host.replace(/\/+$/, '')}`;
   }
 
+  let regionsCachedAt = 0;
+  let regionsCached = [];
+  let regionsPending = null;
   async function getAvailableRegionPmtiles() {
+    if (Date.now() - regionsCachedAt < 5000) return regionsCached;
+    if (regionsPending) return regionsPending;
+    regionsPending = loadAvailableRegionPmtiles().then((regions) => {
+      regionsCached = regions; regionsCachedAt = Date.now(); return regions;
+    }).finally(() => { regionsPending = null; });
+    return regionsPending;
+  }
+  async function loadAvailableRegionPmtiles() {
     if (!dataSettingsService) return [];
     const regions = await dataSettingsService.listRuntimePmtilesRegions();
     return regions
@@ -164,7 +175,7 @@ function registerAppRoutes(deps) {
       registrationEnabled: effectiveRegistrationEnabled
     };
     const basemap = normalizeBasemapConfig(generalConfig);
-    res.type('application/javascript').send(
+    return sendCachedJson(req, res,
       `window.__ARCHIMAP_CONFIG = ${JSON.stringify({
         mapDefault,
         buildingRegionsPmtiles: regionalPmtiles,
@@ -172,7 +183,8 @@ function registerAppRoutes(deps) {
         auth,
         basemap,
         mapSelection
-      })};`
+      })};`,
+      { rawText: true, contentType: 'application/javascript; charset=utf-8', cacheControl: 'public, max-age=5, must-revalidate' }
     );
   });
 

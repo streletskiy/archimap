@@ -7,9 +7,9 @@
   import BuildingPartsIcon from '$lib/components/icons/BuildingPartsIcon.svelte';
   import MoonIcon from '$lib/components/icons/MoonIcon.svelte';
   import SunIcon from '$lib/components/icons/SunIcon.svelte';
-  import { apiJson } from '$lib/services/http';
+  import { logoutSession } from '$lib/services/auth-session';
   import { availableLocales, locale, setLocale, t, translateNow } from '$lib/i18n/index';
-  import { clearSession, session } from '$lib/stores/auth';
+  import { session } from '$lib/stores/auth';
   import {
     mapBuildingPartsVisible,
     mapBuildings3dEnabled,
@@ -31,6 +31,8 @@
   let themeObserver = null;
   let localeItems;
   let effectiveBuildingPartsVisible;
+  let logoutPending = false;
+  let logoutError = false;
 
   $: userInitials = getUserInitials($session.user);
   $: menuIdentityLabel = $session.authenticated ? getUserLabel($session.user) : $t('common.appName');
@@ -80,13 +82,17 @@
   }
 
   async function logout() {
+    if (logoutPending) return;
+    logoutPending = true;
+    logoutError = false;
     try {
-      await apiJson('/api/logout', { method: 'POST' });
+      await logoutSession();
+      closePanel();
     } catch {
-      // ignore
+      logoutError = true;
+    } finally {
+      logoutPending = false;
     }
-    clearSession();
-    closePanel();
   }
 
   onMount(() => {
@@ -129,7 +135,7 @@
     {/if}
 
     <div class="menu-links">
-      {#each primaryLinks as link}
+      {#each primaryLinks as link (link.href)}
         <a href={link.href} class:active={link.active} on:click={closePanel}>{link.label}</a>
       {/each}
     </div>
@@ -209,7 +215,8 @@
     </div>
 
     {#if $session.authenticated}
-      <UiButton type="button" variant="danger" className="menu-btn" onclick={logout}>
+      {#if logoutError}<p role="alert" class="text-sm text-red-600">{$t('header.logoutFailed')}</p>{/if}
+      <UiButton type="button" variant="danger" className="menu-btn" disabled={logoutPending} onclick={logout}>
         {$t('header.logout')}
       </UiButton>
     {/if}

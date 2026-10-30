@@ -4,6 +4,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+function assertFeatureLine(actual, expected) {
+  assert.deepEqual(JSON.parse(actual), JSON.parse(expected));
+}
+
 const {
   buildFeature3dPropertiesFromTagsJson,
   cleanupStaleWorkspaces,
@@ -259,9 +263,9 @@ test('summarizeImportRows handles import rows larger than the stream chunk size'
 test('formatGeojsonFeatureLine preserves geometry json and encoded OSM feature id', () => {
   const line = formatGeojsonFeatureLine('relation', 123, '{"type":"Point","coordinates":[37.6,55.7]}');
 
-  assert.equal(
+  assertFeatureLine(
     line,
-    '{"type":"Feature","id":247,"properties":{"osm_type":"relation","osm_key":"relation/123","osm_id":123,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":247,"properties":{"osm_type":"relation","osm_key":"relation/123","osm_id":123,"feature_kind":"building","render_height_m":3.2,"filter_schema":1,"filter_levels":"","filter_levels_num":null,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -273,9 +277,9 @@ test('formatGeojsonFeatureLine derives building_part feature kind from tags json
     '{"building:part":"apartments"}'
   );
 
-  assert.equal(
+  assertFeatureLine(
     line,
-    '{"type":"Feature","id":248,"properties":{"osm_type":"way","osm_key":"way/124","osm_id":124,"feature_kind":"building_part","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":248,"properties":{"osm_type":"way","osm_key":"way/124","osm_id":124,"feature_kind":"building_part","render_height_m":3.2,"filter_schema":1,"filter_levels":"","filter_levels_num":null,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -287,9 +291,9 @@ test('formatGeojsonFeatureLine treats mixed building tags as building', () => {
     '{"building":"yes","building:part":"apartments"}'
   );
 
-  assert.equal(
+  assertFeatureLine(
     line,
-    '{"type":"Feature","id":250,"properties":{"osm_type":"way","osm_key":"way/125","osm_id":125,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":250,"properties":{"osm_type":"way","osm_key":"way/125","osm_id":125,"feature_kind":"building","render_height_m":3.2,"filter_schema":1,"filter_levels":"","filter_levels_num":null,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -303,9 +307,9 @@ test('formatGeojsonFeatureLine preserves the hide-base-when-parts render flag', 
     1
   );
 
-  assert.equal(
+  assertFeatureLine(
     line,
-    '{"type":"Feature","id":253,"properties":{"osm_type":"relation","osm_key":"relation/126","osm_id":126,"feature_kind":"building","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":253,"properties":{"osm_type":"relation","osm_key":"relation/126","osm_id":126,"feature_kind":"building","render_height_m":3.2,"filter_schema":1,"filter_levels":"","filter_levels_num":null,"render_min_height_m":0,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -318,9 +322,9 @@ test('formatGeojsonFeatureLine preserves building_remainder feature kind', () =>
     'building_remainder'
   );
 
-  assert.equal(
+  assertFeatureLine(
     line,
-    '{"type":"Feature","id":254,"properties":{"osm_type":"way","osm_key":"way/127","osm_id":127,"feature_kind":"building_remainder","render_height_m":3.2,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":254,"properties":{"osm_type":"way","osm_key":"way/127","osm_id":127,"feature_kind":"building_remainder","render_height_m":3.2,"filter_schema":1,"filter_levels":"","filter_levels_num":null,"render_min_height_m":0,"render_hide_base_when_parts":0},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
 });
 
@@ -335,10 +339,29 @@ test('formatRenderedGeojsonFeatureLine preserves stable osm_key properties', () 
     1
   );
 
-  assert.equal(
+  assertFeatureLine(
     line,
-    '{"type":"Feature","id":643,"properties":{"osm_type":"relation","osm_key":"relation/321","osm_id":321,"feature_kind":"building_part","render_height_m":12.5,"render_min_height_m":3.5,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
+    '{"type":"Feature","id":643,"properties":{"osm_type":"relation","osm_key":"relation/321","osm_id":321,"feature_kind":"building_part","render_height_m":12.5,"filter_schema":1,"filter_levels":"","filter_levels_num":null,"render_min_height_m":3.5,"render_hide_base_when_parts":1},"geometry":{"type":"Point","coordinates":[37.6,55.7]}}\n'
   );
+});
+
+test('both PMTiles export paths preserve normalized floor properties', () => {
+  const geometry = '{"type":"Point","coordinates":[44,56]}';
+  for (const [tags, text, numeric] of [
+    [{ 'building:levels': '5' }, '5', 5],
+    [{ 'building:levels': ' 05 ' }, '5', 5],
+    [{ 'building:levels': 'unknown' }, 'unknown', null],
+    [{}, '', null]
+  ]) {
+    const raw = JSON.stringify(tags);
+    for (const line of [formatGeojsonFeatureLine('way', 1, geometry, raw),
+      formatRenderedGeojsonFeatureLine('way', 1, geometry, 'building', 3.2, 0, 0, raw)]) {
+      const properties = JSON.parse(line).properties;
+      assert.equal(properties.filter_schema, 1);
+      assert.equal(properties.filter_levels, text);
+      assert.equal(properties.filter_levels_num, numeric);
+    }
+  }
 });
 
 test('buildFeature3dPropertiesFromTagsJson derives top and base height from levels and min height tags', () => {

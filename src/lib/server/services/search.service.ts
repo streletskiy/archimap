@@ -142,13 +142,13 @@ function createSearchService(options: LooseRecord = {}) {
     };
   }
 
-  async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0, searchBbox = null) {
+  async function getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0, searchBbox = null, styleKeys = []) {
     const tokens = normalizeSearchTokens(queryText);
-    if (tokens.length === 0) {
+    if (tokens.length === 0 && styleKeys.length === 0) {
       return { items: [], total: 0, nextCursor: null, hasMore: false };
     }
 
-    if (isRebuildInProgress()) {
+    if (isRebuildInProgress() && styleKeys.length === 0) {
       return getLocalEditsSearchResults(tokens, centerLon, centerLat, limit, cursor, searchBbox);
     }
 
@@ -167,7 +167,17 @@ function createSearchService(options: LooseRecord = {}) {
     const bboxParams = bbox ? [bbox.west, bbox.east, bbox.south, bbox.north] : [];
 
     const rows =
-      db.provider === 'postgres'
+      styleKeys.length > 0
+        ? await db.prepare(`
+          SELECT s.osm_type, s.osm_id, s.name, s.address, s.style, s.architect, s.design_ref,
+            s.center_lon, s.center_lat, 0 AS rank, COUNT(*) OVER() AS total_count,
+            ((s.center_lon - ?) * (s.center_lon - ?) + (s.center_lat - ?) * (s.center_lat - ?)) AS distance2
+          FROM building_search_source s
+          WHERE lower(s.style) IN (${styleKeys.map(() => '?').join(', ')}) ${bboxSql}
+          ORDER BY s.local_priority DESC, distance2 ASC, s.osm_type ASC, s.osm_id ASC
+          LIMIT ? OFFSET ?
+        `).all(lon, lon, lat, lat, ...styleKeys, ...bboxParams, cappedLimit + 1, offset)
+        : db.provider === 'postgres'
         ? await db
             .prepare(
               `

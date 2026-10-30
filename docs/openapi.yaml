@@ -627,8 +627,14 @@ paths:
       summary: Search buildings by text query
       parameters:
         - in: query
+          name: styleKeys
+          description: JSON array of up to 128 exact canonical style keys, matched case-insensitively in one paginated query. When supplied, replaces text matching.
+          schema:
+            type: string
+            maxLength: 16000
+        - in: query
           name: q
-          required: true
+          description: Text query; optional when styleKeys is supplied.
           schema:
             type: string
         - in: query
@@ -898,8 +904,14 @@ paths:
       summary: Search buildings for map view
       parameters:
         - in: query
+          name: styleKeys
+          description: JSON array of up to 128 exact canonical style keys, matched case-insensitively in one paginated query. When supplied, replaces text matching.
+          schema:
+            type: string
+            maxLength: 16000
+        - in: query
           name: q
-          required: true
+          description: Text query; optional when styleKeys is supplied.
           schema:
             type: string
         - in: query

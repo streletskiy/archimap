@@ -16,6 +16,7 @@ import { normalizeBuildingMaterialSelection, splitBuildingMaterialSelection } fr
 import { normalizeRoofShapeSelection } from '$lib/utils/roof-shape';
 import { filterBuildingEditedFields } from '$lib/utils/building-edit-fields';
 import { resolveAddressText } from '$lib/utils/building-address';
+import { buildingDataRevision, invalidateBuildingData } from '$lib/stores/building-data';
 import { isAbortError } from '$lib/utils/error';
 import {
   coerceNullableIntegerText,
@@ -373,7 +374,12 @@ function getBulkSaveTargets(
 
 export function createBuildingDetailsManager() {
   const state = writable(initialState);
-  let activeBuildingDetailsAbortController = null;
+  let destroyed = false;
+  let savingAccountId = null;
+  const detailCache = new Map();
+  const detailRequests = new Map();
+  const detailQueue = [];
+  let activeDetailLoads = 0;
   let activeBuildingDetailsToken = 0;
   const stopSelectionDebugSync = selectedBuilding.subscribe((selection) => {
     updateSelectionDebugHook(selection);
@@ -484,11 +490,7 @@ export function createBuildingDetailsManager() {
     if (normalizedSelections.length === 0) return;
 
     const token = ++activeBuildingDetailsToken;
-    if (activeBuildingDetailsAbortController) {
-      activeBuildingDetailsAbortController.abort();
-    }
-    activeBuildingDetailsAbortController = new AbortController();
-    const signal = activeBuildingDetailsAbortController.signal;
+    abortDetailRequests(new Set(normalizedSelections.map(getSelectionKey)));
     const selectionKeys = normalizedSelections.map((item) => getSelectionKey(item));
 
     debugSelectionLog('details-load-start', {
@@ -497,7 +499,7 @@ export function createBuildingDetailsManager() {
     });
 
     try {
-      const detailItems = await Promise.all(normalizedSelections.map((item) => fetchBuildingDetails(item, signal)));
+      const detailItems = await Promise.all(normalizedSelections.map(getSelectionDetails));
       if (token !== activeBuildingDetailsToken) return;
       updateState({
         buildingDetails: detailItems[0] || null,
@@ -529,12 +531,76 @@ export function createBuildingDetailsManager() {
             }
           : null
       });
-    } finally {
-      if (activeBuildingDetailsAbortController?.signal === signal) {
-        activeBuildingDetailsAbortController = null;
-      }
     }
   }
+
+  function abortDetailRequests(keepKeys = new Set()) {
+    for (const [key, request] of detailRequests) {
+      if (!keepKeys.has(key)) request.controller.abort();
+    }
+  }
+
+  function drainDetailQueue() {
+    while (activeDetailLoads < 4 && detailQueue.length > 0) {
+      const run = detailQueue.shift();
+      activeDetailLoads += 1;
+      void run().finally(() => {
+        activeDetailLoads -= 1;
+        drainDetailQueue();
+      });
+    }
+  }
+
+  function getSelectionDetails(selection) {
+    const key = getSelectionKey(selection);
+    const cached = detailCache.get(key);
+    if (cached && Date.now() - cached.time < 30_000) return Promise.resolve(cached.value);
+    const pending = detailRequests.get(key);
+    if (pending && !pending.controller.signal.aborted) return pending.promise;
+    const controller = new AbortController();
+    let resolveResult;
+    let rejectResult;
+    const promise = new Promise((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    const request = { controller, promise };
+    detailRequests.set(key, request);
+    detailQueue.push(async () => {
+      try {
+        if (destroyed || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const value = await fetchBuildingDetails(selection, controller.signal);
+        if (destroyed || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        detailCache.delete(key);
+        detailCache.set(key, { time: Date.now(), value });
+        while (detailCache.size > 200) detailCache.delete(detailCache.keys().next().value);
+        resolveResult(value);
+      } catch (error) {
+        rejectResult(error);
+      } finally {
+        if (detailRequests.get(key) === request) detailRequests.delete(key);
+      }
+    });
+    drainDetailQueue();
+    return promise;
+  }
+
+  let dataRevision = get(buildingDataRevision);
+  const getAccountId = () => {
+    const current = get(session);
+    return current.authenticated ? String(current.user?.id ?? current.user?.email ?? 'authenticated') : null;
+  };
+  const stopDataRevisionSync = buildingDataRevision.subscribe((revision) => {
+    if (revision === dataRevision) return;
+    dataRevision = revision;
+    detailCache.clear();
+    activeBuildingDetailsToken += 1;
+    abortDetailRequests();
+    if (destroyed || (get(state).savePending && getAccountId() === savingAccountId)) return;
+    const selections = get(selectedBuildings);
+    updateState({ buildingDetails: null, selectedBuildingDetails: [], selectedBuildingDetailKeys: [], saveStatus: '' });
+    if (selections.length > 0) void loadSelectionDetails(selections);
+  });
 
   function selectBuilding(detail) {
     const normalized = normalizeBuildingSelection(detail);
@@ -607,10 +673,8 @@ export function createBuildingDetailsManager() {
   }
 
   function clearSelection() {
-    if (activeBuildingDetailsAbortController) {
-      activeBuildingDetailsAbortController.abort();
-      activeBuildingDetailsAbortController = null;
-    }
+    activeBuildingDetailsToken += 1;
+    abortDetailRequests();
     updateState({
       buildingDetails: null,
       selectedBuildingDetails: [],
@@ -626,6 +690,7 @@ export function createBuildingDetailsManager() {
     const normalized = normalizeBuildingSelection(detail);
     if (!normalized) return;
     const currentState = get(state);
+    if (currentState.savePending) return;
     const activeSelections = Array.isArray(get(selectedBuildings)) ? get(selectedBuildings) : [];
     const selectionItems = activeSelections.length > 0 ? activeSelections : [normalized];
     const isBulkSelection = selectionItems.length > 1;
@@ -662,6 +727,8 @@ export function createBuildingDetailsManager() {
       savePending: true,
       saveStatus: translateNow('mapPage.saving')
     });
+    const originalAccountId = getAccountId();
+    savingAccountId = originalAccountId;
 
     const payload = {
       osmType: normalized.osmType,
@@ -683,32 +750,55 @@ export function createBuildingDetailsManager() {
     };
 
     try {
-      let lastSaveResult = null;
+      const savedResults = new Map();
+      let failedCount = 0;
       for (const target of saveTargets) {
+        if (destroyed || getAccountId() !== originalAccountId) break;
         const sourceSnapshot = (target?.sourceSnapshot || {}) as any;
-        lastSaveResult = await apiJson('/api/building-info', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...payload,
-            osmType: target.item.osmType,
-            osmId: target.item.osmId,
-            editedFields: target.editedFields,
-            sourceGeometryJson:
-              sourceSnapshot.sourceGeometryJson ?? currentState.buildingDetails?.sourceGeometryJson ?? null,
-            sourceTagsJson: sourceSnapshot.sourceTagsJson ?? currentState.buildingDetails?.sourceTagsJson ?? null,
-            sourceOsmUpdatedAt:
-              sourceSnapshot.sourceOsmUpdatedAt ?? currentState.buildingDetails?.sourceOsmUpdatedAt ?? null,
-            featureKind:
-              sourceSnapshot.featureKind ?? currentState.buildingDetails?.feature_kind ?? normalized.featureKind ?? null
-          })
-        });
+        try {
+          const result = await apiJson('/api/building-info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...payload,
+              osmType: target.item.osmType,
+              osmId: target.item.osmId,
+              editedFields: target.editedFields,
+              sourceGeometryJson:
+                sourceSnapshot.sourceGeometryJson ?? currentState.buildingDetails?.sourceGeometryJson ?? null,
+              sourceTagsJson: sourceSnapshot.sourceTagsJson ?? currentState.buildingDetails?.sourceTagsJson ?? null,
+              sourceOsmUpdatedAt:
+                sourceSnapshot.sourceOsmUpdatedAt ?? currentState.buildingDetails?.sourceOsmUpdatedAt ?? null,
+              featureKind:
+                sourceSnapshot.featureKind ??
+                currentState.buildingDetails?.feature_kind ??
+                normalized.featureKind ??
+                null
+            })
+          });
+          savedResults.set(getSelectionKey(target.item), { result, editedFields: target.editedFields });
+        } catch {
+          failedCount += 1;
+        }
       }
-      const savedEditId = Number(lastSaveResult?.editId || 0);
-      const savedReviewStatus =
-        String(lastSaveResult?.status || '')
-          .trim()
-          .toLowerCase() || 'pending';
+      if (savedResults.size > 0) invalidateBuildingData();
+      if (destroyed || getAccountId() !== originalAccountId) return;
+      const patchSavedDetail = (itemDetail, key) => {
+        const saved = savedResults.get(key);
+        if (!saved) return itemDetail;
+        const editId = Number(saved.result?.editId || 0);
+        const next = {
+          ...itemDetail,
+          review_status: String(saved.result?.status || 'pending').toLowerCase(),
+          user_edit_id: Number.isInteger(editId) && editId > 0 ? editId : (itemDetail?.user_edit_id ?? null),
+          properties: {
+            ...itemDetail?.properties,
+            archiInfo: toDisplayArchiInfoFromPayload(itemDetail?.properties?.archiInfo, payload, saved.editedFields)
+          }
+        };
+        detailCache.set(key, { time: Date.now(), value: next });
+        return next;
+      };
 
       state.update((current) => {
         const isSameSelection =
@@ -724,47 +814,26 @@ export function createBuildingDetailsManager() {
           current.selectedBuildingDetailKeys.length === selectionKeys.length &&
           current.selectedBuildingDetailKeys.every((key, index) => key === selectionKeys[index]);
         const nextSelectedBuildingDetails = canPatchSelectedDetails
-          ? current.selectedBuildingDetails.map((detail) => ({
-              ...detail,
-              review_status: savedReviewStatus,
-              user_edit_id:
-                Number.isInteger(savedEditId) && savedEditId > 0 ? savedEditId : (detail?.user_edit_id ?? null),
-              properties: {
-                archiInfo: toDisplayArchiInfoFromPayload(detail?.properties?.archiInfo, payload, outgoingEditedFields)
-              }
-            }))
+          ? current.selectedBuildingDetails.map((itemDetail, index) =>
+              patchSavedDetail(itemDetail, selectionKeys[index])
+            )
           : current.selectedBuildingDetails;
         const nextBuildingDetails = canPatchSelectedDetails
           ? nextSelectedBuildingDetails[0] || current.buildingDetails
           : isSameSelection
-            ? {
-                ...current.buildingDetails,
-                review_status: savedReviewStatus,
-                user_edit_id:
-                  Number.isInteger(savedEditId) && savedEditId > 0
-                    ? savedEditId
-                    : (current.buildingDetails?.user_edit_id ?? null),
-                feature_kind: current.buildingDetails?.feature_kind || null,
-                region_slugs: Array.isArray(current.buildingDetails?.region_slugs)
-                  ? current.buildingDetails.region_slugs
-                  : [],
-                properties: {
-                  archiInfo: toDisplayArchiInfoFromPayload(
-                    current.buildingDetails?.properties?.archiInfo,
-                    payload,
-                    outgoingEditedFields
-                  )
-                }
-              }
+            ? patchSavedDetail(current.buildingDetails, getSelectionKey(normalized))
             : current.buildingDetails;
 
         return {
           ...current,
           buildingDetails: nextBuildingDetails,
           selectedBuildingDetails: nextSelectedBuildingDetails,
-          saveStatus: isBulkSelection
-            ? translateNow('buildingModal.bulkSaved', { count: saveTargets.length })
-            : translateNow('mapPage.submitted')
+          saveStatus:
+            failedCount > 0
+              ? translateNow('buildingModal.bulkPartialSave', { saved: savedResults.size, failed: failedCount })
+              : isBulkSelection
+                ? translateNow('buildingModal.bulkSaved', { count: savedResults.size })
+                : translateNow('mapPage.submitted')
         };
       });
     } catch (error) {
@@ -772,6 +841,7 @@ export function createBuildingDetailsManager() {
         saveStatus: String(error?.message || translateNow('mapPage.saveFailed'))
       });
     } finally {
+      savingAccountId = null;
       updateState({
         savePending: false
       });
@@ -779,10 +849,11 @@ export function createBuildingDetailsManager() {
   }
 
   function destroy() {
-    if (activeBuildingDetailsAbortController) {
-      activeBuildingDetailsAbortController.abort();
-      activeBuildingDetailsAbortController = null;
-    }
+    destroyed = true;
+    activeBuildingDetailsToken += 1;
+    abortDetailRequests();
+    detailCache.clear();
+    stopDataRevisionSync();
     stopSelectionDebugSync();
   }
 

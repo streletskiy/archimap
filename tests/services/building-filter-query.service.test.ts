@@ -40,6 +40,19 @@ test('filter cache uses validated rules, rebinds batch IDs and isolates actors',
   assert.deepEqual(other.payload.matchedKeys, ['way/3']);
 });
 
+test('completed edits invalidate server filter caches immediately', async () => {
+  const { advanceBuildingDataRevision } = require('../../src/lib/server/infra/building-data-revision.infra');
+  const { service, queries, request } = createFilterFixture();
+  const body = { ...request, requests: [request] };
+  await service.getBatchFilterMatches(body, 'user:1');
+  await service.getBatchFilterMatches(body, 'user:1');
+  assert.equal(queries.length, 1);
+  advanceBuildingDataRevision();
+  const result = await service.getBatchFilterMatches(body, 'user:1');
+  assert.equal(queries.length, 2);
+  assert.equal(result.payload.meta.cacheHit, false);
+});
+
 test('contour requests can omit locations without affecting matches or marker-mode caching', async () => {
   const { service, request } = createFilterFixture();
   const compact = await service.getFilterMatches({ ...request, includeLocations: false });

@@ -6,14 +6,19 @@ export async function loadMapRuntime() {
       import('maplibre-gl'),
       import('maplibre-gl/dist/maplibre-gl-worker.mjs?url'),
       import('pmtiles')
-    ]).then(([maplibreModule, workerModule, pmtilesModule]) => {
-      maplibreModule.setWorkerUrl(workerModule.default);
-      return {
-        maplibregl: maplibreModule,
-        PMTiles: pmtilesModule.PMTiles,
-        Protocol: pmtilesModule.Protocol
-      };
-    });
+    ])
+      .then(([maplibreModule, workerModule, pmtilesModule]) => {
+        maplibreModule.setWorkerUrl(workerModule.default);
+        return {
+          maplibregl: maplibreModule,
+          PMTiles: pmtilesModule.PMTiles,
+          Protocol: pmtilesModule.Protocol
+        };
+      })
+      .catch((error) => {
+        mapRuntimePromise = null;
+        throw error;
+      });
   }
 
   return mapRuntimePromise;

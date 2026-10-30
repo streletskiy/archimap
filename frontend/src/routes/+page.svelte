@@ -1,7 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-  import BuildingModal from '$lib/components/shell/BuildingModal.svelte';
-  import SearchModal from '$lib/components/shell/SearchModal.svelte';
+  import UiButton from '$lib/components/base/UiButton.svelte';
   import { t } from '$lib/i18n/index';
   import { createBuildingDetailsManager } from '$lib/services/building-details-manager';
   import { createSearchManager } from '$lib/services/search-manager';
@@ -18,7 +17,7 @@
     requestMapFocus,
     selectedBuilding
   } from '$lib/stores/map';
-  import { closeSearchModal } from '$lib/stores/search';
+  import { closeSearchModal, searchState } from '$lib/stores/search';
   import { buildingModalOpen } from '$lib/stores/ui';
 
   const buildingDetailsManager = createBuildingDetailsManager();
@@ -31,6 +30,16 @@
   });
 
   let MapCanvasComponent = null;
+  let mapImportFailed = false;
+  let editorLoadAttempt = 0;
+  let searchLoadAttempt = 0;
+  async function loadMapCanvas() {
+    mapImportFailed = false;
+    try {
+      const module = await import('$lib/components/map/MapCanvas.svelte');
+      if (urlStateMounted) MapCanvasComponent = module.default;
+    } catch { if (urlStateMounted) mapImportFailed = true; }
+  }
   let urlStateMounted = false;
   let removePopstateListener = null;
 
@@ -59,11 +68,11 @@
     queueMicrotask(() => {
       applyUrlStateFromLocation();
     });
-    const module = await import('$lib/components/map/MapCanvas.svelte');
-    MapCanvasComponent = module.default;
+    await loadMapCanvas();
   });
 
   onDestroy(() => {
+    urlStateMounted = false;
     removePopstateListener?.();
     removePopstateListener = null;
     searchManager.destroy();
@@ -140,9 +149,12 @@
 {#if MapCanvasComponent}
   <svelte:component this={MapCanvasComponent} on:buildingClick={onBuildingClick} />
 {:else}
-  <div class="map-loading">{$t('mapPage.mapLoading')}</div>
+  <div class="map-loading">{#if mapImportFailed}<p role="alert">{$t('mapPage.loadFailed')}</p><UiButton onclick={loadMapCanvas}>{$t('common.retry')}</UiButton>{:else}{$t('mapPage.mapLoading')}{/if}</div>
 {/if}
-<BuildingModal
+{#if $buildingModalOpen}
+{#key editorLoadAttempt}
+{#await import('$lib/components/shell/BuildingModal.svelte') then modal}
+<svelte:component this={modal.default}
   buildingDetails={$buildingDetailsManager.buildingDetails}
   selectedBuildingDetails={$buildingDetailsManager.selectedBuildingDetails}
   isAuthenticated={$session.authenticated}
@@ -152,9 +164,23 @@
   on:save={onSaveBuildingEdit}
   on:close={closeBuildingSelection}
 />
-<SearchModal on:selectResult={onSelectSearchResult} />
+{:catch}
+  <div class="editor-load-error" role="alert">{$t('common.loadFailed')} <UiButton onclick={() => editorLoadAttempt += 1}>{$t('common.retry')}</UiButton></div>
+{/await}
+{/key}
+{/if}
+{#if $searchState.modalOpen}
+{#key searchLoadAttempt}
+{#await import('$lib/components/shell/SearchModal.svelte') then modal}
+  <svelte:component this={modal.default} on:selectResult={onSelectSearchResult} />
+{:catch}
+  <div class="editor-load-error" role="alert">{$t('common.loadFailed')} <UiButton onclick={() => searchLoadAttempt += 1}>{$t('common.retry')}</UiButton></div>
+{/await}
+{/key}
+{/if}
 
 <style>
+  .editor-load-error { position: fixed; top: 6rem; right: 1rem; z-index: 1100; padding: 1rem; background: var(--panel-solid); }
   .map-loading {
     position: fixed;
     inset: 0;

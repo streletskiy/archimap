@@ -4,6 +4,7 @@ import {
   normalizeFilterPaintColorGroups
 } from '../../components/map/filter-highlight-utils.js';
 import { applyFilterFallbackMarkerGroups } from './filter-fallback-marker-utils.js';
+import { applyFloorPreview } from './filter-floor-preview';
 import {
   BUILDING_FEATURE_KIND,
   BUILDING_PART_FEATURE_KIND,
@@ -189,6 +190,22 @@ export function createFilterDiffApplyStrategy({
 
   function getHighlightLayerIds() {
     return normalizeLayerIdsSnapshot(resolveLayerIds?.() || {});
+  }
+
+  function applyProvisionalFloorHighlight(prepared) {
+    const applied = applyFloorPreview({
+      map: resolveMap?.(),
+      layerIds: getHighlightLayerIds(),
+      prepared,
+      buildingPartsVisible: Boolean(getBuildingPartsVisible?.() ?? true)
+    });
+    if (applied) {
+      // A preview is never a resolved match result. Force the next authoritative
+      // apply even if its IDs are identical to the previous result.
+      lastAppliedHighlightLayerSignature = '';
+      lastAppliedHighlightActive = false;
+    }
+    return applied;
   }
 
   function applyCurrentHighlight(meta: FilterDiffApplyMeta = {}) {
@@ -475,6 +492,7 @@ export function createFilterDiffApplyStrategy({
   }
 
   return {
+    applyProvisionalFloorHighlight,
     applyFilteredFeaturePaintGroups,
     clearFilteredHighlight,
     getFilteredFeatureCount,

@@ -172,6 +172,51 @@ test('auth modal accepts clicks, switches tabs, and closes with shared close but
   await expect(authModal).toBeHidden({ timeout: 10000 });
 });
 
+test('closed panels defer dictionaries and unmount after closing', async ({ page }) => {
+  const dictionaryRequests = [];
+  page.on('request', (request) => {
+    if (/\/api\/(filter-tag-keys|filter-presets)(\?|$)/.test(request.url())) dictionaryRequests.push(request.url());
+  });
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('filter-panel')).toHaveCount(0);
+  await expect(page.locator('.auth-modal')).toHaveCount(0);
+  await expect(page.locator('#building-modal')).toHaveCount(0);
+  expect(dictionaryRequests).toEqual([]);
+  await openFilterPanel(page);
+  await expect.poll(() => dictionaryRequests.length).toBeGreaterThanOrEqual(2);
+  await closeFilterPanel(page);
+  await expect(page.getByTestId('filter-panel')).toHaveCount(0);
+  await openFilterPanel(page);
+  await expect(page.getByTestId('filter-apply-button')).toBeVisible();
+});
+
+test('failed logout keeps the account visible and allows a successful retry', async ({ page }) => {
+  await page.route('**/api/me', (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        csrfToken: 'test-token',
+        user: { id: 7, firstName: 'Audit', email: 'audit@example.test' }
+      }
+    })
+  );
+  let attempts = 0;
+  await page.route('**/api/logout', (route) => route.fulfill({ status: ++attempts === 1 ? 503 : 200, json: {} }));
+  await page.goto(`${BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await page.locator('.menu-btn-trigger').click();
+  const logout = page.getByRole('button', { name: /^(Выйти|Sign out|Log out)$/ });
+  await expect(logout).toBeVisible();
+  await logout.click();
+  await expect(page.getByRole('alert')).toContainText(/выйти|sign out/i);
+  await expect(logout).toBeEnabled();
+  await logout.click();
+  await expect(logout).toHaveCount(0);
+  await page.locator('.menu-btn-trigger').click();
+  await expect(page.getByRole('button', { name: /Войти.*Регистрация|Sign in.*Register/ })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
 test('keeps map deep link params and renders map', async ({ page }) => {
   await page.goto(`${BASE_URL}/app?lat=40.7128&lng=-74.006&z=13.25`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.maplibregl-canvas')).toBeVisible({ timeout: 15000 });

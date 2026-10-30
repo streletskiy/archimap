@@ -1,4 +1,10 @@
 import { get, writable } from 'svelte/store';
+import {
+  estimateOverpassTileBytes,
+  isOverpassTileFresh,
+  OVERPASS_MEMORY_MAX_BYTES,
+  selectOverpassCacheEvictions
+} from './overpass-cache-policy';
 import osmtogeojson from 'osmtogeojson';
 import { translateNow } from '$lib/i18n/index';
 import { buildBboxHash, buildBboxSnapshot } from './filter-bbox.js';
@@ -31,6 +37,7 @@ type OverpassTileRecord = {
   key: string;
   bbox: BboxSnapshot;
   fetchedAt: number;
+  estimatedBytes?: number;
   features: OverpassGeoJsonFeature[];
 };
 
@@ -84,6 +91,9 @@ const OVERPASS_ENDPOINTS = Object.freeze([
 const OVERPASS_STORAGE_PREFIX = 'archimap-overpass';
 const OVERPASS_DB_NAME = `${OVERPASS_STORAGE_PREFIX}-cache-v1`;
 const OVERPASS_DB_STORE = 'tiles';
+const OVERPASS_DB_META = 'tile-meta';
+let lastStaleRefreshAt = 0;
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 const OVERPASS_LAST_ENDPOINT_KEY = `${OVERPASS_STORAGE_PREFIX}-last-endpoint`;
 const OVERPASS_LAST_SYNC_KEY = `${OVERPASS_STORAGE_PREFIX}-last-sync`;
 export const OVERPASS_MIN_COVERAGE_CHECK_ZOOM = 12;
@@ -344,9 +354,10 @@ async function deleteTileRecordFromDb(tileKey: string) {
   }
   return new Promise<void>((resolve) => {
     try {
-      const tx = db.transaction(OVERPASS_DB_STORE, 'readwrite');
+      const tx = db.transaction([OVERPASS_DB_STORE, OVERPASS_DB_META], 'readwrite');
       const store = tx.objectStore(OVERPASS_DB_STORE);
       store.delete(tileKey);
+      tx.objectStore(OVERPASS_DB_META).delete(tileKey);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
@@ -364,9 +375,10 @@ async function clearTileRecordsFromDb() {
   }
   return new Promise<void>((resolve) => {
     try {
-      const tx = db.transaction(OVERPASS_DB_STORE, 'readwrite');
+      const tx = db.transaction([OVERPASS_DB_STORE, OVERPASS_DB_META], 'readwrite');
       const store = tx.objectStore(OVERPASS_DB_STORE);
       store.clear();
+      tx.objectStore(OVERPASS_DB_META).clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
@@ -548,6 +560,7 @@ function addTileKeyAccess(tileKey: string) {
 }
 
 function ingestTileRecord(tileKey: string, record: OverpassTileRecord) {
+  detachTileRecordFromFeatureIndex(tileKey, memoryTileCache.get(tileKey));
   const normalizedFeatures: OverpassGeoJsonFeature[] = [];
   for (const feature of Array.isArray(record?.features) ? record.features : []) {
     const normalized = normalizeTileFeature(feature, tileKey);
@@ -573,6 +586,7 @@ function ingestTileRecord(tileKey: string, record: OverpassTileRecord) {
     key: tileKey,
     bbox: record.bbox,
     fetchedAt: record.fetchedAt,
+    estimatedBytes: record.estimatedBytes || estimateOverpassTileBytes(record),
     features: normalizedFeatures
   });
   addTileKeyAccess(tileKey);
@@ -580,15 +594,20 @@ function ingestTileRecord(tileKey: string, record: OverpassTileRecord) {
 }
 
 function pruneMemoryTileCache() {
-  if (memoryTileCache.size <= OVERPASS_MAX_MEMORY_TILES) return;
-  const ordered = [...tileKeyAccessOrder]
-    .sort((left, right) => left.touchedAt - right.touchedAt)
-    .map((item) => item.key);
-  while (memoryTileCache.size > OVERPASS_MAX_MEMORY_TILES && ordered.length > 0) {
-    const key = ordered.shift();
-    if (!key || !memoryTileCache.has(key)) continue;
+  const touched = new Map(tileKeyAccessOrder.map((entry) => [entry.key, entry.touchedAt]));
+  const keys = selectOverpassCacheEvictions(
+    [...memoryTileCache].map(([key, record]) => ({
+      key,
+      bytes: record.estimatedBytes || estimateOverpassTileBytes(record),
+      touchedAt: touched.get(key) || 0
+    })),
+    OVERPASS_MAX_MEMORY_TILES,
+    OVERPASS_MEMORY_MAX_BYTES
+  );
+  for (const key of keys) {
     const entry = memoryTileCache.get(key);
     memoryTileCache.delete(key);
+    memoryDbFallback.delete(key);
     tileKeyAccessOrder = tileKeyAccessOrder.filter((item) => item.key !== key);
     for (const feature of Array.isArray(entry?.features) ? entry.features : []) {
       const osmKey = String(feature?.properties?.osm_key || '').trim();
@@ -604,20 +623,70 @@ function pruneMemoryTileCache() {
   }
 }
 
+async function pruneDiskTileCache(db) {
+  return new Promise<void>((resolve) => {
+    try {
+      const tx = db.transaction([OVERPASS_DB_STORE, OVERPASS_DB_META], 'readwrite');
+      const metadata = tx.objectStore(OVERPASS_DB_META);
+      const request = metadata.getAll();
+      request.onsuccess = () => {
+        for (const key of selectOverpassCacheEvictions(request.result || [])) {
+          tx.objectStore(OVERPASS_DB_STORE).delete(key);
+          metadata.delete(key);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 async function openOverpassDb() {
   if (!indexedDbAvailable || typeof indexedDB === 'undefined') return null;
   if (idbPromise) return idbPromise;
   idbPromise = new Promise((resolve) => {
     try {
-      const request = indexedDB.open(OVERPASS_DB_NAME, 1);
+      const request = indexedDB.open(OVERPASS_DB_NAME, 2);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(OVERPASS_DB_STORE)) {
           db.createObjectStore(OVERPASS_DB_STORE, { keyPath: 'key' });
         }
+        if (!db.objectStoreNames.contains(OVERPASS_DB_META)) {
+          const metadata = db.createObjectStore(OVERPASS_DB_META, { keyPath: 'key' });
+          const cursorRequest = request.transaction.objectStore(OVERPASS_DB_STORE).openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            const record = cursor.value;
+            metadata.put({
+              key: record.key,
+              bytes: estimateOverpassTileBytes(record),
+              touchedAt: Number(record.fetchedAt || 0)
+            });
+            cursor.continue();
+          };
+        }
       };
       request.onerror = () => resolve(null);
-      request.onsuccess = () => resolve(request.result);
+      request.onblocked = () => {
+        // Another tab may still hold the previous schema. Keep a bounded
+        // in-memory cache instead of leaving every viewport request pending.
+        indexedDbAvailable = false;
+        resolve(null);
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!indexedDbAvailable) {
+          db.close();
+          resolve(null);
+          return;
+        }
+        void pruneDiskTileCache(db).then(() => resolve(db));
+      };
     } catch {
       resolve(null);
     }
@@ -632,11 +701,20 @@ async function readTileRecordFromDb(tileKey: string) {
   }
   return new Promise<OverpassTileRecord | null>((resolve) => {
     try {
-      const tx = db.transaction(OVERPASS_DB_STORE, 'readonly');
+      const tx = db.transaction([OVERPASS_DB_STORE, OVERPASS_DB_META], 'readwrite');
       const store = tx.objectStore(OVERPASS_DB_STORE);
       const request = store.get(tileKey);
       request.onerror = () => resolve(null);
-      request.onsuccess = () => resolve(request.result || null);
+      request.onsuccess = () => {
+        const record = request.result;
+        if (record)
+          tx.objectStore(OVERPASS_DB_META).put({
+            key: tileKey,
+            bytes: record.estimatedBytes || estimateOverpassTileBytes(record),
+            touchedAt: Date.now()
+          });
+        resolve(record || null);
+      };
     } catch {
       resolve(null);
     }
@@ -646,14 +724,24 @@ async function readTileRecordFromDb(tileKey: string) {
 async function writeTileRecordToDb(record: OverpassTileRecord) {
   const db = await openOverpassDb();
   if (!db) {
+    memoryDbFallback.delete(record.key);
     memoryDbFallback.set(record.key, record);
+    const records = [...memoryDbFallback].map(([key, value], index) => ({
+      key,
+      bytes: estimateOverpassTileBytes(value),
+      touchedAt: index
+    }));
+    for (const key of selectOverpassCacheEvictions(records, OVERPASS_MAX_MEMORY_TILES, OVERPASS_MEMORY_MAX_BYTES))
+      memoryDbFallback.delete(key);
     return;
   }
-  return new Promise<void>((resolve) => {
+  await new Promise<void>((resolve) => {
     try {
-      const tx = db.transaction(OVERPASS_DB_STORE, 'readwrite');
+      const tx = db.transaction([OVERPASS_DB_STORE, OVERPASS_DB_META], 'readwrite');
       const store = tx.objectStore(OVERPASS_DB_STORE);
-      store.put(record);
+      const estimatedBytes = estimateOverpassTileBytes(record);
+      store.put({ ...record, estimatedBytes });
+      tx.objectStore(OVERPASS_DB_META).put({ key: record.key, bytes: estimatedBytes, touchedAt: Date.now() });
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
@@ -661,6 +749,7 @@ async function writeTileRecordToDb(record: OverpassTileRecord) {
       resolve();
     }
   });
+  await pruneDiskTileCache(db);
 }
 
 function buildOverpassQueryForBbox(bbox: BboxSnapshot) {
@@ -758,17 +847,23 @@ async function loadCachedTilesForViewport(context: OverpassViewportContext) {
   if (plan.tiles.length === 0) {
     return {
       missingTiles: [] as Array<{ key: string; bbox: BboxSnapshot }>,
+      staleTiles: [] as Array<{ key: string; bbox: BboxSnapshot }>,
       loadedTiles: [] as Array<{ key: string; bbox: BboxSnapshot }>
     };
   }
 
   const loadedTiles: Array<{ key: string; bbox: BboxSnapshot }> = [];
+  const staleTiles: Array<{ key: string; bbox: BboxSnapshot }> = [];
   const missingTiles: Array<{ key: string; bbox: BboxSnapshot }> = [];
 
   for (const tile of plan.tiles) {
     const memoryRecord = memoryTileCache.get(tile.key);
     if (memoryRecord) {
       loadedTiles.push(tile);
+      if (!isOffline() && !isOverpassTileFresh(memoryRecord)) {
+        staleTiles.push(tile);
+        missingTiles.push(tile);
+      }
       addTileKeyAccess(tile.key);
       continue;
     }
@@ -783,6 +878,10 @@ async function loadCachedTilesForViewport(context: OverpassViewportContext) {
       });
       pruneMemoryTileCache();
       loadedTiles.push(tile);
+      if (!isOffline() && !isOverpassTileFresh(cachedRecord)) {
+        staleTiles.push(tile);
+        missingTiles.push(tile);
+      }
       continue;
     }
 
@@ -792,7 +891,8 @@ async function loadCachedTilesForViewport(context: OverpassViewportContext) {
   return {
     plan,
     loadedTiles,
-    missingTiles
+    missingTiles,
+    staleTiles
   };
 }
 
@@ -910,7 +1010,10 @@ export async function scheduleOverpassViewportRefresh(
   await refreshOverpassViewport(latestViewportContext);
 }
 
-export async function refreshOverpassViewport(contextInput: OverpassViewportContext | null | undefined) {
+export async function refreshOverpassViewport(
+  contextInput: OverpassViewportContext | null | undefined,
+  { revalidate = true } = {}
+) {
   const context = normalizeViewportContext(contextInput || {});
   if (!context.viewport) {
     patchOverpassState({
@@ -956,13 +1059,23 @@ export async function refreshOverpassViewport(contextInput: OverpassViewportCont
     return;
   }
 
-  const { loadedTiles, missingTiles } = await loadCachedTilesForViewport(context);
+  const { loadedTiles, missingTiles, staleTiles } = await loadCachedTilesForViewport(context);
   updateViewportState({
     context,
     plan,
     loadedTiles,
     missingTiles
   });
+  if (
+    revalidate &&
+    staleTiles.length > 0 &&
+    !isOffline() &&
+    !get(overpassBuildingsState).loading &&
+    Date.now() - lastStaleRefreshAt > 120_000
+  ) {
+    lastStaleRefreshAt = Date.now();
+    void loadMissingTilesForViewport(context, { staleOnly: true });
+  }
 }
 
 async function fetchTileRecordFromOverpass(
@@ -1018,14 +1131,16 @@ async function fetchTileRecordWithEndpointFallback(
 async function loadMissingTilesForViewport(
   context: OverpassViewportContext,
   {
-    forceRefresh = false
+    forceRefresh = false,
+    staleOnly = false
   }: {
     forceRefresh?: boolean;
+    staleOnly?: boolean;
   } = {}
 ) {
   const normalizedContext = normalizeViewportContext(context);
   latestViewportContext = normalizedContext;
-  if (forceRefresh) {
+  if (forceRefresh && !isOffline()) {
     await evictViewportTiles(normalizedContext);
   }
 
@@ -1038,7 +1153,7 @@ async function loadMissingTilesForViewport(
   }
 
   const cached = await loadCachedTilesForViewport(normalizedContext);
-  const missingTiles = cached.missingTiles;
+  const missingTiles = isOffline() ? [] : staleOnly ? cached.staleTiles : cached.missingTiles;
   if (missingTiles.length === 0) {
     updateViewportState({
       context: normalizedContext,
@@ -1274,7 +1389,7 @@ export function cancelOverpassViewportLoad() {
   }
   abortActiveOverpassLoad();
   if (latestViewportContext) {
-    void refreshOverpassViewport(latestViewportContext);
+    void refreshOverpassViewport(latestViewportContext, { revalidate: false });
   }
 }
 
