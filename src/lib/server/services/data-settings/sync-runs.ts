@@ -541,7 +541,9 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const nextSyncAt = computeNextSyncAt(
       {
         ...region,
-        lastSuccessfulSyncAt: finishedAt
+        lastSuccessfulSyncAt: finishedAt,
+        lastSyncStatus: 'idle',
+        syncFailureCount: 0
       },
       finishedAt
     );
@@ -596,6 +598,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
         last_sync_status = 'idle',
         last_sync_finished_at = ?,
         last_sync_error = NULL,
+        sync_failure_count = 0,
         last_successful_sync_at = ?,
         source_data_updated_at = ?,
         next_sync_at = ?,
@@ -640,6 +643,8 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const nextSyncAt = computeNextSyncAt(
       {
         ...region,
+        lastSyncStatus: 'idle',
+        syncFailureCount: 0,
         lastSuccessfulSyncAt: referenceIso || region.lastSuccessfulSyncAt
       },
       referenceIso || referenceDate
@@ -674,10 +679,12 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
     const finishedAt = toIsoOrNull(now());
     const message = normalizeNullableText(errorText, 4000) || 'Sync failed';
     const failedStatus = String(options.status || 'failed');
+    const failureCount = Math.min(8, Number(region.syncFailureCount || 0) + (failedStatus === 'failed' ? 1 : 0));
     const nextSyncAt = computeNextSyncAt(
       {
         ...region,
         lastSyncStatus: failedStatus,
+        syncFailureCount: failureCount,
         lastSyncFinishedAt: finishedAt
       },
       finishedAt
@@ -735,6 +742,7 @@ function createSyncRunsDomain(context: LooseRecord = {}) {
       `
         )
         .run(failedStatus, finishedAt, message, nextSyncAt, region.id);
+      await db.prepare('UPDATE data_sync_regions SET sync_failure_count = ? WHERE id = ?').run(failureCount, region.id);
     }
 
     const savedRun = await getRunById(run.id);

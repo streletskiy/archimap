@@ -32,6 +32,7 @@ function createTestDb() {
   regionSourceDataUpdatedAtMigration.up(db);
   syncRunStageMigration.up(db);
   regionHierarchyMigration.up(db);
+  require('../../db/migrations/027_runtime_reliability.migration.ts').up(db);
   return db;
 }
 
@@ -2086,7 +2087,7 @@ test('createQueuedRun clears stale region sync errors before a retry starts', as
   assert.equal(queuedRegion?.lastSyncError, null);
 });
 
-test('failed first sync schedules retry after interval instead of immediate rerun', async () => {
+test('failed first sync persists bounded retry backoff instead of immediate rerun', async () => {
   const db = createTestDb();
   let currentNow = new Date('2026-03-07T10:00:00.000Z');
   const service = createService({
@@ -2122,11 +2123,14 @@ test('failed first sync schedules retry after interval instead of immediate reru
   currentNow = new Date('2026-03-07T12:30:00.000Z');
   const failed = await service.markRunFailed(queuedRun.id, 'Network timeout');
   assert.equal(failed.region.lastSyncStatus, 'failed');
-  assert.equal(failed.region.nextSyncAt, '2026-03-08T12:30:00.000Z');
+  assert.equal(failed.region.syncFailureCount, 1);
+  const retryAt = failed.region.nextSyncAt;
+  assert.ok(Date.parse(retryAt) >= currentNow.getTime() + 5 * 60 * 1000);
+  assert.ok(Date.parse(retryAt) < currentNow.getTime() + 6 * 60 * 1000);
 
   currentNow = new Date('2026-03-07T13:00:00.000Z');
   const refreshed = await service.refreshRegionNextSyncAt(region.id);
-  assert.equal(refreshed.nextSyncAt, '2026-03-08T12:30:00.000Z');
+  assert.equal(refreshed.nextSyncAt, retryAt);
 });
 
 test('deleteRegion removes only orphan features and preserves shared data of other regions', async () => {

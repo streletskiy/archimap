@@ -124,3 +124,6 @@ jobs:
 
       - name: PostgreSQL smoke runtime
         run: npm run test:smoke
+
+      - name: PostgreSQL filter performance budget
+        run: PERF_DATABASE_URL="$DATABASE_URL" node --import tsx scripts/run-tests.ts tests/integration/performance-postgres.integration.test.ts tests/integration/sync-worker.integration.test.ts

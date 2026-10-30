@@ -34,6 +34,7 @@ async function runPendingPostgresMigrations({
   const client = new Client({ connectionString });
   await client.connect();
   try {
+    await client.query('SELECT pg_advisory_lock(814217, 1)');
     await ensurePostgresMigrationsTable(client);
     const appliedRows = await client.query('SELECT id FROM public.schema_migrations ORDER BY id');
     const applied = new Set(appliedRows.rows.map((row) => String(row?.id || '')));
@@ -60,6 +61,7 @@ async function runPendingPostgresMigrations({
       }
     }
   } finally {
+    await client.query('SELECT pg_advisory_unlock(814217, 1)').catch(() => {});
     await client.end();
   }
 }

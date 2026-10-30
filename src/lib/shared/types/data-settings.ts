@@ -40,6 +40,7 @@ export interface Region {
   lastSyncFinishedAt: string | null;
   lastSyncStatus: string;
   lastSyncError: string | null;
+  syncFailureCount?: number;
   lastSuccessfulSyncAt: string | null;
   sourceDataUpdatedAt: string | null;
   latestSourceDataUpdatedAt: string | null;

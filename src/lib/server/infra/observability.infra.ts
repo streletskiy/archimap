@@ -1,4 +1,6 @@
 const { sanitizeUrl } = require('../../shared/log-sanitizer');
+const { monitorEventLoopDelay } = require('node:perf_hooks');
+const { getCacheMetrics } = require('./lru-cache.infra');
 
 function initObservabilityInfra(app, options: LooseRecord = {}) {
   const logger = options.logger || console;
@@ -22,6 +24,16 @@ function initObservabilityInfra(app, options: LooseRecord = {}) {
   let requestTotal = 0;
   let request4xx = 0;
   let request5xx = 0;
+  const buckets = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+  const durations = new Map();
+  const loopDelay = metricsEnabled ? monitorEventLoopDelay({ resolution: 20 }) : null;
+  loopDelay?.enable();
+  function routeLabel(path) {
+    const normalized = String(path || '').split('?')[0];
+    if (/^\/api\/(buildings\/filter-(matches(-batch)?|data(-bbox)?)|search-buildings(-map)?|me|contours-status)$/.test(normalized)) return normalized;
+    if (/^\/api\/data\/regions\/\d+\/pmtiles$/.test(normalized)) return '/api/data/regions/:id/pmtiles';
+    return normalized.startsWith('/_app/') ? '/_app/*' : 'other';
+  }
 
   app.use((req, res, next) => {
     const started = process.hrtime.bigint();
@@ -38,6 +50,14 @@ function initObservabilityInfra(app, options: LooseRecord = {}) {
 
       const elapsedNs = Number(process.hrtime.bigint() - started);
       const durationMs = Number((elapsedNs / 1e6).toFixed(2));
+      if (metricsEnabled) {
+        const route = routeLabel(req.path || req.url);
+        const item = durations.get(route) || { count: 0, sum: 0, buckets: buckets.map(() => 0) };
+        const seconds = durationMs / 1000;
+        item.count++; item.sum += seconds;
+        buckets.forEach((limit, index) => { if (seconds <= limit) item.buckets[index]++; });
+        durations.set(route, item);
+      }
       logger.info('http_request', {
         requestId,
         method: req.method,
@@ -61,11 +81,13 @@ function initObservabilityInfra(app, options: LooseRecord = {}) {
     });
   });
 
-  app.get('/readyz', (req, res) => {
-    const checks =
+  app.get('/readyz', async (req, res) => {
+    let checks;
+    try { checks =
       typeof options.getReadinessChecks === 'function'
-        ? options.getReadinessChecks()
+        ? await options.getReadinessChecks()
         : { sessionStoreReady: true, dbReady: true };
+    } catch { checks = { sessionStoreReady: false, dbReady: false }; }
     const ready = Object.values(checks).every((value) => Boolean(value));
     const payload = {
       ok: ready,
@@ -83,7 +105,7 @@ function initObservabilityInfra(app, options: LooseRecord = {}) {
       const validToken = await options.getMetricsToken();
       if (validToken) {
         const authHeader = req.get('Authorization') || '';
-        const providedToken = authHeader.replace(/^Bearer\\s+/i, '').trim();
+        const providedToken = authHeader.replace(/^Bearer\s+/i, '').trim();
         if (providedToken !== validToken) {
           return res.status(401).json({ code: 'ERR_METRICS_UNAUTHORIZED', error: 'Unauthorized metrics access' });
         }
@@ -108,9 +130,30 @@ function initObservabilityInfra(app, options: LooseRecord = {}) {
       '# TYPE archimap_process_heap_used_bytes gauge',
       `archimap_process_heap_used_bytes ${heapUsed}`
     ];
+    lines.push('# TYPE archimap_http_request_duration_seconds histogram');
+    for (const [route, item] of durations) {
+      buckets.forEach((limit, index) => lines.push(`archimap_http_request_duration_seconds_bucket{route="${route}",le="${limit}"} ${item.buckets[index]}`));
+      lines.push(`archimap_http_request_duration_seconds_bucket{route="${route}",le="+Inf"} ${item.count}`);
+      lines.push(`archimap_http_request_duration_seconds_sum{route="${route}"} ${item.sum}`);
+      lines.push(`archimap_http_request_duration_seconds_count{route="${route}"} ${item.count}`);
+    }
+    const delay = Number(loopDelay?.percentile(99) || 0) / 1e9;
+    lines.push('# TYPE archimap_event_loop_delay_p99_seconds gauge', `archimap_event_loop_delay_p99_seconds ${Number.isFinite(delay) ? delay : 0}`);
+    const pool = options.getPoolMetrics?.();
+    for (const key of ['total', 'idle', 'waiting']) {
+      if (pool) lines.push(`# TYPE archimap_db_pool_${key} gauge`, `archimap_db_pool_${key} ${Number(pool[key] || 0)}`);
+    }
+    for (const [name, stats] of getCacheMetrics()) {
+      for (const key of ['hits', 'misses', 'evictions']) lines.push(`archimap_cache_${key}_total{cache="${name}"} ${stats[key]}`);
+    }
+    try {
+      const sync = await options.getSyncMetrics?.();
+      if (sync) lines.push('archimap_sync_worker_up 1', `archimap_sync_running ${sync.running ? 1 : 0}`, `archimap_sync_queued ${Number(sync.queued || 0)}`, `archimap_sync_oldest_queued_seconds ${Number(sync.oldestQueuedSeconds || 0)}`);
+    } catch { lines.push('archimap_sync_worker_up 0'); }
     res.type('text/plain; version=0.0.4; charset=utf-8');
     return res.send(`${lines.join('\n')}\n`);
   });
+  return () => loopDelay?.disable();
 }
 
 module.exports = {

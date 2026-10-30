@@ -678,7 +678,7 @@ function createRegionsDomain(context: LooseRecord = {}) {
         extract_resolution_status, extract_resolution_error, enabled, auto_sync_enabled,
         auto_sync_on_start, auto_sync_interval_hours, pmtiles_min_zoom, pmtiles_max_zoom,
         source_layer, last_sync_started_at, last_sync_finished_at, last_sync_status,
-        last_sync_error, last_successful_sync_at, source_data_updated_at, next_sync_at,
+        last_sync_error, sync_failure_count, last_successful_sync_at, source_data_updated_at, next_sync_at,
         bounds_west, bounds_south, bounds_east, bounds_north, last_feature_count, updated_by,
         created_at, updated_at, parent_region_id, region_kind, order_in_parent,
         visible_in_admin, country_code

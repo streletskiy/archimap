@@ -1,4 +1,5 @@
 const { createDbRuntime } = require('../infra/db-runtime.infra');
+const { createReadinessProbe } = require('../infra/readiness.infra');
 
 function createDeferredDb(runtimePromise, provider) {
   return {
@@ -45,6 +46,7 @@ function createDbRuntimeBoot(options: LooseRecord = {}) {
 
   const rtreeState = { supported: false, ready: false, rebuilding: false };
   let dbRuntimeReady = false;
+  let resolvedRuntime = null;
   let scheduleBuildingContoursRtreeRebuild: (...args: any[]) => any = () => {};
 
   const dbRuntimePromise = createDbRuntime({
@@ -59,6 +61,7 @@ function createDbRuntimeBoot(options: LooseRecord = {}) {
   dbRuntimePromise
     .then((runtime) => {
       dbRuntimeReady = true;
+      resolvedRuntime = runtime;
       if (runtime?.rtreeState && typeof runtime.rtreeState === 'object') {
         rtreeState.supported = Boolean(runtime.rtreeState.supported);
         rtreeState.ready = Boolean(runtime.rtreeState.ready);
@@ -91,6 +94,8 @@ function createDbRuntimeBoot(options: LooseRecord = {}) {
     closeDbRuntime,
     rtreeState,
     isDbRuntimeReady: () => dbRuntimeReady,
+    checkDbReadiness: createReadinessProbe(async () => dbRuntimeReady && Boolean(await db.prepare('SELECT 1 AS ready').get())),
+    getDbPoolMetrics: () => resolvedRuntime?.getPoolMetrics?.() || null,
     scheduleBuildingContoursRtreeRebuild: (...args: any[]) => scheduleBuildingContoursRtreeRebuild(...args)
   };
 }
