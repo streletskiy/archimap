@@ -1,7 +1,9 @@
 const PORT_RANGES: Record<string, { start: number; span: number }> = {
-  api: { start: 3600, span: 100 },
-  postgresRuntime: { start: 3900, span: 100 },
-  sveltekitRuntime: { start: 4200, span: 100 }
+  api: { start: 20000, span: 1000 },
+  postgresRuntime: { start: 21000, span: 1000 },
+  sveltekitRuntime: { start: 22000, span: 1000 },
+  e2eNavigation: { start: 23000, span: 1000 },
+  e2eSmoke: { start: 24000, span: 1000 }
 };
 
 function pickIntegrationPort(rangeName: keyof typeof PORT_RANGES) {

@@ -4,8 +4,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 const assert = require('node:assert/strict');
 const { test, expect } = require('@playwright/test');
+const { pickIntegrationPort } = require('../integration/test-ports');
 
-const PORT = 4150 + Math.floor(Math.random() * 120);
+const PORT = pickIntegrationPort('e2eNavigation');
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 let server;
