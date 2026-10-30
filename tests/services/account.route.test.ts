@@ -1,14 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { listenOnSafeTestPort } = require('../integration/test-ports');
 
 const { createMiniApp, jsonMiddleware } = require('../../src/lib/server/infra/mini-app.infra');
 const { registerAccountRoutes } = require('../../src/lib/server/http/account.route');
 
 async function startServer(app): Promise<import('node:http').Server> {
-  return await new Promise<import('node:http').Server>((resolve, reject) => {
-    const server = app.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
+  return listenOnSafeTestPort(app);
 }
 
 async function stopServer(server) {

@@ -182,11 +182,12 @@ test('integration: sveltekit runtime serves api parity', async () => {
     const meBody = await me.json();
     assert.equal(meBody?.authenticated, true);
   } finally {
-    if (server.exitCode == null) {
+    if (server.exitCode == null && server.signalCode == null) {
+      const closed = new Promise((resolve) => server.once('close', resolve));
       server.kill('SIGTERM');
-      await new Promise((resolve) => server.once('exit', resolve));
+      await closed;
     }
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   if (server.exitCode && server.exitCode !== 0) {
