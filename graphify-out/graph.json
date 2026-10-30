@@ -14776,6 +14776,7 @@
     {
       "id": "ref_child_process",
       "label": "ref_child_process",
+      "_origin": "semantic",
       "community": 10,
       "community_name": "server-runtime.boot.ts",
       "external": true,
@@ -14787,6 +14788,7 @@
     {
       "id": "lib_shared_types_index_filterpreset",
       "label": "lib_shared_types_index_filterpreset",
+      "_origin": "semantic",
       "community": 11,
       "community_name": "presets.ts",
       "external": true,
@@ -14798,6 +14800,7 @@
     {
       "id": "lib_shared_types_index_filterpresetinput",
       "label": "lib_shared_types_index_filterpresetinput",
+      "_origin": "semantic",
       "community": 11,
       "community_name": "presets.ts",
       "external": true,
@@ -14809,6 +14812,7 @@
     {
       "id": "lib_shared_types_index_filterpresetlayer",
       "label": "lib_shared_types_index_filterpresetlayer",
+      "_origin": "semantic",
       "community": 11,
       "community_name": "presets.ts",
       "external": true,
@@ -14820,6 +14824,7 @@
     {
       "id": "lib_shared_types_index_filterpresetnamei18n",
       "label": "lib_shared_types_index_filterpresetnamei18n",
+      "_origin": "semantic",
       "community": 11,
       "community_name": "presets.ts",
       "external": true,
@@ -14831,6 +14836,7 @@
     {
       "id": "lib_shared_types_index_filterpresetrule",
       "label": "lib_shared_types_index_filterpresetrule",
+      "_origin": "semantic",
       "community": 11,
       "community_name": "presets.ts",
       "external": true,
@@ -14842,6 +14848,7 @@
     {
       "id": "lib_shared_types_index_filterpresetstate",
       "label": "lib_shared_types_index_filterpresetstate",
+      "_origin": "semantic",
       "community": 11,
       "community_name": "presets.ts",
       "external": true,
@@ -14853,6 +14860,7 @@
     {
       "id": "ref_http",
       "label": "ref_http",
+      "_origin": "semantic",
       "community": 12,
       "community_name": "mini-app.infra.ts",
       "external": true,
@@ -14864,6 +14872,7 @@
     {
       "id": "ref_url",
       "label": "ref_url",
+      "_origin": "semantic",
       "community": 12,
       "community_name": "mini-app.infra.ts",
       "external": true,
@@ -14875,6 +14884,7 @@
     {
       "id": "lib_shared_types_index_regionextractcandidate",
       "label": "lib_shared_types_index_regionextractcandidate",
+      "_origin": "semantic",
       "community": 13,
       "community_name": "data-settings.ts",
       "external": true,
@@ -14886,6 +14896,7 @@
     {
       "id": "lib_shared_types_index_regionextractsearchresult",
       "label": "lib_shared_types_index_regionextractsearchresult",
+      "_origin": "semantic",
       "community": 13,
       "community_name": "data-settings.ts",
       "external": true,
@@ -14897,6 +14908,7 @@
     {
       "id": "lib_shared_types_index_regionextractvalidationresult",
       "label": "lib_shared_types_index_regionextractvalidationresult",
+      "_origin": "semantic",
       "community": 13,
       "community_name": "data-settings.ts",
       "external": true,
@@ -14908,6 +14920,7 @@
     {
       "id": "lib_shared_types_index_admindatasettings",
       "label": "lib_shared_types_index_admindatasettings",
+      "_origin": "semantic",
       "community": 15,
       "community_name": "data-settings.service.ts",
       "external": true,
@@ -14919,6 +14932,7 @@
     {
       "id": "ref_redis",
       "label": "ref_redis",
+      "_origin": "semantic",
       "community": 17,
       "community_name": ".initializeSubsystems",
       "external": true,
@@ -14930,6 +14944,7 @@
     {
       "id": "lib_shared_types_index_region",
       "label": "lib_shared_types_index_region",
+      "_origin": "semantic",
       "community": 19,
       "community_name": "regions.ts",
       "external": true,
@@ -14941,6 +14956,7 @@
     {
       "id": "lib_shared_types_index_regioninput",
       "label": "lib_shared_types_index_regioninput",
+      "_origin": "semantic",
       "community": 19,
       "community_name": "regions.ts",
       "external": true,
@@ -14952,6 +14968,7 @@
     {
       "id": "lib_shared_types_index_regionupstreamstatus",
       "label": "lib_shared_types_index_regionupstreamstatus",
+      "_origin": "semantic",
       "community": 19,
       "community_name": "regions.ts",
       "external": true,
@@ -14963,6 +14980,7 @@
     {
       "id": "lib_shared_i18n_locales_en",
       "label": "lib_shared_i18n_locales_en",
+      "_origin": "semantic",
       "community": 2,
       "community_name": "shell.ts",
       "external": true,
@@ -14974,6 +14992,7 @@
     {
       "id": "lib_shared_i18n_locales_ru",
       "label": "lib_shared_i18n_locales_ru",
+      "_origin": "semantic",
       "community": 2,
       "community_name": "shell.ts",
       "external": true,
@@ -14985,6 +15004,7 @@
     {
       "id": "ref_fs",
       "label": "ref_fs",
+      "_origin": "semantic",
       "community": 21,
       "community_name": "region-pmtiles.boot.ts",
       "external": true,
@@ -14996,6 +15016,7 @@
     {
       "id": "ref_path",
       "label": "ref_path",
+      "_origin": "semantic",
       "community": 21,
       "community_name": "region-pmtiles.boot.ts",
       "external": true,
@@ -15007,6 +15028,7 @@
     {
       "id": "ref_node_crypto",
       "label": "ref_node_crypto",
+      "_origin": "semantic",
       "community": 22,
       "community_name": ".constructor",
       "external": true,
@@ -15018,6 +15040,7 @@
     {
       "id": "lib_server_services_data_settings_shared_run_select_fields",
       "label": "lib_server_services_data_settings_shared_run_select_fields",
+      "_origin": "semantic",
       "community": 24,
       "community_name": "data-settings/shared.ts",
       "external": true,
@@ -15029,6 +15052,7 @@
     {
       "id": "lib_shared_types_index_regionbounds",
       "label": "lib_shared_types_index_regionbounds",
+      "_origin": "semantic",
       "community": 24,
       "community_name": "data-settings/shared.ts",
       "external": true,
@@ -15040,6 +15064,7 @@
     {
       "id": "lib_shared_types_index_regionresolutionstatus",
       "label": "lib_shared_types_index_regionresolutionstatus",
+      "_origin": "semantic",
       "community": 24,
       "community_name": "data-settings/shared.ts",
       "external": true,
@@ -15051,6 +15076,7 @@
     {
       "id": "ref_connect_redis",
       "label": "ref_connect_redis",
+      "_origin": "semantic",
       "community": 26,
       "community_name": "session-store.infra.ts",
       "external": true,
@@ -15062,6 +15088,7 @@
     {
       "id": "ref_express_session",
       "label": "ref_express_session",
+      "_origin": "semantic",
       "community": 26,
       "community_name": "session-store.infra.ts",
       "external": true,
@@ -15073,6 +15100,7 @@
     {
       "id": "lib_server_email_templates_index_passwordresethtmltemplate",
       "label": "lib_server_email_templates_index_passwordresethtmltemplate",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15084,6 +15112,7 @@
     {
       "id": "lib_server_email_templates_index_passwordresettexttemplate",
       "label": "lib_server_email_templates_index_passwordresettexttemplate",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15095,6 +15124,7 @@
     {
       "id": "lib_server_email_templates_index_registrationcodehtmltemplate",
       "label": "lib_server_email_templates_index_registrationcodehtmltemplate",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15106,6 +15136,7 @@
     {
       "id": "lib_server_email_templates_index_registrationcodetexttemplate",
       "label": "lib_server_email_templates_index_registrationcodetexttemplate",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15117,6 +15148,7 @@
     {
       "id": "ref_node_util",
       "label": "ref_node_util",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15128,6 +15160,7 @@
     {
       "id": "ref_nodemailer",
       "label": "ref_nodemailer",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15139,6 +15172,7 @@
     {
       "id": "ref_zlib",
       "label": "ref_zlib",
+      "_origin": "semantic",
       "community": 3,
       "community_name": "server-runtime.routes.ts",
       "external": true,
@@ -15150,6 +15184,7 @@
     {
       "id": "lib_shared_types_index_synccandidate",
       "label": "lib_shared_types_index_synccandidate",
+      "_origin": "semantic",
       "community": 32,
       "community_name": "osm-candidate-resolver.ts",
       "external": true,
@@ -15161,6 +15196,7 @@
     {
       "id": "lib_shared_types_index_synccandidatepageresult",
       "label": "lib_shared_types_index_synccandidatepageresult",
+      "_origin": "semantic",
       "community": 32,
       "community_name": "osm-candidate-resolver.ts",
       "external": true,
@@ -15172,6 +15208,7 @@
     {
       "id": "lib_shared_types_index_synccandidatesummary",
       "label": "lib_shared_types_index_synccandidatesummary",
+      "_origin": "semantic",
       "community": 32,
       "community_name": "osm-candidate-resolver.ts",
       "external": true,
@@ -15183,6 +15220,7 @@
     {
       "id": "lib_server_services_osm_sync_shared_default_auth_base_url",
       "label": "lib_server_services_osm_sync_shared_default_auth_base_url",
+      "_origin": "semantic",
       "community": 33,
       "community_name": "createOsmOauthController",
       "external": true,
@@ -15194,6 +15232,7 @@
     {
       "id": "lib_server_services_osm_sync_shared_default_scope",
       "label": "lib_server_services_osm_sync_shared_default_scope",
+      "_origin": "semantic",
       "community": 33,
       "community_name": "createOsmOauthController",
       "external": true,
@@ -15205,6 +15244,7 @@
     {
       "id": "lib_server_services_basemap_config_default_custom_basemap_url",
       "label": "lib_server_services_basemap_config_default_custom_basemap_url",
+      "_origin": "semantic",
       "community": 36,
       "community_name": "runtime-settings.boot.ts",
       "external": true,
@@ -15216,6 +15256,7 @@
     {
       "id": "ref_crypto",
       "label": "ref_crypto",
+      "_origin": "semantic",
       "community": 36,
       "community_name": "runtime-settings.boot.ts",
       "external": true,
@@ -15227,6 +15268,7 @@
     {
       "id": "lib_server_services_basemap_config_custom_basemap_tile_proxy_url",
       "label": "lib_server_services_basemap_config_custom_basemap_tile_proxy_url",
+      "_origin": "semantic",
       "community": 37,
       "community_name": "app.route.ts",
       "external": true,
@@ -15238,6 +15280,7 @@
     {
       "id": "lib_server_services_basemap_config_custom_basemap_tilejson_proxy_url",
       "label": "lib_server_services_basemap_config_custom_basemap_tilejson_proxy_url",
+      "_origin": "semantic",
       "community": 37,
       "community_name": "app.route.ts",
       "external": true,
@@ -15249,6 +15292,7 @@
     {
       "id": "lib_shared_types_index_buildingedit",
       "label": "lib_shared_types_index_buildingedit",
+      "_origin": "semantic",
       "community": 4,
       "community_name": "building-edits.ts",
       "external": true,
@@ -15260,6 +15304,7 @@
     {
       "id": "lib_shared_types_index_buildingeditsummary",
       "label": "lib_shared_types_index_buildingeditsummary",
+      "_origin": "semantic",
       "community": 4,
       "community_name": "building-edits.ts",
       "external": true,
@@ -15271,6 +15316,7 @@
     {
       "id": "lib_server_email_templates_index_smtptesthtmltemplate",
       "label": "lib_server_email_templates_index_smtptesthtmltemplate",
+      "_origin": "semantic",
       "community": 40,
       "community_name": "admin-settings.service.ts",
       "external": true,
@@ -15282,6 +15328,7 @@
     {
       "id": "lib_server_email_templates_index_smtptesttexttemplate",
       "label": "lib_server_email_templates_index_smtptesttexttemplate",
+      "_origin": "semantic",
       "community": 40,
       "community_name": "admin-settings.service.ts",
       "external": true,
@@ -15293,6 +15340,7 @@
     {
       "id": "lib_server_services_osm_sync_shared_default_changeset_created_by",
       "label": "lib_server_services_osm_sync_shared_default_changeset_created_by",
+      "_origin": "semantic",
       "community": 43,
       "community_name": "osm-changeset-builder.ts",
       "external": true,
@@ -15304,6 +15352,7 @@
     {
       "id": "lib_server_services_osm_sync_shared_default_changeset_source",
       "label": "lib_server_services_osm_sync_shared_default_changeset_source",
+      "_origin": "semantic",
       "community": 43,
       "community_name": "osm-changeset-builder.ts",
       "external": true,
@@ -15315,6 +15364,7 @@
     {
       "id": "lib_shared_types_index_buildingeditfieldchange",
       "label": "lib_shared_types_index_buildingeditfieldchange",
+      "_origin": "semantic",
       "community": 44,
       "community_name": "building-edits/shared.ts",
       "external": true,
@@ -15326,6 +15376,7 @@
     {
       "id": "lib_shared_types_index_buildingeditmergedinfo",
       "label": "lib_shared_types_index_buildingeditmergedinfo",
+      "_origin": "semantic",
       "community": 44,
       "community_name": "building-edits/shared.ts",
       "external": true,
@@ -15337,6 +15388,7 @@
     {
       "id": "lib_shared_types_index_buildingeditlistquery",
       "label": "lib_shared_types_index_buildingeditlistquery",
+      "_origin": "semantic",
       "community": 5,
       "community_name": "admin-edits.service.ts",
       "external": true,
@@ -15348,6 +15400,7 @@
     {
       "id": "lib_shared_types_index_buildingeditmergecandidate",
       "label": "lib_shared_types_index_buildingeditmergecandidate",
+      "_origin": "semantic",
       "community": 5,
       "community_name": "admin-edits.service.ts",
       "external": true,
@@ -15359,6 +15412,7 @@
     {
       "id": "lib_shared_types_index_buildingeditmergevalues",
       "label": "lib_shared_types_index_buildingeditmergevalues",
+      "_origin": "semantic",
       "community": 5,
       "community_name": "admin-edits.service.ts",
       "external": true,
@@ -15370,6 +15424,7 @@
     {
       "id": "ref_zod",
       "label": "ref_zod",
+      "_origin": "semantic",
       "community": 52,
       "community_name": "server-runtime.config.ts",
       "external": true,
@@ -15381,6 +15436,7 @@
     {
       "id": "ref_pg",
       "label": "ref_pg",
+      "_origin": "semantic",
       "community": 56,
       "community_name": "postgres-migrations.infra.ts",
       "external": true,
@@ -15392,6 +15448,7 @@
     {
       "id": "ref_node_fs",
       "label": "ref_node_fs",
+      "_origin": "semantic",
       "community": 6,
       "community_name": "basemap-proxy.service.ts",
       "external": true,
@@ -15403,6 +15460,7 @@
     {
       "id": "ref_node_path",
       "label": "ref_node_path",
+      "_origin": "semantic",
       "community": 6,
       "community_name": "basemap-proxy.service.ts",
       "external": true,
@@ -15414,6 +15472,7 @@
     {
       "id": "ref_node_stream",
       "label": "ref_node_stream",
+      "_origin": "semantic",
       "community": 6,
       "community_name": "basemap-proxy.service.ts",
       "external": true,
@@ -15425,6 +15484,7 @@
     {
       "id": "ref_async_hooks",
       "label": "ref_async_hooks",
+      "_origin": "semantic",
       "community": 7,
       "community_name": "db-runtime.infra.ts",
       "external": true,
@@ -15436,6 +15496,7 @@
     {
       "id": "ref_better_sqlite3",
       "label": "ref_better_sqlite3",
+      "_origin": "semantic",
       "community": 7,
       "community_name": "db-runtime.infra.ts",
       "external": true,
@@ -15447,6 +15508,7 @@
     {
       "id": "lib_server_services_search_index_source_service_building_search_fts_delete_sql",
       "label": "lib_server_services_search_index_source_service_building_search_fts_delete_sql",
+      "_origin": "semantic",
       "community": 8,
       "community_name": "createSearchIndexBoot",
       "external": true,
@@ -15458,6 +15520,7 @@
     {
       "id": "lib_server_services_search_index_source_service_building_search_fts_insert_sql",
       "label": "lib_server_services_search_index_source_service_building_search_fts_insert_sql",
+      "_origin": "semantic",
       "community": 8,
       "community_name": "createSearchIndexBoot",
       "external": true,
@@ -15469,6 +15532,7 @@
     {
       "id": "lib_server_services_search_index_source_service_building_search_source_delete_sql",
       "label": "lib_server_services_search_index_source_service_building_search_source_delete_sql",
+      "_origin": "semantic",
       "community": 8,
       "community_name": "createSearchIndexBoot",
       "external": true,
@@ -15480,6 +15544,7 @@
     {
       "id": "lib_server_services_search_index_source_service_building_search_source_upsert_sql",
       "label": "lib_server_services_search_index_source_service_building_search_source_upsert_sql",
+      "_origin": "semantic",
       "community": 8,
       "community_name": "createSearchIndexBoot",
       "external": true,
@@ -15491,6 +15556,7 @@
     {
       "id": "lib_server_infra_lru_cache_infra_getcachemetrics",
       "label": "lib_server_infra_lru_cache_infra_getcachemetrics",
+      "_origin": "semantic",
       "community": 9,
       "community_name": "server-runtime.middleware.ts",
       "external": true,
@@ -15502,6 +15568,7 @@
     {
       "id": "ref_node_perf_hooks",
       "label": "ref_node_perf_hooks",
+      "_origin": "semantic",
       "community": 9,
       "community_name": "server-runtime.middleware.ts",
       "external": true,
@@ -18569,7 +18636,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/server/http/app.route.ts",
-      "source_location": "L312",
+      "source_location": "L314",
       "weight": 1.0
     },
     {
@@ -18581,7 +18648,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/server/http/app.route.ts",
-      "source_location": "L326",
+      "source_location": "L328",
       "weight": 1.0
     },
     {
@@ -18593,7 +18660,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/server/http/app.route.ts",
-      "source_location": "L326",
+      "source_location": "L328",
       "weight": 1.0
     },
     {
@@ -46114,7 +46181,7 @@
       "confidence_score": 0.85,
       "context": "collection",
       "source_file": "src/lib/server/http/app.route.ts",
-      "source_location": "L392",
+      "source_location": "L394",
       "weight": 1.0
     },
     {
@@ -50439,5 +50506,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "e2f7e94e2c58ff89a1389b7a42864e5209817f5a"
+  "built_at_commit": "9714aabada3eff740f4249e1b6afd6233dc0736e"
 }

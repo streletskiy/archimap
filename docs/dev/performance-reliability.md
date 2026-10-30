@@ -9,6 +9,12 @@ execution. The worker derives its RPC credential from `SESSION_SECRET`; an expli
 share the same credential. Standalone development retains in-process workers when
 `SYNC_WORKER_URL` is absent.
 
+The worker publishes administrative boundary archives atomically under
+`data/cache/admin-regions.pmtiles`, shared with the web container. The bundled
+archive remains a fallback until the shared copy exists. Archive builds execute
+inside the existing Planetiler sidecar and copy their inputs explicitly, so Docker
+host paths do not need to match paths inside the worker.
+
 The public port binds to loopback by default. Set `ARCHIMAP_BIND_ADDRESS` explicitly
 if the reverse proxy is on another host. Existing writable bind mounts must permit
 UID 1000 to access `data`; verify this before switching an existing Linux deployment.

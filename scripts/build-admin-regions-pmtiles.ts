@@ -199,39 +199,37 @@ function buildPmtilesContainer({
   minZoom,
   maxZoom
 }: LooseRecord) {
-  const CONTAINER_WORKSPACE = '/workspace';
-  const inputRel = path.relative(REPO_ROOT, input).replace(/\\/g, '/');
-  const outputRel = path.relative(REPO_ROOT, output).replace(/\\/g, '/');
-
+  const workspace = `/tmp/archimap-admin-${crypto.randomBytes(12).toString('hex')}`;
   const schemaHostPath = `${output}.planetiler.yml`;
-  const schemaRel = path.relative(REPO_ROOT, schemaHostPath).replace(/\\/g, '/');
-
   writePlanetilerSchema(schemaHostPath, {
     schemaName: 'ArchiMap Admin Regions',
-    inputPath: `${CONTAINER_WORKSPACE}/${inputRel}`,
+    inputPath: `${workspace}/input.geojson`,
     layer,
     attributeKeys: collectAdminRegionAttributeKeys(input),
     includeFeatureId: false
   });
 
   try {
+    run('docker', ['exec', planetilerContainer, 'mkdir', '-p', workspace]);
+    run('docker', ['cp', input, `${planetilerContainer}:${workspace}/input.geojson`]);
+    run('docker', ['cp', schemaHostPath, `${planetilerContainer}:${workspace}/schema.yml`]);
     run('docker', [
-      'run',
-      '--rm',
-      '-v', `${REPO_ROOT}:${CONTAINER_WORKSPACE}`,
-      '-w', CONTAINER_WORKSPACE,
+      'exec',
       planetilerContainer,
       'java',
       '-cp', '/app/resources:/app/classes:/app/libs/*',
       'com.onthegomap.planetiler.Main',
-      `${CONTAINER_WORKSPACE}/${schemaRel}`,
-      `--output=${CONTAINER_WORKSPACE}/${outputRel}`,
+      `${workspace}/schema.yml`,
+      `--output=${workspace}/output.pmtiles`,
       '--force',
       `--minzoom=${String(minZoom)}`,
       `--maxzoom=${String(maxZoom)}`
     ]);
+    run('docker', ['cp', `${planetilerContainer}:${workspace}/output.pmtiles`, output]);
   } finally {
     fs.rmSync(schemaHostPath, { force: true });
+    // The random workspace belongs only to this invocation; never remove a shared path.
+    spawnSync('docker', ['exec', planetilerContainer, 'rm', '-rf', workspace], { stdio: 'ignore', shell: false });
   }
 }
 

@@ -9,6 +9,61 @@ const {
 } = require('../../src/lib/server/infra/http-cache.infra');
 const { parseRangeHeader } = require('../../src/lib/server/infra/pmtiles-stream.infra');
 
+test('administrative tiles serve atomic worker updates from shared data with a bundled fallback', (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const { registerAppRoutes } = require('../../src/lib/server/http/app.route');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-shared-tiles-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bundled = path.join(root, 'frontend', 'build', 'client', 'admin-regions.pmtiles');
+  const shared = path.join(root, 'data', 'cache', 'admin-regions.pmtiles');
+  fs.mkdirSync(path.dirname(bundled), { recursive: true });
+  fs.mkdirSync(path.dirname(shared), { recursive: true });
+  fs.writeFileSync(bundled, 'old');
+  const routes = new Map();
+  registerAppRoutes({ app: { get: (route, ...handlers) => routes.set(route, handlers.at(-1)) }, rootDir: root, dataDir: path.join(root, 'data') });
+  const head = (headers = {}) => {
+    const response = createJsonResponseStub();
+    routes.get('/admin-regions.pmtiles')({ method: 'HEAD', headers }, response);
+    return response;
+  };
+  assert.equal(head().getHeader('Content-Length'), '3');
+  fs.writeFileSync(`${shared}.new`, 'worker-archive');
+  fs.renameSync(`${shared}.new`, shared);
+  const updated = head();
+  assert.equal(updated.getHeader('Content-Length'), '14');
+  assert.equal(head({ 'if-none-match': updated.getHeader('ETag') }).statusCode, 304);
+  const range = head({ range: 'bytes=1-3' });
+  assert.equal(range.statusCode, 206);
+  assert.equal(range.getHeader('Content-Length'), '3');
+});
+
+test('failed administrative archive rebuild keeps the last complete shared archive', async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const childProcess = require('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-atomic-tiles-'));
+  const modulePath = require.resolve('../../scripts/ensure-admin-regions-pmtiles');
+  const previous = require.cache[modulePath];
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); delete require.cache[modulePath]; if (previous) require.cache[modulePath] = previous; });
+  const inputPath = path.join(root, 'input.geojson');
+  const outputPath = path.join(root, 'archive.pmtiles');
+  fs.writeFileSync(inputPath, '{"type":"FeatureCollection","features":[]}');
+  fs.writeFileSync(outputPath, 'complete-archive');
+  t.mock.method(childProcess, 'spawnSync', (_command, args) => {
+    fs.writeFileSync(args[args.indexOf('--output') + 1], 'incomplete');
+    return { status: 1 };
+  });
+  delete require.cache[modulePath];
+  const { ensureAdminRegionsPmtiles } = require(modulePath);
+  const result = await ensureAdminRegionsPmtiles({ mode: 'always', inputPath, outputPath, logger: { log() {}, warn() {} } });
+  assert.equal(result.status, 'failed_kept_existing');
+  assert.equal(fs.readFileSync(outputPath, 'utf8'), 'complete-archive');
+  assert.deepEqual(fs.readdirSync(root).sort(), ['archive.pmtiles', 'input.geojson']);
+});
+
 function createJsonResponseStub() {
   const headers = new Map();
   return {
