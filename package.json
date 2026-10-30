@@ -59,7 +59,7 @@
     "node": ">=24.22.1"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "connect-redis": "^9.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.4",
