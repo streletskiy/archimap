@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.4
+
+### 🐛 Bug Fixes
+
+- **Dependency Security:** Resolved server and browser dependency advisories, including MapLibre HTML sanitization, SMTP delivery, XML parsing, SvelteKit, and serialization issues ([732bfbd](https://github.com/streletskiy/archimap/commit/732bfbdb995147e98859ef657ce93684fa0cda93)).
+- **Admin Coverage Tiles:** Serve the admin PMTiles archive with current file size, byte ranges, and cache validators after a startup rebuild ([732bfbd](https://github.com/streletskiy/archimap/commit/732bfbdb995147e98859ef657ce93684fa0cda93)).
+
+### 📦 Dependency Updates
+
+- **Frontend Platform:** Updated to SvelteKit 3, adapter-node 6, and MapLibre GL 6 while preserving navigation, camera state, and map overscaling. Map rendering now requires WebGL2 ([732bfbd](https://github.com/streletskiy/archimap/commit/732bfbdb995147e98859ef657ce93684fa0cda93)).
+- **Runtime and Tooling:** Updated Node.js to 24.22.2, moved the application image to Alpine 3.24, pinned npm 12.2.1 with patched Undici and ip-address dependencies, and refreshed both npm lockfiles ([732bfbd](https://github.com/streletskiy/archimap/commit/732bfbdb995147e98859ef657ce93684fa0cda93)).
+
+### 🔧 Maintenance
+
+- **Dependency Monitoring:** Audit both complete npm dependency trees in CI, monitor the frontend with Dependabot, and retain a documented MIT-licensed deepmerge patch until an upstream fixed release is available ([732bfbd](https://github.com/streletskiy/archimap/commit/732bfbdb995147e98859ef657ce93684fa0cda93)).
+- **Validation and Operations:** Verified clean npm audits, all 15 browser tests, container smoke checks, and a Trivy scan with no detected vulnerabilities; documented Windows boot startup and recovery ([732bfbd](https://github.com/streletskiy/archimap/commit/732bfbdb995147e98859ef657ce93684fa0cda93)).
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.8.3...0.8.4)
+
 ## v0.8.3
 
 ### 🚀 Features
