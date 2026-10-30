@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.5
+
+### ⚡ Performance
+
+- **Dense Building Filters:** Replaced linear membership scans with indexed MapLibre lookups; the 6,976-building benchmark dropped from 300 ms to 9 ms for 55,808 membership evaluations ([7fede48](https://github.com/streletskiy/archimap/commit/7fede488d0317ba807e5c5ac07a10f819cbc5977)).
+- **Filter Loading:** Omitted unused marker coordinates for contour views, added asynchronous Brotli/gzip compression, and coalesced duplicate initial requests while preserving URL filter identities ([7fede48](https://github.com/streletskiy/archimap/commit/7fede488d0317ba807e5c5ac07a10f819cbc5977)).
+- **Cache Reuse:** Reused equivalent rule sets across client layer IDs and derived cache identity from validated rules instead of caller-supplied hashes ([7fede48](https://github.com/streletskiy/archimap/commit/7fede488d0317ba807e5c5ac07a10f819cbc5977)).
+
+### 🐛 Bug Fixes
+
+- **Highlight Lifecycle:** Prevented stale worker responses from restoring cleared highlights and restored paint after map style recreation ([7fede48](https://github.com/streletskiy/archimap/commit/7fede488d0317ba807e5c5ac07a10f819cbc5977)).
+- **Filter Correctness:** Preserved architectural overrides and derived levels in PostgreSQL filters, corrected exact-limit truncation, and kept personal filter responses out of shared HTTP caches ([7fede48](https://github.com/streletskiy/archimap/commit/7fede488d0317ba807e5c5ac07a10f819cbc5977)).
+
+### 🔧 Validation
+
+- Passed formatting, lint, frontend checks, unit/integration, security, smoke, localization, and all 15 browser tests. No database migrations are required.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.8.4...0.8.5)
+
 ## v0.8.4
 
 ### 🐛 Bug Fixes
