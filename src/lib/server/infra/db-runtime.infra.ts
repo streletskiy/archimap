@@ -317,13 +317,17 @@ async function createDbRuntime(options: LooseRecord = {}) {
       connectionString,
       max: Number(rawEnv.PG_POOL_MAX || 20),
       idleTimeoutMillis: Number(rawEnv.PG_IDLE_TIMEOUT_MS || 30000),
-      connectionTimeoutMillis: Number(rawEnv.PG_CONNECT_TIMEOUT_MS || 15000)
+      connectionTimeoutMillis: Number(rawEnv.PG_CONNECT_TIMEOUT_MS || 5000),
+      statement_timeout: Math.max(0, Number(rawEnv.PG_STATEMENT_TIMEOUT_MS || 0)),
+      idle_in_transaction_session_timeout: Math.max(0, Number(rawEnv.PG_IDLE_TRANSACTION_TIMEOUT_MS || 30000))
     });
+    pool.on('error', (error) => logger?.error?.('postgres_pool_error', { error: String(error?.message || error) }));
     const compatDb = createPostgresCompatDb(pool);
 
     return {
       provider: 'postgres',
       db: compatDb,
+      getPoolMetrics: () => ({ total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount }),
       rtreeState: { supported: false, ready: false, rebuilding: false },
       scheduleBuildingContoursRtreeRebuild: () => {},
       close: async () => {

@@ -51,6 +51,21 @@ test('createWeakEtag returns deterministic weak etag', () => {
   assert.match(a, /^W\/"/);
 });
 
+test('If-None-Match takes precedence over an unchanged modification date', () => {
+  assert.equal(isResourceNotModified({ headers: { 'if-none-match': 'W/"old"', 'if-modified-since': 'Fri, 30 Oct 2026 12:00:00 GMT' } },
+    { etag: 'W/"new"', lastModified: 'Fri, 30 Oct 2026 12:00:00 GMT' }), false);
+});
+
+test('large cached responses compress asynchronously and preserve their body', async () => {
+  const zlib = require('node:zlib');
+  const payload = { items: Array.from({ length: 20000 }, (_, i) => ({ id: i, value: `building-${i}` })) };
+  const res = createJsonResponseStub(); res.send = function (body) { this.body = body; return this; };
+  const pending = sendCachedJson({ method: 'GET', headers: { 'accept-encoding': 'br' } }, res, payload);
+  assert.equal(res.body, null);
+  await pending;
+  assert.deepEqual(JSON.parse(zlib.brotliDecompressSync(res.body).toString()), payload);
+});
+
 test('sendCompressedJson negotiates encoding and preserves private POST payloads', async () => {
   const zlib = require('node:zlib');
   const payload = { matchedKeys: Array.from({ length: 500 }, (_, index) => `way/${index}`) };

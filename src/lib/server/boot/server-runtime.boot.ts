@@ -25,6 +25,7 @@ const { validateSecurityConfig } = require('../infra/security-config.infra');
 const { registerErrorHandlers } = require('../infra/error-handling.infra');
 const { initSessionStore } = require('../infra/session-store.infra');
 const { initSyncWorkersInfra } = require('../infra/sync-workers.infra');
+const { createSyncWorkerClient } = require('../infra/sync-worker-client.infra');
 const { createFeatureInfoSupport } = require('../http/feature-info.http');
 const { createAuthMiddlewareSupport } = require('../http/auth-middleware.http');
 const { createMiniApp } = require('../infra/mini-app.infra');
@@ -41,7 +42,8 @@ const { applyServerRuntimeMiddleware } = require('./server-runtime.middleware');
 const { registerServerRuntimeRoutes } = require('./server-runtime.routes');
 
 async function runPostDbStartupTasks(runtime: LooseRecord) {
-  runtime.refreshRuntimeSettings();
+  await runtime.refreshRuntimeSettings();
+  if (runtime.config?.rawEnv?.SYNC_WORKER_URL && runtime.config.rawEnv.RUNTIME_ROLE !== 'sync-worker') return;
   try {
     await Promise.resolve(runtime.refreshDesignRefSuggestionsCache?.('startup'));
   } catch (error) {
@@ -170,6 +172,8 @@ class ServerRuntime {
     this.closeDbRuntime = dbRuntime.closeDbRuntime;
     this.rtreeState = dbRuntime.rtreeState;
     this.isDbRuntimeReady = dbRuntime.isDbRuntimeReady;
+    this.checkDbReadiness = dbRuntime.checkDbReadiness;
+    this.getDbPoolMetrics = dbRuntime.getDbPoolMetrics;
     this.scheduleBuildingContoursRtreeRebuild = dbRuntime.scheduleBuildingContoursRtreeRebuild;
 
     this.appSettingsService = createAppSettingsService({
@@ -375,6 +379,9 @@ class ServerRuntime {
   }
 
   createSyncWorkers() {
+    if (this.config.rawEnv.SYNC_WORKER_URL && this.config.rawEnv.RUNTIME_ROLE !== 'sync-worker') {
+      return createSyncWorkerClient(this.config.rawEnv);
+    }
     return initSyncWorkersInfra({
       spawn,
       processExecPath: this.config.processRef.execPath,
@@ -397,8 +404,8 @@ class ServerRuntime {
     });
   }
 
-  async getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0) {
-    return this.searchService.getBuildingSearchResults(queryText, centerLon, centerLat, limit, cursor);
+  async getBuildingSearchResults(queryText, centerLon, centerLat, limit = 30, cursor = 0, bbox = null, styleKeys = []) {
+    return this.searchService.getBuildingSearchResults(queryText, centerLon, centerLat, limit, cursor, bbox, styleKeys);
   }
 
   runStartupTasksOnce() {
@@ -493,6 +500,8 @@ class ServerRuntime {
       }
 
       await this.closeDbRuntime();
+      await this.sessionMiddleware?.close?.();
+      this.stopObservability?.();
     })().finally(() => {
       this.stopRuntimePromise = null;
     });

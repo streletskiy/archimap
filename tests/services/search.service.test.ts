@@ -70,6 +70,24 @@ test('getBuildingSearchResults returns empty for short/empty tokens', async () =
   assert.deepEqual(result, { items: [], total: 0, nextCursor: null, hasMore: false });
 });
 
+test('style search uses one query with exact keys, viewport and stable pagination', async () => {
+  const calls = [];
+  const db = { provider: 'sqlite', prepare(sql) { return { all(...params) {
+    calls.push({ sql, params });
+    return [1, 2, 3].map((id) => ({ osm_type: 'way', osm_id: id, style: 'modernism', total_count: 3 }));
+  } }; } };
+  const service = createSearchService({ db });
+  const result = await service.getBuildingSearchResults('', 44, 56, 2, 0,
+    { west: 43, south: 55, east: 45, north: 57 }, ['modernism', 'baroque']);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /lower\(s.style\) IN \(\?, \?\)/);
+  assert.match(calls[0].sql, /s.osm_type ASC, s.osm_id ASC/);
+  assert.deepEqual(calls[0].params, [44, 44, 56, 56, 'modernism', 'baroque', 43, 45, 55, 57, 3, 0]);
+  assert.deepEqual(result.items.map((item) => item.osmId), [1, 2]);
+  assert.equal(result.total, 3);
+  assert.equal(result.nextCursor, 2);
+});
+
 test('getBuildingSearchResults applies viewport bbox constraints to SQL queries', async () => {
   let capturedSql = '';
   let capturedParams = [];

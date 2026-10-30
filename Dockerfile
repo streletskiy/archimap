@@ -93,4 +93,7 @@ COPY --from=frontend-build /app/src/lib/version.generated.json ./src/lib/version
 
 EXPOSE 3252
 
+RUN chown node:node /app/data /app/data/cache
+USER node
+
 CMD ["node", "--import", "tsx", "scripts/runtime-start.ts"]

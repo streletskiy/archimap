@@ -3,6 +3,9 @@ const zlib = require('zlib');
 const { promisify } = require('node:util');
 const gzipAsync = promisify(zlib.gzip);
 const brotliCompressAsync = promisify(zlib.brotliCompress);
+const compressedBodies = new Map();
+let compressedBytes = 0;
+const MAX_COMPRESSED_BYTES = 8 * 1024 * 1024;
 
 function toHttpDate(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -25,7 +28,7 @@ function parseIfNoneMatch(rawHeader) {
 function isResourceNotModified(req, { etag, lastModified }: LooseRecord) {
   const ifNoneMatch = parseIfNoneMatch(req.headers['if-none-match']);
   if (etag && ifNoneMatch.length > 0) {
-    if (ifNoneMatch.includes('*') || ifNoneMatch.includes(etag)) return true;
+    return ifNoneMatch.includes('*') || ifNoneMatch.includes(etag);
   }
 
   if (lastModified) {
@@ -91,33 +94,38 @@ async function sendCompressedJson(req, res, payload) {
   return res.status(200).send(body);
 }
 
-function compressPayload(buffer, encoding) {
-  if (encoding === 'br') {
-    return zlib.brotliCompressSync(buffer, {
-      params: {
-        [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
-        [zlib.constants.BROTLI_PARAM_QUALITY]: 5
-      }
-    });
+async function compressPayload(buffer, encoding) {
+  const key = `${encoding}:${createWeakEtag(buffer)}`;
+  const cached = compressedBodies.get(key);
+  if (cached && Date.now() - cached.at < 15000) return cached.body;
+  const body = encoding === 'br'
+    ? await brotliCompressAsync(buffer, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } })
+    : await gzipAsync(buffer, { level: 4 });
+  const previous = compressedBodies.get(key);
+  if (previous) { compressedBytes -= previous.body.length; compressedBodies.delete(key); }
+  if (body.length <= MAX_COMPRESSED_BYTES) {
+    compressedBodies.set(key, { body, at: Date.now() }); compressedBytes += body.length;
+    while (compressedBytes > MAX_COMPRESSED_BYTES || compressedBodies.size > 100) {
+      const first = compressedBodies.keys().next().value;
+      compressedBytes -= compressedBodies.get(first).body.length;
+      compressedBodies.delete(first);
+    }
   }
-  if (encoding === 'gzip') {
-    return zlib.gzipSync(buffer, { level: 6 });
-  }
-  return buffer;
+  return body;
 }
 
 function sendCachedJson(req, res, payload, options: LooseRecord = {}) {
-  const payloadText = JSON.stringify(payload);
+  const payloadText = options.rawText ? String(payload) : JSON.stringify(payload);
   const rawBuffer = Buffer.from(payloadText, 'utf8');
   const etagPayload = Object.prototype.hasOwnProperty.call(options, 'etagPayload') ? options.etagPayload : payload;
-  const etagBuffer = Buffer.from(JSON.stringify(etagPayload), 'utf8');
+  const etagBuffer = etagPayload === payload ? rawBuffer : Buffer.from(JSON.stringify(etagPayload), 'utf8');
   const etag = createWeakEtag(etagBuffer);
   const lastModified = toHttpDate(options.lastModified);
   const cacheControl = String(options.cacheControl || 'private, no-cache').trim();
   const shouldCompress = rawBuffer.length >= Number(options.minCompressionBytes || 1024);
   const encoding = shouldCompress ? pickEncoding(req.headers['accept-encoding']) : null;
 
-  res.type('application/json; charset=utf-8');
+  res.type(options.contentType || 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', cacheControl);
   res.setHeader('ETag', etag);
   appendVaryHeader(res, 'Accept-Encoding');
@@ -129,17 +137,16 @@ function sendCachedJson(req, res, payload, options: LooseRecord = {}) {
     return res.status(304).end();
   }
 
-  let body = rawBuffer;
+  const sendBody = (body) => {
+    res.setHeader('Content-Length', String(body.length));
+    if (req.method === 'HEAD') return res.status(200).end();
+    return res.status(200).send(body);
+  };
   if (encoding) {
-    body = compressPayload(rawBuffer, encoding);
     res.setHeader('Content-Encoding', encoding);
+    return compressPayload(rawBuffer, encoding).then(sendBody);
   }
-  res.setHeader('Content-Length', String(body.length));
-
-  if (req.method === 'HEAD') {
-    return res.status(200).end();
-  }
-  return res.status(200).send(body);
+  return sendBody(rawBuffer);
 }
 
 module.exports = {
@@ -147,5 +154,6 @@ module.exports = {
   createWeakEtag,
   isResourceNotModified,
   sendCompressedJson,
+  compressPayload,
   sendCachedJson
 };

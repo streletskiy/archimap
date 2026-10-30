@@ -29,7 +29,14 @@ export function appendSearchViewportParams(params, viewport) {
   params.set('north', String(viewport.north));
 }
 
-export function buildSearchRequestParams({ query, center, viewport, limit, cursor = null }: LooseRecord = {}) {
+export function buildSearchRequestParams({
+  query,
+  center,
+  viewport,
+  limit,
+  cursor = null,
+  styleKeys = []
+}: LooseRecord = {}) {
   const params = new URLSearchParams({
     q: clampText(query),
     limit: String(limit)
@@ -40,6 +47,9 @@ export function buildSearchRequestParams({ query, center, viewport, limit, curso
     params.set('lat', String(center.lat));
   }
 
+  if (Array.isArray(styleKeys) && styleKeys.length > 0) {
+    params.set('styleKeys', JSON.stringify([...new Set(styleKeys)]));
+  }
   appendSearchViewportParams(params, viewport);
 
   if (Number.isFinite(Number(cursor)) && Number(cursor) > 0) {

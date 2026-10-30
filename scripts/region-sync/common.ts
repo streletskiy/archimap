@@ -2,6 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const { once } = require('events');
 const { moveFileSync } = require('../../src/lib/server/utils/fs');
+const { deriveLevelsTextFromSourceTags } = require('../../src/lib/server/services/building-filter-query.service');
+const { parseNumericFilterValue } = require('../../src/lib/server/utils/filter-sql-builder');
+
+function formatFilterProperties(tagsJson) {
+  let tags: LooseRecord = {};
+  try { tags = typeof tagsJson === 'string' ? JSON.parse(tagsJson) : tagsJson || {}; } catch { /* malformed upstream tags */ }
+  const value = deriveLevelsTextFromSourceTags(tags) ?? tags['building:levels'] ?? tags.levels;
+  const text = value == null ? '' : String(value).trim().toLowerCase();
+  const number = parseNumericFilterValue(text);
+  return `"filter_schema":1,"filter_levels":${JSON.stringify(text)},"filter_levels_num":${Number.isFinite(number) ? number : 'null'},`;
+}
 
 const NDJSON_STREAM_HIGH_WATER_MARK = 1024 * 1024;
 const DEFAULT_BUILDING_LEVEL_HEIGHT_METERS = 3.2;
@@ -344,6 +355,7 @@ function formatGeojsonFeatureLine(
     `{"type":"Feature","id":${encodeOsmFeatureId(osmType, osmId)},` +
     `"properties":{"osm_type":${JSON.stringify(normalizedOsmType)},"osm_key":${JSON.stringify(normalizedOsmKey)},` +
     `"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
+    formatFilterProperties(tagsJson) +
     `"render_height_m":${feature3dProperties.render_height_m},` +
     `"render_min_height_m":${feature3dProperties.render_min_height_m},` +
     `"render_hide_base_when_parts":${normalizedHideBaseWhenParts}},` +
@@ -358,7 +370,8 @@ function formatRenderedGeojsonFeatureLine(
   featureKind,
   renderHeightM = 0,
   renderMinHeightM = 0,
-  renderHideBaseWhenParts = DEFAULT_RENDER_HIDE_BASE_WHEN_PARTS
+  renderHideBaseWhenParts = DEFAULT_RENDER_HIDE_BASE_WHEN_PARTS,
+  tagsJson = null
 ) {
   const normalizedGeometryJson = String(geometryJson || '').trim();
   if (!normalizedGeometryJson) {
@@ -375,6 +388,7 @@ function formatRenderedGeojsonFeatureLine(
     `"properties":{"osm_type":${JSON.stringify(normalizedOsmType)},"osm_key":${JSON.stringify(normalizedOsmKey)},` +
     `"osm_id":${Number(osmId)},"feature_kind":"${normalizedFeatureKind}",` +
     `"render_height_m":${normalizedRenderHeightM},` +
+    formatFilterProperties(tagsJson) +
     `"render_min_height_m":${normalizedRenderMinHeightM},` +
     `"render_hide_base_when_parts":${normalizedHideBaseWhenParts}},"geometry":${normalizedGeometryJson}}\n`
   );

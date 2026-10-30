@@ -99,6 +99,9 @@ publish and verify `streletskiy/archimap:X.Y.Z` and `streletskiy/archimap:latest
 
 ## Common incidents
 
+For the six-service deployment, resource budgets, metrics, backup verification and
+history retention, see [Performance and reliability operations](dev/performance-reliability.md).
+
 ### Map tiles not loading
 
 - Check region PMTiles file exists in `data/regions/`.

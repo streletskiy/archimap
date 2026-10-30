@@ -1,4 +1,5 @@
 import { get, writable } from 'svelte/store';
+import { translateNow } from '$lib/i18n/index';
 import { createFilterCache } from './filter-cache';
 import {
   buildBboxHash,
@@ -499,6 +500,12 @@ export function createFilterPipeline({
             }
           } catch (error) {
             if (String(error?.name || '').toLowerCase() === 'aborterror') return;
+            if (token !== latestFilterToken) return;
+            // Tile attributes are provisional: never leave them looking authoritative after a failed lookup.
+            filterDiffApplyStrategy.clearFilteredHighlight();
+            patchState({ errorMessage: translateNow('mapPage.filterFailed') });
+            setFilterPhase('idle');
+            updateFilterRuntimeStatus({ statusCode: 'failed', count: 0 });
             return;
           } finally {
             if (activeFilterAbortController?.signal === signal) {
@@ -571,6 +578,7 @@ export function createFilterPipeline({
           }
           const matchedSize = Number(resolvedPayload?.matchedCount || 0);
           if (matchedSize > FILTER_MATCH_DEGRADE_LIMIT && renderMode !== 'markers') {
+            filterDiffApplyStrategy.clearFilteredHighlight();
             updateFilterRuntimeStatus({
               statusCode: 'too_many_matches',
               count: matchedSize
@@ -946,6 +954,9 @@ export function createFilterPipeline({
     updateFilterRuntimeStatus({
       statusCode: 'refining'
     });
+    if (renderMode === 'contours') {
+      filterDiffApplyStrategy.applyProvisionalFloorHighlight(prepared);
+    }
     const debounceMs = prepared.heavy
       ? FILTER_HEAVY_RULE_DEBOUNCE_MS
       : reason === 'rules'

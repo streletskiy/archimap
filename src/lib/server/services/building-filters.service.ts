@@ -1,4 +1,5 @@
 const { createLruCache } = require('../infra/lru-cache.infra');
+const { getBuildingDataRevision } = require('../infra/building-data-revision.infra');
 const { createBuildingFilterQueryService } = require('./building-filter-query.service');
 const {
   normalizeRenderMode,
@@ -480,8 +481,8 @@ function createBuildingFiltersService({
 
   // Centralize filter cache/query orchestration so the route only wires HTTP handlers.
   const queryService = createBuildingFilterQueryService({ db, rtreeState });
-  const bboxCache = createLruCache({ max: 100, ttlMs: 10 * 1000 });
-  const filterMatchesCache = createLruCache({ max: 220, ttlMs: 4000 });
+  const bboxCache = createLruCache({ max: 100, ttlMs: 10 * 1000, name: 'filter_bbox' });
+  const filterMatchesCache = createLruCache({ max: 220, ttlMs: 4000, name: 'filter_matches' });
 
   async function getFilterDataByKeys(rawKeys, actorKey) {
     if (!Array.isArray(rawKeys)) {
@@ -533,7 +534,7 @@ function createBuildingFiltersService({
     );
     const { minLon, minLat, maxLon, maxLat } = bbox;
     const queryMode = queryService.getBboxQueryMode();
-    const cacheKey = `${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${queryMode}`;
+    const cacheKey = `${getBuildingDataRevision()}:${actorKey || 'anon'}:${minLon.toFixed(5)}:${minLat.toFixed(5)}:${maxLon.toFixed(5)}:${maxLat.toFixed(5)}:${limit}:${queryMode}`;
     const cached = bboxCache.get(cacheKey);
     if (cached) {
       return { payload: cached };
@@ -590,7 +591,7 @@ function createBuildingFiltersService({
     const actorKey = normalizeActorKey(actorKeyRaw) || 'anon';
     const queryMode = queryService.getBboxQueryMode();
     // Client IDs and hashes are correlation metadata, never cache identity.
-    const cacheKey = JSON.stringify([actorKey, 'batch', bboxHash, zoomBucket, renderMode, queryMode, includeLocations,
+    const cacheKey = JSON.stringify([getBuildingDataRevision(), actorKey, 'batch', bboxHash, zoomBucket, renderMode, queryMode, includeLocations,
       normalizedRequests.map((request) => [request.rules, request.maxResults])]);
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
@@ -626,13 +627,8 @@ function createBuildingFiltersService({
       };
     }
 
-    const allTagOnly = normalizedRequests.every(
-      (request) => splitPostgresPushdownRules(request.rules).fallbackRules.length === 0
-    );
     const candidateLimit = getBatchFilterMatchCandidateLimit(normalizedRequests);
-    const candidateRows = await queryService.selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit, {
-      tagsOnly: actorKey === 'anon' && allTagOnly
-    });
+    const candidateRows = await queryService.selectBatchFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit, normalizedRequests);
     const candidateItems =
       actorKey === 'anon'
         ? candidateRows.map(queryService.mapFilterDataRow)
@@ -704,7 +700,7 @@ function createBuildingFiltersService({
     const zoomBucket = resolveZoomBucket(body);
     const actorKey = normalizeActorKey(actorKeyRaw) || 'anon';
     const queryMode = queryService.getBboxQueryMode();
-    const cacheKey = JSON.stringify([actorKey, normalizedRules, bboxHash, zoomBucket, renderMode, maxResults, queryMode, includeLocations]);
+    const cacheKey = JSON.stringify([getBuildingDataRevision(), actorKey, normalizedRules, bboxHash, zoomBucket, renderMode, maxResults, queryMode, includeLocations]);
     const cached = filterMatchesCache.get(cacheKey);
     if (cached) {
       return {

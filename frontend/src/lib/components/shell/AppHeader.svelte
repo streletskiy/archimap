@@ -5,8 +5,7 @@
   import FilterIcon from '$lib/components/icons/FilterIcon.svelte';
   import MenuIcon from '$lib/components/icons/MenuIcon.svelte';
   import SearchIcon from '$lib/components/icons/SearchIcon.svelte';
-  import AuthModal from '$lib/components/shell/AuthModal.svelte';
-  import FilterPanel from '$lib/components/shell/FilterPanel.svelte';
+  import UiButton from '$lib/components/base/UiButton.svelte';
   import SearchInput from '$lib/components/shell/SearchInput.svelte';
   import UserMenu from '$lib/components/shell/UserMenu.svelte';
   import { buildAccountUrl, buildAdminUrl, buildInfoUrl } from '$lib/client/section-routes';
@@ -28,6 +27,10 @@
   let filterOpen = false;
   let searchText = '';
   let visibleFilterCount = 0;
+  let authLoadAttempt = 0;
+  let filterLoadAttempt = 0;
+  $: hasAuthLink = ['registerToken', 'resetToken', 'reset'].some((key) => $page.url.searchParams.has(key));
+  $: if (!filterOpen) visibleFilterCount = Array.isArray($buildingFilterLayers) ? $buildingFilterLayers.length : 0;
 
   $: currentPathname = $page.url.pathname;
   $: basePrefix = currentPathname === '/app' || currentPathname.startsWith('/app/') ? '/app' : '';
@@ -132,7 +135,7 @@
       </a>
 
       <nav class="nav-links" aria-label={$t('header.openMenu')}>
-        {#each primaryLinks as link}
+        {#each primaryLinks as link (link.href)}
           <a href={link.href} class:active={link.active} on:click={() => (menuOpen = false)}>{link.label}</a>
         {/each}
       </nav>
@@ -204,11 +207,15 @@
     ></button>
   {/if}
 
-  <FilterPanel
-    open={filterOpen && isMapRoute}
-    bind:visibleCount={visibleFilterCount}
-    on:close={() => (filterOpen = false)}
-  />
+{#if filterOpen && isMapRoute}
+    {#key filterLoadAttempt}
+      {#await import('$lib/components/shell/FilterPanel.svelte') then panel}
+        <svelte:component this={panel.default} open={true} bind:visibleCount={visibleFilterCount} on:close={() => (filterOpen = false)} />
+      {:catch}
+        <div class="panel-load-error" role="alert">{$t('common.loadFailed')} <UiButton onclick={() => filterLoadAttempt += 1}>{$t('common.retry')}</UiButton></div>
+      {/await}
+    {/key}
+  {/if}
   <UserMenu
     open={menuOpen}
     {primaryLinks}
@@ -217,9 +224,18 @@
   />
 </header>
 
-<AuthModal bind:open={authOpen} preferredTab={authPreferredTab} requestId={authRequestId} {termsHref} {privacyHref} />
+{#if authOpen || hasAuthLink}
+  {#key authLoadAttempt}
+    {#await import('$lib/components/shell/AuthModal.svelte') then modal}
+      <svelte:component this={modal.default} bind:open={authOpen} preferredTab={authPreferredTab} requestId={authRequestId} {termsHref} {privacyHref} />
+    {:catch}
+      <div class="panel-load-error" role="alert">{$t('common.loadFailed')} <UiButton onclick={() => authLoadAttempt += 1}>{$t('common.retry')}</UiButton></div>
+    {/await}
+  {/key}
+{/if}
 
 <style>
+  .panel-load-error { position: fixed; top: 6rem; right: 1rem; z-index: 1100; padding: 1rem; background: var(--panel-solid); pointer-events: auto; }
   .nav-shell {
     position: fixed;
     inset-inline: 0;

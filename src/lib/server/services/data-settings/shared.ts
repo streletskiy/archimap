@@ -234,21 +234,27 @@ function createDataSettingsContext(options: LooseRecord = {}) {
     }
 
     const referenceIso = toIsoOrNull(referenceDate) || toIsoOrNull(now());
-    const lastSuccessfulSyncAt = toIsoOrNull(regionLike.lastSuccessfulSyncAt);
-    if (lastSuccessfulSyncAt) {
-      const next = addHours(lastSuccessfulSyncAt, intervalHours);
-      if (!next) return referenceIso;
-      return next.toISOString();
-    }
-
     const lastSyncStatus = String(regionLike.lastSyncStatus || '')
       .trim()
       .toLowerCase();
     const lastSyncFinishedAt = toIsoOrNull(regionLike.lastSyncFinishedAt);
     if (['failed', 'abandoned'].includes(lastSyncStatus) && lastSyncFinishedAt) {
-      const retryAt = addHours(lastSyncFinishedAt, intervalHours);
+      const failures = Math.max(0, Number(regionLike.syncFailureCount || 0));
+      if (failures >= 8) return null;
+      const jitter = (Math.abs(Number(regionLike.id || 0)) % 31) / 300;
+      const retryHours = failures > 0
+        ? Math.min(intervalHours, 6, (5 / 60) * 2 ** (failures - 1)) * (1 + jitter)
+        : intervalHours;
+      const retryAt = addHours(lastSyncFinishedAt, retryHours);
       if (!retryAt) return referenceIso;
       return retryAt.toISOString();
+    }
+
+    const lastSuccessfulSyncAt = toIsoOrNull(regionLike.lastSuccessfulSyncAt);
+    if (lastSuccessfulSyncAt) {
+      const next = addHours(lastSuccessfulSyncAt, intervalHours);
+      if (!next) return referenceIso;
+      return next.toISOString();
     }
 
     return referenceIso;
@@ -301,6 +307,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
       lastSyncFinishedAt: row.last_sync_finished_at ? String(row.last_sync_finished_at) : null,
       lastSyncStatus: String(row.last_sync_status || 'idle'),
       lastSyncError: row.last_sync_error ? String(row.last_sync_error) : null,
+      syncFailureCount: Number(row.sync_failure_count || 0),
       lastSuccessfulSyncAt: row.last_successful_sync_at ? String(row.last_successful_sync_at) : null,
       sourceDataUpdatedAt: row.source_data_updated_at ? String(row.source_data_updated_at) : null,
       latestSourceDataUpdatedAt: null,
@@ -413,6 +420,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
           last_sync_finished_at,
           last_sync_status,
           last_sync_error,
+          sync_failure_count,
           last_successful_sync_at,
           source_data_updated_at,
           next_sync_at,
@@ -468,6 +476,7 @@ function createDataSettingsContext(options: LooseRecord = {}) {
         last_sync_finished_at,
         last_sync_status,
         last_sync_error,
+        sync_failure_count,
         last_successful_sync_at,
         source_data_updated_at,
         next_sync_at,

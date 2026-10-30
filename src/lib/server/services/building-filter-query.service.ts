@@ -76,6 +76,9 @@ function parseBboxInput(source, fields) {
   if (minLon > maxLon || minLat > maxLat) {
     return { bbox: null, error: 'Invalid bbox boundaries' };
   }
+  if (minLon < -180 || maxLon > 180 || minLat < -90 || maxLat > 90) {
+    return { bbox: null, error: 'Bbox coordinates are outside the world bounds' };
+  }
   return {
     bbox: {
       minLon,
@@ -343,6 +346,17 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       : selectFilterRowsBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
   }
 
+  async function selectBatchFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit, requests) {
+    if (!isPostgres) return selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit);
+    const columns = collectRequiredArchiColumns(requests.flatMap((request) => request.rules));
+    const projection = columns.length ? `ai.osm_id AS info_osm_id, ${columns.map((column) => `ai.${column}`).join(', ')}` : 'NULL::bigint AS info_osm_id';
+    const join = columns.length ? 'LEFT JOIN local.architectural_info ai ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id' : '';
+    return db.prepare(`WITH env AS (SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom)
+      SELECT bc.osm_type, bc.osm_id, bc.tags_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat, ${projection}
+      FROM osm.building_contours bc ${join} JOIN env ON bc.geom && env.geom
+      WHERE ST_Intersects(bc.geom, env.geom) LIMIT ?`).all(minLon, minLat, maxLon, maxLat, limit);
+  }
+
   async function selectFilterDataRowsByKeys(keys = []) {
     const rows = [];
     const CHUNK_SIZE = 300;
@@ -519,12 +533,14 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
     parseBboxInput,
     selectFilterDataRowsByKeys,
     selectFilterRowsByBbox,
+    selectBatchFilterRowsByBbox,
     selectGuardedPostgresCandidateRowsByBbox,
     selectTagOnlyPostgresMatchRowsByBbox
   };
 }
 
 module.exports = {
+  deriveLevelsTextFromSourceTags,
   createBuildingFilterQueryService,
   mapFilterDataRow,
   parseBboxInput,

@@ -13,8 +13,8 @@ This page is a human-readable companion to [OpenAPI](openapi.yaml). `docs/openap
 System notes:
 
 - `GET /healthz` returns `200` when the process is alive.
-- `GET /readyz` returns `200` when the runtime is ready and `503` otherwise.
-- `GET /metrics` returns Prometheus-style text payload when `METRICS_ENABLED=true` and an HTTP `Authorization: Bearer <token>` header is provided. The token can be generated in the Admin Settings UI.
+- `GET /readyz` returns `200` when live PostgreSQL and session-store probes pass and `503` otherwise. Probes are coalesced and cached for one second, with a two-second deadline.
+- `GET /metrics` returns Prometheus-style text payload when `METRICS_ENABLED=true` and an HTTP `Authorization: Bearer <token>` header is provided. The token can be supplied through `METRICS_TOKEN` (preferred for operators) or generated in the Admin Settings UI.
 - `GET /metrics` returns `404` when metrics are disabled, and `401` if an invalid token is provided.
 
 ## Core endpoints
@@ -25,11 +25,11 @@ System notes:
   - Returns build/runtime version payload.
   - Cache: `Cache-Control: no-store`.
 - `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...&west=...&south=...&east=...&north=...`
-  - Returns paginated building search results.
+  - Returns paginated building search results. Optional `styleKeys` is a URL-encoded JSON array of up to 128 exact canonical style keys (each at most 120 characters); it replaces text matching and makes `q` optional. All selected styles share one query, count and pagination.
   - Result items include `name`, `address`, `style`, `architect`, and optional `designRef` when present.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/search-buildings-map?q=...&west=...&south=...&east=...&north=...&limit=...&lon=...&lat=...`
-  - Map-oriented search variant that requires a bbox.
+  - Map-oriented search variant that requires a bbox. Supports the same `styleKeys` contract as list search.
   - Returns `items[]`, `total`, and `truncated`.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`

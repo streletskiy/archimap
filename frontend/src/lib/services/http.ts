@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { session } from '../stores/auth.js';
+import { buildingDataRevision } from '../stores/building-data.js';
 import { translateNow } from '../i18n/index.js';
 
 function isStateChangingMethod(method) {
@@ -7,9 +8,33 @@ function isStateChangingMethod(method) {
   return !['GET', 'HEAD', 'OPTIONS'].includes(m);
 }
 
+function getRequestPath(input) {
+  const url = typeof input === 'string' ? input : String(input?.url || input || '');
+  try {
+    return new URL(url, 'http://localhost').pathname;
+  } catch {
+    return '';
+  }
+}
+
+function isSharedDictionaryRequest(input) {
+  return ['/api/filter-tag-keys', '/api/filter-presets'].includes(getRequestPath(input));
+}
+
 export async function apiFetch(input, init: LooseRecord = {}) {
   const nextInit = { ...init };
   const method = String(nextInit.method || 'GET').toUpperCase();
+  if (
+    ['GET', 'HEAD'].includes(method) &&
+    get(buildingDataRevision) > 0 &&
+    getRequestPath(input).startsWith('/api/') &&
+    !isSharedDictionaryRequest(input) &&
+    nextInit.cache !== 'no-store'
+  ) {
+    // A fresh HTTP-cache entry can outlive an edit or account switch. Revalidate it,
+    // retaining conditional requests and the independent dictionary cache.
+    nextInit.cache = 'no-cache';
+  }
   if (isStateChangingMethod(method)) {
     const csrfToken = get(session)?.csrfToken || null;
     if (csrfToken) {
@@ -50,6 +75,11 @@ export async function apiJson(input, init: LooseRecord = {}) {
 }
 
 const getCache = new Map();
+buildingDataRevision.subscribe(() => {
+  for (const [key, entry] of getCache) {
+    if (!entry.revisionIndependent) getCache.delete(key);
+  }
+});
 
 function normalizeCacheKey(input, init) {
   const method = String(init?.method || 'GET').toUpperCase();
@@ -59,7 +89,9 @@ function normalizeCacheKey(input, init) {
 
 export async function apiJsonCached(input, options: LooseRecord = {}) {
   const ttlMs = Math.max(0, Number(options.ttlMs || 0));
-  const cacheKey = options.cacheKey || normalizeCacheKey(input, options);
+  const revision = get(buildingDataRevision);
+  const revisionIndependent = isSharedDictionaryRequest(input);
+  const cacheKey = `${revisionIndependent ? 'dictionary' : revision}:${options.cacheKey || normalizeCacheKey(input, options)}`;
   const now = Date.now();
   const cached = getCache.get(cacheKey);
   if (cached && now - cached.ts <= ttlMs) {
@@ -70,8 +102,8 @@ export async function apiJsonCached(input, options: LooseRecord = {}) {
   delete init.ttlMs;
   delete init.cacheKey;
   const data = await apiJson(input, init);
-  if (ttlMs > 0) {
-    getCache.set(cacheKey, { ts: now, data });
+  if (ttlMs > 0 && (revisionIndependent || revision === get(buildingDataRevision))) {
+    getCache.set(cacheKey, { ts: now, data, revisionIndependent });
     if (getCache.size > 200) {
       const oldestKey = getCache.keys().next().value;
       getCache.delete(oldestKey);

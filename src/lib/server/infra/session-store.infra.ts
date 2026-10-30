@@ -1,6 +1,7 @@
 const session = require('express-session');
 const { RedisStore } = require('connect-redis');
 const { createClient } = require('redis');
+const { createReadinessProbe } = require('./readiness.infra');
 
 function sanitizeRedisUrl(redisUrl) {
   const raw = String(redisUrl || '').trim();
@@ -38,26 +39,32 @@ async function initSessionStore({
   };
 
   let redisClient = null;
+  let connectedOnce = false;
   try {
     redisClient = createClient({
       url: redisUrl,
       socket: {
         connectTimeout: 1500,
-        reconnectStrategy: () => false
-      }
+        reconnectStrategy: (retries) => connectedOnce ? Math.min(5000, 100 * 2 ** Math.min(retries, 6)) + Math.floor(Math.random() * 100) : false
+      },
+      disableOfflineQueue: true
     });
     redisClient.on('error', (error) => {
       logger.error('session_redis_error', { error: String(error.message || error) });
     });
+    redisClient.on('ready', () => { connectedOnce = true; });
     await redisClient.connect();
     logger.info('session_redis_connected', { redisUrl: sanitizeRedisUrl(redisUrl) });
-    return session({
+    const middleware = session({
       ...sessionConfig,
       store: new RedisStore({
         client: redisClient,
         prefix: 'archimap:sess:'
       })
     });
+    middleware.checkReadiness = createReadinessProbe(async () => redisClient.isReady && await redisClient.ping() === 'PONG');
+    middleware.close = async () => { if (redisClient.isOpen) redisClient.destroy(); };
+    return middleware;
   } catch (error) {
     if (!sessionAllowMemoryFallback) {
       throw new Error(
@@ -71,7 +78,10 @@ async function initSessionStore({
     } catch {
       // ignore
     }
-    return session(sessionConfig);
+    const middleware = session(sessionConfig);
+    middleware.checkReadiness = async () => true;
+    middleware.close = async () => {};
+    return middleware;
   }
 }
 

@@ -1,3 +1,9 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '3'
+
 services:
   archimap:
     build:
@@ -10,8 +16,15 @@ services:
     image: ${ARCHIMAP_IMAGE:-streletskiy/archimap:latest}
     container_name: archimap
     restart: unless-stopped
+    logging: *logging
+    user: '1000:1000'
+    init: true
+    mem_limit: ${ARCHIMAP_MEMORY_LIMIT:-1536m}
+    cpus: ${ARCHIMAP_CPUS:-2}
+    security_opt: ['no-new-privileges:true']
+    cap_drop: ['ALL']
     ports:
-      - '${PORT:-3252}:${PORT:-3252}'
+      - '${ARCHIMAP_BIND_ADDRESS:-127.0.0.1}:${PORT:-3252}:${PORT:-3252}'
     env_file:
       - .env
     environment:
@@ -22,15 +35,57 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
-      # Sidecar tool container names (used by region-sync scripts)
-      PLANETILER_CONTAINER: archimap-planetiler
-      OSM2PGSQL_CONTAINER: archimap-osm2pgsql
+      SYNC_WORKER_URL: http://sync-worker:3253
+      PG_POOL_MAX: ${PG_POOL_MAX:-12}
+      PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-15000}
     volumes:
       - ./data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       redis:
         condition: service_started
+      db-postgres:
+        condition: service_healthy
+      sync-worker:
+        condition: service_healthy
+
+  sync-worker:
+    image: ${ARCHIMAP_IMAGE:-streletskiy/archimap:latest}
+    container_name: archimap-sync-worker
+    restart: unless-stopped
+    logging: *logging
+    init: true
+    user: '0:0'
+    mem_limit: ${SYNC_WORKER_MEMORY_LIMIT:-1536m}
+    cpus: ${SYNC_WORKER_CPUS:-2}
+    command: ['node', '--import', 'tsx', 'scripts/sync-worker.ts']
+    env_file: [.env]
+    environment:
+      RUNTIME_ROLE: sync-worker
+      SYNC_WORKER_URL: ''
+      DB_PROVIDER: postgres
+      DATABASE_URL: ${DATABASE_URL:-postgresql://archimap:archimap@db-postgres:5432/archimap}
+      PG_POOL_MAX: '4'
+      PG_STATEMENT_TIMEOUT_MS: '0'
+      PLANETILER_CONTAINER: archimap-planetiler
+      OSM2PGSQL_CONTAINER: archimap-osm2pgsql
+      REGION_SYNC_OSM2PGSQL_JOBS: '2'
+      REGION_SYNC_OSM2PGSQL_CACHE_MB: '512'
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          'fetch("http://127.0.0.1:3253/healthz").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    depends_on:
       db-postgres:
         condition: service_healthy
       planetiler:
@@ -42,16 +97,23 @@ services:
     image: ghcr.io/onthegomap/planetiler:0.10.2
     container_name: archimap-planetiler
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${PLANETILER_MEMORY_LIMIT:-2560m}
+    cpus: ${PLANETILER_CPUS:-3}
     entrypoint: ['tail', '-f', '/dev/null']
     volumes:
       - ./data:/data
     environment:
       XDG_CACHE_HOME: /data/cache
+      JAVA_TOOL_OPTIONS: '-Xmx1536m'
 
   osm2pgsql:
     image: iboates/osm2pgsql:2.2.0
     container_name: archimap-osm2pgsql
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${OSM2PGSQL_MEMORY_LIMIT:-1g}
+    cpus: ${OSM2PGSQL_CPUS:-2}
     entrypoint: ['tail', '-f', '/dev/null']
     volumes:
       - ./data:/data
@@ -60,7 +122,22 @@ services:
     image: redis:7-alpine
     container_name: archimap-redis
     restart: unless-stopped
-    command: ['redis-server', '--appendonly', 'yes', '--save', '60', '1000']
+    logging: *logging
+    mem_limit: 256m
+    cpus: '0.5'
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--save',
+        '60',
+        '1000',
+        '--maxmemory',
+        '192mb',
+        '--maxmemory-policy',
+        'noeviction'
+      ]
     volumes:
       - redis-data:/data
 
@@ -68,21 +145,16 @@ services:
     image: imresamu/postgis:16-3.4-bookworm
     container_name: archimap-postgres
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-8g}
+    cpus: ${POSTGRES_CPUS:-4}
     # PostGIS parallel workers and spatial scans can exhaust Docker's 64MB /dev/shm default.
     shm_size: 512m
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-archimap}
       POSTGRES_USER: ${POSTGRES_USER:-archimap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-archimap}
-    # Tuned for bulk geo-data imports (large COPY + GiST index rebuilds).
-    # max_wal_size=4GB      – fewer checkpoints during bulk writes
-    # checkpoint_completion_target=0.9 – spread checkpoint I/O
-    # shared_buffers=512MB  – hot data cache (¼ of 2 GB container budget is fine)
-    # work_mem=64MB         – faster sorts/hashes for GiST index build
-    # maintenance_work_mem=512MB – faster CREATE INDEX / ANALYZE
-    # effective_io_concurrency=2 – eMMC/SD random-read parallelism
-    # wal_buffers=16MB      – buffer WAL in memory before flushing
-    # log_autovacuum_min_duration=-1 – keep autovacuum skip noise out of the container log
+    # Web requests and imports share a bounded memory budget; work_mem applies per operation.
     command:
       - postgres
       - -c
@@ -90,9 +162,11 @@ services:
       - -c
       - checkpoint_completion_target=0.9
       - -c
-      - shared_buffers=512MB
+      - shared_buffers=1GB
       - -c
-      - work_mem=64MB
+      - work_mem=16MB
+      - -c
+      - effective_cache_size=6GB
       - -c
       - maintenance_work_mem=512MB
       - -c
@@ -100,7 +174,11 @@ services:
       - -c
       - wal_buffers=16MB
       - -c
-      - log_autovacuum_min_duration=-1
+      - log_autovacuum_min_duration=5000
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

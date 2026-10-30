@@ -19,7 +19,9 @@
     "yes": "Yes",
     "no": "No",
     "desc": "DESC",
-    "asc": "ASC"
+    "asc": "ASC",
+    "loadFailed": "This panel could not load. Please retry.",
+    "retry": "Retry"
   },
   "locale": {
     "label": "Language",
@@ -82,7 +84,9 @@
       "loadFailed": "Some OpenStreetMap tiles could not be loaded. Try again.",
       "progress": "{done} / {total} tiles loaded",
       "errorTitle": "Load failed"
-    }
+    },
+    "loadFailed": "The map could not load. Check your connection and retry.",
+    "filterFailed": "The filter could not be verified. Please retry."
   },
   "buildingModal": {
     "title": "Building details",
@@ -157,7 +161,8 @@
     "pendingEditOpen": "Open this edit in your account",
     "osmKey": "OSM key",
     "osmTagsTitle": "All OSM tags",
-    "osmTagsEmpty": "No OSM tags available."
+    "osmTagsEmpty": "No OSM tags available.",
+    "bulkPartialSave": "Saved: {saved}. Failed: {failed}. Retry to save the remaining changes."
   },
   "info": {
     "title": "Information",
@@ -345,7 +350,8 @@
     "noLayers": "No filter layers yet. Add a layer to start.",
     "filterTagKeysLoading": "Loading available tag keys...",
     "filterTagKeysEmpty": "No tag keys available yet.",
-    "filterTagKeysLoadFailed": "Failed to load tag keys."
+    "filterTagKeysLoadFailed": "Failed to load tag keys.",
+    "logoutFailed": "Sign out failed. The server has not confirmed the end of your session. Please retry."
   },
   "email": {
     "registration": {

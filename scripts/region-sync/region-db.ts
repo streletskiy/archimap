@@ -218,6 +218,7 @@ function buildPostgresRegionRenderFeatureExportQuery({ regionSql = '$1' } = {}) 
       rf.osm_type,
       rf.osm_id,
       rf.feature_kind,
+      bc.tags_json,
       ST_AsGeoJSON(rf.geom)::text AS geometry_json,
       rf.render_height_m,
       rf.render_min_height_m,
@@ -227,6 +228,7 @@ function buildPostgresRegionRenderFeatureExportQuery({ regionSql = '$1' } = {}) 
       rf.max_lon,
       rf.max_lat
     FROM osm.region_render_features rf
+    LEFT JOIN osm.building_contours bc ON bc.osm_type = rf.osm_type AND bc.osm_id = rf.osm_id
     WHERE rf.region_id = ${regionSql}
     ORDER BY
       rf.osm_type,
@@ -603,7 +605,8 @@ async function exportRegionRenderFeaturesToGeojsonNdjson({ dbProvider, databaseU
           row.feature_kind,
           row.render_height_m,
           row.render_min_height_m,
-          row.render_hide_base_when_parts
+          row.render_hide_base_when_parts,
+          row.tags_json
         )
       );
       importedFeatureCount += 1;

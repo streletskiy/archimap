@@ -604,6 +604,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       if (!region.enabled) {
         throw new Error('Sync is only available for enabled regions');
       }
+      if (Number(region.syncFailureCount || 0) >= 8 && ['scheduled', 'startup'].includes(String(options.triggerReason))) {
+        log.error(`[region-sync:${region.id}] automatic retry limit reached; manual retry required`);
+        return { queued: false, reason: 'retry_limit', regionId: region.id };
+      }
 
       if (currentRun?.regionId === numericRegionId) {
         return {
