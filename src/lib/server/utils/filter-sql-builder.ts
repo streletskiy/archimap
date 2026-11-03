@@ -10,7 +10,6 @@ const FILTER_RULE_OPS = new Set([
   'less_than',
   'less_or_equals'
 ]);
-
 const NUMERIC_FILTER_RULE_OPS = new Set(['greater_than', 'greater_or_equals', 'less_than', 'less_or_equals']);
 const ARCHI_RULE_KEYS = new Set([
   'name',
@@ -48,127 +47,22 @@ const ARCHI_RULE_COLUMN_ORDER = [
   'description',
   'archimap_description'
 ];
-
-function normalizeArchiRuleKey(ruleKey) {
-  const key = String(ruleKey || '').trim();
-  if (key.startsWith('archi.')) {
-    return `archi.${normalizeArchiRuleKey(key.slice(6))}`;
-  }
-  if (key === 'design:ref') return 'design_ref';
-  if (key === 'design:year') return 'design_year';
-  if (key === 'roof:shape') return 'roof_shape';
-  if (key === 'roof_shape') return 'roof_shape';
-  if (key === 'roof-shape') return 'roof_shape';
-  if (key === 'roofshape') return 'roof_shape';
-  if (key === 'building:roof:shape') return 'roof_shape';
+// String.trim whitespace; PostgreSQL's default btrim removes only ASCII space.
+const TRIM_CHARACTERS =
+  ' \t\n\r\f\v\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+function trimSql(sql) {
+  return `btrim(${sql}, '${TRIM_CHARACTERS}')`;
+}
+function meaningfulSql(sql) {
+  return `COALESCE(length(${trimSql(sql)}), 0) > 0`;
+}
+function unwrapArchiKey(value) {
+  let key = String(value || '').trim();
+  while (key.startsWith('archi.')) key = key.slice(6);
   return key;
 }
-
-function getPostgresRuleTagKeys(ruleKey) {
-  const key = normalizeArchiRuleKey(ruleKey);
-  if (key === 'colour' || key === 'archi.colour') {
-    return ['building:colour', 'colour'];
-  }
-  if (key === 'material' || key === 'archi.material') {
-    return ['building:material', 'material'];
-  }
-  if (key === 'style' || key === 'archi.style') {
-    return ['building:architecture', 'architecture', 'style'];
-  }
-  if (key === 'design_ref' || key === 'archi.design_ref') {
-    return ['design:ref'];
-  }
-  if (key === 'design_year' || key === 'archi.design_year') {
-    return ['design:year'];
-  }
-  if (key === 'roof_shape' || key === 'archi.roof_shape') {
-    return ['roof:shape', 'roof_shape', 'building:roof:shape'];
-  }
-  return [key];
-}
-
-function buildPostgresTagValueSql(tagsAlias, tagKeys = []) {
-  const normalizedKeys = Array.isArray(tagKeys) ? tagKeys.filter(Boolean) : [];
-  if (normalizedKeys.length === 0) {
-    return {
-      sql: 'NULL::text',
-      params: []
-    };
-  }
-  const parts = normalizedKeys.map(() => `jsonb_extract_path_text(${tagsAlias}, ?)`);
-  return {
-    sql: parts.length === 1 ? parts[0] : `COALESCE(${parts.join(', ')})`,
-    params: normalizedKeys
-  };
-}
-
-function getPostgresArchiFallbackSql(key, rowAlias = 'src') {
-  const alias = String(rowAlias || 'src').trim() || 'src';
-  if (key === 'name') return `${alias}.name`;
-  if (key === 'style') return `${alias}.style`;
-  if (key === 'design') return `${alias}.design`;
-  if (key === 'design_ref') return `${alias}.design_ref`;
-  if (key === 'design_year') return `${alias}.design_year::text`;
-  if (key === 'material') return `${alias}.material`;
-  if (key === 'roof_shape') return `${alias}.roof_shape`;
-  if (key === 'colour') return `${alias}.colour`;
-  if (key === 'levels') return `${alias}.levels::text`;
-  if (key === 'year_built') return `${alias}.year_built::text`;
-  if (key === 'architect') return `${alias}.architect`;
-  if (key === 'address') return `${alias}.address`;
-  if (key === 'description') return `${alias}.description`;
-  if (key === 'archimap_description') return `COALESCE(${alias}.archimap_description, ${alias}.description)`;
-  return 'NULL::text';
-}
-
-function buildPostgresRuleValueSql(ruleKey, { rowAlias = 'src', tagsAlias = `${rowAlias}.tags_jsonb` } = {}) {
-  const key = normalizeArchiRuleKey(ruleKey);
-  let fallbackKey = null;
-  if (key.startsWith('archi.')) {
-    fallbackKey = normalizeArchiRuleKey(key.slice(6));
-  } else if (ARCHI_RULE_KEYS.has(key)) {
-    fallbackKey = key;
-  }
-  const tagValueSql = buildPostgresTagValueSql(tagsAlias, getPostgresRuleTagKeys(fallbackKey || key));
-  if (!fallbackKey) {
-    return {
-      sql: `CASE WHEN COALESCE(length(btrim(${tagValueSql.sql})), 0) > 0 THEN ${tagValueSql.sql} ELSE NULL::text END`,
-      params: [...tagValueSql.params, ...tagValueSql.params]
-    };
-  }
-  const fallbackSql = getPostgresArchiFallbackSql(fallbackKey, rowAlias);
-  return {
-    sql: `CASE WHEN COALESCE(length(btrim(${fallbackSql})), 0) > 0 THEN ${fallbackSql} ELSE ${tagValueSql.sql} END`,
-    params: [...tagValueSql.params]
-  };
-}
-
-function buildPostgresNumericValueSql(valueSql, valueParams = []) {
-  const normalizedSql = `replace(btrim(${valueSql}), ',', '.')`;
-  return {
-    sql: `CASE WHEN ${normalizedSql} ~ '^-{0,1}\\d+(\\.\\d+){0,1}$' THEN (${normalizedSql})::double precision ELSE NULL END`,
-    params: [...valueParams, ...valueParams]
-  };
-}
-
-function parseNumericFilterValue(rawValue) {
-  const text = String(rawValue ?? '')
-    .trim()
-    .replace(',', '.');
-  if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
-  const value = Number(text);
-  return Number.isFinite(value) ? value : null;
-}
-
-function usesArchiFallbackRuleKey(ruleKey) {
-  const key = normalizeArchiRuleKey(ruleKey);
-  if (!key) return false;
-  return key.startsWith('archi.') || ARCHI_RULE_KEYS.has(key) || Boolean(getArchiOverrideColumn(key));
-}
-
-// These OSM aliases share the override precedence used by getRuleValue.
-// Pushing their raw tags into SQL would discard edited/derived matches.
-function getArchiOverrideColumn(key) {
+function getArchiOverrideColumn(rawKey) {
+  const key = unwrapArchiKey(rawKey);
   const columns = {
     'building:levels': 'levels',
     'building:colour': 'colour',
@@ -180,245 +74,156 @@ function getArchiOverrideColumn(key) {
     start_date: 'year_built',
     architect_name: 'architect',
     'name:ru': 'name',
-    'name:en': 'name'
+    'name:en': 'name',
+    'roof:shape': 'roof_shape',
+    'building:roof:shape': 'roof_shape',
+    'design:ref': 'design_ref',
+    'design:year': 'design_year'
   };
-  return Object.prototype.hasOwnProperty.call(columns, key) ? columns[key] : null;
+  return Object.prototype.hasOwnProperty.call(columns, key) ? columns[key] : ARCHI_RULE_KEYS.has(key) ? key : null;
 }
-
+function usesArchiFallbackRuleKey(key) {
+  return Boolean(getArchiOverrideColumn(key));
+}
 function splitPostgresPushdownRules(rules) {
   const tagOnlyRules = [];
   const fallbackRules = [];
   for (const rule of Array.isArray(rules) ? rules : []) {
-    if (usesArchiFallbackRuleKey(rule?.key)) {
-      fallbackRules.push(rule);
-    } else {
-      tagOnlyRules.push(rule);
-    }
+    (usesArchiFallbackRuleKey(rule?.key) ? fallbackRules : tagOnlyRules).push(rule);
   }
   return { tagOnlyRules, fallbackRules };
 }
-
 function collectRequiredArchiColumns(rules) {
   const required = new Set();
   for (const rule of Array.isArray(rules) ? rules : []) {
-    const key = normalizeArchiRuleKey(rule?.key);
-    let fallbackKey = null;
-    if (key.startsWith('archi.')) {
-      fallbackKey = normalizeArchiRuleKey(key.slice(6));
-    } else if (ARCHI_RULE_KEYS.has(key)) {
-      fallbackKey = key;
-    }
-
-    fallbackKey = getArchiOverrideColumn(fallbackKey || key) || fallbackKey;
-    if (!ARCHI_RULE_KEYS.has(fallbackKey)) continue;
-    required.add(fallbackKey);
-    if (fallbackKey === 'archimap_description') {
+    const column = getArchiOverrideColumn(rule?.key);
+    if (column) required.add(column);
+    if (column === 'description' || column === 'archimap_description') {
       required.add('description');
+      required.add('archimap_description');
     }
+    if (column === 'material_concrete') required.add('material');
   }
   return ARCHI_RULE_COLUMN_ORDER.filter((column) => required.has(column));
 }
-
-function compilePostgresFilterRulePredicate(rule, options = {}) {
+function getPostgresRuleTagKeys(rawKey) {
+  const key = unwrapArchiKey(rawKey);
+  if (key === 'colour' || key === 'building:colour') return ['building:colour', 'colour'];
+  if (key === 'material' || key === 'building:material') return ['building:material', 'material'];
+  if (key === 'material_concrete' || key === 'building:material:concrete')
+    return ['building:material:concrete', 'material_concrete'];
+  if (['roof_shape', 'roof:shape', 'building:roof:shape'].includes(key))
+    return ['roof:shape', 'roof_shape', 'building:roof:shape'];
+  if (key === 'design_ref' || key === 'design:ref') return ['design:ref', 'design_ref'];
+  if (key === 'design_year' || key === 'design:year') return ['design:year', 'design_year'];
+  return [key];
+}
+function buildPostgresTagValueSql(tagsAlias, tagKeys, fallbackSql = null) {
+  const paths = tagKeys.map(() => `jsonb_extract_path(${tagsAlias}, ?)`);
+  if (fallbackSql) paths.push(`to_jsonb(${fallbackSql})`);
+  const value = paths.length === 1 ? paths[0] : `COALESCE(${paths.join(', ')})`;
+  // A present JSON null blocks later aliases, matching hasOwnProperty in getRuleValue.
+  // OFFSET 0 prevents repeated evaluation when the value is used by CASE branches.
+  return {
+    sql: `(SELECT CASE jsonb_typeof(tag_value)
+      WHEN 'array' THEN osm.filter_json_text(tag_value, ';')
+      WHEN 'object' THEN '[object Object]' ELSE tag_value #>> '{}' END
+      FROM (SELECT ${value} AS tag_value OFFSET 0) tag_input)`,
+    params: tagKeys
+  };
+}
+function buildPostgresRuleValueSql(
+  rawKey,
+  { rowAlias = 'src', tagsAlias = `${rowAlias}.tags_jsonb`, itemLevelsSql = `${rowAlias}.item_levels` } = {}
+) {
+  const key = unwrapArchiKey(rawKey);
+  const column = getArchiOverrideColumn(key);
+  const tag = buildPostgresTagValueSql(
+    tagsAlias,
+    getPostgresRuleTagKeys(key),
+    column === key && ARCHI_RULE_KEYS.has(key) ? `${rowAlias}.${column}::text` : null
+  );
+  if (!column) return tag;
+  const field = `${rowAlias}.${column}::text`;
+  let fallback = tag.sql;
+  // A personal clear falls back to the mapped base level, as in the JS mapper.
+  if (column === 'levels')
+    fallback = `CASE WHEN ${meaningfulSql(itemLevelsSql)} THEN ${itemLevelsSql} ELSE ${fallback} END`;
+  if (column === 'description' || column === 'archimap_description') {
+    return {
+      sql: `CASE WHEN ${meaningfulSql(`${rowAlias}.archimap_description`)} THEN ${rowAlias}.archimap_description WHEN ${meaningfulSql(`${rowAlias}.description`)} THEN ${rowAlias}.description ELSE ${fallback} END`,
+      params: tag.params
+    };
+  }
+  return { sql: `CASE WHEN ${meaningfulSql(field)} THEN ${field} ELSE ${fallback} END`, params: tag.params };
+}
+function buildPostgresNumericValueSql(valueSql, valueParams = []) {
+  const normalized = `replace(${trimSql(valueSql)}, ',', '.')`;
+  return {
+    // Avoid a float overflow exception for arbitrary long tag values; JS rejects infinities.
+    // Normalize once: without this barrier PostgreSQL repeats the entire fallback
+    // expression for the regex, range check and numeric conversion.
+    sql: `(SELECT CASE WHEN n ~ '^-?[0-9]+([.][0-9]+)?$' THEN CASE WHEN abs(n::numeric) <= 1.7976931348623157e308::numeric THEN n::double precision ELSE NULL END ELSE NULL END FROM (SELECT ${normalized} AS n OFFSET 0) numeric_input)`,
+    params: valueParams
+  };
+}
+function parseNumericFilterValue(rawValue) {
+  const text = String(rawValue ?? '')
+    .trim()
+    .replace(',', '.');
+  if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}
+function compilePostgresFilterRulePredicate(rule, options: LooseRecord = {}) {
   if (!rule?.key) return { sql: 'TRUE', params: [] };
   const op = String(rule.op || '').trim();
-  if (!FILTER_RULE_OPS.has(op)) {
-    throw new Error(`Unsupported filter rule operator: ${op}`);
-  }
-
-  const valueExpr = buildPostgresRuleValueSql(rule.key, options);
-  const params = [...valueExpr.params];
-
-  if (op === 'exists') {
-    return {
-      sql: `COALESCE(length(btrim(${valueExpr.sql})), 0) > 0`,
-      params
-    };
-  }
-  if (op === 'not_exists') {
-    return {
-      sql: `COALESCE(length(btrim(${valueExpr.sql})), 0) = 0`,
-      params
-    };
-  }
-
+  if (!FILTER_RULE_OPS.has(op)) throw new Error(`Unsupported filter rule operator: ${op}`);
+  const value = options.valueSql ? { sql: options.valueSql, params: [] } : buildPostgresRuleValueSql(rule.key, options);
+  if (op === 'exists' || op === 'not_exists')
+    return { sql: `${op === 'not_exists' ? 'NOT ' : ''}(${meaningfulSql(value.sql)})`, params: value.params };
   if (NUMERIC_FILTER_RULE_OPS.has(op)) {
-    const numericExpr = buildPostgresNumericValueSql(valueExpr.sql, valueExpr.params);
+    const number = buildPostgresNumericValueSql(value.sql, value.params);
+    const operator = { greater_than: '>', greater_or_equals: '>=', less_than: '<', less_or_equals: '<=' }[op];
     const right = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
-    const numericParams = [...numericExpr.params, right];
-    if (op === 'greater_than') {
-      return {
-        sql: `${numericExpr.sql} > ?`,
-        params: numericParams
-      };
-    }
-    if (op === 'greater_or_equals') {
-      return {
-        sql: `${numericExpr.sql} >= ?`,
-        params: numericParams
-      };
-    }
-    if (op === 'less_than') {
-      return {
-        sql: `${numericExpr.sql} < ?`,
-        params: numericParams
-      };
-    }
-    return {
-      sql: `${numericExpr.sql} <= ?`,
-      params: numericParams
-    };
+    return { sql: `${number.sql} ${operator} ?`, params: [...number.params, right] };
   }
-
-  const right = String(rule.valueNormalized || '').toLowerCase();
-  params.push(right);
-
-  if (op === 'equals') {
-    return {
-      sql: `lower(${valueExpr.sql}) = ?`,
-      params
-    };
-  }
-  if (op === 'not_equals') {
-    return {
-      sql: `lower(${valueExpr.sql}) <> ?`,
-      params
-    };
-  }
-  if (op === 'starts_with') {
-    return {
-      sql: `lower(${valueExpr.sql}) LIKE (? || '%')`,
-      params
-    };
-  }
-  return {
-    sql: `strpos(lower(${valueExpr.sql}), ?) > 0`,
-    params
-  };
+  const right = String(rule.valueNormalized ?? rule.value ?? '').toLowerCase();
+  const left = `lower(${value.sql})`;
+  if (op === 'equals' || op === 'not_equals')
+    return { sql: `${left} ${op === 'equals' ? '=' : '<>'} ?`, params: [...value.params, right] };
+  // %, _ and backslash are literal prefixes, not SQL LIKE patterns.
+  return { sql: `strpos(${left}, ?) ${op === 'starts_with' ? '= 1' : '> 0'}`, params: [...value.params, right] };
 }
-
 function compilePostgresFilterRulesPredicate(rules, options: LooseRecord = {}) {
-  if (!Array.isArray(rules) || rules.length === 0) {
-    return { sql: 'TRUE', params: [] };
-  }
-
-  const parts = [];
-  const params = [];
-  for (const rule of rules) {
-    const compiled = compilePostgresFilterRulePredicate(rule, options);
-    parts.push(`(${compiled.sql})`);
-    params.push(...compiled.params);
-  }
+  const compiled = (Array.isArray(rules) ? rules : []).map((rule) => compilePostgresFilterRulePredicate(rule, options));
   return {
-    sql: parts.join(' AND '),
-    params
+    sql: compiled.map((part) => `(${part.sql})`).join(' AND ') || 'TRUE',
+    params: compiled.flatMap((part) => part.params)
   };
 }
-
 function compilePostgresFilterRuleGuardPredicate(rule: LooseRecord = {}, options: LooseRecord = {}) {
-  if (!rule?.key) return { sql: 'TRUE', params: [] };
-  const op = String(rule.op || '').trim();
-  if (!FILTER_RULE_OPS.has(op)) {
-    throw new Error(`Unsupported filter rule operator: ${op}`);
+  if (rule?.key && !FILTER_RULE_OPS.has(String(rule.op || '').trim())) {
+    throw new Error(`Unsupported filter rule operator: ${String(rule.op || '').trim()}`);
   }
-
-  const tagsAlias = String(options.tagsAlias || `${String(options.rowAlias || 'base')}.tags_jsonb`).trim();
-  const key = String(rule.key || '');
-  if (usesArchiFallbackRuleKey(key)) {
-    return {
-      sql: 'TRUE',
-      params: []
-    };
-  }
-
-  const right = String(rule.valueNormalized || '').toLowerCase();
-  const tagKeys = getPostgresRuleTagKeys(key);
-  const tagValueExpr = buildPostgresTagValueSql(tagsAlias, tagKeys);
-  const tagNumericExpr = buildPostgresNumericValueSql(tagValueExpr.sql, tagKeys);
-
-  if (op === 'exists') {
-    return {
-      sql: `COALESCE(length(btrim(${tagValueExpr.sql})), 0) > 0`,
-      params: tagKeys
-    };
-  }
-  if (op === 'not_exists') {
-    return {
-      sql: `COALESCE(length(btrim(${tagValueExpr.sql})), 0) = 0`,
-      params: tagKeys
-    };
-  }
-  if (op === 'equals') {
-    return {
-      sql: `lower(${tagValueExpr.sql}) = ?`,
-      params: [...tagKeys, right]
-    };
-  }
-  if (op === 'not_equals') {
-    return {
-      sql: `lower(${tagValueExpr.sql}) <> ?`,
-      params: [...tagKeys, right]
-    };
-  }
-  if (op === 'starts_with') {
-    return {
-      sql: `lower(${tagValueExpr.sql}) LIKE (? || '%')`,
-      params: [...tagKeys, right]
-    };
-  }
-  if (NUMERIC_FILTER_RULE_OPS.has(op)) {
-    const numericValue = Number.isFinite(rule.numericValue) ? rule.numericValue : parseNumericFilterValue(rule.value);
-    if (op === 'greater_than') {
-      return {
-        sql: `${tagNumericExpr.sql} > ?`,
-        params: [...tagNumericExpr.params, numericValue]
-      };
-    }
-    if (op === 'greater_or_equals') {
-      return {
-        sql: `${tagNumericExpr.sql} >= ?`,
-        params: [...tagNumericExpr.params, numericValue]
-      };
-    }
-    if (op === 'less_than') {
-      return {
-        sql: `${tagNumericExpr.sql} < ?`,
-        params: [...tagNumericExpr.params, numericValue]
-      };
-    }
-    return {
-      sql: `${tagNumericExpr.sql} <= ?`,
-      params: [...tagNumericExpr.params, numericValue]
-    };
-  }
-  return {
-    sql: `strpos(lower(${tagValueExpr.sql}), ?) > 0`,
-    params: [...tagKeys, right]
-  };
+  if (usesArchiFallbackRuleKey(rule.key)) return { sql: 'TRUE', params: [] };
+  return compilePostgresFilterRulePredicate(rule, { rowAlias: 'base', ...options });
 }
-
 function compilePostgresFilterRulesGuardPredicate(rules, options = {}) {
-  if (!Array.isArray(rules) || rules.length === 0) {
-    return { sql: 'TRUE', params: [] };
-  }
-
-  const parts = [];
-  const params = [];
-  for (const rule of rules) {
-    const compiled = compilePostgresFilterRuleGuardPredicate(rule, options);
-    parts.push(`(${compiled.sql})`);
-    params.push(...compiled.params);
-  }
+  const compiled = (Array.isArray(rules) ? rules : []).map((rule) =>
+    compilePostgresFilterRuleGuardPredicate(rule, options)
+  );
   return {
-    sql: parts.join(' AND '),
-    params
+    sql: compiled.map((part) => `(${part.sql})`).join(' AND ') || 'TRUE',
+    params: compiled.flatMap((part) => part.params)
   };
 }
-
 module.exports = {
   ARCHI_RULE_KEYS,
+  ARCHI_RULE_COLUMN_ORDER,
   FILTER_RULE_OPS,
   NUMERIC_FILTER_RULE_OPS,
+  buildPostgresRuleValueSql,
   collectRequiredArchiColumns,
   compilePostgresFilterRuleGuardPredicate,
   compilePostgresFilterRulePredicate,
@@ -426,5 +231,6 @@ module.exports = {
   compilePostgresFilterRulesPredicate,
   parseNumericFilterValue,
   splitPostgresPushdownRules,
-  usesArchiFallbackRuleKey
+  usesArchiFallbackRuleKey,
+  trimSql
 };

@@ -24,7 +24,7 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
   - contour and marker fallback payloads are cached separately, so the low-zoom marker path does not reuse a contour payload;
   - marker fallback uses a larger `maxResults` budget on lower zooms so clustered circles do not hit the truncation cap too early;
   - marker fallback uses search-like clustering plus a tiny deterministic point jitter so low-zoom circles do not stack on top of each other or disappear during zoom transitions.
-  - below zoom `5`, marker-mode requests also let the backend aggregate matches into viewport-relative cells so the client never needs the full building list for the densest views.
+  - below zoom `5`, marker-mode requests let PostgreSQL aggregate all matching buildings into viewport-relative cells before bounding the response. Counts no longer come from an initial capped building sample.
 - TTL and limits are unchanged:
   - match cache: `8s`, max `90`
   - fallback data cache: `45s`, max `25k`, request chunk `5k`
@@ -43,6 +43,7 @@ Keep filter highlight stable during active panning and reduce repeated `POST /ap
 - `latestFilterToken` rejects stale request and worker results, including results that arrive after a clear.
 - Identical pending applies share their request. URL replay retains layer IDs, preserving client and server cache reuse.
 - Contour requests use `includeLocations=false`; marker requests retain coordinates. Both endpoints compress responses off the server event loop.
+- PostgreSQL evaluates complete rules and personal overrides before each request's result limit. This removes candidate-cutoff omissions, while response-size and client-rendering limits still apply.
 
 ### Dense-filter measurement (2026-10-30)
 
@@ -74,7 +75,7 @@ separate network costs.
   - count
   - elapsed ms
 - The centered map apply loader is quiet on contour zooms (`z13+`) and only becomes prominent for low-zoom marker fallback, where the loader is actually useful.
-- Degrade mode (`>20k matches`) keeps the existing highlight and shows a clear action hint, without forced hard reset.
+- In the current `paint-property` mode, more than `30,000` resolved contour matches clears the highlight and reports `too_many_matches`. Marker mode does not use this contour degradation branch. The per-request response limit is separate from this combined client highlight budget.
 
 ## Dev/Test telemetry
 

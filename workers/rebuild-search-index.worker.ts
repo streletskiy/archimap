@@ -1,6 +1,5 @@
 require('dotenv').config({ quiet: true });
 
-const os = require('os');
 const path = require('path');
 const { Client } = require('pg');
 const { getDbProvider, getPostgresConnectionString } = require('../scripts/lib/postgres-config');
@@ -14,18 +13,6 @@ const {
 const DB_PROVIDER = getDbProvider(process.env);
 const REASON = String(process.env.SEARCH_REBUILD_REASON || 'manual');
 const BATCH_SIZE = Math.max(200, Math.min(20000, Number(process.env.SEARCH_INDEX_BATCH_SIZE || 2500)));
-const DEFAULT_POSTGRES_PARALLEL_CHUNKS = Math.max(
-  1,
-  Math.min(
-    2,
-    Math.floor((typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length || 2) / 2)
-  )
-);
-const POSTGRES_PARALLEL_CHUNKS = Math.max(
-  1,
-  Math.min(4, Number(process.env.SEARCH_INDEX_POSTGRES_CHUNKS || DEFAULT_POSTGRES_PARALLEL_CHUNKS))
-);
-
 const RAW_SEARCH_SOURCE_BATCH_SQL = buildRawSearchSourceQuery({
   where: `
     WHERE (
@@ -37,127 +24,7 @@ const RAW_SEARCH_SOURCE_BATCH_SQL = buildRawSearchSourceQuery({
   limitClause: 'LIMIT ?'
 });
 
-const POSTGRES_SOURCE_INSERT_SELECT_SQL = `
-  INSERT INTO building_search_source (
-    osm_key,
-    osm_type,
-    osm_id,
-    name,
-    address,
-    style,
-    architect,
-    design_ref,
-    local_priority,
-    center_lon,
-    center_lat,
-    updated_at
-  )
-  WITH base AS MATERIALIZED (
-    SELECT
-      bc.osm_type,
-      bc.osm_id,
-      CASE
-        WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
-        ELSE '{}'::jsonb
-      END AS tags_jsonb,
-      NULLIF(btrim(ai.name), '') AS local_name,
-      NULLIF(btrim(ai.address), '') AS local_address,
-      NULLIF(btrim(ai.style), '') AS local_style,
-      NULLIF(btrim(ai.architect), '') AS local_architect,
-      NULLIF(btrim(ai.design_ref), '') AS local_design_ref,
-      CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
-      COALESCE((bc.min_lon + bc.max_lon) / 2.0, 0) AS center_lon,
-      COALESCE((bc.min_lat + bc.max_lat) / 2.0, 0) AS center_lat
-    FROM osm.building_contours bc
-    LEFT JOIN local.architectural_info ai
-      ON ai.osm_type = bc.osm_type
-     AND ai.osm_id = bc.osm_id
-    WHERE bc.osm_id BETWEEN $1 AND $2
-      AND bc.osm_type IN ('way', 'relation')
-      AND bc.osm_id > 0
-  )
-  ,
-  resolved AS MATERIALIZED (
-    SELECT
-      base.osm_type || '/' || base.osm_id::text AS osm_key,
-      base.osm_type,
-      base.osm_id,
-      COALESCE(
-        base.local_name,
-        NULLIF(btrim(base.tags_jsonb ->> 'name'), ''),
-        NULLIF(btrim(base.tags_jsonb ->> 'name:ru'), ''),
-        NULLIF(btrim(base.tags_jsonb ->> 'official_name'), '')
-      ) AS name,
-      COALESCE(
-        base.local_address,
-        NULLIF(btrim(base.tags_jsonb ->> 'addr:full'), ''),
-        (
-          SELECT string_agg(address_parts.part, ', ' ORDER BY address_parts.ord)
-          FROM (
-            SELECT DISTINCT ON (lower(parts.part))
-              parts.ord,
-              parts.part
-            FROM (
-              VALUES
-                (1, NULLIF(btrim(base.tags_jsonb ->> 'addr:postcode'), '')),
-                (2, NULLIF(btrim(base.tags_jsonb ->> 'addr:city'), '')),
-                (3, NULLIF(btrim(base.tags_jsonb ->> 'addr:place'), '')),
-                (4, NULLIF(btrim(base.tags_jsonb ->> 'addr:street'), '')),
-                (5, NULLIF(btrim(base.tags_jsonb ->> 'addr:housenumber'), ''))
-            ) AS parts(ord, part)
-            WHERE parts.part IS NOT NULL
-            ORDER BY lower(parts.part), parts.ord
-          ) AS address_parts
-        )
-      ) AS address,
-      COALESCE(
-        base.local_style,
-        NULLIF(btrim(base.tags_jsonb ->> 'building:architecture'), ''),
-        NULLIF(btrim(base.tags_jsonb ->> 'architecture'), ''),
-        NULLIF(btrim(base.tags_jsonb ->> 'style'), '')
-      ) AS style,
-      COALESCE(
-        base.local_architect,
-        NULLIF(btrim(base.tags_jsonb ->> 'architect'), ''),
-        NULLIF(btrim(base.tags_jsonb ->> 'architect_name'), '')
-      ) AS architect,
-      COALESCE(
-        base.local_design_ref,
-        NULLIF(btrim(base.tags_jsonb ->> 'design:ref'), ''),
-        NULLIF(btrim(base.tags_jsonb ->> 'design_ref'), '')
-      ) AS design_ref,
-      base.local_priority,
-      base.center_lon,
-      base.center_lat,
-      NOW() AS updated_at
-    FROM base
-  )
-  SELECT
-    resolved.osm_key,
-    resolved.osm_type,
-    resolved.osm_id,
-    resolved.name,
-    resolved.address,
-    resolved.style,
-    resolved.architect,
-    resolved.design_ref,
-    resolved.local_priority,
-    resolved.center_lon,
-    resolved.center_lat,
-    resolved.updated_at
-  FROM resolved
-  WHERE resolved.name IS NOT NULL
-     OR resolved.address IS NOT NULL
-     OR resolved.style IS NOT NULL
-     OR resolved.architect IS NOT NULL
-     OR resolved.design_ref IS NOT NULL
-`;
-
-const POSTGRES_CREATE_SOURCE_TSV_INDEX_SQL = `
-  CREATE INDEX IF NOT EXISTS idx_building_search_source_tsv
-    ON public.building_search_source
-    USING GIN (search_tsv)
-`;
+const { refreshPostgresSearchChanges, rebuildPostgresSearchIndex, SEARCH_PROJECTION_VERSION } = require('../src/lib/server/services/search-index-postgres.service');
 
 function delayImmediate() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -182,6 +49,7 @@ async function rebuildWithDriver(driver, providerLabel) {
     await driver.clearIndexes();
 
     if (totalContours === 0) {
+      await driver.publish();
       console.log('[search-worker] rebuild finished: source is empty');
       console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
       return;
@@ -207,6 +75,7 @@ async function rebuildWithDriver(driver, providerLabel) {
       await delayImmediate();
     }
 
+    await driver.publish();
     const totals = await driver.getTotals();
     console.log(`[search-worker] contours=${totals.contoursTotal} source=${totals.sourceTotal} fts=${totals.ftsTotal}`);
     console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
@@ -215,166 +84,22 @@ async function rebuildWithDriver(driver, providerLabel) {
   }
 }
 
-function createProgressTracker(totalContours) {
-  let processed = 0;
-  let lastLogTs = 0;
-
-  return {
-    advance(count) {
-      processed += Number(count || 0);
-      lastLogTs = logProgress(processed, totalContours, lastLogTs);
-    },
-    getProcessed() {
-      return processed;
-    }
-  };
-}
-
-function splitOsmIdRange(minOsmId, maxOsmId, chunkCount = POSTGRES_PARALLEL_CHUNKS) {
-  const ranges = [];
-  const normalizedChunkCount = Math.max(1, Number(chunkCount) || POSTGRES_PARALLEL_CHUNKS);
-  const normalizedMin = Number(minOsmId || 0);
-  const normalizedMax = Number(maxOsmId || 0);
-
-  if (!Number.isFinite(normalizedMin) || !Number.isFinite(normalizedMax) || normalizedMin > normalizedMax) {
-    for (let index = 0; index < normalizedChunkCount; index += 1) {
-      ranges.push({
-        chunkIndex: index + 1,
-        minOsmId: 1,
-        maxOsmId: 0
-      });
-    }
-    return ranges;
-  }
-
-  const span = normalizedMax - normalizedMin + 1;
-  const baseChunkSize = Math.floor(span / normalizedChunkCount);
-  const remainder = span % normalizedChunkCount;
-  let cursor = normalizedMin;
-
-  for (let index = 0; index < normalizedChunkCount; index += 1) {
-    const chunkSize = baseChunkSize + (index < remainder ? 1 : 0);
-    const minValue = cursor;
-    const maxValue = chunkSize > 0 ? cursor + chunkSize - 1 : cursor - 1;
-
-    ranges.push({
-      chunkIndex: index + 1,
-      minOsmId: minValue,
-      maxOsmId: maxValue
-    });
-
-    cursor = maxValue + 1;
-  }
-
-  return ranges;
-}
-
-async function createPostgresClient() {
+async function rebuildPostgres() {
   const connectionString = getPostgresConnectionString(process.env);
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is required for DB_PROVIDER=postgres');
-  }
-
+  if (!connectionString) throw new Error('DATABASE_URL is required for DB_PROVIDER=postgres');
   const client = new Client({ connectionString });
   await client.connect();
-  return client;
-}
-
-async function clearPostgresIndexes(client) {
-  await client.query('BEGIN');
   try {
-    await client.query('TRUNCATE TABLE building_search_source;');
-    await client.query('DROP INDEX IF EXISTS idx_building_search_source_tsv;');
-    await client.query('COMMIT');
-  } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // ignore rollback failures
+    const state = await client.query('SELECT projection_version FROM public.search_index_state WHERE id = 1');
+    const initialized = Number(state.rows[0]?.projection_version || 0) === SEARCH_PROJECTION_VERSION;
+    const incremental = process.env.SEARCH_REBUILD_MODE === 'incremental' && initialized;
+    if (incremental) {
+      const count = await refreshPostgresSearchChanges(client);
+      console.log(`[search-worker] incremental refresh completed: ${count} changed objects`);
+    } else {
+      await rebuildPostgresSearchIndex(client);
+      console.log('[search-worker] complete search projection published atomically');
     }
-    throw error;
-  }
-}
-
-async function processPostgresChunk(range, progressTracker) {
-  const { chunkIndex, minOsmId, maxOsmId } = range || {};
-  if (!Number.isFinite(minOsmId) || !Number.isFinite(maxOsmId) || minOsmId > maxOsmId) {
-    console.log(`[search-worker] chunk ${chunkIndex} skipped (empty range)`);
-    return;
-  }
-
-  const client = await createPostgresClient();
-  console.log(`[search-worker] chunk ${chunkIndex} started (${minOsmId}..${maxOsmId})`);
-
-  try {
-    await client.query('BEGIN');
-    await client.query("SET LOCAL synchronous_commit = 'off'");
-    const result = await client.query(POSTGRES_SOURCE_INSERT_SELECT_SQL, [minOsmId, maxOsmId]);
-    await client.query('COMMIT');
-    const inserted = Number(result.rowCount || 0);
-    progressTracker.advance(inserted);
-    console.log(`[search-worker] chunk ${chunkIndex} inserted ${inserted} rows`);
-  } finally {
-    await client.end();
-    console.log(`[search-worker] chunk ${chunkIndex} finished (${minOsmId}..${maxOsmId})`);
-  }
-}
-
-async function getPostgresTotals(client) {
-  const result = await client.query(`
-    SELECT
-      (SELECT COUNT(*)::bigint FROM osm.building_contours) AS contours_total,
-      (SELECT COUNT(*)::bigint FROM building_search_source) AS source_total
-  `);
-  const row = result.rows[0] || {};
-  return {
-    contoursTotal: Number(row.contours_total || 0),
-    sourceTotal: Number(row.source_total || 0)
-  };
-}
-
-async function rebuildPostgresInParallel() {
-  const startedAt = Date.now();
-  console.log(
-    `[search-worker] rebuild started (${REASON}), provider=postgres, mode=sql, chunks=${POSTGRES_PARALLEL_CHUNKS}`
-  );
-
-  const client = await createPostgresClient();
-
-  try {
-    const stats = await client.query(`
-      SELECT
-        COUNT(*) FILTER (
-          WHERE osm_type IN ('way', 'relation')
-            AND osm_id > 0
-        )::bigint AS total,
-        MIN(osm_id)::bigint AS min_osm_id,
-        MAX(osm_id)::bigint AS max_osm_id
-      FROM osm.building_contours
-    `);
-    const row = stats.rows[0] || {};
-    const totalContours = Number(row.total || 0);
-
-    await clearPostgresIndexes(client);
-
-    if (totalContours === 0) {
-      console.log('[search-worker] rebuild finished: source is empty');
-      console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
-      return;
-    }
-
-    const minOsmId = Number(row.min_osm_id || 0);
-    const maxOsmId = Number(row.max_osm_id || 0);
-    const ranges = splitOsmIdRange(minOsmId, maxOsmId, POSTGRES_PARALLEL_CHUNKS);
-    const progressTracker = createProgressTracker(totalContours);
-
-    await Promise.all(ranges.map((range) => processPostgresChunk(range, progressTracker)));
-    await client.query(POSTGRES_CREATE_SOURCE_TSV_INDEX_SQL);
-    await client.query('ANALYZE building_search_source;');
-
-    const totals = await getPostgresTotals(client);
-    console.log(`[search-worker] contours=${totals.contoursTotal} source=${totals.sourceTotal}`);
-    console.log(`[search-worker] rebuild done in ${Date.now() - startedAt}ms`);
   } finally {
     await client.end();
   }
@@ -417,6 +142,11 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
     db.exec('ALTER TABLE local.architectural_info ADD COLUMN design_ref TEXT;');
   }
 
+  for (const [column, type] of Object.entries({ design: 'TEXT', design_year: 'INTEGER', material: 'TEXT',
+    material_concrete: 'TEXT', roof_shape: 'TEXT', colour: 'TEXT', levels: 'INTEGER', year_built: 'INTEGER' })) {
+    if (!localInfoColumns.has(column)) db.exec(`ALTER TABLE local.architectural_info ADD COLUMN ${column} ${type}`);
+  }
+
   const searchSourceColumns = db.prepare('PRAGMA table_info(building_search_source)').all();
   const searchSourceColumnNames = new Set(searchSourceColumns.map((column) => String(column?.name || '').trim()));
   if (!searchSourceColumnNames.has('local_priority')) {
@@ -428,7 +158,7 @@ CREATE TABLE IF NOT EXISTS local.architectural_info (
 
   const searchFtsColumns = db.prepare('PRAGMA table_info(building_search_fts)').all();
   const searchFtsColumnNames = new Set(searchFtsColumns.map((column) => String(column?.name || '').trim()));
-  if (!searchSourceColumnNames.has('design_ref') || !searchFtsColumnNames.has('design_ref')) {
+  if (!searchSourceColumnNames.has('design_ref') || !searchFtsColumnNames.has('design_ref') || !searchFtsColumnNames.has('tags_text')) {
     db.exec('DROP TABLE IF EXISTS building_search_fts;');
     db.exec(`
 CREATE VIRTUAL TABLE IF NOT EXISTS building_search_fts
@@ -439,6 +169,7 @@ USING fts5(
   style,
   architect,
   design_ref,
+  tags_text,
   tokenize = 'unicode61 remove_diacritics 2'
 );
 `);
@@ -488,11 +219,13 @@ function createSqliteDriver() {
       try {
         db.exec('DELETE FROM building_search_fts;');
         db.exec('DELETE FROM building_search_source;');
-        db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
         throw error;
       }
+    },
+    async publish() {
+      if (db.inTransaction) db.exec('COMMIT');
     },
     async fetchRawBatch(cursorType, cursorId, limit) {
       return selectRawBatch.all(cursorType, cursorType, cursorId, limit);
@@ -501,7 +234,6 @@ function createSqliteDriver() {
       if (!Array.isArray(rows) || rows.length === 0) {
         return;
       }
-      db.exec('BEGIN');
       try {
         for (const row of rows) {
           insertSource.run(
@@ -523,12 +255,12 @@ function createSqliteDriver() {
             row.address || '',
             row.style || '',
             row.architect || '',
-            row.design_ref || ''
+            row.design_ref || '',
+            row.tags_text || ''
           );
         }
-        db.exec('COMMIT');
       } catch (error) {
-        db.exec('ROLLBACK');
+        if (db.inTransaction) db.exec('ROLLBACK');
         throw error;
       }
     },
@@ -541,6 +273,7 @@ function createSqliteDriver() {
       };
     },
     async close() {
+      if (db.inTransaction) db.exec('ROLLBACK');
       db.close();
     }
   };
@@ -548,7 +281,7 @@ function createSqliteDriver() {
 
 async function run() {
   if (DB_PROVIDER === 'postgres') {
-    await rebuildPostgresInParallel();
+    await rebuildPostgres();
     return;
   }
   await rebuildWithDriver(createSqliteDriver(), 'sqlite');

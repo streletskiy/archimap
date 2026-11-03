@@ -9,13 +9,34 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
     env = process.env,
     sqlite = {},
     isShuttingDown = () => false,
-    refreshSearchIndexForBuildingFallback
+    refreshSearchIndexForBuildingFallback,
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout
   } = options;
 
   const canSpawnWorker = Boolean(spawn && processExecPath && rootDir && searchRefreshWorkerScriptPath);
   let currentWorker = null;
   let currentWorkerReady = false;
   let isStopping = false;
+  let restartTimer = null;
+  let restartAttempt = 0;
+  let readyAt = 0;
+
+  function scheduleRestart() {
+    if (String(db?.provider || env.DB_PROVIDER) !== 'postgres' || !canSpawnWorker ||
+      isStopping || isShuttingDown() || restartTimer || currentWorker) return;
+    if (readyAt && Date.now() - readyAt > 30000) restartAttempt = 0;
+    const delay = Math.min(60000, 1000 * (2 ** Math.min(restartAttempt++, 6)));
+    restartTimer = setTimeoutFn(() => {
+      restartTimer = null;
+      if (isStopping || isShuttingDown() || currentWorker) return;
+      try { spawnWorker(); } catch (error) {
+        logWorkerFailure('search_refresh_worker_restart_failed', { error: String(error?.message || error) });
+        scheduleRestart();
+      }
+    }, delay);
+    restartTimer?.unref?.();
+  }
 
   function clearWorkerState() {
     currentWorker = null;
@@ -27,30 +48,36 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
     logger.error(eventName, details);
   }
 
-  function handleWorkerExit(code, signal) {
-    if (!currentWorker) return;
+  function handleWorkerExit(child, code, signal) {
+    if (currentWorker !== child) return;
     logWorkerFailure('search_refresh_worker_stopped', {
       code,
       signal
     });
     clearWorkerState();
+    scheduleRestart();
   }
 
-  function handleWorkerError(error) {
-    if (!currentWorker) return;
+  function handleWorkerError(child, error) {
+    if (currentWorker !== child) return;
     logWorkerFailure('search_refresh_worker_error', {
       error: String(error?.message || error)
     });
+    try { if (!child.killed) child.kill('SIGTERM'); } catch { /* process may already be gone */ }
     clearWorkerState();
+    scheduleRestart();
   }
 
   function spawnWorker() {
+    if (isStopping || isShuttingDown()) return null;
     if (!canSpawnWorker) {
       return null;
     }
     if (currentWorker) {
       return currentWorker;
     }
+    if (restartTimer) clearTimeoutFn(restartTimer);
+    restartTimer = null;
 
     let child;
     try {
@@ -76,18 +103,21 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
 
     currentWorker = child;
     currentWorkerReady = false;
+    readyAt = 0;
 
     const onMessage = (message) => {
       const type = String(message?.type || '').trim();
       if (type === 'ready') {
+        if (currentWorker !== child) return;
         currentWorkerReady = true;
+        readyAt = Date.now();
         return;
       }
     };
 
     child.on('message', onMessage);
-    child.once('error', handleWorkerError);
-    child.once('exit', handleWorkerExit);
+    child.once('error', (error) => handleWorkerError(child, error));
+    child.once('exit', (code, signal) => handleWorkerExit(child, code, signal));
 
     return child;
   }
@@ -132,6 +162,8 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
         });
       }
     } catch (error) {
+      if (currentWorker) handleWorkerError(currentWorker, error);
+      else scheduleRestart();
       if (typeof refreshSearchIndexForBuildingFallback === 'function') {
         logger.error('search_refresh_worker_fallback', {
           osmType,
@@ -167,6 +199,8 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
 
   function stop() {
     isStopping = true;
+    if (restartTimer) clearTimeoutFn(restartTimer);
+    restartTimer = null;
     if (currentWorker && !currentWorker.killed) {
       try {
         currentWorker.kill('SIGTERM');

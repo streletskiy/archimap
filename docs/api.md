@@ -26,14 +26,18 @@ System notes:
   - Cache: `Cache-Control: no-store`.
 - `GET /api/search-buildings?q=...&limit=...&cursor=...&lon=...&lat=...&west=...&south=...&east=...&north=...`
   - Returns paginated building search results. Optional `styleKeys` is a URL-encoded JSON array of up to 128 exact canonical style keys (each at most 120 characters); it replaces text matching and makes `q` optional. All selected styles share one query, count and pagination.
+  - Text search indexes OSM building tag keys and values as well as the named fields. Public local architectural values override their corresponding source values in the search document; names, addresses, styles, architects, and project references receive higher relevance weight than other tags.
+  - Search uses the public indexed state. Pending/rejected personal edits affect authenticated building details and filters, but are not published into this shared search index. Dedicated `building:part` objects retain their existing exclusion from building search.
+  - `q` is tokenized free text, not a structured `key=value` expression. Use filter rules for exact tag equality, literal substring/prefix matching, existence, or numeric comparisons; PostgreSQL full-text search does not imply arbitrary substring matching.
   - Result items include `name`, `address`, `style`, `architect`, and optional `designRef` when present.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/search-buildings-map?q=...&west=...&south=...&east=...&north=...&limit=...&lon=...&lat=...`
-  - Map-oriented search variant that requires a bbox. Supports the same `styleKeys` contract as list search.
+  - Map-oriented search variant that requires a bbox. Uses the same public all-tag text index, local override rules, and `styleKeys` contract as list search.
   - Returns `items[]`, `total`, and `truncated`.
   - Cache: `Cache-Control: public, max-age=15`, `ETag`.
 - `GET /api/filter-tag-keys`
   - Returns cached list of allowlisted OSM tag keys that are currently present in `osm.building_contours`.
+  - PostgreSQL maintains tag-key occurrence counts transactionally as contours change, including removal of the final occurrence of a key. The allowlist controls suggestions; structured match rules can address other valid tag keys.
   - The runtime reuses the persisted `filter_tag_keys_cache` after restarts and only cold-starts a rebuild when the cache is empty.
   - `warmingUp` stays true while a background rebuild is running, and turns false once the cache has been successfully rebuilt even if the resulting key list is empty.
   - Cache: `Cache-Control: public, max-age=300`, `ETag`.
@@ -55,13 +59,17 @@ System notes:
   - `rules[]` remains a flat per-request contract. Layer modes, priorities, presets, and color resolution are handled client-side by issuing one or more requests against this endpoint.
   - Supported operators: `contains`, `equals`, `not_equals`, `starts_with`, `exists`, `not_exists`, `greater_than`, `greater_or_equals`, `less_than`, `less_or_equals`.
   - Numeric operators expect a numeric `value`; `exists` / `not_exists` ignore `value`.
+  - String operators are case-insensitive. `starts_with` treats `%`, `_`, and backslash literally. Existence requires a non-whitespace value; a missing/null value differs from an empty string for equality. Numeric comparisons accept a decimal point or comma and require the complete trimmed value to be numeric.
+  - PostgreSQL evaluates the complete predicates against public architectural overrides and the caller's latest pending/rejected personal edits before applying the result limit. Personal edits can both add and remove matches; there is no preliminary 50,000-building candidate cutoff on this path.
   - Returns `{ matchedKeys[], matchedFeatureIds[], matchedLocations[], matchedCount?, meta: { rulesHash, bboxHash, truncated, elapsedMs, cacheHit } }`.
   - `matchedLocations[]` carries `{ id, lon, lat, count?, osmKey? }` points for low-zoom marker fallback; below `z<5` the backend can aggregate marker-mode matches into viewport-relative cells so the client does not need the full building list, while `z5-12` keeps stable point-level locations.
+  - In PostgreSQL marker aggregation below zoom `5`, cell counts and `matchedCount` are calculated from all matches in the bbox before bounding the cell response. In contour/individual-marker mode, `maxResults` bounds returned buildings and `meta.truncated` indicates additional matches; `matchedCount` then describes the returned subset.
   - `includeLocations` defaults to `true`; `false` returns an empty `matchedLocations` array in contour mode. Marker mode always includes locations.
   - Responses support Brotli/gzip with `Cache-Control: private, no-store`. The short-lived server cache keys validated rules, actor, bbox, zoom, render mode, result limit and location option; client hashes are only echoed metadata.
 - `POST /api/buildings/filter-matches-batch`
   - Body: `{ bbox: { west, south, east, north }, zoom|zoomBucket, renderMode?, includeLocations?, requests[] }`.
   - Each batch item uses the same flat `rules[]` contract as `POST /api/buildings/filter-matches`, with its own optional `id`, `rulesHash?`, and `maxResults?`.
+  - PostgreSQL shares the spatial/effective-value projection across the batch and applies each item's predicates before that item's result limit. Personal override and complete low-zoom aggregation semantics are identical to the single endpoint.
   - Returns `items[]`, each item containing `matchedKeys`, `matchedFeatureIds`, `matchedLocations`, `matchedCount?`, and per-item `meta`.
   - `matchedLocations[]` follows the same low-zoom marker fallback contract as the single request endpoint, including optional `count` on aggregated points.
   - Batch meta includes overall `elapsedMs` and `cacheHit`. Compression and `includeLocations` follow the single-request contract. Identical ordered rule sets reuse cached results across client IDs; response IDs and hashes always belong to the current request.
@@ -122,7 +130,7 @@ System notes:
 - `POST /api/admin/app-settings/data/filter-tag-allowlist`
   - Master-admin only.
   - Body: `{ allowlist: ["building", "height", ...] }`.
-  - Saves the explicit allowlist used by public filter-tag suggestions and server-side filter-key validation.
+  - Saves the explicit allowlist used by public filter-tag suggestions. Match rules still validate key length and operators independently.
 - `GET /api/admin/app-settings/data/filter-presets`
   - Master-admin only.
   - Returns `{ ok, source, items[] }` where each item is a persisted filter preset.

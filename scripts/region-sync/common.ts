@@ -566,6 +566,11 @@ async function writeRowsToNdjsonFile(filePath, rows) {
 function buildPmtilesSwap(finalPath, newBuiltPath) {
   ensureDir(finalPath);
   const backupPath = `${finalPath}.bak`;
+  // A process can stop after moving the old archive aside but before installing
+  // the new one. Recover that last published file before starting another swap.
+  if (!fs.existsSync(finalPath) && fs.existsSync(backupPath)) {
+    fs.renameSync(backupPath, finalPath);
+  }
   const hadExistingFile = fs.existsSync(finalPath);
 
   if (fs.existsSync(backupPath)) {
@@ -574,7 +579,14 @@ function buildPmtilesSwap(finalPath, newBuiltPath) {
   if (hadExistingFile) {
     moveFileSync(finalPath, backupPath);
   }
-  moveFileSync(newBuiltPath, finalPath);
+  try {
+    moveFileSync(newBuiltPath, finalPath);
+  } catch (error) {
+    if (hadExistingFile && fs.existsSync(backupPath)) {
+      fs.renameSync(backupPath, finalPath);
+    }
+    throw error;
+  }
 
   return {
     finalPath,

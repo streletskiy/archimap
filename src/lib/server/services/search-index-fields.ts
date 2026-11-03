@@ -3,7 +3,17 @@ export const SEARCH_INDEX_RELEVANT_FIELDS: readonly string[] = Object.freeze([
   'address',
   'style',
   'architect',
-  'design_ref'
+  'design_ref',
+  'design',
+  'design_year',
+  'material',
+  'material_concrete',
+  'roof_shape',
+  'colour',
+  'levels',
+  'year_built',
+  'description',
+  'archimap_description'
 ] as const);
 
 export const SEARCH_INDEX_RELEVANT_FIELD_SET = new Set<string>(SEARCH_INDEX_RELEVANT_FIELDS);

@@ -405,19 +405,35 @@ async function createPostgresStageApplyState(client) {
   `);
 }
 
-async function countPostgresInsertedContoursFromStage(client, stageSchema, stageTable) {
+async function collectPostgresStageChanges(client, stageSchema, stageTable) {
   const stageRef = buildStageTableRef(stageSchema, stageTable);
-  const result = await client.query(`
-    SELECT COUNT(*)::bigint AS total
+  await client.query(`
+    CREATE TEMP TABLE region_import_changes_tmp ON COMMIT DROP AS
+    SELECT ${buildStageOsmTypeSql('src.osm_type_code')} AS osm_type,
+      src.osm_id, bc.osm_id IS NULL AS is_new
     FROM ${stageRef} src
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM osm.building_contours bc
-      WHERE bc.osm_type = ${buildStageOsmTypeSql('src.osm_type_code')}
-        AND bc.osm_id = src.osm_id
-    )
+    LEFT JOIN osm.building_contours bc
+      ON bc.osm_type = ${buildStageOsmTypeSql('src.osm_type_code')}
+      AND bc.osm_id = src.osm_id
+    WHERE bc.osm_id IS NULL
+      OR bc.tags_json IS DISTINCT FROM src.tags_json::text
+      OR bc.geom IS DISTINCT FROM ST_Multi(src.geom)
+      OR bc.min_lon IS DISTINCT FROM src.min_lon
+      OR bc.min_lat IS DISTINCT FROM src.min_lat
+      OR bc.max_lon IS DISTINCT FROM src.max_lon
+      OR bc.max_lat IS DISTINCT FROM src.max_lat
   `);
-  return Number(result.rows[0]?.total || 0);
+  await client.query('CREATE UNIQUE INDEX ON region_import_changes_tmp (osm_type, osm_id)');
+  await client.query('ANALYZE region_import_changes_tmp');
+  const result = await client.query(`
+    SELECT COUNT(*)::bigint AS changed,
+      COUNT(*) FILTER (WHERE is_new)::bigint AS inserted
+    FROM region_import_changes_tmp
+  `);
+  return {
+    changedFeatureCount: Number(result.rows[0]?.changed || 0),
+    insertedFeatureCount: Number(result.rows[0]?.inserted || 0)
+  };
 }
 
 async function countPostgresStageRows(client, stageSchema, stageTable) {
@@ -455,6 +471,9 @@ async function upsertPostgresContoursFromNamedStage(client, stageSchema, stageTa
       ST_Multi(src.geom),
       $1::timestamptz
     FROM ${stageRef} src
+    JOIN region_import_changes_tmp changed
+      ON changed.osm_type = ${buildStageOsmTypeSql('src.osm_type_code')}
+      AND changed.osm_id = src.osm_id
     ORDER BY src.osm_type_code, src.osm_id
     ON CONFLICT (osm_type, osm_id) DO UPDATE SET
       tags_json = excluded.tags_json,
@@ -968,16 +987,22 @@ async function applyRegionImportFromPostgresStage({
       await preparePostgresStageApplyOrdering(client, stageSchema, stageTable);
       const summaryBefore = await lockPostgresContourSummary(client);
       const importedFeatureCount = Number(totalFeatureCount || 0) || (await countPostgresStageRows(client, stageSchema, stageTable));
+      if (importedFeatureCount <= 0) {
+        throw new Error('Sync produced 0 building contours; refusing to replace region data');
+      }
       await progressReporter.reportRows(importedFeatureCount);
       await progressReporter.reportStep('count_new', APPLY_COUNT_NEW_PROGRESS, 'counting new contours', {
         processedFeatureCount: importedFeatureCount
       });
-      const insertedContourCount = await countPostgresInsertedContoursFromStage(client, stageSchema, stageTable);
+      const changeSummary = await collectPostgresStageChanges(client, stageSchema, stageTable);
+      const insertedContourCount = changeSummary.insertedFeatureCount;
 
       await progressReporter.reportStep('upsert', APPLY_UPSERT_PROGRESS, `upserting ${importedFeatureCount} contours`, {
         processedFeatureCount: importedFeatureCount
       });
-      await upsertPostgresContoursFromNamedStage(client, stageSchema, stageTable, runMarker);
+      if (changeSummary.changedFeatureCount > 0) {
+        await upsertPostgresContoursFromNamedStage(client, stageSchema, stageTable, runMarker);
+      }
 
       await progressReporter.reportStep('memberships', APPLY_MEMBERSHIPS_PROGRESS, 'upserting region memberships', {
         processedFeatureCount: importedFeatureCount
@@ -1034,7 +1059,9 @@ async function applyRegionImportFromPostgresStage({
         insertedContourCount,
         orphanDeletedCount
       );
-      await writePostgresContourSummary(client, nextSummaryTotal, nextSummaryTotal > 0 ? runMarker : null);
+      if (changeSummary.changedFeatureCount > 0 || orphanDeletedCount > 0) {
+        await writePostgresContourSummary(client, nextSummaryTotal, nextSummaryTotal > 0 ? runMarker : null);
+      }
 
       let sourceSnapshotId = null;
       try {
@@ -1069,6 +1096,8 @@ async function applyRegionImportFromPostgresStage({
       return {
         importedFeatureCount,
         activeFeatureCount,
+        changedFeatureCount: changeSummary.changedFeatureCount + orphanDeletedCount,
+        insertedFeatureCount: changeSummary.insertedFeatureCount,
         orphanDeletedCount,
         renderCacheRows: 0,
         sourceSnapshotId,

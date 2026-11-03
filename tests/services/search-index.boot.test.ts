@@ -12,6 +12,7 @@ function createDbStub(snapshot = {}) {
         search_fts_count: 0,
         searchable_rows_expected: false,
         search_tsv_index_present: true,
+        projection_version: 2,
         ...snapshot
       };
     },
@@ -255,6 +256,82 @@ test('search index rebuild starts again when PostgreSQL source index is missing'
   await boot.rebuildSearchIndex('startup');
 
   assert.equal(spawnCalls.length, 1);
+});
+
+test('current PostgreSQL projection drains durable changes incrementally and skips an empty queue', async () => {
+  const spawnCalls = [];
+  const snapshot = { search_source_count: 10, searchable_rows_expected: true, projection_version: 2, has_search_changes: true };
+  const boot = createSearchIndexBoot({
+    db: createDbStub(snapshot), dbProvider: 'postgres', logger: { info() {}, error() {} },
+    spawn: (_exec, args, options) => { const child = createChildProcessStub(); spawnCalls.push({ args, options, child }); return child; },
+    processExecPath: 'node', rootDir: '/app', searchRebuildScriptPath: 'worker.ts', batchSize: 100, env: {}
+  });
+  await boot.rebuildSearchIndex('region-sync:1');
+  assert.equal(spawnCalls[0].options.env.SEARCH_REBUILD_MODE, 'incremental');
+  spawnCalls[0].child.emit('close', 0);
+  snapshot.has_search_changes = false;
+  await boot.rebuildSearchIndex('region-sync:1');
+  assert.equal(spawnCalls.length, 1);
+});
+
+test('concurrent rebuild callers reserve one worker and await queued force work', async () => {
+  let releaseDecision;
+  const decisionWait = new Promise<void>((resolve) => { releaseDecision = resolve; });
+  const db: LooseRecord = createDbStub({ search_source_count: 1, searchable_rows_expected: true, has_search_changes: true });
+  const originalPrepare = db.prepare;
+  db.prepare = (sql) => {
+    const statement = originalPrepare();
+    if (String(sql).includes('search_source_count')) {
+      const get = statement.get;
+      statement.get = async () => { await decisionWait; return get(); };
+    }
+    return statement;
+  };
+  const children = [];
+  const modes = [];
+  const boot = createSearchIndexBoot({ db, dbProvider: 'postgres', logger: { info() {}, error() {} },
+    spawn: (_exec, _args, options) => { const child = createChildProcessStub(); children.push(child); modes.push(options.env.SEARCH_REBUILD_MODE); return child; },
+    processExecPath: 'node', rootDir: '/app', searchRebuildScriptPath: 'worker.ts', batchSize: 100, env: {} });
+  const first = boot.rebuildSearchIndex('initial');
+  let completed = false;
+  const waiting = boot.rebuildSearchIndex('forced', { force: true, waitForCompletion: true }).then(() => { completed = true; });
+  assert.equal(children.length, 0);
+  releaseDecision();
+  await first;
+  assert.equal(children.length, 1);
+  assert.equal(completed, false);
+  children[0].emit('close', 0);
+  await waitFor(() => children.length === 2);
+  assert.equal(completed, false);
+  assert.deepEqual(modes, ['incremental', 'full']);
+  children[1].emit('close', 0);
+  await waiting;
+  assert.equal(boot.isSearchIndexRebuildInProgress(), false);
+});
+
+test('PostgreSQL refresh worker restarts once with backoff and stops retrying on shutdown', async () => {
+  const { createSearchIndexRefreshDispatcher } = require('../../src/lib/server/boot/search-index-refresh.dispatcher');
+  const children = [];
+  const timers = [];
+  const cancelled = [];
+  const dispatcher = createSearchIndexRefreshDispatcher({ db: { provider: 'postgres' }, logger: { error() {} },
+    spawn: () => { const child = createChildProcessStub(); child.send = () => true; children.push(child); return child; },
+    processExecPath: 'node', rootDir: '/app', searchRefreshWorkerScriptPath: 'worker.ts', env: {},
+    setTimeoutFn: (callback, delay) => { const timer = { callback, delay, unref() {} }; timers.push(timer); return timer; },
+    clearTimeoutFn: (timer) => cancelled.push(timer) });
+  await dispatcher.dispatchRefreshTask('way', 1);
+  children[0].emit('error', new Error('worker failed'));
+  children[0].emit('exit', 1);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 1000);
+  timers[0].callback();
+  assert.equal(children.length, 2);
+  children[1].emit('exit', 1);
+  assert.equal(timers[1].delay, 2000);
+  dispatcher.stop();
+  assert.equal(cancelled.includes(timers[1]), true);
+  timers[1].callback();
+  assert.equal(children.length, 2);
 });
 
 test('search index refresh queue deduplicates repeated requests for the same building', async () => {

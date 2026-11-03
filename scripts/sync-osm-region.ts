@@ -89,9 +89,13 @@ process.on('SIGINT', () => handleCancellationSignal('SIGINT'));
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
 const { downloadManagedRegionExtract } = require('./region-sync/extract-download');
-const { applyRegionImportFromPostgresStage, publishPmtilesArchive } = require('./region-sync/import-applier');
+const { applyRegionImportFromPostgresStage } = require('./region-sync/import-applier');
 const { buildPmtilesFromGeojson } = require('./region-sync/pmtiles-builder');
 const { dropStageSchema, importPbfToPostgresStage } = require('./region-sync/osm2pgsql-import');
+const { resolveRegionPmtilesPath } = require('../src/lib/server/services/data-settings.service');
+const {
+  buildRegionTileSignature, canReuseRegionArchive, publishRegionTiles, readRegionTileState
+} = require('./region-sync/tile-state');
 const {
   assertRegionSupportsManagedSync,
   exportRegionMembersToGeojsonNdjson,
@@ -321,7 +325,8 @@ function runRuntimeFollowups({
     scriptPath: path.join(rootDir, 'workers', 'rebuild-search-index.worker.ts'),
     env: {
       ...followupEnv,
-      SEARCH_REBUILD_REASON: reason
+      SEARCH_REBUILD_REASON: reason,
+      SEARCH_REBUILD_MODE: 'incremental'
     },
     rootDir,
     spawnSyncRef,
@@ -443,6 +448,8 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
   try {
+    const tileState = await readRegionTileState(runtimeOptions.databaseUrl, region.id);
+    const tileSignature = buildRegionTileSignature(region);
     emitStageJson('export', null, 'reading region members from PostgreSQL');
     const exported = await exportRegionMembersToGeojsonNdjson({
       ...runtimeOptions,
@@ -456,10 +463,10 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
     emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
     const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
     emitStageJson('publish', null, 'publishing pmtiles archive');
-    const finalArchivePath = publishPmtilesArchive({
-      dataDir: runtimeOptions.dataDir,
-      region,
-      builtPmtilesPath
+    const finalArchivePath = await publishRegionTiles({
+      databaseUrl: runtimeOptions.databaseUrl, regionId: region.id,
+      revision: tileState.data_revision, signature: tileSignature,
+      archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region), builtArchivePath: builtPmtilesPath
     });
 
     return {
@@ -499,6 +506,13 @@ async function runRegionSync(region, runtimeOptions) {
       onStage: async (stage, detail) => emitStageJson(stage, null, detail)
     });
     stageSchema = stageImport.stageSchema;
+    // osm2pgsql has closed the source; retaining it through export/build only
+    // increases peak workspace usage. The metadata fingerprint remains in DB.
+    try {
+      fs.unlinkSync(downloaded.pbfPath);
+    } catch (error) {
+      console.warn(`[region-sync] early source cleanup deferred: ${String(error?.message || error)}`);
+    }
 
     emitStageJson('apply', 0, buildApplyStageDetail(null));
     const dbResult = await applyRegionImportFromPostgresStage({
@@ -510,25 +524,42 @@ async function runRegionSync(region, runtimeOptions) {
       sourceSnapshot: downloaded.sourceSnapshot,
       onProgress: createApplyStageProgressEmitter()
     });
-
-    emitStageJson('export', null, 'exporting region members from PostgreSQL');
-    const exported = await exportRegionMembersToGeojsonNdjson({
-      ...runtimeOptions,
-      regionId: region.id,
-      outputPath: geojsonPath
-    });
-    if (exported.importedFeatureCount <= 0) {
-      throw new Error('Sync produced 0 PMTiles features; keeping previous region archive untouched');
+    try {
+      await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
+      stageSchema = null;
+    } catch (error) {
+      console.warn(`[region-sync] early staging cleanup deferred: ${String(error?.message || error)}`);
     }
 
-    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
-    emitStageJson('publish', null, 'publishing pmtiles archive');
-    const finalArchivePath = publishPmtilesArchive({
-      dataDir: runtimeOptions.dataDir,
-      region,
-      builtPmtilesPath
-    });
+    const tileState = await readRegionTileState(runtimeOptions.databaseUrl, region.id);
+    const tileSignature = buildRegionTileSignature(region);
+    let finalArchivePath = resolveRegionPmtilesPath(runtimeOptions.dataDir, region);
+    let bounds = region.bounds || null;
+    let buildResult;
+    if (canReuseRegionArchive({ state: tileState, signature: tileSignature, archivePath: finalArchivePath })) {
+      buildResult = { engine: 'planetiler', mode: 'unchanged', shardCount: 1, reusedShardCount: 1 };
+      emitStageJson('publish', 100, 'unchanged rendering data; reusing published pmtiles archive');
+    } else {
+      emitStageJson('export', null, 'exporting region members from PostgreSQL');
+      const exported = await exportRegionMembersToGeojsonNdjson({
+        ...runtimeOptions,
+        regionId: region.id,
+        outputPath: geojsonPath
+      });
+      if (exported.importedFeatureCount <= 0) {
+        throw new Error('Sync produced 0 PMTiles features; keeping previous region archive untouched');
+      }
+
+      emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
+      buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
+      emitStageJson('publish', null, 'publishing pmtiles archive');
+      finalArchivePath = await publishRegionTiles({
+        databaseUrl: runtimeOptions.databaseUrl, regionId: region.id,
+        revision: tileState.data_revision, signature: tileSignature,
+        archivePath: finalArchivePath, builtArchivePath: builtPmtilesPath
+      });
+      bounds = exported.bounds;
+    }
 
     if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
       emitStageJson('followup', null, 'rebuilding search indexes');
@@ -543,7 +574,7 @@ async function runRegionSync(region, runtimeOptions) {
       ...summarizePmtilesBuildResult(buildResult),
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
-      bounds: exported.bounds
+      bounds
     };
   } finally {
     if (stageSchema) {

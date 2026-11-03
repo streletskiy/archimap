@@ -1,8 +1,6 @@
 function createSearchService(options: LooseRecord = {}) {
   const db = options.db;
   const isPostgres = db?.provider === 'postgres';
-  const isRebuildInProgress =
-    typeof options.isRebuildInProgress === 'function' ? options.isRebuildInProgress : () => false;
   const defaultLon = Number.isFinite(options.defaultLon) ? Number(options.defaultLon) : 44.0059;
   const defaultLat = Number.isFinite(options.defaultLat) ? Number(options.defaultLat) : 56.3269;
   const maxSearchLimit = Math.max(1, Number(options.maxSearchLimit) || 5000);
@@ -148,10 +146,6 @@ function createSearchService(options: LooseRecord = {}) {
       return { items: [], total: 0, nextCursor: null, hasMore: false };
     }
 
-    if (isRebuildInProgress() && styleKeys.length === 0) {
-      return getLocalEditsSearchResults(tokens, centerLon, centerLat, limit, cursor, searchBbox);
-    }
-
     const cappedLimit = Math.max(1, Math.min(maxSearchLimit, Number(limit) || 30));
     const offset = Math.max(0, Math.min(10000, Number(cursor) || 0));
     const lon = Number.isFinite(centerLon) ? centerLon : defaultLon;
@@ -207,7 +201,7 @@ function createSearchService(options: LooseRecord = {}) {
             .prepare(
               `
         WITH matched AS (
-          SELECT osm_key, bm25(building_search_fts) AS rank
+          SELECT osm_key, bm25(building_search_fts, 0, 10, 10, 10, 10, 10, 1) AS rank
           FROM building_search_fts
           WHERE building_search_fts MATCH ?
         )

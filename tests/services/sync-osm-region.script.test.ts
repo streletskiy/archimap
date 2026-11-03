@@ -164,6 +164,7 @@ test('runRuntimeFollowups executes search and filter workers for standalone sync
   assert.equal(calls[0].args[1], 'tsx');
   assert.equal(calls[0].args[2], path.join(rootDir, 'workers', 'rebuild-search-index.worker.ts'));
   assert.equal(calls[0].options.env.SEARCH_REBUILD_REASON, 'region-sync:42');
+  assert.equal(calls[0].options.env.SEARCH_REBUILD_MODE, 'incremental');
   assert.equal(calls[0].options.env.DB_PROVIDER, 'postgres');
   assert.equal(calls[0].options.env.DATABASE_URL, 'postgresql://archimap:archimap@db-postgres:5432/archimap');
 
