@@ -75,12 +75,14 @@ On 2026-11-03 an isolated Windows/Docker stand used the Nizhny Novgorod Oblast e
 
 | Operation                              |                               Before |                    Optimized |
 | -------------------------------------- | -----------------------------------: | ---------------------------: |
-| Complete export, build and publication |                             101.28 s |     40.93–42.73 s (two runs) |
-| Engine stage including staging/copying |                              84.13 s |                23.46–25.20 s |
+| Complete export, build and publication |                             101.28 s |  46.49 s (final output copy) |
+| Engine stage including staging/copying |                              84.13 s |  28.55 s (final output copy) |
 | Update of the changed snapshot         | 40.55 s with the optimized full path | 6.28 s with the partial path |
 | Export for that update                 |           742,810 features / 16.35 s |      4,340 features / 0.62 s |
 | Tile stage with no subsequent changes  |                                    — |   0.31 s, no export or build |
 
 The change fixture updated a real parent's height, moved and changed the height of a real part, deleted a standalone building, and added a footprint crossing a tile boundary. It invalidated eight tiles; all 89,316 other tiles retained their original compressed payload bytes. Every decompressed MVT byte in the partial result matched the complete build of the same changed database, including feature IDs, properties and geometry. No unreferenced payload bytes or file gaps remained after archive compaction.
+
+The initial local-storage implementation completed full runs in 40.93–42.73 seconds. Release hardening changed output copying to retain an exclusive file descriptor through flushing; the final complete run took 46.49 seconds (17.22 seconds export, 28.55 seconds build/staging) and produced the exact same archive hash as the full changed-snapshot reference. The partial-update and no-change timings above were measured before this output-copy hardening; their archive replacement logic is unchanged.
 
 The old and new complete builds had identical geometry, properties and feature multiplicities in every tile; only the intentional stable-ID migration differed. The full archive stayed approximately 108 MB. These are tile pipeline measurements: source download and canonical import are excluded. Benefits of partial updates depend on the affected area; larger or unsupported changes use the measured full path. Raw benchmark artifacts remain outside version control under the stand's `.benchmarks/efficiency-20261103/results/` directory.

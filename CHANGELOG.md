@@ -14,6 +14,11 @@
 - **Complete Tag Search and Filters:** Include all building tag keys and values in search, preserve architectural and personal overrides, and align custom JSON value handling with application semantics ([3b3b61c](https://github.com/streletskiy/archimap/commit/3b3b61c)).
 - **Update Consistency:** Consume durable search changes incrementally, maintain tag-key counts during imports, and prevent older overlapping source observations from replacing newer shared contours. Preserve complete geometry dependencies and user edits ([3b3b61c](https://github.com/streletskiy/archimap/commit/3b3b61c), [4f8bf2f](https://github.com/streletskiy/archimap/commit/4f8bf2f)).
 - **Archive Publication:** Reject stale revisions and changed patch bases before publication. Commit archive identity and covered spatial invalidations together; keep the previous archive and pending changes after failed or cancelled builds.
+- **Archive File Safety:** Keep the exclusively created output file open through copying and flushing, preventing a path-reopen race during archive staging.
+
+### 🔒 Dependency Maintenance
+
+- Pin the patched `minimatch` 11.0.4 in both dependency trees. Remove the unused, unmaintained `depcheck` command and its obsolete transitive dependencies; both clean dependency installations pass the security audit.
 
 ### 🔧 Operations
 
@@ -23,8 +28,8 @@
 
 ### ✅ Validation
 
-- Passed 558 unit tests, 38 integration tests and 17 browser scenarios with no skips, plus formatting, lint, frontend/type, syntax, security and smoke checks. Integration coverage includes real PostgreSQL, Osmium and Planetiler execution.
-- On an isolated Nizhny Novgorod Oblast stand with 742,579 canonical objects, complete map export/build/publication improved from 101.28 seconds to 40.93–42.73 seconds. A fixture with parent/part edits, movement, deletion and a tile-boundary addition took 6.28 seconds through the partial path versus 40.55 seconds for a complete build of the same changed data. These measurements exclude source download and canonical import.
+- Passed 559 unit tests, 38 integration tests and 17 browser scenarios with no skips, plus formatting, lint, frontend/type, syntax, security and smoke checks. Integration coverage includes real PostgreSQL, Osmium and Planetiler execution.
+- On an isolated Nizhny Novgorod Oblast stand with 742,579 canonical objects, complete map export/build/publication improved from 101.28 seconds to 46.49 seconds with the final safe output-copy path. Before that copy hardening, a fixture with parent/part edits, movement, deletion and a tile-boundary addition took 6.28 seconds through the partial path versus 40.55 seconds for a complete build of the same changed data. These measurements exclude source download and canonical import.
 - All 89,324 tiles in the partial result matched the complete build's decompressed MVT bytes, including IDs, properties and geometry. The 89,316 untouched tiles retained their original compressed payloads, and archive compaction left no unreferenced tile bytes. See [PMTiles measurements](docs/performance/pmtiles.md).
 
 [Full comparison](https://github.com/streletskiy/archimap/compare/0.9.2...0.10.0)
