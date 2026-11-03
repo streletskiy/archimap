@@ -159,18 +159,18 @@ function runPlanetilerBuild({
 
   ensureDir(outputPath);
   const localIO = !['0', 'false', 'off'].includes(String(env.REGION_SYNC_PLANETILER_LOCAL_IO || '').toLowerCase());
+  const nativeTemporaryWorkspace = !containerName && localIO;
   const workspaceName = `archimap-planetiler-${randomUUID()}`;
-  const workspaceRoot = localIO ? (containerName ? '/tmp' : os.tmpdir()) : path.dirname(outputPath);
-  const workspace =
+  const workspaceRoot = containerName && localIO ? '/tmp' : path.dirname(outputPath);
+  let workspace = nativeTemporaryWorkspace ? null :
     containerName && localIO ? `${workspaceRoot}/${workspaceName}` : path.join(workspaceRoot, workspaceName);
-  const engineWorkspace = containerName && !localIO ? toContainerPath(workspace, env) : workspace;
+  let engineWorkspace = containerName && !localIO ? toContainerPath(workspace, env) : workspace;
   if (containerName && localIO) {
     if (!/^\/tmp\/archimap-planetiler-[0-9a-f-]{36}$/.test(engineWorkspace)) {
       throw new Error('Refusing to use an unexpected Planetiler workspace');
     }
-  } else if (
-    path.dirname(path.resolve(workspace)) !== path.resolve(workspaceRoot) ||
-    path.basename(workspace) !== workspaceName
+  } else if (!nativeTemporaryWorkspace && (
+    path.dirname(path.resolve(workspace)) !== path.resolve(workspaceRoot) || path.basename(workspace) !== workspaceName)
   ) {
     throw new Error('Refusing to use an unexpected Planetiler workspace');
   }
@@ -186,7 +186,7 @@ function runPlanetilerBuild({
       : containerName
         ? toContainerPath(effectiveSchemaPath, env)
         : path.resolve(effectiveSchemaPath);
-  const engineOutput = `${engineWorkspace}/output.pmtiles`;
+  let engineOutput = nativeTemporaryWorkspace ? null : `${engineWorkspace}/output.pmtiles`;
   const copyPath = `${outputPath}.${workspaceName}.tmp`;
   let workspaceCreated = false;
   let copyReserved = false;
@@ -203,9 +203,15 @@ function runPlanetilerBuild({
 
   try {
     if (containerName && localIO) {
-      checked('docker', ['exec', containerName, 'mkdir', '--', engineWorkspace], 'workspace creation');
+      checked('docker', ['exec', containerName, 'mkdir', '--mode=700', '--', engineWorkspace], 'workspace creation');
+    } else if (nativeTemporaryWorkspace) {
+      // mkdtemp creates an exclusive private directory under the shared system
+      // temp root. Read the engine output only through this owned directory.
+      workspace = fs.mkdtempSync(path.join(os.tmpdir(), `${workspaceName}-`));
+      engineWorkspace = workspace;
+      engineOutput = path.join(workspace, 'output.pmtiles');
     } else {
-      fs.mkdirSync(workspace);
+      fs.mkdirSync(workspace, { mode: 0o700 });
     }
     workspaceCreated = true;
     writePlanetilerSchema(effectiveSchemaPath, {

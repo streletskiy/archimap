@@ -24,6 +24,7 @@ test('native builds use unique temporary storage and publish only after a succes
       const temp = args.find((arg) => arg.startsWith('--tmpdir=')).slice(9);
       tempPaths.push(path.dirname(temp));
       assert.equal(path.dirname(path.dirname(temp)), os.tmpdir());
+      if (process.platform !== 'win32') assert.equal(fs.statSync(path.dirname(temp)).mode & 0o777, 0o700);
       assert.equal(fs.readFileSync(f.outputPath, 'utf8'), tempPaths.length === 1 ? 'previous archive' : 'new archive');
       assert.ok(args.includes('--minzoom=13'));
       assert.ok(args.includes('--maxzoom=16'));
@@ -82,7 +83,10 @@ for (const failCopy of [false, true]) {
         if (exe === 'missing') return { status: 1 };
         assert.equal(exe, 'docker');
         assert.deepEqual(args.slice(0, 2), ['exec', 'test-engine']);
-        if (args[2] === 'mkdir') localWorkspace = args[4];
+        if (args[2] === 'mkdir') {
+          assert.ok(args.includes('--mode=700'));
+          localWorkspace = args.at(-1);
+        }
         if (args[2] === 'cat') {
           assert.equal(args[4], `${localWorkspace}/output.pmtiles`);
           assert.equal(options.stdio[0], 'ignore');
@@ -183,7 +187,7 @@ test('container-local temporary workspace is not remapped when the shared host r
           env: { PLANETILER_BIN: 'missing', PLANETILER_CONTAINER: 'test-engine', PLANETILER_HOST_DATA_ROOT: '/tmp' },
           spawnSyncRef(exe, args) {
             if (exe === 'missing') return { status: 1 };
-            if (args[2] === 'mkdir') createdWorkspace = args[4];
+            if (args[2] === 'mkdir') createdWorkspace = args.at(-1);
             if (args[2] === 'cp') return { status: 2 };
             return { status: 0 };
           }
