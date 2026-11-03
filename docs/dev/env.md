@@ -94,7 +94,16 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `DATABASE_URL`, `DATABASE_PATH`, `ARCHIMAP_DB_PATH`, `OSM_DB_PATH`
 - `LOCAL_EDITS_DB_PATH`, `USER_EDITS_DB_PATH`, `USER_AUTH_DB_PATH`
 - `ARIA2_BIN` - optional absolute path to `aria2c`. The Docker runtime image ships `aria2c` out of the box.
-- `REGION_SYNC_ALLOW_FETCH_FALLBACK` - set to `true` only for temporary emergency fallback to streamed fetch when `aria2c` is unavailable. Production should leave this unset.
+- `REGION_SYNC_ALLOW_FETCH_FALLBACK` - fallback policy for direct use of the download helper. Managed source preparation also supports streamed fetch when `aria2c` is unavailable.
+- `OSMIUM_BIN` - native Osmium executable; default `osmium`. The Docker application image includes it.
+- `OSMIUM_CONTAINER` - optional existing container for Osmium execution instead of the native executable.
+- `OSMIUM_HOST_DATA_ROOT` / `OSMIUM_CONTAINER_DATA_ROOT` - shared data-volume path mapping for container execution; defaults are `ARCHIMAP_DATA_DIR` or `/app/data` on the host side and `/app/data` inside the container. Tool input/output paths must stay inside this root.
+- `REGION_SYNC_MAX_DIFFS` - maximum contiguous replication files per update; default `11000`, capped at `20000`. The default covers a normal weekly (`168` hour) minute-feed gap; larger gaps or byte-limit violations trigger a full-source refresh.
+- `REGION_SYNC_MAX_DIFF_BYTES` - maximum compressed bytes per replication diff; default `8388608` (8 MiB).
+- `REGION_SYNC_MAX_DIFF_TOTAL_BYTES` - maximum compressed diff bytes per catch-up batch; default `134217728` (128 MiB).
+- `REGION_SYNC_DIFF_CONCURRENCY` - concurrent regional diff downloads; default and maximum `8`. A catch-up batch requests the latest state, the target state and `N` diff files (`N + 2` requests); an unchanged cursor needs only the latest-state request.
+- `REGION_SYNC_DIFF_TIMEOUT_MS` - timeout per replication HTTP request; default `30000`, capped at `120000`.
+- `REGION_SYNC_SOURCE_REBASE_DAYS` - refresh the complete regional source after this age even if replication is available; default `30`, capped at `365`. This also bounds accumulation of objects that leave a provider extract.
 - `PLANETILER_BIN` - optional absolute path to the `planetiler` wrapper/command. The Docker runtime image ships `/usr/local/bin/planetiler` out of the box.
 - `PMTILES_PROGRESS_JSON` / `PMTILES_PROGRESS_INTERVAL_SEC` - optional build-stage progress tuning for managed PMTiles generation.
 - `REGION_SYNC_WORKSPACE_STALE_HOURS` - stale-cleanup threshold for leftover `data/workspaces/archimap-region-*` per-run workspaces; default `24`.
@@ -118,7 +127,11 @@ These values are used as fallback camera only when neither URL nor the saved cli
 - `DB_PROVIDER=postgres` but startup fails:
   verify `DATABASE_URL` (or full `POSTGRES_*`) and run `npm run db:pg:migrate`.
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails before extract starts:
-  verify `DB_PROVIDER=postgres`, `DATABASE_URL`, and that `osm2pgsql` is available in the runtime image.
+  verify `DB_PROVIDER=postgres`, `DATABASE_URL`, and that `osmium` and `osm2pgsql` are available in the runtime.
+- Source cache is missing or damaged:
+  the next sync validates SHA-256 and downloads a fresh source; keep `data/source-cache/` on the persistent data volume to avoid repeated full downloads.
+- Canonical building data needs a forced re-import:
+  use `--force-import`; this bypasses the unchanged-source import shortcut while preserving normal source validation and replication.
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails during PMTiles build:
   verify `planetiler` or `PLANETILER_BIN`.
 - Newly created regions do not appear on the map:

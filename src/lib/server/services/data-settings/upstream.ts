@@ -1,5 +1,10 @@
 import type { Region, RegionUpstreamStatus } from '$shared/types';
 
+const {
+  deriveManagedReplicationBaseUrl,
+  parseReplicationState
+} = require('../../../../../scripts/region-sync/source-cache');
+
 const UPSTREAM_CACHE_TTL_MS = 15 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15 * 1000;
 
@@ -53,13 +58,6 @@ function createUpstreamDomain(context: LooseRecord = {}) {
     return promise;
   }
 
-  function parseOsmfrStateTimestamp(text) {
-    const raw = String(text || '');
-    const match = raw.match(/^\s*timestamp=(.+?)\s*$/m);
-    if (!match) return null;
-    return normalizeIsoTimestamp(match[1].replace(/\\:/g, ':'));
-  }
-
   async function fetchWithTimeout(input, init: LooseRecord = {}) {
     if (typeof fetchImpl !== 'function') {
       throw new Error('fetch is not available');
@@ -88,15 +86,14 @@ function createUpstreamDomain(context: LooseRecord = {}) {
     return normalizeIsoTimestamp(response.headers?.get?.('last-modified'));
   }
 
-  async function fetchOsmfrStateTimestamp(stateUrl) {
+  async function fetchReplicationStateTimestamp(stateUrl) {
     const normalizedStateUrl = String(stateUrl || '').trim();
     if (!normalizedStateUrl) return null;
-    if (!stateUrl) return null;
     const response = await fetchWithTimeout(normalizedStateUrl);
     if (!response?.ok) {
       throw new Error(`HTTP ${Number(response?.status || 0) || 0}`);
     }
-    return parseOsmfrStateTimestamp(await response.text());
+    return normalizeIsoTimestamp(parseReplicationState(await response.text()).timestamp);
   }
 
   async function fetchLatestSourceMetadata(
@@ -142,8 +139,11 @@ function createUpstreamDomain(context: LooseRecord = {}) {
 
       try {
         let latestSourceDataUpdatedAt = null;
-        if (extractSource === 'osmfr') {
-          latestSourceDataUpdatedAt = await fetchOsmfrStateTimestamp(candidate?.stateUrl);
+        // Use the same regional feed as source replication. Daily extract mtime
+        // must not hide minute updates, and arbitrary header URLs are not trusted.
+        const replicationBaseUrl = deriveManagedReplicationBaseUrl({ ...candidate, extractSource, extractId });
+        if (replicationBaseUrl) {
+          latestSourceDataUpdatedAt = await fetchReplicationStateTimestamp(`${replicationBaseUrl}state.txt`);
         }
         if (!latestSourceDataUpdatedAt) {
           latestSourceDataUpdatedAt = await fetchHeadTimestamp(downloadUrl);

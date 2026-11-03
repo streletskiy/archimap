@@ -124,6 +124,7 @@ System notes:
   - Also returns filter-tag allowlist config plus raw available tag keys from the current DB cache for admin UI.
   - Also returns filter presets config for admin (`filterPresets.source`, `filterPresets.items[]`).
   - Region items include curated extract metadata (`extractSource`, `extractId`, `extractLabel`, `extractResolutionStatus`, `extractResolutionError`), storage metadata (`pmtilesBytes`, `dbBytes`, `dbBytesApproximate`), and the last locally known source-version fields (`sourceDataUpdatedAt`, `latestSourceDataUpdatedAt`, `upstreamCheckedAt`, `upstreamStatus`, `upstreamError`, `updateAvailable`).
+  - `sourceDataUpdatedAt` records the source cut actually applied by the completed sync, including the replication cursor; it remains `null` when that cut is unknown. `latestSourceDataUpdatedAt` is the last checked upstream cut, not proof that it has been imported.
   - The endpoint intentionally avoids live upstream checks for every region so the admin list can load quickly even with many regions.
   - `filterTags` includes `source`, `allowlist`, `defaultAllowlist`, `availableKeys`, `updatedBy`, `updatedAt`.
   - `filterPresets.items[]` includes `id`, `key`, `name`, `nameI18n`, `description`, `layers[]`, `createdAt`, `updatedAt`, `updatedBy`.
@@ -150,6 +151,7 @@ System notes:
   - Master-admin only.
   - Query: `ids=1,2,3` and optional `force=true`.
   - Returns live upstream status only for the requested region ids, so the admin UI can lazily refresh the visible page and the selected region without blocking the initial list load.
+  - OSM France and Geofabrik freshness comes from their trusted regional replication feeds derived from the curated catalog. A daily PBF modification time does not hide newer regional changes. Checks use a short-lived cache unless `force=true`.
 - `POST /api/admin/app-settings/data/regions`
   - Creates or updates a region.
   - Existing region `id` stays stable; `name` and `slug` can be updated after creation.
@@ -159,6 +161,7 @@ System notes:
   - On save, server validates the selected curated extract against the repository manifest. Managed syncs only run for regions whose stored `extractResolutionStatus` is `resolved`.
 - `DELETE /api/admin/app-settings/data/regions/:regionId`
   - Deletes a region, its PMTiles archive, region memberships, sync runs, and orphan contours no longer referenced by any region.
+  - After database deletion, attempts to remove managed source-cache files for deleted regions, including cascaded descendants. Cleanup waits for source/import locks; failures are logged and retried on later region deletions.
   - Regions in `queued` or `running` state cannot be deleted.
 - `GET /api/admin/app-settings/data/regions/:regionId/runs`
   - Returns paginated sync runs for the region.
@@ -168,7 +171,8 @@ System notes:
   - `dbBytesApproximate=true` means the stored DB size is an estimate rather than an exact byte count.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-now`
   - Queues region sync in the single managed queue.
-  - Manual syncs queue immediately and do not wait for an upstream freshness probe before the PBF download starts.
+  - Manual syncs queue immediately without waiting for an upstream freshness probe. The worker validates its committed source cache, requests missing regional diffs when possible, and downloads a full regional PBF for bootstrap or recovery when needed.
+  - An unchanged source still allows repair of missing/stale PMTiles and pending search maintenance; manual sync does not force a full download.
   - Returns `400` when the region cannot be queued, for example if the id is invalid, the region is disabled, or its curated extract is unresolved.
 - `POST /api/admin/app-settings/data/regions/:regionId/sync-cancel`
   - Master-admin only.

@@ -405,8 +405,9 @@ async function createPostgresStageApplyState(client) {
   `);
 }
 
-async function collectPostgresStageChanges(client, stageSchema, stageTable) {
+async function collectPostgresStageChanges(client, stageSchema, stageTable, sourceSnapshot = null) {
   const stageRef = buildStageTableRef(stageSchema, stageTable);
+  const sourceCut = sourceSnapshot?.replicationTimestamp || null;
   await client.query(`
     CREATE TEMP TABLE region_import_changes_tmp ON COMMIT DROP AS
     SELECT ${buildStageOsmTypeSql('src.osm_type_code')} AS osm_type,
@@ -415,14 +416,21 @@ async function collectPostgresStageChanges(client, stageSchema, stageTable) {
     LEFT JOIN osm.building_contours bc
       ON bc.osm_type = ${buildStageOsmTypeSql('src.osm_type_code')}
       AND bc.osm_id = src.osm_id
-    WHERE bc.osm_id IS NULL
+    WHERE (bc.osm_id IS NULL
       OR bc.tags_json IS DISTINCT FROM src.tags_json::text
       OR bc.geom IS DISTINCT FROM ST_Multi(src.geom)
       OR bc.min_lon IS DISTINCT FROM src.min_lon
       OR bc.min_lat IS DISTINCT FROM src.min_lat
       OR bc.max_lon IS DISTINCT FROM src.max_lon
-      OR bc.max_lat IS DISTINCT FROM src.max_lat
-  `);
+      OR bc.max_lat IS DISTINCT FROM src.max_lat)
+      AND ($1::timestamptz IS NULL OR NOT EXISTS (
+        SELECT 1 FROM public.data_region_memberships membership
+        JOIN public.data_region_source_snapshots snapshot
+          ON snapshot.region_id = membership.region_id AND snapshot.is_active = 1
+        WHERE membership.osm_type = bc.osm_type AND membership.osm_id = bc.osm_id
+          AND snapshot.replication_timestamp > $1::timestamptz
+      ))
+  `, [sourceCut]);
   await client.query('CREATE UNIQUE INDEX ON region_import_changes_tmp (osm_type, osm_id)');
   await client.query('ANALYZE region_import_changes_tmp');
   const result = await client.query(`
@@ -697,24 +705,53 @@ async function lockPostgresContourSummary(client) {
     [Number(row.total || 0), row.last_updated || null]
   );
 
-  return {
-    total: Number(row.total || 0),
-    lastUpdated: row.last_updated || null
-  };
+  // Another first importer may have inserted/committed the singleton while our
+  // INSERT waited. Re-read and lock the actual row before applying any changes.
+  return lockPostgresContourSummary(client);
 }
 
 function normalizeSourceSnapshotForInsert(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const sha256 = String(snapshot.sha256 || '').trim();
-  if (!sha256) return null;
+  const persistentSource = snapshot.persistentSource === true;
+  if (!sha256 && !persistentSource) return null;
   const sizeBytes = Number(snapshot.sizeBytes);
+  const nullableText = (value) => String(value ?? '').trim() || null;
+  const timestamp = (value) => {
+    const text = nullableText(value);
+    if (!text) return null;
+    const date = new Date(text);
+    if (!Number.isFinite(date.getTime())) {
+      if (persistentSource) throw new Error('Persistent source contains an invalid timestamp');
+      return null;
+    }
+    return date.toISOString();
+  };
+  const replicationTimestamp = timestamp(snapshot.replicationTimestamp);
+  const replicationSequence = snapshot.replicationSequence == null ? null : Number(snapshot.replicationSequence);
+  if (persistentSource && (!/^[a-f0-9]{64}$/i.test(sha256) || !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 ||
+    !nullableText(snapshot.localPath) || !nullableText(snapshot.downloadUrl) || !nullableText(snapshot.importSignature))) {
+    throw new Error('Persistent source requires a complete fingerprint, cache path, URL and import signature');
+  }
+  if (replicationSequence != null && (!Number.isSafeInteger(replicationSequence) || replicationSequence < 0)) {
+    throw new Error('Source replication sequence must be a nonnegative safe integer');
+  }
   return {
-    extractSource: String(snapshot.extractSource || '').trim() || null,
-    extractId: String(snapshot.extractId || '').trim() || null,
+    extractSource: nullableText(snapshot.extractSource),
+    extractId: nullableText(snapshot.extractId),
     sha256,
     sizeBytes: Number.isFinite(sizeBytes) && sizeBytes >= 0 ? Math.trunc(sizeBytes) : 0,
-    sourceMtime: String(snapshot.sourceMtime || '').trim() || null,
-    localPath: String(snapshot.localPath || '').trim() || null
+    sourceMtime: replicationTimestamp || timestamp(snapshot.sourceMtime),
+    localPath: nullableText(snapshot.localPath),
+    downloadUrl: nullableText(snapshot.downloadUrl),
+    sourceEtag: nullableText(snapshot.sourceEtag),
+    sourceLastModified: nullableText(snapshot.sourceLastModified),
+    replicationBaseUrl: nullableText(snapshot.replicationBaseUrl),
+    replicationSequence,
+    replicationTimestamp,
+    lastFullDownloadAt: timestamp(snapshot.lastFullDownloadAt),
+    importSignature: nullableText(snapshot.importSignature),
+    buildingInputSha256: nullableText(snapshot.buildingInputSha256)
   };
 }
 
@@ -725,7 +762,10 @@ async function recordPostgresRegionSourceSnapshot(
   const normalized = normalizeSourceSnapshotForInsert(sourceSnapshot);
   if (!normalized) return null;
   const regionId = Number(region?.id || 0);
-  if (!Number.isInteger(regionId) || regionId <= 0) return null;
+  if (!Number.isInteger(regionId) || regionId <= 0) {
+    if (sourceSnapshot?.persistentSource === true) throw new Error('Persistent source requires a positive region ID');
+    return null;
+  }
 
   // Mark the previously-active row as superseded while retaining full source
   // history for audit/debug and upstream freshness comparisons.
@@ -751,9 +791,20 @@ async function recordPostgresRegionSourceSnapshot(
       local_path,
       imported_feature_count,
       pmtiles_bytes,
-      is_active
+      is_active,
+      download_url,
+      source_etag,
+      source_last_modified,
+      replication_base_url,
+      replication_sequence,
+      replication_timestamp,
+      last_full_download_at,
+      import_signature,
+      building_input_sha256,
+      created_at
     )
-    VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::timestamptz, $7, $8::bigint, $9::bigint, 1)
+    VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::timestamptz, $7, $8::bigint, $9::bigint, 1,
+      $10, $11, $12, $13, $14::bigint, $15::timestamptz, $16::timestamptz, $17, $18, clock_timestamp())
     RETURNING id
   `,
     [
@@ -765,7 +816,16 @@ async function recordPostgresRegionSourceSnapshot(
       normalized.sourceMtime,
       normalized.localPath,
       Number.isFinite(Number(importedFeatureCount)) ? Math.trunc(Number(importedFeatureCount)) : null,
-      Number.isFinite(Number(pmtilesBytes)) ? Math.trunc(Number(pmtilesBytes)) : null
+      Number.isFinite(Number(pmtilesBytes)) ? Math.trunc(Number(pmtilesBytes)) : null,
+      normalized.downloadUrl,
+      normalized.sourceEtag,
+      normalized.sourceLastModified,
+      normalized.replicationBaseUrl,
+      normalized.replicationSequence,
+      normalized.replicationTimestamp,
+      normalized.lastFullDownloadAt,
+      normalized.importSignature,
+      normalized.buildingInputSha256
     ]
   );
   return Number(inserted.rows[0]?.id || 0) || null;
@@ -797,7 +857,7 @@ async function applyRegionImportToPostgres({
   onProgress
 }) {
   const client = new Client({ connectionString: databaseUrl });
-  const runMarker = new Date().toISOString();
+  let runMarker;
   const normalizedBuiltPmtilesPath = String(builtPmtilesPath || '').trim();
   const finalPmtilesPath = normalizedBuiltPmtilesPath ? resolveRegionPmtilesPath(dataDir, region) : null;
   let swap = null;
@@ -811,9 +871,10 @@ async function applyRegionImportToPostgres({
   try {
     await client.query('BEGIN');
     try {
-      await client.query('SET LOCAL synchronous_commit = off');
+      await client.query(sourceSnapshot?.persistentSource ? 'SET LOCAL synchronous_commit = on' : 'SET LOCAL synchronous_commit = off');
       await createPostgresImportState(client);
       const summaryBefore = await lockPostgresContourSummary(client);
+      runMarker = (await client.query('SELECT clock_timestamp() AS marker')).rows[0].marker;
       await progressReporter.reportRows(0);
       const importedFeatureCount = await copyImportRowsIntoPostgresStage(client, {
         ndjsonPath,
@@ -900,6 +961,7 @@ async function applyRegionImportToPostgres({
             : null
         });
       } catch (error) {
+        if (sourceSnapshot?.persistentSource === true) throw error;
         console.warn(`[region-sync] source snapshot record skipped: ${String(error?.message || error)}`);
       }
 
@@ -972,7 +1034,7 @@ async function applyRegionImportFromPostgresStage({
   onProgress
 }) {
   const client = new Client({ connectionString: databaseUrl });
-  const runMarker = new Date().toISOString();
+  let runMarker;
   const progressReporter = createApplyProgressReporter({
     onProgress,
     totalFeatureCount
@@ -982,10 +1044,11 @@ async function applyRegionImportFromPostgresStage({
   try {
     await client.query('BEGIN');
     try {
-      await client.query('SET LOCAL synchronous_commit = off');
+      await client.query(sourceSnapshot?.persistentSource ? 'SET LOCAL synchronous_commit = on' : 'SET LOCAL synchronous_commit = off');
       await createPostgresStageApplyState(client);
       await preparePostgresStageApplyOrdering(client, stageSchema, stageTable);
       const summaryBefore = await lockPostgresContourSummary(client);
+      runMarker = (await client.query('SELECT clock_timestamp() AS marker')).rows[0].marker;
       const importedFeatureCount = Number(totalFeatureCount || 0) || (await countPostgresStageRows(client, stageSchema, stageTable));
       if (importedFeatureCount <= 0) {
         throw new Error('Sync produced 0 building contours; refusing to replace region data');
@@ -994,7 +1057,7 @@ async function applyRegionImportFromPostgresStage({
       await progressReporter.reportStep('count_new', APPLY_COUNT_NEW_PROGRESS, 'counting new contours', {
         processedFeatureCount: importedFeatureCount
       });
-      const changeSummary = await collectPostgresStageChanges(client, stageSchema, stageTable);
+      const changeSummary = await collectPostgresStageChanges(client, stageSchema, stageTable, sourceSnapshot);
       const insertedContourCount = changeSummary.insertedFeatureCount;
 
       await progressReporter.reportStep('upsert', APPLY_UPSERT_PROGRESS, `upserting ${importedFeatureCount} contours`, {
@@ -1072,6 +1135,7 @@ async function applyRegionImportFromPostgresStage({
           pmtilesBytes: null
         });
       } catch (error) {
+        if (sourceSnapshot?.persistentSource === true) throw error;
         console.warn(`[region-sync] source snapshot record skipped: ${String(error?.message || error)}`);
       }
 
@@ -1134,6 +1198,8 @@ module.exports = {
   deletePostgresStaleMembershipsFromNamedStage,
   hasPostgresRegionMemberships,
   normalizeSourceSnapshotForInsert,
+  recordPostgresRegionSourceSnapshot,
+  lockPostgresContourSummary,
   publishPmtilesArchive,
   readImportRowsInBatches,
   resolveImportApplyBatchSize

@@ -15,6 +15,63 @@ function assertIsolatedDatabase() {
     'Import tests require an explicit loopback test_* database');
 }
 
+test('overlapping region imports cannot roll back a newer source observation or node-only geometry', {
+  skip: !databaseUrl && 'ARCHIMAP_IMPORT_TEST_DATABASE_URL is required for the isolated PostgreSQL test'
+}, async () => {
+  assertIsolatedDatabase();
+  const client = new Client({ connectionString: databaseUrl });
+  const suffix = `${process.pid}_${Date.now()}_freshness`;
+  const schema = `region_import_test_${suffix}`;
+  const objectId = 8100000000000 + Date.now();
+  const regionIds = [];
+  await client.connect();
+  try {
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`CREATE TABLE ${schema}.region_import_stage (
+      osm_type_code TEXT NOT NULL, osm_id BIGINT NOT NULL, tags_json JSONB,
+      min_lon REAL NOT NULL, min_lat REAL NOT NULL, max_lon REAL NOT NULL, max_lat REAL NOT NULL,
+      geom geometry(MultiPolygon, 4326) NOT NULL
+    )`);
+    for (const label of ['a', 'b']) {
+      const result = await client.query('INSERT INTO public.data_sync_regions (slug, name) VALUES ($1, $1) RETURNING id',
+        [`source-cut-${suffix}-${label}`]);
+      regionIds.push(Number(result.rows[0].id));
+    }
+    await client.query(`INSERT INTO ${schema}.region_import_stage VALUES
+      ('W', $1, '{"building":"yes","custom:tag":"kept"}', 10, 20, 11, 21,
+       ST_Multi(ST_MakeEnvelope(10,20,11,21,4326)))`, [objectId]);
+    const apply = (regionId, day) => applyRegionImportFromPostgresStage({
+      region: { id: regionId }, databaseUrl, stageSchema: schema, stageTable: 'region_import_stage',
+      totalFeatureCount: null, onProgress: null,
+      sourceSnapshot: { sha256: String(day).padStart(64, '0'), sizeBytes: 10,
+        replicationTimestamp: `2026-01-${String(day).padStart(2, '0')}T00:00:00Z` }
+    });
+    await apply(regionIds[0], 1);
+    await apply(regionIds[1], 1);
+    assert.equal((await apply(regionIds[0], 3)).changedFeatureCount, 0);
+    // A newer unchanged observation must protect against an intermediate old
+    // extract too, even though no contour version/timestamp was rewritten.
+    await client.query(`UPDATE ${schema}.region_import_stage SET tags_json = tags_json || '{"custom:tag":"old"}'`);
+    assert.equal((await apply(regionIds[1], 2)).changedFeatureCount, 0);
+    assert.equal((await client.query('SELECT tags_json::jsonb AS tags FROM osm.building_contours WHERE osm_id=$1', [objectId])).rows[0].tags['custom:tag'], 'kept');
+    await client.query(`UPDATE ${schema}.region_import_stage SET tags_json = '{"building":"yes","custom:tag":"kept"}',
+      min_lon=12, max_lon=13, geom=ST_Multi(ST_MakeEnvelope(12,20,13,21,4326))`);
+    assert.equal((await apply(regionIds[0], 5)).changedFeatureCount, 1);
+    await client.query(`UPDATE ${schema}.region_import_stage SET min_lon=10, max_lon=11,
+      geom=ST_Multi(ST_MakeEnvelope(10,20,11,21,4326))`);
+    assert.equal((await apply(regionIds[1], 4)).changedFeatureCount, 0);
+    assert.equal(Number((await client.query('SELECT min_lon FROM osm.building_contours WHERE osm_id=$1', [objectId])).rows[0].min_lon), 12);
+    assert.equal(Number((await client.query('SELECT count(*) AS total FROM public.data_region_memberships WHERE osm_id=$1', [objectId])).rows[0].total), 2);
+  } finally {
+    await client.query('DELETE FROM public.data_sync_regions WHERE id=ANY($1::bigint[])', [regionIds]);
+    await client.query('DELETE FROM osm.building_contours WHERE osm_id=$1', [objectId]);
+    await client.query('DELETE FROM public.building_data_changes WHERE osm_id=$1', [objectId]);
+    await client.query('UPDATE osm.building_contours_summary SET total=(SELECT count(*) FROM osm.building_contours) WHERE singleton_id=1');
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.end();
+  }
+});
+
 test('incremental region imports preserve tags, overlap, publication retries and part dependencies', {
   skip: !databaseUrl && 'ARCHIMAP_IMPORT_TEST_DATABASE_URL is required for the isolated PostgreSQL test'
 }, async () => {

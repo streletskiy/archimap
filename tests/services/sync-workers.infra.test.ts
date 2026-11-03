@@ -727,6 +727,7 @@ test('managed sync workers heartbeat queued and running runs while using stale-o
 
 test('managed sync workers queue manual sync even when upstream data is already up to date', async () => {
   let spawnCalls = 0;
+  const children = [];
   const dataSettingsService = createManagedDataSettingsService(
     [
       {
@@ -757,7 +758,9 @@ test('managed sync workers queue manual sync even when upstream data is already 
   const workers = initSyncWorkersInfra({
     spawn: () => {
       spawnCalls += 1;
-      return createChildProcessStub();
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
     },
     processExecPath: process.execPath,
     syncRegionScriptPath: 'managed.ts',
@@ -769,20 +772,26 @@ test('managed sync workers queue manual sync even when upstream data is already 
     log: { log() {}, error() {} }
   });
 
-  const skipped = await workers.requestRegionSync(11, {
+  const scheduled = await workers.requestRegionSync(11, {
     triggerReason: 'scheduled',
     requestedBy: 'system'
   });
-  assert.equal(skipped.queued, false);
-  assert.equal(skipped.skipped, true);
-  assert.equal(spawnCalls, 0);
+  assert.equal(scheduled.queued, true);
+  assert.equal(scheduled.skipped, undefined);
+  assert.equal(spawnCalls, 1);
+  children[0].stdout.emit(
+    'data',
+    Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":5,"sourceDataUpdatedAt":null}\n')
+  );
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
 
   const queued = await workers.requestRegionSync(11, { triggerReason: 'manual', requestedBy: 'tester' });
   assert.equal(queued.queued, true);
-  assert.equal(spawnCalls, 1);
+  assert.equal(spawnCalls, 2);
 });
 
-test('managed sync workers skip scheduled sync when upstream data is already up to date', async () => {
+test('managed sync workers queue up-to-date sources so the worker can repair tiles and deferred indexes', async () => {
   let spawnCalls = 0;
   let rescheduled = 0;
   const dataSettingsService = createManagedDataSettingsService(
@@ -836,10 +845,10 @@ test('managed sync workers skip scheduled sync when upstream data is already up 
     requestedBy: 'system'
   });
 
-  assert.equal(result.queued, false);
-  assert.equal(result.skipped, true);
-  assert.equal(spawnCalls, 0);
-  assert.equal(rescheduled, 1);
+  assert.equal(result.queued, true);
+  assert.equal(result.skipped, undefined);
+  assert.equal(spawnCalls, 1);
+  assert.equal(rescheduled, 0);
 });
 
 test('managed sync workers pass imported source version marker to successful runs', async () => {
@@ -898,6 +907,46 @@ test('managed sync workers pass imported source version marker to successful run
   const savedRun = await dataSettingsService.getRunById(queued.run.id);
   assert.equal(savedRun?.summary?.sourceDataUpdatedAt, '2026-04-07T23:15:47.000Z');
 });
+
+for (const actualSourceTime of ['2026-04-08T00:12:00.000Z', null]) {
+  test(`managed success prefers the applied source timestamp (${actualSourceTime}) over prequeue metadata`, async () => {
+    const children = [];
+    const metadata = createDeferredPromise();
+    const dataSettingsService = createManagedDataSettingsService(
+      [{ id: 131, enabled: true, autoSyncEnabled: false, nextSyncAt: null, lastSyncStatus: 'idle' }],
+      { getRegionUpstreamState: () => metadata.promise }
+    );
+    const workers = initSyncWorkersInfra({
+      spawn: () => {
+        const child = createChildProcessStub();
+        children.push(child);
+        return child;
+      },
+      processExecPath: process.execPath,
+      syncRegionScriptPath: 'managed.ts',
+      cwd: process.cwd(),
+      env: process.env,
+      dataSettingsService,
+      isShuttingDown: () => false,
+      onSyncSuccess: async () => {},
+      log: { log() {}, error() {} }
+    });
+    const queued = await workers.requestRegionSync(131, { triggerReason: 'scheduled', requestedBy: 'system' });
+    children[0].stdout.emit(
+      'data',
+      Buffer.from(
+        `SYNC_RESULT_JSON=${JSON.stringify({ activeFeatureCount: 5, sourceDataUpdatedAt: actualSourceTime })}\n`
+      )
+    );
+    children[0].emit('close', 0, null);
+    await waitForMicrotasks();
+    const saved = await dataSettingsService.getRunById(queued.run.id);
+    assert.equal(saved.status, 'success', 'actual source metadata must not wait for an unrelated probe');
+    assert.equal(saved.summary.sourceDataUpdatedAt, actualSourceTime);
+    metadata.resolve({ latestSourceDataUpdatedAt: '2026-04-07T00:00:00.000Z' });
+    workers.stop();
+  });
+}
 
 test('initAutoSync requeues recovered interrupted runs without waiting for upstream refresh', async () => {
   const children = [];

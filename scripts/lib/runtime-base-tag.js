@@ -34,6 +34,10 @@ function parseArgs(argv = process.argv.slice(2)) {
 }
 
 function extractRuntimeBaseStage(dockerfileText) {
+  return extractStage(dockerfileText, 'runtime-base');
+}
+
+function extractStage(dockerfileText, stageName) {
   const lines = String(dockerfileText || '')
     .replace(/\r\n/g, '\n')
     .split('\n');
@@ -43,7 +47,7 @@ function extractRuntimeBaseStage(dockerfileText) {
   for (const rawLine of lines) {
     const line = String(rawLine || '').replace(/[ \t]+$/u, '');
     if (!collecting) {
-      if (/^FROM\s+\$\{NODE_IMAGE\}\s+AS\s+runtime-base$/i.test(line)) {
+      if (/^FROM\s+/i.test(line) && line.match(/\sAS\s+(\S+)$/i)?.[1] === stageName) {
         collecting = true;
         collected.push(line);
       }
@@ -58,10 +62,30 @@ function extractRuntimeBaseStage(dockerfileText) {
   }
 
   if (collected.length === 0) {
-    throw new Error('Unable to locate runtime-base stage in Dockerfile');
+    throw new Error(`Unable to locate ${stageName} stage in Dockerfile`);
   }
 
   return `${collected.join('\n')}\n`;
+}
+
+function collectRuntimeBaseStages(dockerfileText) {
+  const stageNames = new Set([...dockerfileText.matchAll(/^FROM\s+.*\sAS\s+(\S+)\s*$/gim)].map((match) => match[1]));
+  const visited = new Set();
+  const stages = [];
+  function visit(name) {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const stage = extractStage(dockerfileText, name);
+    stages.push(stage);
+    // A cached base also contains artifacts copied from its build stages.
+    const dependencies = [...stage.matchAll(/--from=([\w-]+)|^FROM\s+([\w-]+)(?:\s|$)/gim)];
+    for (const match of dependencies) {
+      const dependency = match[1] || match[2];
+      if (stageNames.has(dependency)) visit(dependency);
+    }
+  }
+  visit('runtime-base');
+  return stages;
 }
 
 function buildRuntimeBaseTag({
@@ -78,8 +102,8 @@ function buildRuntimeBaseTag({
     .split('\n')
     .map((line) => String(line || '').replace(/[ \t]+$/u, ''))
     .find((line) => /^ARG\s+NODE_IMAGE=/i.test(line));
-  const runtimeBaseStage = extractRuntimeBaseStage(sourceText);
-  const runtimeBaseInputs = [nodeImageArg || '', runtimeBaseStage].filter(Boolean).join('\n');
+  const runtimeBaseStages = collectRuntimeBaseStages(normalizedSource);
+  const runtimeBaseInputs = [nodeImageArg || '', ...runtimeBaseStages].filter(Boolean).join('\n');
   const stageHash = crypto.createHash('sha256').update(runtimeBaseInputs, 'utf8').digest('hex').slice(0, 12);
   const version = String(planetilerVersion || '').trim() || DEFAULT_PLANETILER_VERSION;
   return `runtime-base-pl${version}-rb${stageHash}`;

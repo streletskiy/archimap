@@ -351,6 +351,7 @@ paths:
   /api/admin/app-settings/data:
     get:
       summary: Get DB-backed data settings summary
+      description: Cached sourceDataUpdatedAt is the source cut actually applied by the completed sync, including its replication cursor, or null when unknown. latestSourceDataUpdatedAt is the last checked upstream cut and does not imply it has been imported.
       responses:
         '200':
           description: Data settings payload without blocking live upstream checks for every region
@@ -391,6 +392,7 @@ paths:
   /api/admin/app-settings/data/regions/upstream-status:
     get:
       summary: Get live upstream status for selected managed data regions
+      description: OSM France and Geofabrik freshness is derived from trusted regional replication feeds in the curated catalog, so a daily PBF modification time does not hide newer regional changes. Results use a short-lived cache unless force is true.
       parameters:
         - in: query
           name: ids
@@ -413,6 +415,7 @@ paths:
   /api/admin/app-settings/data/regions/{regionId}:
     delete:
       summary: Delete a managed data region
+      description: After database deletion, attempts to remove managed source-cache files for deleted regions, including cascaded descendants, under source/import locks. Cleanup failures are logged and retried on later region deletions.
       parameters:
         - in: path
           name: regionId
@@ -465,7 +468,7 @@ paths:
   /api/admin/app-settings/data/regions/{regionId}/sync-now:
     post:
       summary: Queue a managed sync run for a region
-      description: Manual syncs queue immediately and do not wait for an upstream freshness probe first.
+      description: Manual syncs queue immediately without waiting for an upstream freshness probe. The worker validates its committed source cache and requests missing regional diffs when possible; bootstrap or recovery can download a full regional PBF. An unchanged source still allows PMTiles repair and pending search maintenance. Manual sync does not force a full download.
       parameters:
         - in: path
           name: regionId

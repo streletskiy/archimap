@@ -9,6 +9,8 @@ const {
   smtpTestTextTemplate
 } = require('../email-templates');
 const { registerContoursStatusRoute } = require('../http/contours-status.route');
+const { cleanupDeletedRegionSourceCaches } = require('../../../../scripts/region-sync/source-cache-lifecycle');
+const { resolvePostgresConnectionString } = require('../infra/db-runtime.infra');
 const { registerAppRoutes } = require('../http/app.route');
 const { registerAdminRoutes } = require('../http/admin.route');
 const { registerBuildingsRoutes } = require('../http/buildings.route');
@@ -99,6 +101,17 @@ function registerServerRuntimeRoutes(runtime: LooseRecord) {
       }
       if (action === 'delete') {
         runtime.removeRegionPmtilesFiles(deleted?.region);
+        if (runtime.config.dbProvider === 'postgres') {
+          try {
+            const cleanup = await cleanupDeletedRegionSourceCaches({
+              databaseUrl: resolvePostgresConnectionString(runtime.config.runtimeEnv, runtime.config.rawEnv),
+              dataDir: runtime.config.paths.dataDir
+            });
+            if (cleanup.failures.length) runtime.logger.error('region_delete_source_cache_cleanup_failed', { failures: cleanup.failures });
+          } catch (error) {
+            runtime.logger.error('region_delete_source_cache_cleanup_failed', { error: String(error?.message || error) });
+          }
+        }
         void runtime.rebuildSearchIndex(`region-delete:${deleted?.region?.id || 'unknown'}`).catch((error) => {
           runtime.logger.error('region_delete_search_rebuild_failed', {
             error: String(error?.message || error)

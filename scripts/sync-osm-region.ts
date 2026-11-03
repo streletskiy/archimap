@@ -12,6 +12,7 @@ const SHOULD_EMIT_STAGE_JSON =
 
 let aggregateStageContext: LooseRecord | null = null;
 const activeWorkspaces = new Set();
+const syncAbortController = new AbortController();
 
 function registerActiveWorkspace(workspace) {
   const workspacePath = path.resolve(String(workspace || '').trim());
@@ -75,20 +76,25 @@ function emitStageJson(stage, progress = null, detail = null, extras: LooseRecor
 
 function handleCancellationSignal(signal) {
   emitStageJson('cancelling', null, `signal=${signal}`);
-  cleanupActiveWorkspaces(`signal ${signal}`);
+  syncAbortController.abort(new Error(`Region synchronization cancelled: ${signal}`));
+  // Async download/Osmium operations stop first. Their finally blocks close
+  // files before workspace cleanup; retain a bounded escape for hung drivers.
   setTimeout(() => {
     try {
       process.exit(130);
     } catch {
       // ignore
     }
-  }, 50).unref?.();
+  }, 8000).unref?.();
 }
 process.on('SIGTERM', () => handleCancellationSignal('SIGTERM'));
 process.on('SIGINT', () => handleCancellationSignal('SIGINT'));
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
-const { downloadManagedRegionExtract } = require('./region-sync/extract-download');
+const { prepareManagedRegionSource, pruneRegionSourceCache } = require('./region-sync/source-cache');
+const {
+  acquireRegionSourceLock, buildImportSignature, readActiveRegionSourceState, tryRecordUnchangedRegionSource
+} = require('./region-sync/source-state');
 const { applyRegionImportFromPostgresStage } = require('./region-sync/import-applier');
 const { buildPmtilesFromGeojson } = require('./region-sync/pmtiles-builder');
 const { dropStageSchema, importPbfToPostgresStage } = require('./region-sync/osm2pgsql-import');
@@ -145,7 +151,8 @@ function assertManagedRegionSyncPostgres(runtimeOptions: LooseRecord = {}) {
 function parseArgs(argv): LooseRecord {
   const out = {
     regionId: null,
-    pmtilesOnly: false
+    pmtilesOnly: false,
+    forceImport: false
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -153,6 +160,10 @@ function parseArgs(argv): LooseRecord {
     if (!arg) continue;
     if (arg === '--pmtiles-only') {
       out.pmtilesOnly = true;
+      continue;
+    }
+    if (arg === '--force-import') {
+      out.forceImport = true;
       continue;
     }
     if (arg === '--region-id' && argv[index + 1]) {
@@ -168,7 +179,7 @@ function parseArgs(argv): LooseRecord {
   return out;
 }
 
-function createRuntimeOptions() {
+function createRuntimeOptions(): LooseRecord {
   return {
     dbProvider: DB_PROVIDER,
     databaseUrl: DATABASE_URL,
@@ -484,51 +495,69 @@ async function buildRegionPmtilesOnly(region, runtimeOptions) {
   }
 }
 
+function canReuseBuildingInput(source, previousSnapshot, importSignature) {
+  return Boolean(previousSnapshot && previousSnapshot.importSignature === importSignature &&
+    (source.sourceMode === 'unchanged' ||
+      (source.sourceMode === 'incremental' && source.buildingInputUnchanged === true)));
+}
+
 async function runRegionSync(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = registerActiveWorkspace(createWorkspace(region.id));
   const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
   let stageSchema = null;
+  let releaseSourceLock = null;
 
   try {
-    const downloaded = await downloadManagedRegionExtract({
+    const signal = syncAbortController.signal;
+    releaseSourceLock = await acquireRegionSourceLock(runtimeOptions.databaseUrl, region.id, { signal });
+    signal.throwIfAborted();
+    const previousSnapshot = await readActiveRegionSourceState(runtimeOptions.databaseUrl, region.id);
+    const importSignature = buildImportSignature();
+    const downloaded = await prepareManagedRegionSource({
       region,
+      dataDir: runtimeOptions.dataDir,
       workspace,
+      previousSnapshot,
+      importSignature,
+      signal,
       onStage: async (stage, detail, progress = null) => emitStageJson(stage, progress, detail)
     });
-
-    const stageImport = await importPbfToPostgresStage({
-      region,
-      databaseUrl: runtimeOptions.databaseUrl,
-      pbfPath: downloaded.pbfPath,
-      env: buildExtractorEnv(process.env),
-      onStage: async (stage, detail) => emitStageJson(stage, null, detail)
+    // Verified unchanged raw data, including an entirely empty native-validated
+    // diff batch, has the same building input under the same import contract.
+    const sourceInputUnchanged = canReuseBuildingInput(downloaded, previousSnapshot, importSignature);
+    // osm2pgsql selects buildings and completes their dependencies directly.
+    // A separate dense-ID prefilter adds a large memory peak and another scan.
+    downloaded.sourceSnapshot.buildingInputSha256 = null;
+    signal.throwIfAborted();
+    let dbResult = runtimeOptions.forceImport || !sourceInputUnchanged ? null : await tryRecordUnchangedRegionSource({
+      databaseUrl: runtimeOptions.databaseUrl, region, previousSnapshotId: previousSnapshot?.id,
+      sourceSnapshot: downloaded.sourceSnapshot, importSignature, sourceInputUnchanged
     });
-    stageSchema = stageImport.stageSchema;
-    // osm2pgsql has closed the source; retaining it through export/build only
-    // increases peak workspace usage. The metadata fingerprint remains in DB.
-    try {
-      fs.unlinkSync(downloaded.pbfPath);
-    } catch (error) {
-      console.warn(`[region-sync] early source cleanup deferred: ${String(error?.message || error)}`);
-    }
-
-    emitStageJson('apply', 0, buildApplyStageDetail(null));
-    const dbResult = await applyRegionImportFromPostgresStage({
-      region,
-      databaseUrl: runtimeOptions.databaseUrl,
-      stageSchema: stageImport.stageSchema,
-      stageTable: stageImport.stageTable,
-      totalFeatureCount: null,
-      sourceSnapshot: downloaded.sourceSnapshot,
-      onProgress: createApplyStageProgressEmitter()
-    });
-    try {
-      await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
-      stageSchema = null;
-    } catch (error) {
-      console.warn(`[region-sync] early staging cleanup deferred: ${String(error?.message || error)}`);
+    const buildingImportSkipped = Boolean(dbResult);
+    if (!dbResult) {
+      const stageImport = await importPbfToPostgresStage({
+        region, databaseUrl: runtimeOptions.databaseUrl, pbfPath: downloaded.pbfPath,
+        env: buildExtractorEnv(process.env),
+        onStage: async (stage, detail) => emitStageJson(stage, null, detail)
+      });
+      stageSchema = stageImport.stageSchema;
+      signal.throwIfAborted();
+      emitStageJson('apply', 0, buildApplyStageDetail(null));
+      dbResult = await applyRegionImportFromPostgresStage({
+        region, databaseUrl: runtimeOptions.databaseUrl, stageSchema: stageImport.stageSchema,
+        stageTable: stageImport.stageTable, totalFeatureCount: null,
+        sourceSnapshot: downloaded.sourceSnapshot, onProgress: createApplyStageProgressEmitter()
+      });
+      try {
+        await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
+        stageSchema = null;
+      } catch (error) {
+        console.warn(`[region-sync] early staging cleanup deferred: ${String(error?.message || error)}`);
+      }
+    } else {
+      emitStageJson('apply', 100, 'building data unchanged; skipping osm2pgsql and canonical writes');
     }
 
     const tileState = await readRegionTileState(runtimeOptions.databaseUrl, region.id);
@@ -571,6 +600,13 @@ async function runRegionSync(region, runtimeOptions) {
 
     return {
       ...dbResult,
+      sourceMode: downloaded.sourceMode,
+      sourceDataUpdatedAt: downloaded.sourceDataUpdatedAt || null,
+      sourceDownloadBytes: downloaded.downloadBytes,
+      sourceDownloadRequests: downloaded.downloadRequests,
+      sourceDiffCount: downloaded.diffCount,
+      sourceCacheBytes: downloaded.sourceSnapshot.sizeBytes,
+      buildingImportSkipped,
       ...summarizePmtilesBuildResult(buildResult),
       pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
       pmtilesPath: finalArchivePath,
@@ -582,6 +618,25 @@ async function runRegionSync(region, runtimeOptions) {
         await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
       } catch (error) {
         console.warn(`[region-sync] staging schema cleanup failed: ${String(error?.message || error)}`);
+      }
+    }
+    if (releaseSourceLock) {
+      try {
+        const committed = await readActiveRegionSourceState(runtimeOptions.databaseUrl, region.id, { synchronizeImport: true });
+        if (committed?.persistentSource) pruneRegionSourceCache({
+          dataDir: runtimeOptions.dataDir, regionId: region.id, activePath: committed.localPath
+        });
+        else if (!committed) pruneRegionSourceCache({
+          dataDir: runtimeOptions.dataDir, regionId: region.id, noActiveSnapshot: true
+        });
+      } catch (error) {
+        console.warn(`[region-sync] source cache cleanup deferred: ${String(error?.message || error)}`);
+      } finally {
+        try {
+          await releaseSourceLock();
+        } catch (error) {
+          console.warn(`[region-sync] source lock release failed: ${String(error?.message || error)}`);
+        }
       }
     }
     cleanupManagedWorkspace(workspace, 'region sync run');
@@ -689,6 +744,7 @@ async function main() {
     }
 
     const runtimeOptions = createRuntimeOptions();
+    runtimeOptions.forceImport = args.forceImport;
     assertManagedRegionSyncPostgres(runtimeOptions);
     const staleCleanup = cleanupStaleWorkspaces();
     if (staleCleanup.removed > 0) {
@@ -725,11 +781,12 @@ if (require.main === module) {
   main().catch((error) => {
     const message = String(error?.message || error || 'Unknown managed region sync error');
     console.error(`[region-sync] ${message}`);
-    process.exit(1);
+    process.exit(syncAbortController.signal.aborted ? 130 : 1);
   });
 }
 
 module.exports = {
+  canReuseBuildingInput,
   buildApplyStageDetail,
   buildExtractorEnv,
   buildRuntimeFollowupEnv,

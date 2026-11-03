@@ -665,10 +665,16 @@ test('saveRegion expands a new geofabrik country into an aggregate with hidden s
     db,
     countrySubregionsCatalog: {
       async getCountry(countryId) {
-        return String(countryId || '').trim().toLowerCase() === 'poland' ? country : null;
+        return String(countryId || '')
+          .trim()
+          .toLowerCase() === 'poland'
+          ? country
+          : null;
       },
       async findByExtractId(extractId) {
-        return String(extractId || '').trim().toLowerCase() === 'poland'
+        return String(extractId || '')
+          .trim()
+          .toLowerCase() === 'poland'
           ? { country, subregion: null }
           : null;
       }
@@ -825,14 +831,7 @@ test('saveRegion upgrades an existing standalone geofabrik country into an aggre
       )
       VALUES (?, ?, 'extract', ?, ?, ?, ?, 'resolved', 1, 0, 0, 0, 10, 14, 'custom-buildings', 'standalone', 1, datetime('now'), datetime('now'))
     `
-  ).run(
-    'pl-poland',
-    'PL Poland',
-    'PL Poland',
-    'geofabrik',
-    'geofabrik_europe_poland',
-    'PL Poland'
-  );
+  ).run('pl-poland', 'PL Poland', 'PL Poland', 'geofabrik', 'geofabrik_europe_poland', 'PL Poland');
 
   const inserted = db
     .prepare(
@@ -858,10 +857,16 @@ test('saveRegion upgrades an existing standalone geofabrik country into an aggre
     db,
     countrySubregionsCatalog: {
       async getCountry(countryId) {
-        return String(countryId || '').trim().toLowerCase() === 'poland' ? country : null;
+        return String(countryId || '')
+          .trim()
+          .toLowerCase() === 'poland'
+          ? country
+          : null;
       },
       async findByExtractId(extractId) {
-        const normalized = String(extractId || '').trim().toLowerCase();
+        const normalized = String(extractId || '')
+          .trim()
+          .toLowerCase();
         if (normalized === 'poland' || normalized === 'geofabrik_europe_poland') {
           return { country, subregion: null };
         }
@@ -997,14 +1002,7 @@ test('createQueuedRun upgrades an existing standalone geofabrik country into an 
       )
       VALUES (?, ?, 'extract', ?, ?, ?, ?, 'resolved', 1, 0, 0, 0, 10, 14, 'custom-buildings', 'standalone', 1, datetime('now'), datetime('now'))
     `
-  ).run(
-    'pl-poland',
-    'PL Poland',
-    'PL Poland',
-    'geofabrik',
-    'geofabrik_europe_poland',
-    'PL Poland'
-  );
+  ).run('pl-poland', 'PL Poland', 'PL Poland', 'geofabrik', 'geofabrik_europe_poland', 'PL Poland');
 
   const inserted = db
     .prepare(
@@ -1022,10 +1020,16 @@ test('createQueuedRun upgrades an existing standalone geofabrik country into an 
     db,
     countrySubregionsCatalog: {
       async getCountry(countryId) {
-        return String(countryId || '').trim().toLowerCase() === 'poland' ? country : null;
+        return String(countryId || '')
+          .trim()
+          .toLowerCase() === 'poland'
+          ? country
+          : null;
       },
       async findByExtractId(extractId) {
-        const normalized = String(extractId || '').trim().toLowerCase();
+        const normalized = String(extractId || '')
+          .trim()
+          .toLowerCase();
         if (normalized === 'poland' || normalized === 'geofabrik_europe_poland') {
           return { country, subregion: null };
         }
@@ -1236,7 +1240,7 @@ test('getRegionsUpstreamState marks region when upstream source has a newer vers
   const service = createService({
     db,
     fetchImpl: async () =>
-      new Response('', {
+      new Response('sequenceNumber=123\ntimestamp=2026-04-07T23:15:47Z\n', {
         status: 200,
         headers: {
           'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
@@ -1293,7 +1297,7 @@ test('getRegionsUpstreamState keeps upstream state unknown when local source ver
   const service = createService({
     db,
     fetchImpl: async () =>
-      new Response('', {
+      new Response('sequenceNumber=123\ntimestamp=2026-04-07T23:15:47Z\n', {
         status: 200,
         headers: {
           'last-modified': 'Tue, 07 Apr 2026 23:15:47 GMT'
