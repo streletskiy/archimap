@@ -4,6 +4,8 @@ const path = require('path');
 const { createDbRuntime } = require('../src/lib/server/infra/db-runtime.infra');
 const { getDbProvider, getPostgresConnectionString } = require('../scripts/lib/postgres-config');
 const { createSearchIndexRefreshService } = require('../src/lib/server/services/search-index-refresh.service');
+const { Client } = require('pg');
+const { refreshPostgresSearchChanges } = require('../src/lib/server/services/search-index-postgres.service');
 
 const DB_PROVIDER = getDbProvider(process.env);
 const DATABASE_URL = getPostgresConnectionString(process.env);
@@ -26,6 +28,37 @@ let draining = false;
 let runtime = null;
 let refreshService = null;
 let isReady = false;
+let stopping = false;
+let durableClient = null;
+let durableRetryTimer = null;
+let durableRetryAttempt = 0;
+let durableDrainRequested = DB_PROVIDER === 'postgres';
+
+function scheduleDurableRetry() {
+  if (DB_PROVIDER !== 'postgres' || stopping || durableRetryTimer) return;
+  const delay = Math.min(60000, 1000 * (2 ** Math.min(durableRetryAttempt++, 6)));
+  durableRetryTimer = setTimeout(() => {
+    durableRetryTimer = null;
+    durableDrainRequested = true;
+    void drainQueue();
+  }, delay);
+  durableRetryTimer.unref();
+}
+
+async function drainDurableChanges() {
+  if (!durableClient) {
+    const client = new Client({ connectionString: DATABASE_URL });
+    client.on('error', () => {
+      if (durableClient === client) durableClient = null;
+      void client.end().catch(() => {});
+      scheduleDurableRetry();
+    });
+    try { await client.connect(); } catch (error) { await client.end().catch(() => {}); throw error; }
+    durableClient = client;
+  }
+  const processed = await refreshPostgresSearchChanges(durableClient);
+  sendMessage({ type: 'drained', processed });
+}
 
 function sendMessage(message) {
   if (typeof process.send === 'function') {
@@ -38,7 +71,7 @@ function sendMessage(message) {
 }
 
 function canDrainQueue() {
-  return isReady && Boolean(refreshService);
+  return !stopping && isReady && Boolean(refreshService);
 }
 
 function normalizeTargetMessage(message) {
@@ -68,11 +101,27 @@ async function drainQueue() {
           osmId: item.osmId,
           error: String(error?.message || error)
         });
+        scheduleDurableRetry();
+      }
+    }
+    if (durableDrainRequested && !stopping) {
+      durableDrainRequested = false;
+      try {
+        await drainDurableChanges();
+        durableRetryAttempt = 0;
+        if (durableRetryTimer) clearTimeout(durableRetryTimer);
+        durableRetryTimer = null;
+      } catch (error) {
+        console.error('[search-refresh-worker] durable_drain_failed', String(error?.message || error));
+        const failedClient = durableClient;
+        durableClient = null;
+        if (failedClient) await failedClient.end().catch(() => {});
+        scheduleDurableRetry();
       }
     }
   } finally {
     draining = false;
-    if (canDrainQueue() && queue.length > 0) {
+    if (canDrainQueue() && (queue.length > 0 || durableDrainRequested)) {
       void drainQueue();
     }
   }
@@ -113,6 +162,11 @@ async function main() {
   void drainQueue();
 
   const shutdown = async () => {
+    stopping = true;
+    if (durableRetryTimer) clearTimeout(durableRetryTimer);
+    durableRetryTimer = null;
+    if (durableClient) await durableClient.end().catch(() => {});
+    durableClient = null;
     try {
       if (runtime) {
         await runtime.close();
@@ -128,6 +182,10 @@ async function main() {
   });
 
   process.once('SIGINT', async () => {
+    await shutdown();
+    process.exit(0);
+  });
+  process.once('disconnect', async () => {
     await shutdown();
     process.exit(0);
   });

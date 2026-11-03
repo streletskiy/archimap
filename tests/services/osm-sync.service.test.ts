@@ -1693,7 +1693,7 @@ test('cleanupSyncedLocalOverwritesAfterImport ignores unrelated OSM tag changes 
   assert.equal(searchRefreshCalls, 1);
 });
 
-test('cleanupSyncedLocalOverwritesAfterImport skips search index refresh for material-only overwrites', async () => {
+test('cleanupSyncedLocalOverwritesAfterImport refreshes all-tag search for material-only overwrites', async () => {
   const db = createTestDb();
   db.prepare(`INSERT INTO app_general_settings (id, app_display_name, app_base_url) VALUES (1, ?, ?)`).run(
     'archimap',
@@ -1751,5 +1751,5 @@ test('cleanupSyncedLocalOverwritesAfterImport skips search index refresh for mat
 
   assert.equal(result.ok, true);
   assert.equal(result.cleaned.length, 1);
-  assert.equal(searchRefreshCalls, 0);
+  assert.equal(searchRefreshCalls, 1);
 });

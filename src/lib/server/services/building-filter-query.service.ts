@@ -1,9 +1,5 @@
-const {
-  collectRequiredArchiColumns,
-  compilePostgresFilterRulesGuardPredicate,
-  compilePostgresFilterRulesPredicate
-} = require('../utils/filter-sql-builder');
 const { splitBuildingMaterialSelection } = require('./edits.service');
+const { selectPostgresFilterMatches } = require('./building-filter-postgres');
 
 const FILTER_DATA_SELECT_FIELDS_SQL = `
   SELECT
@@ -346,17 +342,6 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
       : selectFilterRowsBboxPlain.all(minLon, maxLon, minLat, maxLat, limit);
   }
 
-  async function selectBatchFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit, requests) {
-    if (!isPostgres) return selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, limit);
-    const columns = collectRequiredArchiColumns(requests.flatMap((request) => request.rules));
-    const projection = columns.length ? `ai.osm_id AS info_osm_id, ${columns.map((column) => `ai.${column}`).join(', ')}` : 'NULL::bigint AS info_osm_id';
-    const join = columns.length ? 'LEFT JOIN local.architectural_info ai ON ai.osm_type = bc.osm_type AND ai.osm_id = bc.osm_id' : '';
-    return db.prepare(`WITH env AS (SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom)
-      SELECT bc.osm_type, bc.osm_id, bc.tags_json, bc.min_lon, bc.min_lat, bc.max_lon, bc.max_lat, ${projection}
-      FROM osm.building_contours bc ${join} JOIN env ON bc.geom && env.geom
-      WHERE ST_Intersects(bc.geom, env.geom) LIMIT ?`).all(minLon, minLat, maxLon, maxLat, limit);
-  }
-
   async function selectFilterDataRowsByKeys(keys = []) {
     const rows = [];
     const CHUNK_SIZE = 300;
@@ -402,130 +387,6 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
     return rows;
   }
 
-  async function selectTagOnlyPostgresMatchRowsByBbox({ minLon, minLat, maxLon, maxLat, rules, maxResults }) {
-    if (!isPostgres) return null;
-    const compiledTagRules = compilePostgresFilterRulesPredicate(rules, {
-      rowAlias: 'base',
-      tagsAlias: 'base.tags_jsonb'
-    });
-    const selectTagOnlyRowsSql = `
-      WITH env AS (
-        SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom
-      ),
-      base AS MATERIALIZED (
-        SELECT
-          bc.osm_type,
-          bc.osm_id,
-          bc.tags_json,
-          bc.min_lon,
-          bc.min_lat,
-          bc.max_lon,
-          bc.max_lat,
-          CASE
-            WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
-            ELSE '{}'::jsonb
-          END AS tags_jsonb
-        FROM osm.building_contours bc
-        JOIN env
-          ON bc.geom && env.geom
-        WHERE ST_Intersects(bc.geom, env.geom)
-      )
-      SELECT
-        base.osm_type,
-        base.osm_id,
-        base.tags_json,
-        base.min_lon,
-        base.min_lat,
-        base.max_lon,
-        base.max_lat
-      FROM base
-      WHERE ${compiledTagRules.sql}
-      LIMIT ?
-    `;
-    return db
-      .prepare(selectTagOnlyRowsSql)
-      .all(minLon, minLat, maxLon, maxLat, ...compiledTagRules.params, maxResults + 1);
-  }
-
-  async function selectGuardedPostgresCandidateRowsByBbox({
-    minLon,
-    minLat,
-    maxLon,
-    maxLat,
-    rules,
-    archiRules = rules,
-    candidateLimit
-  }) {
-    if (!isPostgres) return [];
-    const requiredArchiColumns = collectRequiredArchiColumns(archiRules);
-    const aiJoinSql =
-      requiredArchiColumns.length > 0
-        ? `
-      LEFT JOIN local.architectural_info ai
-        ON ai.osm_type = guarded.osm_type AND ai.osm_id = guarded.osm_id
-      `
-        : '';
-    const aiSelectSql =
-      requiredArchiColumns.length > 0
-        ? `ai.osm_id AS info_osm_id,
-        ${requiredArchiColumns.map((column) => `ai.${column}`).join(',\n        ')}`
-        : 'NULL::bigint AS info_osm_id';
-    const compiledGuardRules = compilePostgresFilterRulesGuardPredicate(rules, {
-      rowAlias: 'base',
-      tagsAlias: 'base.tags_jsonb'
-    });
-    const selectGuardedCandidateRowsSql = `
-      WITH env AS (
-        SELECT ST_MakeEnvelope(?, ?, ?, ?, 4326) AS geom
-      ),
-      base AS MATERIALIZED (
-        SELECT
-          bc.osm_type,
-          bc.osm_id,
-          bc.tags_json,
-          bc.min_lon,
-          bc.min_lat,
-          bc.max_lon,
-          bc.max_lat,
-          CASE
-            WHEN bc.tags_json ~ '^\\s*\\{' THEN bc.tags_json::jsonb
-            ELSE '{}'::jsonb
-          END AS tags_jsonb
-        FROM osm.building_contours bc
-        JOIN env
-          ON bc.geom && env.geom
-        WHERE ST_Intersects(bc.geom, env.geom)
-      ),
-      guarded AS MATERIALIZED (
-        SELECT
-          base.osm_type,
-          base.osm_id,
-          base.tags_json,
-          base.min_lon,
-          base.min_lat,
-          base.max_lon,
-          base.max_lat
-        FROM base
-        WHERE ${compiledGuardRules.sql}
-        LIMIT ?
-      )
-      SELECT
-        guarded.osm_type,
-        guarded.osm_id,
-        guarded.tags_json,
-        guarded.min_lon,
-        guarded.min_lat,
-        guarded.max_lon,
-        guarded.max_lat,
-        ${aiSelectSql}
-      FROM guarded
-      ${aiJoinSql}
-    `;
-    return db
-      .prepare(selectGuardedCandidateRowsSql)
-      .all(minLon, minLat, maxLon, maxLat, ...compiledGuardRules.params, candidateLimit);
-  }
-
   return {
     isPostgres,
     getBboxQueryMode,
@@ -533,9 +394,7 @@ function createBuildingFilterQueryService({ db, rtreeState }) {
     parseBboxInput,
     selectFilterDataRowsByKeys,
     selectFilterRowsByBbox,
-    selectBatchFilterRowsByBbox,
-    selectGuardedPostgresCandidateRowsByBbox,
-    selectTagOnlyPostgresMatchRowsByBbox
+    selectPostgresFilterMatches: (options) => selectPostgresFilterMatches(db, options)
   };
 }
 

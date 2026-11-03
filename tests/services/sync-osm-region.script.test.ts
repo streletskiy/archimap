@@ -3,16 +3,33 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 const {
+  canReuseBuildingInput,
   buildApplyStageDetail,
   buildExtractorEnv,
   buildRuntimeFollowupEnv,
   isProcessAlive,
+  parseArgs,
   resolveParentWatchdogPid,
   resolveImporterDbGeometryMode,
   runRuntimeFollowups,
   startParentWatchdog,
   shouldRunRuntimeFollowup
 } = require('../../scripts/sync-osm-region');
+
+test('building input reuse requires a verified unchanged source and the exact import contract', () => {
+  const previous = { buildingInputSha256: null, importSignature: 'current' };
+  assert.equal(canReuseBuildingInput({ sourceMode: 'unchanged' }, previous, 'current'), true);
+  assert.equal(canReuseBuildingInput({ sourceMode: 'incremental', buildingInputUnchanged: true }, previous, 'current'), true);
+  assert.equal(canReuseBuildingInput({ sourceMode: 'incremental' }, previous, 'current'), false);
+  assert.equal(canReuseBuildingInput({ sourceMode: 'full', buildingInputUnchanged: true }, previous, 'current'), false);
+  assert.equal(canReuseBuildingInput({ sourceMode: 'unchanged' }, previous, 'changed'), false);
+  assert.equal(canReuseBuildingInput({ sourceMode: 'unchanged' }, null, 'current'), false);
+});
+
+test('force-import is an explicit CLI repair option without changing the default', () => {
+  assert.equal(parseArgs(['--region-id', '267']).forceImport, false);
+  assert.equal(parseArgs(['--region-id=267', '--force-import']).forceImport, true);
+});
 
 test('shouldRunRuntimeFollowup skips pmtiles-only and managed runtime env', () => {
   assert.equal(shouldRunRuntimeFollowup({ pmtilesOnly: true, env: {} }), false);
@@ -164,6 +181,7 @@ test('runRuntimeFollowups executes search and filter workers for standalone sync
   assert.equal(calls[0].args[1], 'tsx');
   assert.equal(calls[0].args[2], path.join(rootDir, 'workers', 'rebuild-search-index.worker.ts'));
   assert.equal(calls[0].options.env.SEARCH_REBUILD_REASON, 'region-sync:42');
+  assert.equal(calls[0].options.env.SEARCH_REBUILD_MODE, 'incremental');
   assert.equal(calls[0].options.env.DB_PROVIDER, 'postgres');
   assert.equal(calls[0].options.env.DATABASE_URL, 'postgresql://archimap:archimap@db-postgres:5432/archimap');
 

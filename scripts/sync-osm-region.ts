@@ -12,6 +12,7 @@ const SHOULD_EMIT_STAGE_JSON =
 
 let aggregateStageContext: LooseRecord | null = null;
 const activeWorkspaces = new Set();
+const syncAbortController = new AbortController();
 
 function registerActiveWorkspace(workspace) {
   const workspacePath = path.resolve(String(workspace || '').trim());
@@ -75,26 +76,31 @@ function emitStageJson(stage, progress = null, detail = null, extras: LooseRecor
 
 function handleCancellationSignal(signal) {
   emitStageJson('cancelling', null, `signal=${signal}`);
-  cleanupActiveWorkspaces(`signal ${signal}`);
+  syncAbortController.abort(new Error(`Region synchronization cancelled: ${signal}`));
+  // Async download/Osmium operations stop first. Their finally blocks close
+  // files before workspace cleanup; retain a bounded escape for hung drivers.
   setTimeout(() => {
     try {
       process.exit(130);
     } catch {
       // ignore
     }
-  }, 50).unref?.();
+  }, 8000).unref?.();
 }
 process.on('SIGTERM', () => handleCancellationSignal('SIGTERM'));
 process.on('SIGINT', () => handleCancellationSignal('SIGINT'));
 
 const { getDbProvider, getPostgresConnectionString } = require('./lib/postgres-config');
-const { downloadManagedRegionExtract } = require('./region-sync/extract-download');
-const { applyRegionImportFromPostgresStage, publishPmtilesArchive } = require('./region-sync/import-applier');
-const { buildPmtilesFromGeojson } = require('./region-sync/pmtiles-builder');
+const { prepareManagedRegionSource, pruneRegionSourceCache } = require('./region-sync/source-cache');
+const {
+  acquireRegionSourceLock, buildImportSignature, readActiveRegionSourceState, tryRecordUnchangedRegionSource
+} = require('./region-sync/source-state');
+const { applyRegionImportFromPostgresStage } = require('./region-sync/import-applier');
+const { buildRegionTiles } = require('./region-sync/tile-build');
 const { dropStageSchema, importPbfToPostgresStage } = require('./region-sync/osm2pgsql-import');
+const { resolveRegionPmtilesPath } = require('../src/lib/server/services/data-settings.service');
 const {
   assertRegionSupportsManagedSync,
-  exportRegionMembersToGeojsonNdjson,
   loadRegion,
   loadSubregions,
   updateRegionPostSync
@@ -118,11 +124,6 @@ const LOCAL_EDITS_DB_PATH =
 const DATA_DIR =
   String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() ||
   path.join(__dirname, '..', 'data');
-const PMTILES_PROGRESS_JSON = String(process.env.PMTILES_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
-const PMTILES_PROGRESS_INTERVAL_SEC = Math.max(
-  1,
-  Math.min(300, Number(process.env.PMTILES_PROGRESS_INTERVAL_SEC || 5))
-);
 const ROOT_DIR = path.join(__dirname, '..');
 const DEFAULT_PARENT_WATCHDOG_INTERVAL_MS = 5_000;
 
@@ -141,7 +142,8 @@ function assertManagedRegionSyncPostgres(runtimeOptions: LooseRecord = {}) {
 function parseArgs(argv): LooseRecord {
   const out = {
     regionId: null,
-    pmtilesOnly: false
+    pmtilesOnly: false,
+    forceImport: false
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -149,6 +151,10 @@ function parseArgs(argv): LooseRecord {
     if (!arg) continue;
     if (arg === '--pmtiles-only') {
       out.pmtilesOnly = true;
+      continue;
+    }
+    if (arg === '--force-import') {
+      out.forceImport = true;
       continue;
     }
     if (arg === '--region-id' && argv[index + 1]) {
@@ -164,7 +170,7 @@ function parseArgs(argv): LooseRecord {
   return out;
 }
 
-function createRuntimeOptions() {
+function createRuntimeOptions(): LooseRecord {
   return {
     dbProvider: DB_PROVIDER,
     databaseUrl: DATABASE_URL,
@@ -321,7 +327,8 @@ function runRuntimeFollowups({
     scriptPath: path.join(rootDir, 'workers', 'rebuild-search-index.worker.ts'),
     env: {
       ...followupEnv,
-      SEARCH_REBUILD_REASON: reason
+      SEARCH_REBUILD_REASON: reason,
+      SEARCH_REBUILD_MODE: 'incremental'
     },
     rootDir,
     spawnSyncRef,
@@ -341,25 +348,6 @@ function runRuntimeFollowups({
   });
 }
 
-async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}, _dataDir = null) {
-  return buildPmtilesFromGeojson({
-    region,
-    geojsonPath,
-    outputPath,
-    bounds: region?.bounds || exportSummary?.bounds || null,
-    featureCount: Number.isFinite(exportSummary?.importedFeatureCount)
-      ? Number(exportSummary.importedFeatureCount)
-      : null,
-    progressJson: PMTILES_PROGRESS_JSON,
-    progressIntervalSec: PMTILES_PROGRESS_INTERVAL_SEC,
-    onShardProgress: (stageInfo) => {
-      const stage = String(stageInfo?.stage || 'build').trim() || 'build';
-      emitStageJson(stage, stageInfo?.progress ?? null, stageInfo?.detail || null);
-    },
-    env: process.env
-  });
-}
-
 function summarizePmtilesBuildResult(buildResult: LooseRecord = {}) {
   return {
     pmtilesBuildEngine: buildResult?.engine || null,
@@ -367,7 +355,12 @@ function summarizePmtilesBuildResult(buildResult: LooseRecord = {}) {
     pmtilesShardCount: Number(buildResult?.shardCount || 0) || null,
     pmtilesShardReusedCount: Number(buildResult?.reusedShardCount || 0),
     pmtilesShardRebuiltCount: Number(buildResult?.rebuiltShardCount || 0),
-    pmtilesShardCacheDir: buildResult?.cacheDir || null
+    pmtilesShardCacheDir: buildResult?.cacheDir || null,
+    pmtilesDirtyTileCount: Number(buildResult?.dirtyTileCount || 0),
+    pmtilesRetainedTileCount: Number(buildResult?.retainedTileCount || 0),
+    pmtilesReplacedTileCount: Number(buildResult?.replacedTileCount || 0),
+    pmtilesDeletedTileCount: Number(buildResult?.deletedTileCount || 0),
+    pmtilesAddedTileCount: Number(buildResult?.addedTileCount || 0)
   };
 }
 
@@ -439,96 +432,94 @@ function createApplyStageProgressEmitter() {
 async function buildRegionPmtilesOnly(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = registerActiveWorkspace(createWorkspace(region.id));
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
   try {
-    emitStageJson('export', null, 'reading region members from PostgreSQL');
-    const exported = await exportRegionMembersToGeojsonNdjson({
-      ...runtimeOptions,
-      regionId: region.id,
-      outputPath: geojsonPath
-    });
-    if (exported.importedFeatureCount <= 0) {
-      throw new Error('Region has no features, PMTiles rebuild aborted');
-    }
-
-    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
-    emitStageJson('publish', null, 'publishing pmtiles archive');
-    const finalArchivePath = publishPmtilesArchive({
-      dataDir: runtimeOptions.dataDir,
-      region,
-      builtPmtilesPath
+    const tiles = await buildRegionTiles({
+      region, runtimeOptions, workspace, forceFull: true,
+      archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region),
+      signal: syncAbortController.signal, onStage: emitStageJson
     });
 
     return {
-      importedFeatureCount: exported.importedFeatureCount,
-      activeFeatureCount: exported.importedFeatureCount,
+      importedFeatureCount: tiles.exportedFeatureCount,
+      activeFeatureCount: tiles.exportedFeatureCount,
       orphanDeletedCount: 0,
       renderCacheRows: 0,
-      ...summarizePmtilesBuildResult(buildResult),
-      pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
-      pmtilesPath: finalArchivePath,
-      bounds: exported.bounds
+      ...summarizePmtilesBuildResult(tiles.buildResult),
+      pmtilesBytes: Number(fs.statSync(tiles.archivePath).size || 0),
+      pmtilesPath: tiles.archivePath,
+      bounds: tiles.bounds
     };
   } finally {
     cleanupManagedWorkspace(workspace, 'pmtiles-only run');
   }
 }
 
+function canReuseBuildingInput(source, previousSnapshot, importSignature) {
+  return Boolean(previousSnapshot && previousSnapshot.importSignature === importSignature &&
+    (source.sourceMode === 'unchanged' ||
+      (source.sourceMode === 'incremental' && source.buildingInputUnchanged === true)));
+}
+
 async function runRegionSync(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = registerActiveWorkspace(createWorkspace(region.id));
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
   let stageSchema = null;
+  let releaseSourceLock = null;
 
   try {
-    const downloaded = await downloadManagedRegionExtract({
+    const signal = syncAbortController.signal;
+    releaseSourceLock = await acquireRegionSourceLock(runtimeOptions.databaseUrl, region.id, { signal });
+    signal.throwIfAborted();
+    const previousSnapshot = await readActiveRegionSourceState(runtimeOptions.databaseUrl, region.id);
+    const importSignature = buildImportSignature();
+    const downloaded = await prepareManagedRegionSource({
       region,
+      dataDir: runtimeOptions.dataDir,
       workspace,
+      previousSnapshot,
+      importSignature,
+      signal,
       onStage: async (stage, detail, progress = null) => emitStageJson(stage, progress, detail)
     });
-
-    const stageImport = await importPbfToPostgresStage({
-      region,
-      databaseUrl: runtimeOptions.databaseUrl,
-      pbfPath: downloaded.pbfPath,
-      env: buildExtractorEnv(process.env),
-      onStage: async (stage, detail) => emitStageJson(stage, null, detail)
+    // Verified unchanged raw data, including an entirely empty native-validated
+    // diff batch, has the same building input under the same import contract.
+    const sourceInputUnchanged = canReuseBuildingInput(downloaded, previousSnapshot, importSignature);
+    // osm2pgsql selects buildings and completes their dependencies directly.
+    // A separate dense-ID prefilter adds a large memory peak and another scan.
+    downloaded.sourceSnapshot.buildingInputSha256 = null;
+    signal.throwIfAborted();
+    let dbResult = runtimeOptions.forceImport || !sourceInputUnchanged ? null : await tryRecordUnchangedRegionSource({
+      databaseUrl: runtimeOptions.databaseUrl, region, previousSnapshotId: previousSnapshot?.id,
+      sourceSnapshot: downloaded.sourceSnapshot, importSignature, sourceInputUnchanged
     });
-    stageSchema = stageImport.stageSchema;
-
-    emitStageJson('apply', 0, buildApplyStageDetail(null));
-    const dbResult = await applyRegionImportFromPostgresStage({
-      region,
-      databaseUrl: runtimeOptions.databaseUrl,
-      stageSchema: stageImport.stageSchema,
-      stageTable: stageImport.stageTable,
-      totalFeatureCount: null,
-      sourceSnapshot: downloaded.sourceSnapshot,
-      onProgress: createApplyStageProgressEmitter()
-    });
-
-    emitStageJson('export', null, 'exporting region members from PostgreSQL');
-    const exported = await exportRegionMembersToGeojsonNdjson({
-      ...runtimeOptions,
-      regionId: region.id,
-      outputPath: geojsonPath
-    });
-    if (exported.importedFeatureCount <= 0) {
-      throw new Error('Sync produced 0 PMTiles features; keeping previous region archive untouched');
+    const buildingImportSkipped = Boolean(dbResult);
+    if (!dbResult) {
+      const stageImport = await importPbfToPostgresStage({
+        region, databaseUrl: runtimeOptions.databaseUrl, pbfPath: downloaded.pbfPath,
+        env: buildExtractorEnv(process.env),
+        onStage: async (stage, detail) => emitStageJson(stage, null, detail)
+      });
+      stageSchema = stageImport.stageSchema;
+      signal.throwIfAborted();
+      emitStageJson('apply', 0, buildApplyStageDetail(null));
+      dbResult = await applyRegionImportFromPostgresStage({
+        region, databaseUrl: runtimeOptions.databaseUrl, stageSchema: stageImport.stageSchema,
+        stageTable: stageImport.stageTable, totalFeatureCount: null,
+        sourceSnapshot: downloaded.sourceSnapshot, onProgress: createApplyStageProgressEmitter()
+      });
+      try {
+        await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
+        stageSchema = null;
+      } catch (error) {
+        console.warn(`[region-sync] early staging cleanup deferred: ${String(error?.message || error)}`);
+      }
+    } else {
+      emitStageJson('apply', 100, 'building data unchanged; skipping osm2pgsql and canonical writes');
     }
 
-    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
-    emitStageJson('publish', null, 'publishing pmtiles archive');
-    const finalArchivePath = publishPmtilesArchive({
-      dataDir: runtimeOptions.dataDir,
-      region,
-      builtPmtilesPath
-    });
+    const tiles = await buildRegionTiles({ region, runtimeOptions, workspace,
+      archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region), signal, onStage: emitStageJson });
 
     if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
       emitStageJson('followup', null, 'rebuilding search indexes');
@@ -540,10 +531,17 @@ async function runRegionSync(region, runtimeOptions) {
 
     return {
       ...dbResult,
-      ...summarizePmtilesBuildResult(buildResult),
-      pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
-      pmtilesPath: finalArchivePath,
-      bounds: exported.bounds
+      sourceMode: downloaded.sourceMode,
+      sourceDataUpdatedAt: downloaded.sourceDataUpdatedAt || null,
+      sourceDownloadBytes: downloaded.downloadBytes,
+      sourceDownloadRequests: downloaded.downloadRequests,
+      sourceDiffCount: downloaded.diffCount,
+      sourceCacheBytes: downloaded.sourceSnapshot.sizeBytes,
+      buildingImportSkipped,
+      ...summarizePmtilesBuildResult(tiles.buildResult),
+      pmtilesBytes: Number(fs.statSync(tiles.archivePath).size || 0),
+      pmtilesPath: tiles.archivePath,
+      bounds: tiles.bounds
     };
   } finally {
     if (stageSchema) {
@@ -551,6 +549,25 @@ async function runRegionSync(region, runtimeOptions) {
         await dropStageSchema(runtimeOptions.databaseUrl, stageSchema);
       } catch (error) {
         console.warn(`[region-sync] staging schema cleanup failed: ${String(error?.message || error)}`);
+      }
+    }
+    if (releaseSourceLock) {
+      try {
+        const committed = await readActiveRegionSourceState(runtimeOptions.databaseUrl, region.id, { synchronizeImport: true });
+        if (committed?.persistentSource) pruneRegionSourceCache({
+          dataDir: runtimeOptions.dataDir, regionId: region.id, activePath: committed.localPath
+        });
+        else if (!committed) pruneRegionSourceCache({
+          dataDir: runtimeOptions.dataDir, regionId: region.id, noActiveSnapshot: true
+        });
+      } catch (error) {
+        console.warn(`[region-sync] source cache cleanup deferred: ${String(error?.message || error)}`);
+      } finally {
+        try {
+          await releaseSourceLock();
+        } catch (error) {
+          console.warn(`[region-sync] source lock release failed: ${String(error?.message || error)}`);
+        }
       }
     }
     cleanupManagedWorkspace(workspace, 'region sync run');
@@ -658,6 +675,7 @@ async function main() {
     }
 
     const runtimeOptions = createRuntimeOptions();
+    runtimeOptions.forceImport = args.forceImport;
     assertManagedRegionSyncPostgres(runtimeOptions);
     const staleCleanup = cleanupStaleWorkspaces();
     if (staleCleanup.removed > 0) {
@@ -694,11 +712,12 @@ if (require.main === module) {
   main().catch((error) => {
     const message = String(error?.message || error || 'Unknown managed region sync error');
     console.error(`[region-sync] ${message}`);
-    process.exit(1);
+    process.exit(syncAbortController.signal.aborted ? 130 : 1);
   });
 }
 
 module.exports = {
+  canReuseBuildingInput,
   buildApplyStageDetail,
   buildExtractorEnv,
   buildRuntimeFollowupEnv,

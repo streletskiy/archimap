@@ -9,6 +9,16 @@ const SEARCH_SOURCE_RAW_SELECT_FIELDS = `
   ai.style AS local_style,
   ai.architect AS local_architect,
   ai.design_ref AS local_design_ref,
+  ai.design AS local_design,
+  ai.design_year AS local_design_year,
+  ai.material AS local_material,
+  ai.material_concrete AS local_material_concrete,
+  ai.roof_shape AS local_roof_shape,
+  ai.colour AS local_colour,
+  ai.levels AS local_levels,
+  ai.year_built AS local_year_built,
+  ai.archimap_description AS local_archimap_description,
+  ai.description AS local_description,
   CASE WHEN ai.osm_id IS NOT NULL THEN 1 ELSE 0 END AS local_priority,
   (bc.min_lon + bc.max_lon) / 2.0 AS center_lon,
   (bc.min_lat + bc.max_lat) / 2.0 AS center_lat
@@ -86,8 +96,8 @@ const BUILDING_SEARCH_SOURCE_DELETE_SQL = `
 `;
 
 const BUILDING_SEARCH_FTS_INSERT_SQL = `
-  INSERT INTO building_search_fts (osm_key, name, address, style, architect, design_ref)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO building_search_fts (osm_key, name, address, style, architect, design_ref, tags_text)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
 `;
 
 const BUILDING_SEARCH_FTS_DELETE_SQL = `
@@ -170,8 +180,36 @@ function hasSearchSourceValues(sourceRow) {
     normalizeNullableSearchText(sourceRow?.address) ||
     normalizeNullableSearchText(sourceRow?.style) ||
     normalizeNullableSearchText(sourceRow?.architect) ||
-    normalizeNullableSearchText(sourceRow?.design_ref)
+    normalizeNullableSearchText(sourceRow?.design_ref) ||
+    normalizeNullableSearchText(sourceRow?.tags_text)
   );
+}
+
+function buildSearchTagText(tags, rawRow) {
+  const effective = { ...tags };
+  const aliases = {
+    name: ['name', 'name:ru', 'name:en', 'official_name'],
+    address: ['address', 'addr:full'],
+    style: ['style', 'building:architecture', 'architecture'],
+    architect: ['architect', 'architect_name'],
+    design: ['design'], design_ref: ['design_ref', 'design:ref'], design_year: ['design_year', 'design:year'],
+    material: ['material', 'building:material'], material_concrete: ['material_concrete', 'building:material:concrete'],
+    roof_shape: ['roof_shape', 'roof:shape', 'building:roof:shape'], colour: ['colour', 'building:colour'],
+    levels: ['levels', 'building:levels'], year_built: ['year_built', 'building:year', 'start_date'],
+    archimap_description: ['archimap_description', 'description']
+  };
+  for (const [field, keys] of Object.entries(aliases)) {
+    const value = pickFirstText(rawRow[`local_${field}`], field === 'archimap_description' ? rawRow.local_description : null);
+    if (!value) continue;
+    if (field === 'address') {
+      for (const key of Object.keys(effective)) if (key.startsWith('addr:')) delete effective[key];
+    }
+    for (const key of keys) {
+      if (key === field || Object.prototype.hasOwnProperty.call(effective, key)) effective[key] = value;
+    }
+  }
+  return Object.entries(effective).sort(([left], [right]) => left.localeCompare(right, 'en'))
+    .flatMap(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')]).join(' ').trim();
 }
 
 function normalizeSearchSourceRow(rawRow) {
@@ -203,6 +241,7 @@ function normalizeSearchSourceRow(rawRow) {
     style,
     architect,
     design_ref: designRef,
+    tags_text: buildSearchTagText(tags, rawRow),
     local_priority: Number(rawRow.local_priority || 0) > 0 ? 1 : 0,
     center_lon: Number.isFinite(centerLon) ? centerLon : 0,
     center_lat: Number.isFinite(centerLat) ? centerLat : 0
@@ -223,6 +262,7 @@ module.exports = {
   SEARCH_SOURCE_RAW_SELECT_FIELDS,
   SEARCH_SOURCE_BASE_FROM_SQL,
   buildRawSearchSourceQuery,
+  buildSearchTagText,
   hasSearchSourceValues,
   normalizeNullableSearchText,
   normalizeSearchSourceRow,

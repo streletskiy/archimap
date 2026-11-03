@@ -98,14 +98,25 @@ async function runPostgres() {
   await client.connect();
   try {
     console.log(`[filter-tags] rebuild started (${reason}), provider=postgres`);
-    const keys = await scanPostgresFilterTagKeys(client, {
-      batchSize: POSTGRES_SCAN_BATCH_SIZE,
-      ensureHealthy
-    });
-    ensureHealthy();
-
+    if (process.env.FILTER_TAG_KEYS_REBUILD_FULL !== 'true') {
+      // The canonical-table triggers update counts and cache in the same transaction.
+      // Replacing the cache from an earlier snapshot here could lose a concurrent insert.
+      const result = await client.query('SELECT count(*)::integer AS count FROM public.filter_tag_key_counts WHERE feature_count > 0');
+      console.log(`[filter-tags] incremental dictionary current: ${result.rows[0].count} keys`);
+      return;
+    }
     await client.query('BEGIN');
     try {
+      if (process.env.FILTER_TAG_KEYS_REBUILD_FULL === 'true') {
+        await client.query('LOCK TABLE osm.building_contours IN SHARE MODE');
+        await client.query('TRUNCATE public.filter_tag_key_counts');
+        await client.query(`INSERT INTO public.filter_tag_key_counts (tag_key, feature_count)
+          SELECT key, count(*) FROM osm.building_contours bc
+          CROSS JOIN LATERAL unnest(public.archimap_filter_tag_keys(bc.tags_json)) AS key GROUP BY key`);
+      }
+      const result = await client.query('SELECT tag_key FROM public.filter_tag_key_counts WHERE feature_count > 0');
+      const keys = result.rows.map((row) => row.tag_key);
+      ensureHealthy();
       await client.query('DELETE FROM filter_tag_keys_cache;');
       const inserted = await client.query(
         `

@@ -288,15 +288,6 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     return `Sync failed with exit code ${code}`;
   }
 
-  function shouldSkipSyncBecauseUpToDate(region: LooseRecord = {}) {
-    const lastSyncStatus = String(region?.lastSyncStatus || '')
-      .trim()
-      .toLowerCase();
-    return Boolean(
-      region?.lastSuccessfulSyncAt && lastSyncStatus !== 'failed' && region?.upstreamStatus === 'up_to_date'
-    );
-  }
-
   async function flushDeferredSyncSuccess() {
     if (typeof onSyncSuccess !== 'function') {
       deferredSyncSuccessPayload = null;
@@ -481,8 +472,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       return sourceDataUpdatedAtPromise.catch(() => null);
     }
 
-    async function finalizeSuccess(summary = {}) {
-      const sourceDataUpdatedAt = await waitForSourceDataUpdatedAt();
+    async function finalizeSuccess(summary: LooseRecord = {}) {
+      const sourceDataUpdatedAt = Object.prototype.hasOwnProperty.call(summary, 'sourceDataUpdatedAt')
+        ? summary.sourceDataUpdatedAt
+        : await waitForSourceDataUpdatedAt();
       await finalizeRun(run.id, {
         success: true,
         summary: {
@@ -604,7 +597,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       if (!region.enabled) {
         throw new Error('Sync is only available for enabled regions');
       }
-      if (Number(region.syncFailureCount || 0) >= 8 && ['scheduled', 'startup'].includes(String(options.triggerReason))) {
+      if (
+        Number(region.syncFailureCount || 0) >= 8 &&
+        ['scheduled', 'startup'].includes(String(options.triggerReason))
+      ) {
         log.error(`[region-sync:${region.id}] automatic retry limit reached; manual retry required`);
         return { queued: false, reason: 'retry_limit', regionId: region.id };
       }
@@ -637,46 +633,12 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       }
 
       const skipUpstreamCheck = options.skipUpstreamCheck === true;
-      const lastSyncStatus = String(region?.lastSyncStatus || '')
-        .trim()
-        .toLowerCase();
-      const shouldProbeUpstreamBeforeQueue =
-        !skipUpstreamCheck &&
-        String(options.triggerReason || '')
-          .trim()
-          .toLowerCase() !== 'manual' &&
-        Boolean(region?.lastSuccessfulSyncAt) &&
-        lastSyncStatus !== 'failed' &&
-        typeof dataSettingsService.getRegionUpstreamState === 'function';
-
-      let sourceDataUpdatedAt = null;
+      // The worker validates its committed source and can cheaply reuse it. A
+      // timestamp alone cannot prove that tiles and deferred indexes are healthy.
+      // Always queue the run so scheduled updates also repair incomplete work.
+      const sourceDataUpdatedAt = null;
       let sourceDataUpdatedAtPromise = null;
-      if (shouldProbeUpstreamBeforeQueue) {
-        let upstreamRegion;
-        try {
-          upstreamRegion =
-            (await dataSettingsService.getRegionUpstreamState(region, {
-              forceRefresh: true
-            })) || region;
-        } catch {
-          upstreamRegion = region;
-        }
-        if (shouldSkipSyncBecauseUpToDate(upstreamRegion)) {
-          if (options.triggerReason === 'manual') {
-            throw new Error('No upstream update is available for this region');
-          }
-          if (typeof dataSettingsService.rescheduleRegionAfterSkippedSync === 'function') {
-            await dataSettingsService.rescheduleRegionAfterSkippedSync(numericRegionId);
-          }
-          return {
-            queued: false,
-            skipped: true,
-            run: null,
-            region: await dataSettingsService.getRegionById(numericRegionId)
-          };
-        }
-        sourceDataUpdatedAt = String(upstreamRegion?.latestSourceDataUpdatedAt || '').trim() || null;
-      } else if (!skipUpstreamCheck && typeof dataSettingsService.getRegionUpstreamState === 'function') {
+      if (!skipUpstreamCheck && typeof dataSettingsService.getRegionUpstreamState === 'function') {
         sourceDataUpdatedAtPromise = Promise.resolve()
           .then(() =>
             dataSettingsService.getRegionUpstreamState(region, {

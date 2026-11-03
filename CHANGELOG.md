@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.10.0
+
+### ⚡ Performance
+
+- **Incremental Regional Sources:** Retain one dependency-complete regional PBF and apply validated replication diffs instead of downloading the full extract for every update. Reuse unchanged building input without repeating import, and keep cache publication atomic with canonical data ([4f8bf2f](https://github.com/streletskiy/archimap/commit/4f8bf2f)).
+- **Incremental Map Archives:** Rebuild complete changed tiles, remove tiles that become empty, and preserve untouched compressed payloads. Track old and new footprints, affected parent buildings, and shared-region membership changes; fall back to a complete build when the base or spatial history cannot be trusted.
+- **Archive Build Storage:** Keep Planetiler sorting and temporary output on local storage inside its existing container. Preserve the same geometry, zoom, simplification and compression settings, and derive stable feature IDs from OSM identity so partial and complete builds agree.
+- **Canonical Export:** Index temporary building-part geometry before clipping and stream the base/remainder export without buffering the whole region ([951c295](https://github.com/streletskiy/archimap/commit/951c295)).
+
+### 🐛 Bug Fixes
+
+- **Complete Tag Search and Filters:** Include all building tag keys and values in search, preserve architectural and personal overrides, and align custom JSON value handling with application semantics ([3b3b61c](https://github.com/streletskiy/archimap/commit/3b3b61c)).
+- **Update Consistency:** Consume durable search changes incrementally, maintain tag-key counts during imports, and prevent older overlapping source observations from replacing newer shared contours. Preserve complete geometry dependencies and user edits ([3b3b61c](https://github.com/streletskiy/archimap/commit/3b3b61c), [4f8bf2f](https://github.com/streletskiy/archimap/commit/4f8bf2f)).
+- **Archive Publication:** Reject stale revisions and changed patch bases before publication. Commit archive identity and covered spatial invalidations together; keep the previous archive and pending changes after failed or cancelled builds.
+- **Archive File Safety:** Keep the exclusively created output file open through copying and flushing, preventing a path-reopen race during archive staging.
+
+### 🔒 Dependency Maintenance
+
+- Pin the patched `minimatch` 11.0.4 in both dependency trees. Remove the unused, unmaintained `depcheck` command and its obsolete transitive dependencies; both clean dependency installations pass the security audit.
+
+### 🔧 Operations
+
+- **Coordinated Upgrade:** Update both `archimap` and `sync-worker` to the same release image. Preserve PostgreSQL, Redis, Planetiler and osm2pgsql sidecars; the application image now includes native Osmium for source replication.
+- **Migration and Warm-up:** PostgreSQL migrations 035–042 add durable change tracking, source cursors and tile invalidations. Startup rebuilds the search projection, and each region's first refresh rebuilds its map archive; legacy sources need an initial complete download to establish their persistent cache and replication anchor.
+- **Rollback:** Take a protected database backup before upgrading. Migration 036 changes search-vector maintenance, so reverting only to the 0.9.2 image is not a complete rollback; follow the [runbook](docs/runbook.md) and preserve writes made after deployment.
+
+### ✅ Validation
+
+- Passed 559 unit tests, 38 integration tests and 17 browser scenarios with no skips, plus formatting, lint, frontend/type, syntax, security and smoke checks. Integration coverage includes real PostgreSQL, Osmium and Planetiler execution.
+- On an isolated Nizhny Novgorod Oblast stand with 742,579 canonical objects, complete map export/build/publication improved from 101.28 seconds to 46.49 seconds with the final safe output-copy path. Before that copy hardening, a fixture with parent/part edits, movement, deletion and a tile-boundary addition took 6.28 seconds through the partial path versus 40.55 seconds for a complete build of the same changed data. These measurements exclude source download and canonical import.
+- All 89,324 tiles in the partial result matched the complete build's decompressed MVT bytes, including IDs, properties and geometry. The 89,316 untouched tiles retained their original compressed payloads, and archive compaction left no unreferenced tile bytes. See [PMTiles measurements](docs/performance/pmtiles.md).
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.9.2...0.10.0)
+
 ## v0.9.2
 
 ### 🐛 Bug Fixes

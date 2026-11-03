@@ -9,9 +9,13 @@
    - PostgreSQL connection via `DATABASE_URL` or full `POSTGRES_*`
    - `REDIS_URL` for Redis-backed sessions, or explicit `SESSION_ALLOW_MEMORY_FALLBACK=false|true`
    - `SMTP_*` / `EMAIL_FROM` if registration or password reset is enabled
-2. Pull release image: `docker pull streletskiy/archimap:<version>`.
-3. Set `ARCHIMAP_IMAGE=streletskiy/archimap:<version>` in environment (or `.env` used by Compose).
-4. Start/update service: `docker compose up -d`.
+2. Inspect active region jobs and pending migrations. Before upgrading from 0.9.2, create and verify a protected database backup as well as configuration and previous-image references. Allow active jobs to finish before the coordinated application cutover; keep the recovery task from starting a competing Compose operation.
+3. Pull the exact release image: `docker pull streletskiy/archimap:<version>`. Set `ARCHIMAP_IMAGE=streletskiy/archimap:<version>` in the environment (or `.env` used by Compose), preserving other settings, and validate with `docker compose config --quiet`.
+4. Stop the old application writers and update both application services to the same image:
+   - `docker compose stop archimap sync-worker`
+   - `docker compose up -d --no-deps --no-build --pull never sync-worker archimap`
+   - Both services use `ARCHIMAP_IMAGE`; updating only the web service leaves regional jobs running the previous import/build code.
+   - Keep the PostgreSQL, Redis, Planetiler and osm2pgsql containers and their volumes unchanged.
    - `docker-compose.yml` sets `pull_policy: never` for the app service, so Compose will not auto-pull the image for you at this step.
    - Pending PostgreSQL migrations are applied automatically by the app container during startup.
    - Do not bind-mount local `./db` over `/app/db`; the image already contains the migration SQL.
@@ -21,6 +25,16 @@
    - `/api/version`
    - `/api/contours-status`
    - `/metrics` only when `METRICS_ENABLED=true`
+   - The web and sync-worker image IDs match the selected release; the worker health check succeeds.
+   - Restore the recovery task's previous enabled state after the cutover, including on failure.
+
+### Upgrading to 0.10.0
+
+Migrations 035–042 install durable search/tag and tile invalidation tracking and regional source replication metadata. Migrations 036 and 039 scan existing canonical tags to initialize/reconcile the tag dictionary; allow startup time appropriate to the data volume. The application rebuilds search projection version 2 in the background, keeping the previous projection available until the new one is ready. Verify `public.search_index_state.projection_version = 2` before evaluating the expanded search behavior or starting a large refresh batch.
+
+Existing regional sources have no reusable cache/replication anchor, and old map archives have no compatible stable-ID publication signature. Their first refresh therefore uses a complete source download and map build. Later updates can reuse the source, consume replication diffs and replace only changed tiles. Preserve enough free space for the persistent compressed source cache, temporary import/build files and a new archive beside the current publication.
+
+Migration 036 changes `building_search_source.search_tsv` from a generated column to an explicitly maintained projection. The 0.9.2 search writers omit that column, so an image-only rollback would leave new or updated search vectors missing or stale. A rollback requires a tested search-schema compatibility procedure or a deliberately chosen database recovery point. Do not automatically restore an older database over newer user writes, and do not claim that retaining the old image alone provides a complete rollback.
 
 ## Windows startup and recovery
 
@@ -74,7 +88,7 @@ publish and verify `streletskiy/archimap:X.Y.Z` and `streletskiy/archimap:latest
    - PowerShell: `-NoCache` or `-CacheRef yourorg/archimap:buildcache`
 5. Deploy published version:
    - `docker pull <image>:<version>`
-   - `docker compose up -d`
+   - Update `archimap` and `sync-worker` together using the coordinated procedure above.
 
 ## Data refresh
 
@@ -145,7 +159,7 @@ history retention, see [Performance and reliability operations](dev/performance-
 - Managed sync does not silently downgrade to streamed fetch in production unless `REGION_SYNC_ALLOW_FETCH_FALLBACK=true` is set intentionally.
 - Verify `osm2pgsql` is available in the container/runtime image.
 - If the failure is in the archive build stage, verify `planetiler` / `PLANETILER_BIN`.
-- Managed region sync no longer depends on Python importer tooling, QuackOSM, DuckDB, `osmium`, or `tippecanoe`.
+- Managed source replication uses native `osmium`, included in the release application image; verify `osmium --version` inside `archimap-sync-worker` when source preparation fails. Managed region sync does not depend on Python importer tooling, QuackOSM, DuckDB or `tippecanoe`.
 
 ### Region shows `Sync interrupted by process restart` while a sync is still alive
 

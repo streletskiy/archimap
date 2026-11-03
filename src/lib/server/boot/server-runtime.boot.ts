@@ -84,7 +84,7 @@ async function runPostSyncTasks(runtime: LooseRecord, payload: LooseRecord = nul
     });
   }
 
-  await runtime.rebuildSearchIndex(reason);
+  await runtime.rebuildSearchIndex(reason, { waitForCompletion: true });
   runtime.resetFilterTagKeysCache?.();
 
   try {

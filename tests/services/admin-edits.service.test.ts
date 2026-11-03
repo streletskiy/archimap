@@ -435,7 +435,7 @@ test('admin merge refreshes search index for style changes without waiting for d
   assert.deepEqual(searchRefreshCalls, ['way/2001']);
 });
 
-test('admin merge skips search index refresh for material-only edits', async () => {
+test('admin merge refreshes all-tag search for material-only edits', async () => {
   const { service, refreshCalls, searchRefreshCalls } = createRefreshTrackingService({
     changes: [{ field: 'material' }],
     editSourceRow: {
@@ -460,7 +460,7 @@ test('admin merge skips search index refresh for material-only edits', async () 
   assert.equal(result.ok, true);
   assert.equal(result.status, 'accepted');
   assert.deepEqual(refreshCalls, []);
-  assert.deepEqual(searchRefreshCalls, []);
+  assert.deepEqual(searchRefreshCalls, ['way/2001']);
 });
 
 test('admin merge refreshes design-ref suggestions without blocking when design-ref changes', async () => {
@@ -493,7 +493,7 @@ test('admin merge refreshes design-ref suggestions without blocking when design-
   assert.deepEqual(searchRefreshCalls, ['way/2001']);
 });
 
-test('admin delete skips search index refresh for material-only accepted edits', async () => {
+test('admin delete refreshes all-tag search for material-only accepted edits', async () => {
   const { service, searchRefreshCalls } = createRefreshTrackingService({
     status: 'accepted',
     changes: [{ field: 'material' }],
@@ -511,7 +511,7 @@ test('admin delete skips search index refresh for material-only accepted edits',
   assert.equal(result.editId, 1);
   assert.equal(result.status, 'accepted');
   assert.equal(result.deletedMergedLocal, true);
-  assert.deepEqual(searchRefreshCalls, []);
+  assert.deepEqual(searchRefreshCalls, ['way/2001']);
 });
 
 test('admin delete refreshes search index for accepted name edits', async () => {

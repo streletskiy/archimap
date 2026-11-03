@@ -13,8 +13,7 @@ const {
   ARCHI_RULE_KEYS,
   FILTER_RULE_OPS,
   NUMERIC_FILTER_RULE_OPS,
-  parseNumericFilterValue,
-  splitPostgresPushdownRules
+  parseNumericFilterValue
 } = require('../utils/filter-sql-builder');
 
 const FILTER_MATCH_MAX_RULES = 30;
@@ -452,6 +451,48 @@ function normalizeActorKey(actorKeyRaw) {
     .toLowerCase();
 }
 
+async function buildPostgresFilterResults(queryService, requests, actorKey, options) {
+  const { bbox, renderMode, zoomBucket, includeLocations } = options;
+  const aggregate = shouldAggregateMarkerMatches(renderMode, zoomBucket);
+  const grid = aggregate ? {
+    ...getMarkerAggregationGridShape(zoomBucket, bbox),
+    legacyCellSize: getMarkerAggregationLegacyCellSize(zoomBucket)
+  } : null;
+  const rows = await queryService.selectPostgresFilterMatches({ bbox, requests, actorKey, markerGrid: grid });
+  const byRequest = requests.map(() => []);
+  for (const row of rows) byRequest[Number(row.request_index) || 0]?.push(row);
+  return requests.map((request, index) => {
+    const selected = byRequest[index];
+    if (!aggregate) {
+      // SQL already evaluated all rules and personal overlays before its result limit.
+      const matches = selected.map((row) => ({
+        osmKey: `${row.osm_type}/${row.osm_id}`,
+        centerLon: (Number(row.min_lon) + Number(row.max_lon)) / 2,
+        centerLat: (Number(row.min_lat) + Number(row.max_lat)) / 2
+      }));
+      return buildFilterMatchResultForRules(matches, [], request.maxResults, {
+        bbox, renderMode, zoomBucket, includeLocations
+      });
+    }
+    const gridKey = grid.bbox ? `${grid.columns}x${grid.rows}` : String(grid.legacyCellSize);
+    const cells = selected.map((row) => {
+      const x = Number(row.cell_x);
+      const y = Number(row.cell_y);
+      const key = buildMarkerAggregationCellKey(zoomBucket, gridKey, x, y);
+      return {
+        id: buildMarkerAggregationCellId(key), osmKey: key, count: Number(row.cell_count),
+        lon: grid.bbox ? grid.bbox.west + (x + 0.5) * grid.bbox.width / grid.columns : (x + 0.5) * grid.legacyCellSize - 180,
+        lat: grid.bbox ? grid.bbox.south + (y + 0.5) * grid.bbox.height / grid.rows : (y + 0.5) * grid.legacyCellSize - 90
+      };
+    }).sort((a, b) => a.id - b.id).slice(0, FILTER_MATCH_CANDIDATE_CAP);
+    return {
+      matchedKeys: cells.map((cell) => cell.osmKey), matchedFeatureIds: cells.map((cell) => cell.id),
+      matchedLocations: cells, matchedCount: Number(selected[0]?.total_count || 0),
+      truncated: selected.length > FILTER_MATCH_CANDIDATE_CAP
+    };
+  });
+}
+
 function resolveZoomBucket(body: LooseRecord = {}) {
   const zoom = Number(body?.zoom);
   return Number.isFinite(Number(body?.zoomBucket))
@@ -627,26 +668,37 @@ function createBuildingFiltersService({
       };
     }
 
-    const candidateLimit = getBatchFilterMatchCandidateLimit(normalizedRequests);
-    const candidateRows = await queryService.selectBatchFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit, normalizedRequests);
-    const candidateItems =
-      actorKey === 'anon'
-        ? candidateRows.map(queryService.mapFilterDataRow)
-        : await applyPersonalEditsToRows(
-            candidateRows,
-            actorKeyRaw,
-            applyPersonalEditsToFilterItems,
-            queryService.mapFilterDataRow
-          );
-    const items = buildFilterMatchBatchResults(candidateItems, normalizedRequests, {
-      bbox,
-      bboxHash,
-      cacheHit: false,
-      forceTruncated: candidateRows.length >= candidateLimit,
-      renderMode,
-      zoomBucket,
-      includeLocations
-    });
+    let items;
+    if (queryService.isPostgres) {
+      const results = await buildPostgresFilterResults(queryService, normalizedRequests, actorKey, {
+        bbox, renderMode, zoomBucket, includeLocations
+      });
+      items = results.map((result, index) => buildFilterMatchPayload({
+        ...result, id: normalizedRequests[index].id, rulesHash: normalizedRequests[index].rulesHash,
+        bboxHash, cacheHit: false
+      }));
+    } else {
+      const candidateLimit = getBatchFilterMatchCandidateLimit(normalizedRequests);
+      const candidateRows = await queryService.selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit);
+      const candidateItems =
+        actorKey === 'anon'
+          ? candidateRows.map(queryService.mapFilterDataRow)
+          : await applyPersonalEditsToRows(
+              candidateRows,
+              actorKeyRaw,
+              applyPersonalEditsToFilterItems,
+              queryService.mapFilterDataRow
+            );
+      items = buildFilterMatchBatchResults(candidateItems, normalizedRequests, {
+        bbox,
+        bboxHash,
+        cacheHit: false,
+        forceTruncated: candidateRows.length >= candidateLimit,
+        renderMode,
+        zoomBucket,
+        includeLocations
+      });
+    }
     const elapsedMs = Date.now() - startedAt;
     for (const item of items) item.meta.elapsedMs = elapsedMs;
     const payload = {
@@ -735,51 +787,10 @@ function createBuildingFiltersService({
     }
 
     let matchedResult;
-    if (queryService.isPostgres && actorKey === 'anon') {
-      const splitRules = splitPostgresPushdownRules(normalizedRules);
-      const aggregateMarkers = shouldAggregateMarkerMatches(renderMode, zoomBucket);
-      const tagOnlyMaxResults = aggregateMarkers ? FILTER_MATCH_CANDIDATE_CAP : maxResults;
-      const rows =
-        splitRules.fallbackRules.length === 0
-          ? await queryService.selectTagOnlyPostgresMatchRowsByBbox({
-              minLon,
-              minLat,
-              maxLon,
-              maxLat,
-              rules: splitRules.tagOnlyRules,
-              maxResults: tagOnlyMaxResults
-            })
-          : null;
-
-      if (rows) {
-        const candidateItems = rows.map(queryService.mapFilterDataRow);
-        matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
-          bbox,
-          renderMode,
-          zoomBucket,
-          includeLocations
-        });
-        matchedResult.truncated = rows.length > tagOnlyMaxResults || matchedResult.truncated;
-      } else {
-        const candidateLimit = getFilterMatchCandidateLimit(normalizedRules, maxResults);
-        const candidateRows = await queryService.selectGuardedPostgresCandidateRowsByBbox({
-          minLon,
-          minLat,
-          maxLon,
-          maxLat,
-          rules: normalizedRules,
-          archiRules: splitRules.fallbackRules,
-          candidateLimit
-        });
-        const candidateItems = candidateRows.map(queryService.mapFilterDataRow);
-        matchedResult = buildFilterMatchResultForRules(candidateItems, normalizedRules, maxResults, {
-          bbox,
-          renderMode,
-          zoomBucket,
-          includeLocations
-        });
-        matchedResult.truncated = candidateRows.length >= candidateLimit || matchedResult.truncated;
-      }
+    if (queryService.isPostgres) {
+      [matchedResult] = await buildPostgresFilterResults(queryService, [{ rules: normalizedRules, maxResults }], actorKey, {
+        bbox, renderMode, zoomBucket, includeLocations
+      });
     } else {
       const candidateLimit = getFilterMatchCandidateLimit(normalizedRules, maxResults);
       const candidateRows = await queryService.selectFilterRowsByBbox(minLon, minLat, maxLon, maxLat, candidateLimit);

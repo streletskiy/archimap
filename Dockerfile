@@ -3,6 +3,24 @@
 ARG NODE_IMAGE=node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
 ARG RUNTIME_BASE_IMAGE=runtime-base
 
+FROM ${NODE_IMAGE} AS osmium-configure
+
+ARG OSMIUM_VERSION=1.19.0
+ARG OSMIUM_SHA256=192713eef894735cf2d0dbeed3f8def67c067198e553de01d4a1f14417a64019
+RUN apk add --no-cache build-base cmake curl boost-dev libosmium-dev protozero-dev nlohmann-json \
+    expat-dev bzip2-dev zlib-dev lz4-dev \
+  && curl --fail --location --retry 3 \
+    "https://codeload.github.com/osmcode/osmium-tool/tar.gz/refs/tags/v${OSMIUM_VERSION}" -o /tmp/osmium.tar.gz \
+  && echo "${OSMIUM_SHA256}  /tmp/osmium.tar.gz" | sha256sum -c - \
+  && mkdir /tmp/osmium-src \
+  && tar -xzf /tmp/osmium.tar.gz --strip-components=1 -C /tmp/osmium-src \
+  && cmake -S /tmp/osmium-src -B /tmp/osmium-build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+FROM osmium-configure AS osmium-build
+RUN cmake --build /tmp/osmium-build --parallel 2 \
+  && install -D /tmp/osmium-build/src/osmium /usr/local/bin/osmium \
+  && strip /usr/local/bin/osmium
+
 FROM ${NODE_IMAGE} AS deps
 
 RUN apk add --no-cache python3 make g++
@@ -69,7 +87,10 @@ RUN npm install --global npm@12.2.1 \
   && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
   && rm -rf /tmp/npm-security
 
-RUN apk add --no-cache aria2 ca-certificates docker-cli sqlite-libs zlib
+RUN apk add --no-cache aria2 ca-certificates docker-cli sqlite-libs zlib \
+    boost-program_options libbz2 libexpat libstdc++ lz4-libs
+COPY --from=osmium-build /usr/local/bin/osmium /usr/local/bin/osmium
+RUN osmium --version
 
 RUN mkdir -p /app/data/cache
 

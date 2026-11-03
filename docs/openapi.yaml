@@ -351,6 +351,7 @@ paths:
   /api/admin/app-settings/data:
     get:
       summary: Get DB-backed data settings summary
+      description: Cached sourceDataUpdatedAt is the source cut actually applied by the completed sync, including its replication cursor, or null when unknown. latestSourceDataUpdatedAt is the last checked upstream cut and does not imply it has been imported.
       responses:
         '200':
           description: Data settings payload without blocking live upstream checks for every region
@@ -391,6 +392,7 @@ paths:
   /api/admin/app-settings/data/regions/upstream-status:
     get:
       summary: Get live upstream status for selected managed data regions
+      description: OSM France and Geofabrik freshness is derived from trusted regional replication feeds in the curated catalog, so a daily PBF modification time does not hide newer regional changes. Results use a short-lived cache unless force is true.
       parameters:
         - in: query
           name: ids
@@ -413,6 +415,7 @@ paths:
   /api/admin/app-settings/data/regions/{regionId}:
     delete:
       summary: Delete a managed data region
+      description: After database deletion, attempts to remove managed source-cache files for deleted regions, including cascaded descendants, under source/import locks. Cleanup failures are logged and retried on later region deletions.
       parameters:
         - in: path
           name: regionId
@@ -465,7 +468,7 @@ paths:
   /api/admin/app-settings/data/regions/{regionId}/sync-now:
     post:
       summary: Queue a managed sync run for a region
-      description: Manual syncs queue immediately and do not wait for an upstream freshness probe first.
+      description: Manual syncs queue immediately without waiting for an upstream freshness probe. The worker validates its committed source cache and requests missing regional diffs when possible; bootstrap or recovery can download a full regional PBF. An unchanged source still allows PMTiles repair and pending search maintenance. Manual sync does not force a full download.
       parameters:
         - in: path
           name: regionId
@@ -552,8 +555,11 @@ paths:
       description: |
         The endpoint accepts a flat `rules[]` array per request.
         Client-side filter layers, priorities, colors, and AND/OR/layer composition are resolved before calling this endpoint.
+        Rules provide structured key/value matching independently of the tokenized free-text search endpoints. String comparisons are case-insensitive; prefix metacharacters are literal. Existence requires a non-whitespace value, missing/null differs from empty for equality, and numeric comparisons require a complete trimmed decimal value (point or comma).
+        PostgreSQL applies all predicates to effective public architectural values and the caller's latest pending/rejected personal edits before limiting matching buildings. Personal edits can add or remove matches; this path has no preliminary 50,000-building candidate cutoff.
         The response includes `matchedLocations[]` points for low-zoom marker fallback, in addition to `matchedFeatureIds[]` for contour highlight.
         When `renderMode=markers` and the zoom is below `5`, the backend can aggregate matches into viewport-relative cells and include `count` on each returned location; zooms `5-12` keep stable point-level locations.
+        PostgreSQL computes low-zoom cell counts and matchedCount from all bbox matches before bounding the cell response. Outside aggregation, maxResults bounds returned buildings, matchedCount describes that subset, and meta.truncated indicates additional matches.
         Use `POST /api/buildings/filter-matches-batch` when you need multiple rule sets against the same bbox.
         Responses support Brotli/gzip and use private, no-store HTTP caching. Validated rules and actor scope determine server cache identity; client IDs and hashes are correlation metadata.
       requestBody:
@@ -625,6 +631,10 @@ paths:
   /api/search-buildings:
     get:
       summary: Search buildings by text query
+      description: |
+        Searches indexed OSM building tag keys and values plus the named building fields. Public local architectural values replace their corresponding source values in the search document; named fields have higher relevance weight.
+        The shared index excludes pending/rejected personal edits, which remain available in authenticated building details and filters. Dedicated building:part objects remain excluded from building search.
+        The q parameter is tokenized free text, not a key=value filter expression. Use structured filter rules for exact equality, literal substring/prefix matching, existence, and numeric comparisons. PostgreSQL full-text search does not provide arbitrary substring matching.
       parameters:
         - in: query
           name: styleKeys
@@ -634,7 +644,7 @@ paths:
             maxLength: 16000
         - in: query
           name: q
-          description: Text query; optional when styleKeys is supplied.
+          description: Tokenized text query over public indexed building tags and named fields; optional when styleKeys is supplied.
           schema:
             type: string
         - in: query
@@ -902,6 +912,9 @@ paths:
   /api/search-buildings-map:
     get:
       summary: Search buildings for map view
+      description: |
+        Bbox-required map variant of /api/search-buildings with the same public all-tag text index, effective local architectural values, relevance weighting, and styleKeys behavior.
+        Pending/rejected personal edits are not part of this shared index. Text queries are tokenized free text; structured tag operators are provided by the filter-match endpoints.
       parameters:
         - in: query
           name: styleKeys
@@ -911,7 +924,7 @@ paths:
             maxLength: 16000
         - in: query
           name: q
-          description: Text query; optional when styleKeys is supplied.
+          description: Tokenized text query over public indexed building tags and named fields; optional when styleKeys is supplied.
           schema:
             type: string
         - in: query
@@ -956,8 +969,11 @@ paths:
       summary: Match multiple filter rule sets against one bbox
       description: |
         Batched variant of `POST /api/buildings/filter-matches`.
+        PostgreSQL shares the spatial/effective-value projection and applies each item's complete predicates before its result limit, including the caller's latest pending/rejected personal edits. There is no preliminary candidate cutoff; edits may add or remove matches.
+        Structured operators follow the single endpoint's case-insensitive, literal-prefix, existence, empty/null, and numeric-value rules; they are distinct from tokenized free-text search.
         Each item includes `matchedLocations[]` for low-zoom marker fallback, alongside `matchedFeatureIds[]` for contour highlight.
         When `renderMode=markers` and the zoom is below `5`, the backend can return aggregated marker cells with `count` instead of a full building list; zooms `5-12` keep stable point-level locations.
+        PostgreSQL aggregation computes cell counts and matchedCount from all bbox matches before bounding the cell response. Outside aggregation, matchedCount describes the returned subset and meta.truncated indicates additional matches.
         Responses support Brotli/gzip and use private, no-store HTTP caching. Validated rules and actor scope determine server cache identity; client IDs and hashes are correlation metadata.
       requestBody:
         required: true

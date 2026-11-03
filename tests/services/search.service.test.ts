@@ -119,7 +119,7 @@ test('getBuildingSearchResults applies viewport bbox constraints to SQL queries'
   assert.equal(capturedParams[10], 0);
 });
 
-test('getBuildingSearchResults local fallback searches design ref values', async () => {
+test('getBuildingSearchResults keeps using the published index during rebuilds', async () => {
   let capturedSql = '';
   const returnedRows = [
     {
@@ -154,7 +154,7 @@ test('getBuildingSearchResults local fallback searches design ref values', async
   const result = await service.getBuildingSearchResults('1-447С-43', 44, 56, 30, 0);
 
   assert.match(capturedSql, /design_ref/);
-  assert.match(capturedSql, /json_extract\(bc\.tags_json, '\$\."design:ref"'\)/);
+  assert.match(capturedSql, /building_search_fts MATCH/);
   assert.equal(result.items[0].designRef, 'II-18-01');
 });
 

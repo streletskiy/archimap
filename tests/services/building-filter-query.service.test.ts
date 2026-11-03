@@ -79,7 +79,8 @@ test('Postgres level filters retain derived values and architectural overrides i
   await service.getBatchFilterMatches({ ...request, requests: [request] });
   assert.match(queries[0], /LEFT JOIN local\.architectural_info/);
   assert.match(queries[0], /ai\.levels/);
-  assert.match(queries[0], /WHERE \(TRUE\)/);
+  assert.match(queries[0], /FROM effective WHERE[\s\S]+LIMIT \?/);
+  assert.match(queries[0], /AS item_levels/);
   assert.match(queries[1], /LEFT JOIN local\.architectural_info/);
 });
 

@@ -254,6 +254,61 @@ function boundsContainBounds(container: GeometryBounds | null, inner: GeometryBo
   );
 }
 
+type BuildingPart = { bounds: GeometryBounds; geometry: GeoJSONLike; order: number };
+type BuildingPartNode = {
+  bounds: GeometryBounds;
+  parts?: BuildingPart[];
+  children?: BuildingPartNode[];
+};
+
+function buildPartIndex(parts: BuildingPart[]): BuildingPartNode {
+  const bounds = {
+    minLon: Infinity,
+    minLat: Infinity,
+    maxLon: -Infinity,
+    maxLat: -Infinity
+  };
+  for (const part of parts) {
+    bounds.minLon = Math.min(bounds.minLon, part.bounds.minLon);
+    bounds.minLat = Math.min(bounds.minLat, part.bounds.minLat);
+    bounds.maxLon = Math.max(bounds.maxLon, part.bounds.maxLon);
+    bounds.maxLat = Math.max(bounds.maxLat, part.bounds.maxLat);
+  }
+  if (parts.length <= 16) return { bounds, parts };
+  const splitLongitude = bounds.maxLon - bounds.minLon >= bounds.maxLat - bounds.minLat;
+  const sorted = [...parts].sort((left, right) =>
+    splitLongitude
+      ? left.bounds.minLon + left.bounds.maxLon - right.bounds.minLon - right.bounds.maxLon
+      : left.bounds.minLat + left.bounds.maxLat - right.bounds.minLat - right.bounds.maxLat
+  );
+  const middle = Math.floor(sorted.length / 2);
+  return { bounds, children: [buildPartIndex(sorted.slice(0, middle)), buildPartIndex(sorted.slice(middle))] };
+}
+
+function findContainedParts(index: BuildingPartNode, bounds: GeometryBounds): BuildingPart[] {
+  const matches: BuildingPart[] = [];
+  const pending = [index];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (
+      node.bounds.minLon > bounds.maxLon ||
+      node.bounds.maxLon < bounds.minLon ||
+      node.bounds.minLat > bounds.maxLat ||
+      node.bounds.maxLat < bounds.minLat
+    ) continue;
+    if (node.parts) {
+      for (const part of node.parts) {
+        if (boundsContainBounds(bounds, part.bounds)) matches.push(part);
+      }
+    } else if (node.children) {
+      pending.push(...node.children);
+    }
+  }
+  // Keep clipping operands in source order so the spatial optimization cannot
+  // change polygon union ordering or the stable output of the previous path.
+  return matches.sort((left, right) => left.order - right.order);
+}
+
 function getGeometryCenter(geometry: GeoJSONLike | null | undefined) {
   const bounds = collectBounds(geometry?.coordinates);
   if (
@@ -514,7 +569,7 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
     Exclude<OverpassFeatureLike, null | undefined>
   >;
   const buildings: Array<{ feature: OverpassFeatureLike; bounds: GeometryBounds | null }> = [];
-  const parts: Array<{ bounds: GeometryBounds; geometry: GeoJSONLike }> = [];
+  const parts: BuildingPart[] = [];
   const syntheticRemainders: OverpassFeatureLike[] = [];
 
   for (const feature of normalizedFeatures) {
@@ -531,7 +586,8 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
       if (bounds && polygonGeometry) {
         parts.push({
           bounds,
-          geometry: polygonGeometry
+          geometry: polygonGeometry,
+          order: parts.length
         });
       }
       continue;
@@ -548,6 +604,7 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
   }
 
   if (parts.length === 0) return normalizedFeatures;
+  const partIndex = buildPartIndex(parts);
 
   for (const building of buildings) {
     const properties =
@@ -555,7 +612,7 @@ export function applyBuildingPartBaseSuppression(features: OverpassFeatureLike[]
         ? building.feature.properties
         : null;
     if (!properties || !building.bounds) continue;
-    const containedParts = parts.filter((part) => boundsContainBounds(building.bounds, part.bounds));
+    const containedParts = findContainedParts(partIndex, building.bounds);
     if (containedParts.length === 0) continue;
     const remainder = buildDifferenceGeometry(
       building.feature?.geometry || null,
