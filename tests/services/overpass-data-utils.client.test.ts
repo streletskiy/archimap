@@ -5,10 +5,65 @@ const test = require('node:test');
 
 let importCounter = 0;
 
+function rectangleFeature(id, kind, west, south, east, north): LooseRecord {
+  return {
+    type: 'Feature',
+    id,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]]
+    },
+    properties: { osm_key: `way/${id}`, feature_kind: kind, render_height_m: 12 }
+  };
+}
+
 async function loadOverpassDataUtils() {
   const modulePath = path.join(process.cwd(), 'frontend', 'src', 'lib', 'services', 'map', 'overpass-data-utils.ts');
   return import(`${pathToFileURL(modulePath).href}?v=${(importCounter += 1)}`);
 }
+
+test('part spatial lookup preserves all remainders and excludes crossing parts across many index branches', async () => {
+  const { applyBuildingPartBaseSuppression } = await loadOverpassDataUtils();
+  const features = [];
+  for (let i = 0; i < 128; i += 1) {
+    const x = (i % 16) * 3;
+    const y = Math.floor(i / 16) * 3;
+    features.push(rectangleFeature(i * 3 + 1, 'building', x, y, x + 1, y + 1));
+    features.push(rectangleFeature(i * 3 + 2, 'building_part', x + 0.5, y, x + 1, y + 1));
+    features.push(rectangleFeature(i * 3 + 3, 'building_part', x - 0.5, y, x + 0.25, y + 1));
+  }
+  const result = applyBuildingPartBaseSuppression(features);
+  const remainders = result.filter((feature) => feature.properties.feature_kind === 'building_remainder');
+  assert.equal(remainders.length, 128);
+  assert.equal(result.length, features.length + 128);
+  for (let i = 0; i < 128; i += 1) {
+    const x = (i % 16) * 3;
+    const y = Math.floor(i / 16) * 3;
+    assert.deepEqual(remainders[i].geometry, rectangleFeature(0, '', x, y, x + 0.5, y + 1).geometry);
+    assert.equal(remainders[i].properties.osm_key, `way/${i * 3 + 1}`);
+    assert.equal(remainders[i].properties.render_height_m, 12);
+    assert.equal(features[i * 3].properties.render_hide_base_when_parts, 1);
+  }
+});
+
+test('part spatial lookup keeps inclusive edges, operand order, and multipart footprints', async () => {
+  const { applyBuildingPartBaseSuppression } = await loadOverpassDataUtils();
+  const base = rectangleFeature(1, 'building', -2, -2, 0, 0);
+  base.geometry = {
+    type: 'MultiPolygon',
+    coordinates: [base.geometry.coordinates, rectangleFeature(0, '', 2, 2, 4, 4).geometry.coordinates]
+  };
+  const parts = [
+    rectangleFeature(2, 'building_part', 3, 2, 4, 4),
+    rectangleFeature(3, 'building_part', -1, -2, 0, 0)
+  ];
+  const expected = applyBuildingPartBaseSuppression(structuredClone([base, ...parts]));
+  const distant = Array.from({ length: 48 }, (_, i) => rectangleFeature(100 + i, 'building_part', 10 + i, 10, 10.5 + i, 11));
+  const actual = applyBuildingPartBaseSuppression(structuredClone([base, ...distant, ...parts]));
+  assert.deepEqual(actual[0], expected[0]);
+  assert.equal(actual[0].geometry.type, 'MultiPolygon');
+  assert.equal(actual[0].geometry.coordinates.length, 2);
+});
 
 test('buildOverpassFeaturePayload normalizes feature tags and geometry center', async () => {
   const { buildOverpassFeaturePayload, buildOverpassSearchItem, buildOverpassBuildingDetails } =
