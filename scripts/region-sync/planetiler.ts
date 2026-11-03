@@ -190,9 +190,10 @@ function runPlanetilerBuild({
   const copyPath = `${outputPath}.${workspaceName}.tmp`;
   let workspaceCreated = false;
   let copyReserved = false;
+  let copyFd = null;
 
-  function checked(exe, args, label) {
-    const result = runCommand(exe, args, { env, spawnSyncRef });
+  function checked(exe, args, label, stdio: import('node:child_process').StdioOptions = 'inherit') {
+    const result = runCommand(exe, args, { env, spawnSyncRef, stdio });
     if (!result.ok) {
       throw new Error(
         `planetiler ${label} failed with exit code ${result.status}${result.error ? `: ${result.error.message}` : ''}`
@@ -253,25 +254,38 @@ function runPlanetilerBuild({
       checked(nativeExe, args, 'build');
     }
 
-    // Copy into a reserved sibling first: a failed build or ENOSPC during copy
-    // must never truncate the caller's previous archive.
-    fs.closeSync(fs.openSync(copyPath, 'wx'));
+    // Keep the exclusively created descriptor through copy and fsync. Reopening
+    // its name could follow a file replaced between reservation and publication.
+    // A failed build or copy must never truncate the caller's previous archive.
+    copyFd = fs.openSync(copyPath, 'wx');
     copyReserved = true;
     if (containerName) {
       checked(
         'docker',
-        ['exec', containerName, 'cp', '--', engineOutput, toContainerPath(copyPath, env)],
-        'output staging'
+        ['exec', containerName, 'cat', '--', engineOutput],
+        'output staging',
+        ['ignore', copyFd, 'inherit']
       );
     } else {
-      fs.copyFileSync(engineOutput, copyPath);
+      const sourceFd = fs.openSync(engineOutput, 'r');
+      try {
+        const buffer = Buffer.allocUnsafe(1024 * 1024);
+        let length;
+        while ((length = fs.readSync(sourceFd, buffer, 0, buffer.length, null)) > 0) {
+          let written = 0;
+          while (written < length) {
+            const count = fs.writeSync(copyFd, buffer, written, length - written);
+            if (count <= 0) throw new Error('Incomplete Planetiler output copy');
+            written += count;
+          }
+        }
+      } finally {
+        fs.closeSync(sourceFd);
+      }
     }
-    const outputFd = fs.openSync(copyPath, 'r+');
-    try {
-      fs.fsyncSync(outputFd);
-    } finally {
-      fs.closeSync(outputFd);
-    }
+    fs.fsyncSync(copyFd);
+    fs.closeSync(copyFd);
+    copyFd = null;
     fs.renameSync(copyPath, outputPath);
     copyReserved = false;
     return {
@@ -279,6 +293,7 @@ function runPlanetilerBuild({
       schemaPath: effectiveSchemaPath
     };
   } finally {
+    if (copyFd !== null) fs.closeSync(copyFd);
     if (copyReserved) fs.rmSync(copyPath, { force: true });
     if (workspaceCreated) {
       if (containerName && localIO) {

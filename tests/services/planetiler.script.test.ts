@@ -75,16 +75,25 @@ for (const failCopy of [false, true]) {
     const calls = [];
     const env = { PLANETILER_BIN: 'missing', PLANETILER_CONTAINER: 'test-engine', PLANETILER_HOST_DATA_ROOT: f.dir };
     let localWorkspace;
+    let copyFd;
     try {
-      const spawnSyncRef = (exe, args) => {
+      const spawnSyncRef = (exe, args, options) => {
         calls.push({ exe, args });
         if (exe === 'missing') return { status: 1 };
         assert.equal(exe, 'docker');
         assert.deepEqual(args.slice(0, 2), ['exec', 'test-engine']);
         if (args[2] === 'mkdir') localWorkspace = args[4];
-        if (args[2] === 'cp' && args[4].endsWith('/output.pmtiles')) {
-          const hostCopy = path.join(f.dir, path.posix.basename(args[5]));
-          fs.writeFileSync(hostCopy, failCopy ? 'partial copy' : 'complete archive');
+        if (args[2] === 'cat') {
+          assert.equal(args[4], `${localWorkspace}/output.pmtiles`);
+          assert.equal(options.stdio[0], 'ignore');
+          assert.equal(options.stdio[2], 'inherit');
+          copyFd = options.stdio[1];
+          assert.ok(Number.isInteger(copyFd));
+          assert.equal(fs.fstatSync(copyFd).size, 0);
+          if (process.platform !== 'win32') {
+            assert.equal(fs.fstatSync(copyFd).mode & 0o777, 0o666 & ~process.umask(), 'published tiles remain readable by the web container');
+          }
+          fs.writeSync(copyFd, failCopy ? 'partial copy' : 'complete archive');
           return { status: failCopy ? 1 : 0 };
         }
         return { status: 0 };
@@ -94,6 +103,8 @@ for (const failCopy of [false, true]) {
       else build();
       assert.match(localWorkspace, /^\/tmp\/archimap-planetiler-[0-9a-f-]{36}$/);
       assert.equal(calls.filter(({ args }) => args[2] === 'cp' && args[4] === '/data/input.ndjson').length, 1);
+      assert.equal(calls.filter(({ args }) => args[2] === 'cat').length, 1);
+      assert.throws(() => fs.fstatSync(copyFd), { code: 'EBADF' });
       assert.deepEqual(calls.at(-1).args, ['exec', 'test-engine', 'rm', '-rf', '--', localWorkspace]);
       assert.equal(fs.readFileSync(f.outputPath, 'utf8'), failCopy ? 'previous archive' : 'complete archive');
       assert.equal(
@@ -105,6 +116,27 @@ for (const failCopy of [false, true]) {
     }
   });
 }
+
+test('native output copy preserves binary data larger than the bounded copy buffer', () => {
+  const f = fixture();
+  const payload = Buffer.alloc(2 * 1024 * 1024 + 31);
+  for (let index = 0; index < payload.length; index++) payload[index] = index % 251;
+  try {
+    runPlanetilerBuild({
+      ...f,
+      planetilerExe: 'fake',
+      env: {},
+      spawnSyncRef(_exe, args) {
+        const output = args.find(arg => arg.startsWith('--output=')).slice(9);
+        fs.writeFileSync(output, payload);
+        return { status: 0 };
+      }
+    });
+    assert.deepEqual(fs.readFileSync(f.outputPath), payload);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
 
 test('local I/O optout keeps an isolated shared workspace and validates optional bounds', () => {
   const f = fixture();

@@ -85,7 +85,7 @@ test(
             fs.readFileSync(schemaPath, 'utf8').replace(/^ {4}id:.*$/m, "    id: '${feature.id}'")
           );
         }
-        return spawnSync(exe, args, { ...options, stdio: 'pipe', maxBuffer: 8 * 1024 * 1024 });
+        return spawnSync(exe, args, { ...options, stdio: Array.isArray(options.stdio) ? options.stdio : 'pipe', maxBuffer: 8 * 1024 * 1024 });
       };
       runPlanetilerBuild({
         inputPath,
