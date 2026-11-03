@@ -12,7 +12,7 @@ const extract = { extractSource: 'osmfr', extractId: 'russia/volga_federal_distr
   downloadUrl: 'https://download.openstreetmap.fr/extracts/russia/volga_federal_district/nizhny_novgorod_oblast.osm.pbf' };
 const baseUrl = deriveManagedReplicationBaseUrl(extract);
 const timestamp = sequence => new Date(Date.UTC(2026, 10, 3, 0, sequence)).toISOString();
-const stateText = sequence => `sequenceNumber=${sequence}\ntimestamp=${timestamp(sequence).replace(/:/g, '\\:')}\n`;
+const stateText = sequence => `sequenceNumber=${sequence}\ntimestamp=${timestamp(sequence).replace(/[\\:]/g, '\\$&')}\n`;
 
 function fixture() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-source-cache-'));

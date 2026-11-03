@@ -9,9 +9,10 @@ const { buildPmtilesSwap } = require('../../scripts/region-sync/common');
 test('tile reuse requires a complete matching published archive and revision', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-tile-state-'));
   const archivePath = path.join(directory, 'region.pmtiles');
+  const archiveFd = fs.openSync(archivePath, 'wx');
   try {
-    fs.writeFileSync(archivePath, 'test archive');
-    const stat = fs.statSync(archivePath);
+    fs.writeSync(archiveFd, 'test archive');
+    const stat = fs.fstatSync(archiveFd);
     const state = {
       data_revision: '12', published_revision: '12', published_signature: 'current',
       published_archive_bytes: stat.size, published_archive_mtime_ms: stat.mtimeMs
@@ -20,11 +21,11 @@ test('tile reuse requires a complete matching published archive and revision', (
     assert.equal(canReuseRegionArchive({ state: { ...state, data_revision: '13' }, signature: 'current', archivePath }), false);
     assert.equal(canReuseRegionArchive({ state, signature: 'changed', archivePath }), false);
     assert.equal(canReuseRegionArchive({ state: null, signature: 'current', archivePath }), false);
-    fs.writeFileSync(archivePath, 'truncated');
+    fs.ftruncateSync(archiveFd, 4);
     assert.equal(canReuseRegionArchive({ state, signature: 'current', archivePath }), false);
-    fs.unlinkSync(archivePath);
-    assert.equal(canReuseRegionArchive({ state, signature: 'current', archivePath }), false);
+    assert.equal(canReuseRegionArchive({ state, signature: 'current', archivePath: path.join(directory, 'missing.pmtiles') }), false);
   } finally {
+    fs.closeSync(archiveFd);
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
