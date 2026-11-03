@@ -103,14 +103,14 @@ The Docker deployment provides `aria2c` and `osmium` in the application image an
    - deletes true orphans only for ids that actually became deletion candidates during this run
    - skips stale membership/orphan cleanup on the first sync for a region that has no prior memberships yet
    - builds a key index on the named stage table and applies rows in OSM key order so the large contour upsert stays as cache-friendly as possible
-   - PostgreSQL triggers enqueue changed/deleted IDs with generation numbers, update filter-tag key counts and invalidate affected region tile revisions in the same transaction
+   - PostgreSQL triggers enqueue changed/deleted IDs with generation numbers, update filter-tag key counts and invalidate affected region tile revisions in the same transaction; bounded old/new spatial invalidations include affected parent footprints when building parts change
    - an import with no canonical changes leaves the contour summary timestamp unchanged
    - the immutable cache pointer, source cut, validators and import contract become active in the same transaction; failure to record a managed source rolls back canonical changes
 10. The overlap-safety model is preserved through `data_region_memberships`, so overlapping regions do not delete each other's objects. Source-cut checks prevent an older overlapping extract from rolling back newer shared contours. After the apply transaction commits, the staging schema is dropped before tile work starts.
 11. [`scripts/region-sync/tile-state.ts`](../scripts/region-sync/tile-state.ts) checks the region's persisted rendering revision, publication revision, export-code/configuration signature and archive size/modification time. A matching nonempty archive is reused without export or build. Metadata-only changes can still update search/filter data while retaining the same map archive.
-12. When rebuilding is necessary, the sync exports the region's active canonical rows into NDJSON. It materializes `building:part` rows into an indexed temporary PostgreSQL table, then streams separate base and remainder passes. Synthetic `building_remainder` features remain derived output, and Node never buffers the full region.
-13. [`scripts/region-sync/pmtiles-builder.ts`](../scripts/region-sync/pmtiles-builder.ts) runs `planetiler` to build `<workspace>/region.pmtiles`. The exported GeoJSON preserves stable `osm_key` identity and includes only the ID/render/filter attributes needed by the map.
-14. `tile-state.ts` publishes into `data/regions/buildings-region-<slug>.pmtiles`. A short row lock validates the captured rendering revision before swapping the file and recording publication metadata. A per-region session advisory lock remains held through commit and backup cleanup, including when separate CLI rebuilds overlap.
+12. When rebuilding is necessary, the planner chooses a complete build or a bounded set of changed tiles. A compatible base archive and complete spatial invalidation history are required for partial updates. Export streams all current canonical features needed by the selected buffered tile windows, or the complete region for a full build. An indexed temporary parts table includes the full dependencies of selected parents, even when a part falls outside the immediate window. Separate base and remainder passes retain whole source geometries. Synthetic `building_remainder` features remain derived output, and Node never buffers the full region.
+13. [`scripts/region-sync/pmtiles-builder.ts`](../scripts/region-sync/pmtiles-builder.ts) runs Planetiler with unchanged geometry/quality settings. The engine stages work in a unique container-local directory by default and copies a completed archive back once. MVT IDs derive from `osm_id * 2 + relationBit`, keeping the same identity in full and subset exports; `osm_key` and the existing ID/render/filter properties remain available to the map. Partial publication replaces complete changed tiles, removes changed tiles that became empty and copies all untouched compressed tiles from the old archive. The export-contract change forces one complete rebuild of older publications before partial reuse.
+14. `tile-state.ts` publishes into `data/regions/buildings-region-<slug>.pmtiles`. A short row lock validates the captured rendering revision before swapping the file, recording publication metadata and clearing covered dirty bounds. Newer changes reject the stale publication and retain their pending invalidations. A per-region session advisory lock remains held through commit and backup cleanup, including when separate CLI rebuilds overlap.
 15. Runtime follow-ups consume the durable search change queue, including when source/import/tile work was reused. Initial projection upgrades or explicit full rebuilds use a shadow search table with atomic publication; ordinary refreshes update changed IDs. Filter-tag keys are maintained transactionally from counts instead of rescanning every contour. The managed runtime coalesces follow-ups until its sync queue drains; standalone sync requests incremental search maintenance directly. Source cache cleanup retains the database's committed active file and removes superseded cache files while the per-region lock is still held.
 16. Runtime clients receive region PMTiles metadata through `/app-config.js` and fetch byte ranges via `/api/data/regions/:regionId/pmtiles`.
 
@@ -186,12 +186,27 @@ Sync summaries include `sourceMode` (`full`, `incremental`, `cached`, `unchanged
 
 - Validates archive reuse against durable region revisions, export code/configuration and file metadata.
 - Rejects publication if rendering data changed during export/build.
+- Clears the spatial invalidation state only with successful publication of the matching revision.
 - Serializes publication and backup cleanup across processes, with file rollback on database failure before commit.
+
+### `scripts/region-sync/tile-build.ts` and `tile-patch-plan.ts`
+
+- Share build orchestration between ordinary synchronization and forced full `--pmtiles-only` runs.
+- Choose archive reuse, a bounded changed-tile update or a complete regional build.
+- Expand old/new invalidation bounds and selected tile input windows conservatively around the unchanged clipping buffer; unsupported, edge-crossing or excessive plans rebuild completely.
+- Recover failed/unsupported patches through a fresh full export without acknowledging dirty state before successful publication.
+
+### `scripts/region-sync/pmtiles-patch.ts`
+
+- Replaces complete authoritative dirty tiles, including deletions when no replacement content exists, while copying untouched compressed payloads.
+- Rebuilds the PMTiles index and archive counts without decoding/re-encoding individual vector tiles.
+- Keeps global archive metadata rather than substituting metadata from a spatial subset, validates input structures and removes only its own incomplete output on failure/cancellation.
 
 ### `scripts/region-sync/region-db.ts`
 
 - Loads region config from PostgreSQL.
 - Exports active region members from canonical PostgreSQL tables with streamed GeoJSON/NDJSON output.
+- Supports spatially selected exports for replacement tiles while retaining unchanged neighbors and complete parent/part dependencies.
 - Derives render-only rows such as `building_remainder` in the PostgreSQL export pipeline, using a temp parts table plus streamed base/remainder passes.
 - Supports `--pmtiles-only` rebuilds without re-importing upstream data.
 
@@ -201,6 +216,13 @@ Sync summaries include `sourceMode` (`full`, `incremental`, `cached`, `unchanged
 - Keeps derived render features such as `building_remainder` in the export/build phase and avoids writing them into canonical contour tables.
 - Writes `osm_key`/`osm_type` on exported building features before invoking `planetiler`, so the PMTiles contract for map selection/highlight stays stable across tile-engine changes.
 - Runs `planetiler` only.
+
+### `scripts/region-sync/planetiler.ts`
+
+- Uses native Planetiler or the configured existing engine container.
+- Gives each build isolated temporary storage; container execution stages input and output locally by default, with a shared-filesystem opt-out.
+- Derives stable encoded OSM IDs from properties instead of the GeoJSON reader's sequential row numbers.
+- Copies and flushes a completed archive into a reserved sibling before replacing the caller's workspace output; failed builds/copies preserve its previous output.
 
 ### `src/lib/server/services/data-settings/upstream.ts`
 
@@ -224,7 +246,7 @@ Persistent runtime outputs:
 - `data_region_source_snapshots`
 - `data/source-cache/r<regionId>/<sha256>.osm.pbf` (the committed complete regional source)
 - `building_data_changes` (pending object IDs and generations)
-- `data_region_tile_state` (rendering/publication state per region)
+- `data_region_tile_state` (rendering/publication state, bounded dirty spatial envelopes and full-rebuild flag per region)
 - `filter_tag_key_counts` and `filter_tag_keys_cache`
 - `data/regions/buildings-region-<slug>.pmtiles`
 
@@ -246,7 +268,8 @@ Repository-managed catalog artifacts:
 - PMTiles publication is protected by revision checks, per-region locks and backup/rollback behavior. Expensive export/build work does not hold publication locks.
 - A failure after database apply but before archive publication leaves the region dirty. A later import with no additional data changes still rebuilds its archive.
 - Missing/replaced archives and changed export signatures force rebuilding. New installations/upgrades without publication state also build once before reuse is possible.
-- Geometry, building-kind, height/floor inputs and membership changes invalidate affected regions. Shared building-part changes invalidate every member region, covering parent remainder geometry as well.
+- Geometry, building-kind, height/floor inputs and membership changes invalidate affected regions. Old and new bounds cover moves and deletions; shared building-part changes invalidate every member region and affected parent footprints, covering hide flags and remainder geometry as well.
+- Partial tile updates replace whole tile payloads, including empty-tile deletions, from a complete buffered feature selection. They never merge independently clipped feature fragments. Excessive or incomplete spatial history and incompatible archive bases use a full build.
 - Rollback restores the previous archive before releasing the publication locks. If commit outcome is unknown, the archive is left in place; persisted revision/file metadata determines whether it can be reused. An interrupted file swap can recover its `.bak` on the next publication attempt.
 - Cleanup deletes only contours that no longer have memberships in any region.
 - Replication diffs are applied to a complete source snapshot before membership reconciliation. A changed-only file is never treated as a complete region, which would incorrectly delete unchanged buildings.
@@ -275,7 +298,7 @@ Managed sync still supports:
 
 - canonical tables keep imported building/building-part geometry
 - export/build phase derives the synthetic remainder only when needed for PMTiles/render output
-- the managed runtime materializes a temporary indexed `building:part` table per region and then streams base/remainder exports separately, which keeps canonical SQL/apply simpler, avoids buffering the full region in Node, and gives PostgreSQL a cheap part lookup path instead of a giant CTE self-join
+- the managed runtime materializes an indexed temporary `building:part` table for the full region or selected parents, then streams base/remainder exports separately; this avoids buffering the full region in Node and retains every required part when a parent crosses a replacement window
 - this avoids persisting a second canonical contour class whose lifecycle would otherwise need extra merge/delete rules
 
 Benchmark comparison should be used to judge the runtime cost of this choice; the pipeline intentionally keeps the canonical merge simpler and leaves the derived geometry in the PMTiles export path.

@@ -104,11 +104,14 @@ On first startup with an empty data-settings DB, bootstrap only records that DB-
 - `REGION_SYNC_DIFF_CONCURRENCY` - concurrent regional diff downloads; default and maximum `8`. A catch-up batch requests the latest state, the target state and `N` diff files (`N + 2` requests); an unchanged cursor needs only the latest-state request.
 - `REGION_SYNC_DIFF_TIMEOUT_MS` - timeout per replication HTTP request; default `30000`, capped at `120000`.
 - `REGION_SYNC_SOURCE_REBASE_DAYS` - refresh the complete regional source after this age even if replication is available; default `30`, capped at `365`. This also bounds accumulation of objects that leave a provider extract.
-- `PLANETILER_BIN` - optional absolute path to the `planetiler` wrapper/command. The Docker runtime image ships `/usr/local/bin/planetiler` out of the box.
-- `PMTILES_PROGRESS_JSON` / `PMTILES_PROGRESS_INTERVAL_SEC` - optional build-stage progress tuning for managed PMTiles generation.
+- `PLANETILER_BIN` - optional path to a native Planetiler wrapper/command. The Compose deployment normally uses the separate Java/Planetiler service when no native executable is available.
+- `PLANETILER_CONTAINER` - existing Planetiler container used when native execution is unavailable; default `archimap-planetiler`.
+- `PLANETILER_HOST_DATA_ROOT` / `PLANETILER_CONTAINER_DATA_ROOT` - shared path mapping for Planetiler inputs, schemas and completed outputs; defaults `/app/data` in the caller and `/data` in the engine container. Override these for host-side development with a different shared-volume path.
+- `REGION_SYNC_PLANETILER_LOCAL_IO` - default `true`: container execution stages input, feature sorting and output in a unique container-local `/tmp` directory, then copies the completed archive back once. `false` (also `0` or `off`) uses a unique shared workspace instead. Native execution uses the system temporary directory by default without copying its input. This changes disk placement only; rendering settings remain unchanged.
+- `REGION_SYNC_EMIT_STAGE_JSON` - emits structured stage/progress events from the managed sync CLI. The legacy `PMTILES_PROGRESS_JSON` / `PMTILES_PROGRESS_INTERVAL_SEC` variables do not control the current builder.
 - `REGION_SYNC_WORKSPACE_STALE_HOURS` - stale-cleanup threshold for leftover `data/workspaces/archimap-region-*` per-run workspaces; default `24`.
 - `REGION_SYNC_IMPORT_APPLY_BATCH_SIZE` - apply-stage batching knob for the PostgreSQL merge/apply path.
-- `REGION_SYNC_RENDER_CACHE_REFRESH` - `true` refreshes `osm.region_render_features` after PostgreSQL apply so later `--pmtiles-only` rebuilds can reuse the derived render model; default `false` keeps the current full-sync path lighter.
+- `REGION_SYNC_RENDER_CACHE_REFRESH` - legacy opt-in maintenance of `osm.region_render_features`; default `false`. Managed sync and `--pmtiles-only` export directly from canonical rows and do not depend on that cache.
 - `ADMIN_REGIONS_PMTILES_ON_START` - `auto` (default), `always`, or `never`; controls whether the container startup checks and optionally rebuilds `frontend/build/client/admin-regions.pmtiles`.
 - `SESSION_SECRET`, `APP_SETTINGS_SECRET`, SMTP credentials, Redis/session settings
 
@@ -133,7 +136,7 @@ These values are used as fallback camera only when neither URL nor the saved cli
 - Canonical building data needs a forced re-import:
   use `--force-import`; this bypasses the unchanged-source import shortcut while preserving normal source validation and replication.
 - `node --import tsx scripts/sync-osm-region.ts --region-id=<id>` fails during PMTiles build:
-  verify `planetiler` or `PLANETILER_BIN`.
+  verify the native `PLANETILER_BIN` or running `PLANETILER_CONTAINER`, shared path mapping and available scratch disk space. `REGION_SYNC_PLANETILER_LOCAL_IO=false` moves scratch work onto the shared output filesystem if the container-local filesystem is too small.
 - Newly created regions do not appear on the map:
   verify the region has a successful sync, non-empty bounds, and a PMTiles file under `data/regions/`.
 

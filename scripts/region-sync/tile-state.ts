@@ -11,6 +11,8 @@ const EXPORT_SOURCE_FILES = [
   'scripts/region-sync/region-db.ts',
   'scripts/region-sync/pmtiles-builder.ts',
   'scripts/region-sync/planetiler.ts',
+  'scripts/region-sync/tile-patch-plan.ts',
+  'scripts/region-sync/pmtiles-patch.ts',
   'src/lib/server/services/building-filter-query.service.ts',
   'src/lib/server/utils/filter-sql-builder.ts'
 ];
@@ -18,7 +20,7 @@ const EXPORT_SOURCE_FILES = [
 function buildRegionTileSignature(region, rootDir = path.resolve(__dirname, '..', '..')) {
   const hash = crypto.createHash('sha256');
   hash.update(JSON.stringify({
-    contract: 1,
+    contract: 2,
     sourceLayer: String(region?.sourceLayer || 'buildings'),
     minZoom: Number(region?.pmtilesMinZoom || 13),
     maxZoom: Number(region?.pmtilesMaxZoom || 16),
@@ -52,8 +54,8 @@ async function readRegionTileState(databaseUrl, regionId) {
   });
 }
 
-function canReuseRegionArchive({ state, signature, archivePath }) {
-  if (!state || String(state.data_revision) !== String(state.published_revision)) return false;
+function matchesPublishedArchive({ state, signature, archivePath }) {
+  if (!state || state.published_revision == null) return false;
   if (state.published_signature !== signature) return false;
   try {
     const stat = fs.statSync(archivePath);
@@ -65,7 +67,20 @@ function canReuseRegionArchive({ state, signature, archivePath }) {
   }
 }
 
-async function publishRegionTiles({ databaseUrl, regionId, revision, signature, archivePath, builtArchivePath, afterCommit = null }: LooseRecord) {
+function canReuseRegionArchive(options) {
+  return String(options.state?.data_revision) === String(options.state?.published_revision) &&
+    matchesPublishedArchive(options);
+}
+
+function canPatchRegionArchive(options) {
+  return options.state?.full_rebuild_required === false &&
+    String(options.state.data_revision) !== String(options.state.published_revision) &&
+    Array.isArray(options.state.dirty_bounds) && options.state.dirty_bounds.length > 0 &&
+    matchesPublishedArchive(options);
+}
+
+async function publishRegionTiles({ databaseUrl, regionId, revision, signature, archivePath, builtArchivePath, expectedBase = null, signal, afterCommit = null }: LooseRecord) {
+  signal?.throwIfAborted();
   if (path.resolve(archivePath) === path.resolve(builtArchivePath)) {
     throw new Error('PMTiles publication requires a separate built archive');
   }
@@ -84,17 +99,24 @@ async function publishRegionTiles({ databaseUrl, regionId, revision, signature, 
       // Only publication holds this lock. Imports can run during the expensive
       // export/build, but a stale builder cannot replace a newer archive.
       const state = await client.query(`
-        SELECT data_revision FROM public.data_region_tile_state WHERE region_id = $1 FOR UPDATE
+        SELECT * FROM public.data_region_tile_state WHERE region_id = $1 FOR UPDATE
       `, [regionId]);
       if (!state.rows[0] || String(state.rows[0].data_revision) !== String(revision)) {
         throw new Error('Region data changed during PMTiles build; refusing to publish a stale archive');
       }
+      if (expectedBase && (['published_revision', 'published_signature', 'published_archive_bytes', 'published_archive_mtime_ms']
+        .some(key => String(state.rows[0][key]) !== String(expectedBase[key])) ||
+        !matchesPublishedArchive({ state: expectedBase, signature, archivePath }))) {
+        throw new Error('PMTiles patch base changed during build; refusing to publish');
+      }
+      signal?.throwIfAborted();
       swap = buildPmtilesSwap(archivePath, builtArchivePath);
       const published = fs.statSync(archivePath);
       await client.query(`
         UPDATE public.data_region_tile_state
         SET published_revision = $2, published_signature = $3,
-          published_archive_bytes = $4, published_archive_mtime_ms = $5
+          published_archive_bytes = $4, published_archive_mtime_ms = $5,
+          full_rebuild_required = false, dirty_bounds = '[]'::jsonb
         WHERE region_id = $1
       `, [regionId, revision, signature, published.size, published.mtimeMs]);
       commitAttempted = true;
@@ -119,4 +141,4 @@ async function publishRegionTiles({ databaseUrl, regionId, revision, signature, 
   });
 }
 
-module.exports = { buildRegionTileSignature, canReuseRegionArchive, publishRegionTiles, readRegionTileState };
+module.exports = { buildRegionTileSignature, canReuseRegionArchive, canPatchRegionArchive, publishRegionTiles, readRegionTileState };

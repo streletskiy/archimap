@@ -96,15 +96,11 @@ const {
   acquireRegionSourceLock, buildImportSignature, readActiveRegionSourceState, tryRecordUnchangedRegionSource
 } = require('./region-sync/source-state');
 const { applyRegionImportFromPostgresStage } = require('./region-sync/import-applier');
-const { buildPmtilesFromGeojson } = require('./region-sync/pmtiles-builder');
+const { buildRegionTiles } = require('./region-sync/tile-build');
 const { dropStageSchema, importPbfToPostgresStage } = require('./region-sync/osm2pgsql-import');
 const { resolveRegionPmtilesPath } = require('../src/lib/server/services/data-settings.service');
 const {
-  buildRegionTileSignature, canReuseRegionArchive, publishRegionTiles, readRegionTileState
-} = require('./region-sync/tile-state');
-const {
   assertRegionSupportsManagedSync,
-  exportRegionMembersToGeojsonNdjson,
   loadRegion,
   loadSubregions,
   updateRegionPostSync
@@ -128,11 +124,6 @@ const LOCAL_EDITS_DB_PATH =
 const DATA_DIR =
   String(process.env.ARCHIMAP_DATA_DIR || path.join(__dirname, '..', 'data')).trim() ||
   path.join(__dirname, '..', 'data');
-const PMTILES_PROGRESS_JSON = String(process.env.PMTILES_PROGRESS_JSON ?? 'true').toLowerCase() === 'true';
-const PMTILES_PROGRESS_INTERVAL_SEC = Math.max(
-  1,
-  Math.min(300, Number(process.env.PMTILES_PROGRESS_INTERVAL_SEC || 5))
-);
 const ROOT_DIR = path.join(__dirname, '..');
 const DEFAULT_PARENT_WATCHDOG_INTERVAL_MS = 5_000;
 
@@ -357,25 +348,6 @@ function runRuntimeFollowups({
   });
 }
 
-async function buildPmtilesStep(region, geojsonPath, outputPath, exportSummary: LooseRecord = {}, _dataDir = null) {
-  return buildPmtilesFromGeojson({
-    region,
-    geojsonPath,
-    outputPath,
-    bounds: region?.bounds || exportSummary?.bounds || null,
-    featureCount: Number.isFinite(exportSummary?.importedFeatureCount)
-      ? Number(exportSummary.importedFeatureCount)
-      : null,
-    progressJson: PMTILES_PROGRESS_JSON,
-    progressIntervalSec: PMTILES_PROGRESS_INTERVAL_SEC,
-    onShardProgress: (stageInfo) => {
-      const stage = String(stageInfo?.stage || 'build').trim() || 'build';
-      emitStageJson(stage, stageInfo?.progress ?? null, stageInfo?.detail || null);
-    },
-    env: process.env
-  });
-}
-
 function summarizePmtilesBuildResult(buildResult: LooseRecord = {}) {
   return {
     pmtilesBuildEngine: buildResult?.engine || null,
@@ -383,7 +355,12 @@ function summarizePmtilesBuildResult(buildResult: LooseRecord = {}) {
     pmtilesShardCount: Number(buildResult?.shardCount || 0) || null,
     pmtilesShardReusedCount: Number(buildResult?.reusedShardCount || 0),
     pmtilesShardRebuiltCount: Number(buildResult?.rebuiltShardCount || 0),
-    pmtilesShardCacheDir: buildResult?.cacheDir || null
+    pmtilesShardCacheDir: buildResult?.cacheDir || null,
+    pmtilesDirtyTileCount: Number(buildResult?.dirtyTileCount || 0),
+    pmtilesRetainedTileCount: Number(buildResult?.retainedTileCount || 0),
+    pmtilesReplacedTileCount: Number(buildResult?.replacedTileCount || 0),
+    pmtilesDeletedTileCount: Number(buildResult?.deletedTileCount || 0),
+    pmtilesAddedTileCount: Number(buildResult?.addedTileCount || 0)
   };
 }
 
@@ -455,40 +432,23 @@ function createApplyStageProgressEmitter() {
 async function buildRegionPmtilesOnly(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = registerActiveWorkspace(createWorkspace(region.id));
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
 
   try {
-    const tileState = await readRegionTileState(runtimeOptions.databaseUrl, region.id);
-    const tileSignature = buildRegionTileSignature(region);
-    emitStageJson('export', null, 'reading region members from PostgreSQL');
-    const exported = await exportRegionMembersToGeojsonNdjson({
-      ...runtimeOptions,
-      regionId: region.id,
-      outputPath: geojsonPath
-    });
-    if (exported.importedFeatureCount <= 0) {
-      throw new Error('Region has no features, PMTiles rebuild aborted');
-    }
-
-    emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-    const buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
-    emitStageJson('publish', null, 'publishing pmtiles archive');
-    const finalArchivePath = await publishRegionTiles({
-      databaseUrl: runtimeOptions.databaseUrl, regionId: region.id,
-      revision: tileState.data_revision, signature: tileSignature,
-      archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region), builtArchivePath: builtPmtilesPath
+    const tiles = await buildRegionTiles({
+      region, runtimeOptions, workspace, forceFull: true,
+      archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region),
+      signal: syncAbortController.signal, onStage: emitStageJson
     });
 
     return {
-      importedFeatureCount: exported.importedFeatureCount,
-      activeFeatureCount: exported.importedFeatureCount,
+      importedFeatureCount: tiles.exportedFeatureCount,
+      activeFeatureCount: tiles.exportedFeatureCount,
       orphanDeletedCount: 0,
       renderCacheRows: 0,
-      ...summarizePmtilesBuildResult(buildResult),
-      pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
-      pmtilesPath: finalArchivePath,
-      bounds: exported.bounds
+      ...summarizePmtilesBuildResult(tiles.buildResult),
+      pmtilesBytes: Number(fs.statSync(tiles.archivePath).size || 0),
+      pmtilesPath: tiles.archivePath,
+      bounds: tiles.bounds
     };
   } finally {
     cleanupManagedWorkspace(workspace, 'pmtiles-only run');
@@ -504,8 +464,6 @@ function canReuseBuildingInput(source, previousSnapshot, importSignature) {
 async function runRegionSync(region, runtimeOptions) {
   assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = registerActiveWorkspace(createWorkspace(region.id));
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
-  const builtPmtilesPath = path.join(workspace, 'region.pmtiles');
   let stageSchema = null;
   let releaseSourceLock = null;
 
@@ -560,35 +518,8 @@ async function runRegionSync(region, runtimeOptions) {
       emitStageJson('apply', 100, 'building data unchanged; skipping osm2pgsql and canonical writes');
     }
 
-    const tileState = await readRegionTileState(runtimeOptions.databaseUrl, region.id);
-    const tileSignature = buildRegionTileSignature(region);
-    let finalArchivePath = resolveRegionPmtilesPath(runtimeOptions.dataDir, region);
-    let bounds = region.bounds || null;
-    let buildResult;
-    if (canReuseRegionArchive({ state: tileState, signature: tileSignature, archivePath: finalArchivePath })) {
-      buildResult = { engine: 'planetiler', mode: 'unchanged', shardCount: 1, reusedShardCount: 1 };
-      emitStageJson('publish', 100, 'unchanged rendering data; reusing published pmtiles archive');
-    } else {
-      emitStageJson('export', null, 'exporting region members from PostgreSQL');
-      const exported = await exportRegionMembersToGeojsonNdjson({
-        ...runtimeOptions,
-        regionId: region.id,
-        outputPath: geojsonPath
-      });
-      if (exported.importedFeatureCount <= 0) {
-        throw new Error('Sync produced 0 PMTiles features; keeping previous region archive untouched');
-      }
-
-      emitStageJson('build', null, `features=${exported.importedFeatureCount}`);
-      buildResult = await buildPmtilesStep(region, geojsonPath, builtPmtilesPath, exported, runtimeOptions.dataDir);
-      emitStageJson('publish', null, 'publishing pmtiles archive');
-      finalArchivePath = await publishRegionTiles({
-        databaseUrl: runtimeOptions.databaseUrl, regionId: region.id,
-        revision: tileState.data_revision, signature: tileSignature,
-        archivePath: finalArchivePath, builtArchivePath: builtPmtilesPath
-      });
-      bounds = exported.bounds;
-    }
+    const tiles = await buildRegionTiles({ region, runtimeOptions, workspace,
+      archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region), signal, onStage: emitStageJson });
 
     if (shouldRunRuntimeFollowup({ pmtilesOnly: false, env: process.env })) {
       emitStageJson('followup', null, 'rebuilding search indexes');
@@ -607,10 +538,10 @@ async function runRegionSync(region, runtimeOptions) {
       sourceDiffCount: downloaded.diffCount,
       sourceCacheBytes: downloaded.sourceSnapshot.sizeBytes,
       buildingImportSkipped,
-      ...summarizePmtilesBuildResult(buildResult),
-      pmtilesBytes: Number(fs.statSync(finalArchivePath).size || 0),
-      pmtilesPath: finalArchivePath,
-      bounds
+      ...summarizePmtilesBuildResult(tiles.buildResult),
+      pmtilesBytes: Number(fs.statSync(tiles.archivePath).size || 0),
+      pmtilesPath: tiles.archivePath,
+      bounds: tiles.bounds
     };
   } finally {
     if (stageSchema) {

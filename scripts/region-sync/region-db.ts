@@ -13,6 +13,7 @@ const POSTGRES_REGION_EXPORT_BATCH_SIZE = 20000;
 const POSTGRES_REGION_EXPORT_PARTS_TABLE = 'region_export_parts_tmp';
 const POSTGRES_REGION_EXPORT_PARTS_TABLE_REF = `pg_temp.${POSTGRES_REGION_EXPORT_PARTS_TABLE}`;
 const POSTGRES_REGION_EXPORT_PARTS_GIST_INDEX = 'region_export_parts_geom_gist';
+const POSTGRES_REGION_EXPORT_SELECTED_REF = 'pg_temp.region_export_selected_tmp';
 const BUILDING_JSON_KEY_SQL = '"building"';
 const BUILDING_PART_JSON_KEY_SQL = '"building:part"';
 const BUILDING_PART_ALT_JSON_KEY_SQL = '"building_part"';
@@ -37,7 +38,7 @@ function buildPostgresFeatureKindSql(columnName = 'bc.tags_json') {
   `;
 }
 
-async function preparePostgresRegionExportPartsTable(client, regionId) {
+async function preparePostgresRegionExportPartsTable(client, regionId, selectedFeatures = false) {
   const normalizedRegionId = Number(regionId);
   if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
     throw new Error('Region export requires a positive integer regionId');
@@ -46,7 +47,7 @@ async function preparePostgresRegionExportPartsTable(client, regionId) {
   await client.query(`DROP TABLE IF EXISTS ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
   await client.query(`
     CREATE TEMP TABLE ${POSTGRES_REGION_EXPORT_PARTS_TABLE} AS
-    SELECT
+    SELECT ${selectedFeatures ? 'DISTINCT ON (bc.osm_type, bc.osm_id)' : ''}
       bc.osm_type,
       bc.osm_id,
       ST_Multi(bc.geom) AS geom,
@@ -54,11 +55,18 @@ async function preparePostgresRegionExportPartsTable(client, regionId) {
       bc.min_lat,
       bc.max_lon,
       bc.max_lat
-    FROM public.data_region_memberships drm
+    ${selectedFeatures ? `FROM ${POSTGRES_REGION_EXPORT_SELECTED_REF} parent
+    JOIN osm.building_contours bc ON bc.geom && parent.geom
+      AND bc.min_lon >= parent.min_lon AND bc.max_lon <= parent.max_lon
+      AND bc.min_lat >= parent.min_lat AND bc.max_lat <= parent.max_lat
+    JOIN public.data_region_memberships drm
+      ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id` : `FROM public.data_region_memberships drm
     JOIN osm.building_contours bc
-      ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
+      ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id`}
     WHERE drm.region_id = $1
       AND ${buildPostgresFeatureKindSql('bc.tags_json')} = 'building_part'
+      ${selectedFeatures ? `AND ${buildPostgresFeatureKindSql('parent.tags_json')} = 'building'
+        ORDER BY bc.osm_type, bc.osm_id` : ''}
   `, [normalizedRegionId]);
   await client.query(`CREATE INDEX ${POSTGRES_REGION_EXPORT_PARTS_GIST_INDEX} ON ${POSTGRES_REGION_EXPORT_PARTS_TABLE} USING GIST (geom)`);
   await client.query(`ANALYZE ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
@@ -89,7 +97,8 @@ function buildPostgresRegionExportQuery({ regionSql = '$1' } = {}) {
 function buildPostgresRegionBaseGeojsonExportQuery({
   regionSql = '$1',
   partsTableRef = POSTGRES_REGION_EXPORT_PARTS_TABLE_REF,
-  orderBy = true
+  orderBy = true,
+  selectedFeatures = false
 } = {}) {
   const featureKindSql = buildPostgresFeatureKindSql('bc.tags_json');
   return `
@@ -129,10 +138,10 @@ function buildPostgresRegionBaseGeojsonExportQuery({
         bc.min_lat,
         bc.max_lon,
         bc.max_lat
-      FROM public.data_region_memberships drm
+      ${selectedFeatures ? `FROM ${POSTGRES_REGION_EXPORT_SELECTED_REF} bc` : `FROM public.data_region_memberships drm
       JOIN osm.building_contours bc
         ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-      WHERE drm.region_id = ${regionSql}
+      WHERE drm.region_id = ${regionSql}`}
     ) rm
     WHERE rm.feature_kind IN ('building', 'building_part')
     ${orderBy ? 'ORDER BY rm.osm_type, rm.osm_id' : ''}
@@ -142,7 +151,8 @@ function buildPostgresRegionBaseGeojsonExportQuery({
 function buildPostgresRegionRemainderGeojsonExportQuery({
   regionSql = '$1',
   partsTableRef = POSTGRES_REGION_EXPORT_PARTS_TABLE_REF,
-  orderBy = true
+  orderBy = true,
+  selectedFeatures = false
 } = {}) {
   const featureKindSql = buildPostgresFeatureKindSql('bc.tags_json');
   return `
@@ -168,10 +178,10 @@ function buildPostgresRegionRemainderGeojsonExportQuery({
         bc.min_lat,
         bc.max_lon,
         bc.max_lat
-      FROM public.data_region_memberships drm
+      ${selectedFeatures ? `FROM ${POSTGRES_REGION_EXPORT_SELECTED_REF} bc` : `FROM public.data_region_memberships drm
       JOIN osm.building_contours bc
         ON bc.osm_type = drm.osm_type AND bc.osm_id = drm.osm_id
-      WHERE drm.region_id = ${regionSql}
+      WHERE drm.region_id = ${regionSql}`}
     ) b
     JOIN LATERAL (
       SELECT
@@ -424,7 +434,8 @@ async function streamPostgresCursorRows({
   params = [],
   cursorName,
   batchSize = POSTGRES_REGION_EXPORT_BATCH_SIZE,
-  onRows
+  onRows,
+  manageTransaction = true
 }) {
   const normalizedBatchSize = Math.max(1, Math.trunc(Number(batchSize) || POSTGRES_REGION_EXPORT_BATCH_SIZE));
   const normalizedCursorName = String(cursorName || '').trim();
@@ -435,7 +446,7 @@ async function streamPostgresCursorRows({
     throw new Error('onRows callback is required for streaming PostgreSQL query rows');
   }
 
-  await client.query('BEGIN READ ONLY');
+  if (manageTransaction) await client.query('BEGIN READ ONLY');
   try {
     await client.query(`DECLARE ${normalizedCursorName} NO SCROLL CURSOR FOR ${query}`, params);
     while (true) {
@@ -449,10 +460,10 @@ async function streamPostgresCursorRows({
       await onRows(result.rows || []);
     }
     await client.query(`CLOSE ${normalizedCursorName}`);
-    await client.query('COMMIT');
+    if (manageTransaction) await client.query('COMMIT');
   } catch (error) {
     try {
-      await client.query('ROLLBACK');
+      if (manageTransaction) await client.query('ROLLBACK');
     } catch {
       // ignore rollback failure
     }
@@ -499,8 +510,37 @@ async function exportRegionMembersToNdjson({ dbProvider, databaseUrl, regionId, 
   }
 }
 
-async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, regionId, outputPath }) {
+function normalizeTileWindows(tileWindows) {
+  if (tileWindows == null) return null;
+  if (!Array.isArray(tileWindows) || tileWindows.length > 100000) throw new Error('Invalid region export tile windows');
+  return tileWindows.map((window) => {
+    const values = [window?.west, window?.south, window?.east, window?.north];
+    if (values.some(value => typeof value !== 'number' || !Number.isFinite(value)) ||
+        window.west < -180 || window.east > 180 || window.south < -90 || window.north > 90 ||
+        window.west > window.east || window.south > window.north) throw new Error('Invalid region export tile window bounds');
+    return { west: window.west, south: window.south, east: window.east, north: window.north };
+  });
+}
+
+async function preparePostgresRegionExportSelection(client, regionId, tileWindows) {
+  await client.query(`CREATE TEMP TABLE region_export_windows_tmp ON COMMIT DROP AS
+    SELECT ST_MakeEnvelope(west,south,east,north,4326) AS geom
+    FROM jsonb_to_recordset($1::jsonb) AS w(west FLOAT8,south FLOAT8,east FLOAT8,north FLOAT8)`, [JSON.stringify(tileWindows)]);
+  await client.query('ANALYZE region_export_windows_tmp');
+  await client.query(`CREATE TEMP TABLE region_export_selected_tmp ON COMMIT DROP AS
+    SELECT DISTINCT ON (bc.osm_type,bc.osm_id) bc.*
+    FROM region_export_windows_tmp win
+    JOIN osm.building_contours bc ON bc.geom && win.geom
+    JOIN public.data_region_memberships drm ON drm.osm_type=bc.osm_type AND drm.osm_id=bc.osm_id
+    WHERE drm.region_id=$1 ORDER BY bc.osm_type,bc.osm_id`, [regionId]);
+  await client.query(`ALTER TABLE ${POSTGRES_REGION_EXPORT_SELECTED_REF} ADD PRIMARY KEY (osm_type,osm_id)`);
+  await client.query(`ANALYZE ${POSTGRES_REGION_EXPORT_SELECTED_REF}`);
+}
+
+async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, regionId, outputPath, tileWindows = null }: LooseRecord) {
   assertPostgresRegionSyncOptions({ dbProvider, databaseUrl });
+  const windows = normalizeTileWindows(tileWindows);
+  const selectedFeatures = windows !== null;
   ensureDir(outputPath);
   const writer = fs.createWriteStream(outputPath, {
     encoding: 'utf8',
@@ -508,6 +548,7 @@ async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, reg
   });
   let importedFeatureCount = 0;
   let bounds = null;
+  let regionBounds = null;
 
   async function writeRow(row) {
     await writeStreamLine(
@@ -531,12 +572,26 @@ async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, reg
       if (!Number.isInteger(normalizedRegionId) || normalizedRegionId <= 0) {
         throw new Error('Region export requires a positive integer regionId');
       }
-      await preparePostgresRegionExportPartsTable(client, normalizedRegionId);
+      // Parts, selected rows and both export passes share one consistent view.
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
       try {
+        if (selectedFeatures) {
+          const result = await client.query(`SELECT MIN(bc.min_lon) AS west, MIN(bc.min_lat) AS south,
+            MAX(bc.max_lon) AS east, MAX(bc.max_lat) AS north
+            FROM public.data_region_memberships drm JOIN osm.building_contours bc USING (osm_type,osm_id)
+            WHERE drm.region_id=$1`, [normalizedRegionId]);
+          const extent = result.rows[0];
+          regionBounds = extent?.west == null ? null : {
+            west: Number(extent.west), south: Number(extent.south), east: Number(extent.east), north: Number(extent.north)
+          };
+          await preparePostgresRegionExportSelection(client, normalizedRegionId, windows);
+        }
+        await preparePostgresRegionExportPartsTable(client, normalizedRegionId, selectedFeatures);
         await streamPostgresCursorRows({
           client,
-          query: buildPostgresRegionBaseGeojsonExportQuery({ regionSql: String(normalizedRegionId) }),
+          query: buildPostgresRegionBaseGeojsonExportQuery({ regionSql: String(normalizedRegionId), selectedFeatures }),
           params: [],
+          manageTransaction: false,
           cursorName: 'region_members_base_geojson_export_cursor',
           onRows: async (rows) => {
             for (const row of rows) {
@@ -546,8 +601,9 @@ async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, reg
         });
         await streamPostgresCursorRows({
           client,
-          query: buildPostgresRegionRemainderGeojsonExportQuery({ regionSql: String(normalizedRegionId) }),
+          query: buildPostgresRegionRemainderGeojsonExportQuery({ regionSql: String(normalizedRegionId), selectedFeatures }),
           params: [],
+          manageTransaction: false,
           cursorName: 'region_members_remainder_geojson_export_cursor',
           onRows: async (rows) => {
             for (const row of rows) {
@@ -555,12 +611,11 @@ async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, reg
             }
           }
         });
-      } finally {
-        try {
-          await client.query(`DROP TABLE IF EXISTS ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
-        } catch {
-          // ignore temp table cleanup failures
-        }
+        await client.query(`DROP TABLE IF EXISTS ${POSTGRES_REGION_EXPORT_PARTS_TABLE}`);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
       }
     });
   } finally {
@@ -569,7 +624,9 @@ async function exportRegionMembersToGeojsonNdjson({ dbProvider, databaseUrl, reg
 
   return {
     importedFeatureCount,
-    bounds
+    bounds,
+    regionBounds: selectedFeatures ? regionBounds : bounds,
+    emptySubsetAllowed: selectedFeatures
   };
 }
 
