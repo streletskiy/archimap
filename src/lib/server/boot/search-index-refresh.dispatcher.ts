@@ -1,3 +1,5 @@
+const { advanceBuildingDataRevision } = require('../infra/building-data-revision.infra');
+
 function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
   const {
     db,
@@ -106,12 +108,18 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
     readyAt = 0;
 
     const onMessage = (message) => {
-      const type = String(message?.type || '').trim();
+      if (currentWorker !== child || isStopping || isShuttingDown()) return;
+      const type = message?.type;
       if (type === 'ready') {
-        if (currentWorker !== child) return;
         currentWorkerReady = true;
         readyAt = Date.now();
         return;
+      }
+      if ((type === 'drained' || type === 'refreshed') &&
+        Number.isSafeInteger(message.processed) && message.processed > 0) {
+        // The worker reports only committed writes. Requests cached before the
+        // projection changed must use a new revision in this parent process.
+        advanceBuildingDataRevision();
       }
     };
 
@@ -209,6 +217,15 @@ function createSearchIndexRefreshDispatcher(options: LooseRecord = {}) {
       }
     }
     clearWorkerState();
+  }
+
+  // Regional imports enqueue PostgreSQL changes without sending edit IPC. Start
+  // their durable consumer even when nobody has edited a building.
+  if (String(db?.provider || env.DB_PROVIDER) === 'postgres' && canSpawnWorker && !isShuttingDown()) {
+    try { spawnWorker(); } catch (error) {
+      logWorkerFailure('search_refresh_worker_start_failed', { error: String(error?.message || error) });
+      scheduleRestart();
+    }
   }
 
   return {

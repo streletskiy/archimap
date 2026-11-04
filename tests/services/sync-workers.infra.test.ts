@@ -99,10 +99,12 @@ function createManagedDataSettingsService(regions = [], overrides: ManagedDataSe
     markRunSucceeded: async (runId, summary: LooseRecord = {}) => {
       const run = runMap.get(Number(runId));
       run.status = 'success';
+      run.finishedAt = new Date(Date.now()).toISOString();
       run.summary = { ...summary };
       const region = regionMap.get(run.regionId);
       if (region) {
         region.lastSyncStatus = 'idle';
+        region.lastSuccessfulSyncAt = run.finishedAt;
         region.lastFeatureCount = summary.activeFeatureCount ?? null;
       }
       return {
@@ -948,7 +950,121 @@ for (const actualSourceTime of ['2026-04-08T00:12:00.000Z', null]) {
   });
 }
 
-test('initAutoSync requeues recovered interrupted runs without waiting for upstream refresh', async () => {
+test('delayed initAutoSync coalesces completed manual work but preserves manual retries and the next startup', async (t) => {
+  let nowMs = Date.parse('2026-11-04T00:00:00.000Z');
+  t.mock.method(Date, 'now', () => nowMs);
+  const children = [];
+  const dataSettingsService = createManagedDataSettingsService([
+    {
+      id: 14,
+      enabled: true,
+      autoSyncEnabled: false,
+      autoSyncOnStart: true,
+      nextSyncAt: null,
+      lastSyncStatus: 'idle'
+    }
+  ]);
+  const options = {
+    spawn: () => {
+      const child = createChildProcessStub();
+      children.push(child);
+      return child;
+    },
+    processExecPath: process.execPath,
+    syncRegionScriptPath: 'managed.ts',
+    cwd: process.cwd(),
+    env: process.env,
+    dataSettingsService,
+    isShuttingDown: () => false,
+    onSyncSuccess: async () => {},
+    log: { log() {}, error() {} }
+  };
+  const workers = initSyncWorkersInfra(options);
+  t.after(() => workers.stop());
+  const oldRegion = await dataSettingsService.getRegionById(14);
+
+  await workers.requestRegionSync(14, { triggerReason: 'manual', requestedBy: 'tester' });
+  nowMs += 60_000;
+  children[0].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[0].emit('close', 0, null);
+  await waitForMicrotasks();
+  assert.equal((await dataSettingsService.getRecentRuns(14))[0].status, 'success');
+
+  nowMs += 60_000;
+  // Simulate the separate region read racing with success persistence: the
+  // completed run still satisfies startup even if that snapshot is stale.
+  const getRegionById = dataSettingsService.getRegionById;
+  let staleRegionRead = true;
+  dataSettingsService.getRegionById = async (regionId) => {
+    if (staleRegionRead) {
+      staleRegionRead = false;
+      return oldRegion;
+    }
+    return getRegionById(regionId);
+  };
+  await workers.initAutoSync();
+  await workers.initAutoSync();
+  assert.equal(children.length, 1, 'completed work satisfies this worker startup even after a long warmup');
+  assert.equal((await dataSettingsService.getRecentRuns(14)).length, 1);
+
+  await workers.requestRegionSync(14, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(children.length, 2, 'a later explicit repair request must still run');
+  children[1].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":1}\n'));
+  children[1].emit('close', 0, null);
+  await waitForMicrotasks();
+  workers.stop();
+
+  nowMs += 60_000;
+  const restartedWorkers = initSyncWorkersInfra(options);
+  t.after(() => restartedWorkers.stop());
+  await restartedWorkers.initAutoSync();
+  await restartedWorkers.initAutoSync();
+  assert.equal(children.length, 3, 'a new worker lifecycle retains its startup intent');
+  assert.equal((await dataSettingsService.getRecentRuns(14))[0].triggerReason, 'startup');
+});
+
+for (const [label, lastSuccessfulSyncAt] of [
+  ['missing', null],
+  ['invalid', 'not-a-timestamp'],
+  ['older than startup', '2026-11-03T23:59:59.999Z'],
+  ['future', '2026-11-04T00:00:00.001Z']
+]) {
+  test(`initAutoSync retains startup work when the successful timestamp is ${label}`, async (t) => {
+    t.mock.method(Date, 'now', () => Date.parse('2026-11-04T00:00:00.000Z'));
+    let spawned = 0;
+    const dataSettingsService = createManagedDataSettingsService([
+      {
+        id: 14,
+        enabled: true,
+        autoSyncEnabled: false,
+        autoSyncOnStart: true,
+        nextSyncAt: null,
+        lastSuccessfulSyncAt
+      }
+    ]);
+    const workers = initSyncWorkersInfra({
+      spawn: () => {
+        spawned += 1;
+        return createChildProcessStub();
+      },
+      processExecPath: process.execPath,
+      syncRegionScriptPath: 'managed.ts',
+      cwd: process.cwd(),
+      env: process.env,
+      dataSettingsService,
+      isShuttingDown: () => false,
+      onSyncSuccess: async () => {},
+      log: { log() {}, error() {} }
+    });
+    t.after(() => workers.stop());
+    await workers.initAutoSync();
+    await workers.initAutoSync();
+    assert.equal(spawned, 1);
+  });
+}
+
+test('initAutoSync requeues recovered interrupted runs without waiting for upstream refresh', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-11-04T00:00:00.000Z'));
   const children = [];
   let upstreamChecks = 0;
   const dataSettingsService = createManagedDataSettingsService(
@@ -957,8 +1073,9 @@ test('initAutoSync requeues recovered interrupted runs without waiting for upstr
         id: 14,
         enabled: true,
         autoSyncEnabled: false,
-        autoSyncOnStart: false,
+        autoSyncOnStart: true,
         nextSyncAt: null,
+        lastSuccessfulSyncAt: '2026-11-04T00:00:00.000Z',
         lastSyncStatus: 'abandoned',
         lastSyncError: 'Sync interrupted by process restart'
       }
