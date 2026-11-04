@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.10.1
+
+### ⚡ Performance
+
+- **Continuous Search Refresh:** Start the PostgreSQL refresh worker without waiting for a user edit. Check durable changes every five seconds and process bounded batches independently of the regional queue, yielding between batches and retrying busy imports without losing changes ([3810ca2](https://github.com/streletskiy/archimap/commit/3810ca2)).
+- **Search Projection:** Compute resolved fields and weighted vectors once per object in bounded refreshes. A paired warm query over 5,000 Nizhny Novgorod identities decreased from 157.113 ms to 94.285 ms with identical output; full rebuild behavior is unchanged.
+
+### 🐛 Bug Fixes
+
+- **Search Freshness:** Invalidate server search caches after committed background refreshes; preserve the existing browser cache lifetime. Recover from connection failures and retain importer-locked rows for a later pass.
+- **Startup Scheduling:** Avoid repeating a region refresh already completed successfully during the same worker startup. Explicit manual, scheduled, and recovery work remains available.
+
+### ✅ Validation
+
+- Passed 576 unit tests and 38 integration tests with no skips, including PostgreSQL, Osmium, and Planetiler checks; formatting, lint, frontend/type checks, security, and smoke checks also passed.
+- No database migrations or source-cache/map-format changes are required.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.10.0...0.10.1)
+
 ## v0.10.0
 
 ### ⚡ Performance
