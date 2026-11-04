@@ -123,19 +123,66 @@ test('PostgreSQL search publication, durable changes, all tags and exact tag cou
       await concurrentDrain.catch(() => {});
       throw error;
     }
-    // Recovery must happen without another edit or a region sync triggering it.
+    // A background slice commits only its budget and leaves both the untouched
+    // objects and a newer generation of an already consumed object durable.
+    await insert(80, { building: 'yes', slicetest: 'firstslicevalue' });
+    await insert(81, { building: 'yes', slicetest: 'secondslicevalue' });
+    await insert(82, { building: 'yes', slicetest: 'thirdslicevalue' });
+    assert.equal(await refreshPostgresSearchChanges(worker, {
+      batchSize: 1, maxBatches: 1,
+      onBatch: () => reader.query('UPDATE osm.building_contours SET tags_json=$1 WHERE osm_id=80',
+        [JSON.stringify({ building: 'yes', slicetest: 'newerslicevalue' })])
+    }), 1);
+    assert.deepEqual(await matches('firstslicevalue'), [80]);
+    assert.deepEqual(await matches('newerslicevalue'), []);
+    assert.equal(Number((await reader.query('SELECT count(*) FROM building_data_changes')).rows[0].count), 3);
+    await reader.query('SELECT pg_advisory_lock(87423619)');
+    try {
+      await worker.query("SET statement_timeout = '250ms'");
+      assert.equal(await refreshPostgresSearchChanges(worker, { maxBatches: 1, waitForLock: false }), 0,
+        'a busy background consumer yields without waiting for the publisher lock');
+      assert.equal(Number((await worker.query('SELECT count(*) FROM building_data_changes')).rows[0].count), 3);
+    } finally {
+      await worker.query('SET statement_timeout = 0');
+      await reader.query('SELECT pg_advisory_unlock(87423619)');
+    }
+    assert.equal(await refreshPostgresSearchChanges(worker, { batchSize: 1, maxBatches: 2 }), 2);
+    assert.equal(Number((await reader.query('SELECT count(*) FROM building_data_changes')).rows[0].count), 1);
+    assert.equal(await refreshPostgresSearchChanges(worker), 1);
+    assert.deepEqual(await matches('newerslicevalue'), [80]);
+    assert.deepEqual(await matches('firstslicevalue'), []);
+
+    // A regional transaction can hold some queue rows while other committed
+    // changes are ready. Background slices leave its generations untouched.
+    await insert(90, { building: 'yes', rowlocktest: 'lockedchange' });
+    await insert(91, { building: 'yes', rowlocktest: 'availablechange' });
+    await reader.query('BEGIN');
+    await reader.query("UPDATE building_data_changes SET generation=nextval('building_data_change_generation_seq') WHERE osm_id=90");
+    try {
+      await worker.query("SET statement_timeout = '500ms'");
+      assert.equal(await refreshPostgresSearchChanges(worker, { batchSize: 2, maxBatches: 1, waitForLock: false }), 1);
+      assert.deepEqual(await matches('availablechange'), [91]);
+      assert.deepEqual(await matches('lockedchange'), []);
+      assert.equal(Number((await worker.query('SELECT count(*) FROM building_data_changes')).rows[0].count), 1);
+    } finally {
+      await worker.query('SET statement_timeout = 0');
+      await reader.query('COMMIT');
+    }
+    assert.equal(await refreshPostgresSearchChanges(worker, { maxBatches: 1, waitForLock: false }), 1);
+    assert.deepEqual(await matches('lockedchange'), [90]);
+
+    // A long-lived worker must discover durable imports without an IPC edit or
+    // the regional queue becoming idle, and must survive a busy publisher.
     await reader.query("UPDATE local.architectural_info SET material='retryvalue' WHERE osm_id=1");
     await insert(8, { building: 'yes', startupretry: 'recovered' });
     await worker.query('SELECT pg_advisory_lock(87423619)');
-    const retryUrl = new URL(url);
-    retryUrl.searchParams.set('options', '-c statement_timeout=100');
     retryChild = require('child_process').spawn(process.execPath, ['--import', 'tsx', 'workers/refresh-search-index.worker.ts'], {
       cwd: require('path').join(__dirname, '../..'), windowsHide: true,
-      env: { ...process.env, DB_PROVIDER: 'postgres', DATABASE_URL: retryUrl.toString() },
+      env: { ...process.env, DB_PROVIDER: 'postgres', DATABASE_URL: url.toString() },
       stdio: ['ignore', 'pipe', 'pipe', 'ipc']
     });
-    const retryFailed = new Promise<void>((resolve) => retryChild.stderr.on('data', (chunk) => {
-      if (String(chunk).includes('durable_drain_failed')) resolve();
+    const yielded = new Promise<void>((resolve) => retryChild.on('message', (message) => {
+      if (message?.type === 'drained' && message.processed === 0) resolve();
     }));
     const recovered = new Promise<void>((resolve) => retryChild.on('message', (message) => {
       if (message?.type === 'drained' && message.processed > 0) resolve();
@@ -145,10 +192,17 @@ test('PostgreSQL search publication, durable changes, all tags and exact tag cou
       try { await Promise.race([promise, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('worker recovery timed out')), 10000); })]); }
       finally { clearTimeout(timeout); }
     };
-    await bounded(retryFailed);
+    await bounded(yielded);
     await worker.query('SELECT pg_advisory_unlock(87423619)');
     await bounded(recovered);
     assert.deepEqual(await matches('recovered'), [8]);
+    assert.equal(Number((await reader.query('SELECT count(*) FROM building_data_changes')).rows[0].count), 0);
+    const nextDrain = new Promise<void>((resolve) => retryChild.on('message', (message) => {
+      if (message?.type === 'drained' && message.processed > 0) resolve();
+    }));
+    await insert(9, { building: 'yes', periodicimport: 'discoveredwithoutwake' });
+    await bounded(nextDrain);
+    assert.deepEqual(await matches('discoveredwithoutwake'), [9]);
     assert.equal(Number((await reader.query('SELECT count(*) FROM building_data_changes')).rows[0].count), 0);
   } finally {
     if (retryChild && retryChild.exitCode === null && retryChild.signalCode === null) {

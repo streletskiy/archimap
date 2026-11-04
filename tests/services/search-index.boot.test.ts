@@ -334,6 +334,68 @@ test('PostgreSQL refresh worker restarts once with backoff and stops retrying on
   assert.equal(children.length, 2);
 });
 
+test('PostgreSQL starts its durable refresh worker without a user edit while SQLite stays lazy', () => {
+  const { createSearchIndexRefreshDispatcher } = require('../../src/lib/server/boot/search-index-refresh.dispatcher');
+  for (const provider of ['postgres', 'sqlite']) {
+    const children = [];
+    const dispatcher = createSearchIndexRefreshDispatcher({ db: { provider }, logger: { error() {} },
+      spawn: () => { const child = createChildProcessStub(); children.push(child); return child; },
+      processExecPath: 'node', rootDir: '/app', searchRefreshWorkerScriptPath: 'worker.ts', env: {} });
+    assert.equal(children.length, provider === 'postgres' ? 1 : 0);
+    dispatcher.stop();
+    if (children.length) assert.equal(children[0].killed, true);
+  }
+});
+
+test('a failed initial PostgreSQL worker start is retried without a user edit', () => {
+  const { createSearchIndexRefreshDispatcher } = require('../../src/lib/server/boot/search-index-refresh.dispatcher');
+  let attempts = 0;
+  const timers = [];
+  const child = createChildProcessStub();
+  const dispatcher = createSearchIndexRefreshDispatcher({ db: { provider: 'postgres' }, logger: { error() {} },
+    spawn: () => { if (++attempts === 1) throw new Error('temporary spawn failure'); return child; },
+    processExecPath: 'node', rootDir: '/app', searchRefreshWorkerScriptPath: 'worker.ts', env: {},
+    setTimeoutFn: (callback, delay) => { const timer = { callback, delay, unref() {} }; timers.push(timer); return timer; },
+    clearTimeoutFn() {} });
+  assert.equal(attempts, 1);
+  assert.equal(timers[0].delay, 1000);
+  timers[0].callback();
+  assert.equal(attempts, 2);
+  dispatcher.stop();
+  assert.equal(child.killed, true);
+});
+
+test('only valid committed refresh messages from the current worker invalidate cached search results', () => {
+  const { createSearchIndexRefreshDispatcher } = require('../../src/lib/server/boot/search-index-refresh.dispatcher');
+  const { getBuildingDataRevision } = require('../../src/lib/server/infra/building-data-revision.infra');
+  const children = [];
+  const timers = [];
+  const dispatcher = createSearchIndexRefreshDispatcher({ db: { provider: 'postgres' }, logger: { error() {} },
+    spawn: () => { const child = createChildProcessStub(); children.push(child); return child; },
+    processExecPath: 'node', rootDir: '/app', searchRefreshWorkerScriptPath: 'worker.ts', env: {},
+    setTimeoutFn: (callback) => { const timer = { callback, unref() {} }; timers.push(timer); return timer; },
+    clearTimeoutFn() {} });
+  const revision = getBuildingDataRevision();
+  const first = children[0];
+  for (const message of [null, {}, { type: 'unknown', processed: 1 }, { type: 'ready', processed: 1 },
+    ...[undefined, 0, -1, 1.5, '1', Infinity, Number.MAX_SAFE_INTEGER + 1].map((processed) => ({ type: 'drained', processed }))]) {
+    first.emit('message', message);
+  }
+  assert.equal(getBuildingDataRevision(), revision);
+  first.emit('message', { type: 'drained', processed: 5000 });
+  first.emit('message', { type: 'refreshed', processed: 1 });
+  assert.equal(getBuildingDataRevision(), revision + 2);
+  first.emit('exit', 1);
+  timers[0].callback();
+  first.emit('message', { type: 'drained', processed: 1 });
+  assert.equal(getBuildingDataRevision(), revision + 2);
+  children[1].emit('message', { type: 'drained', processed: 1 });
+  assert.equal(getBuildingDataRevision(), revision + 3);
+  dispatcher.stop();
+  children[1].emit('message', { type: 'drained', processed: 1 });
+  assert.equal(getBuildingDataRevision(), revision + 3);
+});
+
 test('search index refresh queue deduplicates repeated requests for the same building', async () => {
   const { db, metrics } = createSearchIndexRefreshDbStub();
   const boot = createSearchIndexBoot({

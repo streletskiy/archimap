@@ -40,7 +40,11 @@
   - Save/moderation/cleanup requests enqueue background work rather than rebuilding the full index. Failed/unconsumed entries remain durable for recovery.
   - A full rebuild creates and indexes a separate table while readers keep using the published index, then swaps tables transactionally. Changes committed after the rebuild snapshot remain queued.
   - Startup checks projection version, index presence, and queued changes; a current projection consumes changes instead of rescanning all source rows.
+  - PostgreSQL starts its refresh worker eagerly and polls the durable queue every five seconds, independently of regional sync completion and user-edit IPC. Each background pass processes at most 5,000 objects, yields between busy passes, and retries unavailable writer locks or importer-held rows without discarding their generations. Connection failures back off from one to 60 seconds.
+  - Bounded refreshes materialize resolved fields and weighted vectors once per object; full rebuilds retain their existing materialization strategy. Deletions target projection primary keys, avoiding merge scans across the full projection for sparse batches.
+  - Successful refresh notifications invalidate server-side search caches. Browser responses retain their existing 15-second HTTP cache lifetime; the five-second polling interval describes index discovery, not an unconditional end-to-end freshness guarantee under load or lock contention.
   - SQLite retains Node-side normalization in `search-index-source.service.ts`, `building_search_source`, and `building_search_fts`.
+- Regional startup scheduling coalesces an initial refresh with a successful sync completed since that worker was created. Delayed startup maintenance therefore does not repeat regions already processed manually during the same startup; scheduled, manual, and recovery work remains available.
 - PostgreSQL tag-key suggestions use transactional `filter_tag_key_counts` maintained by statement-level transition-table triggers. New keys and removal of the final occurrence update `filter_tag_keys_cache` without transferring all contours to Node after every sync. Routine maintenance reads the compact dictionary; `FILTER_TAG_KEYS_REBUILD_FULL=true` explicitly repairs counts and cache with a source scan under a write-blocking source-table lock.
 
 ## DB and indexes
@@ -60,3 +64,17 @@
 - For very complex `contains` filters in huge bboxes, planner/index selectivity can dominate p95 and should be monitored with `EXPLAIN ANALYZE`.
 - Batch materialization and complete low-zoom counts must inspect all relevant matches. Compare result completeness as well as latency with older candidate-capped queries; a faster incomplete count is not an equivalent workload.
 - Full search publication temporarily requires both old and new tables/indexes. Incremental maintenance reduces repeated rebuild work but does not eliminate this peak space requirement.
+
+## Search refresh measurement (2026-11-04)
+
+On NODE-H1 with the production dataset, 5,000 existing Nizhny Novgorod region
+identities remained queued for 42.93 seconds in 0.10.0 without a user-edit wake-up;
+an explicit drain then processed them in 465 ms. This isolates missing background
+discovery from SQL execution time. The measurement requeued existing identities
+without modifying contours or user data.
+
+For the same bounded projection, paired warm PostgreSQL `EXPLAIN ANALYZE` runs
+measured 157.113 ms before and 94.285 ms after materializing resolved fields and
+vectors. Both returned the same 3,131 searchable rows from 5,000 inputs; their
+ordered content digests matched in one transaction. This is a projection-query
+comparison, not a claim about full-region synchronization or HTTP latency.

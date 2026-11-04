@@ -33,6 +33,9 @@ async function reclaimEmptyPostgresSearchQueue(client, { minBytes = SEARCH_QUEUE
 }
 
 function buildPostgresSearchSourceSelect(joinSql = '') {
+  // A bounded refresh can resolve each address and weighted tag vector once.
+  // Avoid additional materialization of the complete dataset during rebuilds.
+  const materialized = joinSql ? 'MATERIALIZED ' : '';
   return `WITH base AS MATERIALIZED (
     SELECT bc.osm_type, bc.osm_id,
       public.archimap_parse_tags(bc.tags_json) AS tags,
@@ -44,7 +47,7 @@ function buildPostgresSearchSourceSelect(joinSql = '') {
       (bc.min_lon + bc.max_lon) / 2 AS center_lon, (bc.min_lat + bc.max_lat) / 2 AS center_lat
     FROM osm.building_contours bc ${joinSql}
     LEFT JOIN local.architectural_info ai USING (osm_type, osm_id)
-  ), resolved AS (
+  ), resolved AS ${materialized}(
     SELECT *,
       COALESCE(NULLIF(btrim(local_name), ''), NULLIF(btrim(tags ->> 'name'), ''),
         NULLIF(btrim(tags ->> 'name:ru'), ''), NULLIF(btrim(tags ->> 'official_name'), '')) AS name,
@@ -63,7 +66,7 @@ function buildPostgresSearchSourceSelect(joinSql = '') {
       COALESCE(NULLIF(btrim(local_design_ref), ''), NULLIF(btrim(tags ->> 'design:ref'), ''),
         NULLIF(btrim(tags ->> 'design_ref'), '')) AS design_ref
     FROM base WHERE tags ? 'building' OR NOT (tags ? 'building:part' OR tags ? 'building_part')
-  ), projected AS (
+  ), projected AS ${materialized}(
     SELECT osm_type || '/' || osm_id::text AS osm_key, osm_type, osm_id,
       name, address, style, architect, design_ref, local_priority, center_lon, center_lat, NOW() AS updated_at,
       setweight(to_tsvector('simple', concat_ws(' ', name, address, style, architect, design_ref)), 'A') ||
@@ -72,18 +75,39 @@ function buildPostgresSearchSourceSelect(joinSql = '') {
   ) SELECT ${SEARCH_COLUMNS} FROM projected WHERE search_tsv <> ''::tsvector`;
 }
 
-async function refreshPostgresSearchChanges(client, { batchSize = 5000, onBatch = null }: LooseRecord = {}) {
+async function refreshPostgresSearchChanges(client, {
+  batchSize = 5000, maxBatches = Infinity, waitForLock = true, onBatch = null
+}: LooseRecord = {}) {
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new RangeError('Search batch size must be a positive integer');
+  if (maxBatches !== Infinity && (!Number.isSafeInteger(maxBatches) || maxBatches < 1)) {
+    throw new RangeError('Search batch limit must be a positive integer');
+  }
   let processed = 0;
-  while (true) {
+  for (let batches = 0; batches < maxBatches; batches += 1) {
     await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
     try {
-      await client.query('SELECT pg_advisory_xact_lock($1)', [SEARCH_INDEX_LOCK]);
+      if (waitForLock) {
+        await client.query('SELECT pg_advisory_xact_lock($1)', [SEARCH_INDEX_LOCK]);
+      } else {
+        const lock = await client.query('SELECT pg_try_advisory_xact_lock($1) AS acquired', [SEARCH_INDEX_LOCK]);
+        if (!lock.rows[0].acquired) {
+          await client.query('COMMIT');
+          break;
+        }
+      }
+      const pending = await client.query('SELECT EXISTS (SELECT 1 FROM public.building_data_changes) AS pending');
+      if (!pending.rows[0].pending) {
+        // Idle polling must not create a temporary table on every tick.
+        await reclaimEmptyPostgresSearchQueue(client);
+        await client.query('COMMIT');
+        break;
+      }
       await client.query(`CREATE TEMP TABLE search_change_batch ON COMMIT DROP AS
         WITH oldest AS MATERIALIZED (SELECT osm_type, osm_id FROM public.building_data_changes
           ORDER BY generation LIMIT $1)
         SELECT pending.osm_type, pending.osm_id, pending.generation FROM public.building_data_changes pending
         JOIN oldest USING (osm_type, osm_id)
-        ORDER BY pending.osm_type, pending.osm_id FOR UPDATE OF pending`, [batchSize]);
+        ORDER BY pending.osm_type, pending.osm_id FOR UPDATE OF pending${waitForLock ? '' : ' SKIP LOCKED'}`, [batchSize]);
       const count = await client.query('SELECT count(*)::integer AS count FROM search_change_batch');
       const size = Number(count.rows[0].count);
       if (size === 0) {
@@ -91,8 +115,10 @@ async function refreshPostgresSearchChanges(client, { batchSize = 5000, onBatch 
         await client.query('COMMIT');
         break;
       }
-      await client.query(`DELETE FROM public.building_search_source s USING search_change_batch c
-        WHERE s.osm_type = c.osm_type AND s.osm_id = c.osm_id`);
+      // Target the projection's primary keys directly. A join to a temporary
+      // table can choose a merge scan of the entire projection for sparse IDs.
+      await client.query(`DELETE FROM public.building_search_source WHERE osm_key = ANY(
+        ARRAY(SELECT osm_type || '/' || osm_id::text FROM search_change_batch))`);
       await client.query(`INSERT INTO public.building_search_source (${SEARCH_COLUMNS})
         ${buildPostgresSearchSourceSelect('JOIN search_change_batch changed USING (osm_type, osm_id)')}`);
       await client.query(`DELETE FROM public.building_data_changes pending USING search_change_batch consumed

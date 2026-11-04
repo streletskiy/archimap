@@ -66,6 +66,9 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     recoverySweepIntervalMs = DEFAULT_RECOVERY_SWEEP_INTERVAL_MS
   } = options;
 
+  // Startup maintenance may finish after HTTP requests have already synced a
+  // region. Keep the worker's original baseline, not the later initAutoSync time.
+  const startedAt = Date.now();
   const queue = [];
   const queuedRegionIds = new Set();
   const enqueueLocksByRegionId = new Map();
@@ -632,6 +635,22 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         };
       }
 
+      // A run and its region summary are persisted separately. Include recent
+      // successful runs in case finalization raced with the region read above.
+      const successfulTimes = [
+        region.lastSuccessfulSyncAt,
+        ...recentRuns.filter((item) => item.status === 'success').map((item) => item.finishedAt)
+      ];
+      if (
+        options.skipIfSyncedSinceStartup === true &&
+        successfulTimes.some((value) => {
+          const timestamp = Date.parse(String(value || ''));
+          return Number.isFinite(timestamp) && timestamp >= startedAt && timestamp <= Date.now();
+        })
+      ) {
+        return { queued: false, reason: 'startup_already_synced', region };
+      }
+
       const skipUpstreamCheck = options.skipUpstreamCheck === true;
       // The worker validates its committed source and can cheaply reuse it. A
       // timestamp alone cannot prove that tiles and deferred indexes are healthy.
@@ -694,7 +713,8 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       if (!dueNow && !shouldRunOnStart) continue;
       await requestRegionSync(region.id, {
         triggerReason: shouldRunOnStart ? 'startup' : 'scheduled',
-        requestedBy: 'system'
+        requestedBy: 'system',
+        skipIfSyncedSinceStartup: shouldRunOnStart
       });
     }
     await reloadSchedules();
