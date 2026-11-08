@@ -54,6 +54,10 @@ function toContainerPath(hostPath, env: LooseRecord = process.env) {
   return normalizedPath;
 }
 
+function usesPlanetilerLocalIo(env: LooseRecord = process.env) {
+  return !['0', 'false', 'off'].includes(String(env.REGION_SYNC_PLANETILER_LOCAL_IO || '').toLowerCase());
+}
+
 function normalizeAttributeKeys(attributeKeys = []) {
   return [...new Set((Array.isArray(attributeKeys) ? attributeKeys : []).map((item) => String(item || '').trim()))]
     .filter(Boolean)
@@ -158,7 +162,7 @@ function runPlanetilerBuild({
     path.join(path.dirname(outputPath), `${path.basename(outputPath, '.pmtiles')}.planetiler.yml`);
 
   ensureDir(outputPath);
-  const localIO = !['0', 'false', 'off'].includes(String(env.REGION_SYNC_PLANETILER_LOCAL_IO || '').toLowerCase());
+  const localIO = usesPlanetilerLocalIo(env);
   const nativeTemporaryWorkspace = !containerName && localIO;
   const workspaceName = `archimap-planetiler-${randomUUID()}`;
   const workspaceRoot = containerName && localIO ? '/tmp' : path.dirname(outputPath);
@@ -232,11 +236,17 @@ function runPlanetilerBuild({
 
     if (containerName) {
       if (localIO) {
-        checked(
-          'docker',
-          ['exec', containerName, 'cp', '--', toContainerPath(inputPath, env), engineInput],
-          'input staging'
-        );
+        const inputFd = fs.openSync(inputPath, 'r');
+        try {
+          checked(
+            'docker',
+            ['exec', '-i', containerName, 'sh', '-c', 'cat > "$1"', 'sh', engineInput],
+            'input staging',
+            [inputFd, 'inherit', 'inherit']
+          );
+        } finally {
+          fs.closeSync(inputFd);
+        }
         checked(
           'docker',
           ['exec', containerName, 'cp', '--', toContainerPath(effectiveSchemaPath, env), engineSchema],
@@ -321,5 +331,6 @@ module.exports = {
   normalizeAttributeKeys,
   runPlanetilerBuild,
   toContainerPath,
+  usesPlanetilerLocalIo,
   writePlanetilerSchema
 };
