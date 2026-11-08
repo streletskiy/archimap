@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.10.2
+
+### ⚡ Performance
+
+- **Regional PMTiles Regeneration:** Export intermediate GeoJSON to private local scratch storage and stream it into the Planetiler container. Keep the final archive on the regional filesystem for guarded publication. The tile schema, geometry rules, and shared-storage opt-out are unchanged.
+
+### 🔧 Operations
+
+- Update the web and sync-worker services together. The build signature changes, so each existing regional archive receives one complete rebuild on its next refresh. No database migration is required.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.10.1...0.10.2)
+
 ## v0.10.1
 
 ### ⚡ Performance

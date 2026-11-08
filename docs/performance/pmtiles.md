@@ -35,6 +35,8 @@ The final copy first goes into a reserved sibling file, which is flushed before 
 
 `REGION_SYNC_PLANETILER_LOCAL_IO=false` disables local staging and uses an isolated directory beside the requested output instead. This is useful when the container's local disk lacks capacity or when comparing storage paths. Native `PLANETILER_BIN` execution uses an isolated system temporary directory by default and reads the original input directly. The switch changes storage placement, not rendering quality. See [environment settings](../dev/env.md) for container selection and path mapping.
 
+The managed exporter writes its intermediate NDJSON to a private system temporary directory when local I/O is enabled. The worker streams it to Planetiler through Docker stdin, so the large export stays off the shared Windows bind mount. The finished archive still enters the regional workspace on the publication filesystem before the guarded swap. With local I/O disabled, the export and build use the shared filesystem.
+
 ## Stable feature identity
 
 Building MVT feature IDs are derived from `osm_id * 2 + relationBit`, where the bit is `1` for relations and `0` for ways. A derived remainder intentionally shares its parent's encoded OSM identity; `feature_kind` distinguishes their render roles. `osm_key`, `osm_type` and `osm_id` remain in feature properties, and selection/highlighting uses these properties.

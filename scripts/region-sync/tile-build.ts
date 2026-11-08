@@ -1,8 +1,11 @@
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { buildRegionTileSignature, canReuseRegionArchive, canPatchRegionArchive, publishRegionTiles, readRegionTileState } = require('./tile-state');
 const { buildTilePatchPlan } = require('./tile-patch-plan');
 const { exportRegionMembersToGeojsonNdjson } = require('./region-db');
 const { buildPmtilesFromGeojson } = require('./pmtiles-builder');
+const { usesPlanetilerLocalIo } = require('./planetiler');
 
 // Shared by normal synchronization and explicit full rebuilds. The source data
 // is never changed here; only a successfully published revision is acknowledged.
@@ -22,24 +25,36 @@ async function buildRegionTiles({ region, runtimeOptions, workspace, archivePath
     return { archivePath, bounds: region.bounds || null, exportedFeatureCount: 0,
       buildResult: { engine: 'planetiler', mode: 'unchanged', shardCount: 1, reusedShardCount: 1 } };
   }
-  const geojsonPath = path.join(workspace, 'region-build.ndjson');
   const builtArchivePath = path.join(workspace, 'region.pmtiles');
   const exportAndBuild = async (tileWindows, outputPath) => {
     signal?.throwIfAborted();
-    onStage('export', null, tileWindows ? 'exporting complete features around changed tiles' : 'exporting region members from PostgreSQL');
-    const exported = await exportFeatures({ ...runtimeOptions, regionId: region.id, outputPath: geojsonPath, tileWindows });
-    if (!tileWindows && exported.importedFeatureCount <= 0) {
-      throw new Error('Region has no features, PMTiles rebuild aborted; keeping previous archive');
-    }
-    signal?.throwIfAborted();
-    let buildResult = null;
-    if (exported.importedFeatureCount > 0) {
-      onStage('build', null, `features=${exported.importedFeatureCount}`);
-      buildResult = await build({ region, geojsonPath, outputPath, env: process.env,
-        onShardProgress: info => onStage(info.stage || 'build', info.progress ?? null, info.detail || null) });
+    // Keep the large export off the shared filesystem. Publication still uses
+    // the regional workspace beside the previous archive on that filesystem.
+    const exportDir = usesPlanetilerLocalIo()
+      ? fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-tile-input-'))
+      : workspace;
+    const geojsonPath = path.join(exportDir, 'region-build.ndjson');
+    try {
+      onStage('export', null, tileWindows ? 'exporting complete features around changed tiles' : 'exporting region members from PostgreSQL');
+      const exported = await exportFeatures({ ...runtimeOptions, regionId: region.id, outputPath: geojsonPath, tileWindows });
+      if (!tileWindows && exported.importedFeatureCount <= 0) {
+        throw new Error('Region has no features, PMTiles rebuild aborted; keeping previous archive');
+      }
       signal?.throwIfAborted();
+      let buildResult = null;
+      if (exported.importedFeatureCount > 0) {
+        onStage('build', null, `features=${exported.importedFeatureCount}`);
+        buildResult = await build({ region, geojsonPath, outputPath, env: process.env,
+          onShardProgress: info => onStage(info.stage || 'build', info.progress ?? null, info.detail || null) });
+        signal?.throwIfAborted();
+      }
+      return { exported, buildResult };
+    } finally {
+      if (exportDir !== workspace) {
+        fs.rmSync(geojsonPath, { force: true });
+        fs.rmdirSync(exportDir);
+      }
     }
-    return { exported, buildResult };
   };
   if (!forceFull && canPatchRegionArchive(identity)) {
     const plan = buildTilePatchPlan({ dirtyBounds: state.dirty_bounds,

@@ -36,6 +36,10 @@ test('partial builds use complete buffered tile windows and publish against the 
     assert.equal(result.bounds, 'whole');
     assert.deepEqual(f.calls.map(c => c[0]), ['export', 'build', 'patch', 'publish']);
     assert.ok(f.calls[0][1].tileWindows.length > 0);
+    const exportPath = f.calls[0][1].outputPath;
+    assert.equal(path.dirname(path.dirname(exportPath)), os.tmpdir());
+    assert.equal(f.calls[1][1].geojsonPath, exportPath);
+    assert.equal(fs.existsSync(path.dirname(exportPath)), false);
     assert.equal(f.calls[3][1].expectedBase, f.state);
     assert.equal(f.calls[2][1].bounds, undefined, 'patch must not shrink global archive bounds');
   } finally { fs.rmSync(f.workspace, { recursive: true, force: true }); }
@@ -64,6 +68,7 @@ test('unusable patch falls back to a fresh full export, cancellation never start
     f.dependencies.patch = async () => { abort.abort(new Error('cancelled')); abort.signal.throwIfAborted(); };
     await assert.rejects(buildRegionTiles({ ...f.options, signal: abort.signal }), /cancelled/);
     assert.equal(f.calls.filter(c => c[0] === 'export').length, 1);
+    assert.equal(fs.existsSync(path.dirname(f.calls[0][1].outputPath)), false);
     assert.equal(f.calls.filter(c => c[0] === 'publish').length, 0);
   } finally { fs.rmSync(f.workspace, { recursive: true, force: true }); }
 });
