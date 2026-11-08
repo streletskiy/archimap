@@ -186,10 +186,10 @@ function maybeCleanupStaleWorkspaces(options: LooseRecord = {}) {
 }
 
 function createWorkspace(regionId, options: LooseRecord = {}) {
-  maybeCleanupStaleWorkspaces({
-    log: options.log
-  });
-  const workspace = fs.mkdtempSync(path.join(resolveWorkspaceBaseDir(), `archimap-region-${Number(regionId)}-`));
+  const baseDir = options.baseDir || resolveWorkspaceBaseDir();
+  if (options.baseDir) cleanupStaleWorkspaces({ baseDir });
+  else maybeCleanupStaleWorkspaces({ log: options.log });
+  const workspace = fs.mkdtempSync(path.join(baseDir, `archimap-region-${Number(regionId)}-`));
   writeWorkspaceMarker(workspace, regionId);
   return workspace;
 }

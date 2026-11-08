@@ -144,6 +144,7 @@ function runPlanetilerBuild({
   maxZoom,
   attributeKeys,
   includeFeatureId = false,
+  sharedTileInput = false,
   buildBounds = null,
   env = process.env,
   spawnSyncRef = spawnSync
@@ -179,7 +180,7 @@ function runPlanetilerBuild({
     throw new Error('Refusing to use an unexpected Planetiler workspace');
   }
   const engineInput =
-    containerName && localIO
+    containerName && localIO && !sharedTileInput
       ? `${engineWorkspace}/input.ndjson`
       : containerName
         ? toContainerPath(inputPath, env)
@@ -236,16 +237,12 @@ function runPlanetilerBuild({
 
     if (containerName) {
       if (localIO) {
-        const inputFd = fs.openSync(inputPath, 'r');
-        try {
+        if (!sharedTileInput) {
           checked(
             'docker',
-            ['exec', '-i', containerName, 'sh', '-c', 'cat > "$1"', 'sh', engineInput],
-            'input staging',
-            [inputFd, 'inherit', 'inherit']
+            ['exec', containerName, 'cp', '--', toContainerPath(inputPath, env), engineInput],
+            'input staging'
           );
-        } finally {
-          fs.closeSync(inputFd);
         }
         checked(
           'docker',

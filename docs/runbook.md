@@ -36,6 +36,10 @@ Existing regional sources have no reusable cache/replication anchor, and old map
 
 Migration 036 changes `building_search_source.search_tsv` from a generated column to an explicitly maintained projection. The 0.9.2 search writers omit that column, so an image-only rollback would leave new or updated search vectors missing or stale. A rollback requires a tested search-schema compatibility procedure or a deliberately chosen database recovery point. Do not automatically restore an older database over newer user writes, and do not claim that retaining the old image alone provides a complete rollback.
 
+### Upgrading to 0.10.3
+
+Apply the `tile-inputs` volume and sync-worker environment setting from `docker-compose.yml`. Recreate the Planetiler service with its current image so it sees the read-only input mount, then start the sync worker and web service with the new Archimap image. Keep the published archive directory on the existing data mount. The regional build signature changes, so each archive receives one full rebuild on its next refresh.
+
 ## Windows startup and recovery
 
 The NODE-H1 deployment uses the `Archimap Startup and Recovery` scheduled task.

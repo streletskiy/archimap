@@ -97,6 +97,7 @@ test(
         maxZoom: 16,
         attributeKeys: attrs,
         includeFeatureId: true,
+        sharedTileInput: !legacyIds,
         env,
         spawnSyncRef
       });

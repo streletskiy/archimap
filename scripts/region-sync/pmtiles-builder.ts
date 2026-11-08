@@ -114,7 +114,7 @@ async function summarizeImportRows(importPath, options: LooseRecord = {}) {
   };
 }
 
-function runPlanetilerForRegion({ region, inputPath, outputPath, env }: LooseRecord) {
+function runPlanetilerForRegion({ region, inputPath, outputPath, env, sharedTileInput }: LooseRecord) {
   return runPlanetilerBuild({
     inputPath,
     outputPath,
@@ -124,6 +124,7 @@ function runPlanetilerForRegion({ region, inputPath, outputPath, env }: LooseRec
     maxZoom: Number(region?.pmtilesMaxZoom || 16),
     attributeKeys: REGION_PMTILES_ATTRIBUTE_KEYS,
     includeFeatureId: true,
+    sharedTileInput,
     env
   });
 }
@@ -133,6 +134,7 @@ async function buildPmtilesFromGeojson({
   geojsonPath,
   outputPath,
   onShardProgress = null,
+  sharedTileInput = false,
   env = process.env
 }: LooseRecord) {
   if (typeof onShardProgress === 'function') {
@@ -151,6 +153,7 @@ async function buildPmtilesFromGeojson({
     region,
     inputPath: geojsonPath,
     outputPath,
+    sharedTileInput,
     env
   });
 
