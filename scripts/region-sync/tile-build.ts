@@ -1,6 +1,5 @@
-const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
+const { createWorkspace, removeWorkspace } = require('./common');
 const { buildRegionTileSignature, canReuseRegionArchive, canPatchRegionArchive, publishRegionTiles, readRegionTileState } = require('./tile-state');
 const { buildTilePatchPlan } = require('./tile-patch-plan');
 const { exportRegionMembersToGeojsonNdjson } = require('./region-db');
@@ -10,7 +9,7 @@ const { usesPlanetilerLocalIo } = require('./planetiler');
 // Shared by normal synchronization and explicit full rebuilds. The source data
 // is never changed here; only a successfully published revision is acknowledged.
 async function buildRegionTiles({ region, runtimeOptions, workspace, archivePath, forceFull = false,
-  signal, onStage = () => {}, dependencies = {} }: LooseRecord) {
+  signal, onStage = () => {}, dependencies = {}, env = process.env }: LooseRecord) {
   const readState = dependencies.readState || readRegionTileState;
   const publish = dependencies.publish || publishRegionTiles;
   const exportFeatures = dependencies.exportFeatures || exportRegionMembersToGeojsonNdjson;
@@ -26,13 +25,12 @@ async function buildRegionTiles({ region, runtimeOptions, workspace, archivePath
       buildResult: { engine: 'planetiler', mode: 'unchanged', shardCount: 1, reusedShardCount: 1 } };
   }
   const builtArchivePath = path.join(workspace, 'region.pmtiles');
+  const inputBase = usesPlanetilerLocalIo(env) ? env.REGION_SYNC_TILE_INPUT_DIR?.trim() : '';
   const exportAndBuild = async (tileWindows, outputPath) => {
     signal?.throwIfAborted();
     // Keep the large export off the shared filesystem. Publication still uses
     // the regional workspace beside the previous archive on that filesystem.
-    const exportDir = usesPlanetilerLocalIo()
-      ? fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-tile-input-'))
-      : workspace;
+    const exportDir = inputBase ? createWorkspace(region.id, { baseDir: inputBase }) : workspace;
     const geojsonPath = path.join(exportDir, 'region-build.ndjson');
     try {
       onStage('export', null, tileWindows ? 'exporting complete features around changed tiles' : 'exporting region members from PostgreSQL');
@@ -44,16 +42,13 @@ async function buildRegionTiles({ region, runtimeOptions, workspace, archivePath
       let buildResult = null;
       if (exported.importedFeatureCount > 0) {
         onStage('build', null, `features=${exported.importedFeatureCount}`);
-        buildResult = await build({ region, geojsonPath, outputPath, env: process.env,
+        buildResult = await build({ region, geojsonPath, outputPath, env, sharedTileInput: Boolean(inputBase),
           onShardProgress: info => onStage(info.stage || 'build', info.progress ?? null, info.detail || null) });
         signal?.throwIfAborted();
       }
       return { exported, buildResult };
     } finally {
-      if (exportDir !== workspace) {
-        fs.rmSync(geojsonPath, { force: true });
-        fs.rmdirSync(exportDir);
-      }
+      if (inputBase) removeWorkspace(exportDir, { baseDir: inputBase });
     }
   };
   if (!forceFull && canPatchRegionArchive(identity)) {

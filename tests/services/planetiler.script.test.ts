@@ -71,24 +71,17 @@ test('native failure cleans partial output and preserves the previous archive', 
 });
 
 for (const failCopy of [false, true]) {
-  test(`container staging streams input once and ${failCopy ? 'preserves output after copy failure' : 'cleans only its owned workspace'}`, () => {
+  test(`container staging copies input once and ${failCopy ? 'preserves output after copy failure' : 'cleans only its owned workspace'}`, () => {
     const f = fixture();
     const calls = [];
     const env = { PLANETILER_BIN: 'missing', PLANETILER_CONTAINER: 'test-engine', PLANETILER_HOST_DATA_ROOT: f.dir };
     let localWorkspace;
-    let inputFd;
     let copyFd;
     try {
       const spawnSyncRef = (exe, args, options) => {
         calls.push({ exe, args });
         if (exe === 'missing') return { status: 1 };
         assert.equal(exe, 'docker');
-        if (args[1] === '-i') {
-          assert.deepEqual(args, ['exec', '-i', 'test-engine', 'sh', '-c', 'cat > "$1"', 'sh', `${localWorkspace}/input.ndjson`]);
-          inputFd = options.stdio[0];
-          assert.equal(fs.readFileSync(inputFd, 'utf8'), '{}\n');
-          return { status: 0 };
-        }
         assert.deepEqual(args.slice(0, 2), ['exec', 'test-engine']);
         if (args[2] === 'mkdir') {
           assert.ok(args.includes('--mode=700'));
@@ -113,9 +106,8 @@ for (const failCopy of [false, true]) {
       if (failCopy) assert.throws(build, /output staging failed/);
       else build();
       assert.match(localWorkspace, /^\/tmp\/archimap-planetiler-[0-9a-f-]{36}$/);
-      assert.equal(calls.filter(({ args }) => args[1] === '-i').length, 1);
+      assert.equal(calls.filter(({ args }) => args[2] === 'cp' && args[4] === '/data/input.ndjson').length, 1);
       assert.equal(calls.filter(({ args }) => args[2] === 'cat').length, 1);
-      assert.throws(() => fs.fstatSync(inputFd), { code: 'EBADF' });
       assert.throws(() => fs.fstatSync(copyFd), { code: 'EBADF' });
       assert.deepEqual(calls.at(-1).args, ['exec', 'test-engine', 'rm', '-rf', '--', localWorkspace]);
       assert.equal(fs.readFileSync(f.outputPath, 'utf8'), failCopy ? 'previous archive' : 'complete archive');
@@ -196,7 +188,7 @@ test('container-local temporary workspace is not remapped when the shared host r
           spawnSyncRef(exe, args) {
             if (exe === 'missing') return { status: 1 };
             if (args[2] === 'mkdir') createdWorkspace = args.at(-1);
-            if (args[1] === '-i') return { status: 2 };
+            if (args[2] === 'cp') return { status: 2 };
             return { status: 0 };
           }
         }),

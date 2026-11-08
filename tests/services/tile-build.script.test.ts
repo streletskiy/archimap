@@ -8,6 +8,9 @@ const { buildRegionTileSignature } = require('../../scripts/region-sync/tile-sta
 
 function fixture() {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'archimap-tile-build-'));
+  const inputBase = path.join(workspace, 'tile-inputs');
+  fs.mkdirSync(inputBase);
+  const env: Record<string, string> = { REGION_SYNC_TILE_INPUT_DIR: inputBase };
   const archivePath = path.join(workspace, 'old.pmtiles');
   fs.writeFileSync(archivePath, 'previous');
   const region = { id: 1, slug: 'fixture', pmtilesMinZoom: 13, pmtilesMaxZoom: 16 };
@@ -24,8 +27,8 @@ function fixture() {
     patch: async options => { calls.push(['patch', options]); return { retainedTileCount: 100, replacedTileCount: 4 }; },
     publish: async options => { calls.push(['publish', options]); }
   };
-  return { workspace, archivePath, region, state, calls, dependencies,
-    options: { workspace, archivePath, region, runtimeOptions: { databaseUrl: 'fixture' }, dependencies } };
+  return { workspace, inputBase, archivePath, region, state, calls, dependencies,
+    options: { workspace, archivePath, region, runtimeOptions: { databaseUrl: 'fixture' }, dependencies, env } };
 }
 
 test('partial builds use complete buffered tile windows and publish against the original base identity', async () => {
@@ -37,8 +40,9 @@ test('partial builds use complete buffered tile windows and publish against the 
     assert.deepEqual(f.calls.map(c => c[0]), ['export', 'build', 'patch', 'publish']);
     assert.ok(f.calls[0][1].tileWindows.length > 0);
     const exportPath = f.calls[0][1].outputPath;
-    assert.equal(path.dirname(path.dirname(exportPath)), os.tmpdir());
+    assert.equal(path.dirname(path.dirname(exportPath)), f.inputBase);
     assert.equal(f.calls[1][1].geojsonPath, exportPath);
+    assert.equal(f.calls[1][1].sharedTileInput, true);
     assert.equal(fs.existsSync(path.dirname(exportPath)), false);
     assert.equal(f.calls[3][1].expectedBase, f.state);
     assert.equal(f.calls[2][1].bounds, undefined, 'patch must not shrink global archive bounds');
@@ -80,7 +84,10 @@ test('forced rebuild and changed render contract cannot reuse a partial base', a
     assert.equal(f.calls[0][1].tileWindows, null);
     f.calls.length = 0;
     f.state.published_signature = 'outdated';
+    f.options.env.REGION_SYNC_PLANETILER_LOCAL_IO = 'false';
     assert.equal((await buildRegionTiles(f.options)).buildResult.mode, 'single');
     assert.equal(f.calls[0][1].tileWindows, null);
+    assert.equal(path.dirname(f.calls[0][1].outputPath), f.workspace);
+    assert.equal(f.calls[1][1].sharedTileInput, false);
   } finally { fs.rmSync(f.workspace, { recursive: true, force: true }); }
 });

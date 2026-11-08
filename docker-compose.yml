@@ -67,11 +67,13 @@ services:
       PG_POOL_MAX: '4'
       PG_STATEMENT_TIMEOUT_MS: '0'
       PLANETILER_CONTAINER: archimap-planetiler
+      REGION_SYNC_TILE_INPUT_DIR: /app/data/tile-inputs
       OSM2PGSQL_CONTAINER: archimap-osm2pgsql
       REGION_SYNC_OSM2PGSQL_JOBS: '2'
       REGION_SYNC_OSM2PGSQL_CACHE_MB: '512'
     volumes:
       - ./data:/app/data
+      - tile-inputs:/app/data/tile-inputs
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
@@ -103,6 +105,7 @@ services:
     entrypoint: ['tail', '-f', '/dev/null']
     volumes:
       - ./data:/data
+      - tile-inputs:/data/tile-inputs:ro
     environment:
       XDG_CACHE_HOME: /data/cache
       JAVA_TOOL_OPTIONS: '-Xmx1536m'
@@ -191,3 +194,4 @@ services:
 volumes:
   redis-data:
   postgres-data:
+  tile-inputs:

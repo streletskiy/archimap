@@ -35,7 +35,7 @@ The final copy first goes into a reserved sibling file, which is flushed before 
 
 `REGION_SYNC_PLANETILER_LOCAL_IO=false` disables local staging and uses an isolated directory beside the requested output instead. This is useful when the container's local disk lacks capacity or when comparing storage paths. Native `PLANETILER_BIN` execution uses an isolated system temporary directory by default and reads the original input directly. The switch changes storage placement, not rendering quality. See [environment settings](../dev/env.md) for container selection and path mapping.
 
-The managed exporter writes its intermediate NDJSON to a private system temporary directory when local I/O is enabled. The worker streams it to Planetiler through Docker stdin, so the large export stays off the shared Windows bind mount. The finished archive still enters the regional workspace on the publication filesystem before the guarded swap. With local I/O disabled, the export and build use the shared filesystem.
+Compose mounts the `tile-inputs` volume in the sync worker and mounts it read-only in Planetiler. The worker exports NDJSON into a private workspace on this volume and Planetiler reads the same file directly. The finished archive still enters the regional workspace on the publication filesystem before the guarded swap. Without the volume setting, the worker exports to the shared workspace and stages the input into Planetiler.
 
 ## Stable feature identity
 

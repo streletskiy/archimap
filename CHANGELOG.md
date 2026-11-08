@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.10.3
+
+### ⚡ Performance
+
+- **Shared Tile Inputs:** Write regional exports to a Docker volume read directly by Planetiler. This avoids both Windows bind-mount I/O and Docker stdin transfers for intermediate tile inputs. Keep the shared-filesystem fallback for installations without the new mount.
+
+### 🔧 Operations
+
+- Add the `tile-inputs` mounts before starting the new sync worker. Recreate the Planetiler service with its current image. The release has no database migrations.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.10.2...0.10.3)
+
 ## v0.10.2
 
 ### ⚡ Performance
