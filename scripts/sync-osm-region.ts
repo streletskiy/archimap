@@ -143,6 +143,7 @@ function parseArgs(argv): LooseRecord {
   const out = {
     regionId: null,
     pmtilesOnly: false,
+    refreshTiles: false,
     forceImport: false
   };
 
@@ -151,6 +152,10 @@ function parseArgs(argv): LooseRecord {
     if (!arg) continue;
     if (arg === '--pmtiles-only') {
       out.pmtilesOnly = true;
+      continue;
+    }
+    if (arg === '--refresh-tiles') {
+      out.refreshTiles = true;
       continue;
     }
     if (arg === '--force-import') {
@@ -352,6 +357,7 @@ function summarizePmtilesBuildResult(buildResult: LooseRecord = {}) {
   return {
     pmtilesBuildEngine: buildResult?.engine || null,
     pmtilesBuildMode: buildResult?.mode || null,
+    pmtilesBuildReason: buildResult?.fullReason || null,
     pmtilesShardCount: Number(buildResult?.shardCount || 0) || null,
     pmtilesShardReusedCount: Number(buildResult?.reusedShardCount || 0),
     pmtilesShardRebuiltCount: Number(buildResult?.rebuiltShardCount || 0),
@@ -429,13 +435,13 @@ function createApplyStageProgressEmitter() {
   };
 }
 
-async function buildRegionPmtilesOnly(region, runtimeOptions) {
+async function buildRegionPmtilesOnly(region, runtimeOptions, { forceFull = true } = {}) {
   assertManagedRegionSyncPostgres(runtimeOptions);
   const workspace = registerActiveWorkspace(createWorkspace(region.id));
 
   try {
     const tiles = await buildRegionTiles({
-      region, runtimeOptions, workspace, forceFull: true,
+      region, runtimeOptions, workspace, forceFull,
       archivePath: resolveRegionPmtilesPath(runtimeOptions.dataDir, region),
       signal: syncAbortController.signal, onStage: emitStageJson
     });
@@ -684,15 +690,16 @@ async function main() {
     const region = await loadRegion(runtimeOptions, args.regionId);
     assertRegionSupportsManagedSync(region);
 
+    const tileOnly = args.pmtilesOnly || args.refreshTiles;
     let summary;
     if (region.regionKind === 'country_aggregate') {
-      if (args.pmtilesOnly) {
-        throw new Error('--pmtiles-only is not supported for country_aggregate regions');
+      if (tileOnly) {
+        throw new Error('Tile-only builds are not supported for country_aggregate regions');
       }
       summary = await runCountryAggregateSync(region, runtimeOptions);
     } else {
-      summary = args.pmtilesOnly
-        ? await buildRegionPmtilesOnly(region, runtimeOptions)
+      summary = tileOnly
+        ? await buildRegionPmtilesOnly(region, runtimeOptions, { forceFull: args.pmtilesOnly })
         : await runRegionSync(region, runtimeOptions);
     }
 

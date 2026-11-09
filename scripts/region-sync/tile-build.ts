@@ -1,10 +1,34 @@
 const path = require('node:path');
 const { createWorkspace, removeWorkspace } = require('./common');
 const { buildRegionTileSignature, canReuseRegionArchive, canPatchRegionArchive, publishRegionTiles, readRegionTileState } = require('./tile-state');
-const { buildTilePatchPlan } = require('./tile-patch-plan');
+const { buildTilePatchPlan, DEFAULT_MAX_DIRTY_TILES } = require('./tile-patch-plan');
 const { exportRegionMembersToGeojsonNdjson } = require('./region-db');
 const { buildPmtilesFromGeojson } = require('./pmtiles-builder');
 const { usesPlanetilerLocalIo } = require('./planetiler');
+
+function planRegionTilePatch(region, dirtyBounds) {
+  const options = {
+    minZoom: Number(region.pmtilesMinZoom || 13),
+    maxZoom: Number(region.pmtilesMaxZoom || 16)
+  };
+  const batchSize = 256;
+  if (dirtyBounds.length <= batchSize) return buildTilePatchPlan({ ...options, dirtyBounds });
+
+  const tileIds = new Set<number>();
+  const windows = new Map();
+  for (let offset = 0; offset < dirtyBounds.length; offset += batchSize) {
+    const plan = buildTilePatchPlan({ ...options, dirtyBounds: dirtyBounds.slice(offset, offset + batchSize) });
+    if (plan.mode !== 'incremental') return plan;
+    for (const tileId of plan.dirtyTileIds) tileIds.add(tileId);
+    if (tileIds.size > DEFAULT_MAX_DIRTY_TILES) return { mode: 'full', reason: 'dirty tile limit exceeded' };
+    for (const window of plan.tileWindows) windows.set(JSON.stringify(window), window);
+  }
+  return {
+    mode: 'incremental',
+    dirtyTileIds: [...tileIds].sort((a, b) => a - b),
+    tileWindows: [...windows.values()]
+  };
+}
 
 // Shared by normal synchronization and explicit full rebuilds. The source data
 // is never changed here; only a successfully published revision is acknowledged.
@@ -51,9 +75,9 @@ async function buildRegionTiles({ region, runtimeOptions, workspace, archivePath
       if (inputBase) removeWorkspace(exportDir, { baseDir: inputBase });
     }
   };
+  let fullReason = forceFull ? 'forced' : state.full_rebuild_required ? 'incomplete dirty history' : 'missing compatible base or dirty bounds';
   if (!forceFull && canPatchRegionArchive(identity)) {
-    const plan = buildTilePatchPlan({ dirtyBounds: state.dirty_bounds,
-      minZoom: Number(region.pmtilesMinZoom || 13), maxZoom: Number(region.pmtilesMaxZoom || 16) });
+    const plan = planRegionTilePatch(region, state.dirty_bounds);
     if (plan.mode === 'incremental') {
       try {
         const patchPath = path.join(workspace, 'changed.pmtiles');
@@ -75,14 +99,19 @@ async function buildRegionTiles({ region, runtimeOptions, workspace, archivePath
         // history intact. A fresh full export is the safe recovery path.
         console.warn(`[region-sync] incremental tiles unavailable; rebuilding full archive: ${String(error?.message || error)}`);
         state = await readState(runtimeOptions.databaseUrl, region.id);
+        fullReason = 'incremental build failed';
       }
-    } else onStage('build', null, `full rebuild: ${plan.reason}`);
+    } else {
+      fullReason = plan.reason;
+    }
   }
+  onStage('build', null, `full rebuild: ${fullReason}`);
   const { exported, buildResult } = await exportAndBuild(null, builtArchivePath);
   onStage('publish', null, 'publishing pmtiles archive');
   await publish({ databaseUrl: runtimeOptions.databaseUrl, regionId: region.id,
     revision: state.data_revision, signature, archivePath, builtArchivePath, signal });
-  return { archivePath, bounds: exported.bounds, exportedFeatureCount: exported.importedFeatureCount, buildResult };
+  return { archivePath, bounds: exported.bounds, exportedFeatureCount: exported.importedFeatureCount,
+    buildResult: { ...buildResult, fullReason } };
 }
 
 module.exports = { buildRegionTiles };

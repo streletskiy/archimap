@@ -31,6 +31,12 @@ test('force-import is an explicit CLI repair option without changing the default
   assert.equal(parseArgs(['--region-id=267', '--force-import']).forceImport, true);
 });
 
+test('tile refresh is a separate mode from forcing a full PMTiles rebuild', () => {
+  const args = parseArgs(['--region-id=267', '--refresh-tiles']);
+  assert.equal(args.refreshTiles, true);
+  assert.equal(args.pmtilesOnly, false);
+});
+
 test('shouldRunRuntimeFollowup skips pmtiles-only and managed runtime env', () => {
   assert.equal(shouldRunRuntimeFollowup({ pmtilesOnly: true, env: {} }), false);
   assert.equal(

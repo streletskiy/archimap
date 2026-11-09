@@ -59,6 +59,28 @@ test('empty subset deletes dirty tiles without running Planetiler', async () => 
   } finally { fs.rmSync(f.workspace, { recursive: true, force: true }); }
 });
 
+test('large dirty histories use one patch and one shared tile budget', async () => {
+  const f = fixture();
+  try {
+    const footprint = f.state.dirty_bounds[0];
+    f.state.dirty_bounds = Array.from({ length: 300 }, () => footprint);
+    assert.equal((await buildRegionTiles(f.options)).buildResult.mode, 'incremental');
+    assert.equal(f.calls.filter(c => c[0] === 'patch').length, 1);
+    const tiles = f.calls.find(c => c[0] === 'patch')[1].dirtyTileIds;
+    assert.equal(tiles.length, new Set(tiles).size);
+
+    f.calls.length = 0;
+    f.state.dirty_bounds = [
+      ...Array.from({ length: 255 }, () => footprint),
+      { west: 40, south: 30, east: 40.5, north: 30.5 },
+      { west: 42, south: 30, east: 42.5, north: 30.5 }
+    ];
+    const result = await buildRegionTiles(f.options);
+    assert.equal(result.buildResult.fullReason, 'dirty tile limit exceeded');
+    assert.equal(f.calls[0][1].tileWindows, null);
+  } finally { fs.rmSync(f.workspace, { recursive: true, force: true }); }
+});
+
 test('unusable patch falls back to a fresh full export, cancellation never starts fallback work', async () => {
   const f = fixture();
   try {
