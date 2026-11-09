@@ -4,6 +4,7 @@ const CANCEL_FORCE_KILL_MS = 10_000;
 const DEFAULT_RUN_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_INTERRUPTED_RUN_STALE_MS = 30_000;
 const DEFAULT_RECOVERY_SWEEP_INTERVAL_MS = 10_000;
+const TILE_REFRESH_RETRY_MS = 60_000;
 
 function signalProcessTree(child, signal = 'SIGTERM', log = console, options: LooseRecord = {}) {
   const platform = String(options.platform || process.platform);
@@ -58,6 +59,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
     dataSettingsService,
     isShuttingDown,
     onSyncSuccess,
+    listStalePublishedRegionIds,
     log = console,
     setIntervalRef = setInterval,
     clearIntervalRef = clearInterval,
@@ -86,6 +88,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   let recoverySweepTimer = null;
   let heartbeatInFlight = Promise.resolve();
   let recoveryInFlight = Promise.resolve();
+  let tileRefreshInFlight = false;
+  let currentTileChild = null;
+  let nextTileRefreshAt = 0;
+  let stopped = false;
 
   function clearRegionTimers() {
     for (const timer of regionTimers.values()) {
@@ -163,10 +169,52 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
 
   function scheduleRecoverySweepTick() {
     recoveryInFlight = recoveryInFlight
-      .then(() => recoverInterruptedRunsAndRequeue())
+      .then(async () => {
+        await recoverInterruptedRunsAndRequeue();
+        void refreshStaleTiles();
+      })
       .catch((error) => {
         log.error(`[region-sync] failed to recover interrupted runs: ${String(error?.message || error)}`);
       });
+  }
+
+  async function refreshStaleTiles() {
+    if (typeof listStalePublishedRegionIds !== 'function' || stopped || isShuttingDown() ||
+        tileRefreshInFlight || draining || currentRun || queue.length || Date.now() < nextTileRefreshAt) return;
+    tileRefreshInFlight = true;
+    try {
+      for (const regionId of await listStalePublishedRegionIds()) {
+        if (stopped || isShuttingDown() || queue.length) break;
+        try {
+          currentTileChild = spawn(processExecPath, [
+            '--import', 'tsx', syncRegionScriptPath, `--region-id=${regionId}`, '--refresh-tiles'
+          ], {
+            cwd,
+            env: { ...env, REGION_SYNC_PARENT_PID: String(process.pid) },
+            stdio: 'inherit',
+            detached: process.platform !== 'win32'
+          });
+          await new Promise<void>((resolve, reject) => {
+            currentTileChild.once('error', reject);
+            currentTileChild.once('close', (code, signal) => {
+              if (code === 0) resolve();
+              else reject(new Error(`Tile refresh exited with ${signal || code}`));
+            });
+          });
+        } catch (error) {
+          nextTileRefreshAt = Date.now() + TILE_REFRESH_RETRY_MS;
+          log.error(`[region-tiles:${regionId}] ${String(error?.message || error)}`);
+        } finally {
+          currentTileChild = null;
+        }
+      }
+    } catch (error) {
+      nextTileRefreshAt = Date.now() + TILE_REFRESH_RETRY_MS;
+      log.error(`[region-tiles] failed to list stale regions: ${String(error?.message || error)}`);
+    } finally {
+      tileRefreshInFlight = false;
+      void drainQueue();
+    }
   }
 
   function ensureRunMaintenanceTimers() {
@@ -333,6 +381,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
         await flushDeferredSyncSuccess();
       } finally {
         void drainQueue();
+        void refreshStaleTiles();
       }
     }
   }
@@ -479,6 +528,10 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       const sourceDataUpdatedAt = Object.prototype.hasOwnProperty.call(summary, 'sourceDataUpdatedAt')
         ? summary.sourceDataUpdatedAt
         : await waitForSourceDataUpdatedAt();
+      if (summary.pmtilesBuildMode) {
+        log.log(`[region-sync:${region.id}] tiles=${summary.pmtilesBuildMode} dirty=${summary.pmtilesDirtyTileCount || 0}` +
+          (summary.pmtilesBuildReason ? ` reason=${summary.pmtilesBuildReason}` : ''));
+      }
       await finalizeRun(run.id, {
         success: true,
         summary: {
@@ -551,7 +604,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   }
 
   async function drainQueue() {
-    if (draining || currentSyncChild || queue.length === 0) {
+    if (stopped || draining || tileRefreshInFlight || currentSyncChild || queue.length === 0) {
       return;
     }
     draining = true;
@@ -718,6 +771,7 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
       });
     }
     await reloadSchedules();
+    void refreshStaleTiles();
   }
 
   async function requestRegionSyncCancel(regionId) {
@@ -821,12 +875,16 @@ function initManagedSyncWorkers(options: LooseRecord = {}) {
   }
 
   function stop() {
+    stopped = true;
     clearRegionTimers();
     clearRunMaintenanceTimers();
     queue.length = 0;
     queuedRegionIds.clear();
     if (currentSyncChild && !currentSyncChild.killed) {
       signalProcessTree(currentSyncChild, 'SIGTERM', log);
+    }
+    if (currentTileChild && !currentTileChild.killed) {
+      signalProcessTree(currentTileChild, 'SIGTERM', log);
     }
   }
 

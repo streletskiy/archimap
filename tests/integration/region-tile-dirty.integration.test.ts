@@ -103,7 +103,7 @@ test('dirty bounds preserve old/new footprints, whole parents, shared membership
   } finally { await f.close(); }
 });
 
-test('dirty tracking skips cold spatial capture and falls back for unknown or overflowing bounds', testOptions, async () => {
+test('dirty tracking skips cold capture, compacts clustered changes, and bounds oversized input', testOptions, async () => {
   const f = await fixture();
   try {
     const id = await f.add(1, [1, 1, 2, 2]);
@@ -120,11 +120,28 @@ test('dirty tracking skips cold spatial capture and falls back for unknown or ov
     assert.equal((await f.state()).full_rebuild_required, true);
     assert.deepEqual((await f.state()).dirty_bounds, []);
     await f.clean();
-    const bounds = Array.from({ length: 257 }, (_, index) => ({ west: index / 1000, south: 0, east: index / 1000 + 0.0001, north: 0.001,
-      min_lon: index / 1000, min_lat: 0, max_lon: index / 1000 + 0.0001, max_lat: 0.001, is_part: false }));
-    await f.client.query('SELECT osm.append_region_tile_dirty_inputs($1,$2::jsonb)', [f.regionIds[0], JSON.stringify(bounds.slice(0, 256))]);
-    assert.equal((await f.state()).dirty_bounds.length, 256);
-    await f.client.query('SELECT osm.append_region_tile_dirty_inputs($1,$2::jsonb)', [f.regionIds[0], JSON.stringify(bounds.slice(256))]);
+    const clustered = await f.client.query(`
+      INSERT INTO osm.building_contours (osm_type,osm_id,tags_json,min_lon,min_lat,max_lon,max_lat,geom)
+      SELECT 'way',$1::bigint+i,'{"building":"yes"}',44+i/1000000.0,56,44+i/1000000.0+0.0001,56.0001,
+        ST_Multi(ST_MakeEnvelope(44+i/1000000.0,56,44+i/1000000.0+0.0001,56.0001,4326))
+      FROM generate_series(1001,1300) i RETURNING osm_id
+    `, [f.base]);
+    const clusteredIds = clustered.rows.map(row => Number(row.osm_id));
+    f.ids.push(...clusteredIds);
+    await f.client.query(`
+      INSERT INTO public.data_region_memberships (region_id,osm_type,osm_id)
+      SELECT region_id,'way',osm_id FROM unnest($1::bigint[]) region_id CROSS JOIN unnest($2::bigint[]) osm_id
+    `, [f.regionIds, clusteredIds]);
+    await f.clean();
+    await f.client.query(`UPDATE osm.building_contours SET tags_json='{"building":"yes","height":"9"}'
+      WHERE osm_id=ANY($1::bigint[])`, [clusteredIds]);
+    for (const region of f.regionIds) {
+      const state = await f.state(region);
+      assert.equal(state.dirty_bounds.length, 1);
+      containsBounds(state, [44.001001, 56, 44.0014, 56.0001]);
+    }
+    await f.client.query(`SELECT osm.append_region_tile_dirty_inputs($1, jsonb_agg('{}'::jsonb))
+      FROM generate_series(1,32769)`, [f.regionIds[0]]);
     assert.equal((await f.state()).full_rebuild_required, true);
     assert.deepEqual((await f.state()).dirty_bounds, []);
   } finally { await f.close(); }

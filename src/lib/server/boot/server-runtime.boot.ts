@@ -398,6 +398,16 @@ class ServerRuntime {
       isShuttingDown: () => this.shuttingDown,
       getContoursTotal: async () =>
         Number((await this.db.prepare('SELECT COUNT(*) AS total FROM osm.building_contours').get())?.total || 0),
+      listStalePublishedRegionIds: this.config.dbProvider === 'postgres' ? async () => (
+        await this.db.prepare(`
+          SELECT t.region_id FROM public.data_region_tile_state t
+          JOIN public.data_sync_regions r ON r.id = t.region_id
+          WHERE r.enabled = 1 AND r.region_kind <> 'country_aggregate'
+            AND t.published_revision IS NOT NULL AND t.data_revision <> t.published_revision
+            AND NOT EXISTS (SELECT 1 FROM public.data_region_sync_runs WHERE status IN ('queued', 'running'))
+          ORDER BY t.region_id
+        `).all()
+      ).map(row => Number(row.region_id)) : undefined,
       onSyncSuccess: async (payload = null) => {
         await runPostSyncTasks(this, payload);
       }

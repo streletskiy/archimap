@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.10.4
+
+### 🐛 Bug Fixes
+
+- **Regional Tile Planning:** Preserve compacted dirty bounds for larger imports and apply the tile limit to the complete set of unique tiles. Existing compatible PMTiles archives can serve as patch bases after the upgrade.
+- **Neighboring Map Refresh:** Refresh stale published maps after the import queue drains. Recover pending revisions on startup and retry failed tile builds when idle.
+
+### 🔧 Operations
+
+- Migration 043 expands the dirty bounds limit. Update the web service and sync worker together.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.10.3...0.10.4)
+
 ## v0.10.3
 
 ### ⚡ Performance

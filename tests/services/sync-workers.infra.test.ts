@@ -441,9 +441,11 @@ test('managed sync workers start initial manual sync without waiting for upstrea
   await waitForMicrotasks();
 });
 
-test('managed sync workers defer post-sync maintenance until the queue drains', async () => {
+test('managed sync workers refresh stale neighbor tiles after the queue drains', async () => {
   const children = [];
+  const spawnArgs = [];
   const successEvents = [];
+  let staleRegionIds = [1];
   const dataSettingsService = createManagedDataSettingsService([
     {
       id: 1,
@@ -464,7 +466,8 @@ test('managed sync workers defer post-sync maintenance until the queue drains', 
   ]);
 
   const workers = initSyncWorkersInfra({
-    spawn: () => {
+    spawn: (_exe, args) => {
+      spawnArgs.push(args);
       const child = createChildProcessStub();
       children.push(child);
       return child;
@@ -475,6 +478,7 @@ test('managed sync workers defer post-sync maintenance until the queue drains', 
     env: process.env,
     dataSettingsService,
     isShuttingDown: () => false,
+    listStalePublishedRegionIds: async () => staleRegionIds,
     onSyncSuccess: async (payload) => {
       successEvents.push(payload);
     },
@@ -489,6 +493,7 @@ test('managed sync workers defer post-sync maintenance until the queue drains', 
   await waitForMicrotasks();
 
   assert.equal(successEvents.length, 0);
+  assert.equal(children.length, 2);
 
   children[1].stdout.emit('data', Buffer.from('SYNC_RESULT_JSON={"activeFeatureCount":20}\n'));
   children[1].emit('close', 0, null);
@@ -497,6 +502,17 @@ test('managed sync workers defer post-sync maintenance until the queue drains', 
   assert.equal(successEvents.length, 1);
   assert.equal(successEvents[0]?.region?.id, 2);
   assert.equal(successEvents[0]?.summary?.activeFeatureCount, 20);
+  assert.deepEqual(spawnArgs[2].slice(-2), ['--region-id=1', '--refresh-tiles']);
+
+  const pending = await workers.requestRegionSync(2, { triggerReason: 'manual', requestedBy: 'tester' });
+  assert.equal(pending.run.status, 'queued');
+  assert.equal(children.length, 3);
+  staleRegionIds = [];
+  children[2].emit('close', 0, null);
+  await waitForMicrotasks();
+  assert.equal(children.length, 4);
+  assert.equal(spawnArgs[3].at(-1), '--region-id=2');
+  workers.stop();
 });
 
 test('managed sync workers flush deferred maintenance after the queue drains on failure', async () => {

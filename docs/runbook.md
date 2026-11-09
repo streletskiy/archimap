@@ -102,7 +102,8 @@ publish and verify `streletskiy/archimap:X.Y.Z` and `streletskiy/archimap:latest
    - Scheduled/background runs may still pause for an upstream freshness check when that check can prevent a redundant rerun.
    - While the PBF is downloading, the modal's current-status card shows the live stage progress and detail text, and the worker console prints the same download summaries.
 3. Optional maintenance rebuild without re-import:
-   - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only`
+   - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --refresh-tiles` reuses the current archive or rebuilds the affected tiles when possible.
+   - `node --import tsx scripts/sync-osm-region.ts --region-id=<id> --pmtiles-only` forces a full rebuild.
 4. Verify PMTiles:
    - `curl -I -H "Range: bytes=0-1023" http://host/api/data/regions/<id>/pmtiles`
    - Expect `206`, `Accept-Ranges`, `Content-Range`.
