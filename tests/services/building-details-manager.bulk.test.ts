@@ -69,7 +69,7 @@ test('bulk edit skips buildings that already match the target values', async () 
       body
     });
 
-    if (method === 'GET' && url.endsWith('/api/building-info/way/1')) {
+    if (method === 'GET' && url.endsWith('/api/building-info/way/1?includeSource=true')) {
       return createJsonResponse({
         feature_kind: 'building',
         region_slugs: [],
@@ -95,7 +95,7 @@ test('bulk edit skips buildings that already match the target values', async () 
       });
     }
 
-    if (method === 'GET' && url.endsWith('/api/building-info/way/2')) {
+    if (method === 'GET' && url.endsWith('/api/building-info/way/2?includeSource=true')) {
       return createJsonResponse({
         feature_kind: 'building',
         region_slugs: [],
@@ -258,7 +258,7 @@ test('building details manager keeps design project suggestions and sends design
       body
     });
 
-    if (method === 'GET' && url.endsWith('/api/building-info/way/11')) {
+    if (method === 'GET' && url.endsWith('/api/building-info/way/11?includeSource=true')) {
       return createJsonResponse({
         feature_kind: 'building',
         region_slugs: [],
@@ -377,7 +377,7 @@ test('building details manager preserves pending review metadata for a single bu
       body
     });
 
-    if (method === 'GET' && url.endsWith('/api/building-info/way/21')) {
+    if (method === 'GET' && url.endsWith('/api/building-info/way/21?includeSource=true')) {
       return createJsonResponse({
         feature_kind: 'building',
         review_status: 'pending',

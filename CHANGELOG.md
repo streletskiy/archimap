@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.10.5
+
+### ⚡ Performance
+
+- **Building Details:** Load architectural information, geometry and original OSM tags in one request when opening a building from the map or a shared link.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.10.4...0.10.5)
+
 ## v0.10.4
 
 ### 🐛 Bug Fixes

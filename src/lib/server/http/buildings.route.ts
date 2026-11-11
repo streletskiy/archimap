@@ -171,6 +171,12 @@ function registerBuildingsRoutes(deps) {
     const regionSlugs = (await buildingsRepository.getBuildingRegionSlugsById(osmType, osmId))
       .map((item) => String(item?.slug || '').trim())
       .filter(Boolean);
+    const includeSource = req.query.includeSource === 'true';
+    let sourceFeature = null;
+    if (includeSource) {
+      const sourceRow = contour || (await buildingsRepository.getLatestUserEditSnapshotById?.(osmType, osmId));
+      if (sourceRow) sourceFeature = rowToFeature(sourceRow);
+    }
 
     return sendCachedJson(
       req,
@@ -200,7 +206,8 @@ function registerBuildingsRoutes(deps) {
         admin_comment: personal?.admin_comment ?? null,
         user_edit_id: personal ? Number(personal.id || 0) : null,
         region_slugs: regionSlugs,
-        design_ref_suggestions: Array.isArray(designRefSuggestions) ? designRefSuggestions : []
+        design_ref_suggestions: Array.isArray(designRefSuggestions) ? designRefSuggestions : [],
+        ...(includeSource ? { source_feature: sourceFeature } : {})
       },
       {
         cacheControl: 'private, no-cache',
