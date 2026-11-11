@@ -110,6 +110,12 @@ paths:
           required: true
           schema:
             type: integer
+        - in: query
+          name: includeSource
+          description: Include the source geometry and OSM tags in source_feature (null when unavailable).
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Building info

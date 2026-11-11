@@ -393,7 +393,6 @@ export function createBuildingDetailsManager() {
   }
 
   async function fetchBuildingDetails(detail, signal) {
-    let feature = null;
     const localOverpassDetail =
       detail?.feature?.properties?.source === 'overpass'
         ? getOverpassBuildingDetails(detail.feature)
@@ -402,26 +401,23 @@ export function createBuildingDetailsManager() {
       return localOverpassDetail;
     }
     try {
-      const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}`, { signal });
+      const data = await apiJson(`/api/building-info/${detail.osmType}/${detail.osmId}?includeSource=true`, { signal });
       const reviewStatus =
         String(data?.review_status || '')
           .trim()
           .toLowerCase() || null;
       const userEditId = Number(data?.user_edit_id || 0);
-      let sourceTags = {};
-      let sourceSnapshot;
-      try {
-        feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
-        sourceTags = feature?.properties?.source_tags || {};
-        sourceSnapshot = buildSourceSnapshotFromFeature(feature);
-      } catch (featureError) {
-        if (!isAbortError(featureError)) {
-          sourceTags = detail?.feature?.properties?.source_tags || {};
-          sourceSnapshot = buildSourceSnapshotFromDetail(detail);
-        } else {
-          throw featureError;
+      let feature = data?.source_feature;
+      // Older servers omit the field. A null value means the server found no source snapshot.
+      if (feature === undefined) {
+        try {
+          feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
+        } catch (featureError) {
+          if (isAbortError(featureError)) throw featureError;
         }
       }
+      const sourceTags = (feature || detail?.feature)?.properties?.source_tags || {};
+      const sourceSnapshot = feature ? buildSourceSnapshotFromFeature(feature) : buildSourceSnapshotFromDetail(detail);
       return {
         feature_kind:
           data?.feature_kind ||
@@ -449,7 +445,7 @@ export function createBuildingDetailsManager() {
     } catch (primaryError) {
       if (isAbortError(primaryError)) throw primaryError;
       try {
-        feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
+        const feature = await apiJson(`/api/building/${detail.osmType}/${detail.osmId}`, { signal });
         const archiInfo =
           feature?.properties?.archiInfo || feature?.properties?.source_tags || feature?.properties || {};
         const sourceSnapshot = buildSourceSnapshotFromFeature(feature);

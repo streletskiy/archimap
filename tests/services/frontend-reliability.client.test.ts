@@ -116,8 +116,8 @@ async function detailsFixture(t, postHandler: (body: any) => Response = () => js
     peak = Math.max(peak, inFlight);
     await flush();
     inFlight -= 1;
-    if (String(url).includes('/building-info/')) return json({ levels: '1' });
-    return json({
+    assert.match(String(url), /^\/api\/building-info\/way\/\d+\?includeSource=true$/);
+    const sourceFeature = {
       type: 'Feature',
       geometry: {
         type: 'Polygon',
@@ -131,7 +131,8 @@ async function detailsFixture(t, postHandler: (body: any) => Response = () => js
         ]
       },
       properties: { source_tags: { building: 'yes', 'building:levels': '1' } }
-    });
+    };
+    return json({ levels: '1', source_feature: sourceFeature });
   });
   const manager = createBuildingDetailsManager();
   let state;
@@ -166,16 +167,18 @@ test('adding to bulk selection fetches only the newly selected building', async 
   await fixture.select(1);
   await fixture.select(2, true);
   await fixture.select(3, true);
-  assert.equal(fixture.requests.length, 6);
+  assert.equal(fixture.requests.length, 3);
   assert.equal(fixture.state.selectedBuildingDetails.length, 3);
+  assert.equal(fixture.state.buildingDetails.properties.archiInfo._sourceTags['building:levels'], '1');
+  assert.equal(JSON.parse(fixture.state.buildingDetails.sourceGeometryJson).type, 'Polygon');
   await fixture.select(2, true);
-  assert.equal(fixture.requests.length, 6);
+  assert.equal(fixture.requests.length, 3);
 });
 
-test('selecting 50 buildings makes 100 detail requests instead of refetching earlier selections', async (t) => {
+test('selecting 50 buildings makes one detail request per building', async (t) => {
   const fixture = await detailsFixture(t);
   for (let id = 1; id <= 50; id += 1) await fixture.select(id, id > 1);
-  assert.equal(fixture.requests.length, 100);
+  assert.equal(fixture.requests.length, 50);
   assert.equal(fixture.state.selectedBuildingDetails.length, 50);
   assert.ok(fixture.peak <= 4);
 });

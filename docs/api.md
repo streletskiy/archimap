@@ -78,6 +78,7 @@ System notes:
   - Cache: `Cache-Control: public, max-age=30`, `ETag`.
 - `GET /api/building-info/:osmType/:osmId`
   - Returns merged info + moderation state.
+  - With `?includeSource=true`, also returns `source_feature`, a GeoJSON feature with the source geometry and OSM tags or `null` if no contour or edit snapshot exists.
   - Editable merged fields include `name`, `style`, `design`, `design_ref`, `design_year`, `material`, `roof_shape`, `colour`, `levels`, `year_built`, `architect`, `address`, `archimap_description`.
   - Response also includes `design_ref_suggestions[]`, backed by a startup-warmed in-memory cache of known project numbers.
   - `material` can represent the concrete subtypes `concrete_panels`, `concrete_blocks`, and `concrete_monolith`; the runtime stores them as `material=concrete` plus `material_concrete`.

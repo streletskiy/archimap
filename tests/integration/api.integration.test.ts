@@ -728,6 +728,19 @@ test('integration: auth/csrf/admin/search/system endpoints', async (t) => {
       assert.equal(buildingInfoBody?.feature_kind, 'building');
       assert.deepEqual(buildingInfoBody?.region_slugs, ['ru-moscow']);
       assert.deepEqual(buildingInfoBody?.design_ref_suggestions, []);
+      assert.equal('source_feature' in buildingInfoBody, false);
+
+      const buildingWithSource = await callApi('/api/building-info/way/101?includeSource=true');
+      const buildingFeature = await callApi('/api/building/way/101');
+      assert.equal(buildingWithSource.status, 200);
+      assert.equal(buildingFeature.status, 200);
+      const { source_feature: sourceFeature, ...info } = await buildingWithSource.json();
+      const feature = await buildingFeature.json();
+      assert.deepEqual(info, buildingInfoBody);
+      assert.equal(sourceFeature.id, feature.id);
+      assert.deepEqual(sourceFeature.geometry, feature.geometry);
+      assert.deepEqual(sourceFeature.properties.source_tags, feature.properties.source_tags);
+      assert.equal(sourceFeature.properties.feature_kind, feature.properties.feature_kind);
 
       const partBuildingInfo = await callApi('/api/building-info/way/102');
       assert.equal(partBuildingInfo.status, 200);
