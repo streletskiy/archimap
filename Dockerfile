@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_IMAGE=node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
+ARG NODE_IMAGE=node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5
 ARG RUNTIME_BASE_IMAGE=runtime-base
 
 FROM ${NODE_IMAGE} AS osmium-configure
@@ -25,12 +25,7 @@ FROM ${NODE_IMAGE} AS deps
 
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-RUN npm install --global npm@12.2.1 \
-  && npm install --prefix /tmp/npm-security --ignore-scripts --no-audit --no-fund undici@6.29.1 ip-address@10.7.4 \
-  && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && mv /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
-  && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && rm -rf /tmp/npm-security
+RUN npm install --global npm@12.2.3
 
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
@@ -39,12 +34,7 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend-deps
 
 WORKDIR /app/frontend
-RUN npm install --global npm@12.2.1 \
-  && npm install --prefix /tmp/npm-security --ignore-scripts --no-audit --no-fund undici@6.29.1 ip-address@10.7.4 \
-  && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && mv /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
-  && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && rm -rf /tmp/npm-security
+RUN npm install --global npm@12.2.3
 
 COPY frontend/package*.json ./
 COPY frontend/vendor ./vendor
@@ -80,12 +70,7 @@ RUN BUILD_SHA="${BUILD_SHA}" BUILD_DESCRIBE="${BUILD_DESCRIBE}" BUILD_LATEST_TAG
 FROM ${NODE_IMAGE} AS runtime-base
 
 WORKDIR /app
-RUN npm install --global npm@12.2.1 \
-  && npm install --prefix /tmp/npm-security --ignore-scripts --no-audit --no-fund undici@6.29.1 ip-address@10.7.4 \
-  && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && mv /tmp/npm-security/node_modules/undici /usr/local/lib/node_modules/npm/node_modules/undici \
-  && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
-  && rm -rf /tmp/npm-security
+RUN npm install --global npm@12.2.3
 
 RUN apk add --no-cache aria2 ca-certificates docker-cli sqlite-libs zlib \
     boost-program_options libbz2 libexpat libstdc++ lz4-libs

@@ -3,8 +3,8 @@
 ## Local
 
 1. Install deps:
-   - use Node.js 24 LTS, version 24.22.1 or newer
-   - install npm 12.2.1 (`npm install --global npm@12.2.1`)
+   - use Node.js 24 LTS, version 24.22.3 or newer
+   - install npm 12.2.3 (`npm install --global npm@12.2.3`)
    - `npm ci`
    - `npm --prefix frontend ci`
 2. Prepare env:
