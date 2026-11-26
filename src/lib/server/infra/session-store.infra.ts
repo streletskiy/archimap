@@ -1,5 +1,4 @@
 const session = require('express-session');
-const { RedisStore } = require('connect-redis');
 const { createClient } = require('redis');
 const { createReadinessProbe } = require('./readiness.infra');
 
@@ -41,6 +40,7 @@ async function initSessionStore({
   let redisClient = null;
   let connectedOnce = false;
   try {
+    const { RedisStore } = await import('connect-redis');
     redisClient = createClient({
       url: redisUrl,
       socket: {
