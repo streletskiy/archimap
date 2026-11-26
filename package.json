@@ -58,7 +58,7 @@
     "node": ">=24.22.3"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.2.0",
     "connect-redis": "^9.0.0",
     "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",
@@ -88,7 +88,7 @@
     "minimatch": "11.0.9"
   },
   "allowScripts": {
-    "better-sqlite3@12.11.1": true,
+    "better-sqlite3@13.2.0": false,
     "esbuild@0.28.2": true
   },
   "packageManager": "npm@12.2.3"
