@@ -34,11 +34,11 @@ Reference: [`Dockerfile`](../../Dockerfile)
 5. `runtime-base`
 
 - Installs aria2, Docker CLI, certificates, and SQLite/zlib runtime libraries from Alpine.
-- Uses npm 12.2.1 with its bundled Undici updated to 6.29.1 and ip-address to 10.7.4.
+- Uses npm 12.2.3, which bundles Undici 6.29.1 and ip-address 10.7.5.
 
 6. `runtime`
 
-- Uses digest-pinned `node:24.22.2-alpine` with the October 2026 security fixes.
+- Uses digest-pinned `node:24.22.3-alpine` with the November 2026 security fixes.
 - Contains only runtime assets:
   - backend runtime code (`server.sveltekit.ts`, `server.ts`, `src/`, `scripts/`, `workers/`)
   - `frontend/build`

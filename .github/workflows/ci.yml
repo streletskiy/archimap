@@ -29,7 +29,7 @@ jobs:
             frontend/package-lock.json
 
       - name: Setup npm
-        run: npm install --global npm@12.2.1
+        run: npm install --global npm@12.2.3
 
       - name: Install dependencies
         run: npm ci
@@ -105,7 +105,7 @@ jobs:
             package-lock.json
 
       - name: Setup npm
-        run: npm install --global npm@12.2.1
+        run: npm install --global npm@12.2.3
 
       - name: Install dependencies
         run: npm ci

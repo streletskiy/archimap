@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.10.6
+
+### 🔒 Security
+
+- **Node.js:** Update the runtime to the Node.js 24.22.3 LTS security release and pin its Alpine image by digest. Require Node.js 24.22.3 or newer for local installations.
+- **npm:** Update to 12.2.3, which bundles the patched Undici and ip-address versions used by the image.
+
+### 🔧 Maintenance
+
+- **Dependencies:** Refresh both lockfiles. Update MapLibre GL JS to 6.19.0, Svelte to 5.59.2, SvelteKit to 3.4.1, Vite to 8.3.8, Nodemailer to 10.6.1, and the Redis client to 5.12.4.
+- **Deployment:** Update the web service and sync worker together. This release has no database migrations.
+
+[Full comparison](https://github.com/streletskiy/archimap/compare/0.10.5...0.10.6)
+
 ## v0.10.5
 
 ### ⚡ Performance
